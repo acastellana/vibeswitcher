@@ -25,6 +25,8 @@ final class SidebarController {
     /// After picking a session the mouse is still near the edge; don't pop back until it has moved away.
     private var suppressedUntilAway = false
     private var menuOpen = false
+    /// Shown briefly after a desktop switch; stays for the whole period unless the mouse takes over.
+    private var flashing = false
     private var hideWork: DispatchWorkItem?
     private var monitors: [Any] = []
     private var screen: NSScreen?
@@ -80,6 +82,22 @@ final class SidebarController {
         }
     }
 
+    /// After a desktop switch: slide in for a moment (highlighting the session there), then slide out.
+    func flash(for duration: TimeInterval = 2.5) {
+        guard isEnabled, autoHide else { return }
+        flashing = true
+        reveal(on: currentScreen())
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.hideWork = nil
+            self.flashing = false
+            let inside = self.panel.frame.insetBy(dx: -Self.leaveMargin, dy: -Self.leaveMargin).contains(NSEvent.mouseLocation)
+            if !inside, !self.menuOpen { self.conceal(animated: true) }
+        }
+        hideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
+    }
+
     /// Called after a session was picked: get out of the way until the mouse leaves and comes back.
     func dismissAfterSelection() {
         guard isEnabled, autoHide else { return }
@@ -93,6 +111,15 @@ final class SidebarController {
         let screen = currentScreen()
         if revealed {
             let inside = panel.frame.insetBy(dx: -Self.leaveMargin, dy: -Self.leaveMargin).contains(point)
+            if flashing {
+                // Mouse moves elsewhere don't cut a flash short; entering the sidebar makes it stay.
+                if inside {
+                    flashing = false
+                    hideWork?.cancel()
+                    hideWork = nil
+                }
+                return
+            }
             if inside || menuOpen {
                 hideWork?.cancel()
                 hideWork = nil
@@ -127,6 +154,7 @@ final class SidebarController {
     private func reveal(on screen: NSScreen) {
         hideWork?.cancel()
         hideWork = nil
+        suppressedUntilAway = false
         self.screen = screen
         let docked = dockedFrame(on: screen)
         if !revealed {

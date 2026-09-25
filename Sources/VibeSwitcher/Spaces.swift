@@ -33,6 +33,22 @@ enum Spaces {
         placements(forWindowIDs: windowIDs).mapValues(\.desktop)
     }
 
+    /// The desktop number(s) currently shown (one per display).
+    static func currentDesktops() -> Set<Int> {
+        guard let (mainConnection, copyDisplaySpaces, _) = functions,
+              let displays = copyDisplaySpaces(mainConnection())?.takeRetainedValue() as? [[String: Any]] else { return [] }
+        var result: Set<Int> = []
+        var next = 1
+        for display in displays {
+            let current = (display["Current Space"] as? [String: Any])?["ManagedSpaceID"] as? Int
+            for space in display["Spaces"] as? [[String: Any]] ?? [] {
+                if let id = space["ManagedSpaceID"] as? Int, id == current { result.insert(next) }
+                next += 1
+            }
+        }
+        return result
+    }
+
     static func placements(forWindowIDs windowIDs: [Int]) -> [Int: Placement] {
         guard let (mainConnection, copyDisplaySpaces, copySpacesForWindows) = functions, !windowIDs.isEmpty else { return [:] }
         let connection = mainConnection()

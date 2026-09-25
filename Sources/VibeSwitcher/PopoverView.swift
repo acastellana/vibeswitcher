@@ -274,7 +274,16 @@ struct SessionRow: View {
         }
         .padding(.horizontal, 8).padding(.vertical, 7)
         .background(RoundedRectangle(cornerRadius: 6).fill(isSelected ? Color.accentColor.opacity(0.15) : .clear))
-        .help("\(session.shortCwd ?? session.project) · \(session.agent.displayName) · \(session.tty)")
+        .overlay {
+            // The session(s) on the desktop you're looking at: framed and tinted.
+            if session.onCurrentDesktop {
+                RoundedRectangle(cornerRadius: 6).fill(Color.accentColor.opacity(0.10))
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.accentColor.opacity(0.85), lineWidth: 1.5))
+                    .allowsHitTesting(false)
+            }
+        }
+        .help("\(session.shortCwd ?? session.project) · \(session.agent.displayName) · \(session.tty)"
+              + (session.onCurrentDesktop ? " · on this desktop" : ""))
     }
 
     static func elapsed(from start: Date, to now: Date) -> String {

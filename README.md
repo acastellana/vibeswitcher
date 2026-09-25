@@ -30,6 +30,7 @@ While a session runs a tool, its row shows what and for how long ("⚙ Run unit 
 **Sidebar mode** (⚙︎ › Sidebar mode): the session list lives on the right edge of the screen, on every
 desktop. It hides itself and slides in when the mouse touches the right edge, then slides away when the
 mouse leaves (turn off auto-hide to keep it docked). Click a session to go to it, like the menu bar list.
+When you switch desktops it slides in for a moment, with the session(s) on the new desktop framed.
 
 **Crowded menu bar?** On notched MacBooks, macOS silently hides status icons that don't fit right of the
 notch. VibeSwitcher starts next to the clock, where overflow never reaches (⌘-drag it elsewhere if you

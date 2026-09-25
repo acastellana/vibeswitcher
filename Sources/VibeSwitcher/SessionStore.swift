@@ -140,6 +140,7 @@ final class SessionStore: ObservableObject {
 
     private func apply(raw: [RawSession], tabs: [String: TerminalTab], background: [String: String], now: Date) {
         var quiet: Set<String> = []
+        let currentDesktops = Spaces.currentDesktops()
         let terminalFront = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == TerminalBridge.bundleID
         var result: [Session] = []
         for item in raw {
@@ -187,6 +188,7 @@ final class SessionStore: ObservableObject {
             session.isCurrent = viewing
             session.screenPosition = tab?.position
             session.terminalWindowID = tab?.windowID
+            session.onCurrentDesktop = tab?.position?.desktop.map { currentDesktops.contains($0) } ?? false
             if status == .working, let hook = item.hook, hook.lastEvent == "PreToolUse", let started = hook.toolStartedAt {
                 session.activity = hook.toolDetail
                 session.activitySince = Date(timeIntervalSince1970: started)

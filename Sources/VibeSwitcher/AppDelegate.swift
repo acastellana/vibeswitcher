@@ -69,6 +69,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             onNewSession: sidebarView.onNewSession, onEditCommands: sidebarView.onEditCommands, isSidebar: true)))
         // Windows hidden by the earlier sidebar mode (or a crash during it) always come back.
         DispatchQueue.global(qos: .utility).async { SidebarWorkspace.restoreHiddenWindows() }
+        // Desktop switched: refresh which session is "here" and show the sidebar for a moment.
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification,
+                                                          object: nil, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.store.refresh(forceTerminal: true)
+            if self.preferences.sidebarMode { self.sidebar.flash() }
+        }
         preferences.$sidebarAutoHide
             .receive(on: RunLoop.main)
             .sink { [weak self] autoHide in self?.sidebar.autoHide = autoHide }
