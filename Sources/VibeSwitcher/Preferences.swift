@@ -10,6 +10,7 @@ final class Preferences: ObservableObject {
 
     @Published var notifyNeedsInput: Bool { didSet { defaults.set(notifyNeedsInput, forKey: "notifyNeedsInput") } }
     @Published var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: "notifyDone") } }
+    @Published var playSound: Bool { didSet { defaults.set(playSound, forKey: "playSound") } }
     @Published private(set) var launchAtLogin: Bool
     /// Mirrors the system permission, for the popover banner.
     @Published var notificationsAllowed = true
@@ -18,9 +19,10 @@ final class Preferences: ObservableObject {
     }
 
     init() {
-        defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true])
+        defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true, "playSound": true])
         notifyNeedsInput = defaults.bool(forKey: "notifyNeedsInput")
         notifyDone = defaults.bool(forKey: "notifyDone")
+        playSound = defaults.bool(forKey: "playSound")
         launchAtLogin = SMAppService.mainApp.status == .enabled
         floatingPanel = FloatingPanelMode(rawValue: defaults.string(forKey: "floatingPanel") ?? "") ?? .automatic
     }
@@ -117,14 +119,14 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         AppStatus.extras["lastAlert"] = "\(session.status.rawValue) \(session.tty) \(ISO8601DateFormatter().string(from: Date()))"
         // Without notification permission, at least make a sound when something is blocked on you.
         guard allowed == true else {
-            if needsInput { NSSound(named: "Ping")?.play() }
+            if needsInput, preferences.playSound { NSSound(named: "Ping")?.play() }
             return
         }
         let content = UNMutableNotificationContent()
         content.title = needsInput ? "\(session.project) needs your input" : "\(session.project) is done"
         content.subtitle = session.task ?? session.agent.displayName
         if let detail = session.detail { content.body = detail }
-        content.sound = needsInput ? .default : nil
+        content.sound = needsInput && preferences.playSound ? .default : nil
         content.userInfo = ["tty": session.tty]
         // One notification per terminal: a newer state replaces the older banner.
         center.add(UNNotificationRequest(identifier: session.tty, content: content, trigger: nil))
