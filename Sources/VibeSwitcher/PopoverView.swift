@@ -9,6 +9,7 @@ final class PopoverState: ObservableObject {
 struct PopoverView: View {
     @ObservedObject var store: SessionStore
     @ObservedObject var state: PopoverState
+    @ObservedObject var preferences: Preferences
     let onOpen: (Session) -> Void
     let onInstallHooks: () -> Void
     let onQuit: () -> Void
@@ -81,7 +82,21 @@ struct PopoverView: View {
         HStack {
             Text("⌃⌥V toggle · 1–9 jump · ↑↓ ⏎").font(.caption2).foregroundStyle(.tertiary)
             Spacer()
-            Button("Quit", action: onQuit).buttonStyle(.borderless).controlSize(.small)
+            Menu {
+                Toggle("Notify when a session needs input", isOn: $preferences.notifyNeedsInput)
+                Toggle("Notify when a session finishes", isOn: $preferences.notifyDone)
+                Divider()
+                Toggle("Launch at login", isOn: Binding(get: { preferences.launchAtLogin },
+                                                        set: { preferences.setLaunchAtLogin($0) }))
+                Divider()
+                Button("Reinstall hooks", action: onInstallHooks)
+                Button("Quit VibeSwitcher", action: onQuit)
+            } label: {
+                Image(systemName: "gearshape")
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
     }

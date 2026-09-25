@@ -10,7 +10,7 @@ enum Snapshot {
         store.refreshHookStatus()
         store.refreshNow()
 
-        let view = PopoverView(store: store, state: PopoverState(), onOpen: { _ in }, onInstallHooks: {}, onQuit: {})
+        let view = PopoverView(store: store, state: PopoverState(), preferences: Preferences(), onOpen: { _ in }, onInstallHooks: {}, onQuit: {})
         for (name, appearance) in [("popover-light", NSAppearance.Name.aqua), ("popover-dark", .darkAqua)] {
             let host = NSHostingView(rootView: view.background(Color(nsColor: .windowBackgroundColor)))
             host.appearance = NSAppearance(named: appearance)

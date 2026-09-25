@@ -7,6 +7,8 @@ import VibeCore
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private let store = SessionStore()
     private let popoverState = PopoverState()
+    private let preferences = Preferences()
+    private lazy var notifier = Notifier(preferences: preferences)
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var hotKey: HotKey?
@@ -15,13 +17,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         HookBinary.sync()
+        preferences.setUpLoginItemOnFirstLaunch()
+        notifier.requestAuthorization()
+        notifier.onOpen = { [weak self] tty in
+            guard let self, let session = self.store.sessions.first(where: { $0.tty == tty }) else { return }
+            self.open(session)
+        }
+        store.onAttention = { [weak self] session in self?.notifier.post(for: session) }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.target = self
         statusItem.button?.action = #selector(togglePopover)
         statusItem.button?.image = StatusIcon.image(for: [])
 
-        let view = PopoverView(store: store, state: popoverState,
+        let view = PopoverView(store: store, state: popoverState, preferences: preferences,
                                onOpen: { [weak self] in self?.open($0) },
                                onInstallHooks: { [weak self] in self?.installHooks() },
                                onQuit: { NSApp.terminate(nil) })
@@ -44,6 +53,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotKey = HotKey(keyCode: kVK_ANSI_V, modifiers: controlKey | optionKey) { [weak self] in
             self?.togglePopover()
         }
+        AppStatus.extras["hotKeyRegistered"] = hotKey != nil
+        // `VibeSwitcher --toggle` (e.g. from Raycast or a shell) opens the popover of the running instance.
+        DistributedNotificationCenter.default().addObserver(forName: AppStatus.toggleNotification, object: nil,
+                                                            queue: .main) { [weak self] _ in
+            self?.togglePopover()
+        }
         store.start()
     }
 
@@ -60,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
         startKeyMonitor()
+        AppStatus.write(sessions: store.sessions, terminalAccess: store.terminalAccess, extra: ["popoverOpenedAt": ISO8601DateFormatter().string(from: Date())])
     }
 
     private func startKeyMonitor() {
@@ -90,6 +106,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func open(_ session: Session) {
         popover.performClose(nil)
         store.acknowledge(session)
+        notifier.clear(tty: session.tty)
         DispatchQueue.global(qos: .userInitiated).async {
             if session.inTerminalApp, TerminalBridge.focus(tty: session.tty) { return }
             DispatchQueue.main.async { _ = HostApp.activate(forPID: session.pid) }
@@ -97,33 +114,48 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func installHooks() {
-        HookBinary.sync()
-        var errors: [String] = []
-        for agent in Agent.allCases {
-            do { try HookInstaller.install(agent: agent) } catch { errors.append("\(agent.displayName): \(error.localizedDescription)") }
-        }
-        store.refreshHookStatus()
         popover.performClose(nil)
-
-        let alert = NSAlert()
-        if errors.isEmpty {
-            alert.messageText = "Hooks installed"
-            alert.informativeText = """
-            New Claude Code and Codex sessions will now report live status. Sessions that are already running keep their old configuration: restart them to pick up the hooks.
-
-            Codex asks you to trust new hooks once: run /hooks inside Codex and trust the vibeswitcher-hook entries.
-            """
-        } else {
-            alert.messageText = "Some hooks could not be installed"
-            alert.informativeText = errors.joined(separator: "\n")
+        DispatchQueue.global(qos: .userInitiated).async {
+            let problems = HookSetup.installAll()
+            DispatchQueue.main.async {
+                self.store.refreshHookStatus()
+                let alert = NSAlert()
+                if problems.isEmpty {
+                    alert.messageText = "Hooks installed"
+                    alert.informativeText = "Claude Code and Codex sessions now report live status. Claude picks the hooks up in running sessions; Codex sessions started before now need a restart."
+                } else {
+                    alert.messageText = "Hooks installed with problems"
+                    alert.informativeText = problems.joined(separator: "\n")
+                }
+                NSApp.activate(ignoringOtherApps: true)
+                alert.runModal()
+            }
         }
-        NSApp.activate(ignoringOtherApps: true)
-        alert.runModal()
     }
 
     private static func tooltip(for sessions: [Session]) -> String {
         guard !sessions.isEmpty else { return "VibeSwitcher: no agent sessions" }
         return sessions.map { "\($0.status.label): \($0.title)" }.joined(separator: "\n")
+    }
+}
+
+/// Installs the hook binary and both agents' hook configs, and trusts the Codex hooks.
+/// Returns human-readable problems (empty on success). Blocking: call off the main thread.
+enum HookSetup {
+    static func installAll() -> [String] {
+        var problems: [String] = []
+        if !HookBinary.sync(), !FileManager.default.fileExists(atPath: VibePaths.hookBinary.path) {
+            problems.append("The hook binary could not be installed to \(VibePaths.hookBinary.path).")
+        }
+        for agent in Agent.allCases {
+            do { try HookInstaller.install(agent: agent) } catch {
+                problems.append("\(agent.displayName): \(error.localizedDescription)")
+            }
+        }
+        do { try CodexTrust.trustOurHooks() } catch {
+            problems.append("Codex hooks are installed but not trusted (\(error.localizedDescription)). Run /hooks in Codex and trust the vibeswitcher-hook entries.")
+        }
+        return problems
     }
 }
 

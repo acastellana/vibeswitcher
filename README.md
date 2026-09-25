@@ -21,15 +21,19 @@ The menu bar shows one dot per session (counts once there are more than 10). Cli
 /Applications/VibeSwitcher.app/Contents/MacOS/VibeSwitcher --install-hooks
 ```
 
-Or click **Install hooks** in the popover. Then:
+Or click **Install hooks** in the popover. That installs the hook binary, adds hooks to both agents'
+configs, and marks the Codex hooks as trusted (the same `hooks/list` + `config/batchWrite` calls that
+Codex's own `/hooks` screen makes through `codex app-server`). Then macOS asks twice:
 
-- **Terminal.app** asks once whether VibeSwitcher may control Terminal. Allow it: that's how tab titles are
-  read and tabs are selected.
-- **Codex** asks you to trust new hooks once: run `/hooks` in a Codex session and trust the
-  `vibeswitcher-hook` entries.
+- **Control Terminal**: allow it. That's how tab titles are read and tabs are selected.
+- **Notifications**: allow it to get a banner when a session needs you (with sound) or finishes. Clicking
+  the banner jumps to that tab. Without permission you still get a sound when a session needs input.
 
-Uninstall the hooks with `--uninstall-hooks`. The first install keeps a copy of your original config as
-`~/.claude/settings.json.vibeswitcher-backup`.
+Running Claude Code sessions pick the hooks up immediately; Codex sessions started before the install
+need a restart. VibeSwitcher registers itself as a login item on first launch (toggle it in the ⚙︎ menu).
+
+Uninstall the hooks with `--uninstall-hooks`. The first install keeps copies of your original configs as
+`~/.claude/settings.json.vibeswitcher-backup` (and `~/.codex/config.toml.vibeswitcher-backup` if you made one).
 
 ## How status is detected
 
@@ -49,12 +53,24 @@ Three sources, most precise first:
 Sessions are keyed by TTY, which also identifies the Terminal tab to focus. Sessions in other terminal apps
 are listed too; clicking them activates the hosting app.
 
+## Command line
+
+```sh
+VibeSwitcher --dump            # detected sessions + raw hook state
+VibeSwitcher --toggle          # open/close the popover of the running app (bind it in Raycast etc.)
+VibeSwitcher --focus ttys012   # focus a Terminal tab, same path as clicking a row
+VibeSwitcher --snapshot /tmp   # render popover + menu bar icon PNGs from live data
+VibeSwitcher --install-hooks | --uninstall-hooks
+cat ~/.vibeswitcher/app-status.json   # what the running app currently sees
+```
+
+(`VibeSwitcher` = `/Applications/VibeSwitcher.app/Contents/MacOS/VibeSwitcher`.)
+
 ## Development
 
 ```sh
-swift build && swift test                          # Swift Testing; works with Command Line Tools only
-.build/debug/VibeSwitcher --dump                   # print detected sessions + hook state
-.build/debug/VibeSwitcher --snapshot /tmp          # render popover + icon PNGs from live data
+swift build && swift test      # Swift Testing; works with Command Line Tools only
+./scripts/build-app.sh --install
 ```
 
 `Sources/VibeCore` holds the testable logic (status rules, hook reducer, process table, installer),

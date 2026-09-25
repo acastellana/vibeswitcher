@@ -8,6 +8,8 @@ final class SessionStore: ObservableObject {
     @Published private(set) var sessions: [Session] = []
     @Published private(set) var terminalAccess: TerminalAccess = .unknown
     @Published private(set) var hooksInstalled: [Agent: Bool] = [:]
+    /// Called when a session newly turns red (needs input) or green (done, unseen).
+    var onAttention: ((Session) -> Void)?
 
     private let scanner = SessionScanner()
     private let queue = DispatchQueue(label: "vibeswitcher.scan", qos: .utility)
@@ -24,6 +26,7 @@ final class SessionStore: ObservableObject {
     private let launchedAt = Date()
     private var observed: [String: (status: SessionStatus, since: Date)] = [:]
     private var acknowledged: [String: Date] = [:]
+    private var displayed: [String: SessionStatus] = [:]
 
     func start() {
         refreshHookStatus()
@@ -59,7 +62,10 @@ final class SessionStore: ObservableObject {
             }
             let tabs = self.tabs
             DispatchQueue.main.async {
-                if let access { self.terminalAccess = access }
+                if let access, access != self.terminalAccess {
+                    self.terminalAccess = access
+                    AppStatus.write(sessions: self.sessions, terminalAccess: access)
+                }
                 self.apply(raw: raw, tabs: tabs, now: now)
                 self.scanning = false
                 if self.rescanRequested {
@@ -100,25 +106,33 @@ final class SessionStore: ObservableObject {
             observed[item.tty] = (resolved, since)
 
             // Looking at the tab right now counts as having seen it.
-            if terminalFront, let tab, tab.isSelected, tab.windowOrder == 1 {
-                acknowledged[item.tty] = now
-            }
+            let viewing = terminalFront && tab.map { $0.isSelected && $0.windowOrder == 1 } == true
+            if viewing { acknowledged[item.tty] = now }
             let seenAt = acknowledged[item.tty] ?? launchedAt
             let status: SessionStatus = (resolved == .done && since <= seenAt) ? .idle : resolved
 
-            result.append(Session(
+            let session = Session(
                 tty: item.tty, agent: item.agent, pid: item.pid, startedAt: item.startedAt, cwd: item.cwd,
                 title: displayTitle(parsed: parsed?.text, cwd: item.cwd, agent: item.agent),
                 status: status, statusSince: since,
                 detail: detail(for: status, hook: item.hook, hasHooks: item.hook != nil, agent: item.agent),
-                hasHooks: item.hook != nil, inTerminalApp: tab != nil))
+                hasHooks: item.hook != nil, inTerminalApp: tab != nil)
+            if !viewing, let previous = displayed[item.tty], previous != status, status == .needsInput || status == .done {
+                onAttention?(session)
+            }
+            displayed[item.tty] = status
+            result.append(session)
         }
         let live = Set(raw.map(\.tty))
         observed = observed.filter { live.contains($0.key) }
         acknowledged = acknowledged.filter { live.contains($0.key) }
+        displayed = displayed.filter { live.contains($0.key) }
 
         let ordered = SessionOrdering.sort(result)
-        if ordered != sessions { sessions = ordered }
+        if ordered != sessions {
+            sessions = ordered
+            AppStatus.write(sessions: ordered, terminalAccess: terminalAccess)
+        }
     }
 
     private func displayTitle(parsed: String?, cwd: String?, agent: Agent) -> String {
@@ -143,7 +157,7 @@ final class SessionStore: ObservableObject {
             return hook?.lastMessage
         case .unknown:
             guard !hasHooks else { return nil }
-            return agent == .codex ? "No live status yet: run /hooks in this Codex session and trust vibeswitcher-hook"
+            return agent == .codex ? "No live status: this Codex session started before the hooks; restart it"
                                    : "No live status yet: waiting for this session's first hook event"
         }
     }
