@@ -11,8 +11,11 @@ what each one is doing, and jumps to its Terminal tab in one keystroke.
 | ⚪️ | Idle | Finished and already seen |
 | ◯ | Unknown | No hooks and no readable title yet |
 
-The menu bar shows one dot per session (counts once there are more than 10). Click it or press
-**⌃⌥V**, then click a row or press **1–9** / **↑↓ ⏎** to focus that session's Terminal tab.
+The menu bar shows one dot per session, oldest first, so each dot keeps its position.
+
+- **Click a dot** to jump straight to that session's Terminal tab. Hover a dot to see which session it is.
+- **Right-click** (or **⌃⌥V**) opens the list; there, click a row or press **1–9** / **↑↓ ⏎**.
+- With more than 10 sessions the icon switches to per-status counts, and a click opens the list.
 
 ## Install
 

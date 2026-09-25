@@ -144,3 +144,32 @@ struct HookInstallerTests {
         }
     }
 }
+
+
+struct MenuBarDotsTests {
+    @Test func clicksMapToNearestDot() {
+        let step = MenuBarDots.diameter + MenuBarDots.gap
+        #expect(MenuBarDots.index(atX: 0, count: 3) == 0)
+        #expect(MenuBarDots.index(atX: MenuBarDots.diameter / 2, count: 3) == 0)
+        #expect(MenuBarDots.index(atX: step + 1, count: 3) == 1)
+        // The gap is split between neighbours.
+        #expect(MenuBarDots.index(atX: MenuBarDots.diameter + MenuBarDots.gap / 2 - 0.1, count: 3) == 0)
+        #expect(MenuBarDots.index(atX: MenuBarDots.diameter + MenuBarDots.gap / 2 + 0.1, count: 3) == 1)
+        #expect(MenuBarDots.index(atX: MenuBarDots.width(count: 3) - 1, count: 3) == 2)
+    }
+
+    @Test func outsideTheStripIsNoDot() {
+        #expect(MenuBarDots.index(atX: -10, count: 3) == nil)
+        #expect(MenuBarDots.index(atX: MenuBarDots.width(count: 3) + 10, count: 3) == nil)
+        #expect(MenuBarDots.index(atX: 5, count: 0) == nil)
+        #expect(MenuBarDots.index(atX: 5, count: MenuBarDots.maxDots + 1) == nil)
+    }
+
+    @Test func hitRectsTileTheStrip() {
+        for index in 0..<4 {
+            let hit = MenuBarDots.hitRect(at: index)
+            #expect(hit.contains(CGPoint(x: MenuBarDots.rect(at: index).midX, y: 9)))
+            #expect(MenuBarDots.index(atX: hit.midX, count: 4) == index)
+        }
+    }
+}

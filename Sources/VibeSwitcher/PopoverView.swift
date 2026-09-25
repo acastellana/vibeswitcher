@@ -83,7 +83,7 @@ struct PopoverView: View {
 
     private var footer: some View {
         HStack {
-            Text("⌃⌥V toggle · 1–9 jump · ↑↓ ⏎").font(.caption2).foregroundStyle(.tertiary)
+            Text("Click a dot to switch · right-click or ⌃⌥V for this list · 1–9").font(.caption2).foregroundStyle(.tertiary)
             Spacer()
             Menu {
                 Toggle("Notify when a session needs input", isOn: $preferences.notifyNeedsInput)

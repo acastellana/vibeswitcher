@@ -19,24 +19,20 @@ extension SessionStatus {
 /// Draws the menu bar image: one dot per session, in list order, so a dot's position tells you which
 /// terminal it is. Falls back to per-status counts when there are too many sessions to fit.
 enum StatusIcon {
-    static let maxDots = 10
-
     static func image(for sessions: [Session]) -> NSImage {
         guard !sessions.isEmpty else {
             let image = NSImage(systemSymbolName: "terminal", accessibilityDescription: "VibeSwitcher")!
             image.isTemplate = true
             return image
         }
-        return sessions.count <= maxDots ? dots(sessions) : counts(sessions)
+        return sessions.count <= MenuBarDots.maxDots ? dots(sessions) : counts(sessions)
     }
 
     private static func dots(_ sessions: [Session]) -> NSImage {
-        let diameter: CGFloat = 8, gap: CGFloat = 4, height: CGFloat = 18
-        let width = CGFloat(sessions.count) * diameter + CGFloat(sessions.count - 1) * gap
-        let image = NSImage(size: NSSize(width: width, height: height), flipped: false) { _ in
+        let size = NSSize(width: MenuBarDots.width(count: sessions.count), height: MenuBarDots.height)
+        let image = NSImage(size: size, flipped: false) { _ in
             for (index, session) in sessions.enumerated() {
-                let rect = NSRect(x: CGFloat(index) * (diameter + gap), y: (height - diameter) / 2,
-                                  width: diameter, height: diameter)
+                let rect = MenuBarDots.rect(at: index)
                 let path = NSBezierPath(ovalIn: rect)
                 if session.status == .unknown {
                     session.status.nsColor.setStroke()

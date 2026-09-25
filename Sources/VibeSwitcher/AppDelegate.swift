@@ -4,7 +4,7 @@ import Combine
 import SwiftUI
 import VibeCore
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
     private let store = SessionStore()
     private let popoverState = PopoverState()
     private let preferences = Preferences()
@@ -28,7 +28,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.target = self
-        statusItem.button?.action = #selector(togglePopover)
+        statusItem.button?.action = #selector(statusItemClicked)
+        statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         statusItem.button?.image = StatusIcon.image(for: [])
 
         let view = PopoverView(store: store, state: popoverState, preferences: preferences,
@@ -47,7 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .sink { [weak self] sessions in
                 guard let self else { return }
                 self.statusItem.button?.image = StatusIcon.image(for: sessions)
-                self.statusItem.button?.toolTip = Self.tooltip(for: sessions)
+                DispatchQueue.main.async { self.updateDotToolTips() }
                 self.popoverState.selectedIndex = min(self.popoverState.selectedIndex, max(0, sessions.count - 1))
                 DispatchQueue.main.async { self.fitPopover() }
             }
@@ -70,6 +71,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.togglePopover()
         }
         store.start()
+    }
+
+    /// Left-click on a dot jumps straight to that session; right-click (or ⌃-click), a click beside the
+    /// dots, or the counts/empty icon opens the list.
+    @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        let event = NSApp.currentEvent
+        let secondary = event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true
+        if !secondary, let event, let index = dotIndex(at: event, in: sender), store.sessions.indices.contains(index) {
+            open(store.sessions[index])
+            return
+        }
+        togglePopover()
+    }
+
+    /// Where the dots image sits inside the status bar button (AppKit centers it with some padding).
+    private func dotsImageRect(in button: NSStatusBarButton) -> NSRect? {
+        let count = store.sessions.count
+        guard (1...MenuBarDots.maxDots).contains(count), let image = button.image else { return nil }
+        let rect = button.cell?.imageRect(forBounds: button.bounds)
+            ?? NSRect(x: (button.bounds.width - image.size.width) / 2, y: (button.bounds.height - image.size.height) / 2,
+                      width: image.size.width, height: image.size.height)
+        return rect.width > 0 ? rect : nil
+    }
+
+    private func dotIndex(at event: NSEvent, in button: NSStatusBarButton) -> Int? {
+        guard let rect = dotsImageRect(in: button), let image = button.image else { return nil }
+        let point = button.convert(event.locationInWindow, from: nil)
+        let x = (point.x - rect.minX) * image.size.width / rect.width
+        return MenuBarDots.index(atX: x, count: store.sessions.count)
+    }
+
+    /// One tooltip region per dot, naming that session.
+    private func updateDotToolTips() {
+        guard let button = statusItem.button else { return }
+        button.removeAllToolTips()
+        guard let rect = dotsImageRect(in: button), let image = button.image else {
+            button.toolTip = Self.tooltip(for: store.sessions)
+            return
+        }
+        button.toolTip = nil
+        let scale = rect.width / image.size.width
+        for index in store.sessions.indices {
+            let hit = MenuBarDots.hitRect(at: index)
+            let area = NSRect(x: rect.minX + hit.minX * scale, y: button.bounds.minY,
+                              width: hit.width * scale, height: button.bounds.height)
+            button.addToolTip(area, owner: self, userData: UnsafeMutableRawPointer(bitPattern: index + 1))
+        }
+        AppStatus.extras["menuBar"] = ["buttonWidth": button.bounds.width, "imageX": rect.minX, "imageWidth": rect.width]
+    }
+
+    func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
+              userData data: UnsafeMutableRawPointer?) -> String {
+        let index = Int(bitPattern: data) - 1
+        guard store.sessions.indices.contains(index) else { return "" }
+        let session = store.sessions[index]
+        return "\(index + 1). \(session.title) — \(session.status.label)\nClick to switch · right-click for the list"
     }
 
     @objc private func togglePopover() {
