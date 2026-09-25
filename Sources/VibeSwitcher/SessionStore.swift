@@ -186,6 +186,7 @@ final class SessionStore: ObservableObject {
                 hasHooks: item.hook != nil, inTerminalApp: tab != nil)
             session.isCurrent = viewing
             session.screenPosition = tab?.position
+            session.terminalWindowID = tab?.windowID
             if status == .working, let hook = item.hook, hook.lastEvent == "PreToolUse", let started = hook.toolStartedAt {
                 session.activity = hook.toolDetail
                 session.activitySince = Date(timeIntervalSince1970: started)

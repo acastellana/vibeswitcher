@@ -19,6 +19,8 @@ struct PopoverView: View {
     var onResetName: (Session) -> Void = { _ in }
     var onNewSession: (Agent, String?) -> Void = { _, _ in }
     var onEditCommands: () -> Void = {}
+    /// Rendered as the docked sidebar instead of the menu bar popover.
+    var isSidebar = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -34,7 +36,7 @@ struct PopoverView: View {
                     VStack(spacing: 2) {
                         ForEach(Array(store.sessions.enumerated()), id: \.element.id) { index, session in
                             Button { onOpen(session) } label: {
-                                SessionRow(session: session, index: index, isSelected: index == state.selectedIndex)
+                                SessionRow(session: session, index: index, isSelected: index == state.selectedIndex, compact: isSidebar)
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
@@ -51,19 +53,26 @@ struct PopoverView: View {
                     }
                     .padding(6)
                 }
-                .frame(maxHeight: 640)
+                .frame(maxHeight: isSidebar ? .infinity : 640)
                 .fixedSize(horizontal: false, vertical: true)
             }
             banners
             Divider()
             footer
         }
-        .frame(width: 400)
+        .frame(width: isSidebar ? nil : 400)
+        .frame(maxWidth: isSidebar ? .infinity : nil, maxHeight: isSidebar ? .infinity : nil, alignment: .top)
+        .background {
+            if isSidebar {
+                RoundedRectangle(cornerRadius: 12).fill(.regularMaterial)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.1)))
+            }
+        }
     }
 
     private var header: some View {
         HStack(spacing: 12) {
-            Text("VibeSwitcher").font(.headline)
+            Text(isSidebar ? "Sessions" : "VibeSwitcher").font(.headline).lineLimit(1).fixedSize()
             newSessionMenu
             Spacer()
             ForEach([SessionStatus.needsInput, .working, .background, .done], id: \.self) { status in
@@ -71,8 +80,10 @@ struct PopoverView: View {
                 if count > 0 {
                     HStack(spacing: 4) {
                         Circle().fill(status.color).frame(width: 8, height: 8)
-                        Text("\(count) \(status.label.lowercased())").font(.caption).foregroundStyle(.secondary)
+                        Text(isSidebar ? "\(count)" : "\(count) \(status.label.lowercased())")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize()
                     }
+                    .help("\(count) \(status.label.lowercased())")
                 }
             }
         }
@@ -142,12 +153,19 @@ struct PopoverView: View {
 
     private var footer: some View {
         HStack {
-            Text("Click a dot to switch · right-click or ⌃⌥V for this list · 1–9").font(.caption2).foregroundStyle(.tertiary)
+            if isSidebar {
+                Button("Exit Sidebar Mode") { preferences.sidebarMode = false }
+                    .buttonStyle(.borderless).controlSize(.small)
+            } else {
+                Text("Click a dot to switch · right-click or ⌃⌥V for this list · 1–9").font(.caption2).foregroundStyle(.tertiary)
+            }
             Spacer()
             Menu {
                 Toggle("Notify when a session needs input", isOn: $preferences.notifyNeedsInput)
                 Toggle("Notify when a session finishes", isOn: $preferences.notifyDone)
                 Toggle("Play sound when a session needs input", isOn: $preferences.playSound)
+                Toggle("Sidebar mode", isOn: $preferences.sidebarMode)
+                Divider()
                 Picker("Order sessions", selection: $preferences.sessionOrder) {
                     ForEach(SessionOrder.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
@@ -185,6 +203,8 @@ struct SessionRow: View {
     let session: Session
     let index: Int
     let isSelected: Bool
+    /// Narrow sidebar layout: name gets the whole first line; badge moves next to the task.
+    var compact = false
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -196,15 +216,15 @@ struct SessionRow: View {
                     Text(session.displayName)
                         .font(.system(size: 14, weight: .bold))
                         .lineLimit(1).truncationMode(.middle)
-                    AgentBadge(agent: session.agent)
-                    if session.customName != nil {
+                    if !compact { AgentBadge(agent: session.agent) }
+                    if session.customName != nil, !compact {
                         Text(session.project).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    if let desktop = session.screenPosition?.desktop {
+                    if !compact, let desktop = session.screenPosition?.desktop {
                         Text("Desktop \(desktop)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
                             .help("Mission Control desktop this session's Terminal window is on")
                     }
-                    if session.isCurrent {
+                    if session.isCurrent, !compact {
                         Label("Viewing", systemImage: "eye.fill")
                             .font(.system(size: 10, weight: .semibold))
                             .padding(.horizontal, 5).padding(.vertical, 1)
@@ -213,7 +233,7 @@ struct SessionRow: View {
                     }
                     Spacer(minLength: 6)
                     HStack(spacing: 4) {
-                        Text(session.status.label).foregroundStyle(session.status.color)
+                        if !compact { Text(session.status.label).foregroundStyle(session.status.color) }
                         if session.statusSince > Date.distantPast.addingTimeInterval(1) {
                             TimelineView(.periodic(from: .now, by: 1)) { context in
                                 Text(Self.elapsed(from: session.statusSince, to: context.date))
@@ -223,7 +243,13 @@ struct SessionRow: View {
                     }
                     .font(.caption.weight(.medium))
                 }
-                if let task = session.task {
+                if compact {
+                    HStack(spacing: 5) {
+                        AgentBadge(agent: session.agent)
+                        Text(session.task ?? session.project).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.85))
+                            .lineLimit(1)
+                    }
+                } else if let task = session.task {
                     Text(task).font(.system(size: 12.5)).foregroundStyle(.primary.opacity(0.85)).lineLimit(1)
                 }
                 if let activity = session.activity, let since = session.activitySince {

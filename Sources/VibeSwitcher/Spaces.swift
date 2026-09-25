@@ -22,27 +22,42 @@ enum Spaces {
                 unsafeBitCast(forWindows, to: CopySpacesForWindows.self))
     }()
 
+    struct Placement {
+        let desktop: Int
+        /// The window has a full-screen space of its own.
+        let fullscreen: Bool
+    }
+
     /// Desktop number (1-based) for each window id; windows it can't place are left out.
     static func ordinals(forWindowIDs windowIDs: [Int]) -> [Int: Int] {
+        placements(forWindowIDs: windowIDs).mapValues(\.desktop)
+    }
+
+    static func placements(forWindowIDs windowIDs: [Int]) -> [Int: Placement] {
         guard let (mainConnection, copyDisplaySpaces, copySpacesForWindows) = functions, !windowIDs.isEmpty else { return [:] }
         let connection = mainConnection()
         guard let displays = copyDisplaySpaces(connection)?.takeRetainedValue() as? [[String: Any]] else { return [:] }
 
         var ordinalBySpace: [Int: Int] = [:]
+        var fullscreenSpaces: Set<Int> = []
         var next = 1
         for display in displays {
             for space in display["Spaces"] as? [[String: Any]] ?? [] {
                 guard let id = space["ManagedSpaceID"] as? Int ?? space["id64"] as? Int else { continue }
                 ordinalBySpace[id] = next
+                if space["type"] as? Int == 4 { fullscreenSpaces.insert(id) } // 4 = full-screen app space
                 next += 1
             }
         }
 
-        var result: [Int: Int] = [:]
+        var result: [Int: Placement] = [:]
         for windowID in windowIDs {
             // Mask 0x7: current, other and fullscreen spaces.
             let spaces = copySpacesForWindows(connection, 0x7, [windowID] as CFArray)?.takeRetainedValue() as? [Int] ?? []
-            if let ordinal = spaces.compactMap({ ordinalBySpace[$0] }).min() { result[windowID] = ordinal }
+            if let space = spaces.min(by: { (ordinalBySpace[$0] ?? .max) < (ordinalBySpace[$1] ?? .max) }),
+               let ordinal = ordinalBySpace[space] {
+                result[windowID] = Placement(desktop: ordinal, fullscreen: fullscreenSpaces.contains(space))
+            }
         }
         return result
     }

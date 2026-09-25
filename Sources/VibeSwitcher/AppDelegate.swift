@@ -21,6 +21,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     /// What the menu bar icon depends on; the image is only redrawn when this changes.
     private var iconSignature = ""
     private var floatingPanel: FloatingPanelController!
+    private var sidebar: SidebarController!
     private var visibilityTimer: Timer?
     private var hiddenReadings = 0
     private var notificationTimer: Timer?
@@ -59,6 +60,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                                onNewSession: { [weak self] in self?.newSession(agent: $0, in: $1) },
                                onEditCommands: { [weak self] in self?.editLaunchCommands() })
         makePopoverContent = { AnyView(view) }
+        var sidebarView = view
+        sidebarView.isSidebar = true
+        sidebar = SidebarController(content: AnyView(PopoverView(
+            store: store, state: PopoverState(), preferences: preferences,
+            onOpen: sidebarView.onOpen, onInstallHooks: sidebarView.onInstallHooks, onQuit: sidebarView.onQuit,
+            onRename: sidebarView.onRename, onResetName: sidebarView.onResetName,
+            onNewSession: sidebarView.onNewSession, onEditCommands: sidebarView.onEditCommands, isSidebar: true)))
+        // Crash recovery: windows hidden by a sidebar session that didn't end cleanly come back.
+        if !preferences.sidebarMode {
+            DispatchQueue.global(qos: .utility).async { SidebarWorkspace.restoreHiddenWindows() }
+        }
+        preferences.$sidebarMode
+            .dropFirst(0)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] enabled in
+                guard let self else { return }
+                self.sidebar.setShown(enabled)
+                if !enabled { DispatchQueue.global(qos: .userInitiated).async { SidebarWorkspace.restoreHiddenWindows() } }
+                DispatchQueue.main.async { self.updateFloatingPanel() }
+            }
+            .store(in: &cancellables)
         hostingView = FirstMouseHostingView(rootView: AnyView(EmptyView()))
         let controller = NSViewController()
         controller.view = hostingView
@@ -201,12 +223,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         let visible = statusItemVisible
         // The icon's frame is briefly bogus while macOS places it, so only trust two hidden readings in a row.
         hiddenReadings = visible ? 0 : hiddenReadings + 1
-        let show: Bool
+        var show: Bool
         switch preferences.floatingPanel {
         case .always: show = true
         case .never: show = false
         case .automatic: show = hiddenReadings >= 2
         }
+        if preferences.sidebarMode { show = false } // the sidebar already shows every session
         let changed = show != floatingPanel.isShown
         floatingPanel.setShown(show)
         AppStatus.extras["menuBarIconVisible"] = visible
@@ -241,6 +264,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         popover.contentViewController?.view.window?.makeKey()
         startKeyMonitor()
         AppStatus.write(sessions: store.sessions, terminalAccess: store.terminalAccess, extra: ["popoverOpenedAt": ISO8601DateFormatter().string(from: Date())])
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // Never leave session windows hidden behind a closed app.
+        SidebarWorkspace.restoreHiddenWindows()
     }
 
     func popoverDidClose(_ notification: Notification) {
@@ -282,7 +310,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         popover.performClose(nil)
         store.acknowledge(session)
         notifier?.clear(tty: session.tty)
+        let sidebarMode = preferences.sidebarMode
+        let sessions = store.sessions
         DispatchQueue.global(qos: .userInitiated).async {
+            if sidebarMode, SidebarWorkspace.show(session, among: sessions) {
+                DispatchQueue.main.async { self.store.refresh(forceTerminal: true) }
+                return
+            }
             // Try the exact Terminal tab even if the last title scan missed it; fall back to the host app.
             var result = "terminal-tab"
             if session.inTerminalApp, let terminal = TerminalBridge.app {

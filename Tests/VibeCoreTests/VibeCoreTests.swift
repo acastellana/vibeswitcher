@@ -381,9 +381,12 @@ struct DesktopOrderTests {
 struct BackgroundJobsTests {
     @Test func extractsTheCommandFromClaudesShellWrapper() {
         let prove = "/bin/zsh -c source /Users/me/.claude/shell-snapshots/snapshot-zsh-1.sh 2>/dev/null || true && export X=1 && eval 'mkdir -p .logs && npm run prove > .logs/gate-$(date +%H%M).log 2>&1; echo \"EXIT $?\"' < /dev/null && pwd -P >| /tmp/cwd"
-        #expect(BackgroundJobs.command(fromWrapper: prove) == "npm run prove; echo \"EXIT $?\"")
+        #expect(BackgroundJobs.command(fromWrapper: prove) == "npm run prove")
         let loop = "/bin/zsh -c source /x/shell-snapshots/s.sh && eval 'until ! ps aux | grep -q \"Chrome\"; do sleep 3; done; echo done_waiting' < /dev/null"
-        #expect(BackgroundJobs.command(fromWrapper: loop) == "until ! ps aux | grep -q \"Chrome\"; do sleep 3; done; echo done_waiting")
+        #expect(BackgroundJobs.command(fromWrapper: loop) == "until ! ps aux | grep -q \"Chrome\"")
+        // A heredoc that writes a file, then the real work: show the work, not `cat`.
+        let heredoc = "eval 'cat >> docs/NOTES.md <<'\"'\"'EOF'\"'\"'\n## Notes\n- see it'\"'\"'s table\nEOF\ngit add -A && npm run prove > logs/p.log 2>&1' < /dev/null"
+        #expect(BackgroundJobs.command(fromWrapper: heredoc) == "npm run prove")
         #expect(BackgroundJobs.command(fromWrapper: "eval 'echo it'\\''s' < /dev/null") == "echo it's")
         #expect(BackgroundJobs.command(fromWrapper: "eval 'echo it'\"'\"'s' < /dev/null") == "echo it's")
         #expect(BackgroundJobs.command(fromWrapper: "/bin/zsh -c ls") == nil)
@@ -408,9 +411,9 @@ struct BackgroundJobsTests {
 
     @Test func summarisesSeveralJobs() {
         let now = Date(timeIntervalSince1970: 100_000)
-        let jobs = (0..<5).map { BackgroundJob(pid: Int32($0), command: "until ! pgrep Chrome; do sleep 3; done",
+        let jobs = (0..<5).map { BackgroundJob(pid: Int32($0), command: "until ! pgrep Chrome",
                                                 startedAt: now.addingTimeInterval(-25_200 + Double($0))) }
-        #expect(BackgroundJobs.summary(jobs, now: now) == "5 shells · oldest 7h: until ! pgrep Chrome; do sleep 3; done")
+        #expect(BackgroundJobs.summary(jobs, now: now) == "5 shells · oldest 7h: until ! pgrep Chrome")
         #expect(Durations.short(45) == "45s" && Durations.short(3 * 3600 + 300) == "3h 5m" && Durations.short(2 * 86400 + 4 * 3600) == "2d 4h")
     }
 }

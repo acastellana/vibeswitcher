@@ -27,6 +27,12 @@ While a session runs a tool, its row shows what and for how long ("⚙ Run unit 
   opens there. The commands it runs are editable (e.g. add `--model`), under ⊕ › Launch Commands….
 - The icon stays narrow: up to 4 sessions in one row, then two rows of small dots (12 max, then counts).
 
+**Sidebar mode** (⚙︎ › Sidebar mode): the list docks to the right edge of the screen, on every desktop.
+Picking a session hides the other session windows and brings the chosen one to the desktop you're on,
+sized to fill the space beside the sidebar, so you work on one screen and switch in place. Full-screen
+windows keep their own space. Windows it hides are remembered and shown again when you leave the mode or
+quit the app (then they all appear on the current desktop).
+
 **Crowded menu bar?** On notched MacBooks, macOS silently hides status icons that don't fit right of the
 notch. VibeSwitcher starts next to the clock, where overflow never reaches (⌘-drag it elsewhere if you
 like). If its icon does get hidden, a floating pill with the same numbered dots appears automatically;

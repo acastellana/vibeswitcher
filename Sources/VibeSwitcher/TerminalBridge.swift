@@ -72,10 +72,11 @@ enum TerminalBridge {
             tabs[tty] = TerminalTab(windowID: windowID, title: title, position: position, isSelected: parts[3] == "true", windowOrder: order)
         }
         // Which desktop each window is on (private API, may be unavailable: then positions stay desktop-less).
-        let desktops = Spaces.ordinals(forWindowIDs: Array(Set(tabs.values.map(\.windowID))))
+        let placements = Spaces.placements(forWindowIDs: Array(Set(tabs.values.map(\.windowID))))
         for (tty, tab) in tabs {
-            guard var position = tab.position, let desktop = desktops[tab.windowID] else { continue }
-            position.desktop = desktop
+            guard var position = tab.position, let placement = placements[tab.windowID] else { continue }
+            position.desktop = placement.desktop
+            position.fullscreen = placement.fullscreen
             tabs[tty] = TerminalTab(windowID: tab.windowID, title: tab.title, position: position,
                                     isSelected: tab.isSelected, windowOrder: tab.windowOrder)
         }

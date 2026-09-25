@@ -8,6 +8,8 @@ public struct ScreenPosition: Equatable, Sendable {
     public let tabIndex: Int
     /// Desktop (Space) number, 1-based like Mission Control; nil when it can't be determined.
     public var desktop: Int?
+    /// The window is in its own full-screen space.
+    public var fullscreen = false
 
     public init(frame: CGRect, tabIndex: Int, desktop: Int? = nil) {
         self.frame = frame

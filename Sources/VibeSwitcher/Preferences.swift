@@ -11,6 +11,8 @@ final class Preferences: ObservableObject {
     @Published var notifyNeedsInput: Bool { didSet { defaults.set(notifyNeedsInput, forKey: "notifyNeedsInput") } }
     @Published var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: "notifyDone") } }
     @Published var playSound: Bool { didSet { defaults.set(playSound, forKey: "playSound") } }
+    /// Docked session list on the right; picking a session shows only its window, on this desktop.
+    @Published var sidebarMode: Bool { didSet { defaults.set(sidebarMode, forKey: "sidebarMode") } }
     @Published var sessionOrder: SessionOrder {
         didSet { defaults.set(sessionOrder.rawValue, forKey: "sessionOrder") }
     }
@@ -31,6 +33,7 @@ final class Preferences: ObservableObject {
         notifyDone = defaults.bool(forKey: "notifyDone")
         playSound = defaults.bool(forKey: "playSound")
         claudeCommand = defaults.string(forKey: "claudeCommand") ?? "claude"
+        sidebarMode = defaults.bool(forKey: "sidebarMode")
         sessionOrder = SessionOrder(rawValue: defaults.string(forKey: "sessionOrder") ?? "") ?? .screen
         codexCommand = defaults.string(forKey: "codexCommand") ?? "codex"
         launchAtLogin = SMAppService.mainApp.status == .enabled

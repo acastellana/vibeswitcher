@@ -32,6 +32,17 @@ enum Snapshot {
             write(view: host, to: "\(outputDirectory)/\(name).png")
         }
 
+        var sidebarView = PopoverView(store: store, state: PopoverState(), preferences: Preferences(),
+                                      onOpen: { _ in }, onInstallHooks: {}, onQuit: {})
+        sidebarView.isSidebar = true
+        let sidebarHost = NSHostingView(rootView: sidebarView.padding(8).background(Color(nsColor: .windowBackgroundColor)))
+        sidebarHost.appearance = NSAppearance(named: .darkAqua)
+        sidebarHost.frame = NSRect(x: 0, y: 0, width: SidebarController.width, height: 900)
+        let sidebarWindow = NSWindow(contentRect: sidebarHost.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        sidebarWindow.contentView = sidebarHost
+        sidebarHost.layoutSubtreeIfNeeded()
+        write(view: sidebarHost, to: "\(outputDirectory)/sidebar.png")
+
         let icon = StatusIcon.image(for: store.sessions)
         for (name, appearance, gray) in [("menubar-icon-dark", NSAppearance.Name.darkAqua, 0.15),
                                          ("menubar-icon-light", .aqua, 0.92)] {

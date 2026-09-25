@@ -24,7 +24,9 @@ public enum BackgroundJobs {
             .sorted { $0.startedAt < $1.startedAt }
     }
 
-    /// The user-facing command inside Claude's shell wrapper, first line, without output redirections.
+    /// The user-facing command inside Claude's shell wrapper: the last statement that does real work,
+    /// skipping heredoc bodies, setup (`mkdir`, `cd`, `export`), file writes (`cat >> f <<EOF`) and
+    /// `echo`s, with output redirections removed.
     static func command(fromWrapper wrapper: String) -> String? {
         guard let start = wrapper.range(of: "eval '") else { return nil }
         var body = String(wrapper[start.upperBound...])
@@ -33,16 +35,43 @@ public enum BackgroundJobs {
         }
         // Both shell idioms for a quote inside single quotes: '\'' and '"'"'
         body = body.replacingOccurrences(of: "'\\''", with: "'").replacingOccurrences(of: "'\"'\"'", with: "'")
-        // Drop setup like `mkdir -p logs && ` so the interesting part comes first.
-        let parts = body.components(separatedBy: " && ")
-        let main = parts.first(where: { !$0.hasPrefix("mkdir ") && !$0.hasPrefix("cd ") }) ?? body
-        let firstLine = main.split(whereSeparator: \.isNewline).first.map(String.init) ?? main
-        // Strip `2>&1` first, then file redirections (`> log`, `>> $(date).log`, `>| x`).
-        let withoutRedirects = firstLine
+        let statements = withoutHeredocBodies(body)
+            .components(separatedBy: .newlines)
+            .flatMap { $0.components(separatedBy: " && ") }
+            .flatMap { $0.components(separatedBy: "; ") }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let trivial = ["mkdir ", "cd ", "export ", "echo ", "printf ", "cat >", "set ", "true", "done", "do ", "then", "fi"]
+        // The last real step is usually the slow one (`git add -A && npm run prove`).
+        let main = statements.last { statement in !trivial.contains { statement.hasPrefix($0) } } ?? statements.first
+        return main.map(stripRedirections).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// Removes the lines between `<<EOF` / `<<'EOF'` / `<<-"EOF"` and their terminator, keeping the
+    /// command line that opened the heredoc.
+    static func withoutHeredocBodies(_ script: String) -> String {
+        var output: [String] = []
+        var terminator: String?
+        for line in script.components(separatedBy: .newlines) {
+            if let end = terminator {
+                if line.trimmingCharacters(in: .whitespaces) == end { terminator = nil }
+                continue
+            }
+            output.append(line)
+            if let match = line.range(of: #"<<-?\s*['"]?([A-Za-z_][A-Za-z0-9_]*)['"]?"#, options: .regularExpression) {
+                terminator = String(line[match]).trimmingCharacters(in: CharacterSet(charactersIn: "<-'\" "))
+            }
+        }
+        return output.joined(separator: "\n")
+    }
+
+    static func stripRedirections(_ statement: String) -> String {
+        // `2>&1` first, then file redirections (`> log`, `>> $(date).log`, `>| x`), then heredoc markers.
+        statement
             .replacingOccurrences(of: #"\s*\d?>&\d"#, with: "", options: .regularExpression)
             .replacingOccurrences(of: #"\s*\d?>{1,2}\|?\s*(?:\$\([^)]*\)|[^\s;|&$])+"#, with: "", options: .regularExpression)
-        let trimmed = withoutRedirects.trimmingCharacters(in: .whitespaces)
-        return trimmed.isEmpty ? nil : trimmed
+            .replacingOccurrences(of: #"\s*<<-?\s*['"]?[A-Za-z_][A-Za-z0-9_]*['"]?"#, with: "", options: .regularExpression)
+            .trimmingCharacters(in: .whitespaces)
     }
 
     /// "npm run prove · 6h" or "5 shells · oldest 7h: until ! ps aux | grep …".
