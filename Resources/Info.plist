@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>VibeSwitcher</string>
+    <key>CFBundleDisplayName</key>
+    <string>VibeSwitcher</string>
+    <key>CFBundleIdentifier</key>
+    <string>dev.vibeswitcher.VibeSwitcher</string>
+    <key>CFBundleExecutable</key>
+    <string>VibeSwitcher</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>0.1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>14.0</string>
+    <key>LSUIElement</key>
+    <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>VibeSwitcher reads Terminal tab titles to show what each Claude/Codex session is doing, and selects a tab when you click a session.</string>
+</dict>
+</plist>

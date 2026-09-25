@@ -1,0 +1,84 @@
+import Foundation
+
+public enum Agent: String, Codable, CaseIterable, Sendable {
+    case claude
+    case codex
+
+    /// Maps a process `comm` (executable name, max 16 chars) to an agent.
+    public init?(comm: String) {
+        switch comm {
+        case "claude": self = .claude
+        case "codex": self = .codex
+        default: return nil
+        }
+    }
+
+    public var displayName: String {
+        switch self {
+        case .claude: return "Claude"
+        case .codex: return "Codex"
+        }
+    }
+}
+
+public enum SessionStatus: String, Codable, Sendable {
+    /// Blocked on you: permission prompt, question, plan approval.
+    case needsInput
+    /// Model is thinking or running tools.
+    case working
+    /// Finished a turn you haven't looked at yet.
+    case done
+    /// Finished and already seen (or never started a turn).
+    case idle
+    /// No hooks and no readable terminal title, so the state can't be told.
+    case unknown
+
+    public var label: String {
+        switch self {
+        case .needsInput: return "Needs input"
+        case .working: return "Working"
+        case .done: return "Done"
+        case .idle: return "Idle"
+        case .unknown: return "Unknown"
+        }
+    }
+}
+
+/// One live agent session, identified by the terminal (TTY) it runs in.
+public struct Session: Identifiable, Equatable, Sendable {
+    public var id: String { tty }
+    public let tty: String
+    public var agent: Agent
+    public var pid: Int32
+    public var startedAt: Date
+    public var cwd: String?
+    public var title: String
+    public var status: SessionStatus
+    public var statusSince: Date
+    public var detail: String?
+    public var hasHooks: Bool
+    /// True when the session's tab was found in Terminal.app (so we can focus that exact tab).
+    public var inTerminalApp: Bool
+
+    public init(tty: String, agent: Agent, pid: Int32, startedAt: Date, cwd: String?, title: String,
+                status: SessionStatus, statusSince: Date, detail: String?, hasHooks: Bool, inTerminalApp: Bool) {
+        self.tty = tty
+        self.agent = agent
+        self.pid = pid
+        self.startedAt = startedAt
+        self.cwd = cwd
+        self.title = title
+        self.status = status
+        self.statusSince = statusSince
+        self.detail = detail
+        self.hasHooks = hasHooks
+        self.inTerminalApp = inTerminalApp
+    }
+
+    /// `~/dev/project` style path for display.
+    public var shortCwd: String? {
+        guard let cwd else { return nil }
+        let home = NSHomeDirectory()
+        return cwd.hasPrefix(home) ? "~" + cwd.dropFirst(home.count) : cwd
+    }
+}
