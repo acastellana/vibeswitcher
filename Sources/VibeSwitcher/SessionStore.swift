@@ -21,6 +21,7 @@ final class SessionStore: ObservableObject {
 
     // Scan-queue only.
     private var tabs: [String: TerminalTab] = [:]
+    private var backgroundWork: [String: String] = [:]
     private var lastTerminalQuery = Date.distantPast
 
     // Main-thread only.
@@ -28,6 +29,12 @@ final class SessionStore: ObservableObject {
     private var observed: [String: (status: SessionStatus, since: Date)] = [:]
     private var acknowledged: [String: Date] = [:]
     private var displayed: [String: SessionStatus] = [:]
+    /// Claude sessions whose turn looks finished; only their screens are read for background work.
+    private var quietClaudeTTYs: Set<String> = []
+    private let names = NameStore()
+    /// Project folders seen running an agent, feeding the "New session" menu.
+    private(set) var observedProjects: [String: Date] =
+        (UserDefaults.standard.dictionary(forKey: "observedProjects") as? [String: Date]) ?? [:]
 
     func start() {
         refreshHookStatus()
@@ -38,6 +45,19 @@ final class SessionStore: ObservableObject {
 
     func refreshHookStatus() {
         hooksInstalled = Dictionary(uniqueKeysWithValues: Agent.allCases.map { ($0, HookInstaller.isInstalled(agent: $0)) })
+    }
+
+    /// Gives a session your own name (nil or empty resets it to the project name).
+    func rename(_ session: Session, to name: String?) {
+        names.set(name, for: session.nameKeys)
+        refresh()
+    }
+
+    private func noteProject(_ root: String, at now: Date) {
+        // Persist at most every 10 minutes per folder; this runs on every scan.
+        if let last = observedProjects[root], now.timeIntervalSince(last) < 600 { return }
+        observedProjects[root] = now
+        UserDefaults.standard.set(observedProjects, forKey: "observedProjects")
     }
 
     /// Marks a finished session as seen, turning it from green (done) to grey (idle).
@@ -53,6 +73,7 @@ final class SessionStore: ObservableObject {
             return
         }
         scanning = true
+        let quiet = quietClaudeTTYs
         queue.async { [weak self] in
             guard let self else { return }
             let now = Date()
@@ -64,14 +85,17 @@ final class SessionStore: ObservableObject {
                 self.tabs = result.tabs
                 access = result.access
                 self.lastTerminalQuery = now
+                self.backgroundWork = TerminalBridge.screens(for: quiet)
+                    .compactMapValues { BackgroundWork.summary(fromScreen: $0) }
             }
             let tabs = self.tabs
+            let background = self.backgroundWork
             DispatchQueue.main.async {
                 if let access, access != self.terminalAccess {
                     self.terminalAccess = access
                     AppStatus.write(sessions: self.sessions, terminalAccess: access)
                 }
-                self.apply(raw: raw, tabs: tabs, now: now)
+                self.apply(raw: raw, tabs: tabs, background: background, now: now)
                 self.scanning = false
                 if self.rescanRequested {
                     let force = self.forceTerminalRequested
@@ -88,10 +112,14 @@ final class SessionStore: ObservableObject {
         let now = Date()
         let result = TerminalBridge.tabs()
         terminalAccess = result.access
-        apply(raw: scanner.scan(now: now), tabs: result.tabs, now: now)
+        let raw = scanner.scan(now: now)
+        let quiet = Set(raw.filter { $0.agent == .claude }.map(\.tty))
+        let background = TerminalBridge.screens(for: quiet).compactMapValues { BackgroundWork.summary(fromScreen: $0) }
+        apply(raw: raw, tabs: result.tabs, background: background, now: now)
     }
 
-    private func apply(raw: [RawSession], tabs: [String: TerminalTab], now: Date) {
+    private func apply(raw: [RawSession], tabs: [String: TerminalTab], background: [String: String], now: Date) {
+        var quiet: Set<String> = []
         let terminalFront = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == TerminalBridge.bundleID
         var result: [Session] = []
         for item in raw {
@@ -116,17 +144,39 @@ final class SessionStore: ObservableObject {
             let viewing = terminalFront && tab.map { $0.isSelected && $0.windowOrder == 1 } == true
             if viewing { acknowledged[item.tty] = now }
             let seenAt = acknowledged[item.tty] ?? launchedAt
-            let status: SessionStatus = (resolved == .done && since <= seenAt) ? .idle : resolved
+            var status: SessionStatus = (resolved == .done && since <= seenAt) ? .idle : resolved
+            var waitingOn: String?
+            if item.agent == .claude, status == .done || status == .idle {
+                quiet.insert(item.tty)
+                // Turn over but background work still running: it will resume on its own.
+                if let work = background[item.tty] {
+                    status = .background
+                    waitingOn = work
+                }
+            }
 
-            let session = Session(
+            var session = Session(
                 tty: item.tty, agent: item.agent, pid: item.pid, startedAt: item.startedAt, cwd: item.cwd,
                 project: item.project,
                 task: SessionNaming.task(fromTitle: parsed?.text, project: item.project, firstPrompt: item.hook?.firstPrompt),
                 status: status, statusSince: since,
-                detail: detail(for: status, hook: item.hook, agent: item.agent),
+                detail: waitingOn.map { "Waiting on \($0)" } ?? detail(for: status, hook: item.hook, agent: item.agent),
                 hasHooks: item.hook != nil, inTerminalApp: tab != nil)
-            if !viewing, let previous = displayed[item.tty], previous != status, status == .needsInput || status == .done {
-                onAttention?(session)
+            session.nameKeys = SessionKeys.keys(pid: item.pid, startedAt: item.startedAt, sessionId: item.hook?.sessionId)
+            session.customName = names.name(for: session.nameKeys)
+            if let root = item.projectRoot { noteProject(root, at: now) }
+            if !viewing, let previous = displayed[item.tty], previous != status {
+                if status == .needsInput {
+                    onAttention?(session)
+                } else if status == .done {
+                    // Background work shows up in the footer a moment after the turn ends; only report
+                    // "done" if it is still done once that has had time to appear.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+                        guard let self, self.displayed[session.tty] == .done,
+                              let current = self.sessions.first(where: { $0.tty == session.tty }) else { return }
+                        self.onAttention?(current)
+                    }
+                }
             }
             displayed[item.tty] = status
             result.append(session)
@@ -135,6 +185,8 @@ final class SessionStore: ObservableObject {
         observed = observed.filter { live.contains($0.key) }
         acknowledged = acknowledged.filter { live.contains($0.key) }
         displayed = displayed.filter { live.contains($0.key) }
+        names.prune(liveKeys: Set(result.flatMap(\.nameKeys)))
+        quietClaudeTTYs = quiet
 
         let ordered = SessionOrdering.sort(result)
         if ordered != sessions {
@@ -155,7 +207,7 @@ final class SessionStore: ObservableObject {
         case .working:
             if let prompt = hook?.lastPrompt, !SessionNaming.isSystemPrompt(prompt) { return "› " + prompt }
             return hook?.toolName.map { "Running \($0)" }
-        case .done, .idle:
+        case .done, .idle, .background:
             return hook?.lastMessage
         case .unknown:
             guard hook == nil else { return nil }

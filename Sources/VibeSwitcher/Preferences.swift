@@ -11,6 +11,9 @@ final class Preferences: ObservableObject {
     @Published var notifyNeedsInput: Bool { didSet { defaults.set(notifyNeedsInput, forKey: "notifyNeedsInput") } }
     @Published var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: "notifyDone") } }
     @Published var playSound: Bool { didSet { defaults.set(playSound, forKey: "playSound") } }
+    /// What "New session" runs, e.g. `claude` or `claude --model opus`.
+    @Published var claudeCommand: String { didSet { defaults.set(claudeCommand, forKey: "claudeCommand") } }
+    @Published var codexCommand: String { didSet { defaults.set(codexCommand, forKey: "codexCommand") } }
     @Published private(set) var launchAtLogin: Bool
     /// Mirrors the system permission, for the popover banner.
     @Published var notificationsAllowed = true
@@ -19,12 +22,20 @@ final class Preferences: ObservableObject {
     }
 
     init() {
-        defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true, "playSound": true])
+        defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true, "playSound": true,
+                                     "claudeCommand": "claude", "codexCommand": "codex"])
         notifyNeedsInput = defaults.bool(forKey: "notifyNeedsInput")
         notifyDone = defaults.bool(forKey: "notifyDone")
         playSound = defaults.bool(forKey: "playSound")
+        claudeCommand = defaults.string(forKey: "claudeCommand") ?? "claude"
+        codexCommand = defaults.string(forKey: "codexCommand") ?? "codex"
         launchAtLogin = SMAppService.mainApp.status == .enabled
         floatingPanel = FloatingPanelMode(rawValue: defaults.string(forKey: "floatingPanel") ?? "") ?? .automatic
+    }
+
+    func command(for agent: Agent) -> String {
+        let command = (agent == .claude ? claudeCommand : codexCommand).trimmingCharacters(in: .whitespaces)
+        return command.isEmpty ? agent.rawValue : command
     }
 
     /// Registers the login item once, on first launch from an app bundle; after that the toggle decides.
@@ -122,7 +133,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             return
         }
         let content = UNMutableNotificationContent()
-        content.title = needsInput ? "\(session.project) needs your input" : "\(session.project) is done"
+        content.title = needsInput ? "\(session.displayName) needs your input" : "\(session.displayName) is done"
         content.subtitle = session.task ?? session.agent.displayName
         if let detail = session.detail { content.body = detail }
         content.sound = needsInput && preferences.playSound ? .default : nil

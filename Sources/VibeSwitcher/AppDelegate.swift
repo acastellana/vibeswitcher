@@ -48,7 +48,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
         let view = PopoverView(store: store, state: popoverState, preferences: preferences,
                                onOpen: { [weak self] in self?.open($0) },
                                onInstallHooks: { [weak self] in self?.installHooks() },
-                               onQuit: { NSApp.terminate(nil) })
+                               onQuit: { NSApp.terminate(nil) },
+                               onRename: { [weak self] in self?.rename($0) },
+                               onResetName: { [weak self] in self?.store.rename($0, to: nil) },
+                               onNewSession: { [weak self] in self?.newSession(agent: $0, in: $1) },
+                               onEditCommands: { [weak self] in self?.editLaunchCommands() })
         hostingView = FirstMouseHostingView(rootView: AnyView(view))
         let controller = NSViewController()
         controller.view = hostingView
@@ -162,7 +166,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
         guard store.sessions.indices.contains(index) else { return "" }
         let session = store.sessions[index]
         let task = session.task.map { "\n\($0)" } ?? ""
-        return "\(index + 1). \(session.project) · \(session.status.label)\(task)\nClick to switch · right-click for the list"
+        return "\(index + 1). \(session.displayName) · \(session.status.label)\(task)\nClick to switch · right-click for the list"
     }
 
     /// Whether macOS is actually showing our menu bar icon. When the right side of the menu bar
@@ -212,6 +216,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
         guard let button = target else { return }
         store.refresh(forceTerminal: true)
         notifier?.refreshAuthorization()
+        loadRecentProjects()
         popoverState.selectedIndex = store.sessions.firstIndex { $0.status == .needsInput }
             ?? store.sessions.firstIndex { $0.status == .done } ?? 0
         fitPopover()
@@ -274,6 +279,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
                 AppStatus.extras["lastOpen"] = "\(session.tty) \(result) \(ISO8601DateFormatter().string(from: Date()))"
                 AppStatus.write(sessions: self.store.sessions, terminalAccess: self.store.terminalAccess)
             }
+        }
+    }
+
+    private func loadRecentProjects() {
+        let observed = store.observedProjects
+        DispatchQueue.global(qos: .userInitiated).async {
+            let recents = Launcher.recentProjects(observed: observed)
+            DispatchQueue.main.async { self.popoverState.recentProjects = recents }
+        }
+    }
+
+    private func rename(_ session: Session) {
+        popover.performClose(nil)
+        let alert = NSAlert()
+        alert.messageText = "Rename session"
+        alert.informativeText = "Shown instead of “\(session.project)” in the list, tooltips and notifications, for as long as this session runs."
+        let field = NSTextField(string: session.customName ?? "")
+        field.placeholderString = session.task ?? session.project
+        field.frame = NSRect(x: 0, y: 0, width: 280, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        alert.window.initialFirstResponder = field
+        NSApp.activate()
+        if alert.runModal() == .alertFirstButtonReturn {
+            store.rename(session, to: field.stringValue)
+        }
+    }
+
+    private func newSession(agent: Agent, in directory: String?) {
+        popover.performClose(nil)
+        guard let folder = directory ?? Launcher.chooseFolder(startingAt: popoverState.recentProjects.first
+            .map { ($0.path as NSString).deletingLastPathComponent }) else { return }
+        Launcher.launch(command: preferences.command(for: agent), in: folder)
+    }
+
+    private func editLaunchCommands() {
+        popover.performClose(nil)
+        let alert = NSAlert()
+        alert.messageText = "Launch commands"
+        alert.informativeText = "What “New session” runs in the new Terminal window. Add flags you always use, e.g. --model."
+        let claude = NSTextField(string: preferences.claudeCommand)
+        let codex = NSTextField(string: preferences.codexCommand)
+        let stack = NSStackView(views: [NSTextField(labelWithString: "Claude Code"), claude,
+                                        NSTextField(labelWithString: "Codex"), codex])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.frame = NSRect(x: 0, y: 0, width: 300, height: 110)
+        [claude, codex].forEach { $0.widthAnchor.constraint(equalToConstant: 300).isActive = true }
+        alert.accessoryView = stack
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate()
+        if alert.runModal() == .alertFirstButtonReturn {
+            preferences.claudeCommand = claude.stringValue
+            preferences.codexCommand = codex.stringValue
         }
     }
 

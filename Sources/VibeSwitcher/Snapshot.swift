@@ -40,7 +40,7 @@ enum Snapshot {
         write(view: iconView, to: "\(outputDirectory)/menubar-icon.png")
 
         for session in store.sessions {
-            print("\(session.status.rawValue)\t\(session.agent.rawValue)\t\(session.tty)\t\(session.project)\t\(session.task ?? "-")\t\(session.detail ?? "")")
+            print("\(session.status.rawValue)\t\(session.agent.rawValue)\t\(session.tty)\t\(session.displayName)\t\(session.task ?? "-")\t\(session.detail ?? "")")
         }
     }
 

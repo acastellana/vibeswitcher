@@ -5,6 +5,7 @@ import VibeCore
 /// Selection shared between the SwiftUI list and the AppKit key monitor (arrows / 1–9 / return).
 final class PopoverState: ObservableObject {
     @Published var selectedIndex = 0
+    @Published var recentProjects: [RecentProjects.Candidate] = []
 }
 
 struct PopoverView: View {
@@ -14,6 +15,10 @@ struct PopoverView: View {
     let onOpen: (Session) -> Void
     let onInstallHooks: () -> Void
     let onQuit: () -> Void
+    var onRename: (Session) -> Void = { _ in }
+    var onResetName: (Session) -> Void = { _ in }
+    var onNewSession: (Agent, String?) -> Void = { _, _ in }
+    var onEditCommands: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -34,6 +39,14 @@ struct PopoverView: View {
                             }
                             .buttonStyle(.plain)
                             .onHover { if $0 { state.selectedIndex = index } }
+                            .contextMenu {
+                                Button("Switch to Session") { onOpen(session) }
+                                Divider()
+                                Button("Rename…") { onRename(session) }
+                                if session.customName != nil {
+                                    Button("Reset Name to “\(session.project)”") { onResetName(session) }
+                                }
+                            }
                         }
                     }
                     .padding(6)
@@ -51,8 +64,9 @@ struct PopoverView: View {
     private var header: some View {
         HStack(spacing: 12) {
             Text("VibeSwitcher").font(.headline)
+            newSessionMenu
             Spacer()
-            ForEach([SessionStatus.needsInput, .working, .done], id: \.self) { status in
+            ForEach([SessionStatus.needsInput, .working, .background, .done], id: \.self) { status in
                 let count = store.sessions.filter { $0.status == status }.count
                 if count > 0 {
                     HStack(spacing: 4) {
@@ -63,6 +77,42 @@ struct PopoverView: View {
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
+    }
+
+    private var newSessionMenu: some View {
+        Menu {
+            if !state.recentProjects.isEmpty {
+                Section("Recent projects") {
+                    ForEach(state.recentProjects, id: \.path) { project in
+                        Menu(Self.menuLabel(for: project.path)) {
+                            Button("Claude Code") { onNewSession(.claude, project.path) }
+                            Button("Codex") { onNewSession(.codex, project.path) }
+                        }
+                    }
+                }
+            }
+            Menu("Other Folder…") {
+                Button("Claude Code") { onNewSession(.claude, nil) }
+                Button("Codex") { onNewSession(.codex, nil) }
+            }
+            Divider()
+            Button("Launch Commands…", action: onEditCommands)
+        } label: {
+            Image(systemName: "plus.circle")
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Start a new session")
+    }
+
+    /// "vibeswitcher — ~/dev"
+    static func menuLabel(for path: String) -> String {
+        let name = SessionNaming.name(forProjectRoot: path)
+        var parent = (path as NSString).deletingLastPathComponent
+        let home = NSHomeDirectory()
+        if parent.hasPrefix(home) { parent = "~" + parent.dropFirst(home.count) }
+        return "\(name) — \(parent)"
     }
 
     @ViewBuilder private var banners: some View {
@@ -140,10 +190,13 @@ struct SessionRow: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Text(session.project)
+                    Text(session.displayName)
                         .font(.system(size: 14, weight: .bold))
                         .lineLimit(1).truncationMode(.middle)
                     AgentBadge(agent: session.agent)
+                    if session.customName != nil {
+                        Text(session.project).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
                     Spacer(minLength: 6)
                     HStack(spacing: 4) {
                         Text(session.status.label).foregroundStyle(session.status.color)

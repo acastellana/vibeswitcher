@@ -63,3 +63,33 @@ public enum StatusRules {
         return (.none, trimmed)
     }
 }
+
+/// Background work a Claude Code session is still waiting on after its turn ended (background shells,
+/// tasks, monitors). Claude shows it in its footer, e.g. "⏵⏵ bypass permissions on · 1 shell · ← 2 agents";
+/// the session resumes by itself when that work reports back. "← N agents" is only a hint for switching
+/// to agent views (it shows on sessions idle for hours), so it doesn't count.
+public enum BackgroundWork {
+    private static let pattern = try! NSRegularExpression(
+        pattern: #"(?:^|·)\s*(←)?[^0-9A-Za-z·←]*(\d+)\s+(shells?|agents?|background tasks?|monitors?)(?=\s*(?:·|$))"#,
+        options: [.caseInsensitive])
+
+    /// Summary like "1 shell · 2 agents" from the last lines of the terminal, or nil if nothing is running.
+    /// Only the footer (last few non-empty lines) is inspected so conversation text can't match.
+    public static func summary(fromScreen screen: String, footerLines: Int = 6) -> String? {
+        let lines = screen.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .suffix(footerLines)
+        var parts: [String] = []
+        for line in lines {
+            let range = NSRange(line.startIndex..., in: line)
+            for match in pattern.matches(in: line, range: range) {
+                guard match.range(at: 1).location == NSNotFound,
+                      let count = Range(match.range(at: 2), in: line), let kind = Range(match.range(at: 3), in: line),
+                      Int(line[count]) ?? 0 > 0 else { continue }
+                parts.append("\(line[count]) \(line[kind].lowercased())")
+            }
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}

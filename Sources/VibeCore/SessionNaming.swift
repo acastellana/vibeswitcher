@@ -6,16 +6,23 @@ public enum SessionNaming {
     /// started in (so `cd`-ing into subfolders doesn't rename it), else that directory itself.
     public static func project(forLaunchDirectory directory: String, home: String = NSHomeDirectory(),
                                fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> String {
+        name(forProjectRoot: projectRoot(forLaunchDirectory: directory, home: home, fileExists: fileExists), home: home)
+    }
+
+    /// The git repository root containing `directory`, else `directory` itself.
+    public static func projectRoot(forLaunchDirectory directory: String, home: String = NSHomeDirectory(),
+                                   fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> String {
         let standardized = (directory as NSString).standardizingPath
-        if standardized == home { return "~ (home)" }
         var current = standardized
         while current != "/", current != home, !current.isEmpty {
-            if fileExists((current as NSString).appendingPathComponent(".git")) {
-                return (current as NSString).lastPathComponent
-            }
+            if fileExists((current as NSString).appendingPathComponent(".git")) { return current }
             current = (current as NSString).deletingLastPathComponent
         }
-        return (standardized as NSString).lastPathComponent
+        return standardized
+    }
+
+    public static func name(forProjectRoot root: String, home: String = NSHomeDirectory()) -> String {
+        root == home ? "~ (home)" : (root as NSString).lastPathComponent
     }
 
     static let genericTitles: Set<String> = ["terminal", "claude", "claude code", "codex", "zsh", "-zsh", "bash", "-bash", "node"]

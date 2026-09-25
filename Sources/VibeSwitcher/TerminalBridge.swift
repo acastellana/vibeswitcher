@@ -59,6 +59,41 @@ enum TerminalBridge {
         return (tabs, .granted)
     }
 
+    /// Visible text of the tabs on `ttys` (Claude's footer shows background shells/agents there).
+    static func screens(for ttys: Set<String>) -> [String: String] {
+        guard isRunning, !ttys.isEmpty else { return [:] }
+        let list = ttys.map { "\"/dev/\($0)\"" }.joined(separator: ", ")
+        let script = """
+        set wanted to {\(list)}
+        set out to ""
+        tell application "Terminal"
+            repeat with w in windows
+                try
+                    -- Address tabs by index: `contents of t` on a loop variable is AppleScript's own
+                    -- dereference operator, not Terminal's screen-text property.
+                    repeat with ti from 1 to (count of tabs of w)
+                        set ttyName to (tty of tab ti of w) as text
+                        if wanted contains ttyName then
+                            set out to out & ttyName & (character id 29) & ((contents of tab ti of w) as text) & (character id 30)
+                        end if
+                    end repeat
+                end try
+            end repeat
+        end tell
+        return out
+        """
+        let result = runAppleScript(script)
+        guard result.status == 0 else { return [:] }
+        var screens: [String: String] = [:]
+        for record in result.output.split(separator: "\u{1E}") {
+            let parts = record.split(separator: "\u{1D}", maxSplits: 1, omittingEmptySubsequences: false)
+            guard parts.count == 2 else { continue }
+            let tty = parts[0].trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "/dev/", with: "")
+            screens[tty] = String(parts[1])
+        }
+        return screens
+    }
+
     static var app: NSRunningApplication? {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first
     }
@@ -126,15 +161,28 @@ enum TerminalBridge {
         process.standardOutput = out
         process.standardError = err
         do { try process.run() } catch { return ("", "\(error)", -1) }
-        let deadline = DispatchTime.now() + timeout
-        let done = DispatchSemaphore(value: 0)
-        process.terminationHandler = { _ in done.signal() }
-        if done.wait(timeout: deadline) == .timedOut {
+        // Read while the script runs: waiting for exit first deadlocks once the output fills the
+        // 64 KB pipe buffer (screen contents of several tabs easily do). A watchdog enforces the timeout.
+        var timedOut = false
+        let watchdog = DispatchWorkItem {
+            timedOut = true
             process.terminate()
-            return ("", "timeout", -2)
         }
-        let output = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-        let error = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: watchdog)
+        var errorData = Data()
+        let errorRead = DispatchGroup()
+        errorRead.enter()
+        DispatchQueue.global().async {
+            errorData = err.fileHandleForReading.readDataToEndOfFile()
+            errorRead.leave()
+        }
+        let outputData = out.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        errorRead.wait()
+        watchdog.cancel()
+        if timedOut { return ("", "timeout", -2) }
+        let output = String(data: outputData, encoding: .utf8) ?? ""
+        let error = String(data: errorData, encoding: .utf8) ?? ""
         return (output, error, process.terminationStatus)
     }
 }

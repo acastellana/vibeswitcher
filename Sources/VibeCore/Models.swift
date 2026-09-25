@@ -26,6 +26,8 @@ public enum SessionStatus: String, Codable, Sendable {
     case needsInput
     /// Model is thinking or running tools.
     case working
+    /// Turn ended, but background shells/agents are still running; it will resume by itself.
+    case background
     /// Finished a turn you haven't looked at yet.
     case done
     /// Finished and already seen (or never started a turn).
@@ -37,6 +39,7 @@ public enum SessionStatus: String, Codable, Sendable {
         switch self {
         case .needsInput: return "Needs input"
         case .working: return "Working"
+        case .background: return "Background"
         case .done: return "Done"
         case .idle: return "Idle"
         case .unknown: return "Unknown"
@@ -56,6 +59,10 @@ public struct Session: Identifiable, Equatable, Sendable {
     public var project: String
     /// What it's working on, e.g. "Website redesign concepts". Nil when nothing useful is known.
     public var task: String?
+    /// Name you gave the session (right-click › Rename); replaces the project as the headline.
+    public var customName: String?
+    /// Keys the custom name is stored under (see `SessionKeys`).
+    public var nameKeys: [String] = []
     public var status: SessionStatus
     public var statusSince: Date
     public var detail: String?
@@ -79,10 +86,13 @@ public struct Session: Identifiable, Equatable, Sendable {
         self.inTerminalApp = inTerminalApp
     }
 
+    /// Headline: your custom name if you gave one, else the project.
+    public var displayName: String { customName ?? project }
+
     /// One-line label for tooltips and notifications: "acme-site — Website redesign concepts".
     public var title: String {
-        guard let task else { return project }
-        return "\(project) — \(task)"
+        guard let task else { return displayName }
+        return "\(displayName) — \(task)"
     }
 
     /// `~/dev/project` style path for display.

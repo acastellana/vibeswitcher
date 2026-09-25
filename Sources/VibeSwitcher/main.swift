@@ -33,11 +33,27 @@ if let index = arguments.firstIndex(of: "--open"), arguments.indices.contains(in
                                                                  userInfo: nil, deliverImmediately: true)
     exit(0)
 }
+if let index = arguments.firstIndex(of: "--new"), arguments.indices.contains(index + 1),
+   let agent = Agent(rawValue: arguments[index + 1]) {
+    // Same as the popover's "New session" menu: a new Terminal window running the configured command.
+    let folder = arguments.indices.contains(index + 2) ? arguments[index + 2] : FileManager.default.currentDirectoryPath
+    let command = Preferences().command(for: agent)
+    Launcher.launch(command: command, in: (folder as NSString).expandingTildeInPath)
+    Thread.sleep(forTimeInterval: 2) // launch runs asynchronously
+    print("started \(command) in \(folder)")
+    exit(0)
+}
 if arguments.contains("--dump") {
-    for session in SessionScanner().scan() {
+    let sessions = SessionScanner().scan()
+    let screens = TerminalBridge.screens(for: Set(sessions.filter { $0.agent == .claude }.map(\.tty)))
+    for session in sessions {
+        let work = screens[session.tty].flatMap { BackgroundWork.summary(fromScreen: $0) }.map { "\tbackground: \($0)" } ?? ""
         let hook = session.hook.map { "\($0.lastEvent) (\(Int(Date().timeIntervalSince1970 - $0.lastEventAt))s ago)" } ?? "no hooks"
-        print("\(session.tty)\t\(session.agent.rawValue)\tpid \(session.pid)\t\(hook)\t\(session.cwd ?? "?")")
+        print("\(session.tty)\t\(session.agent.rawValue)\tpid \(session.pid)\t\(hook)\t\(session.cwd ?? "?")\(work)")
     }
+    let observed = UserDefaults.standard.dictionary(forKey: "observedProjects") as? [String: Date] ?? [:]
+    print("\nrecent projects:")
+    for project in Launcher.recentProjects(observed: observed) { print("  \(project.path)") }
     exit(0)
 }
 

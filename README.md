@@ -7,6 +7,7 @@ what each one is doing, and jumps to its Terminal tab in one keystroke.
 | --- | --- | --- |
 | 🔴 | Needs input | Blocked on you: permission prompt, question, plan approval |
 | 🟠 | Working | Thinking or running tools |
+| 🔵 | Background | Turn ended, but background shells/tasks are still running; it will resume on its own |
 | 🟢 | Done | Finished a turn you haven't looked at yet |
 | ⚪️ | Idle | Finished and already seen |
 | ◯ | Unknown | No hooks and no readable title yet |
@@ -15,6 +16,11 @@ The menu bar shows one dot per session, oldest first, so each dot keeps its posi
 
 - **Click a dot** to jump straight to that session's Terminal tab. Hover a dot to see which session it is.
 - **Right-click** (or **⌃⌥V**) opens the list; there, click a row or press **1–9** / **↑↓ ⏎**.
+- **Right-click a row › Rename…** to give a session your own name (kept while it runs, and across
+  `--resume` when the session id is kept).
+- **⊕ in the list header** starts a new session: pick a recent project (from your running sessions, Claude
+  Code's project list and Codex's trusted projects) and Claude Code or Codex, and a new Terminal window
+  opens there. The commands it runs are editable (e.g. add `--model`), under ⊕ › Launch Commands….
 - The icon stays narrow: up to 4 sessions in one row, then two rows of small dots (12 max, then counts).
 
 **Crowded menu bar?** On notched MacBooks, macOS silently hides status icons that don't fit right of the
@@ -62,7 +68,8 @@ Three sources, most precise first:
    exits 0, so it can never block an agent.
 2. **Terminal tab titles.** Claude Code titles its tab `✳ <task>` when idle and uses a spinner glyph while
    working. That covers sessions without hooks, plus the transitions hooks miss (Esc interrupts fire no
-   `Stop`).
+   `Stop`). For finished Claude sessions the footer is read too: `1 shell` / `2 background tasks` there
+   means it's waiting on background work (🔵).
 3. **The process table** (`sysctl`, no `ps`). Finds every `claude` / `codex` process attached to a TTY, so
    every session is listed even before it sends a hook event.
 
@@ -77,6 +84,7 @@ VibeSwitcher --toggle          # open/close the popover of the running app (bind
 VibeSwitcher --open ttys012    # ask the running app to open a session (same path as clicking its row)
 VibeSwitcher --focus ttys012   # select a Terminal tab directly (no activation handling)
 VibeSwitcher --snapshot /tmp   # render popover + menu bar icon PNGs from live data
+VibeSwitcher --new claude ~/dev/app   # new Terminal window running the configured command there
 VibeSwitcher --install-hooks | --uninstall-hooks
 cat ~/.vibeswitcher/app-status.json   # debug aid: what the running app currently sees
 ```

@@ -224,3 +224,65 @@ struct SessionNamingTests {
         #expect(StatusRules.status(for: final) == .working)
     }
 }
+
+struct BackgroundWorkTests {
+    @Test func readsClaudeFooter() {
+        let screen = """
+          The VM is stable, up 2 h 24 min. I'll report when Flows finishes.
+        ────────────────────────────────
+        ❯
+        ────────────────────────────────
+          [Opus] ███████░░░ 71% | webshop git:(main*)
+          ⏵⏵ bypass permissions on · 1 shell · ← 2 agents
+        """
+        #expect(BackgroundWork.summary(fromScreen: screen) == "1 shell")
+        #expect(BackgroundWork.summary(fromScreen: "❯ \n  ? for shortcuts · 3 background tasks") == "3 background tasks")
+    }
+
+    @Test func ignoresConversationTextAndIdleFooters() {
+        #expect(BackgroundWork.summary(fromScreen: "❯\n  ⏵⏵ bypass permissions on (shift+tab to cycle)") == nil)
+        // Prose above the footer mentioning shells must not count.
+        let prose = (["I started 2 shells for the build"] + Array(repeating: "line", count: 8)).joined(separator: "\n")
+        #expect(BackgroundWork.summary(fromScreen: prose) == nil)
+        #expect(BackgroundWork.summary(fromScreen: "  ⏵⏵ accept edits on · 0 shells") == nil)
+        // "← N agents" is a navigation hint, present even on long-idle sessions.
+        #expect(BackgroundWork.summary(fromScreen: "  ⏵⏵ bypass permissions on (shift+tab to cycle) · ← 2 agents") == nil)
+        #expect(BackgroundWork.summary(fromScreen: "  ⏵⏵ bypass permissions on · 2 agents") == "2 agents")
+    }
+}
+
+struct RecentProjectsTests {
+    @Test func ranksNewestFirstAndDropsJunk() {
+        let now = Date()
+        let ranked = RecentProjects.rank([
+            .init(path: "/Users/me/dev/old", lastUsed: now.addingTimeInterval(-500)),
+            .init(path: "/Users/me/dev/new", lastUsed: now),
+            .init(path: "/Users/me/dev/old/", lastUsed: now.addingTimeInterval(-10)),   // same folder, newer
+            .init(path: "/Users/me", lastUsed: now),                                     // bare home
+            .init(path: "/Users/me/dev/gone", lastUsed: now),                            // deleted
+        ], home: "/Users/me", exists: { $0 != "/Users/me/dev/gone" })
+        #expect(ranked.map(\.path) == ["/Users/me/dev/new", "/Users/me/dev/old"])
+        #expect(ranked[1].lastUsed == now.addingTimeInterval(-10))
+    }
+
+    @Test func claudeSlugMatchesTranscriptFolders() {
+        #expect(RecentProjects.claudeSlug(for: "/Users/me/dev/vibeswitcher") == "-Users-me-dev-vibeswitcher")
+        #expect(RecentProjects.claudeSlug(for: "/Users/me/My Project.v2") == "-Users-me-My-Project-v2")
+    }
+
+    @Test func readsCodexProjects() {
+        let toml = "model = \"x\"\n[projects.\"/Users/me/dev/a\"]\ntrust_level = \"trusted\"\n[hooks.state]\n"
+        #expect(RecentProjects.codexProjects(fromConfig: toml) == ["/Users/me/dev/a"])
+    }
+
+    @Test func shellCommandQuotesAnyFolder() {
+        #expect(RecentProjects.shellCommand(cd: "/Users/me/it's here", run: "claude")
+                == "cd '/Users/me/it'\\''s here' && claude")
+    }
+
+    @Test func nameKeysCoverProcessAndResume() {
+        let start = Date(timeIntervalSince1970: 1000)
+        #expect(SessionKeys.keys(pid: 42, startedAt: start, sessionId: "abc") == ["proc:42-1000", "session:abc"])
+        #expect(SessionKeys.keys(pid: 42, startedAt: start, sessionId: nil) == ["proc:42-1000"])
+    }
+}

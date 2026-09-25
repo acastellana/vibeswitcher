@@ -7,6 +7,7 @@ extension SessionStatus {
         switch self {
         case .needsInput: return .systemRed
         case .working: return .systemOrange
+        case .background: return .systemBlue
         case .done: return .systemGreen
         case .idle: return NSColor.systemGray.withAlphaComponent(0.55)
         case .unknown: return NSColor.systemGray.withAlphaComponent(0.35)
@@ -50,7 +51,7 @@ enum StatusIcon {
     }
 
     private static func counts(_ sessions: [Session]) -> NSImage {
-        let order: [SessionStatus] = [.needsInput, .working, .done, .idle]
+        let order: [SessionStatus] = [.needsInput, .working, .background, .done, .idle]
         let text = NSMutableAttributedString()
         let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
         for status in order {

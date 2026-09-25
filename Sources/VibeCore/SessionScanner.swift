@@ -9,6 +9,8 @@ public struct RawSession: Sendable {
     public let cwd: String?
     /// Repo/folder name the agent was launched in (see `SessionNaming.project`).
     public let project: String
+    /// Full path of that repo/folder.
+    public let projectRoot: String?
     public let hook: HookState?
 }
 
@@ -37,8 +39,10 @@ public final class SessionScanner {
             let hook = hooks[tty].flatMap { isCurrent($0, agent: agent, root: root, procs: agentProcs) ? $0 : nil }
             let launchDirectory = cachedCwd(root.pid)
             let cwd = hook?.cwd ?? launchDirectory
+            let projectRoot = cachedProjectRoot(root.pid, launchDirectory ?? cwd)
             sessions.append(RawSession(tty: tty, agent: agent, pid: root.pid, startedAt: root.startTime,
-                                       cwd: cwd, project: cachedProject(root.pid, launchDirectory ?? cwd), hook: hook))
+                                       cwd: cwd, project: projectRoot.map { SessionNaming.name(forProjectRoot: $0) } ?? "?",
+                                       projectRoot: projectRoot, hook: hook))
         }
         cwdCache = cwdCache.filter { procs[$0.key] != nil }
         projectCache = projectCache.filter { procs[$0.key] != nil }
@@ -54,12 +58,12 @@ public final class SessionScanner {
     }
 
     /// The agent's own cwd is where it was launched (its tools `cd` in subprocesses), so it is stable.
-    private func cachedProject(_ pid: Int32, _ directory: String?) -> String {
+    private func cachedProjectRoot(_ pid: Int32, _ directory: String?) -> String? {
         if let cached = projectCache[pid] { return cached }
-        guard let directory else { return "?" }
-        let project = SessionNaming.project(forLaunchDirectory: directory)
-        projectCache[pid] = project
-        return project
+        guard let directory else { return nil }
+        let root = SessionNaming.projectRoot(forLaunchDirectory: directory)
+        projectCache[pid] = root
+        return root
     }
 
     private func cachedCwd(_ pid: Int32) -> String? {
