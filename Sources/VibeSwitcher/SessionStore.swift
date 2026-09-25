@@ -188,7 +188,10 @@ final class SessionStore: ObservableObject {
             session.isCurrent = viewing
             session.screenPosition = tab?.position
             session.terminalWindowID = tab?.windowID
-            session.onCurrentDesktop = tab?.position?.desktop.map { currentDesktops.contains($0) } ?? false
+            // Only the visible tab counts: a window full of session tabs sits on one desktop, but
+            // you can only be looking at the selected one.
+            session.onCurrentDesktop = tab?.isSelected == true
+                && (tab?.position?.desktop.map { currentDesktops.contains($0) } ?? false)
             if status == .working, let hook = item.hook, hook.lastEvent == "PreToolUse", let started = hook.toolStartedAt {
                 session.activity = hook.toolDetail
                 session.activitySince = Date(timeIntervalSince1970: started)

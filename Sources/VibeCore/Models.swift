@@ -73,7 +73,7 @@ public struct Session: Identifiable, Equatable, Sendable {
     public var isCurrent = false
     /// Window frame and tab index in Terminal, used to order sessions like the screen.
     public var screenPosition: ScreenPosition?
-    /// Its window is on the desktop you're looking at now.
+    /// It's the visible tab of a window on the desktop you're looking at now.
     public var onCurrentDesktop = false
     /// Terminal.app window id (also its window-server id), when the tab was found.
     public var terminalWindowID: Int?
