@@ -147,33 +147,43 @@ struct HookInstallerTests {
 
 
 struct MenuBarDotsTests {
-    @Test func clicksMapToNearestDot() {
-        let step = MenuBarDots.diameter + MenuBarDots.gap
-        #expect(MenuBarDots.index(atX: 0, count: 3) == 0)
-        #expect(MenuBarDots.index(atX: MenuBarDots.diameter / 2, count: 3) == 0)
-        #expect(MenuBarDots.index(atX: step + 1, count: 3) == 1)
+    @Test func fewSessionsUseOneRow() {
+        let layout = MenuBarDots.layout(count: 3)
+        #expect(layout.rows == 1)
+        let step = layout.diameter + layout.gap
+        #expect(MenuBarDots.index(at: CGPoint(x: 0, y: 9), count: 3) == 0)
+        #expect(MenuBarDots.index(at: CGPoint(x: step + 1, y: 2), count: 3) == 1)
         // The gap is split between neighbours.
-        #expect(MenuBarDots.index(atX: MenuBarDots.diameter + MenuBarDots.gap / 2 - 0.1, count: 3) == 0)
-        #expect(MenuBarDots.index(atX: MenuBarDots.diameter + MenuBarDots.gap / 2 + 0.1, count: 3) == 1)
-        #expect(MenuBarDots.index(atX: MenuBarDots.width(count: 3) - 1, count: 3) == 2)
+        #expect(MenuBarDots.index(at: CGPoint(x: layout.diameter + layout.gap / 2 - 0.1, y: 9), count: 3) == 0)
+        #expect(MenuBarDots.index(at: CGPoint(x: layout.diameter + layout.gap / 2 + 0.1, y: 9), count: 3) == 1)
+        #expect(MenuBarDots.index(at: CGPoint(x: -10, y: 9), count: 3) == nil)
+        #expect(MenuBarDots.index(at: CGPoint(x: layout.width + 10, y: 9), count: 3) == nil)
     }
 
-    @Test func outsideTheStripIsNoDot() {
-        #expect(MenuBarDots.index(atX: -10, count: 3) == nil)
-        #expect(MenuBarDots.index(atX: MenuBarDots.width(count: 3) + 10, count: 3) == nil)
-        #expect(MenuBarDots.index(atX: 5, count: 0) == nil)
-        #expect(MenuBarDots.index(atX: 5, count: MenuBarDots.maxDots + 1) == nil)
+    @Test func manySessionsWrapIntoTwoNarrowRows() {
+        let layout = MenuBarDots.layout(count: 9)
+        #expect(layout.rows == 2 && layout.columns == 5)
+        #expect(layout.width < 60, "9 sessions must stay compact, was \(layout.width)")
+        // Top row holds 1–5, bottom row 6–9; the empty 10th cell is not a session.
+        #expect(MenuBarDots.index(at: CGPoint(x: 1, y: 15), count: 9) == 0)
+        #expect(MenuBarDots.index(at: CGPoint(x: 1, y: 3), count: 9) == 5)
+        #expect(MenuBarDots.index(at: CGPoint(x: layout.width - 1, y: 3), count: 9) == nil)
+        #expect(MenuBarDots.rect(at: 0, count: 9).minY > MenuBarDots.rect(at: 5, count: 9).maxY)
+        #expect(MenuBarDots.index(at: CGPoint(x: 5, y: 9), count: MenuBarDots.maxDots + 1) == nil)
     }
 
-    @Test func hitRectsTileTheStrip() {
-        for index in 0..<4 {
-            let hit = MenuBarDots.hitRect(at: index)
-            #expect(hit.contains(CGPoint(x: MenuBarDots.rect(at: index).midX, y: 9)))
-            #expect(MenuBarDots.index(atX: hit.midX, count: 4) == index)
+    @Test func hitRectsMatchHitTesting() {
+        for count in [1, 4, 5, 9, 12] {
+            for index in 0..<count {
+                let hit = MenuBarDots.hitRect(at: index, count: count)
+                let dot = MenuBarDots.rect(at: index, count: count)
+                #expect(hit.contains(CGPoint(x: dot.midX, y: dot.midY)))
+                #expect(MenuBarDots.index(at: CGPoint(x: hit.midX, y: hit.midY), count: count) == index)
+                #expect(dot.minY >= 0 && dot.maxY <= MenuBarDots.height)
+            }
         }
     }
 }
-
 
 struct SessionNamingTests {
     private let repos: Set<String> = ["/Users/me/dev/webshop/.git", "/Users/me/dev/site/.git"]

@@ -15,7 +15,12 @@ The menu bar shows one dot per session, oldest first, so each dot keeps its posi
 
 - **Click a dot** to jump straight to that session's Terminal tab. Hover a dot to see which session it is.
 - **Right-click** (or **⌃⌥V**) opens the list; there, click a row or press **1–9** / **↑↓ ⏎**.
-- With more than 10 sessions the icon switches to per-status counts, and a click opens the list.
+- The icon stays narrow: up to 4 sessions in one row, then two rows of small dots (12 max, then counts).
+
+**Crowded menu bar?** On notched MacBooks, macOS silently hides status icons that don't fit right of the
+notch. VibeSwitcher starts next to the clock, where overflow never reaches (⌘-drag it elsewhere if you
+like). If its icon does get hidden, a floating pill with the same numbered dots appears automatically;
+drag it anywhere. Set it to Always / Never in the ⚙︎ menu.
 
 ## Install
 

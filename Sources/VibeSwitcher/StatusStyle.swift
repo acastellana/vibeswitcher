@@ -32,7 +32,7 @@ enum StatusIcon {
         let size = NSSize(width: MenuBarDots.width(count: sessions.count), height: MenuBarDots.height)
         let image = NSImage(size: size, flipped: false) { _ in
             for (index, session) in sessions.enumerated() {
-                let rect = MenuBarDots.rect(at: index)
+                let rect = MenuBarDots.rect(at: index, count: sessions.count)
                 let path = NSBezierPath(ovalIn: rect)
                 if session.status == .unknown {
                     session.status.nsColor.setStroke()

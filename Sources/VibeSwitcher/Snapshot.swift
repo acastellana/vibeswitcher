@@ -21,6 +21,17 @@ enum Snapshot {
             write(view: host, to: "\(outputDirectory)/\(name).png")
         }
 
+        for (name, appearance) in [("panel-light", NSAppearance.Name.aqua), ("panel-dark", .darkAqua)] {
+            let host = NSHostingView(rootView: FloatingDotsView(store: store, onOpen: { _ in }, onShowList: {})
+                .padding(10).background(Color(nsColor: .windowBackgroundColor)))
+            host.appearance = NSAppearance(named: appearance)
+            host.frame = NSRect(origin: .zero, size: host.fittingSize)
+            let window = NSWindow(contentRect: host.frame, styleMask: .borderless, backing: .buffered, defer: false)
+            window.contentView = host
+            host.layoutSubtreeIfNeeded()
+            write(view: host, to: "\(outputDirectory)/\(name).png")
+        }
+
         let icon = StatusIcon.image(for: store.sessions)
         let iconView = NSImageView(image: icon)
         iconView.frame = NSRect(x: 0, y: 0, width: icon.size.width + 16, height: 24)

@@ -11,12 +11,16 @@ final class Preferences: ObservableObject {
     @Published var notifyNeedsInput: Bool { didSet { defaults.set(notifyNeedsInput, forKey: "notifyNeedsInput") } }
     @Published var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: "notifyDone") } }
     @Published private(set) var launchAtLogin: Bool
+    @Published var floatingPanel: FloatingPanelMode {
+        didSet { defaults.set(floatingPanel.rawValue, forKey: "floatingPanel") }
+    }
 
     init() {
         defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true])
         notifyNeedsInput = defaults.bool(forKey: "notifyNeedsInput")
         notifyDone = defaults.bool(forKey: "notifyDone")
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        floatingPanel = FloatingPanelMode(rawValue: defaults.string(forKey: "floatingPanel") ?? "") ?? .automatic
     }
 
     /// Registers the login item once, on first launch from an app bundle; after that the toggle decides.
@@ -33,6 +37,22 @@ final class Preferences: ObservableObject {
             NSLog("VibeSwitcher: login item change failed: \(error)")
         }
         launchAtLogin = SMAppService.mainApp.status == .enabled
+        floatingPanel = FloatingPanelMode(rawValue: defaults.string(forKey: "floatingPanel") ?? "") ?? .automatic
+    }
+}
+
+enum FloatingPanelMode: String, CaseIterable {
+    /// Only when the menu bar icon is hidden (crowded menu bar / notch).
+    case automatic
+    case always
+    case never
+
+    var label: String {
+        switch self {
+        case .automatic: return "When the menu bar icon is hidden"
+        case .always: return "Always"
+        case .never: return "Never"
+        }
     }
 }
 

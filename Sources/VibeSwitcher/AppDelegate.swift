@@ -15,6 +15,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
     private var keyMonitor: Any?
     private var cancellables: Set<AnyCancellable> = []
     private var hostingView: NSHostingView<AnyView>!
+    private var floatingPanel: FloatingPanelController!
+    private var visibilityTimer: Timer?
+    private var hiddenReadings = 0
+    /// Stored by macOS as the distance from the right screen edge; set once so we start next to the
+    /// clock, where an overflowing menu bar never hides items. ⌘-dragging the icon overrides it.
+    private static let statusItemName = "VibeSwitcher"
+    private static let positionKey = "NSStatusItem Preferred Position VibeSwitcher"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         HookBinary.sync()
@@ -26,7 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
         }
         store.onAttention = { [weak self] session in self?.notifier.post(for: session) }
 
+        if UserDefaults.standard.object(forKey: Self.positionKey) == nil {
+            UserDefaults.standard.set(120.0, forKey: Self.positionKey)
+        }
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+        statusItem.autosaveName = Self.statusItemName
         statusItem.button?.target = self
         statusItem.button?.action = #selector(statusItemClicked)
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -43,12 +54,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
         popover.behavior = .transient
         popover.animates = false
 
+        floatingPanel = FloatingPanelController(store: store, onOpen: { [weak self] in self?.open($0) },
+                                                onShowList: { [weak self] anchor in self?.togglePopover(anchor: anchor) })
+        preferences.$floatingPanel
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.updateFloatingPanel() } }
+            .store(in: &cancellables)
+        visibilityTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
+            self?.updateFloatingPanel()
+        }
+
         store.$sessions
             .receive(on: RunLoop.main)
             .sink { [weak self] sessions in
                 guard let self else { return }
                 self.statusItem.button?.image = StatusIcon.image(for: sessions)
-                DispatchQueue.main.async { self.updateDotToolTips() }
+                DispatchQueue.main.async {
+                    self.updateDotToolTips()
+                    self.floatingPanel.fit()
+                }
                 self.popoverState.selectedIndex = min(self.popoverState.selectedIndex, max(0, sessions.count - 1))
                 DispatchQueue.main.async { self.fitPopover() }
             }
@@ -95,11 +119,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
         return rect.width > 0 ? rect : nil
     }
 
+    /// Button point → point in the dots image (origin bottom-left), whatever the button's flippedness.
+    private func imagePoint(_ point: NSPoint, in button: NSStatusBarButton, imageRect rect: NSRect, image: NSImage) -> CGPoint {
+        let fx = (point.x - rect.minX) / rect.width
+        var fy = (point.y - rect.minY) / rect.height
+        if button.isFlipped { fy = 1 - fy }
+        return CGPoint(x: fx * image.size.width, y: fy * image.size.height)
+    }
+
     private func dotIndex(at event: NSEvent, in button: NSStatusBarButton) -> Int? {
         guard let rect = dotsImageRect(in: button), let image = button.image else { return nil }
         let point = button.convert(event.locationInWindow, from: nil)
-        let x = (point.x - rect.minX) * image.size.width / rect.width
-        return MenuBarDots.index(atX: x, count: store.sessions.count)
+        return MenuBarDots.index(at: imagePoint(point, in: button, imageRect: rect, image: image), count: store.sessions.count)
     }
 
     /// One tooltip region per dot, naming that session.
@@ -111,14 +142,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
             return
         }
         button.toolTip = nil
-        let scale = rect.width / image.size.width
+        let sx = rect.width / image.size.width, sy = rect.height / image.size.height
         for index in store.sessions.indices {
-            let hit = MenuBarDots.hitRect(at: index)
-            let area = NSRect(x: rect.minX + hit.minX * scale, y: button.bounds.minY,
-                              width: hit.width * scale, height: button.bounds.height)
+            let hit = MenuBarDots.hitRect(at: index, count: store.sessions.count)
+            let y = button.isFlipped ? rect.maxY - hit.maxY * sy : rect.minY + hit.minY * sy
+            let area = NSRect(x: rect.minX + hit.minX * sx, y: y, width: hit.width * sx, height: hit.height * sy)
             button.addToolTip(area, owner: self, userData: UnsafeMutableRawPointer(bitPattern: index + 1))
         }
-        AppStatus.extras["menuBar"] = ["buttonWidth": button.bounds.width, "imageX": rect.minX, "imageWidth": rect.width]
+        AppStatus.extras["menuBar"] = ["buttonWidth": button.bounds.width, "imageX": rect.minX, "imageWidth": rect.width,
+                                       "flipped": button.isFlipped]
     }
 
     func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
@@ -130,12 +162,54 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
         return "\(index + 1). \(session.project) · \(session.status.label)\(task)\nClick to switch · right-click for the list"
     }
 
+    /// Whether macOS is actually showing our menu bar icon. When the right side of the menu bar
+    /// overflows, the leftmost items are pushed under the notch (or off screen) and silently vanish.
+    private var statusItemVisible: Bool {
+        guard let window = statusItem.button?.window, window.isVisible,
+              let screen = window.screen ?? NSScreen.main else { return false }
+        let frame = window.frame
+        guard frame.width > 0, frame.minX >= screen.frame.minX, frame.maxX <= screen.frame.maxX else { return false }
+        // On a notched screen macOS only shows status items right of the notch; overflow is parked
+        // under the notch or behind the app menus on the left, invisible either way.
+        if let right = screen.auxiliaryTopRightArea, frame.minX < right.minX { return false }
+        return true
+    }
+
+    private func updateFloatingPanel() {
+        let visible = statusItemVisible
+        // The icon's frame is briefly bogus while macOS places it, so only trust two hidden readings in a row.
+        hiddenReadings = visible ? 0 : hiddenReadings + 1
+        let show: Bool
+        switch preferences.floatingPanel {
+        case .always: show = true
+        case .never: show = false
+        case .automatic: show = hiddenReadings >= 2
+        }
+        let changed = show != floatingPanel.isShown
+        floatingPanel.setShown(show)
+        AppStatus.extras["menuBarIconVisible"] = visible
+        AppStatus.extras["floatingPanelShown"] = show
+        if let frame = statusItem.button?.window?.frame {
+            AppStatus.extras["menuBarIconFrame"] = ["x": frame.minX, "width": frame.width]
+        }
+        if changed { AppStatus.write(sessions: store.sessions, terminalAccess: store.terminalAccess) }
+    }
+
     @objc private func togglePopover() {
+        togglePopover(anchor: nil)
+    }
+
+    /// Shows the list under the menu bar icon, or under the floating panel when the icon is hidden.
+    private func togglePopover(anchor: NSView?) {
         if popover.isShown {
             popover.performClose(nil)
             return
         }
-        guard let button = statusItem.button else { return }
+        let target: NSView?
+        if let anchor { target = anchor }
+        else if statusItemVisible || !floatingPanel.isShown { target = statusItem.button }
+        else { target = floatingPanel.anchorView }
+        guard let button = target else { return }
         store.refresh(forceTerminal: true)
         popoverState.selectedIndex = store.sessions.firstIndex { $0.status == .needsInput }
             ?? store.sessions.firstIndex { $0.status == .done } ?? 0

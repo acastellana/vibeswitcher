@@ -88,6 +88,9 @@ struct PopoverView: View {
             Menu {
                 Toggle("Notify when a session needs input", isOn: $preferences.notifyNeedsInput)
                 Toggle("Notify when a session finishes", isOn: $preferences.notifyDone)
+                Picker("Floating dots panel", selection: $preferences.floatingPanel) {
+                    ForEach(FloatingPanelMode.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
                 Divider()
                 Toggle("Launch at login", isOn: Binding(get: { preferences.launchAtLogin },
                                                         set: { preferences.setLaunchAtLogin($0) }))
