@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
     private var floatingPanel: FloatingPanelController!
     private var visibilityTimer: Timer?
     private var hiddenReadings = 0
+    private var notificationTimer: Timer?
     /// Stored by macOS as the distance from the right screen edge; set once so we start next to the
     /// clock, where an overflowing menu bar never hides items. ⌘-dragging the icon overrides it.
     private static let statusItemName = "VibeSwitcher"
@@ -62,6 +63,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
             .store(in: &cancellables)
         visibilityTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
             self?.updateFloatingPanel()
+        }
+        notificationTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+            self?.notifier.refreshAuthorization()
         }
 
         store.$sessions
@@ -211,6 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
         else { target = floatingPanel.anchorView }
         guard let button = target else { return }
         store.refresh(forceTerminal: true)
+        notifier.refreshAuthorization()
         popoverState.selectedIndex = store.sessions.firstIndex { $0.status == .needsInput }
             ?? store.sessions.firstIndex { $0.status == .done } ?? 0
         fitPopover()

@@ -11,6 +11,8 @@ final class Preferences: ObservableObject {
     @Published var notifyNeedsInput: Bool { didSet { defaults.set(notifyNeedsInput, forKey: "notifyNeedsInput") } }
     @Published var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: "notifyDone") } }
     @Published private(set) var launchAtLogin: Bool
+    /// Mirrors the system permission, for the popover banner.
+    @Published var notificationsAllowed = true
     @Published var floatingPanel: FloatingPanelMode {
         didSet { defaults.set(floatingPanel.rawValue, forKey: "floatingPanel") }
     }
@@ -61,7 +63,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private let center = UNUserNotificationCenter.current()
     private let preferences: Preferences
     var onOpen: ((String) -> Void)?
-    private var allowed = false
+    /// nil until the first check, so a permission that is already on doesn't trigger the test banner.
+    private var allowed: Bool?
 
     init(preferences: Preferences) {
         self.preferences = preferences
@@ -70,13 +73,42 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func requestAuthorization() {
-        center.requestAuthorization(options: [.alert, .sound]) { granted, error in
+        center.requestAuthorization(options: [.alert, .sound]) { _, error in
             if let error { NSLog("VibeSwitcher: notification authorization failed: \(error)") }
+            self.refreshAuthorization()
+        }
+    }
+
+    /// Re-reads the permission (it only changes in System Settings, while we're running), and confirms
+    /// with a test banner the moment it gets switched on.
+    func refreshAuthorization() {
+        center.getNotificationSettings { settings in
+            let allowed = [.authorized, .provisional].contains(settings.authorizationStatus)
+                && settings.alertSetting != .disabled
             DispatchQueue.main.async {
-                self.allowed = granted
-                AppStatus.extras["notificationsAllowed"] = granted
+                let wasAllowed = self.allowed
+                self.allowed = allowed
+                self.preferences.notificationsAllowed = allowed
+                AppStatus.extras["notificationsAllowed"] = allowed
+                if allowed, wasAllowed == false { self.postTest() }
             }
         }
+    }
+
+    /// Opens System Settings › Notifications › VibeSwitcher.
+    static func openSettings() {
+        let id = Bundle.main.bundleIdentifier ?? "dev.vibeswitcher.VibeSwitcher"
+        if let url = URL(string: "x-apple.systempreferences:com.apple.Notifications-Settings.extension?id=\(id)") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    private func postTest() {
+        let content = UNMutableNotificationContent()
+        content.title = "VibeSwitcher notifications are on"
+        content.body = "You'll get a banner when a session needs your input or finishes. Click one to jump to it."
+        center.add(UNNotificationRequest(identifier: "vibeswitcher-test", content: content, trigger: nil))
+        AppStatus.extras["lastAlert"] = "test \(ISO8601DateFormatter().string(from: Date()))"
     }
 
     func post(for session: Session) {
@@ -84,7 +116,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         guard needsInput ? preferences.notifyNeedsInput : preferences.notifyDone else { return }
         AppStatus.extras["lastAlert"] = "\(session.status.rawValue) \(session.tty) \(ISO8601DateFormatter().string(from: Date()))"
         // Without notification permission, at least make a sound when something is blocked on you.
-        guard allowed else {
+        guard allowed == true else {
             if needsInput { NSSound(named: "Ping")?.play() }
             return
         }

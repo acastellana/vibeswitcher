@@ -69,6 +69,15 @@ struct PopoverView: View {
         if store.terminalAccess == .denied {
             Banner(text: "Allow VibeSwitcher to control Terminal in System Settings › Privacy & Security › Automation to see tab titles and jump to tabs.")
         }
+        if !preferences.notificationsAllowed {
+            HStack {
+                Text("Notifications are off, so you won't get a banner when a session needs you.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Turn on…") { Notifier.openSettings() }.controlSize(.small)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+        }
         let missing = Agent.allCases.filter { store.hooksInstalled[$0] != true }
         if !missing.isEmpty {
             HStack {
