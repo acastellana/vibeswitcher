@@ -12,7 +12,10 @@ what each one is doing, and jumps to its Terminal tab in one keystroke.
 | ⚪️ | Idle | Finished and already seen |
 | ◯ | Unknown | No hooks and no readable title yet |
 
-The menu bar shows one dot per session, oldest first, so each dot keeps its position.
+The menu bar shows one dot per session, in the order of your desktops: sessions on Desktop 1 first, then
+Desktop 2, and so on (as Mission Control and ⌃← / ⌃→ order them); windows sharing a desktop go in reading
+order, tabs in tab order. Each row says which desktop it's on. Prefer oldest-first? Switch it in ⚙︎.
+While a session runs a tool, its row shows what and for how long ("⚙ Run unit tests · 3m", orange after 10 min).
 
 - **Click a dot** to jump straight to that session's Terminal tab. Hover a dot to see which session it is.
 - The session whose Terminal tab you're looking at has a **ring** around its dot (and a "Viewing" tag in the list).
@@ -73,6 +76,9 @@ Three sources, most precise first:
    means it's waiting on background work (🔵).
 3. **The process table** (`sysctl`, no `ps`). Finds every `claude` / `codex` process attached to a TTY, so
    every session is listed even before it sends a hook event.
+
+Desktop numbers come from macOS's private SkyLight window-server calls (the same ones yabai and Hammerspoon
+use), looked up at runtime; if they're ever unavailable, ordering falls back to window position.
 
 Sessions are keyed by TTY, which also identifies the Terminal tab to focus. Sessions in other terminal apps
 are listed too; clicking them activates the hosting app.

@@ -1,13 +1,120 @@
+import CoreGraphics
 import Foundation
 
+/// Where a session's terminal sits on screen: its window's frame (top-left origin, as Terminal reports
+/// it) and the tab's position within that window.
+public struct ScreenPosition: Equatable, Sendable {
+    public let frame: CGRect
+    public let tabIndex: Int
+    /// Desktop (Space) number, 1-based like Mission Control; nil when it can't be determined.
+    public var desktop: Int?
+
+    public init(frame: CGRect, tabIndex: Int, desktop: Int? = nil) {
+        self.frame = frame
+        self.tabIndex = tabIndex
+        self.desktop = desktop
+    }
+}
+
+public enum SessionOrder: String, CaseIterable, Sendable {
+    /// Desktop by desktop (1, 2, 3… as in Mission Control), and within a desktop in reading order
+    /// of the windows, so the dots follow ⌃← / ⌃→.
+    case screen
+    /// Oldest session first; positions never move.
+    case started
+
+    public var label: String {
+        switch self {
+        case .screen: return "By desktop and window position"
+        case .started: return "Oldest first"
+        }
+    }
+}
+
 public enum SessionOrdering {
-    /// Decides the order of the dots in the menu bar and the rows in the popover.
-    /// The order also defines the 1–9 keyboard shortcuts, so it shapes muscle memory.
-    ///
-    /// Positions are stable: oldest session first, so "3" keeps meaning the same terminal and each
-    /// menu bar dot stays put while its color changes. Urgency is handled elsewhere: opening the
-    /// popover preselects the first red (then green) row, so ⌃⌥V ⏎ jumps to whoever needs you.
-    public static func sort(_ sessions: [Session]) -> [Session] {
-        sessions.sorted { ($0.startedAt, $0.tty) < ($1.startedAt, $1.tty) }
+    /// Decides the order of the dots in the menu bar and the rows in the popover, which also defines
+    /// the 1–9 keyboard shortcuts.
+    public static func sort(_ sessions: [Session], by order: SessionOrder = .screen) -> [Session] {
+        let byStart = sessions.sorted { ($0.startedAt, $0.tty) < ($1.startedAt, $1.tty) }
+        guard order == .screen else { return byStart }
+
+        // Sessions we can't place (other terminal apps, tab not found) keep their start order, at the end.
+        let placed = byStart.filter { $0.screenPosition != nil }
+        let unplaced = byStart.filter { $0.screenPosition == nil }
+        let desktops = Dictionary(grouping: placed) { $0.screenPosition?.desktop ?? Int.max }
+        return desktops.keys.sorted().flatMap { readingOrder(desktops[$0]!) } + unplaced
+    }
+
+    /// Top-to-bottom rows, left to right within a row; windows whose top edges are close count as one
+    /// row (side-by-side tiles rarely line up to the point). Tabs of one window stay in tab order.
+    static func readingOrder(_ sessions: [Session], rowTolerance: CGFloat = 80) -> [Session] {
+        let byTop = sessions.sorted { $0.screenPosition!.frame.minY < $1.screenPosition!.frame.minY }
+        var rows: [[Session]] = []
+        for session in byTop {
+            let top = session.screenPosition!.frame.minY
+            if let rowTop = rows.last?.first?.screenPosition?.frame.minY, top - rowTop <= rowTolerance {
+                rows[rows.count - 1].append(session)
+            } else {
+                rows.append([session])
+            }
+        }
+        return rows.flatMap { row in
+            row.sorted { a, b in
+                let pa = a.screenPosition!, pb = b.screenPosition!
+                if pa.frame.minX != pb.frame.minX { return pa.frame.minX < pb.frame.minX }
+                if pa.frame.minY != pb.frame.minY { return pa.frame.minY < pb.frame.minY }
+                if pa.tabIndex != pb.tabIndex { return pa.tabIndex < pb.tabIndex }
+                return (a.startedAt, a.tty) < (b.startedAt, b.tty)
+            }
+        }
+    }
+}
+
+/// A short human description of the tool call a session is running, e.g. "Run unit tests",
+/// "npm test", "Edit Package.swift".
+public enum ToolActivity {
+    public static func describe(toolName: String, input: [String: Any]) -> String {
+        func text(_ key: String) -> String? {
+            if let value = input[key] as? String, !value.trimmingCharacters(in: .whitespaces).isEmpty { return value }
+            if let parts = input[key] as? [String], !parts.isEmpty { return parts.joined(separator: " ") } // Codex argv
+            return nil
+        }
+        func file(_ key: String) -> String? { text(key).map { ($0 as NSString).lastPathComponent } }
+
+        let detail: String?
+        switch toolName {
+        case "Bash", "shell", "local_shell", "exec_command", "container.exec":
+            // Claude's own one-line description reads better than the raw command when present.
+            detail = text("description") ?? text("command").map(firstLine) ?? text("cmd").map(firstLine)
+            return clip(detail ?? toolName)
+        case "Read": detail = file("file_path").map { "Read \($0)" }
+        case "Edit", "MultiEdit": detail = file("file_path").map { "Edit \($0)" }
+        case "Write": detail = file("file_path").map { "Write \($0)" }
+        case "NotebookEdit": detail = file("notebook_path").map { "Edit \($0)" }
+        case "Grep": detail = text("pattern").map { "Search “\($0)”" }
+        case "Glob": detail = text("pattern").map { "Find \($0)" }
+        case "WebFetch": detail = text("url").map { "Fetch \(URL(string: $0)?.host ?? $0)" }
+        case "WebSearch": detail = text("query").map { "Search web: \($0)" }
+        case "Task", "Agent": detail = text("description").map { "Agent: \($0)" }
+        case "apply_patch": detail = "Apply patch"
+        default:
+            // MCP tools: "mcp__server__tool_name" → "tool name (server)"
+            let parts = toolName.components(separatedBy: "__")
+            if parts.count >= 3, parts[0] == "mcp" {
+                detail = "\(parts[2...].joined(separator: " ").replacingOccurrences(of: "_", with: " ")) (\(parts[1]))"
+            } else {
+                detail = nil
+            }
+        }
+        return clip(detail ?? toolName)
+    }
+
+    static func firstLine(_ text: String) -> String {
+        text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
+    }
+
+    static func clip(_ text: String, to limit: Int = 70) -> String {
+        let flat = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return flat.count > limit ? String(flat.prefix(limit)) + "…" : flat
     }
 }

@@ -148,6 +148,9 @@ struct PopoverView: View {
                 Toggle("Notify when a session needs input", isOn: $preferences.notifyNeedsInput)
                 Toggle("Notify when a session finishes", isOn: $preferences.notifyDone)
                 Toggle("Play sound when a session needs input", isOn: $preferences.playSound)
+                Picker("Order sessions", selection: $preferences.sessionOrder) {
+                    ForEach(SessionOrder.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
                 Picker("Floating dots panel", selection: $preferences.floatingPanel) {
                     ForEach(FloatingPanelMode.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
@@ -197,6 +200,10 @@ struct SessionRow: View {
                     if session.customName != nil {
                         Text(session.project).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
+                    if let desktop = session.screenPosition?.desktop {
+                        Text("Desktop \(desktop)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                            .help("Mission Control desktop this session's Terminal window is on")
+                    }
                     if session.isCurrent {
                         Label("Viewing", systemImage: "eye.fill")
                             .font(.system(size: 10, weight: .semibold))
@@ -219,7 +226,19 @@ struct SessionRow: View {
                 if let task = session.task {
                     Text(task).font(.system(size: 12.5)).foregroundStyle(.primary.opacity(0.85)).lineLimit(1)
                 }
-                if let detail = session.detail {
+                if let activity = session.activity, let since = session.activitySince {
+                    // Live: what it's running and for how long; long calls turn orange so a hung one stands out.
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let seconds = context.date.timeIntervalSince(since)
+                        HStack(spacing: 4) {
+                            Image(systemName: "gearshape.2").imageScale(.small)
+                            Text(activity).lineLimit(1).truncationMode(.middle)
+                            Text("· " + Self.elapsed(from: since, to: context.date))
+                                .foregroundStyle(seconds > 600 ? AnyShapeStyle(SessionStatus.working.color) : AnyShapeStyle(.secondary))
+                        }
+                        .font(.caption).foregroundStyle(.secondary)
+                    }
+                } else if let detail = session.detail {
                     Text(detail).font(.caption).foregroundStyle(.secondary)
                         .lineLimit(session.status == .needsInput ? 2 : 1)
                 }

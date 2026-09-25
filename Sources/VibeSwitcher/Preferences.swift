@@ -11,6 +11,9 @@ final class Preferences: ObservableObject {
     @Published var notifyNeedsInput: Bool { didSet { defaults.set(notifyNeedsInput, forKey: "notifyNeedsInput") } }
     @Published var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: "notifyDone") } }
     @Published var playSound: Bool { didSet { defaults.set(playSound, forKey: "playSound") } }
+    @Published var sessionOrder: SessionOrder {
+        didSet { defaults.set(sessionOrder.rawValue, forKey: "sessionOrder") }
+    }
     /// What "New session" runs, e.g. `claude` or `claude --model opus`.
     @Published var claudeCommand: String { didSet { defaults.set(claudeCommand, forKey: "claudeCommand") } }
     @Published var codexCommand: String { didSet { defaults.set(codexCommand, forKey: "codexCommand") } }
@@ -28,6 +31,7 @@ final class Preferences: ObservableObject {
         notifyDone = defaults.bool(forKey: "notifyDone")
         playSound = defaults.bool(forKey: "playSound")
         claudeCommand = defaults.string(forKey: "claudeCommand") ?? "claude"
+        sessionOrder = SessionOrder(rawValue: defaults.string(forKey: "sessionOrder") ?? "") ?? .screen
         codexCommand = defaults.string(forKey: "codexCommand") ?? "codex"
         launchAtLogin = SMAppService.mainApp.status == .enabled
         floatingPanel = FloatingPanelMode(rawValue: defaults.string(forKey: "floatingPanel") ?? "") ?? .automatic

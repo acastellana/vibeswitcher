@@ -1,9 +1,13 @@
 import AppKit
+import CoreGraphics
 import Foundation
 import VibeCore
 
 struct TerminalTab: Equatable {
+    let windowID: Int
     let title: String
+    /// Window frame (top-left origin) and the tab's index in that window.
+    let position: ScreenPosition?
     let isSelected: Bool
     /// Position of the window in Terminal's front-to-back order (1 = frontmost).
     let windowOrder: Int
@@ -34,10 +38,12 @@ enum TerminalBridge {
                 set wi to wi + 1
                 try
                     set wid to (id of w) as text
+                    set b to bounds of w
+                    set frameText to ((item 1 of b) as text) & "," & ((item 2 of b) as text) & "," & ((item 3 of b) as text) & "," & ((item 4 of b) as text)
                     set ti to 0
                     repeat with t in tabs of w
                         set ti to ti + 1
-                        set out to out & wid & sep & ti & sep & (tty of t) & sep & ((selected of t) as text) & sep & wi & sep & (custom title of t) & linefeed
+                        set out to out & wid & sep & ti & sep & (tty of t) & sep & ((selected of t) as text) & sep & wi & sep & frameText & sep & (custom title of t) & linefeed
                     end repeat
                 end try
             end repeat
@@ -51,10 +57,24 @@ enum TerminalBridge {
         var tabs: [String: TerminalTab] = [:]
         for line in result.output.split(separator: "\n") {
             let parts = line.components(separatedBy: separator)
-            guard parts.count >= 6, let order = Int(parts[4]) else { continue }
+            guard parts.count >= 7, let windowID = Int(parts[0]), let order = Int(parts[4]), let tabIndex = Int(parts[1])
+            else { continue }
             let tty = parts[2].replacingOccurrences(of: "/dev/", with: "")
-            let title = parts[5...].joined(separator: separator)
-            tabs[tty] = TerminalTab(title: title, isSelected: parts[3] == "true", windowOrder: order)
+            let title = parts[6...].joined(separator: separator)
+            let edges = parts[5].split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+            let position = edges.count == 4
+                ? ScreenPosition(frame: CGRect(x: edges[0], y: edges[1], width: edges[2] - edges[0], height: edges[3] - edges[1]),
+                                 tabIndex: tabIndex)
+                : nil
+            tabs[tty] = TerminalTab(windowID: windowID, title: title, position: position, isSelected: parts[3] == "true", windowOrder: order)
+        }
+        // Which desktop each window is on (private API, may be unavailable: then positions stay desktop-less).
+        let desktops = Spaces.ordinals(forWindowIDs: Array(Set(tabs.values.map(\.windowID))))
+        for (tty, tab) in tabs {
+            guard var position = tab.position, let desktop = desktops[tab.windowID] else { continue }
+            position.desktop = desktop
+            tabs[tty] = TerminalTab(windowID: tab.windowID, title: tab.title, position: position,
+                                    isSelected: tab.isSelected, windowOrder: tab.windowOrder)
         }
         return (tabs, .granted)
     }

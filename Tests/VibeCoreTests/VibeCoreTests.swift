@@ -303,3 +303,77 @@ struct ViewingRingTests {
         }
     }
 }
+
+struct ScreenOrderTests {
+    private func session(_ tty: String, _ frame: CGRect?, tab: Int = 1, started: Double = 0) -> Session {
+        var s = Session(tty: tty, agent: .claude, pid: 1, startedAt: Date(timeIntervalSince1970: started), cwd: nil,
+                        project: tty, task: nil, status: .idle, statusSince: .distantPast, detail: nil,
+                        hasHooks: true, inTerminalApp: frame != nil)
+        s.screenPosition = frame.map { ScreenPosition(frame: $0, tabIndex: tab) }
+        return s
+    }
+
+    @Test func readsLikeTheScreen() {
+        let sessions = [
+            session("bottomRight", CGRect(x: 900, y: 600, width: 800, height: 400), started: 1),
+            session("right", CGRect(x: 916, y: 37, width: 800, height: 500), started: 2),
+            session("left", CGRect(x: 0, y: 40, width: 900, height: 500), started: 3),     // tiled: tops differ by 3pt
+            session("bottomLeft", CGRect(x: 0, y: 620, width: 800, height: 400), started: 4),
+            session("elsewhere", nil, started: 0),                                           // not in Terminal
+        ]
+        #expect(SessionOrdering.sort(sessions).map(\.tty) == ["left", "right", "bottomLeft", "bottomRight", "elsewhere"])
+        #expect(SessionOrdering.sort(sessions, by: .started).map(\.tty).first == "elsewhere")
+    }
+
+    @Test func tabsOfOneWindowKeepTabOrder() {
+        let frame = CGRect(x: 0, y: 40, width: 800, height: 600)
+        let sessions = [session("tab3", frame, tab: 3), session("tab1", frame, tab: 1), session("tab2", frame, tab: 2)]
+        #expect(SessionOrdering.sort(sessions).map(\.tty) == ["tab1", "tab2", "tab3"])
+    }
+}
+
+struct ToolActivityTests {
+    @Test func describesCommonTools() {
+        #expect(ToolActivity.describe(toolName: "Bash", input: ["command": "npm test", "description": "Run unit tests"]) == "Run unit tests")
+        #expect(ToolActivity.describe(toolName: "Bash", input: ["command": "npm test\nnpm run lint"]) == "npm test")
+        #expect(ToolActivity.describe(toolName: "shell", input: ["command": ["bash", "-lc", "cargo build"]]) == "bash -lc cargo build")
+        #expect(ToolActivity.describe(toolName: "Edit", input: ["file_path": "/repo/Sources/App.swift"]) == "Edit App.swift")
+        #expect(ToolActivity.describe(toolName: "Grep", input: ["pattern": "TODO"]) == "Search “TODO”")
+        #expect(ToolActivity.describe(toolName: "WebFetch", input: ["url": "https://example.com/docs"]) == "Fetch example.com")
+        #expect(ToolActivity.describe(toolName: "mcp__linear__list_issues", input: [:]) == "list issues (linear)")
+        #expect(ToolActivity.describe(toolName: "SomethingNew", input: [:]) == "SomethingNew")
+        #expect(ToolActivity.describe(toolName: "Bash", input: ["command": String(repeating: "x", count: 200)]).count == 71)
+    }
+
+    @Test func toolTimerRunsOnlyWhileTheToolDoes() throws {
+        var state: HookState?
+        func send(_ payload: [String: Any], at time: Double) {
+            var full = payload
+            full["session_id"] = "s"
+            if case .write(let next) = HookState.reduce(current: state, payload: full, agent: .claude, tty: "t",
+                                                        agentPid: 1, now: time) { state = next }
+        }
+        send(["hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": ["command": "sleep 600"]], at: 10)
+        #expect(state?.toolDetail == "sleep 600")
+        #expect(state?.toolStartedAt == 10)
+        send(["hook_event_name": "PostToolUse", "tool_name": "Bash"], at: 610)
+        #expect(state?.toolStartedAt == nil)
+        send(["hook_event_name": "PreToolUse", "tool_name": "Read", "tool_input": ["file_path": "/a/b.md"]], at: 611)
+        send(["hook_event_name": "Stop"], at: 612)
+        #expect(state?.toolStartedAt == nil)
+    }
+}
+
+struct DesktopOrderTests {
+    @Test func desktopsComeFirstThenScreenPosition() {
+        func s(_ tty: String, x: CGFloat, desktop: Int?) -> Session {
+            var session = Session(tty: tty, agent: .claude, pid: 1, startedAt: .distantPast, cwd: nil, project: tty,
+                                  task: nil, status: .idle, statusSince: .distantPast, detail: nil, hasHooks: true, inTerminalApp: true)
+            session.screenPosition = ScreenPosition(frame: CGRect(x: x, y: 40, width: 800, height: 900), tabIndex: 1, desktop: desktop)
+            return session
+        }
+        let sessions = [s("d7-right", x: 900, desktop: 7), s("d1", x: 500, desktop: 1), s("unknown", x: 0, desktop: nil),
+                        s("d7-left", x: 0, desktop: 7), s("d3", x: 0, desktop: 3)]
+        #expect(SessionOrdering.sort(sessions).map(\.tty) == ["d1", "d3", "d7-left", "d7-right", "unknown"])
+    }
+}

@@ -71,6 +71,11 @@ public struct Session: Identifiable, Equatable, Sendable {
     public var inTerminalApp: Bool
     /// The Terminal tab you're looking at right now (Terminal frontmost, this tab selected in its front window).
     public var isCurrent = false
+    /// Window frame and tab index in Terminal, used to order sessions like the screen.
+    public var screenPosition: ScreenPosition?
+    /// The tool call it's running right now ("Run unit tests") and since when; nil between tool calls.
+    public var activity: String?
+    public var activitySince: Date?
 
     public init(tty: String, agent: Agent, pid: Int32, startedAt: Date, cwd: String?, project: String, task: String?,
                 status: SessionStatus, statusSince: Date, detail: String?, hasHooks: Bool, inTerminalApp: Bool) {

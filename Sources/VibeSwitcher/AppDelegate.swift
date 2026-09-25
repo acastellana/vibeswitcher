@@ -62,6 +62,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
 
         floatingPanel = FloatingPanelController(store: store, onOpen: { [weak self] in self?.open($0) },
                                                 onShowList: { [weak self] anchor in self?.togglePopover(anchor: anchor) })
+        preferences.$sessionOrder
+            .receive(on: RunLoop.main)
+            .sink { [weak self] order in self?.store.order = order }
+            .store(in: &cancellables)
         preferences.$floatingPanel
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.updateFloatingPanel() } }

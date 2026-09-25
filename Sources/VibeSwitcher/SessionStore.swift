@@ -10,6 +10,8 @@ final class SessionStore: ObservableObject {
     @Published private(set) var hooksInstalled: [Agent: Bool] = [:]
     /// Called when a session newly turns red (needs input) or green (done, unseen).
     var onAttention: ((Session) -> Void)?
+    /// Set from Preferences; changing it re-sorts on the next refresh.
+    var order: SessionOrder = .screen { didSet { if order != oldValue { refresh() } } }
 
     private let scanner = SessionScanner()
     private let queue = DispatchQueue(label: "vibeswitcher.scan", qos: .utility)
@@ -171,6 +173,11 @@ final class SessionStore: ObservableObject {
                 detail: waitingOn.map { "Waiting on \($0)" } ?? detail(for: status, hook: item.hook, agent: item.agent),
                 hasHooks: item.hook != nil, inTerminalApp: tab != nil)
             session.isCurrent = viewing
+            session.screenPosition = tab?.position
+            if status == .working, let hook = item.hook, hook.lastEvent == "PreToolUse", let started = hook.toolStartedAt {
+                session.activity = hook.toolDetail
+                session.activitySince = Date(timeIntervalSince1970: started)
+            }
             session.nameKeys = SessionKeys.keys(pid: item.pid, startedAt: item.startedAt, sessionId: item.hook?.sessionId)
             session.customName = names.name(for: session.nameKeys)
             if let root = item.projectRoot { noteProject(root, at: now) }
@@ -197,7 +204,7 @@ final class SessionStore: ObservableObject {
         names.prune(liveKeys: Set(result.flatMap(\.nameKeys)))
         quietClaudeTTYs = quiet
 
-        let ordered = SessionOrdering.sort(result)
+        let ordered = SessionOrdering.sort(result, by: order)
         if ordered != sessions {
             sessions = ordered
             AppStatus.write(sessions: ordered, terminalAccess: terminalAccess)

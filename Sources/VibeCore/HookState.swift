@@ -15,6 +15,9 @@ public struct HookState: Codable, Equatable, Sendable {
     public var notice: String?
     public var lastPrompt: String?
     public var lastMessage: String?
+    /// What the running tool call is doing ("npm test", "Edit Package.swift") and when it started.
+    public var toolDetail: String?
+    public var toolStartedAt: Double?
     /// First thing the user asked in this session; a fallback label when the tab has no useful title.
     public var firstPrompt: String?
 
@@ -83,8 +86,14 @@ extension HookState {
                 state.firstPrompt = state.firstPrompt ?? state.lastPrompt
                 state.lastMessage = nil
             }
-        case "PreToolUse", "PostToolUse":
+        case "PreToolUse":
+            let tool = payload["tool_name"] as? String
+            state.toolName = tool
+            state.toolDetail = tool.map { ToolActivity.describe(toolName: $0, input: payload["tool_input"] as? [String: Any] ?? [:]) }
+            state.toolStartedAt = now
+        case "PostToolUse":
             state.toolName = payload["tool_name"] as? String
+            state.toolStartedAt = nil
         case "PermissionRequest":
             let tool = payload["tool_name"] as? String
             state.toolName = tool
@@ -94,6 +103,7 @@ extension HookState {
         default:
             break
         }
+        if event != "PreToolUse", event != "PermissionRequest", event != "Notification" { state.toolStartedAt = nil }
         state.lastEvent = event
         state.lastEventAt = now
         return .write(state)
