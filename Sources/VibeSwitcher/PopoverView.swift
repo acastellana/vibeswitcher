@@ -165,6 +165,8 @@ struct PopoverView: View {
                 Toggle("Notify when a session finishes", isOn: $preferences.notifyDone)
                 Toggle("Play sound when a session needs input", isOn: $preferences.playSound)
                 Toggle("Sidebar mode", isOn: $preferences.sidebarMode)
+                Toggle("Auto-hide sidebar (show at right edge)", isOn: $preferences.sidebarAutoHide)
+                    .disabled(!preferences.sidebarMode)
                 Divider()
                 Picker("Order sessions", selection: $preferences.sessionOrder) {
                     ForEach(SessionOrder.allCases, id: \.self) { Text($0.label).tag($0) }

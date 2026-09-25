@@ -67,16 +67,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             onOpen: sidebarView.onOpen, onInstallHooks: sidebarView.onInstallHooks, onQuit: sidebarView.onQuit,
             onRename: sidebarView.onRename, onResetName: sidebarView.onResetName,
             onNewSession: sidebarView.onNewSession, onEditCommands: sidebarView.onEditCommands, isSidebar: true)))
-        // Crash recovery: windows hidden by a sidebar session that didn't end cleanly come back.
-        if !preferences.sidebarMode {
-            DispatchQueue.global(qos: .utility).async { SidebarWorkspace.restoreHiddenWindows() }
-        }
+        // Windows hidden by the earlier sidebar mode (or a crash during it) always come back.
+        DispatchQueue.global(qos: .utility).async { SidebarWorkspace.restoreHiddenWindows() }
+        preferences.$sidebarAutoHide
+            .receive(on: RunLoop.main)
+            .sink { [weak self] autoHide in self?.sidebar.autoHide = autoHide }
+            .store(in: &cancellables)
         preferences.$sidebarMode
-            .dropFirst(0)
             .receive(on: RunLoop.main)
             .sink { [weak self] enabled in
                 guard let self else { return }
-                self.sidebar.setShown(enabled)
+                self.sidebar.setEnabled(enabled)
                 if !enabled { DispatchQueue.global(qos: .userInitiated).async { SidebarWorkspace.restoreHiddenWindows() } }
                 DispatchQueue.main.async { self.updateFloatingPanel() }
             }
@@ -310,13 +311,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         popover.performClose(nil)
         store.acknowledge(session)
         notifier?.clear(tty: session.tty)
-        let sidebarMode = preferences.sidebarMode
-        let sessions = store.sessions
+        if preferences.sidebarMode { sidebar.dismissAfterSelection() }
         DispatchQueue.global(qos: .userInitiated).async {
-            if sidebarMode, SidebarWorkspace.show(session, among: sessions) {
-                DispatchQueue.main.async { self.store.refresh(forceTerminal: true) }
-                return
-            }
             // Try the exact Terminal tab even if the last title scan missed it; fall back to the host app.
             var result = "terminal-tab"
             if session.inTerminalApp, let terminal = TerminalBridge.app {

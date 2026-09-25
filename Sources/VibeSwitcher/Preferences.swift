@@ -13,6 +13,8 @@ final class Preferences: ObservableObject {
     @Published var playSound: Bool { didSet { defaults.set(playSound, forKey: "playSound") } }
     /// Docked session list on the right; picking a session shows only its window, on this desktop.
     @Published var sidebarMode: Bool { didSet { defaults.set(sidebarMode, forKey: "sidebarMode") } }
+    /// Sidebar slides in at the right screen edge instead of staying docked.
+    @Published var sidebarAutoHide: Bool { didSet { defaults.set(sidebarAutoHide, forKey: "sidebarAutoHide") } }
     @Published var sessionOrder: SessionOrder {
         didSet { defaults.set(sessionOrder.rawValue, forKey: "sessionOrder") }
     }
@@ -27,13 +29,14 @@ final class Preferences: ObservableObject {
     }
 
     init() {
-        defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true, "playSound": true,
+        defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true, "playSound": true, "sidebarAutoHide": true,
                                      "claudeCommand": "claude", "codexCommand": "codex"])
         notifyNeedsInput = defaults.bool(forKey: "notifyNeedsInput")
         notifyDone = defaults.bool(forKey: "notifyDone")
         playSound = defaults.bool(forKey: "playSound")
         claudeCommand = defaults.string(forKey: "claudeCommand") ?? "claude"
         sidebarMode = defaults.bool(forKey: "sidebarMode")
+        sidebarAutoHide = defaults.bool(forKey: "sidebarAutoHide")
         sessionOrder = SessionOrder(rawValue: defaults.string(forKey: "sessionOrder") ?? "") ?? .screen
         codexCommand = defaults.string(forKey: "codexCommand") ?? "codex"
         launchAtLogin = SMAppService.mainApp.status == .enabled
