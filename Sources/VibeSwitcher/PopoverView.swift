@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 import VibeCore
 
@@ -27,10 +28,12 @@ struct PopoverView: View {
                 ScrollView {
                     VStack(spacing: 2) {
                         ForEach(Array(store.sessions.enumerated()), id: \.element.id) { index, session in
-                            SessionRow(session: session, index: index, isSelected: index == state.selectedIndex)
-                                .contentShape(Rectangle())
-                                .onTapGesture { onOpen(session) }
-                                .onHover { if $0 { state.selectedIndex = index } }
+                            Button { onOpen(session) } label: {
+                                SessionRow(session: session, index: index, isSelected: index == state.selectedIndex)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .onHover { if $0 { state.selectedIndex = index } }
                         }
                     }
                     .padding(6)
@@ -176,4 +179,11 @@ private struct AgentBadge: View {
             .foregroundStyle(agent == .claude ? Color(red: 0.85, green: 0.47, blue: 0.34) : .primary)
             .overlay(RoundedRectangle(cornerRadius: 3).stroke(.secondary.opacity(0.4)))
     }
+}
+
+/// Hosting view that reacts to the first click even when VibeSwitcher is not the active app.
+/// Without this, macOS 14+ often leaves the popover non-key and the first click on a row only
+/// focuses the popover instead of opening the session.
+final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }

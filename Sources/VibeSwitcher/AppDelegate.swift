@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var hotKey: HotKey?
     private var keyMonitor: Any?
     private var cancellables: Set<AnyCancellable> = []
+    private var hostingView: NSHostingView<AnyView>!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         HookBinary.sync()
@@ -34,9 +35,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                onOpen: { [weak self] in self?.open($0) },
                                onInstallHooks: { [weak self] in self?.installHooks() },
                                onQuit: { NSApp.terminate(nil) })
-        let host = NSHostingController(rootView: view)
-        host.sizingOptions = .preferredContentSize
-        popover.contentViewController = host
+        hostingView = FirstMouseHostingView(rootView: AnyView(view))
+        let controller = NSViewController()
+        controller.view = hostingView
+        popover.contentViewController = controller
         popover.behavior = .transient
         popover.animates = false
 
@@ -47,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.statusItem.button?.image = StatusIcon.image(for: sessions)
                 self.statusItem.button?.toolTip = Self.tooltip(for: sessions)
                 self.popoverState.selectedIndex = min(self.popoverState.selectedIndex, max(0, sessions.count - 1))
+                DispatchQueue.main.async { self.fitPopover() }
             }
             .store(in: &cancellables)
 
@@ -55,6 +58,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         AppStatus.extras["hotKeyRegistered"] = hotKey != nil
         // `VibeSwitcher --toggle` (e.g. from Raycast or a shell) opens the popover of the running instance.
+        // `VibeSwitcher --open ttysNNN`: same code path as clicking that row.
+        DistributedNotificationCenter.default().addObserver(forName: AppStatus.openNotification, object: nil,
+                                                            queue: .main) { [weak self] note in
+            guard let self, let tty = note.object as? String,
+                  let session = self.store.sessions.first(where: { $0.tty == tty }) else { return }
+            self.open(session)
+        }
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.toggleNotification, object: nil,
                                                             queue: .main) { [weak self] _ in
             self?.togglePopover()
@@ -71,7 +81,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         store.refresh(forceTerminal: true)
         popoverState.selectedIndex = store.sessions.firstIndex { $0.status == .needsInput }
             ?? store.sessions.firstIndex { $0.status == .done } ?? 0
-        NSApp.activate(ignoringOtherApps: true)
+        fitPopover()
+        NSApp.activate()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
         startKeyMonitor()
@@ -103,13 +114,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    private func fitPopover() {
+        hostingView.layoutSubtreeIfNeeded()
+        let size = hostingView.fittingSize
+        if size.width > 0, size.height > 0, popover.contentSize != size { popover.contentSize = size }
+    }
+
     private func open(_ session: Session) {
         popover.performClose(nil)
         store.acknowledge(session)
         notifier.clear(tty: session.tty)
         DispatchQueue.global(qos: .userInitiated).async {
-            if session.inTerminalApp, TerminalBridge.focus(tty: session.tty) { return }
-            DispatchQueue.main.async { _ = HostApp.activate(forPID: session.pid) }
+            // Try the exact Terminal tab even if the last title scan missed it; fall back to the host app.
+            var result = "terminal-tab"
+            if session.inTerminalApp, let terminal = TerminalBridge.app {
+                // Activate first, then pick the tab: raising a window while Terminal is in the background
+                // only reorders it, and Terminal re-fronts its previous key window when it activates.
+                let active = HostApp.bringToFrontAndWait(terminal)
+                if !TerminalBridge.focus(tty: session.tty) { result = "tab-not-found" }
+                else if !active { result = "terminal-tab (activation timed out)" }
+            } else {
+                result = "host-app"
+                DispatchQueue.main.sync { if !HostApp.activate(forPID: session.pid) { result = "failed" } }
+            }
+            DispatchQueue.main.async {
+                AppStatus.extras["lastOpen"] = "\(session.tty) \(result) \(ISO8601DateFormatter().string(from: Date()))"
+                AppStatus.write(sessions: self.store.sessions, terminalAccess: self.store.terminalAccess)
+            }
         }
     }
 

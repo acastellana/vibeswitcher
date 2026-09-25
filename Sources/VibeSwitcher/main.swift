@@ -27,6 +27,12 @@ if arguments.contains("--toggle") {
                                                                  userInfo: nil, deliverImmediately: true)
     exit(0)
 }
+if let index = arguments.firstIndex(of: "--open"), arguments.indices.contains(index + 1) {
+    // Asks the running app to open a session, exactly like clicking its row.
+    DistributedNotificationCenter.default().postNotificationName(AppStatus.openNotification, object: arguments[index + 1],
+                                                                 userInfo: nil, deliverImmediately: true)
+    exit(0)
+}
 if arguments.contains("--dump") {
     for session in SessionScanner().scan() {
         let hook = session.hook.map { "\($0.lastEvent) (\(Int(Date().timeIntervalSince1970 - $0.lastEventAt))s ago)" } ?? "no hooks"

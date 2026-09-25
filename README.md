@@ -58,7 +58,8 @@ are listed too; clicking them activates the hosting app.
 ```sh
 VibeSwitcher --dump            # detected sessions + raw hook state
 VibeSwitcher --toggle          # open/close the popover of the running app (bind it in Raycast etc.)
-VibeSwitcher --focus ttys012   # focus a Terminal tab, same path as clicking a row
+VibeSwitcher --open ttys012    # ask the running app to open a session (same path as clicking its row)
+VibeSwitcher --focus ttys012   # select a Terminal tab directly (no activation handling)
 VibeSwitcher --snapshot /tmp   # render popover + menu bar icon PNGs from live data
 VibeSwitcher --install-hooks | --uninstall-hooks
 cat ~/.vibeswitcher/app-status.json   # what the running app currently sees

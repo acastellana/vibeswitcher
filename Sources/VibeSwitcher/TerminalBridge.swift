@@ -63,35 +63,61 @@ enum TerminalBridge {
         return (tabs, .granted)
     }
 
-    /// Selects the tab running on `tty`, un-minimizes and raises its window, and activates Terminal.
+    static var app: NSRunningApplication? {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first
+    }
+
+    /// Selects the tab running on `tty` and makes its window Terminal's front window. Activating Terminal
+    /// is left to the caller (`HostApp.bringToFront`), because AppleScript's `activate` is ignored when
+    /// sent from a background app.
     @discardableResult
     static func focus(tty: String) -> Bool {
         guard isRunning else { return false }
+        // Windows are addressed by id, not position: activating Terminal reorders its windows, so a
+        // positional reference ("window 16") can end up pointing at a neighbour. The final check
+        // re-raises once if something else still ended up in front.
         let script = """
+        set target to "/dev/\(tty)"
         tell application "Terminal"
+            set targetWindow to missing value
+            set targetTab to 0
             repeat with w in windows
                 try
+                    set k to 0
                     repeat with t in tabs of w
-                        if (tty of t) is "/dev/\(tty)" then
-                            try
-                                set miniaturized of w to false
-                            end try
-                            set selected tab of w to t
-                            set index of w to 1
-                            try
-                                set frontmost of w to true
-                            end try
-                            activate
-                            return "ok"
+                        set k to k + 1
+                        if (tty of t) is target then
+                            set targetWindow to id of w
+                            set targetTab to k
+                            exit repeat
                         end if
                     end repeat
                 end try
+                if targetWindow is not missing value then exit repeat
             end repeat
+            if targetWindow is missing value then return "missing"
+            set w to window id targetWindow
+            try
+                set miniaturized of w to false
+            end try
+            set selected tab of w to tab targetTab of w
+            set index of w to 1
+            activate
+            delay 0.05
+            if (tty of selected tab of front window) is target then return "ok"
+            -- Windows tiled side by side (macOS window tiling) keep their partner on top of
+            -- `set index`; hiding and re-showing the window does reorder it.
+            set visible of w to false
+            set visible of w to true
+            set index of w to 1
+            activate
+            delay 0.05
+            if (tty of selected tab of front window) is target then return "ok"
+            return "ok-unverified"
         end tell
-        return "missing"
         """
         let result = runAppleScript(script)
-        return result.status == 0 && result.output.trimmingCharacters(in: .whitespacesAndNewlines) == "ok"
+        return result.status == 0 && result.output.hasPrefix("ok")
     }
 
     /// Runs AppleScript through `osascript` so it is safe to call off the main thread.
@@ -117,13 +143,46 @@ enum TerminalBridge {
     }
 }
 
-/// For sessions that are not in Terminal.app (iTerm, VS Code, …): activate whichever GUI app hosts them.
+/// Brings another app to the front from VibeSwitcher.
+///
+/// macOS 14+ ignores activation requests from a background app (which a menu bar app nearly always is),
+/// including AppleScript's `activate`. Opening the app through Launch Services counts as user intent and
+/// is honored, so that is the reliable path; yielding our own activation first helps when we are active.
 enum HostApp {
+    static func bringToFront(_ app: NSRunningApplication) {
+        NSApp.yieldActivation(to: app)
+        app.activate(from: NSRunningApplication.current, options: [])
+        guard let url = app.bundleURL else { return }
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.activates = true
+        configuration.addsToRecentItems = false
+        NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+    }
+
+    /// Off the main thread: activates `app` and waits (up to `timeout`) until it is really frontmost,
+    /// retrying the Launch Services open once if the first request was swallowed.
+    static func bringToFrontAndWait(_ app: NSRunningApplication, timeout: TimeInterval = 1.5) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        var retried = false
+        DispatchQueue.main.sync { bringToFront(app) }
+        while Date() < deadline {
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier { return true }
+            if !retried, deadline.timeIntervalSinceNow < timeout / 2 {
+                retried = true
+                DispatchQueue.main.sync { bringToFront(app) }
+            }
+            Thread.sleep(forTimeInterval: 0.03)
+        }
+        return false
+    }
+
+    /// For sessions that are not in Terminal.app (iTerm, VS Code, …): activate whichever GUI app hosts them.
     static func activate(forPID pid: Int32) -> Bool {
         var current = pid
         for _ in 0..<32 {
             if let app = NSRunningApplication(processIdentifier: current), app.activationPolicy == .regular {
-                return app.activate()
+                bringToFront(app)
+                return true
             }
             guard let parent = ProcessTable.info(pid: current)?.ppid, parent > 1 else { return false }
             current = parent

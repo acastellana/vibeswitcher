@@ -8,6 +8,7 @@ enum AppStatus {
     /// Sticky fields included in every write (e.g. whether the hotkey registered).
     static var extras: [String: Any] = [:]
     static let toggleNotification = Notification.Name("dev.vibeswitcher.toggle")
+    static let openNotification = Notification.Name("dev.vibeswitcher.open")
 
     static func write(sessions: [Session], terminalAccess: TerminalAccess, extra: [String: Any] = [:]) {
         var object: [String: Any] = [
