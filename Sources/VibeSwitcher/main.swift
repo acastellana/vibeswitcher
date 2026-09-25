@@ -42,7 +42,7 @@ if arguments.contains("--dump") {
 }
 
 if let index = arguments.firstIndex(of: "--focus"), arguments.indices.contains(index + 1) {
-    // Same code path as clicking a session row.
+    // Selects the tab only; unlike --open (a real row click) it does not handle activating Terminal.
     let ok = TerminalBridge.focus(tty: arguments[index + 1])
     print(ok ? "focused \(arguments[index + 1])" : "no Terminal tab on \(arguments[index + 1])")
     exit(ok ? 0 : 1)

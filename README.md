@@ -41,7 +41,15 @@ Running Claude Code sessions pick the hooks up immediately; Codex sessions start
 need a restart. VibeSwitcher registers itself as a login item on first launch (toggle it in the ⚙︎ menu).
 
 Uninstall the hooks with `--uninstall-hooks`. The first install keeps copies of your original configs as
-`~/.claude/settings.json.vibeswitcher-backup` (and `~/.codex/config.toml.vibeswitcher-backup` if you made one).
+`~/.claude/settings.json.vibeswitcher-backup` and `~/.codex/hooks.json.vibeswitcher-backup`. The Codex trust
+entries (`hooks.state` in `~/.codex/config.toml`) stay behind after uninstalling; they are inert without the
+hooks and can be deleted by hand.
+
+## Privacy
+
+Everything stays on your Mac. The hook writes a few facts per terminal (last event, your last prompt, the
+agent's last message, both truncated) to `~/.vibeswitcher/state/`, and the app reads them plus Terminal's
+tab titles. Nothing is sent anywhere. Delete `~/.vibeswitcher` to remove all of it.
 
 ## How status is detected
 
@@ -70,17 +78,22 @@ VibeSwitcher --open ttys012    # ask the running app to open a session (same pat
 VibeSwitcher --focus ttys012   # select a Terminal tab directly (no activation handling)
 VibeSwitcher --snapshot /tmp   # render popover + menu bar icon PNGs from live data
 VibeSwitcher --install-hooks | --uninstall-hooks
-cat ~/.vibeswitcher/app-status.json   # what the running app currently sees
+cat ~/.vibeswitcher/app-status.json   # debug aid: what the running app currently sees
 ```
 
 (`VibeSwitcher` = `/Applications/VibeSwitcher.app/Contents/MacOS/VibeSwitcher`.)
 
 ## Development
 
+Requires macOS 14+ and a Swift 6 toolchain (Xcode or just the Command Line Tools).
+
 ```sh
 swift build && swift test      # Swift Testing; works with Command Line Tools only
 ./scripts/build-app.sh --install
 ```
+
+Run the app through `build-app.sh` rather than `swift run`: notifications, the login item and the
+Automation permission all need a real `.app` bundle.
 
 `Sources/VibeCore` holds the testable logic (status rules, hook reducer, process table, installer),
 `Sources/VibeSwitcher` the AppKit/SwiftUI app, and `Sources/vibeswitcher-hook` the hook binary.

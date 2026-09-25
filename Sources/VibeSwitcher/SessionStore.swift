@@ -17,6 +17,7 @@ final class SessionStore: ObservableObject {
     private var watcher: DispatchSourceFileSystemObject?
     private var scanning = false
     private var rescanRequested = false
+    private var forceTerminalRequested = false
 
     // Scan-queue only.
     private var tabs: [String: TerminalTab] = [:]
@@ -46,7 +47,11 @@ final class SessionStore: ObservableObject {
     }
 
     func refresh(forceTerminal: Bool = false) {
-        guard !scanning else { rescanRequested = true; return }
+        guard !scanning else {
+            rescanRequested = true
+            forceTerminalRequested = forceTerminalRequested || forceTerminal
+            return
+        }
         scanning = true
         queue.async { [weak self] in
             guard let self else { return }
@@ -69,8 +74,10 @@ final class SessionStore: ObservableObject {
                 self.apply(raw: raw, tabs: tabs, now: now)
                 self.scanning = false
                 if self.rescanRequested {
+                    let force = self.forceTerminalRequested
                     self.rescanRequested = false
-                    self.refresh()
+                    self.forceTerminalRequested = false
+                    self.refresh(forceTerminal: force)
                 }
             }
         }
@@ -116,7 +123,7 @@ final class SessionStore: ObservableObject {
                 project: item.project,
                 task: SessionNaming.task(fromTitle: parsed?.text, project: item.project, firstPrompt: item.hook?.firstPrompt),
                 status: status, statusSince: since,
-                detail: detail(for: status, hook: item.hook, hasHooks: item.hook != nil, agent: item.agent),
+                detail: detail(for: status, hook: item.hook, agent: item.agent),
                 hasHooks: item.hook != nil, inTerminalApp: tab != nil)
             if !viewing, let previous = displayed[item.tty], previous != status, status == .needsInput || status == .done {
                 onAttention?(session)
@@ -136,7 +143,7 @@ final class SessionStore: ObservableObject {
         }
     }
 
-    private func detail(for status: SessionStatus, hook: HookState?, hasHooks: Bool, agent: Agent) -> String? {
+    private func detail(for status: SessionStatus, hook: HookState?, agent: Agent) -> String? {
         switch status {
         case .needsInput:
             if let notice = hook?.notice { return notice }
@@ -151,7 +158,7 @@ final class SessionStore: ObservableObject {
         case .done, .idle:
             return hook?.lastMessage
         case .unknown:
-            guard !hasHooks else { return nil }
+            guard hook == nil else { return nil }
             return agent == .codex ? "No live status: this Codex session started before the hooks; restart it"
                                    : "No live status yet: waiting for this session's first hook event"
         }

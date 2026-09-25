@@ -3,9 +3,6 @@ import Foundation
 import VibeCore
 
 struct TerminalTab: Equatable {
-    let windowID: Int
-    let tabIndex: Int
-    let tty: String          // "ttys009"
     let title: String
     let isSelected: Bool
     /// Position of the window in Terminal's front-to-back order (1 = frontmost).
@@ -54,11 +51,10 @@ enum TerminalBridge {
         var tabs: [String: TerminalTab] = [:]
         for line in result.output.split(separator: "\n") {
             let parts = line.components(separatedBy: separator)
-            guard parts.count >= 6, let wid = Int(parts[0]), let ti = Int(parts[1]), let order = Int(parts[4]) else { continue }
+            guard parts.count >= 6, let order = Int(parts[4]) else { continue }
             let tty = parts[2].replacingOccurrences(of: "/dev/", with: "")
             let title = parts[5...].joined(separator: separator)
-            tabs[tty] = TerminalTab(windowID: wid, tabIndex: ti, tty: tty, title: title,
-                                    isSelected: parts[3] == "true", windowOrder: order)
+            tabs[tty] = TerminalTab(title: title, isSelected: parts[3] == "true", windowOrder: order)
         }
         return (tabs, .granted)
     }
@@ -67,9 +63,9 @@ enum TerminalBridge {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first
     }
 
-    /// Selects the tab running on `tty` and makes its window Terminal's front window. Activating Terminal
-    /// is left to the caller (`HostApp.bringToFront`), because AppleScript's `activate` is ignored when
-    /// sent from a background app.
+    /// Selects the tab running on `tty` and makes its window Terminal's front window. The script's own
+    /// `activate` only works when the caller is frontmost (e.g. from a shell); from the menu bar app,
+    /// call `HostApp.bringToFrontAndWait` first, because macOS ignores activation from background apps.
     @discardableResult
     static func focus(tty: String) -> Bool {
         guard isRunning else { return false }

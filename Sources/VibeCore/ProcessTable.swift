@@ -6,7 +6,6 @@ public struct ProcInfo: Sendable {
     public let ppid: Int32
     /// Controlling terminal, e.g. "ttys009"; nil for daemons and GUI apps.
     public let tty: String?
-    public let comm: String
     public let startTime: Date
     /// Set for terminal-attached `claude` / `codex` processes.
     public let agent: Agent?
@@ -76,7 +75,7 @@ public enum ProcessTable {
         let startTime = Date(timeIntervalSince1970: Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000)
         // Only terminal-attached processes can be sessions; skipping the rest keeps snapshots cheap.
         let agent = tty == nil ? nil : (Agent(comm: comm) ?? argv0(pid: proc.p_pid).flatMap(Agent.init(comm:)))
-        return ProcInfo(pid: proc.p_pid, ppid: kinfo.kp_eproc.e_ppid, tty: tty, comm: comm, startTime: startTime,
+        return ProcInfo(pid: proc.p_pid, ppid: kinfo.kp_eproc.e_ppid, tty: tty, startTime: startTime,
                         agent: agent)
     }
 

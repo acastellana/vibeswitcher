@@ -8,7 +8,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
     private let store = SessionStore()
     private let popoverState = PopoverState()
     private let preferences = Preferences()
-    private lazy var notifier = Notifier(preferences: preferences)
+    /// Notifications need an app bundle; `swift run` (no bundle) runs without them instead of crashing.
+    private lazy var notifier: Notifier? = Bundle.main.bundleIdentifier == nil ? nil : Notifier(preferences: preferences)
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var hotKey: HotKey?
@@ -19,20 +20,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
     private var visibilityTimer: Timer?
     private var hiddenReadings = 0
     private var notificationTimer: Timer?
+    private static let statusItemName = "VibeSwitcher"
     /// Stored by macOS as the distance from the right screen edge; set once so we start next to the
     /// clock, where an overflowing menu bar never hides items. ⌘-dragging the icon overrides it.
-    private static let statusItemName = "VibeSwitcher"
     private static let positionKey = "NSStatusItem Preferred Position VibeSwitcher"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         HookBinary.sync()
         preferences.setUpLoginItemOnFirstLaunch()
-        notifier.requestAuthorization()
-        notifier.onOpen = { [weak self] tty in
+        notifier?.requestAuthorization()
+        notifier?.onOpen = { [weak self] tty in
             guard let self, let session = self.store.sessions.first(where: { $0.tty == tty }) else { return }
             self.open(session)
         }
-        store.onAttention = { [weak self] session in self?.notifier.post(for: session) }
+        store.onAttention = { [weak self] session in self?.notifier?.post(for: session) }
 
         if UserDefaults.standard.object(forKey: Self.positionKey) == nil {
             UserDefaults.standard.set(120.0, forKey: Self.positionKey)
@@ -65,7 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
             self?.updateFloatingPanel()
         }
         notificationTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
-            self?.notifier.refreshAuthorization()
+            self?.notifier?.refreshAuthorization()
         }
 
         store.$sessions
@@ -153,8 +154,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
             let area = NSRect(x: rect.minX + hit.minX * sx, y: y, width: hit.width * sx, height: hit.height * sy)
             button.addToolTip(area, owner: self, userData: UnsafeMutableRawPointer(bitPattern: index + 1))
         }
-        AppStatus.extras["menuBar"] = ["buttonWidth": button.bounds.width, "imageX": rect.minX, "imageWidth": rect.width,
-                                       "flipped": button.isFlipped]
     }
 
     func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
@@ -193,13 +192,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
         floatingPanel.setShown(show)
         AppStatus.extras["menuBarIconVisible"] = visible
         AppStatus.extras["floatingPanelShown"] = show
-        if let frame = statusItem.button?.window?.frame {
-            AppStatus.extras["menuBarIconFrame"] = ["x": frame.minX, "width": frame.width]
-        }
         if changed { AppStatus.write(sessions: store.sessions, terminalAccess: store.terminalAccess) }
     }
 
-    @objc private func togglePopover() {
+    private func togglePopover() {
         togglePopover(anchor: nil)
     }
 
@@ -215,7 +211,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
         else { target = floatingPanel.anchorView }
         guard let button = target else { return }
         store.refresh(forceTerminal: true)
-        notifier.refreshAuthorization()
+        notifier?.refreshAuthorization()
         popoverState.selectedIndex = store.sessions.firstIndex { $0.status == .needsInput }
             ?? store.sessions.firstIndex { $0.status == .done } ?? 0
         fitPopover()
@@ -260,7 +256,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
     private func open(_ session: Session) {
         popover.performClose(nil)
         store.acknowledge(session)
-        notifier.clear(tty: session.tty)
+        notifier?.clear(tty: session.tty)
         DispatchQueue.global(qos: .userInitiated).async {
             // Try the exact Terminal tab even if the last title scan missed it; fall back to the host app.
             var result = "terminal-tab"

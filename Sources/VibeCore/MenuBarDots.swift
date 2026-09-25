@@ -8,7 +8,6 @@ public enum MenuBarDots {
     public static let height: CGFloat = 18
 
     public struct Layout: Equatable {
-        public let count: Int
         public let rows: Int
         public let columns: Int
         public let diameter: CGFloat
@@ -22,9 +21,9 @@ public enum MenuBarDots {
 
     public static func layout(count: Int) -> Layout {
         if count <= 4 {
-            return Layout(count: count, rows: 1, columns: max(count, 0), diameter: 9, gap: 5, rowGap: 0)
+            return Layout(rows: 1, columns: max(count, 0), diameter: 9, gap: 5, rowGap: 0)
         }
-        return Layout(count: count, rows: 2, columns: (count + 1) / 2, diameter: 7, gap: 4, rowGap: 3)
+        return Layout(rows: 2, columns: (count + 1) / 2, diameter: 7, gap: 4, rowGap: 3)
     }
 
     public static func width(count: Int) -> CGFloat { layout(count: count).width }

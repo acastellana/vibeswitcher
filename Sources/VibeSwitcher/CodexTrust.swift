@@ -53,7 +53,8 @@ enum CodexTrust {
             throw Failure.timeout
         }
 
-        _ = try call(1, "initialize", ["clientInfo": ["name": "vibeswitcher", "title": "VibeSwitcher", "version": "0.1.0"]])
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
+        _ = try call(1, "initialize", ["clientInfo": ["name": "vibeswitcher", "title": "VibeSwitcher", "version": version]])
         try send(["jsonrpc": "2.0", "method": "initialized"])
         let listing = try call(2, "hooks/list", ["cwds": [NSHomeDirectory()]])
         let entries = (listing["data"] as? [[String: Any]]) ?? []

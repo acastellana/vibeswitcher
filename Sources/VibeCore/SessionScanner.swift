@@ -82,7 +82,10 @@ public final class SessionScanner {
                 // Give a just-started process a moment to show up in the process table.
                 let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?
                     .contentModificationDate ?? .distantPast
-                if now.timeIntervalSince(modified) > 15 { try? fm.removeItem(at: file) }
+                if now.timeIntervalSince(modified) > 15 {
+                    try? fm.removeItem(at: file)
+                    try? fm.removeItem(at: file.appendingPathExtension("lock"))
+                }
                 continue
             }
             if let state = HookState.load(from: file) { states[tty] = state }

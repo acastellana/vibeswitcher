@@ -41,7 +41,6 @@ final class Preferences: ObservableObject {
             NSLog("VibeSwitcher: login item change failed: \(error)")
         }
         launchAtLogin = SMAppService.mainApp.status == .enabled
-        floatingPanel = FloatingPanelMode(rawValue: defaults.string(forKey: "floatingPanel") ?? "") ?? .automatic
     }
 }
 
