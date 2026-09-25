@@ -43,6 +43,13 @@ enum StatusIcon {
                     session.status.nsColor.setFill()
                     path.fill()
                 }
+                if session.isCurrent {
+                    // labelColor resolves when the menu bar draws, so the ring is white on a dark bar, black on a light one.
+                    NSColor.labelColor.setStroke()
+                    let ring = NSBezierPath(ovalIn: rect.insetBy(dx: -MenuBarDots.ringOffset, dy: -MenuBarDots.ringOffset))
+                    ring.lineWidth = 1.2
+                    ring.stroke()
+                }
             }
             return true
         }

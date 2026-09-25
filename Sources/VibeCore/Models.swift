@@ -69,6 +69,8 @@ public struct Session: Identifiable, Equatable, Sendable {
     public var hasHooks: Bool
     /// True when the session's tab was found in Terminal.app (so we can focus that exact tab).
     public var inTerminalApp: Bool
+    /// The Terminal tab you're looking at right now (Terminal frontmost, this tab selected in its front window).
+    public var isCurrent = false
 
     public init(tty: String, agent: Agent, pid: Int32, startedAt: Date, cwd: String?, project: String, task: String?,
                 status: SessionStatus, statusSince: Date, detail: String?, hasHooks: Bool, inTerminalApp: Bool) {

@@ -40,6 +40,11 @@ final class SessionStore: ObservableObject {
         refreshHookStatus()
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in self?.refresh() }
+        // Switching apps changes which session you're viewing; don't wait for the next poll.
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
+                                                          object: nil, queue: .main) { [weak self] _ in
+            self?.refresh(forceTerminal: true)
+        }
         watchStateDirectory()
     }
 
@@ -74,13 +79,16 @@ final class SessionStore: ObservableObject {
         }
         scanning = true
         let quiet = quietClaudeTTYs
+        // While you're in Terminal, check which tab you're on every second so the "viewing" ring keeps up.
+        let terminalInterval: TimeInterval =
+            NSWorkspace.shared.frontmostApplication?.bundleIdentifier == TerminalBridge.bundleID ? 1 : 2
         queue.async { [weak self] in
             guard let self else { return }
             let now = Date()
             let raw = self.scanner.scan(now: now)
             var access: TerminalAccess?
             // AppleScript is the expensive part; query at most every 2s unless forced.
-            if forceTerminal || now.timeIntervalSince(self.lastTerminalQuery) >= 2 {
+            if forceTerminal || now.timeIntervalSince(self.lastTerminalQuery) >= terminalInterval - 0.05 {
                 let result = TerminalBridge.tabs()
                 self.tabs = result.tabs
                 access = result.access
@@ -162,6 +170,7 @@ final class SessionStore: ObservableObject {
                 status: status, statusSince: since,
                 detail: waitingOn.map { "Waiting on \($0)" } ?? detail(for: status, hook: item.hook, agent: item.agent),
                 hasHooks: item.hook != nil, inTerminalApp: tab != nil)
+            session.isCurrent = viewing
             session.nameKeys = SessionKeys.keys(pid: item.pid, startedAt: item.startedAt, sessionId: item.hook?.sessionId)
             session.customName = names.name(for: session.nameKeys)
             if let root = item.projectRoot { noteProject(root, at: now) }

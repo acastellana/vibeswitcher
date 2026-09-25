@@ -5,7 +5,12 @@ import CoreGraphics
 /// (a crowded menu bar hides its leftmost icons under the notch). Shared by drawing and hit-testing.
 public enum MenuBarDots {
     public static let maxDots = 12
-    public static let height: CGFloat = 18
+    /// Taller than the dots need, so the ring around the session you're viewing fits inside the image.
+    public static let height: CGFloat = 22
+    /// How far that ring sits outside its dot; smaller than half of every gap, so it never touches a neighbour.
+    public static let ringOffset: CGFloat = 1.5
+    /// Side margin so the ring around the first/last dot isn't clipped.
+    static let sideMargin: CGFloat = 2.5
 
     public struct Layout: Equatable {
         public let rows: Int
@@ -14,7 +19,9 @@ public enum MenuBarDots {
         public let gap: CGFloat          // horizontal gap between dots
         public let rowGap: CGFloat
 
-        public var width: CGFloat { CGFloat(columns) * diameter + CGFloat(max(columns - 1, 0)) * gap }
+        /// Image width: the dots plus a margin on each side for the viewing ring.
+        public var width: CGFloat { dotsWidth + 2 * MenuBarDots.sideMargin }
+        var dotsWidth: CGFloat { CGFloat(columns) * diameter + CGFloat(max(columns - 1, 0)) * gap }
         var pitch: CGFloat { diameter + gap }
         var gridHeight: CGFloat { CGFloat(rows) * diameter + CGFloat(rows - 1) * rowGap }
     }
@@ -34,7 +41,7 @@ public enum MenuBarDots {
         let row = index / max(layout.columns, 1), column = index % max(layout.columns, 1)
         let top = (height + layout.gridHeight) / 2
         let y = top - CGFloat(row + 1) * layout.diameter - CGFloat(row) * layout.rowGap
-        return CGRect(x: CGFloat(column) * layout.pitch, y: y, width: layout.diameter, height: layout.diameter)
+        return CGRect(x: sideMargin + CGFloat(column) * layout.pitch, y: y, width: layout.diameter, height: layout.diameter)
     }
 
     /// Hit area of a dot: its grid cell, widened by half the gap on each side. Cells tile the icon.
@@ -51,8 +58,9 @@ public enum MenuBarDots {
     public static func index(at point: CGPoint, count: Int) -> Int? {
         guard (1...maxDots).contains(count) else { return nil }
         let layout = layout(count: count)
-        guard point.x >= -layout.gap / 2, point.x < layout.width + layout.gap / 2 else { return nil }
-        let column = min(max(Int(((point.x + layout.gap / 2) / layout.pitch).rounded(.down)), 0), layout.columns - 1)
+        let x = point.x - sideMargin
+        guard x >= -layout.gap / 2 - sideMargin, x < layout.dotsWidth + layout.gap / 2 + sideMargin else { return nil }
+        let column = min(max(Int(((x + layout.gap / 2) / layout.pitch).rounded(.down)), 0), layout.columns - 1)
         let row = layout.rows == 1 ? 0 : (point.y >= height / 2 ? 0 : 1)
         let index = row * layout.columns + column
         return index < count ? index : nil

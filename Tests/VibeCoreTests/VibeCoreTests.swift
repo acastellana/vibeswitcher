@@ -150,14 +150,15 @@ struct MenuBarDotsTests {
     @Test func fewSessionsUseOneRow() {
         let layout = MenuBarDots.layout(count: 3)
         #expect(layout.rows == 1)
-        let step = layout.diameter + layout.gap
-        #expect(MenuBarDots.index(at: CGPoint(x: 0, y: 9), count: 3) == 0)
-        #expect(MenuBarDots.index(at: CGPoint(x: step + 1, y: 2), count: 3) == 1)
+        let first = MenuBarDots.rect(at: 0, count: 3), second = MenuBarDots.rect(at: 1, count: 3)
+        #expect(MenuBarDots.index(at: CGPoint(x: first.midX, y: 11), count: 3) == 0)
+        #expect(MenuBarDots.index(at: CGPoint(x: second.midX, y: 3), count: 3) == 1)
         // The gap is split between neighbours.
-        #expect(MenuBarDots.index(at: CGPoint(x: layout.diameter + layout.gap / 2 - 0.1, y: 9), count: 3) == 0)
-        #expect(MenuBarDots.index(at: CGPoint(x: layout.diameter + layout.gap / 2 + 0.1, y: 9), count: 3) == 1)
-        #expect(MenuBarDots.index(at: CGPoint(x: -10, y: 9), count: 3) == nil)
-        #expect(MenuBarDots.index(at: CGPoint(x: layout.width + 10, y: 9), count: 3) == nil)
+        let boundary = (first.maxX + second.minX) / 2
+        #expect(MenuBarDots.index(at: CGPoint(x: boundary - 0.1, y: 11), count: 3) == 0)
+        #expect(MenuBarDots.index(at: CGPoint(x: boundary + 0.1, y: 11), count: 3) == 1)
+        #expect(MenuBarDots.index(at: CGPoint(x: -10, y: 11), count: 3) == nil)
+        #expect(MenuBarDots.index(at: CGPoint(x: layout.width + 10, y: 11), count: 3) == nil)
     }
 
     @Test func manySessionsWrapIntoTwoNarrowRows() {
@@ -165,8 +166,8 @@ struct MenuBarDotsTests {
         #expect(layout.rows == 2 && layout.columns == 5)
         #expect(layout.width < 60, "9 sessions must stay compact, was \(layout.width)")
         // Top row holds 1–5, bottom row 6–9; the empty 10th cell is not a session.
-        #expect(MenuBarDots.index(at: CGPoint(x: 1, y: 15), count: 9) == 0)
-        #expect(MenuBarDots.index(at: CGPoint(x: 1, y: 3), count: 9) == 5)
+        #expect(MenuBarDots.index(at: CGPoint(x: MenuBarDots.rect(at: 0, count: 9).midX, y: 17), count: 9) == 0)
+        #expect(MenuBarDots.index(at: CGPoint(x: MenuBarDots.rect(at: 5, count: 9).midX, y: 4), count: 9) == 5)
         #expect(MenuBarDots.index(at: CGPoint(x: layout.width - 1, y: 3), count: 9) == nil)
         #expect(MenuBarDots.rect(at: 0, count: 9).minY > MenuBarDots.rect(at: 5, count: 9).maxY)
         #expect(MenuBarDots.index(at: CGPoint(x: 5, y: 9), count: MenuBarDots.maxDots + 1) == nil)
@@ -284,5 +285,21 @@ struct RecentProjectsTests {
         let start = Date(timeIntervalSince1970: 1000)
         #expect(SessionKeys.keys(pid: 42, startedAt: start, sessionId: "abc") == ["proc:42-1000", "session:abc"])
         #expect(SessionKeys.keys(pid: 42, startedAt: start, sessionId: nil) == ["proc:42-1000"])
+    }
+}
+
+struct ViewingRingTests {
+    @Test func ringFitsAndNeverTouchesNeighbours() {
+        let halo = MenuBarDots.ringOffset + 0.6 // ring offset plus half its stroke
+        for count in 1...MenuBarDots.maxDots {
+            let rings = (0..<count).map { MenuBarDots.rect(at: $0, count: count).insetBy(dx: -halo, dy: -halo) }
+            for (index, ring) in rings.enumerated() {
+                #expect(ring.minY >= 0 && ring.maxY <= MenuBarDots.height, "count \(count) index \(index)")
+                #expect(ring.minX >= 0 && ring.maxX <= MenuBarDots.layout(count: count).width, "count \(count) index \(index)")
+                for other in 0..<count where other != index {
+                    #expect(!ring.intersects(MenuBarDots.rect(at: other, count: count)), "count \(count): \(index) vs \(other)")
+                }
+            }
+        }
     }
 }

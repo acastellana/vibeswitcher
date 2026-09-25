@@ -15,6 +15,7 @@ what each one is doing, and jumps to its Terminal tab in one keystroke.
 The menu bar shows one dot per session, oldest first, so each dot keeps its position.
 
 - **Click a dot** to jump straight to that session's Terminal tab. Hover a dot to see which session it is.
+- The session whose Terminal tab you're looking at has a **ring** around its dot (and a "Viewing" tag in the list).
 - **Right-click** (or **⌃⌥V**) opens the list; there, click a row or press **1–9** / **↑↓ ⏎**.
 - **Right-click a row › Rename…** to give a session your own name (kept while it runs, and across
   `--resume` when the session id is kept).

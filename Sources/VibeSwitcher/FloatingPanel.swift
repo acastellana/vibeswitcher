@@ -91,6 +91,10 @@ struct FloatingDotsView: View {
                             .foregroundStyle(session.status == .unknown || session.status == .idle ? Color.primary : Color.white)
                     }
                     .frame(width: 17, height: 17)
+                    .padding(2)
+                    .overlay {
+                        if session.isCurrent { Circle().stroke(Color.primary, lineWidth: 1.5) }
+                    }
                 }
                 .buttonStyle(.plain)
                 .help("\(index + 1). \(session.title) · \(session.status.label)")

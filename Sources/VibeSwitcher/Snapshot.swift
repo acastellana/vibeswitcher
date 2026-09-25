@@ -33,11 +33,15 @@ enum Snapshot {
         }
 
         let icon = StatusIcon.image(for: store.sessions)
-        let iconView = NSImageView(image: icon)
-        iconView.frame = NSRect(x: 0, y: 0, width: icon.size.width + 16, height: 24)
-        iconView.wantsLayer = true
-        iconView.layer?.backgroundColor = NSColor(white: 0.15, alpha: 1).cgColor
-        write(view: iconView, to: "\(outputDirectory)/menubar-icon.png")
+        for (name, appearance, gray) in [("menubar-icon-dark", NSAppearance.Name.darkAqua, 0.15),
+                                         ("menubar-icon-light", .aqua, 0.92)] {
+            let iconView = NSImageView(image: icon)
+            iconView.appearance = NSAppearance(named: appearance)
+            iconView.frame = NSRect(x: 0, y: 0, width: icon.size.width + 16, height: 26)
+            iconView.wantsLayer = true
+            iconView.layer?.backgroundColor = NSColor(white: gray, alpha: 1).cgColor
+            write(view: iconView, to: "\(outputDirectory)/\(name).png")
+        }
 
         for session in store.sessions {
             print("\(session.status.rawValue)\t\(session.agent.rawValue)\t\(session.tty)\t\(session.displayName)\t\(session.task ?? "-")\t\(session.detail ?? "")")

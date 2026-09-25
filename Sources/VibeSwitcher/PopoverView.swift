@@ -185,7 +185,7 @@ struct SessionRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            NumberBadge(number: index + 1, status: session.status)
+            NumberBadge(number: index + 1, status: session.status, isCurrent: session.isCurrent)
                 .padding(.top, 1)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -196,6 +196,13 @@ struct SessionRow: View {
                     AgentBadge(agent: session.agent)
                     if session.customName != nil {
                         Text(session.project).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    if session.isCurrent {
+                        Label("Viewing", systemImage: "eye.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Capsule().fill(Color.primary.opacity(0.08)))
+                            .help("The Terminal tab you're looking at right now")
                     }
                     Spacer(minLength: 6)
                     HStack(spacing: 4) {
@@ -235,6 +242,7 @@ struct SessionRow: View {
 private struct NumberBadge: View {
     let number: Int
     let status: SessionStatus
+    var isCurrent = false
 
     var body: some View {
         ZStack {
@@ -248,6 +256,11 @@ private struct NumberBadge: View {
                 .foregroundStyle(status == .unknown || status == .idle ? Color.primary : Color.white)
         }
         .frame(width: 20, height: 20)
+        .overlay {
+            if isCurrent {
+                Circle().stroke(Color.primary, lineWidth: 1.5).frame(width: 25, height: 25)
+            }
+        }
         .overlay {
             if status == .working {
                 Circle().stroke(status.color.opacity(0.35), lineWidth: 3).frame(width: 25, height: 25)
