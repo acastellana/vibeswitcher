@@ -6,6 +6,8 @@ public struct ProcInfo: Sendable {
     public let ppid: Int32
     /// Controlling terminal, e.g. "ttys009"; nil for daemons and GUI apps.
     public let tty: String?
+    /// Executable name from the kernel (max 16 chars), e.g. "zsh".
+    public let comm: String
     public let startTime: Date
     /// Set for terminal-attached `claude` / `codex` processes.
     public let agent: Agent?
@@ -13,6 +15,26 @@ public struct ProcInfo: Sendable {
 
 /// Reads the kernel process table directly via sysctl (no `ps` subprocess, so it is cheap to poll).
 public enum ProcessTable {
+    // Both lookups below are slow enough to dominate a snapshot of ~750 processes if repeated every
+    // poll: devname() scans /dev on every call, and argv needs a sysctl per process. Their answers
+    // never change for a given device / process, so they're cached.
+    private static let cacheLock = NSLock()
+    private static var ttyNames: [dev_t: String?] = [:]
+    private static var argumentCache: [Int32: (start: Int, arguments: [String])] = [:]
+
+    static func ttyName(_ device: dev_t) -> String? {
+        guard device != -1 else { return nil }
+        cacheLock.lock(); defer { cacheLock.unlock() }
+        if let cached = ttyNames[device] { return cached }
+        var name: String?
+        if let raw = devname(device, S_IFCHR) {
+            let value = String(cString: raw)
+            if value != "??" { name = value }
+        }
+        ttyNames[device] = name
+        return name
+    }
+
     public static func snapshot() -> [Int32: ProcInfo] {
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
         var size = 0
@@ -27,6 +49,9 @@ public enum ProcessTable {
             let info = makeInfo(buffer[index])
             result[info.pid] = info
         }
+        cacheLock.lock()
+        argumentCache = argumentCache.filter { result[$0.key] != nil }
+        cacheLock.unlock()
         return result
     }
 
@@ -65,36 +90,52 @@ public enum ProcessTable {
         let comm = withUnsafePointer(to: &proc.p_comm) {
             $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXCOMLEN) + 1) { String(cString: $0) }
         }
-        let tdev = kinfo.kp_eproc.e_tdev
-        var tty: String?
-        if tdev != -1, let name = devname(tdev, S_IFCHR) {
-            let value = String(cString: name)
-            if value != "??" { tty = value }
-        }
+        let tty = ttyName(kinfo.kp_eproc.e_tdev)
         let start = proc.p_un.__p_starttime
         let startTime = Date(timeIntervalSince1970: Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000)
         // Only terminal-attached processes can be sessions; skipping the rest keeps snapshots cheap.
-        let agent = tty == nil ? nil : (Agent(comm: comm) ?? argv0(pid: proc.p_pid).flatMap(Agent.init(comm:)))
-        return ProcInfo(pid: proc.p_pid, ppid: kinfo.kp_eproc.e_ppid, tty: tty, startTime: startTime,
+        let agent = tty == nil ? nil
+            : (Agent(comm: comm) ?? arguments(pid: proc.p_pid, start: start.tv_sec).first
+                .map { ($0 as NSString).lastPathComponent }.flatMap(Agent.init(comm:)))
+        return ProcInfo(pid: proc.p_pid, ppid: kinfo.kp_eproc.e_ppid, tty: tty, comm: comm, startTime: startTime,
                         agent: agent)
     }
 
-    /// Basename of argv[0]. Needed because Claude Code runs as a versioned binary
-    /// (`~/.local/share/claude/versions/2.1.282`), so the kernel's `comm` is "2.1.282", not "claude".
-    static func argv0(pid: Int32) -> String? {
+    /// A process's argv, cached per (pid, start time). Claude Code runs as a versioned binary
+    /// (`~/.local/share/claude/versions/2.1.282`), so the kernel's `comm` is "2.1.282", not "claude";
+    /// argv[0] tells them apart.
+    public static func arguments(pid: Int32, start: Int) -> [String] {
+        cacheLock.lock()
+        if let cached = argumentCache[pid], cached.start == start {
+            cacheLock.unlock()
+            return cached.arguments
+        }
+        cacheLock.unlock()
+        let arguments = readArguments(pid: pid)
+        cacheLock.lock()
+        argumentCache[pid] = (start, arguments)
+        cacheLock.unlock()
+        return arguments
+    }
+
+    static func readArguments(pid: Int32) -> [String] {
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
         var size = 0
-        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return nil }
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return [] }
         var buffer = [UInt8](repeating: 0, count: size)
-        guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0 else { return nil }
-        // Layout: argc (int32), exec path, NUL padding, argv[0], argv[1], …
+        guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0 else { return [] }
+        // Layout: argc (int32), exec path, NUL padding, argv[0] … argv[argc-1], environment…
+        let argc = buffer.withUnsafeBytes { $0.load(as: Int32.self) }
         var index = MemoryLayout<Int32>.size
-        while index < size, buffer[index] != 0 { index += 1 }   // skip exec path
-        while index < size, buffer[index] == 0 { index += 1 }   // skip padding
-        let start = index
-        while index < size, buffer[index] != 0 { index += 1 }
-        guard index > start else { return nil }
-        let arg = String(decoding: buffer[start..<index], as: UTF8.self)
-        return (arg as NSString).lastPathComponent
+        while index < size, buffer[index] != 0 { index += 1 }   // exec path
+        while index < size, buffer[index] == 0 { index += 1 }   // padding
+        var arguments: [String] = []
+        while arguments.count < argc, index < size {
+            let begin = index
+            while index < size, buffer[index] != 0 { index += 1 }
+            arguments.append(String(decoding: buffer[begin..<index], as: UTF8.self))
+            index += 1
+        }
+        return arguments
     }
 }

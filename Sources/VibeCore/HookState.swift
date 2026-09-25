@@ -33,9 +33,11 @@ public struct HookState: Codable, Equatable, Sendable {
         return try? JSONDecoder().decode(HookState.self, from: data)
     }
 
+    /// Written readable by you only: it holds your last prompt and the agent's last message.
     public func save(to url: URL) throws {
         let data = try JSONEncoder().encode(self)
         try data.write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }
 }
 

@@ -12,11 +12,15 @@ public struct RawSession: Sendable {
     /// Full path of that repo/folder.
     public let projectRoot: String?
     public let hook: HookState?
+    /// Claude only: shells still running under the agent (background commands, monitor loops).
+    public let backgroundJobs: [BackgroundJob]
 }
 
 public final class SessionScanner {
     private var cwdCache: [Int32: String] = [:]
     private var projectCache: [Int32: String] = [:]
+    /// Decoded state files by path, re-read only when their modification date changes.
+    private var stateCache: [String: (modified: Date, state: HookState)] = [:]
 
     public init() {}
 
@@ -42,7 +46,10 @@ public final class SessionScanner {
             let projectRoot = cachedProjectRoot(root.pid, launchDirectory ?? cwd)
             sessions.append(RawSession(tty: tty, agent: agent, pid: root.pid, startedAt: root.startTime,
                                        cwd: cwd, project: projectRoot.map { SessionNaming.name(forProjectRoot: $0) } ?? "?",
-                                       projectRoot: projectRoot, hook: hook))
+                                       projectRoot: projectRoot, hook: hook,
+                                       backgroundJobs: agent == .claude ? BackgroundJobs.jobs(forAgent: root.pid, in: procs) {
+                                           ProcessTable.arguments(pid: $0.pid, start: Int($0.startTime.timeIntervalSince1970))
+                                       } : []))
         }
         cwdCache = cwdCache.filter { procs[$0.key] != nil }
         projectCache = projectCache.filter { procs[$0.key] != nil }
@@ -92,8 +99,15 @@ public final class SessionScanner {
                 }
                 continue
             }
-            if let state = HookState.load(from: file) { states[tty] = state }
+            let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+            if let cached = stateCache[file.path], cached.modified == modified {
+                states[tty] = cached.state
+            } else if let state = HookState.load(from: file) {
+                stateCache[file.path] = (modified, state)
+                states[tty] = state
+            }
         }
+        stateCache = stateCache.filter { entry in files.contains { $0.path == entry.key } }
         return states
     }
 }

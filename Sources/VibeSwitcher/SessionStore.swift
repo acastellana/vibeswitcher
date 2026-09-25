@@ -25,12 +25,14 @@ final class SessionStore: ObservableObject {
     private var tabs: [String: TerminalTab] = [:]
     private var backgroundWork: [String: String] = [:]
     private var lastTerminalQuery = Date.distantPast
+    private var lastScreenQuery = Date.distantPast
 
     // Main-thread only.
     private let launchedAt = Date()
     private var observed: [String: (status: SessionStatus, since: Date)] = [:]
     private var acknowledged: [String: Date] = [:]
     private var displayed: [String: SessionStatus] = [:]
+    private var watcherRefreshPending = false
     /// Claude sessions whose turn looks finished; only their screens are read for background work.
     private var quietClaudeTTYs: Set<String> = []
     private let names = NameStore()
@@ -41,7 +43,10 @@ final class SessionStore: ObservableObject {
     func start() {
         refreshHookStatus()
         refresh()
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: true) { [weak self] _ in self?.refresh() }
+        // Hook updates arrive through the state-directory watcher right away; the timer only has to
+        // notice sessions starting/ending, title changes and the viewing ring.
+        timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in self?.refresh() }
+        timer?.tolerance = 0.5
         // Switching apps changes which session you're viewing; don't wait for the next poll.
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
                                                           object: nil, queue: .main) { [weak self] _ in
@@ -83,7 +88,7 @@ final class SessionStore: ObservableObject {
         let quiet = quietClaudeTTYs
         // While you're in Terminal, check which tab you're on every second so the "viewing" ring keeps up.
         let terminalInterval: TimeInterval =
-            NSWorkspace.shared.frontmostApplication?.bundleIdentifier == TerminalBridge.bundleID ? 1 : 2
+            NSWorkspace.shared.frontmostApplication?.bundleIdentifier == TerminalBridge.bundleID ? 1.5 : 4
         queue.async { [weak self] in
             guard let self else { return }
             let now = Date()
@@ -95,8 +100,13 @@ final class SessionStore: ObservableObject {
                 self.tabs = result.tabs
                 access = result.access
                 self.lastTerminalQuery = now
-                self.backgroundWork = TerminalBridge.screens(for: quiet)
-                    .compactMapValues { BackgroundWork.summary(fromScreen: $0) }
+                // Screen text is only needed for Claude's footer (background agents/tasks that aren't
+                // processes); it's the most expensive query, so read it less often.
+                if forceTerminal || now.timeIntervalSince(self.lastScreenQuery) >= 6 {
+                    self.backgroundWork = TerminalBridge.screens(for: quiet)
+                        .compactMapValues { BackgroundWork.summary(fromScreen: $0) }
+                    self.lastScreenQuery = now
+                }
             }
             let tabs = self.tabs
             let background = self.backgroundWork
@@ -135,8 +145,9 @@ final class SessionStore: ObservableObject {
         for item in raw {
             let tab = tabs[item.tty]
             let parsed = tab.map { StatusRules.parseTitle($0.title) }
-            // Claude's ✳/spinner glyph is meaningful; Codex titles carry no activity glyph.
-            let activity = item.agent == .claude ? (parsed?.activity ?? .none) : .none
+            // Claude uses ✳ (idle) and spinners (busy); Codex only shows a braille spinner while busy.
+            let activity: TitleActivity = item.agent == .claude ? (parsed?.activity ?? .none)
+                : (parsed?.activity == .busy ? .busy : .none)
             let resolved = StatusRules.resolve(hook: item.hook, title: activity, now: now.timeIntervalSince1970)
 
             let since: Date
@@ -158,10 +169,11 @@ final class SessionStore: ObservableObject {
             var waitingOn: String?
             if item.agent == .claude, status == .done || status == .idle {
                 quiet.insert(item.tty)
-                // Turn over but background work still running: it will resume on its own.
-                if let work = background[item.tty] {
+                // Turn over but background work still running. Prefer the real processes (what and how
+                // long); fall back to Claude's footer for background agents/tasks that aren't processes.
+                if let jobs = BackgroundJobs.summary(item.backgroundJobs, now: now) ?? background[item.tty] {
                     status = .background
-                    waitingOn = work
+                    waitingOn = jobs
                 }
             }
 
@@ -206,8 +218,10 @@ final class SessionStore: ObservableObject {
 
         let ordered = SessionOrdering.sort(result, by: order)
         if ordered != sessions {
+            // The debug status file only records statuses; don't rewrite it for detail/timer changes.
+            let statusesChanged = ordered.map { "\($0.tty)\($0.status.rawValue)" } != sessions.map { "\($0.tty)\($0.status.rawValue)" }
             sessions = ordered
-            AppStatus.write(sessions: ordered, terminalAccess: terminalAccess)
+            if statusesChanged { AppStatus.write(sessions: ordered, terminalAccess: terminalAccess) }
         }
     }
 
@@ -239,7 +253,15 @@ final class SessionStore: ObservableObject {
         guard fd >= 0 else { return }
         let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: [.write, .rename, .delete],
                                                                queue: .main)
-        source.setEventHandler { [weak self] in self?.refresh() }
+        // Busy sessions write several hook events per second; coalesce them into one refresh.
+        source.setEventHandler { [weak self] in
+            guard let self, !self.watcherRefreshPending else { return }
+            self.watcherRefreshPending = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                self.watcherRefreshPending = false
+                self.refresh()
+            }
+        }
         source.setCancelHandler { close(fd) }
         source.resume()
         watcher = source

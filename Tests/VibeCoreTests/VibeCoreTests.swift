@@ -377,3 +377,40 @@ struct DesktopOrderTests {
         #expect(SessionOrdering.sort(sessions).map(\.tty) == ["d1", "d3", "d7-left", "d7-right", "unknown"])
     }
 }
+
+struct BackgroundJobsTests {
+    @Test func extractsTheCommandFromClaudesShellWrapper() {
+        let prove = "/bin/zsh -c source /Users/me/.claude/shell-snapshots/snapshot-zsh-1.sh 2>/dev/null || true && export X=1 && eval 'mkdir -p .logs && npm run prove > .logs/gate-$(date +%H%M).log 2>&1; echo \"EXIT $?\"' < /dev/null && pwd -P >| /tmp/cwd"
+        #expect(BackgroundJobs.command(fromWrapper: prove) == "npm run prove; echo \"EXIT $?\"")
+        let loop = "/bin/zsh -c source /x/shell-snapshots/s.sh && eval 'until ! ps aux | grep -q \"Chrome\"; do sleep 3; done; echo done_waiting' < /dev/null"
+        #expect(BackgroundJobs.command(fromWrapper: loop) == "until ! ps aux | grep -q \"Chrome\"; do sleep 3; done; echo done_waiting")
+        #expect(BackgroundJobs.command(fromWrapper: "eval 'echo it'\\''s' < /dev/null") == "echo it's")
+        #expect(BackgroundJobs.command(fromWrapper: "eval 'echo it'\"'\"'s' < /dev/null") == "echo it's")
+        #expect(BackgroundJobs.command(fromWrapper: "/bin/zsh -c ls") == nil)
+    }
+
+    @Test func findsOnlyShellChildrenOfTheAgent() {
+        func p(_ pid: Int32, _ ppid: Int32, _ comm: String, _ age: Double) -> ProcInfo {
+            ProcInfo(pid: pid, ppid: ppid, tty: nil, comm: comm, startTime: Date(timeIntervalSince1970: 10_000 - age), agent: nil)
+        }
+        let processes: [Int32: ProcInfo] = [
+            10: p(10, 10, "zsh", 100),     // wrapper, child of agent 1? no: ppid 10 (not agent) -> ignored
+            11: p(11, 1, "zsh", 3600),     // background job
+            12: p(12, 1, "node", 9999),    // MCP server, not a shell
+            13: p(13, 1, "zsh", 60),       // shell without snapshot wrapper -> ignored
+        ]
+        let argv: [Int32: [String]] = [11: ["/bin/zsh", "-c", "source /h/.claude/shell-snapshots/a.sh && eval 'npm run prove' < /dev/null"],
+                                       13: ["/bin/zsh", "-c", "ls"], 10: ["/bin/zsh"]]
+        let jobs = BackgroundJobs.jobs(forAgent: 1, in: processes) { argv[$0.pid] ?? [] }
+        #expect(jobs.map(\.command) == ["npm run prove"])
+        #expect(BackgroundJobs.summary(jobs, now: Date(timeIntervalSince1970: 10_000)) == "npm run prove · 1h")
+    }
+
+    @Test func summarisesSeveralJobs() {
+        let now = Date(timeIntervalSince1970: 100_000)
+        let jobs = (0..<5).map { BackgroundJob(pid: Int32($0), command: "until ! pgrep Chrome; do sleep 3; done",
+                                                startedAt: now.addingTimeInterval(-25_200 + Double($0))) }
+        #expect(BackgroundJobs.summary(jobs, now: now) == "5 shells · oldest 7h: until ! pgrep Chrome; do sleep 3; done")
+        #expect(Durations.short(45) == "45s" && Durations.short(3 * 3600 + 300) == "3h 5m" && Durations.short(2 * 86400 + 4 * 3600) == "2d 4h")
+    }
+}

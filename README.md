@@ -7,7 +7,7 @@ what each one is doing, and jumps to its Terminal tab in one keystroke.
 | --- | --- | --- |
 | 🔴 | Needs input | Blocked on you: permission prompt, question, plan approval |
 | 🟠 | Working | Thinking or running tools |
-| 🔵 | Background | Turn ended, but background shells/tasks are still running; it will resume on its own |
+| 🔵 | Background | Turn ended, but background work is still running (the row shows what and for how long, e.g. `npm run prove · 6h`) |
 | 🟢 | Done | Finished a turn you haven't looked at yet |
 | ⚪️ | Idle | Finished and already seen |
 | ◯ | Unknown | No hooks and no readable title yet |
@@ -57,7 +57,7 @@ hooks and can be deleted by hand.
 
 ## Privacy
 
-Everything stays on your Mac. The hook writes a few facts per terminal (last event, your last prompt, the
+Everything stays on your Mac, readable only by you (`~/.vibeswitcher` is `0700`, its files `0600`). The hook writes a few facts per terminal (last event, your last prompt, the
 agent's last message, both truncated) to `~/.vibeswitcher/state/`, and the app reads them plus Terminal's
 tab titles. Nothing is sent anywhere. Delete `~/.vibeswitcher` to remove all of it.
 
@@ -72,8 +72,9 @@ Three sources, most precise first:
    exits 0, so it can never block an agent.
 2. **Terminal tab titles.** Claude Code titles its tab `✳ <task>` when idle and uses a spinner glyph while
    working. That covers sessions without hooks, plus the transitions hooks miss (Esc interrupts fire no
-   `Stop`). For finished Claude sessions the footer is read too: `1 shell` / `2 background tasks` there
-   means it's waiting on background work (🔵).
+   `Stop`). For finished Claude sessions, background work is found in the process tree: shells Claude
+   started that are still running (with their real command and age), plus Claude's footer for
+   background agents/tasks that aren't processes (🔵).
 3. **The process table** (`sysctl`, no `ps`). Finds every `claude` / `codex` process attached to a TTY, so
    every session is listed even before it sends a hook event.
 

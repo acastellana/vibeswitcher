@@ -21,11 +21,11 @@ let agentPid = agentAncestors.first?.pid
 // this session comes from the agent process itself.
 guard let tty = agentAncestors.first?.tty ?? ProcessTable.info(pid: getpid())?.tty else { exit(0) }
 
-try? FileManager.default.createDirectory(at: VibePaths.stateDir, withIntermediateDirectories: true)
+VibePaths.ensurePrivateDirectories()
 let stateURL = VibePaths.stateFile(tty: tty)
 
 // Serialize concurrent hooks (parallel tool calls fire PreToolUse at the same time).
-let lock = open(stateURL.path + ".lock", O_CREAT | O_RDWR, 0o644)
+let lock = open(stateURL.path + ".lock", O_CREAT | O_RDWR, 0o600)
 if lock >= 0 { flock(lock, LOCK_EX) }
 
 let update = HookState.reduce(current: HookState.load(from: stateURL), payload: payload, agent: agent,

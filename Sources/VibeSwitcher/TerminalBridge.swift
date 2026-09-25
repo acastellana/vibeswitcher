@@ -29,25 +29,28 @@ enum TerminalBridge {
     static func tabs() -> (tabs: [String: TerminalTab], access: TerminalAccess) {
         // `tell application "Terminal"` would launch Terminal, so check first.
         guard isRunning else { return ([:], .notRunning) }
+        // Five bulk Apple Events (one per property across all windows/tabs), then local list
+        // walking: much cheaper for Terminal than one event per property per tab.
         let script = """
+        tell application "Terminal"
+            set wids to id of every window
+            set wbounds to bounds of every window
+            set ttys to tty of every tab of every window
+            set sels to selected of every tab of every window
+            set titles to custom title of every tab of every window
+        end tell
         set sep to (character id 31)
         set out to ""
-        tell application "Terminal"
-            set wi to 0
-            repeat with w in windows
-                set wi to wi + 1
-                try
-                    set wid to (id of w) as text
-                    set b to bounds of w
-                    set frameText to ((item 1 of b) as text) & "," & ((item 2 of b) as text) & "," & ((item 3 of b) as text) & "," & ((item 4 of b) as text)
-                    set ti to 0
-                    repeat with t in tabs of w
-                        set ti to ti + 1
-                        set out to out & wid & sep & ti & sep & (tty of t) & sep & ((selected of t) as text) & sep & wi & sep & frameText & sep & (custom title of t) & linefeed
-                    end repeat
-                end try
-            end repeat
-        end tell
+        repeat with i from 1 to count of wids
+            set tl to item i of ttys
+            set b to item i of wbounds
+            if class of tl is list and class of b is list then
+                set frameText to ((item 1 of b) as text) & "," & ((item 2 of b) as text) & "," & ((item 3 of b) as text) & "," & ((item 4 of b) as text)
+                repeat with j from 1 to count of tl
+                    set out to out & ((item i of wids) as text) & sep & j & sep & (item j of tl) & sep & ((item j of (item i of sels)) as text) & sep & i & sep & frameText & sep & (item j of (item i of titles)) & linefeed
+                end repeat
+            end if
+        end repeat
         return out
         """
         let result = runAppleScript(script)

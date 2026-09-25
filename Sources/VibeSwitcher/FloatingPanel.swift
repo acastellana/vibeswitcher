@@ -8,6 +8,8 @@ import VibeCore
 final class FloatingPanelController {
     private let panel: NSPanel
     private let hostingView: NSHostingView<AnyView>
+    /// Mounted only while the panel is visible, so a hidden panel costs nothing.
+    private var content: AnyView = AnyView(EmptyView())
 
     init(store: SessionStore, onOpen: @escaping (Session) -> Void, onShowList: @escaping (NSView) -> Void) {
         panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 120, height: 30),
@@ -22,9 +24,10 @@ final class FloatingPanelController {
 
         var anchor: NSView?
         let view = FloatingDotsView(store: store, onOpen: onOpen, onShowList: { if let anchor { onShowList(anchor) } })
-        hostingView = FirstMouseHostingView(rootView: AnyView(view))
+        hostingView = FirstMouseHostingView(rootView: AnyView(EmptyView()))
         panel.contentView = hostingView
         anchor = hostingView
+        content = AnyView(view)
 
         if !panel.setFrameUsingName("VibeSwitcherFloatingPanel") { placeUnderMenuBar() }
         panel.setFrameAutosaveName("VibeSwitcherFloatingPanel")
@@ -36,11 +39,13 @@ final class FloatingPanelController {
     func setShown(_ shown: Bool) {
         guard shown != panel.isVisible else { return }
         if shown {
+            hostingView.rootView = content
             fit()
             panel.orderFrontRegardless()
             DispatchQueue.main.async { self.fit() } // SwiftUI may only settle its size after the first display
         } else {
             panel.orderOut(nil)
+            hostingView.rootView = AnyView(EmptyView())
         }
     }
 

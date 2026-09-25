@@ -47,7 +47,9 @@ if arguments.contains("--dump") {
     let sessions = SessionScanner().scan()
     let screens = TerminalBridge.screens(for: Set(sessions.filter { $0.agent == .claude }.map(\.tty)))
     for session in sessions {
-        let work = screens[session.tty].flatMap { BackgroundWork.summary(fromScreen: $0) }.map { "\tbackground: \($0)" } ?? ""
+        let footer = screens[session.tty].flatMap { BackgroundWork.summary(fromScreen: $0) }.map { "\tfooter: \($0)" } ?? ""
+        let jobs = BackgroundJobs.summary(session.backgroundJobs).map { "\tshells: \($0)" } ?? ""
+        let work = footer + jobs
         let hook = session.hook.map { "\($0.lastEvent) (\(Int(Date().timeIntervalSince1970 - $0.lastEventAt))s ago)" } ?? "no hooks"
         print("\(session.tty)\t\(session.agent.rawValue)\tpid \(session.pid)\t\(hook)\t\(session.cwd ?? "?")\(work)")
     }

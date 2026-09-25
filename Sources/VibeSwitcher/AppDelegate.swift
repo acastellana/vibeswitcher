@@ -4,7 +4,7 @@ import Combine
 import SwiftUI
 import VibeCore
 
-final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NSPopoverDelegate {
     private let store = SessionStore()
     private let popoverState = PopoverState()
     private let preferences = Preferences()
@@ -16,6 +16,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
     private var keyMonitor: Any?
     private var cancellables: Set<AnyCancellable> = []
     private var hostingView: NSHostingView<AnyView>!
+    /// Builds the list; it's only mounted while the popover is open, so SwiftUI does no work otherwise.
+    private var makePopoverContent: (() -> AnyView)!
+    /// What the menu bar icon depends on; the image is only redrawn when this changes.
+    private var iconSignature = ""
     private var floatingPanel: FloatingPanelController!
     private var visibilityTimer: Timer?
     private var hiddenReadings = 0
@@ -27,6 +31,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         HookBinary.sync()
+        VibePaths.ensurePrivateDirectories()
         preferences.setUpLoginItemOnFirstLaunch()
         notifier?.requestAuthorization()
         notifier?.onOpen = { [weak self] tty in
@@ -53,11 +58,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
                                onResetName: { [weak self] in self?.store.rename($0, to: nil) },
                                onNewSession: { [weak self] in self?.newSession(agent: $0, in: $1) },
                                onEditCommands: { [weak self] in self?.editLaunchCommands() })
-        hostingView = FirstMouseHostingView(rootView: AnyView(view))
+        makePopoverContent = { AnyView(view) }
+        hostingView = FirstMouseHostingView(rootView: AnyView(EmptyView()))
         let controller = NSViewController()
         controller.view = hostingView
         popover.contentViewController = controller
         popover.behavior = .transient
+        popover.delegate = self
         popover.animates = false
 
         floatingPanel = FloatingPanelController(store: store, onOpen: { [weak self] in self?.open($0) },
@@ -81,13 +88,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
             .receive(on: RunLoop.main)
             .sink { [weak self] sessions in
                 guard let self else { return }
-                self.statusItem.button?.image = StatusIcon.image(for: sessions)
-                DispatchQueue.main.async {
-                    self.updateDotToolTips()
-                    self.floatingPanel.fit()
+                let signature = sessions.map { "\($0.status.rawValue):\($0.isCurrent)" }.joined(separator: ",")
+                if signature != self.iconSignature {
+                    self.iconSignature = signature
+                    self.statusItem.button?.image = StatusIcon.image(for: sessions)
+                    DispatchQueue.main.async { self.updateDotToolTips() }
                 }
                 self.popoverState.selectedIndex = min(self.popoverState.selectedIndex, max(0, sessions.count - 1))
-                DispatchQueue.main.async { self.fitPopover() }
+                DispatchQueue.main.async {
+                    if self.floatingPanel.isShown { self.floatingPanel.fit() }
+                    if self.popover.isShown { self.fitPopover() }
+                }
             }
             .store(in: &cancellables)
 
@@ -223,12 +234,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
         loadRecentProjects()
         popoverState.selectedIndex = store.sessions.firstIndex { $0.status == .needsInput }
             ?? store.sessions.firstIndex { $0.status == .done } ?? 0
+        hostingView.rootView = makePopoverContent()
         fitPopover()
         NSApp.activate()
         popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         popover.contentViewController?.view.window?.makeKey()
         startKeyMonitor()
         AppStatus.write(sessions: store.sessions, terminalAccess: store.terminalAccess, extra: ["popoverOpenedAt": ISO8601DateFormatter().string(from: Date())])
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        hostingView.rootView = AnyView(EmptyView())
     }
 
     private func startKeyMonitor() {
