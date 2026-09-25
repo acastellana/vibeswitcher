@@ -113,7 +113,8 @@ final class SessionStore: ObservableObject {
 
             let session = Session(
                 tty: item.tty, agent: item.agent, pid: item.pid, startedAt: item.startedAt, cwd: item.cwd,
-                title: displayTitle(parsed: parsed?.text, cwd: item.cwd, agent: item.agent),
+                project: item.project,
+                task: SessionNaming.task(fromTitle: parsed?.text, project: item.project, firstPrompt: item.hook?.firstPrompt),
                 status: status, statusSince: since,
                 detail: detail(for: status, hook: item.hook, hasHooks: item.hook != nil, agent: item.agent),
                 hasHooks: item.hook != nil, inTerminalApp: tab != nil)
@@ -135,12 +136,6 @@ final class SessionStore: ObservableObject {
         }
     }
 
-    private func displayTitle(parsed: String?, cwd: String?, agent: Agent) -> String {
-        if let parsed, !parsed.isEmpty, parsed != "Terminal", parsed != agent.rawValue { return parsed }
-        if let cwd { return (cwd as NSString).lastPathComponent }
-        return agent.displayName
-    }
-
     private func detail(for status: SessionStatus, hook: HookState?, hasHooks: Bool, agent: Agent) -> String? {
         switch status {
         case .needsInput:
@@ -151,7 +146,7 @@ final class SessionStore: ObservableObject {
             default: return "Waiting for you"
             }
         case .working:
-            if let prompt = hook?.lastPrompt { return "› " + prompt }
+            if let prompt = hook?.lastPrompt, !SessionNaming.isSystemPrompt(prompt) { return "› " + prompt }
             return hook?.toolName.map { "Running \($0)" }
         case .done, .idle:
             return hook?.lastMessage

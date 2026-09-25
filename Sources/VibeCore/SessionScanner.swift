@@ -7,11 +7,14 @@ public struct RawSession: Sendable {
     public let pid: Int32
     public let startedAt: Date
     public let cwd: String?
+    /// Repo/folder name the agent was launched in (see `SessionNaming.project`).
+    public let project: String
     public let hook: HookState?
 }
 
 public final class SessionScanner {
     private var cwdCache: [Int32: String] = [:]
+    private var projectCache: [Int32: String] = [:]
 
     public init() {}
 
@@ -32,11 +35,13 @@ public final class SessionScanner {
             guard let root = agentProcs.min(by: { $0.startTime < $1.startTime }),
                   let agent = root.agent else { continue }
             let hook = hooks[tty].flatMap { isCurrent($0, agent: agent, root: root, procs: agentProcs) ? $0 : nil }
-            let cwd = hook?.cwd ?? cachedCwd(root.pid)
+            let launchDirectory = cachedCwd(root.pid)
+            let cwd = hook?.cwd ?? launchDirectory
             sessions.append(RawSession(tty: tty, agent: agent, pid: root.pid, startedAt: root.startTime,
-                                       cwd: cwd, hook: hook))
+                                       cwd: cwd, project: cachedProject(root.pid, launchDirectory ?? cwd), hook: hook))
         }
         cwdCache = cwdCache.filter { procs[$0.key] != nil }
+        projectCache = projectCache.filter { procs[$0.key] != nil }
         return sessions
     }
 
@@ -46,6 +51,15 @@ public final class SessionScanner {
         if state.lastEventAt < root.startTime.timeIntervalSince1970 - 2 { return false }
         if let pid = state.agentPid, !procs.contains(where: { $0.pid == pid }) { return false }
         return true
+    }
+
+    /// The agent's own cwd is where it was launched (its tools `cd` in subprocesses), so it is stable.
+    private func cachedProject(_ pid: Int32, _ directory: String?) -> String {
+        if let cached = projectCache[pid] { return cached }
+        guard let directory else { return "?" }
+        let project = SessionNaming.project(forLaunchDirectory: directory)
+        projectCache[pid] = project
+        return project
     }
 
     private func cachedCwd(_ pid: Int32) -> String? {

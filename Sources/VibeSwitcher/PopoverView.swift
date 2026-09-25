@@ -38,7 +38,7 @@ struct PopoverView: View {
                     }
                     .padding(6)
                 }
-                .frame(maxHeight: 460)
+                .frame(maxHeight: 640)
                 .fixedSize(horizontal: false, vertical: true)
             }
             banners
@@ -122,44 +122,39 @@ struct SessionRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            ZStack {
-                Circle().fill(session.status.color).frame(width: 12, height: 12)
-                if session.status == .working {
-                    Circle().stroke(session.status.color.opacity(0.35), lineWidth: 3).frame(width: 18, height: 18)
-                }
-            }
-            .frame(width: 18, height: 18)
-            .padding(.top, 1)
+            NumberBadge(number: index + 1, status: session.status)
+                .padding(.top, 1)
 
             VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(session.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                    Spacer(minLength: 4)
-                    if index < 9 {
-                        Text("\(index + 1)").font(.caption2.monospaced()).foregroundStyle(.tertiary)
-                    }
-                }
-                HStack(spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(session.project)
+                        .font(.system(size: 14, weight: .bold))
+                        .lineLimit(1).truncationMode(.middle)
                     AgentBadge(agent: session.agent)
-                    Text(session.status.label).foregroundStyle(session.status.color)
-                    if session.statusSince > Date.distantPast.addingTimeInterval(1) {
-                        TimelineView(.periodic(from: .now, by: 1)) { context in
-                            Text(Self.elapsed(from: session.statusSince, to: context.date))
+                    Spacer(minLength: 6)
+                    HStack(spacing: 4) {
+                        Text(session.status.label).foregroundStyle(session.status.color)
+                        if session.statusSince > Date.distantPast.addingTimeInterval(1) {
+                            TimelineView(.periodic(from: .now, by: 1)) { context in
+                                Text(Self.elapsed(from: session.statusSince, to: context.date))
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
-                    if let cwd = session.shortCwd {
-                        Text(cwd).lineLimit(1).truncationMode(.middle)
-                    }
+                    .font(.caption.weight(.medium))
                 }
-                .font(.caption).foregroundStyle(.secondary)
+                if let task = session.task {
+                    Text(task).font(.system(size: 12.5)).foregroundStyle(.primary.opacity(0.85)).lineLimit(1)
+                }
                 if let detail = session.detail {
-                    Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                        .lineLimit(session.status == .needsInput ? 2 : 1)
                 }
             }
         }
         .padding(.horizontal, 8).padding(.vertical, 7)
         .background(RoundedRectangle(cornerRadius: 6).fill(isSelected ? Color.accentColor.opacity(0.15) : .clear))
-        .help("\(session.agent.displayName) · \(session.tty) · pid \(session.pid)")
+        .help("\(session.shortCwd ?? session.project) · \(session.agent.displayName) · \(session.tty)")
     }
 
     static func elapsed(from start: Date, to now: Date) -> String {
@@ -167,6 +162,31 @@ struct SessionRow: View {
         if seconds < 60 { return "\(seconds)s" }
         if seconds < 3600 { return "\(seconds / 60)m" }
         return "\(seconds / 3600)h \((seconds % 3600) / 60)m"
+    }
+}
+
+/// The row's number inside its status color: row 3 is the 3rd dot in the menu bar.
+private struct NumberBadge: View {
+    let number: Int
+    let status: SessionStatus
+
+    var body: some View {
+        ZStack {
+            if status == .unknown {
+                Circle().stroke(status.color, lineWidth: 1.5)
+            } else {
+                Circle().fill(status.color)
+            }
+            Text("\(number)")
+                .font(.system(size: 11, weight: .bold, design: .rounded))
+                .foregroundStyle(status == .unknown || status == .idle ? Color.primary : Color.white)
+        }
+        .frame(width: 20, height: 20)
+        .overlay {
+            if status == .working {
+                Circle().stroke(status.color.opacity(0.35), lineWidth: 3).frame(width: 25, height: 25)
+            }
+        }
     }
 }
 

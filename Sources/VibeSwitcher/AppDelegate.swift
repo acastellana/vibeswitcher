@@ -126,7 +126,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner {
         let index = Int(bitPattern: data) - 1
         guard store.sessions.indices.contains(index) else { return "" }
         let session = store.sessions[index]
-        return "\(index + 1). \(session.title) — \(session.status.label)\nClick to switch · right-click for the list"
+        let task = session.task.map { "\n\($0)" } ?? ""
+        return "\(index + 1). \(session.project) · \(session.status.label)\(task)\nClick to switch · right-click for the list"
     }
 
     @objc private func togglePopover() {

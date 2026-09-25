@@ -52,7 +52,10 @@ public struct Session: Identifiable, Equatable, Sendable {
     public var pid: Int32
     public var startedAt: Date
     public var cwd: String?
-    public var title: String
+    /// Headline: the repo/folder the session was started in, e.g. "acme-site".
+    public var project: String
+    /// What it's working on, e.g. "Website redesign concepts". Nil when nothing useful is known.
+    public var task: String?
     public var status: SessionStatus
     public var statusSince: Date
     public var detail: String?
@@ -60,19 +63,26 @@ public struct Session: Identifiable, Equatable, Sendable {
     /// True when the session's tab was found in Terminal.app (so we can focus that exact tab).
     public var inTerminalApp: Bool
 
-    public init(tty: String, agent: Agent, pid: Int32, startedAt: Date, cwd: String?, title: String,
+    public init(tty: String, agent: Agent, pid: Int32, startedAt: Date, cwd: String?, project: String, task: String?,
                 status: SessionStatus, statusSince: Date, detail: String?, hasHooks: Bool, inTerminalApp: Bool) {
         self.tty = tty
         self.agent = agent
         self.pid = pid
         self.startedAt = startedAt
         self.cwd = cwd
-        self.title = title
+        self.project = project
+        self.task = task
         self.status = status
         self.statusSince = statusSince
         self.detail = detail
         self.hasHooks = hasHooks
         self.inTerminalApp = inTerminalApp
+    }
+
+    /// One-line label for tooltips and notifications: "acme-site — Website redesign concepts".
+    public var title: String {
+        guard let task else { return project }
+        return "\(project) — \(task)"
     }
 
     /// `~/dev/project` style path for display.

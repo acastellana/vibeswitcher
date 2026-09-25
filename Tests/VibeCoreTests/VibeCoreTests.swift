@@ -173,3 +173,44 @@ struct MenuBarDotsTests {
         }
     }
 }
+
+
+struct SessionNamingTests {
+    private let repos: Set<String> = ["/Users/me/dev/webshop/.git", "/Users/me/dev/site/.git"]
+
+    @Test func projectIsTheRepoTheSessionStartedIn() {
+        let exists: (String) -> Bool = { repos.contains($0) }
+        #expect(SessionNaming.project(forLaunchDirectory: "/Users/me/dev/webshop", home: "/Users/me", fileExists: exists) == "webshop")
+        #expect(SessionNaming.project(forLaunchDirectory: "/Users/me/dev/webshop/docs/reviews", home: "/Users/me", fileExists: exists) == "webshop")
+        #expect(SessionNaming.project(forLaunchDirectory: "/Users/me/dev/scratch", home: "/Users/me", fileExists: exists) == "scratch")
+        #expect(SessionNaming.project(forLaunchDirectory: "/Users/me", home: "/Users/me", fileExists: exists) == "~ (home)")
+    }
+
+    @Test func taskComesFromTheTabTitle() {
+        #expect(SessionNaming.task(fromTitle: "Website redesign concepts", project: "site", firstPrompt: nil) == "Website redesign concepts")
+        #expect(SessionNaming.task(fromTitle: "Explore the billing API | payments", project: "payments", firstPrompt: nil) == "Explore the billing API")
+        #expect(SessionNaming.task(fromTitle: "Terminal", project: "site", firstPrompt: "fix the header") == "fix the header")
+        #expect(SessionNaming.task(fromTitle: "SANDBOX", project: "SANDBOX", firstPrompt: nil) == nil)
+        #expect(SessionNaming.task(fromTitle: nil, project: "x", firstPrompt: String(repeating: "a", count: 80))?.count == 61)
+    }
+
+    @Test func systemPromptsAreRecognised() {
+        #expect(SessionNaming.isSystemPrompt("<task-notification> <task-id>abc</task-id>"))
+        #expect(SessionNaming.isSystemPrompt("<system-reminder>x</system-reminder>"))
+        #expect(!SessionNaming.isSystemPrompt("fix the <div> layout"))
+        #expect(!SessionNaming.isSystemPrompt("<3 thanks"))
+    }
+
+    @Test func taskNotificationDoesNotReplaceTheRealPrompt() throws {
+        var state: HookState?
+        for (index, prompt) in ["build the app", "<task-notification> <task-id>1</task-id>"].enumerated() {
+            let payload: [String: Any] = ["hook_event_name": "UserPromptSubmit", "session_id": "s", "prompt": prompt]
+            if case .write(let next) = HookState.reduce(current: state, payload: payload, agent: .claude, tty: "t",
+                                                        agentPid: 1, now: Double(index)) { state = next }
+        }
+        let final = try #require(state)
+        #expect(final.lastPrompt == "build the app")
+        #expect(final.firstPrompt == "build the app")
+        #expect(StatusRules.status(for: final) == .working)
+    }
+}

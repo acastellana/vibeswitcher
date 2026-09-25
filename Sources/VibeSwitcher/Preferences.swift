@@ -69,8 +69,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             return
         }
         let content = UNMutableNotificationContent()
-        content.title = needsInput ? "\(session.agent.displayName) needs your input" : "\(session.agent.displayName) is done"
-        content.subtitle = session.title
+        content.title = needsInput ? "\(session.project) needs your input" : "\(session.project) is done"
+        content.subtitle = session.task ?? session.agent.displayName
         if let detail = session.detail { content.body = detail }
         content.sound = needsInput ? .default : nil
         content.userInfo = ["tty": session.tty]

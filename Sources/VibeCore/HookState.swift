@@ -16,6 +16,8 @@ public struct HookState: Codable, Equatable, Sendable {
     public var lastPrompt: String?
     public var lastMessage: String?
     public var turnStartedAt: Double?
+    /// First thing the user asked in this session; a fallback label when the tab has no useful title.
+    public var firstPrompt: String?
 
     public init(agent: Agent, tty: String, lastEvent: String, lastEventAt: Double) {
         self.agent = agent
@@ -74,10 +76,15 @@ extension HookState {
             state.notificationType = type
             state.notice = message
         case "UserPromptSubmit":
-            state.lastPrompt = clip(payload["prompt"] as? String)
-            state.lastMessage = nil
             state.notice = nil
             state.turnStartedAt = now
+            // Background-task notices also arrive as prompts; they start a turn but aren't what you asked.
+            let prompt = payload["prompt"] as? String ?? ""
+            if !SessionNaming.isSystemPrompt(prompt) {
+                state.lastPrompt = clip(prompt)
+                state.firstPrompt = state.firstPrompt ?? state.lastPrompt
+                state.lastMessage = nil
+            }
         case "PreToolUse", "PostToolUse":
             state.toolName = payload["tool_name"] as? String
         case "PermissionRequest":
