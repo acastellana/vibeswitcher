@@ -11,6 +11,8 @@ struct TerminalTab: Equatable {
     let isSelected: Bool
     /// Position of the window in Terminal's front-to-back order (1 = frontmost).
     let windowOrder: Int
+    /// The window server shows it on a desktop: for native tabs, only the visible tab of its group.
+    var isOnScreenTab = true
 }
 
 enum TerminalAccess: Equatable {
@@ -77,7 +79,11 @@ enum TerminalBridge {
         // macOS briefly reports no desktop for a window during animations and full-screen transitions;
         // keep its last known desktop so the list order doesn't jump around.
         let windowIDs = Set(tabs.values.map(\.windowID))
-        var placements = Spaces.placements(forWindowIDs: Array(windowIDs))
+        let live = Spaces.placements(forWindowIDs: Array(windowIDs))
+        // Hidden native tabs have no desktop of their own: they take their visible sibling's.
+        var frames: [Int: CGRect] = [:]
+        for tab in tabs.values { if let frame = tab.position?.frame { frames[tab.windowID] = frame } }
+        var placements = TabGroups.inheritDesktops(frames: frames, placed: live)
         for id in windowIDs where placements[id] == nil { placements[id] = knownPlacements[id] }
         knownPlacements = placements.filter { windowIDs.contains($0.key) }
         for (tty, tab) in tabs {
@@ -85,7 +91,8 @@ enum TerminalBridge {
             position.desktop = placement.desktop
             position.fullscreen = placement.fullscreen
             tabs[tty] = TerminalTab(windowID: tab.windowID, title: tab.title, position: position,
-                                    isSelected: tab.isSelected, windowOrder: tab.windowOrder)
+                                    isSelected: tab.isSelected, windowOrder: tab.windowOrder,
+                                    isOnScreenTab: live[tab.windowID] != nil)
         }
         return (tabs, .granted)
     }

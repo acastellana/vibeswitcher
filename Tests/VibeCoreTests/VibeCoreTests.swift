@@ -432,3 +432,18 @@ struct SidebarHotZoneTests {
         #expect(!SidebarHotZone.contains(CGPoint(x: 3647, y: -150), screen: right))
     }
 }
+
+struct TabGroupTests {
+    @Test func hiddenTabsInheritTheVisibleTabsDesktop() {
+        let tabFrame = CGRect(x: 1, y: 38, width: 1722, height: 984)
+        let frames: [Int: CGRect] = [
+            1: tabFrame, 2: tabFrame, 3: tabFrame,               // one window with 3 tabs; tab 2 visible
+            4: CGRect(x: 868, y: 44, width: 860, height: 1003),  // separate window
+            5: CGRect(x: 0, y: 0, width: 500, height: 500),      // unplaced, no sibling
+        ]
+        let placed = [2: 1, 4: 1]
+        let resolved = TabGroups.inheritDesktops(frames: frames, placed: placed)
+        #expect(resolved[1] == 1 && resolved[2] == 1 && resolved[3] == 1 && resolved[4] == 1)
+        #expect(resolved[5] == nil)
+    }
+}

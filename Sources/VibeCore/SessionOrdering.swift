@@ -120,3 +120,19 @@ public enum ToolActivity {
         return flat.count > limit ? String(flat.prefix(limit)) + "…" : flat
     }
 }
+
+/// Terminal's tabs are native macOS window tabs: scripting sees every tab as its own window, and the
+/// window server only puts the *visible* tab of a tab group on a desktop. Tabs of one group share the
+/// exact same frame, which is how the hidden ones are matched to the visible one.
+public enum TabGroups {
+    /// Fills in the desktop of windows the window server doesn't place (hidden tabs) from a placed
+    /// window with the identical frame (the visible tab of the same group).
+    public static func inheritDesktops<Placement>(frames: [Int: CGRect], placed: [Int: Placement]) -> [Int: Placement] {
+        var result = placed
+        for (id, frame) in frames where placed[id] == nil {
+            let sibling = placed.keys.sorted().first { frames[$0] == frame }
+            if let sibling { result[id] = placed[sibling] }
+        }
+        return result
+    }
+}

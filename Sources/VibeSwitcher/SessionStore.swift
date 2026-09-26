@@ -163,7 +163,7 @@ final class SessionStore: ObservableObject {
             observed[item.tty] = (resolved, since)
 
             // Looking at the tab right now counts as having seen it.
-            let viewing = terminalFront && tab.map { $0.isSelected && $0.windowOrder == 1 } == true
+            let viewing = terminalFront && tab.map { $0.isSelected && $0.isOnScreenTab && $0.windowOrder == 1 } == true
             if viewing { acknowledged[item.tty] = now }
             let seenAt = acknowledged[item.tty] ?? launchedAt
             var status: SessionStatus = (resolved == .done && since <= seenAt) ? .idle : resolved
@@ -190,7 +190,7 @@ final class SessionStore: ObservableObject {
             session.terminalWindowID = tab?.windowID
             // Only the visible tab counts: a window full of session tabs sits on one desktop, but
             // you can only be looking at the selected one.
-            session.onCurrentDesktop = tab?.isSelected == true
+            session.onCurrentDesktop = tab?.isSelected == true && tab?.isOnScreenTab == true
                 && (tab?.position?.desktop.map { currentDesktops.contains($0) } ?? false)
             if status == .working, let hook = item.hook, hook.lastEvent == "PreToolUse", let started = hook.toolStartedAt {
                 session.activity = hook.toolDetail
