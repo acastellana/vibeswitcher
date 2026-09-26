@@ -330,6 +330,18 @@ struct ScreenOrderTests {
         let sessions = [session("tab3", frame, tab: 3), session("tab1", frame, tab: 1), session("tab2", frame, tab: 2)]
         #expect(SessionOrdering.sort(sessions).map(\.tty) == ["tab1", "tab2", "tab3"])
     }
+
+    @Test func windowsSharingACornerKeepTheirTabsTogether() {
+        let tabbed = CGRect(x: 1, y: 38, width: 1600, height: 986)
+        let sessions = [
+            session("tabbed1", tabbed, tab: 1, started: 1),
+            session("other", CGRect(x: 1, y: 38, width: 1722, height: 962), started: 2),
+            session("tabbed3", tabbed, tab: 3, started: 3),
+            session("tabbed2", tabbed, tab: 2, started: 4),
+            session("third", CGRect(x: 1, y: 38, width: 1606, height: 993), started: 0),
+        ]
+        #expect(SessionOrdering.sort(sessions).map(\.tty) == ["third", "tabbed1", "tabbed2", "tabbed3", "other"])
+    }
 }
 
 struct ToolActivityTests {
@@ -462,6 +474,21 @@ struct TabOrderMatchingTests {
                    "acme-site — ✳ Redesign concepts — node ◂ claude"]
         let indices = TabGroups.tabIndices(windowNames: names, tabBars: [bar])
         #expect(indices == [12: 1, 10: 2, 11: 3])
+    }
+
+    @Test func tabBarPathsMatchWindowFolderNames() {
+        // Terminal's tab bar shows the working directory as a path; the window name shows its folder.
+        let home = (NSHomeDirectory() as NSString).lastPathComponent
+        let names: [Int: String] = [
+            1: "webshop — ✳ Plan review — node ◂ claude — 106×31",
+            2: "acme-site — ✳ Redesign concepts — node ◂ claude — 133×38",
+            3: "\(home) — ✳ Connect to the server — node ◂ claude — 107×30",
+        ]
+        let bar = ["~/dev/acme-site — ✳ Redesign concepts — node ◂ claude",
+                   "~ — ✳ Connect to the server — node ◂ claude",
+                   "/srv/webshop — ✳ Plan review — node ◂ claude"]
+        let indices = TabGroups.tabIndices(windowNames: names, tabBars: [bar])
+        #expect(indices == [2: 1, 3: 2, 1: 3])
     }
 
     @Test func identicalTitlesStillGetDistinctPositions() {

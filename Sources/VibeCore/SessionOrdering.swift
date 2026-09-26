@@ -66,11 +66,23 @@ public enum SessionOrdering {
                 rows.append([session])
             }
         }
+        // Windows can share a corner (e.g. all snapped to the top left) and differ only in size; keep
+        // each window's tabs together, windows in the order they were first used.
+        var windowStart: [String: (Date, String)] = [:]
+        for session in sessions {
+            let key = "\(session.screenPosition!.frame)"
+            let start = (session.startedAt, session.tty)
+            if let known = windowStart[key], known <= start { continue }
+            windowStart[key] = start
+        }
         return rows.flatMap { row in
             row.sorted { a, b in
                 let pa = a.screenPosition!, pb = b.screenPosition!
                 if pa.frame.minX != pb.frame.minX { return pa.frame.minX < pb.frame.minX }
                 if pa.frame.minY != pb.frame.minY { return pa.frame.minY < pb.frame.minY }
+                if pa.frame != pb.frame {
+                    return windowStart["\(pa.frame)"]! < windowStart["\(pb.frame)"]!
+                }
                 if pa.tabIndex != pb.tabIndex { return pa.tabIndex < pb.tabIndex }
                 return (a.startedAt, a.tty) < (b.startedAt, b.tty)
             }
@@ -172,6 +184,13 @@ extension TabGroups {
         if let size = text.range(of: #"\s*—\s*\d+×\d+\s*$"#, options: .regularExpression) { text.removeSubrange(size) }
         let glyphs = CharacterSet(charactersIn: "✳◐◓◑◒·✢✶✻✽*").union(CharacterSet(charactersIn: "\u{2800}"..."\u{28FF}"))
         text = String(String.UnicodeScalarView(text.unicodeScalars.filter { !glyphs.contains($0) }))
-        return text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        text = text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        // The tab bar leads with the working directory as a path ("~/dev/shop"), the window name with
+        // just its folder ("shop").
+        var parts = text.components(separatedBy: " — ")
+        if let first = parts.first, first == "~" || first.contains("/") {
+            parts[0] = ((first as NSString).expandingTildeInPath as NSString).lastPathComponent
+        }
+        return parts.joined(separator: " — ")
     }
 }
