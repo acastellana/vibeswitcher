@@ -8,10 +8,14 @@ import VibeCore
 enum TabOrder {
     static var isTrusted: Bool { AXIsProcessTrusted() }
 
-    /// Shows the system prompt that leads to the Accessibility settings.
+    /// Registers the app for the Accessibility permission and opens that settings page. (The system
+    /// prompt alone doesn't always add the app to the list, so the page is opened either way.)
     static func requestTrust() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
         _ = AXIsProcessTrustedWithOptions(options)
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
     }
 
     /// For each Terminal window with a tab bar, its tab titles from left to right.
