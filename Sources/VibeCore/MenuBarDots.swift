@@ -71,7 +71,7 @@ public enum MenuBarDots {
 /// the top and bottom corners (hot corners, scroll bars, window resizing) don't trigger it.
 public enum SidebarHotZone {
     /// Share of the screen height, centred, that counts.
-    public static let band: CGFloat = 0.5
+    public static let band: CGFloat = 0.3
     /// How close to the right edge the pointer must be.
     public static let edgeWidth: CGFloat = 2
 
