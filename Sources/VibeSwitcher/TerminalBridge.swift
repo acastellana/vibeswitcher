@@ -20,6 +20,8 @@ enum TerminalAccess: Equatable {
 /// Talks to Terminal.app over AppleScript: reads tab titles/TTYs and brings a given tab to the front.
 enum TerminalBridge {
     static let bundleID = "com.apple.Terminal"
+    /// Last desktop seen per window id (only touched from the scan queue).
+    private static var knownPlacements: [Int: Spaces.Placement] = [:]
     private static let separator = "\u{1F}"
 
     static var isRunning: Bool {
@@ -72,7 +74,12 @@ enum TerminalBridge {
             tabs[tty] = TerminalTab(windowID: windowID, title: title, position: position, isSelected: parts[3] == "true", windowOrder: order)
         }
         // Which desktop each window is on (private API, may be unavailable: then positions stay desktop-less).
-        let placements = Spaces.placements(forWindowIDs: Array(Set(tabs.values.map(\.windowID))))
+        // macOS briefly reports no desktop for a window during animations and full-screen transitions;
+        // keep its last known desktop so the list order doesn't jump around.
+        let windowIDs = Set(tabs.values.map(\.windowID))
+        var placements = Spaces.placements(forWindowIDs: Array(windowIDs))
+        for id in windowIDs where placements[id] == nil { placements[id] = knownPlacements[id] }
+        knownPlacements = placements.filter { windowIDs.contains($0.key) }
         for (tty, tab) in tabs {
             guard var position = tab.position, let placement = placements[tab.windowID] else { continue }
             position.desktop = placement.desktop
