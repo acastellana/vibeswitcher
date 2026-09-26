@@ -417,3 +417,17 @@ struct BackgroundJobsTests {
         #expect(Durations.short(45) == "45s" && Durations.short(3 * 3600 + 300) == "3h 5m" && Durations.short(2 * 86400 + 4 * 3600) == "2d 4h")
     }
 }
+
+struct SidebarHotZoneTests {
+    @Test func onlyTheMiddleOfTheRightEdgeReveals() {
+        let screen = CGRect(x: 0, y: 0, width: 1728, height: 1117)
+        #expect(SidebarHotZone.contains(CGPoint(x: 1727, y: 558), screen: screen))          // middle of the edge
+        #expect(!SidebarHotZone.contains(CGPoint(x: 1727, y: 1100), screen: screen))       // top corner
+        #expect(!SidebarHotZone.contains(CGPoint(x: 1727, y: 20), screen: screen))         // bottom corner
+        #expect(!SidebarHotZone.contains(CGPoint(x: 1700, y: 558), screen: screen))        // not at the edge
+        // Second display to the right of the first.
+        let right = CGRect(x: 1728, y: -200, width: 1920, height: 1080)
+        #expect(SidebarHotZone.contains(CGPoint(x: 3647, y: 340), screen: right))
+        #expect(!SidebarHotZone.contains(CGPoint(x: 3647, y: -150), screen: right))
+    }
+}

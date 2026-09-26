@@ -66,3 +66,19 @@ public enum MenuBarDots {
         return index < count ? index : nil
     }
 }
+
+/// Where touching the screen edge reveals the sidebar: the right edge, but only its vertical middle, so
+/// the top and bottom corners (hot corners, scroll bars, window resizing) don't trigger it.
+public enum SidebarHotZone {
+    /// Share of the screen height, centred, that counts.
+    public static let band: CGFloat = 0.5
+    /// How close to the right edge the pointer must be.
+    public static let edgeWidth: CGFloat = 2
+
+    public static func contains(_ point: CGPoint, screen: CGRect) -> Bool {
+        let margin = screen.height * (1 - band) / 2
+        return point.x >= screen.maxX - edgeWidth
+            && point.y >= screen.minY + margin
+            && point.y <= screen.maxY - margin
+    }
+}

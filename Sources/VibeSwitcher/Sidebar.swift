@@ -3,7 +3,8 @@ import SwiftUI
 import VibeCore
 
 /// Sidebar mode: the session list on the right edge of the screen, on every desktop. By default it
-/// auto-hides: it slides in when the mouse touches the right edge and slides out once the mouse leaves.
+/// auto-hides: it slides in when the mouse touches the middle of the right edge (see `SidebarHotZone`)
+/// and slides out once the mouse leaves.
 /// It's a switcher: picking a session goes to it (its own desktop) exactly like the menu bar list.
 final class SidebarController {
     static let width: CGFloat = 320
@@ -133,12 +134,11 @@ final class SidebarController {
             }
             return
         }
-        let edge = screen.frame.maxX
         if suppressedUntilAway {
-            if point.x < edge - Self.width - Self.leaveMargin { suppressedUntilAway = false }
+            if point.x < screen.frame.maxX - Self.width - Self.leaveMargin { suppressedUntilAway = false }
             return
         }
-        if point.x >= edge - 2 { reveal(on: screen) }
+        if SidebarHotZone.contains(point, screen: screen.frame) { reveal(on: screen) }
     }
 
     private func currentScreen() -> NSScreen {

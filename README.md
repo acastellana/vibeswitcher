@@ -28,7 +28,7 @@ While a session runs a tool, its row shows what and for how long ("⚙ Run unit 
 - The icon stays narrow: up to 4 sessions in one row, then two rows of small dots (12 max, then counts).
 
 **Sidebar mode** (⚙︎ › Sidebar mode): the session list lives on the right edge of the screen, on every
-desktop. It hides itself and slides in when the mouse touches the right edge, then slides away when the
+desktop. It hides itself and slides in when the mouse touches the middle of the right edge (not the corners), then slides away when the
 mouse leaves (turn off auto-hide to keep it docked). Click a session to go to it, like the menu bar list.
 When you switch desktops it slides in for a moment, with the session(s) on the new desktop framed.
 
