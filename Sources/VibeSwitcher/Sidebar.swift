@@ -30,6 +30,9 @@ final class SidebarController {
     private var flashing = false
     private var hideWork: DispatchWorkItem?
     private var monitors: [Any] = []
+    /// Safety net: mouse-moved events can be missed (fast flicks into the edge, moments the system
+    /// doesn't deliver them), so the pointer is also checked a few times a second while enabled.
+    private var pollTimer: Timer?
     private var screen: NSScreen?
 
     init(content: AnyView) {
@@ -40,6 +43,7 @@ final class SidebarController {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
+        panel.acceptsMouseMovedEvents = true // moves over the sidebar itself reach the local monitor
         self.content = content
         hostingView = FirstMouseHostingView(rootView: AnyView(EmptyView()))
         panel.contentView = hostingView
@@ -75,10 +79,14 @@ final class SidebarController {
                 self?.mouseMoved()
                 return event
             }) { monitors.append(local) }
+            pollTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in self?.mouseMoved() }
+            pollTimer?.tolerance = 0.05
             if !autoHide { reveal(on: currentScreen()) }
         } else {
             monitors.forEach(NSEvent.removeMonitor)
             monitors.removeAll()
+            pollTimer?.invalidate()
+            pollTimer = nil
             conceal(animated: false)
         }
     }
@@ -135,10 +143,20 @@ final class SidebarController {
             return
         }
         if suppressedUntilAway {
-            if point.x < screen.frame.maxX - Self.width - Self.leaveMargin { suppressedUntilAway = false }
+            // After picking a session: re-arm as soon as the pointer has left the edge for a moment.
+            if point.x < screen.frame.maxX - 40 { suppressedUntilAway = false }
             return
         }
-        if SidebarHotZone.contains(point, screen: screen.frame) { reveal(on: screen) }
+        if SidebarHotZone.contains(point, screen: screen.frame), isOuterRightEdge(of: screen, at: point.y) {
+            reveal(on: screen)
+        }
+    }
+
+    /// False where another display continues to the right: the pointer just crosses over there.
+    private func isOuterRightEdge(of screen: NSScreen, at y: CGFloat) -> Bool {
+        !NSScreen.screens.contains { other in
+            other != screen && abs(other.frame.minX - screen.frame.maxX) < 1 && other.frame.minY <= y && y <= other.frame.maxY
+        }
     }
 
     private func currentScreen() -> NSScreen {
