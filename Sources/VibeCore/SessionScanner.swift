@@ -18,7 +18,7 @@ public struct RawSession: Sendable {
 
 public final class SessionScanner {
     private var cwdCache: [Int32: String] = [:]
-    private var projectCache: [Int32: String] = [:]
+    private var projectCache: [Int32: (workingDirectory: String?, root: String)] = [:]
     /// Decoded state files by path, re-read only when their modification date changes.
     private var stateCache: [String: (modified: Date, state: HookState)] = [:]
 
@@ -43,7 +43,7 @@ public final class SessionScanner {
             let hook = hooks[tty].flatMap { isCurrent($0, agent: agent, root: root, procs: agentProcs) ? $0 : nil }
             let launchDirectory = cachedCwd(root.pid)
             let cwd = hook?.cwd ?? launchDirectory
-            let projectRoot = cachedProjectRoot(root.pid, launchDirectory ?? cwd)
+            let projectRoot = cachedProjectRoot(root.pid, launchDirectory: launchDirectory ?? cwd, workingDirectory: hook?.cwd)
             sessions.append(RawSession(tty: tty, agent: agent, pid: root.pid, startedAt: root.startTime,
                                        cwd: cwd, project: projectRoot.map { SessionNaming.name(forProjectRoot: $0) } ?? "?",
                                        projectRoot: projectRoot, hook: hook,
@@ -64,12 +64,13 @@ public final class SessionScanner {
         return true
     }
 
-    /// The agent's own cwd is where it was launched (its tools `cd` in subprocesses), so it is stable.
-    private func cachedProjectRoot(_ pid: Int32, _ directory: String?) -> String? {
-        if let cached = projectCache[pid] { return cached }
-        guard let directory else { return nil }
-        let root = SessionNaming.projectRoot(forLaunchDirectory: directory)
-        projectCache[pid] = root
+    /// The agent's own cwd is where it was launched (its tools `cd` in subprocesses), so it is stable;
+    /// the working directory only matters when that isn't a repo.
+    private func cachedProjectRoot(_ pid: Int32, launchDirectory: String?, workingDirectory: String?) -> String? {
+        if let cached = projectCache[pid], cached.workingDirectory == workingDirectory { return cached.root }
+        guard let launchDirectory else { return nil }
+        let root = SessionNaming.projectRoot(launchDirectory: launchDirectory, workingDirectory: workingDirectory)
+        projectCache[pid] = (workingDirectory, root)
         return root
     }
 

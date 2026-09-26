@@ -56,6 +56,10 @@ struct PopoverView: View {
                 .frame(maxHeight: isSidebar ? .infinity : 640)
                 .fixedSize(horizontal: false, vertical: true)
             }
+            if !isSidebar, !store.today.projects.isEmpty {
+                Divider()
+                TodaySummary(ledger: store.today)
+            }
             banners
             Divider()
             footer
@@ -174,6 +178,7 @@ struct PopoverView: View {
                 Toggle("Notify when a session needs input", isOn: $preferences.notifyNeedsInput)
                 Toggle("Notify when a session finishes", isOn: $preferences.notifyDone)
                 Toggle("Play sound when a session needs input", isOn: $preferences.playSound)
+                Toggle("Remind me about waiting or stuck sessions", isOn: $preferences.notifyReminders)
                 Toggle("Sidebar mode", isOn: $preferences.sidebarMode)
                 Toggle("Auto-hide sidebar (show at right edge)", isOn: $preferences.sidebarAutoHide)
                     .disabled(!preferences.sidebarMode)
@@ -198,6 +203,54 @@ struct PopoverView: View {
             .fixedSize()
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+}
+
+/// Where today went: agent time vs. time sessions sat waiting on you, per project on demand.
+private struct TodaySummary: View {
+    let ledger: ActivityLedger
+    @State private var expanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button { expanded.toggle() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: expanded ? "chevron.down" : "chevron.right").imageScale(.small)
+                        .foregroundStyle(.tertiary).frame(width: 10)
+                    Text("Today").font(.caption.weight(.semibold))
+                    Spacer()
+                    stat(SessionStatus.working.color, ledger.agentsBusy, "agents busy")
+                    stat(SessionStatus.needsInput.color, ledger.blockedOnYou, "blocked on you")
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Agents busy: time at least one agent was working. Blocked on you: time sessions waited "
+                  + "for your answer or review while no agent was working.")
+            if expanded {
+                ForEach(ledger.byProject().prefix(8), id: \.project) { row in
+                    HStack {
+                        Text(row.project).lineLimit(1).truncationMode(.middle)
+                        Spacer()
+                        Text("worked \(Durations.short(row.working))").foregroundStyle(.secondary)
+                        Text("waited \(Durations.short(row.waiting))")
+                            .foregroundStyle(row.waiting > row.working ? AnyShapeStyle(SessionStatus.needsInput.color)
+                                                                       : AnyShapeStyle(.secondary))
+                            .frame(minWidth: 84, alignment: .trailing)
+                    }
+                    .font(.caption)
+                    .padding(.leading, 16)
+                }
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+    }
+
+    private func stat(_ color: Color, _ seconds: Double, _ label: String) -> some View {
+        HStack(spacing: 4) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text("\(Durations.short(seconds)) \(label)").font(.caption).foregroundStyle(.secondary)
+        }
     }
 }
 

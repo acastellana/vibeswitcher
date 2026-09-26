@@ -7,6 +7,8 @@ public enum VibePaths {
     }
     /// One `<tty>.json` per terminal, written by the hook binary.
     public static var stateDir: URL { root.appendingPathComponent("state") }
+    /// One `<yyyy-MM-dd>.json` per day: where the agents' time went (see `ActivityLedger`).
+    public static var statsDir: URL { root.appendingPathComponent("stats") }
     public static var binDir: URL { root.appendingPathComponent("bin") }
     /// Stable location referenced from the Claude/Codex hook configs (independent of where the .app lives).
     public static var hookBinary: URL { binDir.appendingPathComponent("vibeswitcher-hook") }

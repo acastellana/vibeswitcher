@@ -32,6 +32,10 @@ desktop. It hides itself and slides in when the mouse touches the middle of the 
 mouse leaves (turn off auto-hide to keep it docked). Click a session to go to it, like the menu bar list.
 When you switch desktops it slides in for a moment, with the session(s) on the new desktop framed.
 
+**Today** (at the bottom of the list): how long agents were busy today, and how long you were the
+bottleneck: sessions waited for your answer or review while no agent was working. Expand it for a
+per-project split of agent time vs. time spent waiting on you.
+
 **Crowded menu bar?** On notched MacBooks, macOS silently hides status icons that don't fit right of the
 notch. VibeSwitcher starts next to the clock, where overflow never reaches (⌘-drag it elsewhere if you
 like). If its icon does get hidden, a floating pill with the same numbered dots appears automatically;
@@ -51,6 +55,11 @@ Codex's own `/hooks` screen makes through `codex app-server`). Then macOS asks t
 - **Control Terminal**: allow it. That's how tab titles are read and tabs are selected.
 - **Notifications**: allow it to get a banner when a session needs you (with sound) or finishes. Clicking
   the banner jumps to that tab. Without permission you still get a sound when a session needs input.
+  The banner says what's being asked: the question, the exact command waiting for approval
+  ("Run: npm publish"), or the plan's title; a finished session shows the start of its last message.
+  One reminder follows if a session has waited on you for 10 minutes (looking at its tab restarts the
+  clock), or if a working session has shown no progress for 15 minutes, which usually means it's stuck.
+  Turn reminders off in ⚙︎.
 
 Running Claude Code sessions pick the hooks up immediately; Codex sessions started before the install
 need a restart. VibeSwitcher registers itself as a login item on first launch (toggle it in the ⚙︎ menu).
@@ -64,7 +73,7 @@ hooks and can be deleted by hand.
 
 Everything stays on your Mac, readable only by you (`~/.vibeswitcher` is `0700`, its files `0600`). The hook writes a few facts per terminal (last event, your last prompt, the
 agent's last message, both truncated) to `~/.vibeswitcher/state/`, and the app reads them plus Terminal's
-tab titles. Nothing is sent anywhere. Delete `~/.vibeswitcher` to remove all of it.
+tab titles. The Today totals are kept per day in `~/.vibeswitcher/stats/` (project names and seconds). Nothing is sent anywhere. Delete `~/.vibeswitcher` to remove all of it.
 
 ## How status is detected
 

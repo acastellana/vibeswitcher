@@ -11,6 +11,8 @@ final class Preferences: ObservableObject {
     @Published var notifyNeedsInput: Bool { didSet { defaults.set(notifyNeedsInput, forKey: "notifyNeedsInput") } }
     @Published var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: "notifyDone") } }
     @Published var playSound: Bool { didSet { defaults.set(playSound, forKey: "playSound") } }
+    /// One reminder when a session has waited on you 10+ min, or shown no progress for 15+ min.
+    @Published var notifyReminders: Bool { didSet { defaults.set(notifyReminders, forKey: "notifyReminders") } }
     /// Docked session list on the right; picking a session shows only its window, on this desktop.
     @Published var sidebarMode: Bool { didSet { defaults.set(sidebarMode, forKey: "sidebarMode") } }
     /// Sidebar slides in at the right screen edge instead of staying docked.
@@ -29,11 +31,12 @@ final class Preferences: ObservableObject {
     }
 
     init() {
-        defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true, "playSound": true, "sidebarAutoHide": true,
+        defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true, "playSound": true, "notifyReminders": true, "sidebarAutoHide": true,
                                      "claudeCommand": "claude", "codexCommand": "codex"])
         notifyNeedsInput = defaults.bool(forKey: "notifyNeedsInput")
         notifyDone = defaults.bool(forKey: "notifyDone")
         playSound = defaults.bool(forKey: "playSound")
+        notifyReminders = defaults.bool(forKey: "notifyReminders")
         claudeCommand = defaults.string(forKey: "claudeCommand") ?? "claude"
         sidebarMode = defaults.bool(forKey: "sidebarMode")
         sidebarAutoHide = defaults.bool(forKey: "sidebarAutoHide")
@@ -149,6 +152,26 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         content.sound = needsInput && preferences.playSound ? .default : nil
         content.userInfo = ["tty": session.tty]
         // One notification per terminal: a newer state replaces the older banner.
+        center.add(UNNotificationRequest(identifier: session.tty, content: content, trigger: nil))
+    }
+
+    func post(_ nudge: Nudge, for session: Session) {
+        guard preferences.notifyReminders, allowed == true else { return }
+        AppStatus.extras["lastAlert"] = "reminder \(session.tty) \(ISO8601DateFormatter().string(from: Date()))"
+        let content = UNMutableNotificationContent()
+        let task = session.task.map { " · \($0)" } ?? ""
+        switch nudge {
+        case .stillWaiting(let minutes):
+            content.title = "\(session.displayName) is still waiting for you"
+            content.subtitle = "For \(minutes) min" + task
+            content.body = session.detail ?? ""
+            content.sound = preferences.playSound ? .default : nil
+        case .stalled(let minutes):
+            content.title = "\(session.displayName) may be stuck"
+            content.subtitle = "No progress for \(minutes) min" + task
+            content.body = session.activity.map { "Still running: \($0)" } ?? ""
+        }
+        content.userInfo = ["tty": session.tty]
         center.add(UNNotificationRequest(identifier: session.tty, content: content, trigger: nil))
     }
 

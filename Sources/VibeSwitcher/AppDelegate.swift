@@ -40,6 +40,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             self.open(session)
         }
         store.onAttention = { [weak self] session in self?.notifier?.post(for: session) }
+        store.onNudge = { [weak self] session, nudge in self?.notifier?.post(nudge, for: session) }
 
         if UserDefaults.standard.object(forKey: Self.positionKey) == nil {
             UserDefaults.standard.set(120.0, forKey: Self.positionKey)
@@ -277,6 +278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     func applicationWillTerminate(_ notification: Notification) {
         // Never leave session windows hidden behind a closed app.
         SidebarWorkspace.restoreHiddenWindows()
+        store.saveLedger()
     }
 
     func popoverDidClose(_ notification: Notification) {

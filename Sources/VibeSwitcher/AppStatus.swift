@@ -7,10 +7,13 @@ enum AppStatus {
     static var url: URL { VibePaths.root.appendingPathComponent("app-status.json") }
     /// Sticky fields included in every write (e.g. whether the hotkey registered).
     static var extras: [String: Any] = [:]
+    /// Off for command-line runs (e.g. `--snapshot`), so they don't overwrite what the running app reports.
+    static var enabled = true
     static let toggleNotification = Notification.Name("dev.vibeswitcher.toggle")
     static let openNotification = Notification.Name("dev.vibeswitcher.open")
 
     static func write(sessions: [Session], terminalAccess: TerminalAccess, extra: [String: Any] = [:]) {
+        guard enabled else { return }
         var object: [String: Any] = [
             "updatedAt": ISO8601DateFormatter().string(from: Date()),
             "pid": ProcessInfo.processInfo.processIdentifier,

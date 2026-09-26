@@ -66,6 +66,7 @@ if let index = arguments.firstIndex(of: "--focus"), arguments.indices.contains(i
     exit(ok ? 0 : 1)
 }
 if let index = arguments.firstIndex(of: "--snapshot") {
+    AppStatus.enabled = false
     _ = NSApplication.shared
     Snapshot.run(outputDirectory: arguments.indices.contains(index + 1) ? arguments[index + 1] : ".")
     exit(0)

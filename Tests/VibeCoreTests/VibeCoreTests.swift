@@ -45,6 +45,32 @@ struct HookReduceTests {
         #expect(state.lastMessage == "All done.")
     }
 
+    @Test func recordsWhatTheSessionIsAskingYou() throws {
+        var state = try #require(apply([event("UserPromptSubmit", ["prompt": "x"]),
+                                        event("PreToolUse", ["tool_name": "Bash", "tool_input": ["command": "rm -rf build", "description": "Clean"]]),
+                                        event("PermissionRequest", ["tool_name": "Bash", "tool_input": ["command": "rm -rf build", "description": "Clean"]]),
+                                        event("Notification", ["notification_type": "permission_prompt",
+                                                               "message": "Claude needs your permission to use Bash"])]))
+        #expect(state.request == "Run: rm -rf build")
+
+        state = try #require(apply([event("PermissionRequest", ["tool_name": "Edit", "tool_input": ["file_path": "/repo/App.swift"]])]))
+        #expect(state.request == "Allow: Edit App.swift")
+
+        state = try #require(apply([event("PreToolUse", ["tool_name": "AskUserQuestion", "tool_input": ["questions": [
+            ["question": "Which database should we use?"], ["question": "Keep the cache?"]]]])]))
+        #expect(state.request == "Which database should we use? (+1 more)")
+
+        state = try #require(apply([event("PreToolUse", ["tool_name": "ExitPlanMode", "tool_input": ["plan": "\n# Plan: split the parser\n\n1. …"]])]))
+        #expect(state.request == "Plan ready: Plan: split the parser")
+
+        // Answered: the request is gone once the tool runs or a new turn starts.
+        state = try #require(apply([event("PermissionRequest", ["tool_name": "Bash", "tool_input": ["command": "ls"]]),
+                                    event("PostToolUse", ["tool_name": "Bash"])]))
+        #expect(state.request == nil)
+        state = try #require(apply([event("PreToolUse", ["tool_name": "Read", "tool_input": ["file_path": "/a"]])]))
+        #expect(state.request == nil)
+    }
+
     @Test func testQuestionToolNeedsInput() throws {
         let state = try #require(apply([event("UserPromptSubmit"), event("PreToolUse", ["tool_name": "AskUserQuestion"])]))
         #expect(StatusRules.status(for: state) == .needsInput)
@@ -495,5 +521,86 @@ struct TabOrderMatchingTests {
         let names: [Int: String] = [1: "shell — -zsh — 80×24", 2: "shell — -zsh — 80×24"]
         let indices = TabGroups.tabIndices(windowNames: names, tabBars: [["shell — -zsh", "shell — -zsh"]])
         #expect(Set(indices.values) == [1, 2])
+    }
+}
+
+struct NudgeTests {
+    let start = Date(timeIntervalSince1970: 10_000)
+
+    @Test func remindsOnceAWaitingSessionHasBeenIgnored() {
+        let early = Nudges.due(status: .needsInput, statusSince: start, lastSeen: nil, lastActivity: start,
+                               now: start.addingTimeInterval(9 * 60))
+        #expect(early == nil)
+        let due = Nudges.due(status: .needsInput, statusSince: start, lastSeen: nil, lastActivity: start,
+                             now: start.addingTimeInterval(11 * 60))
+        #expect(due?.nudge == .stillWaiting(minutes: 11))
+        #expect(due?.episode == start)
+    }
+
+    @Test func lookingAtTheTabRestartsTheWaitingClock() {
+        let due = Nudges.due(status: .needsInput, statusSince: start, lastSeen: start.addingTimeInterval(8 * 60),
+                             lastActivity: start, now: start.addingTimeInterval(12 * 60))
+        #expect(due == nil)
+    }
+
+    @Test func flagsWorkingSessionsWithNoHookActivity() {
+        let lastEvent = start.addingTimeInterval(60)
+        #expect(Nudges.due(status: .working, statusSince: start, lastSeen: nil, lastActivity: lastEvent,
+                           now: lastEvent.addingTimeInterval(14 * 60)) == nil)
+        let due = Nudges.due(status: .working, statusSince: start, lastSeen: nil, lastActivity: lastEvent,
+                             now: lastEvent.addingTimeInterval(16 * 60))
+        #expect(due?.nudge == .stalled(minutes: 16))
+        #expect(due?.episode == lastEvent)
+        // Without hooks there's no activity signal to judge by.
+        #expect(Nudges.due(status: .working, statusSince: start, lastSeen: nil, lastActivity: nil,
+                           now: start.addingTimeInterval(3600)) == nil)
+        #expect(Nudges.due(status: .done, statusSince: start, lastSeen: nil, lastActivity: start,
+                           now: start.addingTimeInterval(3600)) == nil)
+    }
+}
+
+struct ActivityLedgerTests {
+    @Test func splitsAgentTimeFromTimeWaitingOnYou() {
+        var ledger = ActivityLedger(day: "2026-09-26")
+        ledger.record([("shop", .working), ("site", .needsInput), ("notes", .idle)], seconds: 60)
+        ledger.record([("shop", .done), ("site", .needsInput)], seconds: 30)   // nobody working: you're the bottleneck
+        ledger.record([("shop", .background)], seconds: 10)
+        #expect(ledger.seconds([.working, .background]) == 70)
+        #expect(ledger.seconds([.needsInput, .unseenDone]) == 120)
+        #expect(ledger.agentsBusy == 70)
+        #expect(ledger.blockedOnYou == 30)
+        #expect(ledger.projects["notes"] == nil)
+        let rows = ledger.byProject()
+        #expect(rows.map(\.project) == ["shop", "site"])   // 100s vs 90s in total
+        #expect(rows.last?.waiting == 90)
+    }
+
+    @Test func dayKeyUsesTheLocalCalendar() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Madrid")!
+        // 23:30 UTC on Sep 26 is already Sep 27 in Madrid.
+        #expect(ActivityLedger.dayKey(for: Date(timeIntervalSince1970: 1_790_465_400), calendar: calendar) == "2026-09-27")
+    }
+}
+
+struct ProjectRootTests {
+    let repos: Set<String> = ["/Users/me/dev/shop/.git", "/Users/me/dev/site/.git"]
+
+    @Test func sessionStartedInAFolderOfReposTakesTheRepoItWorksIn() {
+        let root = SessionNaming.projectRoot(launchDirectory: "/Users/me/dev", workingDirectory: "/Users/me/dev/shop/src",
+                                             home: "/Users/me", fileExists: repos.contains)
+        #expect(root == "/Users/me/dev/shop")
+        #expect(SessionNaming.projectRoot(launchDirectory: "/Users/me/dev", workingDirectory: "/Users/me/dev",
+                                          home: "/Users/me", fileExists: repos.contains) == "/Users/me/dev")
+    }
+
+    @Test func aRepoLaunchDirectoryWins() {
+        // Launched in a repo: stays that repo even while working in another folder.
+        let root = SessionNaming.projectRoot(launchDirectory: "/Users/me/dev/shop", workingDirectory: "/Users/me/dev/site",
+                                             home: "/Users/me", fileExists: repos.contains)
+        #expect(root == "/Users/me/dev/shop")
+        // Similar prefix isn't a subfolder.
+        #expect(SessionNaming.projectRoot(launchDirectory: "/Users/me/dev/sh", workingDirectory: "/Users/me/dev/shop",
+                                          home: "/Users/me", fileExists: repos.contains) == "/Users/me/dev/sh")
     }
 }

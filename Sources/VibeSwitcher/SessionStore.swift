@@ -12,6 +12,10 @@ final class SessionStore: ObservableObject {
     @Published private(set) var tabOrderUnavailable = false
     /// Called when a session newly turns red (needs input) or green (done, unseen).
     var onAttention: ((Session) -> Void)?
+    /// Called once per episode when a session has waited on you, or shown no progress, for too long.
+    var onNudge: ((Session, Nudge) -> Void)?
+    /// Where today's time went; republished at most every 15 s (the popover shows it).
+    @Published private(set) var today = ActivityLedger.load(day: ActivityLedger.dayKey(for: Date()))
     /// Set from Preferences; changing it re-sorts on the next refresh.
     var order: SessionOrder = .screen { didSet { if order != oldValue { refresh() } } }
 
@@ -34,6 +38,12 @@ final class SessionStore: ObservableObject {
     private var observed: [String: (status: SessionStatus, since: Date)] = [:]
     private var acknowledged: [String: Date] = [:]
     private var displayed: [String: SessionStatus] = [:]
+    /// "<tty>|<episode start>" of reminders already sent.
+    private var nudged: Set<String> = []
+    private lazy var ledger = today
+    private var lastLedgerAt: Date?
+    private var lastLedgerSave = Date()
+    private var lastLedgerPublish = Date()
     private var watcherRefreshPending = false
     /// Claude sessions whose turn looks finished; only their screens are read for background work.
     private var quietClaudeTTYs: Set<String> = []
@@ -142,6 +152,7 @@ final class SessionStore: ObservableObject {
 
     private func apply(raw: [RawSession], tabs: [String: TerminalTab], background: [String: String], now: Date) {
         var quiet: Set<String> = []
+        var nudges: [(Session, Nudge)] = []
         let currentDesktops = Spaces.currentDesktops()
         let terminalFront = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == TerminalBridge.bundleID
         var result: [Session] = []
@@ -215,12 +226,25 @@ final class SessionStore: ObservableObject {
                 }
             }
             displayed[item.tty] = status
+            if !viewing, let due = Nudges.due(status: status, statusSince: since, lastSeen: acknowledged[item.tty],
+                                              lastActivity: item.hook.map { Date(timeIntervalSince1970: $0.lastEventAt) },
+                                              now: now) {
+                let key = "\(item.tty)|\(due.episode.timeIntervalSince1970)"
+                // Only remind about what became overdue while we were running, not a backlog found at launch.
+                let threshold = status == .needsInput ? Nudges.waitingAfter : Nudges.stalledAfter
+                if nudged.insert(key).inserted, due.episode.addingTimeInterval(threshold) >= launchedAt {
+                    nudges.append((session, due.nudge))
+                }
+            }
             result.append(session)
         }
         let live = Set(raw.map(\.tty))
         observed = observed.filter { live.contains($0.key) }
         acknowledged = acknowledged.filter { live.contains($0.key) }
         displayed = displayed.filter { live.contains($0.key) }
+        nudged = nudged.filter { live.contains(String($0.prefix { $0 != "|" })) }
+        for (session, nudge) in nudges { onNudge?(session, nudge) }
+        recordLedger(result, now: now)
         names.prune(liveKeys: Set(result.flatMap(\.nameKeys)))
         quietClaudeTTYs = quiet
 
@@ -239,9 +263,34 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    /// Books the time since the previous scan against each session's status.
+    private func recordLedger(_ sessions: [Session], now: Date) {
+        let day = ActivityLedger.dayKey(for: now)
+        if ledger.day != day {
+            ledger.save()
+            ledger = ActivityLedger.load(day: day)
+        }
+        // Longer gaps are sleep or a stuck scan: nobody was working or waiting in any meaningful sense.
+        if let last = lastLedgerAt, now.timeIntervalSince(last) <= 30 {
+            ledger.record(sessions.map { ($0.project, $0.status) }, seconds: now.timeIntervalSince(last))
+        }
+        lastLedgerAt = now
+        if now.timeIntervalSince(lastLedgerSave) >= 60 {
+            ledger.save()
+            lastLedgerSave = now
+        }
+        if now.timeIntervalSince(lastLedgerPublish) >= 15 || today.day != ledger.day {
+            today = ledger
+            lastLedgerPublish = now
+        }
+    }
+
+    func saveLedger() { ledger.save() }
+
     private func detail(for status: SessionStatus, hook: HookState?, agent: Agent) -> String? {
         switch status {
         case .needsInput:
+            if let request = hook?.request { return request }
             if let notice = hook?.notice { return notice }
             switch hook?.toolName {
             case "AskUserQuestion", "request_user_input": return "Asking you a question"

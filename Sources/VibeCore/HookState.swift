@@ -20,6 +20,8 @@ public struct HookState: Codable, Equatable, Sendable {
     public var toolStartedAt: Double?
     /// First thing the user asked in this session; a fallback label when the tab has no useful title.
     public var firstPrompt: String?
+    /// What the session is asking you right now: its question, the command it wants to run, its plan.
+    public var request: String?
 
     public init(agent: Agent, tty: String, lastEvent: String, lastEventAt: Double) {
         self.agent = agent
@@ -81,6 +83,7 @@ extension HookState {
             state.notice = message
         case "UserPromptSubmit":
             state.notice = nil
+            state.request = nil
             // Background-task notices also arrive as prompts; they start a turn but aren't what you asked.
             let prompt = payload["prompt"] as? String ?? ""
             if !SessionNaming.isSystemPrompt(prompt) {
@@ -93,14 +96,18 @@ extension HookState {
             state.toolName = tool
             state.toolDetail = tool.map { ToolActivity.describe(toolName: $0, input: payload["tool_input"] as? [String: Any] ?? [:]) }
             state.toolStartedAt = now
+            state.request = tool.flatMap { Self.question(toolName: $0, input: payload["tool_input"] as? [String: Any] ?? [:]) }
         case "PostToolUse":
             state.toolName = payload["tool_name"] as? String
             state.toolStartedAt = nil
+            state.request = nil
         case "PermissionRequest":
             let tool = payload["tool_name"] as? String
             state.toolName = tool
             state.notice = tool.map { "Wants permission to use \($0)" } ?? "Wants permission"
+            state.request = tool.map { Self.permission(toolName: $0, input: payload["tool_input"] as? [String: Any] ?? [:]) }
         case "Stop":
+            state.request = nil
             state.lastMessage = clip(payload["last_assistant_message"] as? String) ?? state.lastMessage
         default:
             break
@@ -109,6 +116,36 @@ extension HookState {
         state.lastEvent = event
         state.lastEventAt = now
         return .write(state)
+    }
+
+    /// The question behind tools that stop and ask you something; nil for every other tool.
+    static func question(toolName: String, input: [String: Any]) -> String? {
+        switch toolName {
+        case "AskUserQuestion", "request_user_input":
+            let questions = (input["questions"] as? [[String: Any]] ?? []).compactMap { $0["question"] as? String }
+            guard let first = clip(questions.first, to: 200) else { return nil }
+            return questions.count > 1 ? "\(first) (+\(questions.count - 1) more)" : first
+        case "ExitPlanMode":
+            // The plan's first line is usually its title ("# Plan: …").
+            let plan = (input["plan"] as? String ?? "").split(whereSeparator: \.isNewline)
+                .map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "# ").union(.whitespaces)) }
+                .first { !$0.isEmpty }
+            return "Plan ready: " + (clip(plan, to: 160) ?? "review it")
+        default:
+            return nil
+        }
+    }
+
+    /// What a permission prompt is about: the exact command for shells (what you actually approve,
+    /// rather than the agent's description of it), a short description for everything else.
+    static func permission(toolName: String, input: [String: Any]) -> String {
+        let command = (input["command"] as? String) ?? (input["command"] as? [String])?.joined(separator: " ")
+            ?? (input["cmd"] as? String)
+        if ["Bash", "shell", "local_shell", "exec_command", "container.exec"].contains(toolName),
+           let command = clip(command, to: 200) {
+            return "Run: " + command
+        }
+        return "Allow: " + ToolActivity.describe(toolName: toolName, input: input)
     }
 
     /// Older Claude Code versions send no `notification_type`; fall back to the message text.

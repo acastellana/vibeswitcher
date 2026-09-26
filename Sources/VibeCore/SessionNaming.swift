@@ -12,13 +12,29 @@ public enum SessionNaming {
     /// The git repository root containing `directory`, else `directory` itself.
     public static func projectRoot(forLaunchDirectory directory: String, home: String = NSHomeDirectory(),
                                    fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> String {
-        let standardized = (directory as NSString).standardizingPath
-        var current = standardized
+        repositoryRoot(containing: directory, home: home, fileExists: fileExists) ?? (directory as NSString).standardizingPath
+    }
+
+    /// Like `projectRoot(forLaunchDirectory:)`, but a session started in a plain folder of repos
+    /// (`~/dev`) and then working inside one of them (`~/dev/shop`) belongs to that repo.
+    public static func projectRoot(launchDirectory: String, workingDirectory: String?, home: String = NSHomeDirectory(),
+                                   fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> String {
+        if let root = repositoryRoot(containing: launchDirectory, home: home, fileExists: fileExists) { return root }
+        let launch = (launchDirectory as NSString).standardizingPath
+        if let working = workingDirectory.map({ ($0 as NSString).standardizingPath }), working.hasPrefix(launch + "/"),
+           let root = repositoryRoot(containing: working, home: home, fileExists: fileExists) {
+            return root
+        }
+        return launch
+    }
+
+    static func repositoryRoot(containing directory: String, home: String, fileExists: (String) -> Bool) -> String? {
+        var current = (directory as NSString).standardizingPath
         while current != "/", current != home, !current.isEmpty {
             if fileExists((current as NSString).appendingPathComponent(".git")) { return current }
             current = (current as NSString).deletingLastPathComponent
         }
-        return standardized
+        return nil
     }
 
     public static func name(forProjectRoot root: String, home: String = NSHomeDirectory()) -> String {
