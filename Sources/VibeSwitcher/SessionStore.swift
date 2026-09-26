@@ -227,14 +227,15 @@ final class SessionStore: ObservableObject {
         let frames = result.compactMap { $0.screenPosition?.frame }
         let hasTabGroups = Set(frames.map { "\($0)" }).count < frames.count
         let unavailable = hasTabGroups && !TabOrder.isTrusted
-        if unavailable != tabOrderUnavailable { tabOrderUnavailable = unavailable }
+        let trustChanged = unavailable != tabOrderUnavailable
+        if trustChanged { tabOrderUnavailable = unavailable }
         let ordered = SessionOrdering.sort(result, by: order)
         if ordered != sessions {
             // The debug status file only records statuses; don't rewrite it for detail/timer changes.
             let signature: (Session) -> String = { "\($0.tty)\($0.status.rawValue)\($0.screenPosition?.tabIndex ?? 0)" }
             let statusesChanged = ordered.map(signature) != sessions.map(signature)
             sessions = ordered
-            if statusesChanged { AppStatus.write(sessions: ordered, terminalAccess: terminalAccess) }
+            if statusesChanged || trustChanged { AppStatus.write(sessions: ordered, terminalAccess: terminalAccess) }
         }
     }
 

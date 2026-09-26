@@ -15,6 +15,8 @@ enum AppStatus {
             "updatedAt": ISO8601DateFormatter().string(from: Date()),
             "pid": ProcessInfo.processInfo.processIdentifier,
             "terminalAccess": "\(terminalAccess)",
+            "accessibilityTrusted": TabOrder.isTrusted,
+            "tabBars": TabOrder.tabBars().map(\.count),
             "sessions": sessions.map { ["tty": $0.tty, "agent": $0.agent.rawValue, "status": $0.status.rawValue,
                                         "title": $0.title, "hooks": $0.hasHooks,
                                         "desktop": $0.screenPosition?.desktop ?? 0, "tab": $0.screenPosition?.tabIndex ?? 0] },
