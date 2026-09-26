@@ -24,6 +24,8 @@ enum TerminalBridge {
     static let bundleID = "com.apple.Terminal"
     /// Last desktop seen per window id (only touched from the scan queue).
     private static var knownPlacements: [Int: Spaces.Placement] = [:]
+    /// Tab position within its window's tab bar, per window id (only touched from the scan queue).
+    private static var knownTabIndices: [Int: Int] = [:]
     private static let separator = "\u{1F}"
 
     static var isRunning: Bool {
@@ -42,6 +44,7 @@ enum TerminalBridge {
             set ttys to tty of every tab of every window
             set sels to selected of every tab of every window
             set titles to custom title of every tab of every window
+            set wnames to name of every window
         end tell
         set sep to (character id 31)
         set out to ""
@@ -51,7 +54,7 @@ enum TerminalBridge {
             if class of tl is list and class of b is list then
                 set frameText to ((item 1 of b) as text) & "," & ((item 2 of b) as text) & "," & ((item 3 of b) as text) & "," & ((item 4 of b) as text)
                 repeat with j from 1 to count of tl
-                    set out to out & ((item i of wids) as text) & sep & j & sep & (item j of tl) & sep & ((item j of (item i of sels)) as text) & sep & i & sep & frameText & sep & (item j of (item i of titles)) & linefeed
+                    set out to out & ((item i of wids) as text) & sep & j & sep & (item j of tl) & sep & ((item j of (item i of sels)) as text) & sep & i & sep & frameText & sep & (item i of wnames) & sep & (item j of (item i of titles)) & linefeed
                 end repeat
             end if
         end repeat
@@ -62,12 +65,14 @@ enum TerminalBridge {
             return ([:], result.error.contains("-1743") ? .denied : .unknown)
         }
         var tabs: [String: TerminalTab] = [:]
+        var windowNames: [Int: String] = [:]
         for line in result.output.split(separator: "\n") {
             let parts = line.components(separatedBy: separator)
-            guard parts.count >= 7, let windowID = Int(parts[0]), let order = Int(parts[4]), let tabIndex = Int(parts[1])
+            guard parts.count >= 8, let windowID = Int(parts[0]), let order = Int(parts[4]), let tabIndex = Int(parts[1])
             else { continue }
+            windowNames[windowID] = parts[6]
             let tty = parts[2].replacingOccurrences(of: "/dev/", with: "")
-            let title = parts[6...].joined(separator: separator)
+            let title = parts[7...].joined(separator: separator)
             let edges = parts[5].split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
             let position = edges.count == 4
                 ? ScreenPosition(frame: CGRect(x: edges[0], y: edges[1], width: edges[2] - edges[0], height: edges[3] - edges[1]),
@@ -86,8 +91,16 @@ enum TerminalBridge {
         var placements = TabGroups.inheritDesktops(frames: frames, placed: live)
         for id in windowIDs where placements[id] == nil { placements[id] = knownPlacements[id] }
         knownPlacements = placements.filter { windowIDs.contains($0.key) }
+        // Native tabs: their visual order, read from the tab bars (needs Accessibility; windows on other
+        // desktops may not be readable right now, so the last known position is kept).
+        if TabOrder.isTrusted {
+            let fresh = TabGroups.tabIndices(windowNames: windowNames, tabBars: TabOrder.tabBars())
+            knownTabIndices.merge(fresh) { $1 }
+        }
+        knownTabIndices = knownTabIndices.filter { windowIDs.contains($0.key) }
         for (tty, tab) in tabs {
             guard var position = tab.position, let placement = placements[tab.windowID] else { continue }
+            if let index = knownTabIndices[tab.windowID] { position = position.withTabIndex(index) }
             position.desktop = placement.desktop
             position.fullscreen = placement.fullscreen
             tabs[tty] = TerminalTab(windowID: tab.windowID, title: tab.title, position: position,

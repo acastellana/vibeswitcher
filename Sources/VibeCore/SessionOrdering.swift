@@ -16,6 +16,12 @@ public struct ScreenPosition: Equatable, Sendable {
         self.tabIndex = tabIndex
         self.desktop = desktop
     }
+
+    public func withTabIndex(_ index: Int) -> ScreenPosition {
+        var copy = ScreenPosition(frame: frame, tabIndex: index, desktop: desktop)
+        copy.fullscreen = fullscreen
+        return copy
+    }
 }
 
 public enum SessionOrder: String, CaseIterable, Sendable {
@@ -134,5 +140,38 @@ public enum TabGroups {
             if let sibling { result[id] = placed[sibling] }
         }
         return result
+    }
+}
+
+extension TabGroups {
+    /// Matches tab-bar titles (left to right, one array per window) to Terminal window names and returns
+    /// each matched window's 1-based tab position. Names are compared without the activity glyph and
+    /// the "— 120×40" size suffix, which change between the two reads.
+    public static func tabIndices(windowNames: [Int: String], tabBars: [[String]]) -> [Int: Int] {
+        let normalizedNames = windowNames.mapValues(normalize)
+        var result: [Int: Int] = [:]
+        for bar in tabBars {
+            var used: Set<Int> = []
+            for (index, title) in bar.enumerated() {
+                let wanted = normalize(title)
+                guard !wanted.isEmpty else { continue }
+                let candidates = normalizedNames.filter { !used.contains($0.key) }
+                let exact = candidates.filter { $0.value == wanted }.map(\.key).sorted()
+                let loose = candidates.filter { $0.value.hasPrefix(wanted) || wanted.hasPrefix($0.value) }.map(\.key).sorted()
+                if let id = exact.first ?? (loose.count == 1 ? loose.first : nil) {
+                    used.insert(id)
+                    result[id] = index + 1
+                }
+            }
+        }
+        return result
+    }
+
+    static func normalize(_ title: String) -> String {
+        var text = title
+        if let size = text.range(of: #"\s*—\s*\d+×\d+\s*$"#, options: .regularExpression) { text.removeSubrange(size) }
+        let glyphs = CharacterSet(charactersIn: "✳◐◓◑◒·✢✶✻✽*").union(CharacterSet(charactersIn: "\u{2800}"..."\u{28FF}"))
+        text = String(String.UnicodeScalarView(text.unicodeScalars.filter { !glyphs.contains($0) }))
+        return text.split(whereSeparator: \.isWhitespace).joined(separator: " ")
     }
 }

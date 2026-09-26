@@ -447,3 +447,26 @@ struct TabGroupTests {
         #expect(resolved[5] == nil)
     }
 }
+
+struct TabOrderMatchingTests {
+    @Test func matchesTabTitlesToWindowsDespiteGlyphsAndSize() {
+        let names: [Int: String] = [
+            10: "webshop — ✳ Plan review — node ◂ claude — 115×33",
+            11: "acme-site — ◐ Redesign concepts — node ◂ claude — 115×33",
+            12: "payments — Explore the billing API — codex — 115×33",
+            13: "notes — -zsh — 80×24",
+        ]
+        // Tab bar as the user arranged it; glyphs changed between the reads.
+        let bar = ["payments — Explore the billing API — codex",
+                   "webshop — ◓ Plan review — node ◂ claude",
+                   "acme-site — ✳ Redesign concepts — node ◂ claude"]
+        let indices = TabGroups.tabIndices(windowNames: names, tabBars: [bar])
+        #expect(indices == [12: 1, 10: 2, 11: 3])
+    }
+
+    @Test func identicalTitlesStillGetDistinctPositions() {
+        let names: [Int: String] = [1: "shell — -zsh — 80×24", 2: "shell — -zsh — 80×24"]
+        let indices = TabGroups.tabIndices(windowNames: names, tabBars: [["shell — -zsh", "shell — -zsh"]])
+        #expect(Set(indices.values) == [1, 2])
+    }
+}

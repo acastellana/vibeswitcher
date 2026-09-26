@@ -8,6 +8,8 @@ final class SessionStore: ObservableObject {
     @Published private(set) var sessions: [Session] = []
     @Published private(set) var terminalAccess: TerminalAccess = .unknown
     @Published private(set) var hooksInstalled: [Agent: Bool] = [:]
+    /// Several sessions are native tabs of one window, but we can't read the tab order (no Accessibility).
+    @Published private(set) var tabOrderUnavailable = false
     /// Called when a session newly turns red (needs input) or green (done, unseen).
     var onAttention: ((Session) -> Void)?
     /// Set from Preferences; changing it re-sorts on the next refresh.
@@ -222,10 +224,15 @@ final class SessionStore: ObservableObject {
         names.prune(liveKeys: Set(result.flatMap(\.nameKeys)))
         quietClaudeTTYs = quiet
 
+        let frames = result.compactMap { $0.screenPosition?.frame }
+        let hasTabGroups = Set(frames.map { "\($0)" }).count < frames.count
+        let unavailable = hasTabGroups && !TabOrder.isTrusted
+        if unavailable != tabOrderUnavailable { tabOrderUnavailable = unavailable }
         let ordered = SessionOrdering.sort(result, by: order)
         if ordered != sessions {
             // The debug status file only records statuses; don't rewrite it for detail/timer changes.
-            let statusesChanged = ordered.map { "\($0.tty)\($0.status.rawValue)" } != sessions.map { "\($0.tty)\($0.status.rawValue)" }
+            let signature: (Session) -> String = { "\($0.tty)\($0.status.rawValue)\($0.screenPosition?.tabIndex ?? 0)" }
+            let statusesChanged = ordered.map(signature) != sessions.map(signature)
             sessions = ordered
             if statusesChanged { AppStatus.write(sessions: ordered, terminalAccess: terminalAccess) }
         }

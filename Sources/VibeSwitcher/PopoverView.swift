@@ -139,6 +139,15 @@ struct PopoverView: View {
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
         }
+        if store.tabOrderUnavailable {
+            HStack {
+                Text("Some sessions are tabs of one window. Allow Accessibility so the list follows your tab order.")
+                    .font(.caption).foregroundStyle(.secondary)
+                Spacer()
+                Button("Allow…") { TabOrder.requestTrust() }.controlSize(.small)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+        }
         let missing = Agent.allCases.filter { store.hooksInstalled[$0] != true }
         if !missing.isEmpty {
             HStack {

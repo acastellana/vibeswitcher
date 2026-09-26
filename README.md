@@ -86,6 +86,10 @@ Three sources, most precise first:
 Desktop numbers come from macOS's private SkyLight window-server calls (the same ones yabai and Hammerspoon
 use), looked up at runtime; if they're ever unavailable, ordering falls back to window position.
 
+Terminal's tabs are native macOS window tabs, which its scripting sees as separate windows. With the
+Accessibility permission, VibeSwitcher reads each window's tab bar so tabbed sessions are listed in
+the order you see (and follow you when you drag tabs); without it they stay together, oldest first.
+
 Sessions are keyed by TTY, which also identifies the Terminal tab to focus. Sessions in other terminal apps
 are listed too; clicking them activates the hosting app.
 
