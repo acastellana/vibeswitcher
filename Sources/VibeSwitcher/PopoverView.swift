@@ -141,8 +141,9 @@ struct PopoverView: View {
         }
         if store.tabOrderUnavailable {
             HStack {
-                Text("Some sessions are tabs of one window. Allow Accessibility so the list follows your tab order.")
+                Text("Some sessions are tabs of one window. Allow Accessibility so the list follows your tab order. Already on in Settings? Remove VibeSwitcher there (−) and add it again: macOS forgot it after an update.")
                     .font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 Spacer()
                 Button("Allow…") { TabOrder.requestTrust() }.controlSize(.small)
             }
