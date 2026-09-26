@@ -4,8 +4,13 @@
 # permissions you granted (Accessibility, Automation of Terminal). Ad-hoc signatures change with
 # every build, which silently invalidates those grants.
 #
+# The certificate is then trusted for code signing (for your user only; macOS asks for your password):
+# without that trust, macOS pins each permission to the exact build anyway.
+#
 # Your login keychain and keychain search list are left as they are.
-# Undo: security delete-keychain ~/.vibeswitcher/signing/vibeswitcher.keychain-db
+# Undo: security remove-trusted-cert <(security find-certificate -c "VibeSwitcher Local Signing" -p \
+#           ~/.vibeswitcher/signing/vibeswitcher.keychain-db)
+#       security delete-keychain ~/.vibeswitcher/signing/vibeswitcher.keychain-db
 #       rm -f ~/.vibeswitcher/signing/password && rmdir ~/.vibeswitcher/signing
 set -euo pipefail
 
@@ -13,8 +18,23 @@ DIR="$HOME/.vibeswitcher/signing"
 KEYCHAIN="$DIR/vibeswitcher.keychain-db"
 NAME="VibeSwitcher Local Signing"
 
+trust_certificate() {
+    local pem
+    pem="$(mktemp)"
+    security find-certificate -c "$NAME" -p "$KEYCHAIN" > "$pem"
+    if security verify-cert -c "$pem" -p codeSign >/dev/null 2>&1; then
+        echo "Certificate already trusted for code signing"
+    elif security add-trusted-cert -r trustRoot -p codeSign "$pem"; then
+        echo "Certificate trusted for code signing"
+    else
+        echo "Not trusted: macOS will ask for permissions again after each rebuild." >&2
+    fi
+    rm -f "$pem"
+}
+
 if [[ -f "$KEYCHAIN" ]]; then
     echo "Signing identity already set up in $KEYCHAIN"
+    trust_certificate
     exit 0
 fi
 
@@ -75,3 +95,4 @@ security import "$WORK/identity.p12" -k "$KEYCHAIN" -P "$PASSWORD" -T /usr/bin/c
 security set-key-partition-list -S apple-tool:,apple: -s -k "$PASSWORD" "$KEYCHAIN" >/dev/null
 DONE=1
 echo "Created '$NAME' in $KEYCHAIN"
+trust_certificate

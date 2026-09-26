@@ -119,8 +119,10 @@ swift build && swift test      # Swift Testing; works with Command Line Tools on
 
 Run `./scripts/setup-signing.sh` once: it creates a self-signed signing identity in its own keychain
 file (`~/.vibeswitcher/signing`, your login keychain is untouched) so every rebuild keeps the same code
-identity. Without it builds are ad-hoc signed, and macOS silently drops the Accessibility and Automation
-permissions on each rebuild while System Settings still shows them as on.
+identity, and trusts that certificate for code signing (your user only; macOS asks for your password).
+macOS only keeps a permission across rebuilds for a trusted signature: otherwise, ad-hoc or not, it pins
+the Accessibility and Automation permissions to the exact build and silently drops them on the next one,
+while System Settings still shows them as on.
 
 Run the app through `build-app.sh` rather than `swift run`: notifications, the login item and the
 Automation permission all need a real `.app` bundle.
