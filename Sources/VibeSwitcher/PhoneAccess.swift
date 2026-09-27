@@ -457,6 +457,7 @@ final class PhoneAccess: ObservableObject {
         case "resume": store.resume(session)
         case "hour": store.pause(session, for: .hours(1))
         case "tomorrow": store.pause(session, for: .untilTomorrowMorning)
+        case "week": store.pause(session, for: .hours(24 * 7))
         case "indefinitely": store.pause(session, for: .indefinitely)
         default: return .error(400, "unknown duration")
         }
@@ -500,7 +501,8 @@ final class PhoneAccess: ObservableObject {
     }
 
     private func deliver(_ message: [String: Any], to targets: [PairedDevice]) {
-        guard let payload = try? JSONSerialization.data(withJSONObject: message) else { return }
+        guard JSONSerialization.isValidJSONObject(message),
+              let payload = try? JSONSerialization.data(withJSONObject: message) else { return }
         let key = vapidKey
         for device in targets {
             guard let subscription = device.push, let endpoint = try? WebPush.validatedEndpoint(subscription.endpoint),

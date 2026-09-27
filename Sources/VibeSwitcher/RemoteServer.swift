@@ -9,6 +9,10 @@ struct HTTPResponse {
     var cacheable = false
 
     static func json(_ object: Any, status: Int = 200) -> HTTPResponse {
+        // An invalid value (e.g. an Optional boxed in `Any`) makes JSONSerialization raise, not throw.
+        guard JSONSerialization.isValidJSONObject(object) else {
+            return HTTPResponse(status: 500, contentType: "application/json; charset=utf-8", body: Data(#"{"error":"internal"}"#.utf8))
+        }
         let data = (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data("{}".utf8)
         return HTTPResponse(status: status, contentType: "application/json; charset=utf-8", body: data)
     }

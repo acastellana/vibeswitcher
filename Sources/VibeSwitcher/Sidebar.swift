@@ -34,6 +34,15 @@ final class SidebarController {
     /// doesn't deliver them), so the pointer is also checked a few times a second while enabled.
     private var pollTimer: Timer?
     private var screen: NSScreen?
+    // Diagnostics in ~/.vibeswitcher/sidebar-debug.json: how late the pointer checks run, and why
+    // visits to the right edge didn't open the sidebar (counted per pointer check, not per visit).
+    private var lastPoll = Date()
+    private var pollGaps: [Double] = []
+    private var edgeMisses: [String: Int] = [:]
+    private var edgeHits = 0
+    private var lastDebugWrite = Date()
+    private var totalPolls = 0
+    private var lastWrittenVisits = -1
 
     init(content: AnyView) {
         panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -79,7 +88,10 @@ final class SidebarController {
                 self?.mouseMoved()
                 return event
             }) { monitors.append(local) }
-            pollTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in self?.mouseMoved() }
+            pollTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
+                self?.recordPoll()
+                self?.mouseMoved()
+            }
             pollTimer?.tolerance = 0.05
             if !autoHide { reveal(on: currentScreen()) }
         } else {
@@ -142,13 +154,45 @@ final class SidebarController {
             }
             return
         }
+        let atEdge = point.x >= screen.frame.maxX - 8
         if suppressedUntilAway {
             // After picking a session: re-arm as soon as the pointer has left the edge for a moment.
             if point.x < screen.frame.maxX - 40 { suppressedUntilAway = false }
+            if atEdge { edgeMisses["suppressed", default: 0] += 1 }
             return
         }
         if SidebarHotZone.contains(point, screen: screen.frame), isOuterRightEdge(of: screen, at: point.y) {
+            edgeHits += 1
             reveal(on: screen)
+        } else if atEdge {
+            let reason = !SidebarHotZone.contains(point, screen: screen.frame)
+                ? (point.x < screen.frame.maxX - SidebarHotZone.edgeWidth ? "x=\(Int(screen.frame.maxX - point.x))pt short" : "outside band")
+                : "not outer edge"
+            edgeMisses[reason, default: 0] += 1
+        }
+    }
+
+    private func recordPoll() {
+        let now = Date()
+        pollGaps.append(now.timeIntervalSince(lastPoll))
+        lastPoll = now
+        if pollGaps.count > 3000 { pollGaps.removeFirst(pollGaps.count - 3000) }
+        totalPolls += 1
+        // Only when something happened at the edge (or every 10 minutes): no steady disk writes.
+        let visits = edgeHits + edgeMisses.values.reduce(0, +)
+        guard visits != lastWrittenVisits || now.timeIntervalSince(lastDebugWrite) > 600 else { return }
+        lastWrittenVisits = visits
+        lastDebugWrite = now
+        let sorted = pollGaps.sorted()
+        let object: [String: Any] = [
+            "updatedAt": ISO8601DateFormatter().string(from: now),
+            "polls": pollGaps.count, "gapMedian": sorted[sorted.count / 2], "gapMax": sorted.last ?? 0.0 as Double,
+            "gapsOver1s": pollGaps.filter { $0 > 1 }.count, "gapsOver0_5s": pollGaps.filter { $0 > 0.5 }.count,
+            "edgeHits": edgeHits, "edgeMisses": edgeMisses, "totalPolls": totalPolls,
+        ]
+        if JSONSerialization.isValidJSONObject(object),
+           let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
+            try? data.write(to: VibePaths.root.appendingPathComponent("sidebar-debug.json"))
         }
     }
 

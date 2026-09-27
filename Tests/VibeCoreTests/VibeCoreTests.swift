@@ -462,12 +462,14 @@ struct SidebarHotZoneTests {
         #expect(SidebarHotZone.contains(CGPoint(x: 1727, y: 558), screen: screen))          // middle of the edge
         #expect(!SidebarHotZone.contains(CGPoint(x: 1727, y: 1100), screen: screen))       // top corner
         #expect(!SidebarHotZone.contains(CGPoint(x: 1727, y: 20), screen: screen))         // bottom corner
-        #expect(!SidebarHotZone.contains(CGPoint(x: 1727, y: 300), screen: screen))        // lower third: outside the band
-        #expect(!SidebarHotZone.contains(CGPoint(x: 1700, y: 558), screen: screen))        // not at the edge
+        #expect(!SidebarHotZone.contains(CGPoint(x: 1727, y: 250), screen: screen))        // lower quarter: outside the band
+        #expect(SidebarHotZone.contains(CGPoint(x: 1727, y: 800), screen: screen))         // upper middle: inside
+        #expect(SidebarHotZone.contains(CGPoint(x: 1724.5, y: 558), screen: screen))       // stopped just short of the edge
+        #expect(!SidebarHotZone.contains(CGPoint(x: 1720, y: 558), screen: screen))        // not at the edge
         // Second display to the right of the first.
         let right = CGRect(x: 1728, y: -200, width: 1920, height: 1080)
         #expect(SidebarHotZone.contains(CGPoint(x: 3647, y: 340), screen: right))
-        #expect(!SidebarHotZone.contains(CGPoint(x: 3647, y: -150), screen: right))
+        #expect(!SidebarHotZone.contains(CGPoint(x: 3647, y: -180), screen: right))
     }
 }
 

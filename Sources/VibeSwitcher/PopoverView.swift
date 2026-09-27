@@ -54,6 +54,7 @@ struct PopoverView: View {
                                         Button("Until I Resume It") { onPause(session, .indefinitely) }
                                         Button("For 1 Hour") { onPause(session, .hours(1)) }
                                         Button("Until Tomorrow Morning") { onPause(session, .untilTomorrowMorning) }
+                                        Button("For 1 Week") { onPause(session, .hours(24 * 7)) }
                                     }
                                 }
                                 Divider()

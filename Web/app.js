@@ -236,7 +236,7 @@ function renderPauseControls(session) {
     box.replaceChildren(el('span', 'muted', pauseLabel(session)), button('Resume', 'resume'));
   } else {
     box.replaceChildren(el('span', 'muted', 'Pause:'), button('1 hour', 'hour'), button('Tomorrow', 'tomorrow'),
-                        button('Until resumed', 'indefinitely'));
+                        button('1 week', 'week'), button('Until resumed', 'indefinitely'));
   }
 }
 
