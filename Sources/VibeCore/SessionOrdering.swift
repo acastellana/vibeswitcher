@@ -134,7 +134,7 @@ public enum ToolActivity {
     }
 
     static func clip(_ text: String, to limit: Int = 70) -> String {
-        let flat = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let flat = Redaction.secrets(in: text).trimmingCharacters(in: .whitespacesAndNewlines)
         return flat.count > limit ? String(flat.prefix(limit)) + "…" : flat
     }
 }

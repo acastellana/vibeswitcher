@@ -535,12 +535,16 @@ struct NudgeTests {
                              now: start.addingTimeInterval(11 * 60))
         #expect(due?.nudge == .stillWaiting(minutes: 11))
         #expect(due?.episode == start)
+        #expect(due?.dueAt == start.addingTimeInterval(10 * 60))
     }
 
     @Test func lookingAtTheTabRestartsTheWaitingClock() {
-        let due = Nudges.due(status: .needsInput, statusSince: start, lastSeen: start.addingTimeInterval(8 * 60),
-                             lastActivity: start, now: start.addingTimeInterval(12 * 60))
-        #expect(due == nil)
+        let lastSeen = start.addingTimeInterval(8 * 60)
+        #expect(Nudges.due(status: .needsInput, statusSince: start, lastSeen: lastSeen,
+                           lastActivity: start, now: start.addingTimeInterval(12 * 60)) == nil)
+        let later = Nudges.due(status: .needsInput, statusSince: start, lastSeen: lastSeen,
+                               lastActivity: start, now: start.addingTimeInterval(19 * 60))
+        #expect(later?.dueAt == lastSeen.addingTimeInterval(10 * 60))   // not the (earlier) episode start
     }
 
     @Test func flagsWorkingSessionsWithNoHookActivity() {
@@ -560,19 +564,47 @@ struct NudgeTests {
 }
 
 struct ActivityLedgerTests {
+    let now = Date(timeIntervalSince1970: 100_000)
+    func entry(_ project: String, _ status: SessionStatus, minutesAgo: Double = 1) -> ActivityLedger.Entry {
+        ActivityLedger.Entry(project: project, status: status, since: now.addingTimeInterval(-minutesAgo * 60))
+    }
+
     @Test func splitsAgentTimeFromTimeWaitingOnYou() {
         var ledger = ActivityLedger(day: "2026-09-26")
-        ledger.record([("shop", .working), ("site", .needsInput), ("notes", .idle)], seconds: 60)
-        ledger.record([("shop", .done), ("site", .needsInput)], seconds: 30)   // nobody working: you're the bottleneck
-        ledger.record([("shop", .background)], seconds: 10)
-        #expect(ledger.seconds([.working, .background]) == 70)
-        #expect(ledger.seconds([.needsInput, .unseenDone]) == 120)
-        #expect(ledger.agentsBusy == 70)
-        #expect(ledger.blockedOnYou == 30)
+        ledger.record([entry("shop", .working), entry("site", .needsInput), entry("notes", .idle)], seconds: 60, now: now)
+        ledger.record([entry("shop", .done), entry("site", .needsInput)], seconds: 30, now: now)
+        ledger.record([entry("shop", .background)], seconds: 600, now: now)
+        #expect(ledger.agentsWorking == 60)               // background jobs aren't an agent working
+        #expect(ledger.waitingOnYou == 90)                // waiting counts even while another agent works
+        #expect(ledger.seconds([.background]) == 600)
         #expect(ledger.projects["notes"] == nil)
         let rows = ledger.byProject()
-        #expect(rows.map(\.project) == ["shop", "site"])   // 100s vs 90s in total
+        #expect(rows.map(\.project) == ["shop", "site"])  // 90s each (background aside): name order
         #expect(rows.last?.waiting == 90)
+        #expect(rows.first?.background == 600)
+    }
+
+    @Test func aFinishedSessionLeftAloneStopsCounting() {
+        var ledger = ActivityLedger(day: "2026-09-26")
+        ledger.record([entry("shop", .done, minutesAgo: 10)], seconds: 60, now: now)
+        ledger.record([entry("shop", .done, minutesAgo: 45)], seconds: 60, now: now)
+        #expect(ledger.waitingOnYou == 60)
+    }
+
+    @Test func waitingWhileYouAreAwayIsNotABottleneck() {
+        var ledger = ActivityLedger(day: "2026-09-26")
+        ledger.record([entry("shop", .needsInput), entry("site", .working)], seconds: 3600, now: now, userPresent: false)
+        #expect(ledger.waitingOnYou == 0)
+        #expect(ledger.waitedWhileAway == 3600)
+        #expect(ledger.agentsWorking == 3600)                    // agents worked while you were away
+        #expect(ledger.seconds([.needsInput, .unseenDone]) == 0)
+    }
+
+    @Test func readsLedgersFromOtherVersions() throws {
+        let old = #"{"day":"2026-09-26","projects":{"shop":{"working":60}},"agentsBusy":60,"blockedOnYou":5}"#
+        let ledger = try JSONDecoder().decode(ActivityLedger.self, from: Data(old.utf8))
+        #expect(ledger.seconds([.working]) == 60)
+        #expect(ledger.waitingOnYou == 0)
     }
 
     @Test func dayKeyUsesTheLocalCalendar() {
@@ -602,5 +634,41 @@ struct ProjectRootTests {
         // Similar prefix isn't a subfolder.
         #expect(SessionNaming.projectRoot(launchDirectory: "/Users/me/dev/sh", workingDirectory: "/Users/me/dev/shop",
                                           home: "/Users/me", fileExists: repos.contains) == "/Users/me/dev/sh")
+    }
+}
+
+struct RedactionTests {
+    @Test func masksCredentialsInCommands() {
+        // Fake tokens are assembled at runtime so secret scanners don't flag this file.
+        let github = "ghp" + "_" + String(repeating: "a1", count: 12)
+        let openAI = "sk" + "-proj-" + String(repeating: "x9", count: 10)
+        let aws = "AK" + "IA" + String(repeating: "Q", count: 16)
+        let cases: [(String, String)] = [
+            (#"curl -H "Authorization: Bearer abc.def-123" https://api.example.com"#,
+             #"curl -H "Authorization: Bearer •••" https://api.example.com"#),
+            ("GITHUB_TOKEN=\(github) gh pr list", "GITHUB_TOKEN=••• gh pr list"),
+            ("gh auth login --with-token < \(github)", "gh auth login --with-token < •••"),
+            ("mysql --password hunter2 -u root", "mysql --password ••• -u root"),
+            ("deploy --api-key=abc123 --env prod", "deploy --api-key=••• --env prod"),
+            (#"{"api_key": "abc123", "name": "x"}"#, #"{"api_key": "•••", "name": "x"}"#),
+            ("git clone https://me:s3cret@github.com/x/y", "git clone https://me:•••@github.com/x/y"),
+            ("export OPENAI_KEY=\(openAI)", "export OPENAI_KEY=•••"),
+            ("aws s3 ls # \(aws)", "aws s3 ls # •••"),
+        ]
+        for (input, expected) in cases {
+            #expect(Redaction.secrets(in: input) == expected, "\(input)")
+        }
+    }
+
+    @Test func leavesOrdinaryTextAlone() {
+        for text in ["npm test", "Rotate the token before the deploy", "Edit TokenStore.swift",
+                     "git commit -m \"Fix password reset\"", "Search “api key”", "cd ~/dev/shop && swift build"] {
+            #expect(Redaction.secrets(in: text) == text)
+        }
+    }
+
+    @Test func permissionPromptsAreRedacted() {
+        let request = HookState.permission(toolName: "Bash", input: ["command": "STRIPE_SECRET=sk_live_x npm run seed"])
+        #expect(request == "Run: STRIPE_SECRET=••• npm run seed")
     }
 }

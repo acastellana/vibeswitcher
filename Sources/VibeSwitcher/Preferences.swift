@@ -167,9 +167,15 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             content.body = session.detail ?? ""
             content.sound = preferences.playSound ? .default : nil
         case .stalled(let minutes):
-            content.title = "\(session.displayName) may be stuck"
-            content.subtitle = "No progress for \(minutes) min" + task
-            content.body = session.activity.map { "Still running: \($0)" } ?? ""
+            if let activity = session.activity {
+                // A long command may be legitimate (a build, a test suite): say what, and let you judge.
+                content.title = "\(session.displayName): one command running for \(minutes) min"
+                content.subtitle = activity
+                content.body = "No other progress since it started. Check it isn't stuck."
+            } else {
+                content.title = "\(session.displayName) may be stuck"
+                content.subtitle = "No progress for \(minutes) min" + task
+            }
         }
         content.userInfo = ["tty": session.tty]
         center.add(UNNotificationRequest(identifier: session.tty, content: content, trigger: nil))

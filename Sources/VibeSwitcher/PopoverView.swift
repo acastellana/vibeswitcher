@@ -219,19 +219,28 @@ private struct TodaySummary: View {
                         .foregroundStyle(.tertiary).frame(width: 10)
                     Text("Today").font(.caption.weight(.semibold))
                     Spacer()
-                    stat(SessionStatus.working.color, ledger.agentsBusy, "agents busy")
-                    stat(SessionStatus.needsInput.color, ledger.blockedOnYou, "blocked on you")
+                    stat(SessionStatus.working.color, ledger.agentsWorking, "agents working")
+                    stat(SessionStatus.needsInput.color, ledger.waitingOnYou, "waiting on you")
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Agents busy: time at least one agent was working. Blocked on you: time sessions waited "
-                  + "for your answer or review while no agent was working.")
+            .help("Agents working: time at least one agent was in a turn. Waiting on you: time, while you were "
+                  + "at the Mac, that at least one session needed your answer or had finished unseen "
+                  + "(its first 30 min). Background jobs are listed per project.")
             if expanded {
+                if ledger.waitedWhileAway >= 60 {
+                    Text("Plus \(Durations.short(ledger.waitedWhileAway)) of waiting while you were away")
+                        .font(.caption).foregroundStyle(.tertiary).padding(.leading, 16)
+                }
                 ForEach(ledger.byProject().prefix(8), id: \.project) { row in
                     HStack {
                         Text(row.project).lineLimit(1).truncationMode(.middle)
                         Spacer()
+                        if row.background >= 60 {
+                            Text("bg \(Durations.short(row.background))").foregroundStyle(.tertiary)
+                                .help("Background jobs running after the turn ended")
+                        }
                         Text("worked \(Durations.short(row.working))").foregroundStyle(.secondary)
                         Text("waited \(Durations.short(row.waiting))")
                             .foregroundStyle(row.waiting > row.working ? AnyShapeStyle(SessionStatus.needsInput.color)

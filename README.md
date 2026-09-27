@@ -32,9 +32,11 @@ desktop. It hides itself and slides in when the mouse touches the middle of the 
 mouse leaves (turn off auto-hide to keep it docked). Click a session to go to it, like the menu bar list.
 When you switch desktops it slides in for a moment, with the session(s) on the new desktop framed.
 
-**Today** (at the bottom of the list): how long agents were busy today, and how long you were the
-bottleneck: sessions waited for your answer or review while no agent was working. Expand it for a
-per-project split of agent time vs. time spent waiting on you.
+**Today** (at the bottom of the list): how long agents were working today (in a turn; background jobs are
+listed per project, since a leftover dev server isn't work), and how long sessions were waiting on you:
+a question or permission prompt, or a finished turn you hadn't looked at (its first 30 minutes; after that
+you've set it aside). Waiting only counts while you're at the Mac (screen unlocked, input in the last
+5 minutes). Expand it for a per-project split.
 
 **Crowded menu bar?** On notched MacBooks, macOS silently hides status icons that don't fit right of the
 notch. VibeSwitcher starts next to the clock, where overflow never reaches (⌘-drag it elsewhere if you
@@ -59,7 +61,9 @@ Codex's own `/hooks` screen makes through `codex app-server`). Then macOS asks t
   ("Run: npm publish"), or the plan's title; a finished session shows the start of its last message.
   One reminder follows if a session has waited on you for 10 minutes (looking at its tab restarts the
   clock), or if a working session has shown no progress for 15 minutes, which usually means it's stuck.
-  Turn reminders off in ⚙︎.
+  Reminders wait while you're away from the Mac. Turn them off in ⚙︎. Credentials in commands and
+  messages (tokens, passwords, API keys, `Authorization` headers, `user:pass@` URLs) are masked before
+  they are stored or shown.
 
 Running Claude Code sessions pick the hooks up immediately; Codex sessions started before the install
 need a restart. VibeSwitcher registers itself as a login item on first launch (toggle it in the ⚙︎ menu).

@@ -159,7 +159,7 @@ extension HookState {
     static func clip(_ text: String?, to limit: Int = 280) -> String? {
         guard let text else { return nil }
         // One line of plain text: drop newlines and the markdown emphasis agents like to use.
-        let flat = text.split(whereSeparator: \.isNewline).joined(separator: " ")
+        let flat = Redaction.secrets(in: text).split(whereSeparator: \.isNewline).joined(separator: " ")
             .replacingOccurrences(of: "**", with: "")
             .replacingOccurrences(of: "`", with: "")
             .trimmingCharacters(in: .whitespaces)

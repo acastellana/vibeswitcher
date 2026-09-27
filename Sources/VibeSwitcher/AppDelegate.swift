@@ -25,12 +25,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private var visibilityTimer: Timer?
     private var hiddenReadings = 0
     private var notificationTimer: Timer?
+    private var terminationSignal: DispatchSourceSignal?
     private static let statusItemName = "VibeSwitcher"
     /// Stored by macOS as the distance from the right screen edge; set once so we start next to the
     /// clock, where an overflowing menu bar never hides items. ⌘-dragging the icon overrides it.
     private static let positionKey = "NSStatusItem Preferred Position VibeSwitcher"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // `kill`/`pkill` (and the build script) send SIGTERM, which skips applicationWillTerminate: route it
+        // through a normal quit so hidden windows come back and today's stats are saved.
+        signal(SIGTERM, SIG_IGN)
+        terminationSignal = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        terminationSignal?.setEventHandler { NSApp.terminate(nil) }
+        terminationSignal?.resume()
         HookBinary.sync()
         VibePaths.ensurePrivateDirectories()
         preferences.setUpLoginItemOnFirstLaunch()

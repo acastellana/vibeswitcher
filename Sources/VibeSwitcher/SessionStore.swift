@@ -38,6 +38,8 @@ final class SessionStore: ObservableObject {
     private var observed: [String: (status: SessionStatus, since: Date)] = [:]
     private var acknowledged: [String: Date] = [:]
     private var displayed: [String: SessionStatus] = [:]
+    /// What each session was asking when last shown, so a new question gets its own banner.
+    private var displayedRequest: [String: String] = [:]
     /// "<tty>|<episode start>" of reminders already sent.
     private var nudged: Set<String> = []
     private lazy var ledger = today
@@ -153,6 +155,7 @@ final class SessionStore: ObservableObject {
     private func apply(raw: [RawSession], tabs: [String: TerminalTab], background: [String: String], now: Date) {
         var quiet: Set<String> = []
         var nudges: [(Session, Nudge)] = []
+        let present = UserPresence.isPresent()
         let currentDesktops = Spaces.currentDesktops()
         let terminalFront = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == TerminalBridge.bundleID
         var result: [Session] = []
@@ -225,14 +228,24 @@ final class SessionStore: ObservableObject {
                     }
                 }
             }
+            // Still waiting, but on something new (answered one prompt, got the next before we looked).
+            let request = status == .needsInput ? session.detail : nil
+            if !viewing, status == .needsInput, displayed[item.tty] == .needsInput,
+               let request, let previous = displayedRequest[item.tty], previous != request {
+                onAttention?(session)
+            }
             displayed[item.tty] = status
-            if !viewing, let due = Nudges.due(status: status, statusSince: since, lastSeen: acknowledged[item.tty],
-                                              lastActivity: item.hook.map { Date(timeIntervalSince1970: $0.lastEventAt) },
-                                              now: now) {
+            displayedRequest[item.tty] = request
+            // Only hook-driven "working" has a meaningful last-activity time (see Nudges.due).
+            let hookActivity = item.hook.flatMap {
+                StatusRules.status(for: $0) == .working ? Date(timeIntervalSince1970: $0.lastEventAt) : nil
+            }
+            // Away from the Mac: hold reminders; they go out when you're back if still relevant.
+            if !viewing, present, let due = Nudges.due(status: status, statusSince: since, lastSeen: acknowledged[item.tty],
+                                                       lastActivity: hookActivity, now: now) {
                 let key = "\(item.tty)|\(due.episode.timeIntervalSince1970)"
                 // Only remind about what became overdue while we were running, not a backlog found at launch.
-                let threshold = status == .needsInput ? Nudges.waitingAfter : Nudges.stalledAfter
-                if nudged.insert(key).inserted, due.episode.addingTimeInterval(threshold) >= launchedAt {
+                if nudged.insert(key).inserted, due.dueAt >= launchedAt {
                     nudges.append((session, due.nudge))
                 }
             }
@@ -242,9 +255,10 @@ final class SessionStore: ObservableObject {
         observed = observed.filter { live.contains($0.key) }
         acknowledged = acknowledged.filter { live.contains($0.key) }
         displayed = displayed.filter { live.contains($0.key) }
+        displayedRequest = displayedRequest.filter { live.contains($0.key) }
         nudged = nudged.filter { live.contains(String($0.prefix { $0 != "|" })) }
         for (session, nudge) in nudges { onNudge?(session, nudge) }
-        recordLedger(result, now: now)
+        recordLedger(result, now: now, userPresent: present)
         names.prune(liveKeys: Set(result.flatMap(\.nameKeys)))
         quietClaudeTTYs = quiet
 
@@ -264,7 +278,7 @@ final class SessionStore: ObservableObject {
     }
 
     /// Books the time since the previous scan against each session's status.
-    private func recordLedger(_ sessions: [Session], now: Date) {
+    private func recordLedger(_ sessions: [Session], now: Date, userPresent: Bool) {
         let day = ActivityLedger.dayKey(for: now)
         if ledger.day != day {
             ledger.save()
@@ -272,7 +286,8 @@ final class SessionStore: ObservableObject {
         }
         // Longer gaps are sleep or a stuck scan: nobody was working or waiting in any meaningful sense.
         if let last = lastLedgerAt, now.timeIntervalSince(last) <= 30 {
-            ledger.record(sessions.map { ($0.project, $0.status) }, seconds: now.timeIntervalSince(last))
+            ledger.record(sessions.map { .init(project: $0.project, status: $0.status, since: $0.statusSince) },
+                          seconds: now.timeIntervalSince(last), now: now, userPresent: userPresent)
         }
         lastLedgerAt = now
         if now.timeIntervalSince(lastLedgerSave) >= 60 {
