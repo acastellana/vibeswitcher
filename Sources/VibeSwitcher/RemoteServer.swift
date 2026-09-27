@@ -50,21 +50,42 @@ final class RemoteServer {
         self.handler = handler
     }
 
-    func start(port: UInt16, onFailure: @escaping (String) -> Void) {
+    /// Exactly one of the callbacks is called, on the main thread: `onReady` once the port is really
+    /// listening, `onFailure` if it can't be (e.g. the port is still held by a quitting copy of the app).
+    func start(port: UInt16, onReady: @escaping () -> Void, onFailure: @escaping (String) -> Void) {
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!)
-        parameters.allowLocalEndpointReuse = true
+        // No address reuse: two listeners on one port would split requests between them.
+        parameters.allowLocalEndpointReuse = false
         guard let listener = try? NWListener(using: parameters) else {
             onFailure("Couldn't open local port \(port).")
             return
         }
+        var reported = false
+        // nil: ready; otherwise the failure message.
+        let report: (String?) -> Void = { failure in
+            DispatchQueue.main.async {
+                guard !reported else { return }
+                reported = true
+                if let failure { onFailure(failure) } else { onReady() }
+            }
+        }
         listener.newConnectionHandler = { [weak self] connection in self?.accept(connection) }
-        listener.stateUpdateHandler = { state in
-            if case .failed(let error) = state { DispatchQueue.main.async { onFailure("Local server failed: \(error)") } }
+        listener.stateUpdateHandler = { [weak self] state in
+            switch state {
+            case .ready: report(nil)
+            case .failed(let error), .waiting(let error):
+                // `.waiting` is how a busy port shows up; don't sit there, let the owner retry.
+                listener.cancel()   // `isListening` turns false; `listener` itself is only touched on main
+                report("Local port \(port) unavailable (\(error)).")
+            default: break
+            }
         }
         listener.start(queue: queue)
         self.listener = listener
     }
+
+    var isListening: Bool { listener?.state == .ready }
 
     func stop() {
         listener?.cancel()
@@ -80,7 +101,8 @@ final class RemoteServer {
         connections += 1
         connection.stateUpdateHandler = { [weak self] state in
             switch state {
-            case .cancelled, .failed: self?.queue.async { self?.connections -= 1 }
+            case .failed: connection.cancel()                     // ends in .cancelled, counted once there
+            case .cancelled: self?.connections -= 1                 // handlers run on `queue`
             default: break
             }
         }

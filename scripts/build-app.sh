@@ -41,6 +41,8 @@ echo "Built $APP"
 
 if [[ "${1:-}" == "--install" ]]; then
     pkill -x VibeSwitcher 2>/dev/null || true
+    # Wait for it to finish quitting: `open` on an app that's still quitting is silently dropped.
+    for _ in $(seq 1 50); do pgrep -x VibeSwitcher >/dev/null || break; sleep 0.2; done
     rm -rf /Applications/VibeSwitcher.app
     cp -R "$APP" /Applications/
     open /Applications/VibeSwitcher.app

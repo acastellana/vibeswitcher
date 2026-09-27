@@ -51,8 +51,8 @@ enum TailscaleCLI {
     }
 
     /// What our HTTPS port currently proxies to, if anything.
-    static func servedTarget(host: String) -> String? {
-        let result = run(["serve", "status", "--json"])
+    static func servedTarget(host: String, timeout: TimeInterval = 10) -> String? {
+        let result = run(["serve", "status", "--json"], timeout: timeout)
         guard result.status == 0, let data = result.output.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let web = json["Web"] as? [String: Any],
@@ -73,9 +73,9 @@ enum TailscaleCLI {
     }
 
     /// Removes our mapping (only if it's still ours).
-    static func stopServing(host: String, localTarget: String) {
-        guard servedTarget(host: host) == localTarget else { return }
-        _ = run(["serve", "--https=\(PhoneAccess.httpsPort)", "off"])
+    static func stopServing(host: String, localTarget: String, timeout: TimeInterval = 10) {
+        guard servedTarget(host: host, timeout: timeout) == localTarget else { return }
+        _ = run(["serve", "--https=\(PhoneAccess.httpsPort)", "off"], timeout: timeout)
     }
 
     private static func run(_ arguments: [String], timeout: TimeInterval = 10) -> (output: String, error: String, status: Int32) {

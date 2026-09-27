@@ -17,18 +17,45 @@ let clockOffset = 0;          // Mac clock minus phone clock, seconds
 
 // ---------- API ----------
 
-async function api(path, options = {}) {
+const UNREACHABLE = "Can't reach your Mac. Is Tailscale on here, and is the Mac awake?";
+
+async function api(path, options = {}, authToken = token) {
   const headers = { 'Content-Type': 'application/json' };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await fetch(path, { ...options, headers, cache: 'no-store', credentials: 'omit' });
+  if (authToken) headers.Authorization = `Bearer ${authToken}`;
+  // A dropped connection (phone off Wi-Fi, Mac asleep) must not leave requests hanging for minutes.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeout || 10000);
+  let response;
+  try {
+    response = await fetch(path, { ...options, headers, cache: 'no-store', credentials: 'omit', signal: controller.signal });
+  } catch (error) {
+    setOnline(false);
+    throw new Error(UNREACHABLE);
+  } finally {
+    clearTimeout(timer);
+  }
   let body = {};
-  try { body = await response.json(); } catch (e) { /* empty body */ }
-  if (response.status === 401) {
+  try { body = await response.json(); } catch (e) { /* empty or non-JSON body (e.g. Tailscale's 502) */ }
+  // Our server always answers errors with a JSON message; a bare error (404, 502, 504) comes from
+  // Tailscale itself, meaning VibeSwitcher isn't running or Phone Access is off.
+  if (!response.ok && !body.error) {
+    const message = "VibeSwitcher isn't running on your Mac, or Phone Access is off.";
+    setOnline(false, message);
+    throw new Error(message);
+  }
+  setOnline(true);
+  if (response.status === 401 && authToken === token) {
     forgetToken();
     throw new Error(body.error || 'Not paired');
   }
   if (!response.ok) throw new Error(body.error || `Error ${response.status}`);
   return body;
+}
+
+function setOnline(online, message = UNREACHABLE) {
+  const banner = $('offline');
+  banner.hidden = online;
+  if (!online) banner.textContent = message;
 }
 
 function forgetToken() {
@@ -84,13 +111,20 @@ function badge(session) {
   return node;
 }
 
+let listBusy = false;
+let screenBusy = false;
+
 async function refreshList(render = true) {
+  if (listBusy || !token) return;   // one poll at a time: a slow network must not stack requests
+  listBusy = true;
   try {
     state = await api('/api/state');
   } catch (error) {
-    if (token) $('subtitle').textContent = error.message;
     return;
+  } finally {
+    listBusy = false;
   }
+  if (!pushChecked) { pushChecked = true; syncPushSubscription(); }
   clockOffset = state.now - Date.now() / 1000;
   $('subtitle').textContent = state.mac;
   $('notifyCard').hidden = Boolean(state.device.push) || !('PushManager' in window);
@@ -179,7 +213,12 @@ function renderSessionMeta() {
 }
 
 async function refreshScreen() {
-  if (!current) return;
+  if (!current || screenBusy) return;
+  screenBusy = true;
+  try { await loadScreen(); } finally { screenBusy = false; }
+}
+
+async function loadScreen() {
   const screen = $('screen');
   const atBottom = screen.scrollHeight - screen.scrollTop - screen.clientHeight < 40;
   try {
@@ -222,6 +261,10 @@ async function pair(event) {
       method: 'POST',
       body: JSON.stringify({ code: $('code').value, name: $('deviceName').value || defaultName() }),
     });
+    // Pairing again from a phone that was already paired: retire the old entry on the Mac.
+    const previous = localStorage.getItem('vs.previousToken');
+    if (previous) api('/api/unpair', { method: 'POST', body: '{}' }, previous).catch(() => {});
+    localStorage.removeItem('vs.previousToken');
     token = result.token;
     localStorage.setItem('vs.token', token);
     history.replaceState(null, '', '/');
@@ -245,19 +288,42 @@ function keyBytes(base64url) {
   return Uint8Array.from(atob(base64), c => c.charCodeAt(0));
 }
 
+/// A subscription made for this Mac's current key (a new key needs a new subscription).
+async function currentSubscription() {
+  const registration = await navigator.serviceWorker.ready;
+  const wanted = keyBytes(state.vapidPublicKey);
+  let subscription = await registration.pushManager.getSubscription();
+  const key = subscription && subscription.options && subscription.options.applicationServerKey;
+  if (subscription && key && !sameBytes(new Uint8Array(key), wanted)) {
+    await subscription.unsubscribe();
+    subscription = null;
+  }
+  return subscription || registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: wanted });
+}
+
+function sameBytes(a, b) {
+  return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+let pushChecked = false;
+
+/// Once per app start: if notifications were allowed, make sure the Mac has this browser's current
+/// subscription (browsers rotate them; the Mac drops ones the push service rejects).
+async function syncPushSubscription() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || Notification.permission !== 'granted') return;
+  try {
+    const subscription = await currentSubscription();
+    await api('/api/push', { method: 'POST', body: JSON.stringify(subscription.toJSON()) });
+  } catch (error) { /* shown via the card if it matters */ }
+}
+
 async function enableNotifications() {
   $('notifyError').hidden = true;
   try {
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) throw new Error('This browser has no web push.');
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') throw new Error('Notifications are blocked for this site in the browser settings.');
-    const registration = await navigator.serviceWorker.ready;
-    let subscription = await registration.pushManager.getSubscription();
-    if (!subscription) {
-      subscription = await registration.pushManager.subscribe({
-        userVisibleOnly: true, applicationServerKey: keyBytes(state.vapidPublicKey),
-      });
-    }
+    const subscription = await currentSubscription();
     await api('/api/push', { method: 'POST', body: JSON.stringify(subscription.toJSON()) });
     await api('/api/push/test', { method: 'POST', body: '{}' });
     refreshList();
@@ -276,6 +342,7 @@ function route() {
   if (params.get('pair')) {
     $('code').value = params.get('pair');
     $('deviceName').value = defaultName();
+    if (token) localStorage.setItem('vs.previousToken', token);
     forgetToken();
     return;
   }

@@ -77,3 +77,5 @@ details#today summary span.muted { font-weight: 400; text-align: right; }
 .keys button:active { background: var(--line); }
 .reply { display: flex; gap: 8px; }
 .reply input { flex: 1; }
+.offline { position: sticky; top: 0; z-index: 1; background: #ff9f0a; color: #1c1c1e; font-size: 13px;
+  font-weight: 600; padding: 8px 12px; text-align: center; }

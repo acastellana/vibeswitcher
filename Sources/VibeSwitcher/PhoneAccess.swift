@@ -24,7 +24,9 @@ final class PhoneAccess: ObservableObject {
         case failed(String)
     }
 
-    @Published private(set) var state: State = .off
+    @Published private(set) var state: State = .off {
+        didSet { AppStatus.extras["phoneAccess"] = "\(state)" }
+    }
     @Published private(set) var url: URL?
     @Published private(set) var devices: [PairedDevice] = []
     @Published private(set) var pairing: PairingCode?
@@ -55,7 +57,12 @@ final class PhoneAccess: ObservableObject {
     private lazy var vapidKey: P256.Signing.PrivateKey = Self.loadOrCreateVapidKey()
     private var screenCache: [String: (at: Date, text: String)] = [:]
     private var failedAuth: [Date] = []
+    /// Typing into tabs, one input at a time.
     private let work = DispatchQueue(label: "vibeswitcher.phone-access", qos: .userInitiated)
+    /// Reading screens; separate so a slow Terminal read never holds up a key press.
+    private let reads = DispatchQueue(label: "vibeswitcher.phone-access.reads", qos: .userInitiated)
+    /// Requests waiting for a screen read already in flight, per tty.
+    private var screenWaiters: [String: [(HTTPResponse) -> Void]] = [:]
 
     init(store: SessionStore) {
         self.store = store
@@ -65,6 +72,11 @@ final class PhoneAccess: ObservableObject {
         pushOnlyWhenAway = defaults.bool(forKey: "phonePushOnlyWhenAway")
         devices = Self.loadDevices()
         recentActivity = Self.tailOfAuditLog()
+        // Network and Tailscale come back a few seconds after wake.
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil,
+                                                          queue: .main) { [weak self] _ in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self?.checkHealth() }
+        }
     }
 
     func startIfEnabled() { if enabled { start() } }
@@ -84,67 +96,162 @@ final class PhoneAccess: ObservableObject {
     }
 
     // MARK: - Lifecycle
+    //
+    // Every start bumps `generation`. Asynchronous steps belonging to an older start (Tailscale calls,
+    // listener callbacks) see a different generation and stand down instead of touching current state.
 
-    private func start() {
-        state = .starting
-        work.async {
+    private var generation = 0
+    private var healthTimer: Timer?
+    private var healthCheckRunning = false
+    /// Consecutive failed checks; one slow `tailscale status` under load isn't worth a restart.
+    private var unhealthyChecks = 0
+    /// Tailscale CLI calls, one at a time (a stop must never overtake the start it undoes).
+    private let control = DispatchQueue(label: "vibeswitcher.phone-access.control")
+
+    private func isCurrent(_ run: Int) -> Bool { enabled && run == generation }
+
+    /// `quiet`: a background retry; keep showing the last problem instead of flashing "Starting…".
+    private func start(quiet: Bool = false) {
+        generation += 1
+        let run = generation
+        server?.stop()
+        server = nil
+        if !quiet { state = .starting }
+        scheduleHealthChecks()
+        control.async {
             let status = TailscaleCLI.status()
             DispatchQueue.main.async {
-                guard self.enabled else { return }
+                guard self.isCurrent(run) else { return }
                 switch status {
                 case .failure(let failure):
-                    self.state = .failed(failure.description)
+                    self.fail(failure.description)
                 case .success(let status) where !status.httpsAvailable:
-                    self.state = .failed(TailscaleCLI.Failure.httpsDisabled.description)
+                    self.fail(TailscaleCLI.Failure.httpsDisabled.description)
                 case .success(let status):
                     self.tailscale = status
-                    self.startServer(host: status.dnsName)
+                    self.startListener(run: run, host: status.dnsName, attempt: 1)
                 }
             }
         }
     }
 
-    private func startServer(host: String) {
+    private func startListener(run: Int, host: String, attempt: Int) {
         let server = RemoteServer { [weak self] request, respond in
             DispatchQueue.main.async {
                 guard let self else { return respond(.error(503, "unavailable")) }
                 self.route(request, respond: respond)
             }
         }
-        server.start(port: Self.port) { [weak self] message in self?.fail(message) }
         self.server = server
-        work.async {
+        server.start(port: Self.port, onReady: { [weak self] in
+            guard let self, self.isCurrent(run) else { return server.stop() }
+            self.startServing(run: run, host: host)
+        }, onFailure: { [weak self] message in
+            guard let self, self.isCurrent(run) else { return }
+            self.server = nil
+            // A copy of the app that is still quitting can hold the port for a moment.
+            guard attempt < 5 else { return self.fail(message) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                if self.isCurrent(run) { self.startListener(run: run, host: host, attempt: attempt + 1) }
+            }
+        })
+    }
+
+    /// "On" only once both halves exist: the listener is ready and Tailscale points at it.
+    private func startServing(run: Int, host: String) {
+        control.async {
             let failure = TailscaleCLI.startServing(host: host, localTarget: Self.localTarget)
             DispatchQueue.main.async {
-                guard self.enabled else { return }
+                guard self.isCurrent(run) else {
+                    // Turned off while this was in flight: take the mapping back down.
+                    if failure == nil, !self.enabled {
+                        self.control.async { TailscaleCLI.stopServing(host: host, localTarget: Self.localTarget) }
+                    }
+                    return
+                }
                 if let failure { return self.fail(failure.description) }
                 self.url = URL(string: "https://\(host):\(Self.httpsPort)/")
-                self.state = .on
-                self.audit("phone access on (\(host))")
+                if self.state != .on {
+                    self.state = .on
+                    self.audit("phone access on (\(host))")
+                }
             }
         }
     }
 
+    /// Stays enabled: the health check retries (e.g. Tailscale connects a minute after login).
     private func fail(_ message: String) {
         server?.stop()
         server = nil
+        url = nil
+        if state != .failed(message) { audit("phone access problem: \(message)") }
         state = .failed(message)
     }
 
     private func stop() {
+        generation += 1
+        healthTimer?.invalidate()
+        healthTimer = nil
         server?.stop()
         server = nil
         pairing = nil
         state = .off
         url = nil
-        if let host = tailscale?.dnsName { work.async { TailscaleCLI.stopServing(host: host, localTarget: Self.localTarget) } }
+        if let host = tailscale?.dnsName {
+            control.async { TailscaleCLI.stopServing(host: host, localTarget: Self.localTarget) }
+        }
         audit("phone access off")
     }
 
     /// On quit: nothing may keep pointing the tailnet at a port we no longer own.
     func shutdown() {
+        generation += 1
+        healthTimer?.invalidate()
         server?.stop()
-        if let host = tailscale?.dnsName, state == .on { TailscaleCLI.stopServing(host: host, localTarget: Self.localTarget) }
+        guard enabled, let host = tailscale?.dnsName else { return }
+        TailscaleCLI.stopServing(host: host, localTarget: Self.localTarget, timeout: 3)
+    }
+
+    private func scheduleHealthChecks() {
+        guard healthTimer == nil else { return }
+        healthTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.checkHealth() }
+        healthTimer?.tolerance = 5
+    }
+
+    /// Every 30 s and after wake, repairs what can go missing behind our back: Tailscale not connected
+    /// yet at login, the serve mapping removed (`tailscale serve reset`, another copy of the app quitting),
+    /// the listener gone, or this Mac's tailnet name or account changed.
+    func checkHealth() {
+        guard enabled, !healthCheckRunning else { return }
+        switch state {
+        case .off, .starting: return
+        case .failed: return start(quiet: true)
+        case .on: break
+        }
+        healthCheckRunning = true
+        let run = generation
+        let listening = server?.isListening == true
+        let known = tailscale
+        control.async {
+            let status = TailscaleCLI.status()
+            let served = (try? status.get()).flatMap { TailscaleCLI.servedTarget(host: $0.dnsName) }
+            DispatchQueue.main.async {
+                self.healthCheckRunning = false
+                guard self.isCurrent(run), self.state == .on else { return }
+                guard case .success(let current) = status, current == known, listening else {
+                    self.unhealthyChecks += 1
+                    guard self.unhealthyChecks >= 2 else { return }
+                    self.unhealthyChecks = 0
+                    self.audit("phone access restarting (Tailscale or local server changed)")
+                    return self.start()
+                }
+                self.unhealthyChecks = 0
+                if served != Self.localTarget {
+                    self.audit("tailscale serve mapping was missing; restored")
+                    self.startServing(run: run, host: current.dnsName)
+                }
+            }
+        }
     }
 
     // MARK: - Pairing and devices
@@ -273,15 +380,31 @@ final class PhoneAccess: ObservableObject {
         if let cached = screenCache[tty], cached.at.timeIntervalSinceNow > -0.8 {
             return respond(.json(["tty": tty, "text": cached.text]))
         }
-        work.async {
-            let raw = TerminalBridge.screens(for: [tty])[tty] ?? ""
+        // Several phones (or a slow read) must not stack up AppleScript calls: join the one in flight.
+        if screenWaiters[tty] != nil {
+            screenWaiters[tty]?.append(respond)
+            return
+        }
+        screenWaiters[tty] = [respond]
+        reads.async {
+            let raw = TerminalBridge.screens(for: [tty])[tty]
             // Visible screen only, credentials masked, trailing blank lines dropped.
-            var lines = Redaction.secrets(in: raw).components(separatedBy: "\n")
+            var lines = Redaction.secrets(in: raw ?? "").components(separatedBy: "\n")
             while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty { lines.removeLast() }
             let text = lines.joined(separator: "\n")
             DispatchQueue.main.async {
-                self.screenCache[tty] = (Date(), text)
-                respond(.json(["tty": tty, "text": text]))
+                let waiters = self.screenWaiters.removeValue(forKey: tty) ?? []
+                // Forget screens of sessions that are gone.
+                let live = Set(self.store.sessions.map(\.tty))
+                self.screenCache = self.screenCache.filter { live.contains($0.key) }
+                let response: HTTPResponse
+                if raw == nil {
+                    response = .error(503, "Couldn't read that tab right now.")
+                } else {
+                    self.screenCache[tty] = (Date(), text)
+                    response = .json(["tty": tty, "text": text])
+                }
+                waiters.forEach { $0(response) }
             }
         }
     }
@@ -346,7 +469,8 @@ final class PhoneAccess: ObservableObject {
 
     /// Mirrors a Mac alert to paired phones (by default only while you're away from the Mac).
     func notify(title: String, body: String, tty: String) {
-        guard state == .on, !(pushOnlyWhenAway && UserPresence.isPresent()) else { return }
+        // Pushes go straight to the push service: they don't need the tailnet server to be up.
+        guard enabled, !(pushOnlyWhenAway && UserPresence.isPresent()) else { return }
         let targets = devices.filter { $0.push != nil }
         guard !targets.isEmpty else { return }
         deliver(["title": Redaction.secrets(in: title), "body": Redaction.secrets(in: body), "tty": tty, "tag": tty],
@@ -372,8 +496,9 @@ final class PhoneAccess: ObservableObject {
             request.setValue(authorization, forHTTPHeaderField: "Authorization")
             URLSession.shared.dataTask(with: request) { [weak self] _, response, _ in
                 let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                guard status == 404 || status == 410 else { return }
-                // The browser dropped this subscription; forget it.
+                // 404/410: the browser dropped this subscription. 403: it was made for another key of ours.
+                // Either way it's dead; the phone subscribes again the next time the app opens.
+                guard [403, 404, 410].contains(status) else { return }
                 DispatchQueue.main.async {
                     guard let self, let index = self.devices.firstIndex(where: { $0.id == device.id }) else { return }
                     self.devices[index].push = nil

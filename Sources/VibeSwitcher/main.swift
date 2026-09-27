@@ -72,6 +72,23 @@ if let index = arguments.firstIndex(of: "--snapshot") {
     exit(0)
 }
 
+// One copy at a time. Two would show two icons, double every notification, and fight over the
+// Phone Access port and Tailscale mapping (one quitting removes the other's). A copy that is still
+// quitting (e.g. during an update) gets a few seconds; a live one is shown instead and we leave.
+if let bundleID = Bundle.main.bundleIdentifier {
+    func others() -> [NSRunningApplication] {
+        NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+            .filter { $0.processIdentifier != getpid() && !$0.isTerminated }
+    }
+    let deadline = Date().addingTimeInterval(5)
+    while !others().isEmpty, Date() < deadline { Thread.sleep(forTimeInterval: 0.2) }
+    if !others().isEmpty {
+        DistributedNotificationCenter.default().postNotificationName(AppStatus.toggleNotification, object: nil,
+                                                                     userInfo: nil, deliverImmediately: true)
+        exit(0)   // not NSApp.terminate: our quit path would tear down the other copy's Phone Access
+    }
+}
+
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
