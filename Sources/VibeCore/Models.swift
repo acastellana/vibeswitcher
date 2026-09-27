@@ -61,6 +61,9 @@ public struct Session: Identifiable, Equatable, Sendable {
     public var task: String?
     /// Name you gave the session (right-click › Rename); replaces the project as the headline.
     public var customName: String?
+    /// Set while you've paused the session (`distantFuture`: until you resume it).
+    public var pausedUntil: Date?
+    public var isPaused: Bool { pausedUntil != nil }
     /// Keys the custom name is stored under (see `SessionKeys`).
     public var nameKeys: [String] = []
     public var status: SessionStatus

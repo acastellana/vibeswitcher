@@ -86,14 +86,15 @@ struct FloatingDotsView: View {
             ForEach(Array(store.sessions.enumerated()), id: \.element.id) { index, session in
                 Button { onOpen(session) } label: {
                     ZStack {
-                        if session.status == .unknown {
-                            Circle().stroke(session.status.color, lineWidth: 1.5)
+                        if session.dotIsHollow {
+                            Circle().stroke(session.dotColor, lineWidth: 1.5)
                         } else {
-                            Circle().fill(session.status.color)
+                            Circle().fill(session.dotColor)
                         }
                         Text("\(index + 1)")
                             .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                            .foregroundStyle(session.status == .unknown || session.status == .idle ? Color.primary : Color.white)
+                            .foregroundStyle(session.isPaused || session.status == .unknown || session.status == .idle
+                                             ? Color.primary.opacity(session.isPaused ? 0.5 : 1) : Color.white)
                     }
                     .frame(width: 17, height: 17)
                     .padding(2)
@@ -102,7 +103,7 @@ struct FloatingDotsView: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .help("\(index + 1). \(session.title) · \(session.status.label)")
+                .help("\(index + 1). \(session.title) · \(session.status.label)" + (session.isPaused ? " · paused" : ""))
             }
             Button(action: onShowList) {
                 Image(systemName: "list.bullet").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)

@@ -17,6 +17,15 @@ extension SessionStatus {
     var color: Color { Color(nsColor: nsColor) }
 }
 
+extension Session {
+    /// Paused sessions are drawn greyed out, whatever they're doing.
+    static let pausedNSColor = NSColor.systemGray.withAlphaComponent(0.28)
+    var dotNSColor: NSColor { isPaused ? Self.pausedNSColor : status.nsColor }
+    var dotColor: Color { Color(nsColor: dotNSColor) }
+    /// Drawn as an outline (unknown status) rather than a filled dot.
+    var dotIsHollow: Bool { !isPaused && status == .unknown }
+}
+
 /// Draws the menu bar image: one dot per session, in list order, so a dot's position tells you which
 /// terminal it is. Falls back to per-status counts when there are too many sessions to fit.
 enum StatusIcon {
@@ -35,12 +44,12 @@ enum StatusIcon {
             for (index, session) in sessions.enumerated() {
                 let rect = MenuBarDots.rect(at: index, count: sessions.count)
                 let path = NSBezierPath(ovalIn: rect)
-                if session.status == .unknown {
-                    session.status.nsColor.setStroke()
+                if session.dotIsHollow {
+                    session.dotNSColor.setStroke()
                     path.lineWidth = 1.2
                     NSBezierPath(ovalIn: rect.insetBy(dx: 0.6, dy: 0.6)).stroke()
                 } else {
-                    session.status.nsColor.setFill()
+                    session.dotNSColor.setFill()
                     path.fill()
                 }
                 if session.isCurrent {
@@ -59,6 +68,12 @@ enum StatusIcon {
 
     private static func counts(_ sessions: [Session]) -> NSImage {
         let order: [SessionStatus] = [.needsInput, .working, .background, .done, .idle]
+        // Paused sessions count with the quiet (grey) ones.
+        let sessions = sessions.map { session -> Session in
+            var shown = session
+            if session.isPaused { shown.status = .idle }
+            return shown
+        }
         let text = NSMutableAttributedString()
         let font = NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold)
         for status in order {

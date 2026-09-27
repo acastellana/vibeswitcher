@@ -22,7 +22,8 @@ enum AppStatus {
             "tabBars": TabOrder.tabBars(),
             "sessions": sessions.map { ["tty": $0.tty, "agent": $0.agent.rawValue, "status": $0.status.rawValue,
                                         "title": $0.title, "hooks": $0.hasHooks,
-                                        "desktop": $0.screenPosition?.desktop ?? 0, "tab": $0.screenPosition?.tabIndex ?? 0] },
+                                        "desktop": $0.screenPosition?.desktop ?? 0, "tab": $0.screenPosition?.tabIndex ?? 0,
+                                        "paused": $0.isPaused] },
         ]
         object.merge(extras) { $1 }
         object.merge(extra) { $1 }

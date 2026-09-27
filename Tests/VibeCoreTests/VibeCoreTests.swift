@@ -775,3 +775,44 @@ struct HTTPParserTests {
         #expect(HTTPParser.parse(Data(String(repeating: "a", count: 20_000).utf8)) == .tooLarge)
     }
 }
+
+struct PauseStoreTests {
+    func store() -> PauseStore {
+        let defaults = UserDefaults(suiteName: "vibeswitcher-tests-\(UUID().uuidString)")!
+        return PauseStore(defaults: defaults)
+    }
+
+    @Test func pausesExpireAndResume() {
+        let pauses = store()
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        pauses.pause(["proc:1", "session:a"], for: .hours(1), now: now)
+        #expect(pauses.pausedUntil(for: ["proc:1"], now: now) == now.addingTimeInterval(3600))
+        #expect(pauses.pausedUntil(for: ["session:a"], now: now.addingTimeInterval(3601)) == nil)
+        pauses.pause(["proc:2"], for: .indefinitely, now: now)
+        #expect(pauses.pausedUntil(for: ["proc:2"], now: now.addingTimeInterval(1e9)) == .distantFuture)
+        pauses.resume(["proc:2"])
+        #expect(pauses.pausedUntil(for: ["proc:2"], now: now) == nil)
+    }
+
+    @Test func survivesRestartsAndPrunesDeadProcesses() {
+        let defaults = UserDefaults(suiteName: "vibeswitcher-tests-\(UUID().uuidString)")!
+        let now = Date()
+        PauseStore(defaults: defaults).pause(["proc:1", "session:a"], for: .indefinitely, now: now)
+        let reloaded = PauseStore(defaults: defaults)
+        #expect(reloaded.pausedUntil(for: ["proc:1"]) != nil)
+        reloaded.prune(liveKeys: [])
+        #expect(reloaded.pausedUntil(for: ["proc:1"]) == nil)       // its process is gone
+        #expect(reloaded.pausedUntil(for: ["session:a"]) != nil)    // kept for `--resume`
+    }
+
+    @Test func tomorrowMorningMeansTheNextNineOClock() {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: "Europe/Madrid")!
+        func date(_ day: Int, _ hour: Int) -> Date {
+            calendar.date(from: DateComponents(year: 2026, month: 9, day: day, hour: hour))!
+        }
+        #expect(PauseStore.nextMorning(after: date(27, 22), calendar: calendar) == date(28, 9))
+        #expect(PauseStore.nextMorning(after: date(27, 10), calendar: calendar) == date(28, 9))
+        #expect(PauseStore.nextMorning(after: date(28, 2), calendar: calendar) == date(28, 9))   // after midnight
+    }
+}

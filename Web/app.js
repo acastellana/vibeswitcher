@@ -105,8 +105,8 @@ function el(tag, className, text) {
 }
 
 function badge(session) {
-  const node = el('span', `badge ${session.status}`, String(session.number));
-  node.style.background = STATUS_COLORS[session.status] || 'transparent';
+  const node = el('span', `badge ${session.paused ? 'paused' : session.status}`, String(session.number));
+  node.style.background = session.paused ? 'var(--paused)' : (STATUS_COLORS[session.status] || 'transparent');
   if (session.viewing) node.classList.add('viewing');
   return node;
 }
@@ -138,7 +138,7 @@ function renderList() {
   const counts = $('counts');
   counts.replaceChildren();
   for (const status of ORDER) {
-    const count = sessions.filter(s => s.status === status).length;
+    const count = sessions.filter(s => s.status === status && !s.paused).length;
     if (!count) continue;
     const chip = el('span', 'chip');
     const dot = el('i');
@@ -146,14 +146,17 @@ function renderList() {
     chip.append(dot, `${count} ${LABELS[status]}`);
     counts.append(chip);
   }
+  const paused = sessions.filter(s => s.paused).length;
+  if (paused) counts.append(el('span', 'chip', `⏸ ${paused} paused`));
   const list = $('sessions');
   list.replaceChildren(...sessions.map(session => {
-    const row = el('button', 'row');
+    const row = el('button', session.paused ? 'row paused' : 'row');
     row.type = 'button';
     row.addEventListener('click', () => openSession(session.tty));
     const text = el('div', 'text');
     const first = el('div', 'line1');
     first.append(el('b', 'name', session.name), el('span', `agent ${session.agent}`, session.agent === 'claude' ? 'Claude' : 'Codex'));
+    if (session.paused) first.append(el('span', 'pausedTag', '⏸ Paused'));
     const when = el('span', `when ${session.status}`, `${session.statusLabel} ${elapsed(session.since)}`.trim());
     first.append(when);
     text.append(first);
@@ -208,8 +211,46 @@ function renderSessionMeta() {
   meta.replaceChildren(badge(session), status);
   if (session.detail && !session.activity) meta.append(el('div', 'detail', session.detail));
   if (session.activity) meta.append(el('div', 'detail', `⚙ ${session.activity} · ${elapsed(session.activitySince)}`));
+  renderPauseControls(session);
   $('controls').hidden = !state.inputAllowed || !session.inTerminal;
   $('inputOff').hidden = state.inputAllowed || !session.inTerminal;
+}
+
+function pauseLabel(session) {
+  if (!session.pausedUntil) return 'Paused until you resume it';
+  const until = new Date(session.pausedUntil * 1000);
+  const sameDay = until.toDateString() === new Date().toDateString();
+  return `Paused until ${until.toLocaleString([], sameDay ? { hour: '2-digit', minute: '2-digit' }
+                                                            : { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`;
+}
+
+function renderPauseControls(session) {
+  const box = $('pauseControls');
+  const button = (label, duration) => {
+    const node = el('button', 'small', label);
+    node.type = 'button';
+    node.addEventListener('click', () => setPause(session.tty, duration, node));
+    return node;
+  };
+  if (session.paused) {
+    box.replaceChildren(el('span', 'muted', pauseLabel(session)), button('Resume', 'resume'));
+  } else {
+    box.replaceChildren(el('span', 'muted', 'Pause:'), button('1 hour', 'hour'), button('Tomorrow', 'tomorrow'),
+                        button('Until resumed', 'indefinitely'));
+  }
+}
+
+async function setPause(tty, duration, node) {
+  node.disabled = true;
+  try {
+    await api('/api/pause', { method: 'POST', body: JSON.stringify({ tty, duration }) });
+    setTimeout(() => refreshList(false), 300);
+  } catch (error) {
+    $('inputError').textContent = error.message;
+    $('inputError').hidden = false;
+  } finally {
+    node.disabled = false;
+  }
 }
 
 async function refreshScreen() {

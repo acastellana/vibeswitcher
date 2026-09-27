@@ -50,6 +50,7 @@ final class SessionStore: ObservableObject {
     /// Claude sessions whose turn looks finished; only their screens are read for background work.
     private var quietClaudeTTYs: Set<String> = []
     private let names = NameStore()
+    private let pauses = PauseStore()
     /// Project folders seen running an agent, feeding the "New session" menu.
     private(set) var observedProjects: [String: Date] =
         (UserDefaults.standard.dictionary(forKey: "observedProjects") as? [String: Date]) ?? [:]
@@ -74,6 +75,17 @@ final class SessionStore: ObservableObject {
     }
 
     /// Gives a session your own name (nil or empty resets it to the project name).
+    /// Parks a session: greyed out, no notifications or reminders until it's resumed (or the time's up).
+    func pause(_ session: Session, for duration: PauseStore.Duration) {
+        pauses.pause(session.nameKeys, for: duration)
+        refresh()
+    }
+
+    func resume(_ session: Session) {
+        pauses.resume(session.nameKeys)
+        refresh()
+    }
+
     func rename(_ session: Session, to name: String?) {
         names.set(name, for: session.nameKeys)
         refresh()
@@ -214,8 +226,11 @@ final class SessionStore: ObservableObject {
             }
             session.nameKeys = SessionKeys.keys(pid: item.pid, startedAt: item.startedAt, sessionId: item.hook?.sessionId)
             session.customName = names.name(for: session.nameKeys)
+            session.pausedUntil = pauses.pausedUntil(for: session.nameKeys, now: now)
+            // Paused: still tracked (and shown greyed), but it doesn't ask for your attention.
+            let alerts = !viewing && !session.isPaused
             if let root = item.projectRoot { noteProject(root, at: now) }
-            if !viewing, let previous = displayed[item.tty], previous != status {
+            if alerts, let previous = displayed[item.tty], previous != status {
                 if status == .needsInput {
                     onAttention?(session)
                 } else if status == .done {
@@ -223,14 +238,15 @@ final class SessionStore: ObservableObject {
                     // "done" if it is still done once that has had time to appear.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
                         guard let self, self.displayed[session.tty] == .done,
-                              let current = self.sessions.first(where: { $0.tty == session.tty }) else { return }
+                              let current = self.sessions.first(where: { $0.tty == session.tty }), !current.isPaused
+                        else { return }
                         self.onAttention?(current)
                     }
                 }
             }
             // Still waiting, but on something new (answered one prompt, got the next before we looked).
             let request = status == .needsInput ? session.detail : nil
-            if !viewing, status == .needsInput, displayed[item.tty] == .needsInput,
+            if alerts, status == .needsInput, displayed[item.tty] == .needsInput,
                let request, let previous = displayedRequest[item.tty], previous != request {
                 onAttention?(session)
             }
@@ -241,7 +257,7 @@ final class SessionStore: ObservableObject {
                 StatusRules.status(for: $0) == .working ? Date(timeIntervalSince1970: $0.lastEventAt) : nil
             }
             // Away from the Mac: hold reminders; they go out when you're back if still relevant.
-            if !viewing, present, let due = Nudges.due(status: status, statusSince: since, lastSeen: acknowledged[item.tty],
+            if alerts, present, let due = Nudges.due(status: status, statusSince: since, lastSeen: acknowledged[item.tty],
                                                        lastActivity: hookActivity, now: now) {
                 let key = "\(item.tty)|\(due.episode.timeIntervalSince1970)"
                 // Only remind about what became overdue while we were running, not a backlog found at launch.
@@ -260,6 +276,7 @@ final class SessionStore: ObservableObject {
         for (session, nudge) in nudges { onNudge?(session, nudge) }
         recordLedger(result, now: now, userPresent: present)
         names.prune(liveKeys: Set(result.flatMap(\.nameKeys)))
+        pauses.prune(liveKeys: Set(result.flatMap(\.nameKeys)), now: now)
         quietClaudeTTYs = quiet
 
         let frames = result.compactMap { $0.screenPosition?.frame }
@@ -270,7 +287,7 @@ final class SessionStore: ObservableObject {
         let ordered = SessionOrdering.sort(result, by: order)
         if ordered != sessions {
             // The debug status file only records statuses; don't rewrite it for detail/timer changes.
-            let signature: (Session) -> String = { "\($0.tty)\($0.status.rawValue)\($0.screenPosition?.tabIndex ?? 0)" }
+            let signature: (Session) -> String = { "\($0.tty)\($0.status.rawValue)\($0.screenPosition?.tabIndex ?? 0)\($0.isPaused)" }
             let statusesChanged = ordered.map(signature) != sessions.map(signature)
             sessions = ordered
             if statusesChanged || trustChanged { AppStatus.write(sessions: ordered, terminalAccess: terminalAccess) }
@@ -286,7 +303,11 @@ final class SessionStore: ObservableObject {
         }
         // Longer gaps are sleep or a stuck scan: nobody was working or waiting in any meaningful sense.
         if let last = lastLedgerAt, now.timeIntervalSince(last) <= 30 {
-            ledger.record(sessions.map { .init(project: $0.project, status: $0.status, since: $0.statusSince) },
+            // A paused session's waiting is your choice, not a bottleneck; its agent work still counts.
+            ledger.record(sessions.map { session in
+                let parkedWait = session.isPaused && [.needsInput, .done].contains(session.status)
+                return .init(project: session.project, status: parkedWait ? .idle : session.status, since: session.statusSince)
+            },
                           seconds: now.timeIntervalSince(last), now: now, userPresent: userPresent)
         }
         lastLedgerAt = now

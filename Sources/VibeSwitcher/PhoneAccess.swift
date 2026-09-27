@@ -294,6 +294,7 @@ final class PhoneAccess: ObservableObject {
         case ("GET", "/api/state"): respond(.json(stateObject(for: device)))
         case ("GET", "/api/screen"): screen(request.query["tty"] ?? "", respond: respond)
         case ("POST", "/api/input"): input(request, device: device, respond: respond)
+        case ("POST", "/api/pause"): respond(pause(request, device: device))
         case ("POST", "/api/push"): respond(subscribe(request, device: device))
         case ("POST", "/api/push/test"): respond(testPush(device))
         case ("POST", "/api/unpair"):
@@ -356,6 +357,10 @@ final class PhoneAccess: ObservableObject {
                 row["activitySince"] = since.timeIntervalSince1970
             }
             if let desktop = session.screenPosition?.desktop { row["desktop"] = desktop }
+            if let until = session.pausedUntil {
+                row["paused"] = true
+                if until != .distantFuture { row["pausedUntil"] = until.timeIntervalSince1970 }
+            }
             return row
         }
         let today = store.today
@@ -440,6 +445,23 @@ final class PhoneAccess: ObservableObject {
                 respond(.json(["ok": true]))
             }
         }
+    }
+
+    /// Pausing only changes what VibeSwitcher shows and announces, so it's allowed even with replies off.
+    private func pause(_ request: HTTPRequest, device: PairedDevice) -> HTTPResponse {
+        let object = body(request) ?? [:]
+        guard let tty = object["tty"] as? String, let session = store.sessions.first(where: { $0.tty == tty }) else {
+            return .error(404, "no such session")
+        }
+        switch object["duration"] as? String {
+        case "resume": store.resume(session)
+        case "hour": store.pause(session, for: .hours(1))
+        case "tomorrow": store.pause(session, for: .untilTomorrowMorning)
+        case "indefinitely": store.pause(session, for: .indefinitely)
+        default: return .error(400, "unknown duration")
+        }
+        audit("\(device.name) \(object["duration"] as? String == "resume" ? "resumed" : "paused") \(session.displayName)")
+        return .json(["ok": true])
     }
 
     // MARK: - Push notifications

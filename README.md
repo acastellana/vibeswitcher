@@ -20,6 +20,10 @@ While a session runs a tool, its row shows what and for how long ("⚙ Run unit 
 - **Click a dot** to jump straight to that session's Terminal tab. Hover a dot to see which session it is.
 - The session whose Terminal tab you're looking at has a **ring** around its dot (and a "Viewing" tag in the list).
 - **Right-click** (or **⌃⌥V**) opens the list; there, click a row or press **1–9** / **↑↓ ⏎**.
+- **Right-click a row › Pause** (until you resume it, for 1 hour, or until tomorrow morning), or select it
+  and press **P**, to park a session you're waiting on or don't want to deal with now. It stays in its place
+  but greyed out (dot, row, floating panel, phone), sends no notifications or reminders, and its waiting
+  doesn't count in Today. Resume from the same menu (or P). Pauses survive restarts; timed ones end by themselves.
 - **Right-click a row › Rename…** to give a session your own name (kept while it runs, and across
   `--resume` when the session id is kept).
 - **⊕ in the list header** starts a new session: pick a recent project (from your running sessions, Claude

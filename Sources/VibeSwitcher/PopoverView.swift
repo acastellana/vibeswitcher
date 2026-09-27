@@ -20,6 +20,8 @@ struct PopoverView: View {
     var onNewSession: (Agent, String?) -> Void = { _, _ in }
     var onEditCommands: () -> Void = {}
     var onPhoneAccess: () -> Void = {}
+    var onPause: (Session, PauseStore.Duration) -> Void = { _, _ in }
+    var onResume: (Session) -> Void = { _ in }
     /// Rendered as the docked sidebar instead of the menu bar popover.
     var isSidebar = false
 
@@ -44,6 +46,16 @@ struct PopoverView: View {
                             .onHover { if $0 { state.selectedIndex = index } }
                             .contextMenu {
                                 Button("Switch to Session") { onOpen(session) }
+                                Divider()
+                                if session.isPaused {
+                                    Button("Resume") { onResume(session) }
+                                } else {
+                                    Menu("Pause") {
+                                        Button("Until I Resume It") { onPause(session, .indefinitely) }
+                                        Button("For 1 Hour") { onPause(session, .hours(1)) }
+                                        Button("Until Tomorrow Morning") { onPause(session, .untilTomorrowMorning) }
+                                    }
+                                }
                                 Divider()
                                 Button("Rename…") { onRename(session) }
                                 if session.customName != nil {
@@ -81,7 +93,7 @@ struct PopoverView: View {
             newSessionMenu
             Spacer()
             ForEach([SessionStatus.needsInput, .working, .background, .done], id: \.self) { status in
-                let count = store.sessions.filter { $0.status == status }.count
+                let count = store.sessions.filter { $0.status == status && !$0.isPaused }.count
                 if count > 0 {
                     HStack(spacing: 4) {
                         Circle().fill(status.color).frame(width: 8, height: 8)
@@ -90,6 +102,15 @@ struct PopoverView: View {
                     }
                     .help("\(count) \(status.label.lowercased())")
                 }
+            }
+            let paused = store.sessions.filter(\.isPaused).count
+            if paused > 0 {
+                HStack(spacing: 3) {
+                    Image(systemName: "pause.circle").imageScale(.small)
+                    Text(isSidebar ? "\(paused)" : "\(paused) paused").fixedSize()
+                }
+                .font(.caption).foregroundStyle(.secondary)
+                .help("\(paused) paused: no notifications until you resume them")
             }
         }
         .padding(.horizontal, 12).padding(.vertical, 10)
@@ -172,7 +193,7 @@ struct PopoverView: View {
                 Button("Exit Sidebar Mode") { preferences.sidebarMode = false }
                     .buttonStyle(.borderless).controlSize(.small)
             } else {
-                Text("Click a dot to switch · right-click or ⌃⌥V for this list · 1–9").font(.caption2).foregroundStyle(.tertiary)
+                Text("Click a dot to switch · ⌃⌥V for this list · 1–9 · P pauses").font(.caption2).foregroundStyle(.tertiary)
             }
             Spacer()
             Menu {
@@ -284,7 +305,7 @@ struct SessionRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            NumberBadge(number: index + 1, status: session.status, isCurrent: session.isCurrent)
+            NumberBadge(number: index + 1, status: session.status, isCurrent: session.isCurrent, isPaused: session.isPaused)
                 .padding(.top, 1)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -307,9 +328,16 @@ struct SessionRow: View {
                             .background(Capsule().fill(Color.primary.opacity(0.08)))
                             .help("The Terminal tab you're looking at right now")
                     }
+                    if session.isPaused {
+                        Label(compact ? "" : "Paused", systemImage: "pause.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Capsule().fill(Color.primary.opacity(0.08)))
+                            .help(Self.pauseHelp(session.pausedUntil))
+                    }
                     Spacer(minLength: 6)
                     HStack(spacing: 4) {
-                        if !compact { Text(session.status.label).foregroundStyle(session.status.color) }
+                        if !compact { Text(session.status.label).foregroundStyle(session.isPaused ? Color.secondary : session.status.color) }
                         if session.statusSince > Date.distantPast.addingTimeInterval(1) {
                             TimelineView(.periodic(from: .now, by: 1)) { context in
                                 Text(Self.elapsed(from: session.statusSince, to: context.date))
@@ -345,6 +373,8 @@ struct SessionRow: View {
                         .lineLimit(session.status == .needsInput ? 2 : 1)
                 }
             }
+            // Paused: still readable, clearly set aside.
+            .opacity(session.isPaused ? 0.5 : 1)
         }
         .padding(.horizontal, 8).padding(.vertical, 7)
         .background(RoundedRectangle(cornerRadius: 6).fill(isSelected ? Color.accentColor.opacity(0.15) : .clear))
@@ -360,6 +390,14 @@ struct SessionRow: View {
               + (session.onCurrentDesktop ? " · on this desktop" : ""))
     }
 
+    static func pauseHelp(_ until: Date?) -> String {
+        guard let until, until != .distantFuture else { return "Paused until you resume it (right-click › Resume, or P)" }
+        let when = Calendar.current.isDateInToday(until)
+            ? until.formatted(date: .omitted, time: .shortened)
+            : until.formatted(date: .abbreviated, time: .shortened)
+        return "Paused until \(when): no notifications or reminders"
+    }
+
     static func elapsed(from start: Date, to now: Date) -> String {
         let seconds = max(0, Int(now.timeIntervalSince(start)))
         if seconds < 60 { return "\(seconds)s" }
@@ -373,17 +411,20 @@ private struct NumberBadge: View {
     let number: Int
     let status: SessionStatus
     var isCurrent = false
+    var isPaused = false
 
     var body: some View {
         ZStack {
-            if status == .unknown {
+            if isPaused {
+                Circle().fill(Color(nsColor: Session.pausedNSColor))
+            } else if status == .unknown {
                 Circle().stroke(status.color, lineWidth: 1.5)
             } else {
                 Circle().fill(status.color)
             }
             Text("\(number)")
                 .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(status == .unknown || status == .idle ? Color.primary : Color.white)
+                .foregroundStyle(isPaused || status == .unknown || status == .idle ? Color.primary : Color.white)
         }
         .frame(width: 20, height: 20)
         .overlay {
@@ -392,7 +433,7 @@ private struct NumberBadge: View {
             }
         }
         .overlay {
-            if status == .working {
+            if status == .working, !isPaused {
                 Circle().stroke(status.color.opacity(0.35), lineWidth: 3).frame(width: 25, height: 25)
             }
         }

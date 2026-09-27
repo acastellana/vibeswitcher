@@ -1,7 +1,7 @@
 :root {
   color-scheme: light dark;
   --bg: #f4f4f6; --card: #ffffff; --text: #1c1c1e; --muted: #6e6e73; --line: rgba(0,0,0,0.08);
-  --accent: #0a84ff; --warn: #ff453a; --screen-bg: #1c1e22; --screen-text: #e8e8ea;
+  --accent: #0a84ff; --warn: #ff453a; --paused: rgba(142,142,147,0.3); --screen-bg: #1c1e22; --screen-text: #e8e8ea;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #111214; --card: #1c1e22; --text: #f2f2f4; --muted: #9a9aa0; --line: rgba(255,255,255,0.08); }
@@ -79,3 +79,8 @@ details#today summary span.muted { font-weight: 400; text-align: right; }
 .reply input { flex: 1; }
 .offline { position: sticky; top: 0; z-index: 1; background: #ff9f0a; color: #1c1c1e; font-size: 13px;
   font-weight: 600; padding: 8px 12px; text-align: center; }
+.row.paused .text { opacity: 0.5; }
+.badge.paused { color: var(--text); opacity: 0.8; }
+.pausedTag { flex: none; font-size: 10px; font-weight: 700; color: var(--muted); }
+.pause { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0 0 8px; font-size: 13px; }
+.pause button.small { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 5px 10px; font-size: 13px; }

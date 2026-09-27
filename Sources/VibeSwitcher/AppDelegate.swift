@@ -72,7 +72,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                                onResetName: { [weak self] in self?.store.rename($0, to: nil) },
                                onNewSession: { [weak self] in self?.newSession(agent: $0, in: $1) },
                                onEditCommands: { [weak self] in self?.editLaunchCommands() },
-                               onPhoneAccess: { [weak self] in self?.showPhoneAccess() })
+                               onPhoneAccess: { [weak self] in self?.showPhoneAccess() },
+                               onPause: { [weak self] in self?.store.pause($0, for: $1) },
+                               onResume: { [weak self] in self?.store.resume($0) })
         makePopoverContent = { AnyView(view) }
         var sidebarView = view
         sidebarView.isSidebar = true
@@ -81,7 +83,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             onOpen: sidebarView.onOpen, onInstallHooks: sidebarView.onInstallHooks, onQuit: sidebarView.onQuit,
             onRename: sidebarView.onRename, onResetName: sidebarView.onResetName,
             onNewSession: sidebarView.onNewSession, onEditCommands: sidebarView.onEditCommands,
-            onPhoneAccess: sidebarView.onPhoneAccess, isSidebar: true)))
+            onPhoneAccess: sidebarView.onPhoneAccess, onPause: sidebarView.onPause, onResume: sidebarView.onResume,
+            isSidebar: true)))
         // Windows hidden by the earlier sidebar mode (or a crash during it) always come back.
         DispatchQueue.global(qos: .utility).async { SidebarWorkspace.restoreHiddenWindows() }
         // Desktop switched: refresh which session is "here" and show the sidebar for a moment.
@@ -133,7 +136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .receive(on: RunLoop.main)
             .sink { [weak self] sessions in
                 guard let self else { return }
-                let signature = sessions.map { "\($0.status.rawValue):\($0.isCurrent)" }.joined(separator: ",")
+                let signature = sessions.map { "\($0.status.rawValue):\($0.isCurrent):\($0.isPaused)" }.joined(separator: ",")
                 if signature != self.iconSignature {
                     self.iconSignature = signature
                     self.statusItem.button?.image = StatusIcon.image(for: sessions)
@@ -226,7 +229,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         guard store.sessions.indices.contains(index) else { return "" }
         let session = store.sessions[index]
         let task = session.task.map { "\n\($0)" } ?? ""
-        return "\(index + 1). \(session.displayName) · \(session.status.label)\(task)\nClick to switch · right-click for the list"
+        let paused = session.isPaused ? " · paused" : ""
+        return "\(index + 1). \(session.displayName) · \(session.status.label)\(paused)\(task)\nClick to switch · right-click for the list"
     }
 
     /// Whether macOS is actually showing our menu bar icon. When the right side of the menu bar
@@ -278,8 +282,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         store.refresh(forceTerminal: true)
         notifier?.refreshAuthorization()
         loadRecentProjects()
-        popoverState.selectedIndex = store.sessions.firstIndex { $0.status == .needsInput }
-            ?? store.sessions.firstIndex { $0.status == .done } ?? 0
+        popoverState.selectedIndex = store.sessions.firstIndex { $0.status == .needsInput && !$0.isPaused }
+            ?? store.sessions.firstIndex { $0.status == .done && !$0.isPaused } ?? 0
         hostingView.rootView = makePopoverContent()
         fitPopover()
         NSApp.activate()
@@ -330,6 +334,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 }
             case kVK_Escape:
                 self.popover.performClose(nil)
+            case kVK_ANSI_P where event.modifierFlags.intersection([.command, .control, .option]).isEmpty:
+                // P: pause / resume the selected session.
+                guard sessions.indices.contains(self.popoverState.selectedIndex) else { return event }
+                let session = sessions[self.popoverState.selectedIndex]
+                session.isPaused ? self.store.resume(session) : self.store.pause(session, for: .indefinitely)
             default:
                 guard let digit = event.charactersIgnoringModifiers.flatMap(Int.init), (1...9).contains(digit),
                       sessions.indices.contains(digit - 1) else { return event }
@@ -448,7 +457,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
 
     private static func tooltip(for sessions: [Session]) -> String {
         guard !sessions.isEmpty else { return "VibeSwitcher: no agent sessions" }
-        return sessions.map { "\($0.status.label): \($0.title)" }.joined(separator: "\n")
+        return sessions.map { "\($0.status.label)\($0.isPaused ? " (paused)" : ""): \($0.title)" }.joined(separator: "\n")
     }
 }
 
