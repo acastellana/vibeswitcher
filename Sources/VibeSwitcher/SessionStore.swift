@@ -75,15 +75,40 @@ final class SessionStore: ObservableObject {
     }
 
     /// Gives a session your own name (nil or empty resets it to the project name).
+    /// Minimize the session's window when pausing it (only if it's alone in that window).
+    var minimizeOnPause = true
+    /// Windows minimized by a pause, by session key, so resuming brings back exactly those.
+    private var minimizedByPause: [String: Int] =
+        (UserDefaults.standard.dictionary(forKey: "pauseMinimizedWindows") as? [String: Int]) ?? [:]
+
     /// Parks a session: greyed out, no notifications or reminders until it's resumed (or the time's up).
     func pause(_ session: Session, for duration: PauseStore.Duration) {
         pauses.pause(session.nameKeys, for: duration)
         refresh()
+        guard minimizeOnPause, session.inTerminalApp, !session.isPaused else { return }
+        let keys = session.nameKeys
+        DispatchQueue.global(qos: .userInitiated).async {
+            guard let windowID = TerminalBridge.minimizeIfAlone(tty: session.tty) else { return }
+            DispatchQueue.main.async {
+                for key in keys { self.minimizedByPause[key] = windowID }
+                self.saveMinimized()
+            }
+        }
     }
 
+    /// Resuming restores a window the pause minimized. (A timed pause running out doesn't: the
+    /// window stays in the Dock rather than popping up unannounced; opening the session restores it.)
     func resume(_ session: Session) {
         pauses.resume(session.nameKeys)
+        let windowID = session.nameKeys.lazy.compactMap { self.minimizedByPause[$0] }.first
+        session.nameKeys.forEach { minimizedByPause[$0] = nil }
+        saveMinimized()
         refresh()
+        if let windowID { DispatchQueue.global(qos: .userInitiated).async { TerminalBridge.unminimize(windowID: windowID) } }
+    }
+
+    private func saveMinimized() {
+        UserDefaults.standard.set(minimizedByPause, forKey: "pauseMinimizedWindows")
     }
 
     func rename(_ session: Session, to name: String?) {
@@ -277,6 +302,11 @@ final class SessionStore: ObservableObject {
         recordLedger(result, now: now, userPresent: present)
         names.prune(liveKeys: Set(result.flatMap(\.nameKeys)))
         pauses.prune(liveKeys: Set(result.flatMap(\.nameKeys)), now: now)
+        let liveKeys = Set(result.flatMap(\.nameKeys))
+        if minimizedByPause.keys.contains(where: { $0.hasPrefix("proc:") && !liveKeys.contains($0) }) {
+            minimizedByPause = minimizedByPause.filter { !$0.key.hasPrefix("proc:") || liveKeys.contains($0.key) }
+            saveMinimized()
+        }
         quietClaudeTTYs = quiet
 
         let frames = result.compactMap { $0.screenPosition?.frame }

@@ -202,6 +202,7 @@ struct PopoverView: View {
                 Toggle("Notify when a session finishes", isOn: $preferences.notifyDone)
                 Toggle("Play sound when a session needs input", isOn: $preferences.playSound)
                 Toggle("Remind me about waiting or stuck sessions", isOn: $preferences.notifyReminders)
+                Toggle("Minimize a session's window when pausing it", isOn: $preferences.minimizeOnPause)
                 Toggle("Sidebar mode", isOn: $preferences.sidebarMode)
                 Toggle("Auto-hide sidebar (show at right edge)", isOn: $preferences.sidebarAutoHide)
                     .disabled(!preferences.sidebarMode)

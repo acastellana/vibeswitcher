@@ -13,6 +13,8 @@ final class Preferences: ObservableObject {
     @Published var playSound: Bool { didSet { defaults.set(playSound, forKey: "playSound") } }
     /// One reminder when a session has waited on you 10+ min, or shown no progress for 15+ min.
     @Published var notifyReminders: Bool { didSet { defaults.set(notifyReminders, forKey: "notifyReminders") } }
+    /// Pausing a session minimizes its window (when it's the only tab there); resuming restores it.
+    @Published var minimizeOnPause: Bool { didSet { defaults.set(minimizeOnPause, forKey: "minimizeOnPause") } }
     /// Docked session list on the right; picking a session shows only its window, on this desktop.
     @Published var sidebarMode: Bool { didSet { defaults.set(sidebarMode, forKey: "sidebarMode") } }
     /// Sidebar slides in at the right screen edge instead of staying docked.
@@ -31,12 +33,13 @@ final class Preferences: ObservableObject {
     }
 
     init() {
-        defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true, "playSound": true, "notifyReminders": true, "sidebarAutoHide": true,
+        defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true, "playSound": true, "notifyReminders": true, "minimizeOnPause": true, "sidebarAutoHide": true,
                                      "claudeCommand": "claude", "codexCommand": "codex"])
         notifyNeedsInput = defaults.bool(forKey: "notifyNeedsInput")
         notifyDone = defaults.bool(forKey: "notifyDone")
         playSound = defaults.bool(forKey: "playSound")
         notifyReminders = defaults.bool(forKey: "notifyReminders")
+        minimizeOnPause = defaults.bool(forKey: "minimizeOnPause")
         claudeCommand = defaults.string(forKey: "claudeCommand") ?? "claude"
         sidebarMode = defaults.bool(forKey: "sidebarMode")
         sidebarAutoHide = defaults.bool(forKey: "sidebarAutoHide")

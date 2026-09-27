@@ -94,6 +94,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             self.store.refresh(forceTerminal: true)
             if self.preferences.sidebarMode { self.sidebar.flash() }
         }
+        preferences.$minimizeOnPause
+            .sink { [weak self] enabled in self?.store.minimizeOnPause = enabled }
+            .store(in: &cancellables)
         preferences.$sidebarAutoHide
             .receive(on: RunLoop.main)
             .sink { [weak self] autoHide in self?.sidebar.autoHide = autoHide }

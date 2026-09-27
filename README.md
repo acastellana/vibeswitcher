@@ -23,7 +23,9 @@ While a session runs a tool, its row shows what and for how long ("⚙ Run unit 
 - **Right-click a row › Pause** (until you resume it, for 1 hour, until tomorrow morning, or for a week), or select it
   and press **P**, to park a session you're waiting on or don't want to deal with now. It stays in its place
   but greyed out (dot, row, floating panel, phone), sends no notifications or reminders, and its waiting
-  doesn't count in Today. Resume from the same menu (or P). Pauses survive restarts; timed ones end by themselves.
+  doesn't count in Today. Pausing also minimizes the session's window to the Dock when it's the only tab there
+  (⚙︎ to turn off); Resume brings it back. Pauses survive restarts; timed ones end by themselves (the window
+  stays in the Dock then, instead of popping up). Resume from the same menu (or P).
 - **Right-click a row › Rename…** to give a session your own name (kept while it runs, and across
   `--resume` when the session id is kept).
 - **⊕ in the list header** starts a new session: pick a recent project (from your running sessions, Claude

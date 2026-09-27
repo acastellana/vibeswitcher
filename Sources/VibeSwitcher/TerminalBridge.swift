@@ -207,6 +207,38 @@ enum TerminalBridge {
         return result.status == 0 && (strict ? output == "ok" : output.hasPrefix("ok"))
     }
 
+    /// Minimizes the window running `tty` if that session is its only tab (minimizing a shared window
+    /// would hide the other tabs too). Returns the window id when it did.
+    static func minimizeIfAlone(tty: String) -> Int? {
+        guard isRunning, isValidTTY(tty) else { return nil }
+        let result = runAppleScript("""
+        tell application "Terminal"
+            repeat with w in windows
+                try
+                    if (count of tabs of w) is 1 and ((tty of tab 1 of w) as text) is "/dev/\(tty)" then
+                        set miniaturized of w to true
+                        return (id of w) as text
+                    end if
+                end try
+            end repeat
+        end tell
+        return ""
+        """)
+        return Int(result.output.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+
+    /// Brings back a window minimized by `minimizeIfAlone` (if it still exists and is still minimized).
+    static func unminimize(windowID: Int) {
+        guard isRunning else { return }
+        _ = runAppleScript("""
+        tell application "Terminal"
+            try
+                if miniaturized of window id \(windowID) then set miniaturized of window id \(windowID) to false
+            end try
+        end tell
+        """)
+    }
+
     /// The tty of the tab in Terminal's front window, e.g. "ttys011".
     static func frontTTY() -> String? {
         let result = runAppleScript(#"tell application "Terminal" to return (tty of selected tab of front window) as text"#)
