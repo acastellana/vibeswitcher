@@ -112,6 +112,7 @@ enum TerminalBridge {
 
     /// Visible text of the tabs on `ttys` (Claude's footer shows background shells/agents there).
     static func screens(for ttys: Set<String>) -> [String: String] {
+        let ttys = ttys.filter(isValidTTY)
         guard isRunning, !ttys.isEmpty else { return [:] }
         let list = ttys.map { "\"/dev/\($0)\"" }.joined(separator: ", ")
         let script = """
@@ -152,9 +153,11 @@ enum TerminalBridge {
     /// Selects the tab running on `tty` and makes its window Terminal's front window. The script's own
     /// `activate` only works when the caller is frontmost (e.g. from a shell); from the menu bar app,
     /// call `HostApp.bringToFrontAndWait` first, because macOS ignores activation from background apps.
+    /// `strict`: never use the hide/re-show fallback (it can strand windows across desktops) and only
+    /// report success when the tab is verified to be in front, as typing into it requires.
     @discardableResult
-    static func focus(tty: String) -> Bool {
-        guard isRunning else { return false }
+    static func focus(tty: String, strict: Bool = false) -> Bool {
+        guard isRunning, isValidTTY(tty) else { return false }
         // Windows are addressed by id, not position: activating Terminal reorders its windows, so a
         // positional reference ("window 16") can end up pointing at a neighbour. The final check
         // re-raises once if something else still ended up in front.
@@ -187,6 +190,7 @@ enum TerminalBridge {
             activate
             delay 0.05
             if (tty of selected tab of front window) is target then return "ok"
+            if \(strict) then return "unverified"
             -- Windows tiled side by side (macOS window tiling) keep their partner on top of
             -- `set index`; hiding and re-showing the window does reorder it.
             set visible of w to false
@@ -199,7 +203,20 @@ enum TerminalBridge {
         end tell
         """
         let result = runAppleScript(script)
-        return result.status == 0 && result.output.hasPrefix("ok")
+        let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
+        return result.status == 0 && (strict ? output == "ok" : output.hasPrefix("ok"))
+    }
+
+    /// The tty of the tab in Terminal's front window, e.g. "ttys011".
+    static func frontTTY() -> String? {
+        let result = runAppleScript(#"tell application "Terminal" to return (tty of selected tab of front window) as text"#)
+        guard result.status == 0 else { return nil }
+        return result.output.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "/dev/", with: "")
+    }
+
+    /// TTY names are interpolated into AppleScript; accept only the shape macOS uses.
+    static func isValidTTY(_ tty: String) -> Bool {
+        tty.range(of: #"^ttys[0-9]{1,4}$"#, options: .regularExpression) != nil
     }
 
     /// Runs AppleScript through `osascript` so it is safe to call off the main thread.

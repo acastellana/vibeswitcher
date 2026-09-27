@@ -672,3 +672,106 @@ struct RedactionTests {
         #expect(request == "Run: STRIPE_SECRET=••• npm run seed")
     }
 }
+
+import CryptoKit
+
+struct WebPushTests {
+    // RFC 8291, Section 5 and Appendix A.
+    @Test func matchesTheRFCExample() throws {
+        let subscription = WebPush.Subscription(
+            endpoint: "https://fcm.googleapis.com/fcm/send/x",
+            p256dh: "BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4",
+            auth: "BTBZMqHH6r4Tts7J_aSIgg")
+        let serverKey = try P256.KeyAgreement.PrivateKey(
+            rawRepresentation: #require(Base64URL.decode("yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw")))
+        let body = try WebPush.encrypt(Data("When I grow up, I want to be a watermelon".utf8), for: subscription,
+                                       serverKey: serverKey, salt: #require(Base64URL.decode("DGv6ra1nlYgDCS1FRnbzlw")))
+        let header = try #require(Base64URL.decode("""
+            DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z 9KsN6nGRTbVYI_c7VJSPQTBtkgcy27ml
+            mlMoZIIgDll6e3vCYLocInmYWAmS6Tlz AC8wEqKK6PBru3jl7A8
+            """))
+        let ciphertext = try #require(Base64URL.decode("""
+            8pfeW0KbunFT06SuDKoJH9Ql87S1QUrd irN6GcG7sFz1y1sqLgVi1VhjVkHsUoEs
+            bI_0LpXMuGvnzQ
+            """))
+        #expect(header.count == 86)
+        #expect(body.prefix(86) == header)
+        #expect(body.dropFirst(86) == ciphertext)
+    }
+
+    @Test func vapidTokenVerifiesWithOurPublicKey() throws {
+        let key = P256.Signing.PrivateKey()
+        let header = try WebPush.vapidAuthorization(endpoint: #require(URL(string: "https://fcm.googleapis.com/fcm/send/abc")),
+                                                    key: key, subject: "mailto:push@example.com",
+                                                    now: Date(timeIntervalSince1970: 1_000_000))
+        let token = try #require(header.split(separator: " ").dropFirst().first).dropLast()   // "t=…,"
+        let parts = token.dropFirst(2).split(separator: ".")
+        #expect(parts.count == 3)
+        let claims = try JSONSerialization.jsonObject(with: #require(Base64URL.decode(String(parts[1])))) as? [String: Any]
+        #expect(claims?["aud"] as? String == "https://fcm.googleapis.com")
+        #expect(claims?["exp"] as? Int == 1_000_000 + 12 * 3600)
+        let signature = try P256.Signing.ECDSASignature(rawRepresentation: #require(Base64URL.decode(String(parts[2]))))
+        #expect(key.publicKey.isValidSignature(signature, for: Data("\(parts[0]).\(parts[1])".utf8)))
+    }
+
+    @Test func onlyDeliversToKnownPushServices() {
+        #expect((try? WebPush.validatedEndpoint("https://fcm.googleapis.com/fcm/send/x")) != nil)
+        #expect((try? WebPush.validatedEndpoint("https://updates.push.services.mozilla.com/wpush/v2/x")) != nil)
+        #expect((try? WebPush.validatedEndpoint("http://fcm.googleapis.com/x")) == nil)
+        #expect((try? WebPush.validatedEndpoint("https://fcm.googleapis.com.evil.example/x")) == nil)
+        #expect((try? WebPush.validatedEndpoint("https://127.0.0.1/x")) == nil)
+    }
+}
+
+struct RemoteAuthTests {
+    @Test func pairingCodesAreSingleSessionAndRateLimited() {
+        var code = PairingCode(code: "ABCD2345", expires: Date(timeIntervalSince1970: 1000))
+        let expired = code.check("abcd-2345", now: Date(timeIntervalSince1970: 1001))
+        #expect(!expired)
+        code = PairingCode(code: "ABCD2345", expires: Date(timeIntervalSince1970: 1000))
+        let accepted = code.check("abcd-2345", now: Date(timeIntervalSince1970: 999))
+        #expect(accepted)
+        var guessed = PairingCode(code: "ABCD2345", expires: .distantFuture)
+        for _ in 0..<PairingCode.maxAttempts {
+            let wrong = guessed.check("WRONG123")
+            #expect(!wrong)
+        }
+        let afterLockout = guessed.check("ABCD2345")
+        #expect(!afterLockout)   // locked after too many wrong guesses
+        #expect(PairingCode.generate().code.count == 8)
+    }
+
+    @Test func requestsNeedTheTokenAndTheSameTailscaleAccount() {
+        let token = RemoteAuth.newToken()
+        let device = PairedDevice(id: "d1", name: "Pixel", tokenHash: RemoteAuth.hash(token),
+                                  tailscaleLogin: "me@example.com", pairedAt: Date())
+        #expect(RemoteAuth.authenticate(authorization: "Bearer \(token)", login: "me@example.com", devices: [device])?.id == "d1")
+        #expect(RemoteAuth.authenticate(authorization: "Bearer \(token)", login: nil, devices: [device]) == nil)
+        #expect(RemoteAuth.authenticate(authorization: "Bearer \(token)", login: "other@example.com", devices: [device]) == nil)
+        #expect(RemoteAuth.authenticate(authorization: "Bearer nope", login: "me@example.com", devices: [device]) == nil)
+        #expect(RemoteAuth.authenticate(authorization: token, login: "me@example.com", devices: [device]) == nil)
+    }
+}
+
+struct HTTPParserTests {
+    @Test func parsesRequestsWithBodies() {
+        let raw = "POST /api/pair?x=1 HTTP/1.1\r\nHost: mac\r\nContent-Length: 4\r\nTailscale-User-Login: me@example.com\r\n\r\nab"
+        #expect(HTTPParser.parse(Data(raw.utf8)) == .incomplete)
+        guard case .complete(let request) = HTTPParser.parse(Data((raw + "cd").utf8)) else {
+            Issue.record("not parsed"); return
+        }
+        #expect(request.method == "POST")
+        #expect(request.path == "/api/pair")
+        #expect(request.query == ["x": "1"])
+        #expect(request.header("TAILSCALE-USER-LOGIN") == "me@example.com")
+        #expect(request.body == Data("abcd".utf8))
+    }
+
+    @Test func rejectsWhatWeDontServe() {
+        #expect(HTTPParser.parse(Data("PUT / HTTP/1.1\r\n\r\n".utf8)) == .invalid)
+        #expect(HTTPParser.parse(Data("GET http://evil/ HTTP/1.1\r\n\r\n".utf8)) == .invalid)
+        #expect(HTTPParser.parse(Data("POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n".utf8)) == .invalid)
+        #expect(HTTPParser.parse(Data("POST / HTTP/1.1\r\nContent-Length: 999999\r\n\r\n".utf8)) == .tooLarge)
+        #expect(HTTPParser.parse(Data(String(repeating: "a", count: 20_000).utf8)) == .tooLarge)
+    }
+}

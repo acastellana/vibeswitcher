@@ -88,6 +88,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     private let center = UNUserNotificationCenter.current()
     private let preferences: Preferences
     var onOpen: ((String) -> Void)?
+    /// Every alert that passed the notification settings (title, text, tty), whether or not the Mac
+    /// may show banners: Phone Access mirrors them.
+    var onAlert: ((String, String, String) -> Void)?
     /// nil until the first check, so a permission that is already on doesn't trigger the test banner.
     private var allowed: Bool?
 
@@ -140,6 +143,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let needsInput = session.status == .needsInput
         guard needsInput ? preferences.notifyNeedsInput : preferences.notifyDone else { return }
         AppStatus.extras["lastAlert"] = "\(session.status.rawValue) \(session.tty) \(ISO8601DateFormatter().string(from: Date()))"
+        let title = needsInput ? "\(session.displayName) needs your input" : "\(session.displayName) is done"
+        onAlert?(title, [session.task, session.detail].compactMap { $0 }.joined(separator: "\n"), session.tty)
         // Without notification permission, at least make a sound when something is blocked on you.
         guard allowed == true else {
             if needsInput, preferences.playSound { NSSound(named: "Ping")?.play() }
@@ -156,8 +161,10 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     }
 
     func post(_ nudge: Nudge, for session: Session) {
-        guard preferences.notifyReminders, allowed == true else { return }
+        guard preferences.notifyReminders else { return }
         AppStatus.extras["lastAlert"] = "reminder \(session.tty) \(ISO8601DateFormatter().string(from: Date()))"
+        defer { onAlert?(nudgeTitle(nudge, session), session.activity ?? session.detail ?? "", session.tty) }
+        guard allowed == true else { return }
         let content = UNMutableNotificationContent()
         let task = session.task.map { " · \($0)" } ?? ""
         switch nudge {
@@ -179,6 +186,24 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         }
         content.userInfo = ["tty": session.tty]
         center.add(UNNotificationRequest(identifier: session.tty, content: content, trigger: nil))
+    }
+
+    private func nudgeTitle(_ nudge: Nudge, _ session: Session) -> String {
+        switch nudge {
+        case .stillWaiting(let minutes): return "\(session.displayName) is still waiting for you (\(minutes) min)"
+        case .stalled(let minutes):
+            return session.activity != nil ? "\(session.displayName): one command running for \(minutes) min"
+                                           : "\(session.displayName) may be stuck (\(minutes) min)"
+        }
+    }
+
+    /// A plain informational banner (pairings, remote input).
+    func postInfo(title: String, body: String) {
+        guard allowed == true else { return }
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        center.add(UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil))
     }
 
     func clear(tty: String) {

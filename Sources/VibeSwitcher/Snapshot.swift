@@ -43,6 +43,14 @@ enum Snapshot {
         sidebarHost.layoutSubtreeIfNeeded()
         write(view: sidebarHost, to: "\(outputDirectory)/sidebar.png")
 
+        let phoneHost = NSHostingView(rootView: PhoneAccessView(access: .preview(store: store))
+            .background(Color(nsColor: .windowBackgroundColor)))
+        phoneHost.frame = NSRect(origin: .zero, size: phoneHost.fittingSize)
+        let phoneWindow = NSWindow(contentRect: phoneHost.frame, styleMask: .borderless, backing: .buffered, defer: false)
+        phoneWindow.contentView = phoneHost
+        phoneHost.layoutSubtreeIfNeeded()
+        write(view: phoneHost, to: "\(outputDirectory)/phone-access.png")
+
         let icon = StatusIcon.image(for: store.sessions)
         for (name, appearance, gray) in [("menubar-icon-dark", NSAppearance.Name.darkAqua, 0.15),
                                          ("menubar-icon-light", .aqua, 0.92)] {

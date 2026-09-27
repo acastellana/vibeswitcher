@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1c1e22">
+<title>VibeSwitcher</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<link rel="stylesheet" href="/style.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header id="top">
+  <button id="back" class="icon" hidden aria-label="Back">‹</button>
+  <div class="titles">
+    <h1 id="title">VibeSwitcher</h1>
+    <div id="subtitle" class="muted"></div>
+  </div>
+  <button id="bell" class="icon" hidden aria-label="Notifications">🔔</button>
+</header>
+
+<main>
+  <section id="pair" hidden>
+    <h2>Pair this phone</h2>
+    <p class="muted">On your Mac: VibeSwitcher › ⚙︎ › Phone Access… › Pair a phone. Scan the code there, or type it here.</p>
+    <form id="pairForm">
+      <input id="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false"
+             placeholder="ABCD-2345" maxlength="12" required>
+      <input id="deviceName" maxlength="40" placeholder="Name for this phone">
+      <button type="submit" class="primary">Pair</button>
+    </form>
+    <p id="pairError" class="error" hidden></p>
+  </section>
+
+  <section id="list" hidden>
+    <div id="counts" class="counts"></div>
+    <div id="sessions"></div>
+    <p id="empty" class="muted center" hidden>No Claude Code or Codex sessions running.</p>
+    <details id="today" hidden>
+      <summary><span>Today</span><span id="todayLine" class="muted"></span></summary>
+      <div id="todayRows"></div>
+    </details>
+    <div id="notifyCard" class="card" hidden>
+      <p>Get a notification when a session needs you or finishes.</p>
+      <button id="notifyOn" class="primary">Turn on notifications</button>
+      <p id="notifyError" class="error" hidden></p>
+    </div>
+    <p class="muted small center"><button id="unpair" class="link">Unpair this phone</button></p>
+  </section>
+
+  <section id="session" hidden>
+    <div id="sessionMeta" class="meta"></div>
+    <pre id="screen" class="screen" aria-live="off"></pre>
+    <p id="screenError" class="error" hidden></p>
+    <div id="controls" hidden>
+      <div class="keys">
+        <button data-key="escape">Esc</button>
+        <button data-text="1">1</button>
+        <button data-text="2">2</button>
+        <button data-text="3">3</button>
+        <button data-key="up">↑</button>
+        <button data-key="down">↓</button>
+        <button data-key="enter">⏎</button>
+        <button data-key="interrupt">⌃C</button>
+      </div>
+      <form id="replyForm" class="reply">
+        <input id="reply" placeholder="Reply…" autocomplete="off" maxlength="2000" enterkeyhint="send">
+        <button type="submit" class="primary">Send</button>
+      </form>
+      <p id="inputError" class="error" hidden></p>
+    </div>
+    <p id="inputOff" class="muted small" hidden>Replying is off. Turn it on on the Mac: Phone Access › Allow replies.</p>
+  </section>
+</main>
+</body>
+</html>

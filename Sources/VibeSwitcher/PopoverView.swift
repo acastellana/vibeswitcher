@@ -19,6 +19,7 @@ struct PopoverView: View {
     var onResetName: (Session) -> Void = { _ in }
     var onNewSession: (Agent, String?) -> Void = { _, _ in }
     var onEditCommands: () -> Void = {}
+    var onPhoneAccess: () -> Void = {}
     /// Rendered as the docked sidebar instead of the menu bar popover.
     var isSidebar = false
 
@@ -193,6 +194,7 @@ struct PopoverView: View {
                 Toggle("Launch at login", isOn: Binding(get: { preferences.launchAtLogin },
                                                         set: { preferences.setLaunchAtLogin($0) }))
                 Divider()
+                Button("Phone Access…", action: onPhoneAccess)
                 Button("Reinstall hooks", action: onInstallHooks)
                 Button("Quit VibeSwitcher", action: onQuit)
             } label: {

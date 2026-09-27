@@ -43,6 +43,33 @@ notch. VibeSwitcher starts next to the clock, where overflow never reaches (⌘-
 like). If its icon does get hidden, a floating pill with the same numbered dots appears automatically;
 drag it anywhere. Set it to Always / Never in the ⚙︎ menu.
 
+## Phone Access (over Tailscale)
+
+See your sessions on your phone: the list with live status, each session's screen, the Today summary,
+and notifications when a session needs you or finishes. Optionally reply and press keys (Esc, 1–3, ↑↓, ⏎, ⌃C).
+
+1. ⚙︎ › **Phone Access…** › turn it on. It needs Tailscale on this Mac with HTTPS certificates enabled
+   for your tailnet (admin console › DNS). VibeSwitcher runs `tailscale serve --bg --https=8443` for its
+   local server and removes that mapping when you turn Phone Access off or quit.
+2. **Pair a Phone…**: scan the QR code with your phone (Tailscale on), or open the address shown and type
+   the code. Add the page to your home screen, then tap **Turn on notifications**.
+3. To reply from the phone, switch on **Allow replies and key presses** (off by default).
+
+How it's kept safe:
+
+- **Tailnet only.** The server listens on `127.0.0.1`; `tailscale serve` (never Funnel) is the only way in,
+  over HTTPS. Requests must come from this Mac's own Tailscale account, which Tailscale vouches for.
+- **Paired devices only.** Every request needs a device token, handed out once per pairing with a
+  one-time code shown on the Mac (10 minutes, one use, 5 attempts). Only a hash of each token is kept.
+  Remove a device on the Mac or unpair it from the phone; its token stops working immediately.
+- **Replies are remote control.** Your sessions can run commands, so typing is a separate switch. The tab is
+  brought to the front and verified before anything is typed, keys go to Terminal only, and nothing is
+  typed while the Mac is locked. Every pairing and input is written to `~/.vibeswitcher/remote/audit.log`
+  and announced on the Mac.
+- **Minimal data.** Credentials are masked in everything sent to the phone. Notifications are end-to-end
+  encrypted (Web Push, RFC 8291): Google's push service relays them but can't read them. By default the
+  phone is notified only while you're away from the Mac. No page content is cached on the phone.
+
 ## Install
 
 ```sh

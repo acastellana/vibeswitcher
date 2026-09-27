@@ -10,6 +10,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private let preferences = Preferences()
     /// Notifications need an app bundle; `swift run` (no bundle) runs without them instead of crashing.
     private lazy var notifier: Notifier? = Bundle.main.bundleIdentifier == nil ? nil : Notifier(preferences: preferences)
+    private lazy var phoneAccess = PhoneAccess(store: store)
+    private var phoneAccessWindow: NSWindow?
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var hotKey: HotKey?
@@ -48,6 +50,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         }
         store.onAttention = { [weak self] session in self?.notifier?.post(for: session) }
         store.onNudge = { [weak self] session, nudge in self?.notifier?.post(nudge, for: session) }
+        notifier?.onAlert = { [weak self] title, body, tty in self?.phoneAccess.notify(title: title, body: body, tty: tty) }
+        phoneAccess.onEvent = { [weak self] title, body in self?.notifier?.postInfo(title: title, body: body) }
+        phoneAccess.startIfEnabled()
 
         if UserDefaults.standard.object(forKey: Self.positionKey) == nil {
             UserDefaults.standard.set(120.0, forKey: Self.positionKey)
@@ -66,7 +71,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                                onRename: { [weak self] in self?.rename($0) },
                                onResetName: { [weak self] in self?.store.rename($0, to: nil) },
                                onNewSession: { [weak self] in self?.newSession(agent: $0, in: $1) },
-                               onEditCommands: { [weak self] in self?.editLaunchCommands() })
+                               onEditCommands: { [weak self] in self?.editLaunchCommands() },
+                               onPhoneAccess: { [weak self] in self?.showPhoneAccess() })
         makePopoverContent = { AnyView(view) }
         var sidebarView = view
         sidebarView.isSidebar = true
@@ -74,7 +80,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             store: store, state: PopoverState(), preferences: preferences,
             onOpen: sidebarView.onOpen, onInstallHooks: sidebarView.onInstallHooks, onQuit: sidebarView.onQuit,
             onRename: sidebarView.onRename, onResetName: sidebarView.onResetName,
-            onNewSession: sidebarView.onNewSession, onEditCommands: sidebarView.onEditCommands, isSidebar: true)))
+            onNewSession: sidebarView.onNewSession, onEditCommands: sidebarView.onEditCommands,
+            onPhoneAccess: sidebarView.onPhoneAccess, isSidebar: true)))
         // Windows hidden by the earlier sidebar mode (or a crash during it) always come back.
         DispatchQueue.global(qos: .utility).async { SidebarWorkspace.restoreHiddenWindows() }
         // Desktop switched: refresh which session is "here" and show the sidebar for a moment.
@@ -286,6 +293,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         // Never leave session windows hidden behind a closed app.
         SidebarWorkspace.restoreHiddenWindows()
         store.saveLedger()
+        phoneAccess.shutdown()
+    }
+
+    private func showPhoneAccess() {
+        popover.performClose(nil)
+        if phoneAccessWindow == nil {
+            let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            window.title = "Phone Access"
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: PhoneAccessView(access: phoneAccess))
+            window.center()
+            phoneAccessWindow = window
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        phoneAccessWindow?.makeKeyAndOrderFront(nil)
     }
 
     func popoverDidClose(_ notification: Notification) {
