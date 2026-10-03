@@ -37,9 +37,13 @@ enum TailscaleCLI {
     static func status() -> Result<Status, Failure> {
         guard executable != nil else { return .failure(.notInstalled) }
         let result = run(["status", "--json"])
-        guard result.status == 0, let data = result.output.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              json["BackendState"] as? String == "Running",
+        // Tell "couldn't ask Tailscale" apart from "Tailscale says it isn't connected".
+        guard let data = result.output.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let detail = (result.error.isEmpty ? result.output : result.error).trimmingCharacters(in: .whitespacesAndNewlines)
+            return .failure(.command("couldn't read its status (\(detail.isEmpty ? "exit \(result.status)" : String(detail.prefix(160))))"))
+        }
+        guard json["BackendState"] as? String == "Running",
               let me = json["Self"] as? [String: Any],
               let dnsName = (me["DNSName"] as? String)?.trimmingCharacters(in: CharacterSet(charactersIn: ".")),
               let userID = me["UserID"] as? Int,
@@ -83,6 +87,11 @@ enum TailscaleCLI {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
+        // The Mac app's binary is both the GUI and the CLI, and decides from its environment. Launched
+        // from Finder or at login (no terminal), it tries to start the GUI instead and fails.
+        var environment = ProcessInfo.processInfo.environment
+        environment["TAILSCALE_BE_CLI"] = "1"
+        process.environment = environment
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err
