@@ -243,3 +243,246 @@ struct PreviewGateTests {
                                            target: target).value("connection") == "Upgrade")
     }
 }
+
+/// A one-request-per-connection HTTP server for proxy tests. It records each request head, answers with
+/// `reply`, and then closes, or with `echoAfterReply` keeps echoing (an upgraded connection).
+final class FakeUpstream: @unchecked Sendable {
+    private let listener: NWListener
+    private let queue = DispatchQueue(label: "fake-upstream")
+    private var heads: [String] = []
+    var reply = Data("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".utf8)
+    var echoAfterReply = false
+
+    init(host: String = "127.0.0.1") throws {
+        let parameters = NWParameters.tcp
+        parameters.requiredLocalEndpoint = .hostPort(host: NWEndpoint.Host(host), port: .any)
+        listener = try NWListener(using: parameters)
+    }
+
+    func start() async -> UInt16 {
+        await withCheckedContinuation { continuation in
+            var resumed = false
+            listener.stateUpdateHandler = { [listener] state in
+                guard case .ready = state, !resumed else { return }
+                resumed = true
+                continuation.resume(returning: listener.port!.rawValue)
+            }
+            listener.newConnectionHandler = { [weak self] connection in
+                guard let self else { return }
+                connection.start(queue: self.queue)
+                self.readHead(connection, buffer: Data())
+            }
+            listener.start(queue: queue)
+        }
+    }
+
+    var recorded: [String] { queue.sync { heads } }
+    func stop() { listener.cancel() }
+
+    private func readHead(_ connection: NWConnection, buffer: Data) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, done, _ in
+            guard let self else { return }
+            var buffer = buffer
+            if let data { buffer.append(data) }
+            guard let end = buffer.range(of: Data("\r\n\r\n".utf8)) else {
+                if !done { self.readHead(connection, buffer: buffer) }
+                return
+            }
+            self.heads.append(String(decoding: buffer[buffer.startIndex..<end.lowerBound], as: UTF8.self))
+            connection.send(content: self.reply, completion: .contentProcessed { _ in
+                if self.echoAfterReply { self.echo(connection) } else { connection.cancel() }
+            })
+        }
+    }
+
+    private func echo(_ connection: NWConnection) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, done, _ in
+            if let data, !data.isEmpty { connection.send(content: data, completion: .contentProcessed { _ in }) }
+            if done { connection.cancel() } else { self?.echo(connection) }
+        }
+    }
+}
+
+/// Sends `request` to 127.0.0.1:`port`; returns everything received until the server closes.
+func exchange(port: UInt16, _ request: String, timeout: TimeInterval = 5) async -> Data {
+    await withCheckedContinuation { continuation in
+        let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+        let queue = DispatchQueue(label: "test-client")
+        var received = Data()
+        var finished = false
+        func finish() {
+            guard !finished else { return }
+            finished = true
+            connection.cancel()
+            continuation.resume(returning: received)
+        }
+        func read() {
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { data, _, done, error in
+                if let data { received.append(data) }
+                if done || error != nil { finish() } else { read() }
+            }
+        }
+        connection.start(queue: queue)
+        connection.send(content: Data(request.utf8), completion: .contentProcessed { _ in read() })
+        queue.asyncAfter(deadline: .now() + timeout) { finish() }
+    }
+}
+
+/// Sends an upgrade request; once the response head arrives, sends `payload` and waits for it to come back.
+func upgradeExchange(port: UInt16, _ request: String, payload: Data) async -> (head: String, echoed: Data) {
+    await withCheckedContinuation { continuation in
+        let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+        let queue = DispatchQueue(label: "test-upgrade")
+        var buffer = Data()
+        var head: String?
+        var finished = false
+        func finish() {
+            guard !finished else { return }
+            finished = true
+            connection.cancel()
+            continuation.resume(returning: (head ?? String(decoding: buffer, as: UTF8.self), head == nil ? Data() : buffer))
+        }
+        func read() {
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { data, _, done, error in
+                if let data { buffer.append(data) }
+                if head == nil, let end = buffer.range(of: Data("\r\n\r\n".utf8)) {
+                    head = String(decoding: buffer[buffer.startIndex..<end.upperBound], as: UTF8.self)
+                    buffer = Data(buffer[end.upperBound...])
+                    connection.send(content: payload, completion: .contentProcessed { _ in })
+                }
+                if head != nil, buffer.count >= payload.count { return finish() }
+                if done || error != nil { finish() } else { read() }
+            }
+        }
+        connection.start(queue: queue)
+        connection.send(content: Data(request.utf8), completion: .contentProcessed { _ in read() })
+        queue.asyncAfter(deadline: .now() + 5) { finish() }
+    }
+}
+
+struct ProxyStartFailure: Error { let message: String }
+
+struct PreviewProxyTests {
+    static let me = "Tailscale-User-Login: me@example.com\r\n"
+    static let ours = "Cookie: vs_preview_8444=TOK\r\n"
+
+    func startProxy(target: PreviewTarget?, redeemed: (path: String, sessionToken: String)? = nil) async throws -> (PreviewProxy, UInt16) {
+        let proxy = PreviewProxy(label: "test-proxy", context: {
+            PreviewProxy.Context(owner: "me@example.com", ownOrigin: "https://mac.example.ts.net:8444",
+                                 siblingOrigins: Set((8443...8447).map { "https://mac.example.ts.net:\($0)" }), publicPort: 8444)
+        }, redeem: { $0 == "TICKET" ? redeemed : nil }, resolve: { $0 == "TOK" ? target : nil })
+        let port: UInt16 = try await withCheckedThrowingContinuation { continuation in
+            proxy.start(port: 0, callbackQueue: .global(), onReady: { continuation.resume(returning: proxy.port!) },
+                        onFailure: { continuation.resume(throwing: ProxyStartFailure(message: $0)) })
+        }
+        return (proxy, port)
+    }
+
+    func text(_ data: Data) -> String { String(decoding: data, as: UTF8.self) }
+
+    @Test func ticketSetsTheSlotCookieAndRedirects() async throws {
+        let (proxy, port) = try await startProxy(target: nil, redeemed: ("/app?x=1", "TOK"))
+        defer { proxy.stop() }
+        let response = text(await exchange(port: port, "GET /__vibeswitcher/enter?t=TICKET HTTP/1.1\r\n\(Self.me)\r\n"))
+        #expect(response.hasPrefix("HTTP/1.1 302"))
+        #expect(response.contains("Location: /app?x=1\r\n"))
+        #expect(response.contains("Set-Cookie: vs_preview_8444=TOK; Path=/; Secure; HttpOnly; SameSite=Strict\r\n"))
+        let wrong = text(await exchange(port: port, "GET /__vibeswitcher/enter?t=WRONG HTTP/1.1\r\n\(Self.me)\r\n"))
+        #expect(wrong.hasPrefix("HTTP/1.1 403"))
+    }
+
+    @Test func forwardsToTheDevServerWithLocalHeaders() async throws {
+        let upstream = try FakeUpstream()
+        let upstreamPort = await upstream.start()
+        upstream.reply = Data(("HTTP/1.1 302 Found\r\nLocation: http://localhost:\(upstreamPort)/login\r\n"
+                               + "Set-Cookie: sid=1; Domain=localhost; Path=/\r\nContent-Length: 2\r\n\r\nok").utf8)
+        let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstreamPort)", port: Int(upstreamPort))
+        let (proxy, port) = try await startProxy(target: target)
+        defer { proxy.stop(); upstream.stop() }
+        let response = text(await exchange(port: port,
+            "GET /x?y=1 HTTP/1.1\r\nHost: mac.example.ts.net:8444\r\n\(Self.me)Tailscale-User-Name: Me\r\n"
+            + "Origin: https://mac.example.ts.net:8444\r\nCookie: theme=dark; vs_preview_8444=TOK\r\nConnection: keep-alive\r\n\r\n"))
+        let seen = try #require(upstream.recorded.first)
+        #expect(seen.hasPrefix("GET /x?y=1 HTTP/1.1\r\n"))
+        #expect(seen.contains("Host: localhost:\(upstreamPort)"))
+        #expect(seen.contains("Origin: http://localhost:\(upstreamPort)"))
+        #expect(seen.contains("Cookie: theme=dark"))
+        #expect(!seen.contains("vs_preview"))
+        #expect(!seen.lowercased().contains("tailscale-"))
+        #expect(seen.contains("Connection: close"))
+        #expect(response.contains("Location: /login\r\n"))
+        #expect(response.contains("Set-Cookie: sid=1; Path=/\r\n"))
+        #expect(response.hasSuffix("\r\n\r\nok"))
+    }
+
+    @Test func refusesOtherAccountsAndStaleCookiesWithoutContactingTheServer() async throws {
+        let upstream = try FakeUpstream()
+        let upstreamPort = await upstream.start()
+        let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstreamPort)", port: Int(upstreamPort))
+        let (proxy, port) = try await startProxy(target: target)
+        defer { proxy.stop(); upstream.stop() }
+        let other = text(await exchange(port: port, "GET / HTTP/1.1\r\nTailscale-User-Login: someone@else.com\r\n\(Self.ours)\r\n"))
+        #expect(other.hasPrefix("HTTP/1.1 403"))
+        let stale = text(await exchange(port: port, "GET / HTTP/1.1\r\n\(Self.me)Cookie: vs_preview_8444=OLD\r\n\r\n"))
+        #expect(stale.hasPrefix("HTTP/1.1 403"))
+        #expect(stale.contains("Open it again from VibeSwitcher"))
+        let crossSlot = text(await exchange(port: port,
+            "POST / HTTP/1.1\r\n\(Self.me)\(Self.ours)Origin: https://mac.example.ts.net:8445\r\nContent-Length: 0\r\n\r\n"))
+        #expect(crossSlot.hasPrefix("HTTP/1.1 403"))
+        #expect(upstream.recorded.isEmpty)
+    }
+
+    @Test func streamsLargeResponsesIntact() async throws {
+        let upstream = try FakeUpstream()
+        let upstreamPort = await upstream.start()
+        let body = Data((0..<5_000_000).map { UInt8($0 % 251) })
+        upstream.reply = Data("HTTP/1.1 200 OK\r\nContent-Length: \(body.count)\r\n\r\n".utf8) + body
+        let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstreamPort)", port: Int(upstreamPort))
+        let (proxy, port) = try await startProxy(target: target)
+        defer { proxy.stop(); upstream.stop() }
+        let response = await exchange(port: port, "GET /big.js HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n", timeout: 15)
+        let split = try #require(response.range(of: Data("\r\n\r\n".utf8)))
+        #expect(Data(response[split.upperBound...]) == body)
+    }
+
+    @Test func reachesServersListeningOnlyOnIPv6Loopback() async throws {
+        let upstream = try FakeUpstream(host: "::1")
+        let upstreamPort = await upstream.start()
+        let target = PreviewTarget(connectHost: "localhost", hostHeader: "localhost:\(upstreamPort)", port: Int(upstreamPort))
+        let (proxy, port) = try await startProxy(target: target)
+        defer { proxy.stop(); upstream.stop() }
+        let response = text(await exchange(port: port, "GET / HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n"))
+        #expect(response.hasPrefix("HTTP/1.1 200"))
+        #expect(response.hasSuffix("ok"))
+    }
+
+    @Test func answers502WhenTheDevServerIsDown() async throws {
+        let probe = try FakeUpstream()
+        let deadPort = await probe.start()
+        probe.stop()
+        try await Task.sleep(nanoseconds: 200_000_000)
+        let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(deadPort)", port: Int(deadPort))
+        let (proxy, port) = try await startProxy(target: target)
+        defer { proxy.stop() }
+        let response = text(await exchange(port: port, "GET / HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n", timeout: 10))
+        #expect(response.hasPrefix("HTTP/1.1 502"))
+        #expect(response.contains("isn't answering"))
+    }
+
+    @Test func pipesUpgradedConnectionsBothWays() async throws {
+        let upstream = try FakeUpstream()
+        upstream.echoAfterReply = true
+        upstream.reply = Data("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n".utf8)
+        let upstreamPort = await upstream.start()
+        let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstreamPort)", port: Int(upstreamPort))
+        let (proxy, port) = try await startProxy(target: target)
+        defer { proxy.stop(); upstream.stop() }
+        let result = await upgradeExchange(port: port,
+            "GET /hmr HTTP/1.1\r\n\(Self.me)\(Self.ours)Upgrade: websocket\r\nConnection: Upgrade\r\n\r\n", payload: Data("ping".utf8))
+        #expect(result.head.hasPrefix("HTTP/1.1 101"))
+        #expect(!result.head.contains("Connection: close"))
+        #expect(result.echoed == Data("ping".utf8))
+        let seen = try #require(upstream.recorded.first)
+        #expect(seen.contains("Connection: Upgrade"))
+    }
+}
