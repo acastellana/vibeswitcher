@@ -194,3 +194,54 @@ struct TranscriptReaderTests {
         #expect(TranscriptReader.checkedURL(projects.appendingPathComponent("none.jsonl").path, home: home.path) == nil)
     }
 }
+
+// Final-review fixes.
+struct HistoryReviewFixTests {
+    @Test func absurdPageRequestsDontCrash() {
+        let page = Scrollback.page(["a", "b"], before: Int.min, limit: Int.max)
+        #expect(page.lines.isEmpty)
+        let fromEnd = Scrollback.page(["a", "b"], before: Int.max, limit: Int.min)
+        #expect(fromEnd.lines.isEmpty)
+    }
+
+    @Test func cursorsOnlyContinueTheSameFileAndNeverReadTooMuch() {
+        let tail = 2_000_000
+        // Same file, small step: continue after the cursor.
+        #expect(TranscriptWindow.plan(fileSize: 5_000, after: 4_000, sameFile: true, tailBytes: tail) == .init(start: 4_000, fresh: false))
+        // Fresh open: the tail (from one byte early, so a line starting exactly there isn't skipped).
+        #expect(TranscriptWindow.plan(fileSize: 5_000_000, after: nil, sameFile: true, tailBytes: tail) == .init(start: 2_999_999, fresh: true))
+        #expect(TranscriptWindow.plan(fileSize: 100, after: nil, sameFile: true, tailBytes: tail) == .init(start: 0, fresh: true))
+        // Another transcript (after /clear or /resume), a shrunk file, or a huge gap: start over from the tail.
+        #expect(TranscriptWindow.plan(fileSize: 5_000, after: 4_000, sameFile: false, tailBytes: tail).fresh)
+        #expect(TranscriptWindow.plan(fileSize: 3_000, after: 4_000, sameFile: true, tailBytes: tail).fresh)
+        #expect(TranscriptWindow.plan(fileSize: 9_000_000, after: 10, sameFile: true, tailBytes: tail) == .init(start: 6_999_999, fresh: true))
+    }
+
+    @Test func freshTailsSkipOnlyAPartialFirstLine() {
+        // Starting one byte early: if that byte is the newline ending the previous line, only it is skipped.
+        #expect(TranscriptReader.tailStart(Data("\n{\"a\":1}\n".utf8)) == 1)
+        #expect(TranscriptReader.tailStart(Data("ial}\n{\"a\":1}\n".utf8)) == 5)
+    }
+
+    @Test func showAllFindsOneCallInAHugeTranscript() throws {
+        var lines: [String] = []
+        for i in 0..<2_000 {
+            lines.append(#"{"type":"assistant","uuid":"a\#(i)","message":{"content":[{"type":"tool_use","id":"t\#(i)","name":"Bash","input":{"command":"echo \#(i)"}}]}}"#)
+            lines.append(#"{"type":"user","uuid":"u\#(i)","message":{"content":[{"type":"tool_result","tool_use_id":"t\#(i)","content":"out \#(i)"}]}}"#)
+        }
+        let data = Data((lines.joined(separator: "\n") + "\n").utf8)
+        let only = TranscriptReader.lines(mentioning: "t1234", in: data)
+        #expect(only.split(separator: 0x0A).count == 2)
+        let entry = try #require(TranscriptReader.read(only, format: .claude).entries.first { $0.id == "t1234" })
+        #expect(entry.output == "out 1234")
+    }
+
+    @Test func longPromptsAndRepliesAreCapped() {
+        let huge = String(repeating: "log line\n", count: 50_000)
+        let object: [String: Any] = ["type": "user", "uuid": "u", "message": ["content": huge]]
+        let data = Data((String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self) + "\n").utf8)
+        let entry = TranscriptReader.read(data, format: .claude).entries[0]
+        #expect(entry.text.utf8.count <= TranscriptReader.textLimit + 8)
+        #expect(entry.text.hasSuffix("…"))
+    }
+}

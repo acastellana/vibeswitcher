@@ -333,6 +333,8 @@ async function loadScreen() {
       lastScreenText = result.text;
       renderScreen(result.text);
       if (stick) screen.scrollTop = screen.scrollHeight;
+      // Watching the bottom while output arrives: what scrolled off is newer than the loaded scrollback.
+      if (stick && !first) older.stale = true;
       if (first) loadEarlier();   // the page above the screen, so there's something to scroll back to
     }
     $('screenError').hidden = true;
@@ -360,35 +362,40 @@ function growReply() {
 // ---------- Terminal scrollback ----------
 
 // Named `older`, not `history`: that would shadow window.history (used for the #s= URL).
-const older = { start: null, first: 0, busy: false };
+const older = { start: null, first: 0, busy: false, stale: false };
 
 function resetOlder() {
   older.start = null;
   older.first = 0;
+  older.stale = false;
   $('scrollback').replaceChildren();
   $('live').replaceChildren();
   $('earlier').hidden = true;
 }
 
 /// Near the top of the Terminal tab: fetch the page above what's shown and keep the view where it was.
+/// After new output has scrolled off the live screen (`stale`), it starts again from the newest page
+/// instead, so nothing between the scrollback and the screen goes missing.
 async function loadEarlier() {
-  if (older.busy || !current || (older.start !== null && older.start <= older.first)) return;
+  const fromTail = older.start === null || older.stale;
+  if (older.busy || !current || (!fromTail && older.start <= older.first)) return;
   older.busy = true;
   const tty = current;
   const screen = $('screen');
   try {
-    const before = older.start === null ? '' : `&before=${older.start}`;
+    const before = fromTail ? '' : `&before=${older.start}`;
     const page = await api(`/api/history?tty=${encodeURIComponent(tty)}${before}`);
     if (tty !== current) return;
     // A cleared terminal is shorter than what we asked about: start over from its end.
-    if (older.start !== null && page.total < older.start) {
-      older.start = null;
-      $('scrollback').replaceChildren();
+    if (!fromTail && page.total < older.start) {
+      older.stale = true;
       return;
     }
     const fragment = document.createDocumentFragment();
     for (const raw of page.lines) fragment.append(lineNode(raw));
     const fromBottom = screen.scrollHeight - screen.scrollTop;
+    if (fromTail) $('scrollback').replaceChildren();
+    older.stale = false;
     $('scrollback').prepend(fragment);
     screen.scrollTop = screen.scrollHeight - fromBottom;
     older.start = page.start;
@@ -405,12 +412,15 @@ async function loadEarlier() {
 
 // ---------- Conversation ----------
 
-const conversation = { cursor: null, eventAt: null, busy: false, loaded: false };
+const conversation = { cursor: null, file: null, eventAt: null, status: null, busy: false, loaded: false, retry: null };
 
 function resetConversation() {
   conversation.cursor = null;
+  conversation.file = null;
   conversation.eventAt = null;
+  conversation.status = null;
   conversation.loaded = false;
+  clearTimeout(conversation.retry);
   $('conversation').replaceChildren();
 }
 
@@ -459,13 +469,20 @@ function entryNode(entry) {
   return bubble;
 }
 
+/// A tool's result arriving in a later read: keep the row's description and time, add output and duration.
+function mergeToolResult(row, result) {
+  const merged = { ...row, kind: 'tool', output: result.output, outputTruncated: result.outputTruncated, failed: result.failed };
+  if (row.at && result.at) merged.duration = Math.max(0, result.at - row.at);
+  return merged;
+}
+
 function applyEntries(entries) {
   const box = $('conversation');
   const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
   for (const entry of entries) {
     if (entry.kind === 'toolResult') {
       const row = box.querySelector(`.toolRow[data-id="${CSS.escape(entry.id)}"]`);
-      if (row) row.replaceWith(entryNode({ ...JSON.parse(row.dataset.entry || '{}'), ...entry, kind: 'tool' }));
+      if (row) row.replaceWith(entryNode(mergeToolResult(JSON.parse(row.dataset.entry || '{}'), entry)));
       continue;
     }
     box.append(entryNode(entry));
@@ -477,19 +494,29 @@ function applyEntries(entries) {
 async function refreshConversation(force = false) {
   if (!current || $('conversation').hidden || conversation.busy) return;
   const session = state && state.sessions.find(s => s.tty === current);
-  if (!force && conversation.loaded && session && session.eventAt === conversation.eventAt) return;
+  if (!force && conversation.loaded && session && session.eventAt === conversation.eventAt &&
+      session.status === conversation.status) return;
   conversation.busy = true;
   const tty = current;
   try {
-    const after = conversation.cursor === null ? '' : `&after=${conversation.cursor}`;
+    const after = conversation.cursor === null ? '' : `&after=${conversation.cursor}&file=${encodeURIComponent(conversation.file)}`;
     const result = await api(`/api/conversation?tty=${encodeURIComponent(tty)}${after}`);
     if (tty !== current) return;
-    if (!conversation.loaded && result.truncatedBefore) $('conversation').append(el('p', 'muted small center', 'Earlier messages aren’t shown.'));
+    // A fresh tail (first open, another transcript after /clear or /resume, or a big gap): start over.
+    if (result.fresh) {
+      $('conversation').replaceChildren();
+      if (result.truncatedBefore) $('conversation').append(el('p', 'muted small center', 'Earlier messages aren’t shown.'));
+    }
     applyEntries(result.entries);
-    if (!conversation.loaded && !result.entries.length) $('conversation').append(el('p', 'muted small center', 'Nothing yet.'));
+    if (result.fresh && !result.entries.length) $('conversation').append(el('p', 'muted small center', 'Nothing yet.'));
     conversation.cursor = result.cursor;
+    conversation.file = result.file;
     conversation.eventAt = session ? session.eventAt : null;
+    conversation.status = session ? session.status : null;
     conversation.loaded = true;
+    // The agent is still writing a line: ask again shortly rather than waiting for the next hook event.
+    clearTimeout(conversation.retry);
+    if (result.pending) conversation.retry = setTimeout(() => refreshConversation(true), 1000);
   } catch (error) {
     if (!conversation.loaded) $('conversation').replaceChildren(el('p', 'muted center', error.message));
   } finally {
@@ -740,7 +767,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   $('screen').addEventListener('scroll', () => {
     $('toBottom').hidden = isAtBottom();
-    if ($('screen').scrollTop < 300) loadEarlier();
+    // Near the top: the next page up. Leaving the bottom after new output: refresh to the newest page first.
+    if ($('screen').scrollTop < 300 || (older.stale && !isAtBottom())) loadEarlier();
   }, { passive: true });
   $('tabTerminal').addEventListener('click', () => showTab('terminal'));
   $('tabConversation').addEventListener('click', () => showTab('conversation'));

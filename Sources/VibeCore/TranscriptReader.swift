@@ -34,6 +34,25 @@ public struct TranscriptEntry: Equatable, Sendable {
 public enum TranscriptReader {
     public enum Format: Sendable { case claude, codex }
 
+    /// Longest prompt or reply text sent to the phone (a pasted log shouldn't become a 1 MB bubble).
+    public static let textLimit = 16 * 1024
+
+    /// Only the lines that mention `id` as a JSON string (a tool call and its result), so "Show all" on
+    /// a big transcript parses two lines instead of all of them.
+    public static func lines(mentioning id: String, in data: Data) -> Data {
+        let needle = Data("\"\(id)\"".utf8)
+        var out = Data()
+        var from = data.startIndex
+        while from < data.endIndex, let found = data.range(of: needle, in: from..<data.endIndex) {
+            let lineStart = data[data.startIndex..<found.lowerBound].lastIndex(of: 0x0A).map { $0 + 1 } ?? data.startIndex
+            let lineEnd = data[found.upperBound...].firstIndex(of: 0x0A) ?? data.endIndex
+            out.append(data[lineStart..<lineEnd])
+            out.append(0x0A)
+            from = lineEnd
+        }
+        return out
+    }
+
     /// The transcript file, if `path` really is a `.jsonl` file inside the agents' own folders (after
     /// resolving symlinks and `..`), and which format it is.
     public static func checkedURL(_ path: String, home: String) -> (URL, Format)? {
@@ -105,7 +124,7 @@ public enum TranscriptReader {
                 }
             case ("assistant", "text"):
                 if let text = block["text"] as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    entries.append(TranscriptEntry(kind: .reply, id: "\(uuid).\(index)", text: Redaction.secrets(in: text), at: at))
+                    entries.append(TranscriptEntry(kind: .reply, id: "\(uuid).\(index)", text: bounded(text, limit: textLimit).0, at: at))
                 }
             case ("assistant", "tool_use"):
                 let name = block["name"] as? String ?? "tool"
@@ -113,7 +132,7 @@ public enum TranscriptReader {
                 entries.append(TranscriptEntry(kind: .tool, id: block["id"] as? String ?? "\(uuid).\(index)",
                                                text: ToolActivity.describe(toolName: name, input: input), tool: name, at: at))
             case ("user", "tool_result"):
-                let (output, truncated) = clipped(resultText(block["content"]), limit: outputLimit)
+                let (output, truncated) = bounded(resultText(block["content"]), limit: outputLimit)
                 entries.append(TranscriptEntry(kind: .toolResult, id: block["tool_use_id"] as? String ?? "", text: "",
                                                output: output, outputTruncated: truncated,
                                                failed: block["is_error"] as? Bool == true, at: at))
@@ -138,7 +157,7 @@ public enum TranscriptReader {
             case "user": return humanText(text).map { [TranscriptEntry(kind: .prompt, id: id, text: $0, at: at)] } ?? []
             case "assistant":
                 guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
-                return [TranscriptEntry(kind: .reply, id: id, text: Redaction.secrets(in: text), at: at)]
+                return [TranscriptEntry(kind: .reply, id: id, text: bounded(text, limit: textLimit).0, at: at)]
             default: return []
             }
         case "function_call", "custom_tool_call", "local_shell_call":
@@ -153,7 +172,7 @@ public enum TranscriptReader {
             let described = ToolActivity.describe(toolName: input["command"] != nil ? "shell" : name, input: input)
             return [TranscriptEntry(kind: .tool, id: payload["call_id"] as? String ?? id, text: described, tool: name, at: at)]
         case "function_call_output", "custom_tool_call_output", "local_shell_call_output":
-            let (output, truncated) = clipped(resultText(payload["output"]), limit: outputLimit)
+            let (output, truncated) = bounded(resultText(payload["output"]), limit: outputLimit)
             return [TranscriptEntry(kind: .toolResult, id: payload["call_id"] as? String ?? id, text: "",
                                     output: output, outputTruncated: truncated, at: at)]
         default:
@@ -168,7 +187,7 @@ public enum TranscriptReader {
     private static func humanText(_ text: String) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, !trimmed.hasPrefix("<") else { return nil }
-        return Redaction.secrets(in: trimmed)
+        return bounded(trimmed, limit: textLimit).0
     }
 
     private static func resultText(_ content: Any?) -> String {
@@ -183,12 +202,20 @@ public enum TranscriptReader {
         return ""
     }
 
-    private static func clipped(_ text: String, limit: Int) -> (String, Bool) {
-        let masked = Redaction.secrets(in: text)
-        guard masked.utf8.count > limit else { return (masked, false) }
-        var cut = masked.utf8.prefix(limit)
+    /// Masked and at most `limit` bytes. Masking happens before the final cut (a secret on the cut can't
+    /// leak half-matched), but only on a little more than will be kept, so a 10 MB output stays cheap.
+    private static func bounded(_ text: String, limit: Int) -> (String, Bool) {
+        let rawLimit = limit + 1024
+        let cutRaw = text.utf8.count > rawLimit
+        let masked = Redaction.secrets(in: cutRaw ? prefix(text, bytes: rawLimit) : text)
+        guard cutRaw || masked.utf8.count > limit else { return (masked, false) }
+        return (prefix(masked, bytes: limit) + "\n…", true)
+    }
+
+    private static func prefix(_ text: String, bytes: Int) -> String {
+        var cut = text.utf8.prefix(bytes)
         while String(cut) == nil { cut = cut.dropLast() }   // don't split a character
-        return (String(cut)! + "\n…", true)
+        return String(cut)!
     }
 
     private static let isoFormatter: ISO8601DateFormatter = {
@@ -200,5 +227,30 @@ public enum TranscriptReader {
     private static func time(_ value: Any?) -> Double? {
         guard let text = value as? String else { return nil }
         return (isoFormatter.date(from: text) ?? ISO8601DateFormatter().date(from: text))?.timeIntervalSince1970
+    }
+}
+
+/// Where a conversation read starts: right after the phone's cursor when that cursor belongs to this
+/// same file and isn't too far behind; otherwise a fresh tail (after /clear or /resume the session has
+/// another transcript, and a phone back from hours away shouldn't pull megabytes).
+public enum TranscriptWindow {
+    public struct Plan: Equatable, Sendable {
+        public var start: Int
+        /// A new tail: the phone starts the timeline over, and a partial first line is skipped.
+        public var fresh: Bool
+
+        public init(start: Int, fresh: Bool) {
+            self.start = start
+            self.fresh = fresh
+        }
+    }
+
+    public static func plan(fileSize: Int, after: Int?, sameFile: Bool, tailBytes: Int) -> Plan {
+        if let after, sameFile, after >= 0, after <= fileSize, fileSize - after <= tailBytes {
+            return Plan(start: after, fresh: false)
+        }
+        // One byte early: if that byte ends the previous line, skipping "the partial first line" skips
+        // just that newline instead of a whole complete line.
+        return Plan(start: max(0, fileSize - tailBytes - 1), fresh: true)
     }
 }

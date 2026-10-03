@@ -40,7 +40,8 @@ public enum Scrollback {
     public static func page(_ lines: [String], before: Int?, limit: Int) -> Page {
         let total = lines.count
         let first = max(0, total - maxLines)
-        let end = min(before ?? total, total)
+        // Clamped first: `before` comes from the phone, and Int.min - 500 would trap.
+        let end = min(max(before ?? total, 0), total)
         let start = max(first, end - min(max(limit, 0), pageLimit))
         guard end > start else { return Page(lines: [], start: max(first, min(end, total)), total: total, first: first) }
         return Page(lines: Array(lines[start..<end]), start: start, total: total, first: first)
