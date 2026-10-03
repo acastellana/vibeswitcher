@@ -133,7 +133,7 @@ async function refreshList(render = true) {
   $('subtitle').textContent = state.mac;
   $('notifyCard').hidden = Boolean(state.device.push) || !('PushManager' in window);
   $('bell').classList.toggle('on', Boolean(state.device.push));
-  if (current) return renderSessionMeta();
+  if (current) { refreshConversation(); return renderSessionMeta(); }
   if (render) renderList();
 }
 
@@ -212,7 +212,9 @@ function openSession(tty) {
   current = tty;
   history.replaceState(null, '', `#s=${tty}`);
   lastScreenText = null;
-  $('screen').replaceChildren();
+  resetOlder();
+  resetConversation();
+  showTab('terminal');
   $('screenError').hidden = true;
   setInputStatus('');
   $('reply').value = '';
@@ -302,20 +304,22 @@ function isAtBottom() {
 
 /// Terminal text made for a phone: trailing padding trimmed (Terminal pads every line to the window
 /// width, which wraps into blank lines), rules drawn as a thin line, long box-character runs shortened.
+function lineNode(raw) {
+  const line = raw.replace(/\s+$/, '');
+  const node = document.createElement('div');
+  if (BOX.test(line) && line.trim().length >= 6) {
+    node.className = 'rule';
+  } else {
+    node.className = 'ln';
+    node.textContent = line.replace(/([─-╿])\1{7,}/g, (run, c) => c.repeat(6)) || ' ';
+  }
+  return node;
+}
+
 function renderScreen(text) {
   const fragment = document.createDocumentFragment();
-  for (const raw of text.split('\n')) {
-    const line = raw.replace(/\s+$/, '');
-    const node = document.createElement('div');
-    if (BOX.test(line) && line.trim().length >= 6) {
-      node.className = 'rule';
-    } else {
-      node.className = 'ln';
-      node.textContent = line.replace(/([─-╿])\1{7,}/g, (run, c) => c.repeat(6)) || ' ';
-    }
-    fragment.append(node);
-  }
-  $('screen').replaceChildren(fragment);
+  for (const raw of text.split('\n')) fragment.append(lineNode(raw));
+  $('live').replaceChildren(fragment);
 }
 
 async function loadScreen() {
@@ -325,9 +329,11 @@ async function loadScreen() {
     const result = await api(`/api/screen?tty=${encodeURIComponent(current)}`);
     if (result.tty !== current) return;   // switched sessions meanwhile
     if (result.text !== lastScreenText) {
+      const first = lastScreenText === null;
       lastScreenText = result.text;
       renderScreen(result.text);
       if (stick) screen.scrollTop = screen.scrollHeight;
+      if (first) loadEarlier();   // the page above the screen, so there's something to scroll back to
     }
     $('screenError').hidden = true;
   } catch (error) {
@@ -349,6 +355,157 @@ function growReply() {
   reply.style.height = 'auto';
   reply.style.height = `${Math.min(reply.scrollHeight, 132)}px`;
   $('clearReply').hidden = !reply.value;
+}
+
+// ---------- Terminal scrollback ----------
+
+// Named `older`, not `history`: that would shadow window.history (used for the #s= URL).
+const older = { start: null, first: 0, busy: false };
+
+function resetOlder() {
+  older.start = null;
+  older.first = 0;
+  $('scrollback').replaceChildren();
+  $('live').replaceChildren();
+  $('earlier').hidden = true;
+}
+
+/// Near the top of the Terminal tab: fetch the page above what's shown and keep the view where it was.
+async function loadEarlier() {
+  if (older.busy || !current || (older.start !== null && older.start <= older.first)) return;
+  older.busy = true;
+  const tty = current;
+  const screen = $('screen');
+  try {
+    const before = older.start === null ? '' : `&before=${older.start}`;
+    const page = await api(`/api/history?tty=${encodeURIComponent(tty)}${before}`);
+    if (tty !== current) return;
+    // A cleared terminal is shorter than what we asked about: start over from its end.
+    if (older.start !== null && page.total < older.start) {
+      older.start = null;
+      $('scrollback').replaceChildren();
+      return;
+    }
+    const fragment = document.createDocumentFragment();
+    for (const raw of page.lines) fragment.append(lineNode(raw));
+    const fromBottom = screen.scrollHeight - screen.scrollTop;
+    $('scrollback').prepend(fragment);
+    screen.scrollTop = screen.scrollHeight - fromBottom;
+    older.start = page.start;
+    older.first = page.first;
+    $('earlier').hidden = false;
+    $('earlier').textContent = page.start > page.first ? '↑ Scroll for earlier output' : 'Start of the scrollback';
+  } catch (error) {
+    $('screenError').textContent = error.message;
+    $('screenError').hidden = false;
+  } finally {
+    older.busy = false;
+  }
+}
+
+// ---------- Conversation ----------
+
+const conversation = { cursor: null, eventAt: null, busy: false, loaded: false };
+
+function resetConversation() {
+  conversation.cursor = null;
+  conversation.eventAt = null;
+  conversation.loaded = false;
+  $('conversation').replaceChildren();
+}
+
+function showTab(name) {
+  const terminal = name === 'terminal';
+  $('screen').hidden = !terminal;
+  $('conversation').hidden = terminal;
+  $('toBottom').hidden = !terminal || isAtBottom();
+  $('tabTerminal').classList.toggle('on', terminal);
+  $('tabConversation').classList.toggle('on', !terminal);
+  $('tabTerminal').setAttribute('aria-selected', String(terminal));
+  $('tabConversation').setAttribute('aria-selected', String(!terminal));
+  for (const id of ['wrapToggle', 'fontDown', 'fontUp']) $(id).hidden = !terminal;
+  if (!terminal) refreshConversation(true);
+}
+
+function timeLabel(at) {
+  return at ? new Date(at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+}
+
+function entryNode(entry) {
+  if (entry.kind === 'tool') {
+    const box = el('details', `toolRow${entry.failed ? ' failed' : ''}`);
+    box.dataset.id = entry.id;
+    box.dataset.entry = JSON.stringify({ id: entry.id, tool: entry.tool, text: entry.text, at: entry.at });
+    const summary = el('summary');
+    const status = entry.output === undefined ? '…' : (entry.failed ? '✗' : '✓');
+    const took = entry.duration >= 1 ? ` · ${duration(entry.duration)}` : '';
+    summary.append(el('span', 'toolName', entry.tool || 'tool'), el('span', 'toolText', entry.text),
+                   el('span', 'toolMeta', `${took} ${status}`.trim()));
+    box.append(summary);
+    if (entry.output !== undefined) {
+      box.append(el('pre', 'toolOutput', entry.output));
+      if (entry.outputTruncated) {
+        const more = el('button', 'link', 'Show all');
+        more.type = 'button';
+        more.addEventListener('click', () => showFullTool(entry.id, box));
+        box.append(more);
+      }
+    }
+    return box;
+  }
+  // Not `reply`: that class already styles the reply form.
+  const bubble = el('div', `bubble ${entry.kind === 'prompt' ? 'fromYou' : 'fromAgent'}`);
+  bubble.append(el('div', 'bubbleText', entry.text), el('div', 'bubbleTime', timeLabel(entry.at)));
+  return bubble;
+}
+
+function applyEntries(entries) {
+  const box = $('conversation');
+  const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+  for (const entry of entries) {
+    if (entry.kind === 'toolResult') {
+      const row = box.querySelector(`.toolRow[data-id="${CSS.escape(entry.id)}"]`);
+      if (row) row.replaceWith(entryNode({ ...JSON.parse(row.dataset.entry || '{}'), ...entry, kind: 'tool' }));
+      continue;
+    }
+    box.append(entryNode(entry));
+  }
+  if (stick) box.scrollTop = box.scrollHeight;
+}
+
+/// First open: the transcript's tail. Afterwards only what's new, and only when the session changed.
+async function refreshConversation(force = false) {
+  if (!current || $('conversation').hidden || conversation.busy) return;
+  const session = state && state.sessions.find(s => s.tty === current);
+  if (!force && conversation.loaded && session && session.eventAt === conversation.eventAt) return;
+  conversation.busy = true;
+  const tty = current;
+  try {
+    const after = conversation.cursor === null ? '' : `&after=${conversation.cursor}`;
+    const result = await api(`/api/conversation?tty=${encodeURIComponent(tty)}${after}`);
+    if (tty !== current) return;
+    if (!conversation.loaded && result.truncatedBefore) $('conversation').append(el('p', 'muted small center', 'Earlier messages aren’t shown.'));
+    applyEntries(result.entries);
+    if (!conversation.loaded && !result.entries.length) $('conversation').append(el('p', 'muted small center', 'Nothing yet.'));
+    conversation.cursor = result.cursor;
+    conversation.eventAt = session ? session.eventAt : null;
+    conversation.loaded = true;
+  } catch (error) {
+    if (!conversation.loaded) $('conversation').replaceChildren(el('p', 'muted center', error.message));
+  } finally {
+    conversation.busy = false;
+  }
+}
+
+async function showFullTool(id, row) {
+  try {
+    const result = await api(`/api/conversation/tool?tty=${encodeURIComponent(current)}&id=${encodeURIComponent(id)}`);
+    const node = entryNode(result.entry);
+    node.open = true;
+    row.replaceWith(node);
+  } catch (error) {
+    row.append(el('p', 'error', error.message));
+  }
 }
 
 // ---------- Quick replies ----------
@@ -581,7 +738,12 @@ document.addEventListener('DOMContentLoaded', () => {
       growReply();
     }
   });
-  $('screen').addEventListener('scroll', () => { $('toBottom').hidden = isAtBottom(); }, { passive: true });
+  $('screen').addEventListener('scroll', () => {
+    $('toBottom').hidden = isAtBottom();
+    if ($('screen').scrollTop < 300) loadEarlier();
+  }, { passive: true });
+  $('tabTerminal').addEventListener('click', () => showTab('terminal'));
+  $('tabConversation').addEventListener('click', () => showTab('conversation'));
   $('toBottom').addEventListener('click', () => {
     const screen = $('screen');
     screen.scrollTop = screen.scrollHeight;

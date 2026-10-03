@@ -136,3 +136,24 @@ select.chip-btn { appearance: none; -webkit-appearance: none; }
 .quickActions { display: flex; align-items: center; gap: 6px; }
 .quickActions .spacer { flex: 1; }
 .primaryChip { background: var(--accent); border-color: var(--accent); color: #fff; }
+.viewTabs { display: flex; gap: 4px; background: var(--bg); border-radius: 9px; padding: 3px; align-self: flex-start; }
+.viewTabs button { border: 0; background: transparent; color: var(--muted); border-radius: 7px; padding: 5px 12px;
+  font-size: 13px; font-weight: 600; }
+.viewTabs button.on { background: var(--card); color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,0.15); }
+.earlier { color: #8e8e93; font-size: 11px; text-align: center; padding: 4px 0 8px; }
+.conversation { flex: 1; overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 8px;
+  padding: 4px 2px; }
+.bubble { max-width: 88%; border-radius: 14px; padding: 8px 11px; font-size: 14.5px; line-height: 1.38;
+  white-space: pre-wrap; overflow-wrap: anywhere; }
+.bubble.fromYou { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
+.bubble.fromAgent { align-self: flex-start; background: var(--card); border-bottom-left-radius: 4px; }
+.bubbleTime { font-size: 10.5px; opacity: 0.6; margin-top: 3px; text-align: right; }
+.toolRow { align-self: stretch; background: var(--card); border-radius: 10px; font-size: 12.5px; }
+.toolRow summary { display: flex; gap: 6px; align-items: baseline; padding: 7px 10px; list-style: none; }
+.toolRow summary::-webkit-details-marker { display: none; }
+.toolName { flex: none; font-weight: 700; color: var(--muted); }
+.toolText { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.toolMeta { flex: none; color: var(--muted); }
+.toolRow.failed .toolMeta { color: var(--warn); }
+.toolOutput { margin: 0; padding: 8px 10px; border-top: 1px solid var(--line); max-height: 40dvh; overflow: auto;
+  font: 11.5px/1.35 ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }

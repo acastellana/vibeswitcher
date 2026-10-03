@@ -70,9 +70,14 @@
         <button id="fontDown" class="chip-btn" type="button" aria-label="Smaller text">A−</button>
         <button id="fontUp" class="chip-btn" type="button" aria-label="Larger text">A+</button>
       </div>
+      <div class="viewTabs" role="tablist">
+        <button id="tabTerminal" class="on" type="button" role="tab" aria-selected="true">Terminal</button>
+        <button id="tabConversation" type="button" role="tab" aria-selected="false">Conversation</button>
+      </div>
     </div>
     <div class="screenWrap">
-      <div id="screen" class="screen" aria-live="off"></div>
+      <div id="screen" class="screen" aria-live="off"><div id="earlier" class="earlier" hidden></div><div id="scrollback"></div><div id="live"></div></div>
+      <div id="conversation" class="conversation" hidden></div>
       <button id="toBottom" class="toBottom" type="button" hidden>↓ Latest</button>
     </div>
     <p id="screenError" class="error" hidden></p>
