@@ -22,6 +22,9 @@ public struct HookState: Codable, Equatable, Sendable {
     public var firstPrompt: String?
     /// What the session is asking you right now: its question, the command it wants to run, its plan.
     public var request: String?
+    /// The agent's own transcript of this session (Claude Code and Codex pass it to every hook).
+    /// Not trusted as-is: `TranscriptReader.checkedURL` validates it before anything reads it.
+    public var transcriptPath: String?
 
     public init(agent: Agent, tty: String, lastEvent: String, lastEventAt: Double) {
         self.agent = agent
@@ -71,6 +74,9 @@ extension HookState {
         state.sessionId = sessionId ?? state.sessionId
         state.agentPid = agentPid ?? state.agentPid
         if let cwd = payload["cwd"] as? String, !cwd.isEmpty { state.cwd = cwd }
+        if let path = payload["transcript_path"] as? String, !path.isEmpty, path.utf8.count <= 1024 {
+            state.transcriptPath = path
+        }
 
         switch event {
         case "Notification":
