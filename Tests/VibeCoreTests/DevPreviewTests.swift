@@ -128,3 +128,118 @@ struct PreviewSlotsTests {
         #expect(none == nil)
     }
 }
+
+func requestHead(_ raw: String) -> HTTPHead {
+    guard case .complete(let head, _) = HTTPHead.parse(Data((raw + "\r\n").utf8), kind: .request) else {
+        fatalError("test request didn't parse: \(raw)")
+    }
+    return head
+}
+
+func responseHead(_ raw: String) -> HTTPHead {
+    guard case .complete(let head, _) = HTTPHead.parse(Data((raw + "\r\n").utf8), kind: .response) else {
+        fatalError("test response didn't parse: \(raw)")
+    }
+    return head
+}
+
+struct HTTPHeadTests {
+    @Test func parsesAndReserializesHeads() throws {
+        let raw = "GET /a?b=1 HTTP/1.1\r\nHost: x\r\nCookie: a=1\r\nCookie: b=2\r\n\r\nBODY"
+        guard case .complete(let head, let consumed) = HTTPHead.parse(Data(raw.utf8), kind: .request) else {
+            Issue.record("not parsed"); return
+        }
+        #expect(consumed == raw.utf8.count - 4)
+        #expect(head.method == "GET")
+        #expect(head.path == "/a")
+        #expect(head.query == ["b": "1"])
+        #expect(head.values("COOKIE") == ["a=1", "b=2"])
+        #expect(String(decoding: head.serialized, as: UTF8.self) == String(raw.dropLast(4)))
+        #expect(responseHead("HTTP/1.1 204\r\n").status == 204)
+        #expect(HTTPHead.parse(Data("GET / HTTP/1.1\r\nHost".utf8), kind: .request) == .incomplete)
+        #expect(HTTPHead.parse(Data("GET http://x/ HTTP/1.1\r\n\r\n".utf8), kind: .request) == .invalid)
+        #expect(HTTPHead.parse(Data("SSH-2.0-OpenSSH\r\n\r\n".utf8), kind: .response) == .invalid)
+        #expect(HTTPHead.parse(Data(String(repeating: "a", count: 70_000).utf8), kind: .request) == .tooLarge)
+    }
+
+    @Test func editsKeepOneValuePerName() {
+        var head = requestHead("GET / HTTP/1.1\r\nConnection: keep-alive\r\nconnection: x\r\n")
+        head.set("Connection", "close")
+        #expect(head.values("connection") == ["close"])
+        head.remove("CONNECTION")
+        #expect(head.value("connection") == nil)
+        head.set("Host", "a")
+        #expect(head.fields.last == HTTPHead.Field(name: "Host", value: "a"))
+    }
+}
+
+struct PreviewGateTests {
+    let own = "https://mac.example.ts.net:8444"
+    let siblings: Set<String> = Set((8443...8447).map { "https://mac.example.ts.net:\($0)" })
+    let me = "Tailscale-User-Login: me@example.com\r\n"
+
+    func decide(_ raw: String) -> PreviewGate.Decision {
+        PreviewGate.decide(requestHead(raw), owner: "me@example.com", ownOrigin: own, siblingOrigins: siblings, publicPort: 8444)
+    }
+
+    @Test func decidesWhoGetsThrough() {
+        #expect(decide("GET / HTTP/1.1\r\nCookie: vs_preview_8444=T\r\n")
+                == .reject(status: 403, message: PreviewGate.wrongAccountMessage))
+        #expect(decide("GET / HTTP/1.1\r\nTailscale-User-Login: other@example.com\r\nCookie: vs_preview_8444=T\r\n")
+                == .reject(status: 403, message: PreviewGate.wrongAccountMessage))
+        #expect(decide("GET /__vibeswitcher/enter?t=abc HTTP/1.1\r\n\(me)") == .enter(ticket: "abc"))
+        #expect(decide("GET /x HTTP/1.1\r\n\(me)Cookie: a=1; vs_preview_8444=T\r\n") == .forward(sessionToken: "T"))
+        #expect(decide("GET /x HTTP/1.1\r\n\(me)") == .reject(status: 403, message: PreviewGate.expiredMessage))
+        // Another slot's cookie is not this slot's (cookies ignore ports).
+        #expect(decide("GET /x HTTP/1.1\r\n\(me)Cookie: vs_preview_8445=T\r\n")
+                == .reject(status: 403, message: PreviewGate.expiredMessage))
+        // A page in another slot (or the app itself) may not use this slot's session.
+        #expect(decide("POST /x HTTP/1.1\r\n\(me)Cookie: vs_preview_8444=T\r\nOrigin: https://mac.example.ts.net:8445\r\n")
+                == .reject(status: 403, message: PreviewGate.crossOriginMessage))
+        #expect(decide("POST /x HTTP/1.1\r\n\(me)Cookie: vs_preview_8444=T\r\nOrigin: \(own)\r\n") == .forward(sessionToken: "T"))
+    }
+
+    @Test func rewritesRequestsForTheDevServer() {
+        let target = PreviewTarget(connectHost: "localhost", hostHeader: "localhost:5173", port: 5173)
+        let rewritten = PreviewGate.upstreamRequest(requestHead(
+            "GET /src/main.ts HTTP/1.1\r\nHost: mac.example.ts.net:8444\r\n\(me)Tailscale-User-Name: Me\r\n"
+            + "Origin: \(own)\r\nReferer: \(own)/settings\r\nCookie: theme=dark; vs_preview_8444=T\r\n"
+            + "Connection: keep-alive\r\nKeep-Alive: timeout=5\r\n"), target: target, ownOrigin: own, publicPort: 8444)
+        #expect(rewritten.startLine == "GET /src/main.ts HTTP/1.1")
+        #expect(rewritten.value("host") == "localhost:5173")
+        #expect(rewritten.value("origin") == "http://localhost:5173")
+        #expect(rewritten.value("referer") == "http://localhost:5173/settings")
+        #expect(rewritten.values("cookie") == ["theme=dark"])
+        #expect(rewritten.value("tailscale-user-login") == nil)
+        #expect(rewritten.value("tailscale-user-name") == nil)
+        #expect(rewritten.value("connection") == "close")
+        #expect(rewritten.value("keep-alive") == nil)
+        let bare = PreviewGate.upstreamRequest(requestHead("GET / HTTP/1.1\r\nCookie: vs_preview_8444=T\r\n"),
+                                               target: target, ownOrigin: own, publicPort: 8444)
+        #expect(bare.value("cookie") == nil)
+        let upgrade = PreviewGate.upstreamRequest(requestHead("GET /hmr HTTP/1.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"),
+                                                  target: target, ownOrigin: own, publicPort: 8444)
+        #expect(upgrade.value("connection") == "Upgrade")
+    }
+
+    @Test func rewritesDevServerRedirectsAndCookies() {
+        let target = PreviewTarget(connectHost: "localhost", hostHeader: "localhost:3000", port: 3000)
+        let response = PreviewGate.clientResponse(responseHead(
+            "HTTP/1.1 302 Found\r\nLocation: http://localhost:3000/login?next=%2F\r\n"
+            + "Set-Cookie: sid=abc; Domain=localhost; Path=/; HttpOnly\r\nSet-Cookie: theme=dark; domain=.localhost\r\n"
+            + "Connection: keep-alive\r\n"), target: target)
+        #expect(response.value("location") == "/login?next=%2F")
+        #expect(response.values("set-cookie") == ["sid=abc; Path=/; HttpOnly", "theme=dark"])
+        #expect(response.value("connection") == "close")
+        #expect(PreviewGate.clientResponse(responseHead("HTTP/1.1 301 Moved\r\nLocation: http://127.0.0.1:3000\r\n"),
+                                           target: target).value("location") == "/")
+        #expect(PreviewGate.clientResponse(responseHead("HTTP/1.1 302 Found\r\nLocation: http://localhost:3000//evil.example\r\n"),
+                                           target: target).value("location") == "/evil.example")
+        #expect(PreviewGate.clientResponse(responseHead("HTTP/1.1 302 Found\r\nLocation: https://accounts.example.com/o\r\n"),
+                                           target: target).value("location") == "https://accounts.example.com/o")
+        #expect(PreviewGate.clientResponse(responseHead("HTTP/1.1 302 Found\r\nLocation: http://localhost:4000/\r\n"),
+                                           target: target).value("location") == "http://localhost:4000/")
+        #expect(PreviewGate.clientResponse(responseHead("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"),
+                                           target: target).value("connection") == "Upgrade")
+    }
+}
