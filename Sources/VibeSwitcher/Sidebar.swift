@@ -42,6 +42,9 @@ final class SidebarController {
     private var edgeHits = 0
     private var lastDebugWrite = Date()
     private var totalPolls = 0
+    /// Last misses with time and height, to match a "it just didn't open" report.
+    private var recentMisses: [String] = []
+    private var lastMissRecorded = Date.distantPast
     private var lastWrittenVisits = -1
 
     init(content: AnyView) {
@@ -130,6 +133,14 @@ final class SidebarController {
         guard isEnabled, autoHide else { return }
         let point = NSEvent.mouseLocation
         let screen = currentScreen()
+        if isStrandedOffScreen {
+            // Believed shown but it isn't: reset, then detect normally below.
+            recordMiss("healed: was stuck off screen", point: point, screen: screen)
+            revealed = false
+            transition += 1
+            panel.orderOut(nil)
+            hostingView.rootView = AnyView(EmptyView())
+        }
         if revealed {
             let inside = panel.frame.insetBy(dx: -Self.leaveMargin, dy: -Self.leaveMargin).contains(point)
             if flashing {
@@ -158,7 +169,7 @@ final class SidebarController {
         if suppressedUntilAway {
             // After picking a session: re-arm as soon as the pointer has left the edge for a moment.
             if point.x < screen.frame.maxX - 40 { suppressedUntilAway = false }
-            if atEdge { edgeMisses["suppressed", default: 0] += 1 }
+            if atEdge { recordMiss("suppressed", point: point, screen: screen) }
             return
         }
         if SidebarHotZone.contains(point, screen: screen.frame), isOuterRightEdge(of: screen, at: point.y) {
@@ -168,8 +179,18 @@ final class SidebarController {
             let reason = !SidebarHotZone.contains(point, screen: screen.frame)
                 ? (point.x < screen.frame.maxX - SidebarHotZone.edgeWidth ? "x=\(Int(screen.frame.maxX - point.x))pt short" : "outside band")
                 : "not outer edge"
-            edgeMisses[reason, default: 0] += 1
+            recordMiss(reason, point: point, screen: screen)
         }
+    }
+
+    private func recordMiss(_ reason: String, point: NSPoint, screen: NSScreen) {
+        edgeMisses[reason, default: 0] += 1
+        // One entry per visit (not per pointer check): at most every 2 s.
+        guard Date().timeIntervalSince(lastMissRecorded) > 2 else { return }
+        lastMissRecorded = Date()
+        let height = Int(((point.y - screen.frame.minY) / screen.frame.height * 100).rounded())
+        let time = Date().formatted(date: .omitted, time: .standard)
+        recentMisses = Array(([String(format: "%@  %@  (x %.1f, %d%% up)", time, reason, point.x, height)] + recentMisses).prefix(30))
     }
 
     private func recordPoll() {
@@ -188,7 +209,7 @@ final class SidebarController {
             "updatedAt": ISO8601DateFormatter().string(from: now),
             "polls": pollGaps.count, "gapMedian": sorted[sorted.count / 2], "gapMax": sorted.last ?? 0.0 as Double,
             "gapsOver1s": pollGaps.filter { $0 > 1 }.count, "gapsOver0_5s": pollGaps.filter { $0 > 0.5 }.count,
-            "edgeHits": edgeHits, "edgeMisses": edgeMisses, "totalPolls": totalPolls,
+            "edgeHits": edgeHits, "edgeMisses": edgeMisses, "totalPolls": totalPolls, "recentMisses": recentMisses,
         ]
         if JSONSerialization.isValidJSONObject(object),
            let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
@@ -213,24 +234,38 @@ final class SidebarController {
         return NSRect(x: visible.maxX - Self.width, y: visible.minY, width: Self.width, height: visible.height)
     }
 
+    /// Bumped by every slide in/out; an animation's completion only acts if no newer one started.
+    private var transition = 0
+    private var animating = false
+
     private func reveal(on screen: NSScreen) {
         hideWork?.cancel()
         hideWork = nil
         suppressedUntilAway = false
         self.screen = screen
+        // Absolute targets, never relative to the current frame: interrupted animations used to leave
+        // the panel further off screen each time while we believed it was shown.
         let docked = dockedFrame(on: screen)
-        if !revealed {
-            revealed = true
+        revealed = true
+        if !panel.isVisible {
             hostingView.rootView = content
-            panel.setFrame(docked.offsetBy(dx: Self.width, dy: 0), display: false) // start just off screen
+            panel.setFrame(docked.offsetBy(dx: Self.width, dy: 0), display: false)   // start just off screen
             panel.alphaValue = 1
             panel.orderFrontRegardless()
         }
-        NSAnimationContext.runAnimationGroup { context in
+        guard panel.frame != docked else { return }
+        transition += 1
+        let id = transition
+        animating = true
+        NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.16
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().setFrame(docked, display: true)
-        }
+        }, completionHandler: { [weak self] in
+            guard let self, self.transition == id else { return }
+            self.animating = false
+            if self.revealed { self.panel.setFrame(docked, display: true) }   // land exactly
+        })
     }
 
     private func conceal(animated: Bool) {
@@ -238,17 +273,30 @@ final class SidebarController {
         hideWork = nil
         guard revealed else { return }
         revealed = false
+        transition += 1
+        let id = transition
+        let hidden = dockedFrame(on: screen ?? currentScreen()).offsetBy(dx: Self.width, dy: 0)
         let finish = { [weak self] in
-            guard let self, !self.revealed else { return }
+            guard let self, self.transition == id, !self.revealed else { return }
+            self.animating = false
             self.panel.orderOut(nil)
+            self.panel.setFrame(hidden, display: false)
             self.hostingView.rootView = AnyView(EmptyView()) // no SwiftUI work while hidden
         }
         guard animated else { return finish() }
+        animating = true
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.14
             context.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            panel.animator().setFrame(panel.frame.offsetBy(dx: Self.width, dy: 0), display: true)
+            panel.animator().setFrame(hidden, display: true)
         }, completionHandler: finish)
+    }
+
+    /// Safety net: "shown" but not actually on screen where it belongs (outside any animation).
+    private var isStrandedOffScreen: Bool {
+        guard revealed, !animating else { return false }
+        let docked = dockedFrame(on: screen ?? currentScreen())
+        return !panel.isVisible || abs(panel.frame.minX - docked.minX) > 1
     }
 }
 
