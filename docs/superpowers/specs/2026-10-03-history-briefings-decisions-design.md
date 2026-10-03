@@ -38,8 +38,7 @@ Out of scope:
   - Credentials are masked with `Redaction.secrets`, like the screen.
 - The phone opens the tab scrolled to the bottom: the existing live screen, refreshed as now. Scrolling up
   fetches older pages and adds them above, without jumping.
-- **Cost:** one AppleScript read per page request, cached for 2 s per tty. Concurrent requests share one
-  read, like `/api/screen` does.
+- **Cost:** one AppleScript read per page request, cached for 2 s per tty, so paging quickly reuses one read.
 
 ### Conversation tab
 - The hook records `transcript_path` from every Claude Code hook payload into `HookState` (new field
@@ -50,7 +49,6 @@ Out of scope:
   - `reply`: assistant text;
   - `tool`: name, one-line summary (as in `ToolActivity`), duration, ok/failed, and output truncated to
     4 KB, fetched in full on expand up to 64 KB;
-  - `question`: an AskUserQuestion, with the chosen answer when known.
   - Thinking blocks, system/meta lines and sidechains are skipped. Everything is masked with
     `Redaction.secrets`.
   - `cursor` is a byte offset, so polling only reads what's new.
@@ -75,6 +73,10 @@ Out of scope:
 **The menu's numbered choices** for permissions and plans are read from the **visible screen** when the
 phone asks: lines like `❯ 1. Yes`, `  2. Yes, and don't ask again for …`. The parser
 `DecisionMenu.parse(screen:)` lives in VibeCore and is tested on real screen captures (fixtures).
+
+### Conversation tab
+An AskUserQuestion shows as its own row (the question, with the chosen answer when known) instead of a
+generic tool row. This needs the structured decision captured below, so it's built here, not in part A.
 
 ### Phone
 - The `ask` card becomes a **decision card**: the question, then one large button per option, label in
