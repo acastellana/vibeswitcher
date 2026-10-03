@@ -56,6 +56,7 @@ function setOnline(online, message = UNREACHABLE) {
   const banner = $('offline');
   banner.hidden = online;
   if (!online) banner.textContent = message;
+  layoutSession();
 }
 
 function forgetToken() {
@@ -69,6 +70,9 @@ function forgetToken() {
 function show(view) {
   for (const id of ['pair', 'list', 'session']) $(id).hidden = id !== view;
   $('back').hidden = view !== 'session';
+  $('prev').hidden = view !== 'session';
+  $('next').hidden = view !== 'session';
+  document.body.classList.toggle('in-session', view === 'session');
   $('bell').hidden = view === 'pair';
   clearInterval(listTimer);
   clearInterval(screenTimer);
@@ -187,21 +191,55 @@ function renderToday() {
 
 // ---------- Session view ----------
 
+const BOX = /^[\s─-╿]+$/;            // a line drawn only with box characters: a rule
+const prefs = {
+  font: Number(localStorage.getItem('vs.font')) || 12,
+  wrap: localStorage.getItem('vs.wrap') !== 'off',
+};
+let lastScreenText = null;
+
+function applyViewPrefs() {
+  const screen = $('screen');
+  screen.style.setProperty('--term-font', `${prefs.font}px`);
+  screen.classList.toggle('nowrap', !prefs.wrap);
+  $('wrapToggle').classList.toggle('on', prefs.wrap);
+  $('wrapToggle').setAttribute('aria-pressed', String(prefs.wrap));
+  localStorage.setItem('vs.font', String(prefs.font));
+  localStorage.setItem('vs.wrap', prefs.wrap ? 'on' : 'off');
+}
+
 function openSession(tty) {
   current = tty;
   history.replaceState(null, '', `#s=${tty}`);
-  $('screen').textContent = '';
+  lastScreenText = null;
+  $('screen').replaceChildren();
   $('screenError').hidden = true;
-  $('inputError').hidden = true;
+  setInputStatus('');
+  $('reply').value = '';
+  growReply();
   renderSessionMeta();
   show('session');
+  layoutSession();
+}
+
+/// Steps to the previous/next session in the list (same order as the Mac).
+function step(delta) {
+  if (!state || !current) return;
+  const index = state.sessions.findIndex(s => s.tty === current);
+  const next = state.sessions[index + delta];
+  if (next) openSession(next.tty);
 }
 
 function renderSessionMeta() {
   const session = state && state.sessions.find(s => s.tty === current);
+  const index = session ? state.sessions.indexOf(session) : -1;
+  $('prev').disabled = index <= 0;
+  $('next').disabled = index < 0 || index >= state.sessions.length - 1;
   if (!session) {
     $('title').textContent = 'Session ended';
     $('sessionMeta').replaceChildren();
+    $('composer').hidden = true;
+    $('askCard').hidden = true;
     return;
   }
   $('title').textContent = session.name;
@@ -209,47 +247,45 @@ function renderSessionMeta() {
   const meta = $('sessionMeta');
   const status = el('span', `when ${session.status}`, `${session.statusLabel} ${elapsed(session.since)}`.trim());
   meta.replaceChildren(badge(session), status);
-  if (session.detail && !session.activity) meta.append(el('div', 'detail', session.detail));
-  if (session.activity) meta.append(el('div', 'detail', `⚙ ${session.activity} · ${elapsed(session.activitySince)}`));
+  if (session.activity) meta.append(el('span', 'activity', `⚙ ${session.activity} · ${elapsed(session.activitySince)}`));
+  // What it's asking you, where you'll answer it.
+  const asking = session.status === 'needsInput' && !session.paused;
+  $('askCard').hidden = !asking;
+  if (asking) $('askText').textContent = session.detail || 'Waiting for you';
   renderPauseControls(session);
-  $('controls').hidden = !state.inputAllowed || !session.inTerminal;
+  const canType = state.inputAllowed && session.inTerminal;
+  $('composer').hidden = !canType;
   $('inputOff').hidden = state.inputAllowed || !session.inTerminal;
+  $('reply').placeholder = `Message ${session.name}…`;
+  layoutSession();
 }
 
 function pauseLabel(session) {
-  if (!session.pausedUntil) return 'Paused until you resume it';
+  if (!session.pausedUntil) return 'Paused';
   const until = new Date(session.pausedUntil * 1000);
   const sameDay = until.toDateString() === new Date().toDateString();
-  return `Paused until ${until.toLocaleString([], sameDay ? { hour: '2-digit', minute: '2-digit' }
-                                                            : { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`;
+  return `Until ${until.toLocaleString([], sameDay ? { hour: '2-digit', minute: '2-digit' }
+                                                    : { weekday: 'short', hour: '2-digit', minute: '2-digit' })}`;
 }
 
 function renderPauseControls(session) {
-  const box = $('pauseControls');
-  const button = (label, duration) => {
-    const node = el('button', 'small', label);
-    node.type = 'button';
-    node.addEventListener('click', () => setPause(session.tty, duration, node));
-    return node;
-  };
-  if (session.paused) {
-    box.replaceChildren(el('span', 'muted', pauseLabel(session)), button('Resume', 'resume'));
-  } else {
-    box.replaceChildren(el('span', 'muted', 'Pause:'), button('1 hour', 'hour'), button('Tomorrow', 'tomorrow'),
-                        button('1 week', 'week'), button('Until resumed', 'indefinitely'));
-  }
+  $('pausedInfo').hidden = !session.paused;
+  $('resume').hidden = !session.paused;
+  $('pauseSelect').hidden = session.paused;
+  if (session.paused) $('pausedInfo').textContent = `⏸ ${pauseLabel(session)}`;
 }
 
-async function setPause(tty, duration, node) {
-  node.disabled = true;
+async function setPause(duration, control) {
+  if (!current || !duration) return;
+  control.disabled = true;
   try {
-    await api('/api/pause', { method: 'POST', body: JSON.stringify({ tty, duration }) });
+    await api('/api/pause', { method: 'POST', body: JSON.stringify({ tty: current, duration }) });
     setTimeout(() => refreshList(false), 300);
   } catch (error) {
-    $('inputError').textContent = error.message;
-    $('inputError').hidden = false;
+    setInputStatus(error.message, true);
   } finally {
-    node.disabled = false;
+    control.disabled = false;
+    if (control.tagName === 'SELECT') control.value = '';
   }
 }
 
@@ -259,33 +295,82 @@ async function refreshScreen() {
   try { await loadScreen(); } finally { screenBusy = false; }
 }
 
+function isAtBottom() {
+  const screen = $('screen');
+  return screen.scrollHeight - screen.scrollTop - screen.clientHeight < 40;
+}
+
+/// Terminal text made for a phone: trailing padding trimmed (Terminal pads every line to the window
+/// width, which wraps into blank lines), rules drawn as a thin line, long box-character runs shortened.
+function renderScreen(text) {
+  const fragment = document.createDocumentFragment();
+  for (const raw of text.split('\n')) {
+    const line = raw.replace(/\s+$/, '');
+    const node = document.createElement('div');
+    if (BOX.test(line) && line.trim().length >= 6) {
+      node.className = 'rule';
+    } else {
+      node.className = 'ln';
+      node.textContent = line.replace(/([─-╿])\1{7,}/g, (run, c) => c.repeat(6)) || ' ';
+    }
+    fragment.append(node);
+  }
+  $('screen').replaceChildren(fragment);
+}
+
 async function loadScreen() {
   const screen = $('screen');
-  const atBottom = screen.scrollHeight - screen.scrollTop - screen.clientHeight < 40;
+  const stick = lastScreenText === null || isAtBottom();
   try {
     const result = await api(`/api/screen?tty=${encodeURIComponent(current)}`);
-    if (screen.textContent !== result.text) {
-      screen.textContent = result.text;
-      if (atBottom) screen.scrollTop = screen.scrollHeight;
+    if (result.tty !== current) return;   // switched sessions meanwhile
+    if (result.text !== lastScreenText) {
+      lastScreenText = result.text;
+      renderScreen(result.text);
+      if (stick) screen.scrollTop = screen.scrollHeight;
     }
     $('screenError').hidden = true;
   } catch (error) {
     $('screenError').textContent = error.message;
     $('screenError').hidden = false;
   }
+  $('toBottom').hidden = isAtBottom();
+}
+
+/// Session view fills the screen between the header and the composer (which stays above the keyboard).
+function layoutSession() {
+  if ($('session').hidden) return;
+  const top = document.querySelector('header').offsetHeight + ($('offline').hidden ? 0 : $('offline').offsetHeight);
+  document.documentElement.style.setProperty('--top', `${top}px`);
+}
+
+function growReply() {
+  const reply = $('reply');
+  reply.style.height = 'auto';
+  reply.style.height = `${Math.min(reply.scrollHeight, 132)}px`;
+}
+
+let statusTimer = null;
+function setInputStatus(message, isError = false) {
+  const status = $('inputStatus');
+  status.textContent = message;
+  status.classList.toggle('error', isError);
+  status.hidden = !message;
+  clearTimeout(statusTimer);
+  if (message && !isError) statusTimer = setTimeout(() => { status.hidden = true; }, 2000);
 }
 
 async function send(payload, button) {
-  if (!current) return;
-  $('inputError').hidden = true;
+  if (!current) return false;
   if (button) button.disabled = true;
   try {
     await api('/api/input', { method: 'POST', body: JSON.stringify({ tty: current, ...payload }) });
+    setInputStatus(payload.text && payload.submit ? 'Sent ✓' : `${button ? button.textContent : 'Key'} ✓`);
     setTimeout(refreshScreen, 250);
+    setTimeout(refreshScreen, 1200);
     return true;
   } catch (error) {
-    $('inputError').textContent = error.message;
-    $('inputError').hidden = false;
+    setInputStatus(error.message, true);
     return false;
   } finally {
     if (button) button.disabled = false;
@@ -410,12 +495,38 @@ document.addEventListener('DOMContentLoaded', () => {
       ? send({ key: button.dataset.key }, button)
       : send({ text: button.dataset.text, submit: false }, button));
   }
+  const reply = $('reply');
+  reply.addEventListener('input', growReply);
+  reply.addEventListener('keydown', event => {
+    // Enter sends (the phone keyboard's send key too); the agent's box is single-line anyway.
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      $('replyForm').requestSubmit();
+    }
+  });
   $('replyForm').addEventListener('submit', async event => {
     event.preventDefault();
-    const input = $('reply');
-    if (!input.value.trim()) return;
-    if (await send({ text: input.value, submit: true }, event.submitter)) input.value = '';
+    if (!reply.value.trim()) return reply.focus();
+    if (await send({ text: reply.value.replace(/\s*\n\s*/g, ' '), submit: true }, $('sendButton'))) {
+      reply.value = '';
+      growReply();
+    }
   });
+  $('screen').addEventListener('scroll', () => { $('toBottom').hidden = isAtBottom(); }, { passive: true });
+  $('toBottom').addEventListener('click', () => {
+    const screen = $('screen');
+    screen.scrollTop = screen.scrollHeight;
+    $('toBottom').hidden = true;
+  });
+  $('wrapToggle').addEventListener('click', () => { prefs.wrap = !prefs.wrap; applyViewPrefs(); });
+  $('fontDown').addEventListener('click', () => { prefs.font = Math.max(8, prefs.font - 1); applyViewPrefs(); });
+  $('fontUp').addEventListener('click', () => { prefs.font = Math.min(20, prefs.font + 1); applyViewPrefs(); });
+  $('pauseSelect').addEventListener('change', event => setPause(event.target.value, event.target));
+  $('resume').addEventListener('click', event => setPause('resume', event.target));
+  $('prev').addEventListener('click', () => step(-1));
+  $('next').addEventListener('click', () => step(1));
+  window.addEventListener('resize', layoutSession);
+  applyViewPrefs();
   document.addEventListener('visibilitychange', () => {
     if (document.hidden) return;
     if (current) refreshScreen(); else if (token) refreshList();

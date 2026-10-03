@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="theme-color" content="#1c1e22">
 <title>VibeSwitcher</title>
 <link rel="manifest" href="/manifest.webmanifest">
@@ -17,6 +17,8 @@
     <h1 id="title">VibeSwitcher</h1>
     <div id="subtitle" class="muted"></div>
   </div>
+  <button id="prev" class="icon nav" hidden aria-label="Previous session">‹</button>
+  <button id="next" class="icon nav" hidden aria-label="Next session">›</button>
   <button id="bell" class="icon" hidden aria-label="Notifications">🔔</button>
 </header>
 
@@ -51,11 +53,34 @@
   </section>
 
   <section id="session" hidden>
-    <div id="sessionMeta" class="meta"></div>
-    <div id="pauseControls" class="pause"></div>
-    <pre id="screen" class="screen" aria-live="off"></pre>
+    <div class="sessionBar">
+      <div id="sessionMeta" class="meta"></div>
+      <div class="tools">
+        <span id="pausedInfo" class="muted" hidden></span>
+        <button id="resume" class="chip-btn" type="button" hidden>Resume</button>
+        <select id="pauseSelect" class="chip-btn" aria-label="Pause this session">
+          <option value="">⏸ Pause…</option>
+          <option value="hour">For 1 hour</option>
+          <option value="tomorrow">Until tomorrow morning</option>
+          <option value="week">For 1 week</option>
+          <option value="indefinitely">Until I resume it</option>
+        </select>
+        <span class="spacer"></span>
+        <button id="wrapToggle" class="chip-btn" type="button" aria-label="Wrap long lines">Wrap</button>
+        <button id="fontDown" class="chip-btn" type="button" aria-label="Smaller text">A−</button>
+        <button id="fontUp" class="chip-btn" type="button" aria-label="Larger text">A+</button>
+      </div>
+    </div>
+    <div class="screenWrap">
+      <div id="screen" class="screen" aria-live="off"></div>
+      <button id="toBottom" class="toBottom" type="button" hidden>↓ Latest</button>
+    </div>
     <p id="screenError" class="error" hidden></p>
-    <div id="controls" hidden>
+    <div id="askCard" class="ask" hidden>
+      <div class="askLabel">Needs you</div>
+      <div id="askText"></div>
+    </div>
+    <div id="composer" class="composer" hidden>
       <div class="keys">
         <button data-key="escape">Esc</button>
         <button data-text="1">1</button>
@@ -63,15 +88,16 @@
         <button data-text="3">3</button>
         <button data-key="up">↑</button>
         <button data-key="down">↓</button>
+        <button data-key="tab">Tab</button>
         <button data-key="enter">⏎</button>
         <button data-key="interrupt">⌃C</button>
       </div>
       <form id="replyForm" class="reply">
-        <input id="reply" placeholder="Reply…" autocomplete="off" maxlength="2000" enterkeyhint="send">
-        <button type="submit" class="primary">Send</button>
+        <textarea id="reply" rows="1" autocomplete="off" maxlength="2000" enterkeyhint="send" placeholder="Message…"></textarea>
+        <button id="sendButton" type="submit" class="primary">Send</button>
       </form>
+      <p id="inputStatus" class="status" hidden></p>
     </div>
-    <p id="inputError" class="error" hidden></p>
     <p id="inputOff" class="muted small" hidden>Replying is off. Turn it on on the Mac: Phone Access › Allow replies.</p>
   </section>
 </main>
