@@ -348,6 +348,7 @@ function growReply() {
   const reply = $('reply');
   reply.style.height = 'auto';
   reply.style.height = `${Math.min(reply.scrollHeight, 132)}px`;
+  $('clearReply').hidden = !reply.value;
 }
 
 // ---------- Quick replies ----------
@@ -563,6 +564,14 @@ document.addEventListener('DOMContentLoaded', () => {
       event.preventDefault();
       $('replyForm').requestSubmit();
     }
+  });
+  // Clear only empties the phone's box; nothing is sent. Keeping the press from taking focus keeps
+  // the keyboard up, so you can start retyping straight away.
+  $('clearReply').addEventListener('pointerdown', event => event.preventDefault());
+  $('clearReply').addEventListener('click', () => {
+    reply.value = '';
+    growReply();
+    reply.focus();
   });
   $('replyForm').addEventListener('submit', async event => {
     event.preventDefault();

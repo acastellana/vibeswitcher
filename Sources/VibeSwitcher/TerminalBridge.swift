@@ -157,7 +157,14 @@ enum TerminalBridge {
     /// report success when the tab is verified to be in front, as typing into it requires.
     @discardableResult
     static func focus(tty: String, strict: Bool = false) -> Bool {
-        guard isRunning, isValidTTY(tty) else { return false }
+        focusReport(tty: tty, strict: strict).ok
+    }
+
+    /// `focus`, plus what happened, for the focus log: the script's verdict ("ok", "missing", …),
+    /// whether the window was minimized, and which tab was in front when it wasn't the target.
+    static func focusReport(tty: String, strict: Bool = false) -> (ok: Bool, detail: String) {
+        guard isRunning else { return (false, "terminal not running") }
+        guard isValidTTY(tty) else { return (false, "invalid tty") }
         // Windows are addressed by id, not position: activating Terminal reorders its windows, so a
         // positional reference ("window 16") can end up pointing at a neighbour. The final check
         // re-raises once if something else still ended up in front.
@@ -182,15 +189,20 @@ enum TerminalBridge {
             end repeat
             if targetWindow is missing value then return "missing"
             set w to window id targetWindow
+            set extra to ""
             try
+                if miniaturized of w then set extra to " minimized"
                 set miniaturized of w to false
             end try
             set selected tab of w to tab targetTab of w
             set index of w to 1
             activate
             delay 0.05
-            if (tty of selected tab of front window) is target then return "ok"
-            if \(strict) then return "unverified"
+            if (tty of selected tab of front window) is target then return "ok" & extra
+            try
+                set extra to extra & " front=" & (tty of selected tab of front window)
+            end try
+            if \(strict) then return "unverified" & extra
             -- Windows tiled side by side (macOS window tiling) keep their partner on top of
             -- `set index`; hiding and re-showing the window does reorder it.
             set visible of w to false
@@ -198,13 +210,20 @@ enum TerminalBridge {
             set index of w to 1
             activate
             delay 0.05
-            if (tty of selected tab of front window) is target then return "ok"
-            return "ok-unverified"
+            if (tty of selected tab of front window) is target then return "ok-after-reshow" & extra
+            return "ok-unverified" & extra
         end tell
         """
+        let start = Date()
         let result = runAppleScript(script)
         let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
-        return result.status == 0 && (strict ? output == "ok" : output.hasPrefix("ok"))
+        let verdict = output.split(separator: " ").first.map(String.init) ?? ""
+        let ok = result.status == 0 && (strict ? verdict == "ok" : verdict.hasPrefix("ok"))
+        let elapsed = Int(Date().timeIntervalSince(start) * 1000)
+        let detail = result.status == 0
+            ? "\(output.replacingOccurrences(of: "/dev/", with: "")) (\(elapsed) ms)"
+            : "script error \(result.status): \(result.error.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160)) (\(elapsed) ms)"
+        return (ok, detail)
     }
 
     /// Minimizes the window running `tty` if that session is its only tab (minimizing a shared window

@@ -46,7 +46,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         notifier?.requestAuthorization()
         notifier?.onOpen = { [weak self] tty in
             guard let self, let session = self.store.sessions.first(where: { $0.tty == tty }) else { return }
-            self.open(session)
+            self.open(session, source: "notification")
         }
         store.onAttention = { [weak self] session in self?.notifier?.post(for: session) }
         store.onNudge = { [weak self] session, nudge in self?.notifier?.post(nudge, for: session) }
@@ -80,7 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         sidebarView.isSidebar = true
         sidebar = SidebarController(content: AnyView(PopoverView(
             store: store, state: PopoverState(), preferences: preferences,
-            onOpen: sidebarView.onOpen, onInstallHooks: sidebarView.onInstallHooks, onQuit: sidebarView.onQuit,
+            onOpen: { [weak self] in self?.open($0, source: "sidebar") }, onInstallHooks: sidebarView.onInstallHooks, onQuit: sidebarView.onQuit,
             onRename: sidebarView.onRename, onResetName: sidebarView.onResetName,
             onNewSession: sidebarView.onNewSession, onEditCommands: sidebarView.onEditCommands,
             onPhoneAccess: sidebarView.onPhoneAccess, onPause: sidebarView.onPause, onResume: sidebarView.onResume,
@@ -118,7 +118,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         popover.delegate = self
         popover.animates = false
 
-        floatingPanel = FloatingPanelController(store: store, onOpen: { [weak self] in self?.open($0) },
+        floatingPanel = FloatingPanelController(store: store, onOpen: { [weak self] in self?.open($0, source: "panel") },
                                                 onShowList: { [weak self] anchor in self?.togglePopover(anchor: anchor) })
         preferences.$sessionOrder
             .receive(on: RunLoop.main)
@@ -163,7 +163,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                                                             queue: .main) { [weak self] note in
             guard let self, let tty = note.object as? String,
                   let session = self.store.sessions.first(where: { $0.tty == tty }) else { return }
-            self.open(session)
+            self.open(session, source: "command")
         }
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.toggleNotification, object: nil,
                                                             queue: .main) { [weak self] _ in
@@ -178,7 +178,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         let event = NSApp.currentEvent
         let secondary = event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true
         if !secondary, let event, let index = dotIndex(at: event, in: sender), store.sessions.indices.contains(index) {
-            open(store.sessions[index])
+            open(store.sessions[index], source: "menu bar dot")
             return
         }
         togglePopover()
@@ -357,7 +357,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         if size.width > 0, size.height > 0, popover.contentSize != size { popover.contentSize = size }
     }
 
-    private func open(_ session: Session) {
+    private func open(_ session: Session, source: String = "list") {
         popover.performClose(nil)
         store.acknowledge(session)
         notifier?.clear(tty: session.tty)
@@ -366,11 +366,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             // Try the exact Terminal tab even if the last title scan missed it; fall back to the host app.
             var result = "terminal-tab"
             if session.inTerminalApp, let terminal = TerminalBridge.app {
+                var attempt = FocusLog.begin(session, source: source)
                 // Activate first, then pick the tab: raising a window while Terminal is in the background
                 // only reorders it, and Terminal re-fronts its previous key window when it activates.
+                let activationStart = Date()
                 let active = HostApp.bringToFrontAndWait(terminal)
-                if !TerminalBridge.focus(tty: session.tty) { result = "tab-not-found" }
+                attempt.steps.append("activate Terminal: \(active ? "ok" : "timed out") (\(Int(Date().timeIntervalSince(activationStart) * 1000)) ms)")
+                let focus = TerminalBridge.focusReport(tty: session.tty)
+                attempt.steps.append("select tab: \(focus.detail)")
+                if !focus.ok { result = "tab-not-found" }
                 else if !active { result = "terminal-tab (activation timed out)" }
+                FocusLog.finish(attempt)
             } else {
                 result = "host-app"
                 DispatchQueue.main.sync { if !HostApp.activate(forPID: session.pid) { result = "failed" } }

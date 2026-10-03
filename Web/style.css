@@ -113,6 +113,8 @@ select.chip-btn { appearance: none; -webkit-appearance: none; }
   border: 1.5px solid var(--accent); border-radius: 12px; padding: 10px 12px; resize: none; min-height: 44px; max-height: 132px; }
 .reply textarea::placeholder { color: var(--muted); }
 .reply button { min-height: 44px; }
+.replyButtons { display: flex; flex-direction: column; gap: 6px; }
+.replyButtons #clearReply { min-height: 32px; padding: 4px 9px; color: var(--muted); }
 .status { margin: 6px 2px 0; font-size: 12.5px; color: #30d158; }
 .status.error { color: var(--warn); }
 

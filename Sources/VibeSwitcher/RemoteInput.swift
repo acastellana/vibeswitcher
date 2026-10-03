@@ -62,8 +62,15 @@ enum RemoteInput {
             guard let clean = sanitized(text) else { return .invalidText }
             cleanText = clean
         }
-        _ = HostApp.bringToFrontAndWait(terminal)
-        guard TerminalBridge.focus(tty: tty, strict: true), TerminalBridge.frontTTY() == tty else { return .focusFailed }
+        let active = HostApp.bringToFrontAndWait(terminal)
+        let focus = TerminalBridge.focusReport(tty: tty, strict: true)
+        let front = focus.ok ? TerminalBridge.frontTTY() : nil
+        guard focus.ok, front == tty else {
+            FocusLog.record(tty: tty, source: "phone", steps: [
+                "activate Terminal: \(active ? "ok" : "timed out")", "select tab: \(focus.detail)",
+                "front tab before typing: \(front ?? "?")"])
+            return .focusFailed
+        }
         let pid = terminal.processIdentifier
         if let cleanText {
             post(text: cleanText, to: pid)

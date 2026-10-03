@@ -105,7 +105,10 @@
       </div>
       <form id="replyForm" class="reply">
         <textarea id="reply" rows="1" autocomplete="off" maxlength="2000" enterkeyhint="send" placeholder="Message…"></textarea>
-        <button id="sendButton" type="submit" class="primary">Send</button>
+        <div class="replyButtons">
+          <button id="clearReply" type="button" class="chip-btn" hidden>Clear</button>
+          <button id="sendButton" type="submit" class="primary">Send</button>
+        </div>
       </form>
       <p id="inputStatus" class="status" hidden></p>
     </div>
