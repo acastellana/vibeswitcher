@@ -60,6 +60,9 @@ and notifications when a session needs you or finishes. Optionally reply and pre
 2. **Pair a Phone…**: scan the QR code with your phone (Tailscale on), or open the address shown and type
    the code. Add the page to your home screen, then tap **Turn on notifications**.
 3. To reply from the phone, switch on **Allow replies and key presses** (off by default).
+   The session view has quick replies (tap to send; ✎ edits the list, kept on that phone). While a
+   session is showing a question or menu, a quick reply goes into the box instead of being sent:
+   text doesn't answer a menu (use 1–3 / ↑↓ ⏎), it gets read as "let's discuss the question".
 
 How it's kept safe:
 

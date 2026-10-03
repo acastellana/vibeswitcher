@@ -105,7 +105,13 @@ extension HookState {
             let tool = payload["tool_name"] as? String
             state.toolName = tool
             state.notice = tool.map { "Wants permission to use \($0)" } ?? "Wants permission"
-            state.request = tool.map { Self.permission(toolName: $0, input: payload["tool_input"] as? [String: Any] ?? [:]) }
+            let input = payload["tool_input"] as? [String: Any] ?? [:]
+            // Question tools also raise a permission request; what you're asked is still the question.
+            if let tool, StatusRules.questionTools.contains(tool) {
+                state.request = Self.question(toolName: tool, input: input) ?? state.request
+            } else {
+                state.request = tool.map { Self.permission(toolName: $0, input: input) }
+            }
         case "Stop":
             state.request = nil
             state.lastMessage = clip(payload["last_assistant_message"] as? String) ?? state.lastMessage

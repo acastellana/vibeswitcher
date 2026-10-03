@@ -350,6 +350,65 @@ function growReply() {
   reply.style.height = `${Math.min(reply.scrollHeight, 132)}px`;
 }
 
+// ---------- Quick replies ----------
+
+const DEFAULT_QUICK_REPLIES = ['Yes, go ahead', 'Continue', 'Show me the diff', 'Run the tests', 'Explain briefly'];
+
+function quickReplies() {
+  try {
+    const saved = JSON.parse(localStorage.getItem('vs.quickReplies'));
+    if (Array.isArray(saved)) return saved.filter(t => typeof t === 'string' && t.trim());
+  } catch (e) { /* fall back to defaults */ }
+  return DEFAULT_QUICK_REPLIES;
+}
+
+function renderQuickReplies() {
+  const box = $('quickReplies');
+  const chips = quickReplies().map(text => {
+    const chip = el('button', 'quickChip', text);
+    chip.type = 'button';
+    chip.addEventListener('click', () => {
+      const session = state && state.sessions.find(s => s.tty === current);
+      // A question or menu is open: text doesn't answer it (1–3 / arrows do) and gets taken as
+      // "let's discuss the question" instead. Put the reply in the box rather than sending it.
+      if (session && session.status === 'needsInput') {
+        $('reply').value = text;
+        growReply();
+        $('reply').focus();
+        setInputStatus('A question is open: answer it with 1–3 / ↑↓ ⏎, or tap Send to send this text.', true);
+        return;
+      }
+      // Otherwise it's sent right away, like typing it and pressing Enter.
+      send({ text, submit: true }, chip);
+    });
+    return chip;
+  });
+  const editButton = el('button', 'quickChip edit', '✎');
+  editButton.type = 'button';
+  editButton.setAttribute('aria-label', 'Edit quick replies');
+  editButton.addEventListener('click', openQuickEditor);
+  box.replaceChildren(...chips, editButton);
+}
+
+function openQuickEditor() {
+  $('quickText').value = quickReplies().join('\n');
+  $('quickEditor').hidden = false;
+  $('quickReplies').hidden = true;
+  $('quickText').focus();
+}
+
+function closeQuickEditor() {
+  $('quickEditor').hidden = true;
+  $('quickReplies').hidden = false;
+}
+
+function saveQuickReplies(list) {
+  const clean = list.map(t => t.trim().slice(0, 200)).filter(Boolean).slice(0, 12);
+  localStorage.setItem('vs.quickReplies', JSON.stringify(clean));
+  renderQuickReplies();
+  closeQuickEditor();
+}
+
 let statusTimer = null;
 function setInputStatus(message, isError = false) {
   const status = $('inputStatus');
@@ -365,7 +424,8 @@ async function send(payload, button) {
   if (button) button.disabled = true;
   try {
     await api('/api/input', { method: 'POST', body: JSON.stringify({ tty: current, ...payload }) });
-    setInputStatus(payload.text && payload.submit ? 'Sent ✓' : `${button ? button.textContent : 'Key'} ✓`);
+    const label = button && button.classList.contains('quickChip') ? `“${payload.text}” sent ✓` : 'Sent ✓';
+    setInputStatus(payload.text && payload.submit ? label : `${button ? button.textContent : 'Key'} ✓`);
     setTimeout(refreshScreen, 250);
     setTimeout(refreshScreen, 1200);
     return true;
@@ -523,6 +583,10 @@ document.addEventListener('DOMContentLoaded', () => {
   $('fontUp').addEventListener('click', () => { prefs.font = Math.min(20, prefs.font + 1); applyViewPrefs(); });
   $('pauseSelect').addEventListener('change', event => setPause(event.target.value, event.target));
   $('resume').addEventListener('click', event => setPause('resume', event.target));
+  $('quickSave').addEventListener('click', () => saveQuickReplies($('quickText').value.split('\n')));
+  $('quickCancel').addEventListener('click', closeQuickEditor);
+  $('quickReset').addEventListener('click', () => saveQuickReplies(DEFAULT_QUICK_REPLIES));
+  renderQuickReplies();
   $('prev').addEventListener('click', () => step(-1));
   $('next').addEventListener('click', () => step(1));
   window.addEventListener('resize', layoutSession);

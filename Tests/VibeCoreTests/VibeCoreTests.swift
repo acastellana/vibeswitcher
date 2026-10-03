@@ -60,6 +60,12 @@ struct HookReduceTests {
             ["question": "Which database should we use?"], ["question": "Keep the cache?"]]]])]))
         #expect(state.request == "Which database should we use? (+1 more)")
 
+        // A question tool's permission request doesn't replace the question with "Allow: …".
+        let questionInput: [String: Any] = ["questions": [["question": "Which launches count?"]]]
+        state = try #require(apply([event("PreToolUse", ["tool_name": "AskUserQuestion", "tool_input": questionInput]),
+                                    event("PermissionRequest", ["tool_name": "AskUserQuestion", "tool_input": questionInput])]))
+        #expect(state.request == "Which launches count?")
+
         state = try #require(apply([event("PreToolUse", ["tool_name": "ExitPlanMode", "tool_input": ["plan": "\n# Plan: split the parser\n\n1. …"]])]))
         #expect(state.request == "Plan ready: Plan: split the parser")
 

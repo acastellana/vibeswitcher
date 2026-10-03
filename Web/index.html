@@ -81,6 +81,17 @@
       <div id="askText"></div>
     </div>
     <div id="composer" class="composer" hidden>
+      <div id="quickReplies" class="quick" aria-label="Quick replies"></div>
+      <div id="quickEditor" class="quickEditor" hidden>
+        <label for="quickText" class="muted small">Quick replies, one per line (tap one to send it):</label>
+        <textarea id="quickText" rows="5" autocomplete="off"></textarea>
+        <div class="quickActions">
+          <button id="quickReset" type="button" class="link">Restore defaults</button>
+          <span class="spacer"></span>
+          <button id="quickCancel" type="button" class="chip-btn">Cancel</button>
+          <button id="quickSave" type="button" class="chip-btn primaryChip">Save</button>
+        </div>
+      </div>
       <div class="keys">
         <button data-key="escape">Esc</button>
         <button data-text="1">1</button>
