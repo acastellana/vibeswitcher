@@ -21,6 +21,6 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSAppleEventsUsageDescription</key>
-    <string>VibeSwitcher reads Terminal tab titles to show what each Claude/Codex session is doing, and selects a tab when you click a session.</string>
+    <string>VibeSwitcher reads Terminal tab titles to show what each Claude/Codex session is doing and selects a tab when you click a session. If you allow dev pages for your phone, it also lists the localhost pages open in Google Chrome.</string>
 </dict>
 </plist>

@@ -58,6 +58,17 @@ if arguments.contains("--dump") {
     for project in Launcher.recentProjects(observed: observed) { print("  \(project.path)") }
     exit(0)
 }
+if arguments.contains("--dev-pages") {
+    // What the phone's Dev pages list would show right now.
+    switch ChromeTabs.localPages() {
+    case .success(let pages):
+        pages.forEach { print("\($0.target.hostHeader)\($0.path)\t\($0.title)\tid \(DevPages.id(for: $0))") }
+        if pages.isEmpty { print("no localhost pages open in Chrome") }
+    case .failure(let failure):
+        print("\(failure)")
+    }
+    exit(0)
+}
 
 if let index = arguments.firstIndex(of: "--focus"), arguments.indices.contains(index + 1) {
     // Selects the tab only; unlike --open (a real row click) it does not handle activating Terminal.

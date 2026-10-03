@@ -15,7 +15,7 @@ enum TailscaleCLI {
         case notInstalled
         case notRunning
         case httpsDisabled
-        case portInUse(String)
+        case portInUse(port: Int, target: String)
         case command(String)
 
         var description: String {
@@ -23,7 +23,7 @@ enum TailscaleCLI {
             case .notInstalled: return "Tailscale isn't installed on this Mac."
             case .notRunning: return "Tailscale isn't connected. Open Tailscale and log in."
             case .httpsDisabled: return "Turn on HTTPS certificates for your tailnet (admin console › DNS › HTTPS Certificates)."
-            case .portInUse(let target): return "Port \(PhoneAccess.httpsPort) is already served by Tailscale (to \(target))."
+            case .portInUse(let port, let target): return "Port \(port) is already served by Tailscale (to \(target))."
             case .command(let message): return "Tailscale: \(message)"
             }
         }
@@ -54,32 +54,46 @@ enum TailscaleCLI {
         return .success(Status(dnsName: dnsName, login: login, httpsAvailable: certDomains.contains(dnsName)))
     }
 
-    /// What our HTTPS port currently proxies to, if anything.
-    static func servedTarget(host: String, timeout: TimeInterval = 10) -> String? {
+    /// What each of this Mac's HTTPS ports proxies to (port → target), or nil if it can't be read.
+    static func servedTargets(host: String, timeout: TimeInterval = 10) -> [Int: String]? {
         let result = run(["serve", "status", "--json"], timeout: timeout)
         guard result.status == 0, let data = result.output.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let web = json["Web"] as? [String: Any],
-              let site = web["\(host):\(PhoneAccess.httpsPort)"] as? [String: Any],
-              let handlers = site["Handlers"] as? [String: Any], let root = handlers["/"] as? [String: Any]
-        else { return nil }
-        return root["Proxy"] as? String
-    }
-
-    /// Maps https://<this mac>:8443 on the tailnet to the loopback server. Never `funnel`: tailnet only.
-    static func startServing(host: String, localTarget: String) -> Failure? {
-        if let existing = servedTarget(host: host) {
-            return existing == localTarget ? nil : .portInUse(existing)
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        var targets: [Int: String] = [:]
+        for (key, value) in json["Web"] as? [String: Any] ?? [:] {
+            guard key.hasPrefix("\(host):"), let port = Int(key.dropFirst(host.count + 1)),
+                  let site = value as? [String: Any], let handlers = site["Handlers"] as? [String: Any],
+                  let root = handlers["/"] as? [String: Any], let proxy = root["Proxy"] as? String else { continue }
+            targets[port] = proxy
         }
-        let result = run(["serve", "--bg", "--https=\(PhoneAccess.httpsPort)", localTarget])
-        guard result.status == 0 else { return .command(result.error.isEmpty ? result.output : result.error) }
-        return servedTarget(host: host) == localTarget ? nil : .command("serve config didn't take effect")
+        return targets
     }
 
-    /// Removes our mapping (only if it's still ours).
+    /// What one HTTPS port currently proxies to, if anything.
+    static func servedTarget(host: String, httpsPort: Int = PhoneAccess.httpsPort, timeout: TimeInterval = 10) -> String? {
+        servedTargets(host: host, timeout: timeout)?[httpsPort]
+    }
+
+    /// Maps https://<this mac>:<httpsPort> on the tailnet to a loopback server. Never `funnel`: tailnet only.
+    static func startServing(host: String, httpsPort: Int = PhoneAccess.httpsPort, localTarget: String) -> Failure? {
+        if let existing = servedTarget(host: host, httpsPort: httpsPort) {
+            return existing == localTarget ? nil : .portInUse(port: httpsPort, target: existing)
+        }
+        let result = run(["serve", "--bg", "--https=\(httpsPort)", localTarget])
+        guard result.status == 0 else { return .command(result.error.isEmpty ? result.output : result.error) }
+        return servedTarget(host: host, httpsPort: httpsPort) == localTarget ? nil : .command("serve config didn't take effect")
+    }
+
+    /// Removes our mappings (port → our local target), each only if it's still ours. One status read.
+    static func stopServing(host: String, mappings: [Int: String], timeout: TimeInterval = 10) {
+        guard let served = servedTargets(host: host, timeout: timeout) else { return }
+        for (port, target) in mappings where served[port] == target {
+            _ = run(["serve", "--https=\(port)", "off"], timeout: timeout)
+        }
+    }
+
     static func stopServing(host: String, localTarget: String, timeout: TimeInterval = 10) {
-        guard servedTarget(host: host, timeout: timeout) == localTarget else { return }
-        _ = run(["serve", "--https=\(PhoneAccess.httpsPort)", "off"], timeout: timeout)
+        stopServing(host: host, mappings: [PhoneAccess.httpsPort: localTarget], timeout: timeout)
     }
 
     private static func run(_ arguments: [String], timeout: TimeInterval = 10) -> (output: String, error: String, status: Int32) {

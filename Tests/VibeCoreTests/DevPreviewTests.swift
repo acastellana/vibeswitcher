@@ -486,3 +486,13 @@ struct PreviewProxyTests {
         #expect(seen.contains("Connection: Upgrade"))
     }
 }
+
+struct AutomationAccessTests {
+    @Test func macOSAnswersMapToWhatThePhoneAccessWindowShows() {
+        #expect(AutomationAccess(status: 0) == .allowed)
+        #expect(AutomationAccess(status: -1743) == .denied)
+        #expect(AutomationAccess(status: -1744) == .notAsked)
+        #expect(AutomationAccess(status: -600) == .appNotRunning)
+        #expect(AutomationAccess(status: -50) == .unknown(-50))
+    }
+}

@@ -74,3 +74,25 @@ public enum DevPages {
         "/" + path.drop { $0 == "/" || $0 == "\\" }
     }
 }
+
+/// Whether macOS lets this app control another one (Privacy & Security › Automation), from the
+/// status `AEDeterminePermissionToAutomateTarget` returns.
+public enum AutomationAccess: Equatable, Sendable {
+    case allowed
+    case denied
+    /// macOS hasn't asked yet (only when checking without asking).
+    case notAsked
+    /// macOS can only answer while the other app is running.
+    case appNotRunning
+    case unknown(Int32)
+
+    public init(status: Int32) {
+        switch status {
+        case 0: self = .allowed
+        case -1743: self = .denied           // errAEEventNotPermitted
+        case -1744: self = .notAsked         // errAEEventWouldRequireUserConsent
+        case -600: self = .appNotRunning     // procNotFound
+        default: self = .unknown(status)
+        }
+    }
+}
