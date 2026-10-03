@@ -55,9 +55,12 @@ Vite refuses the `*.ts.net` host name.
   7. Connects to the target the way the browser did: `localhost` tries `::1` then `127.0.0.1`, since Vite
      often listens on `::1` only.
 - **API (existing server):**
-  - `GET /api/devpages` returns `[{title, url, slotOpen}]`.
-  - `POST /api/preview {url}` checks that the URL is *currently* one of Chrome's qualifying tabs, assigns
-    a slot, and returns `{open: "https://<mac>:<slotPort>/__vibeswitcher/enter?t=…"}`. The path travels inside the ticket, not the URL, so the enter link can't be turned into an open redirect.
+  - `GET /api/devpages` returns `[{id, title, label, open}]`. Titles and labels are masked like everything
+    else sent to the phone.
+  - `POST /api/preview {id}` re-reads Chrome's tabs, finds the page with that opaque id (so only a page
+    open *right now* qualifies), assigns a slot, and returns `{open: "https://<mac>:<slotPort>/__vibeswitcher/enter?t=…"}`.
+    The path travels inside the ticket, not the URL, so the enter link can't be turned into an open
+    redirect. The phone never sends a URL.
   - Both use the existing device-token auth, and both refuse unless the new **Allow dev pages** toggle is on.
 - **Tailscale:** turning the toggle on maps 8444–8447 with the same `startServing` logic (refusing a port
   that's already serving something else). Turning it, or Phone Access, off removes them. The health check
