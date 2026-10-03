@@ -146,6 +146,29 @@ enum TerminalBridge {
         return screens
     }
 
+    /// A tab's whole scrollback and its visible screen, in one read (for the phone's Terminal tab).
+    static func history(tty: String) -> (history: String, screen: String)? {
+        guard isRunning, isValidTTY(tty) else { return nil }
+        let result = runAppleScript("""
+        set target to "/dev/\(tty)"
+        tell application "Terminal"
+            repeat with w in windows
+                try
+                    repeat with ti from 1 to (count of tabs of w)
+                        if ((tty of tab ti of w) as text) is target then
+                            return ((history of tab ti of w) as text) & (character id 29) & ((contents of tab ti of w) as text)
+                        end if
+                    end repeat
+                end try
+            end repeat
+        end tell
+        return ""
+        """, timeout: 8)
+        let parts = result.output.components(separatedBy: "\u{1D}")
+        guard result.status == 0, parts.count == 2 else { return nil }
+        return (parts[0], parts[1])
+    }
+
     static var app: NSRunningApplication? {
         NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).first
     }

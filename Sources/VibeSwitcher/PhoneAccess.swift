@@ -56,6 +56,7 @@ final class PhoneAccess: ObservableObject {
     private var tailscale: TailscaleCLI.Status?
     private lazy var vapidKey: P256.Signing.PrivateKey = Self.loadOrCreateVapidKey()
     private var screenCache: [String: (at: Date, text: String)] = [:]
+    private var historyCache: [String: (at: Date, lines: [String])] = [:]
     private var failedAuth: [Date] = []
     /// Typing into tabs, one input at a time.
     private let work = DispatchQueue(label: "vibeswitcher.phone-access", qos: .userInitiated)
@@ -297,6 +298,9 @@ final class PhoneAccess: ObservableObject {
         case ("POST", "/api/pause"): respond(pause(request, device: device))
         case ("POST", "/api/push"): respond(subscribe(request, device: device))
         case ("POST", "/api/push/test"): respond(testPush(device))
+        case ("GET", "/api/history"): history(request, respond: respond)
+        case ("GET", "/api/conversation"): conversation(request, respond: respond)
+        case ("GET", "/api/conversation/tool"): conversationTool(request, respond: respond)
         case ("POST", "/api/unpair"):
             remove(device)
             respond(.json(["ok": true]))
@@ -361,6 +365,10 @@ final class PhoneAccess: ObservableObject {
                 row["paused"] = true
                 if until != .distantFuture { row["pausedUntil"] = until.timeIntervalSince1970 }
             }
+            if let hook = Self.hookState(for: session.tty) {
+                row["eventAt"] = hook.lastEventAt
+                row["hasTranscript"] = hook.transcriptPath.flatMap { TranscriptReader.checkedURL($0, home: NSHomeDirectory()) } != nil
+            }
             return row
         }
         let today = store.today
@@ -410,6 +418,97 @@ final class PhoneAccess: ObservableObject {
                     response = .json(["tty": tty, "text": text])
                 }
                 waiters.forEach { $0(response) }
+            }
+        }
+    }
+
+    private static func hookState(for tty: String) -> HookState? {
+        guard TerminalBridge.isValidTTY(tty) else { return nil }
+        return HookState.load(from: VibePaths.stateDir.appendingPathComponent("\(tty).json"))
+    }
+
+    /// The tab's scrollback above the visible screen, a page at a time (the phone prepends pages as you
+    /// scroll up). Read once and kept for 2 s, so paging quickly doesn't re-read a huge scrollback.
+    private func history(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
+        let tty = request.query["tty"] ?? ""
+        guard TerminalBridge.isValidTTY(tty), let session = store.sessions.first(where: { $0.tty == tty }) else {
+            return respond(.error(404, "no such session"))
+        }
+        guard session.inTerminalApp else { return respond(.error(409, "This session isn't in a Terminal tab.")) }
+        let before = request.query["before"].flatMap { Int($0) }
+        let limit = request.query["limit"].flatMap { Int($0) } ?? Scrollback.pageLimit
+        let send: ([String]) -> Void = { lines in
+            let page = Scrollback.page(lines, before: before, limit: limit)
+            respond(.json(["tty": tty, "lines": page.lines, "start": page.start, "total": page.total, "first": page.first]))
+        }
+        if let cached = historyCache[tty], cached.at.timeIntervalSinceNow > -2 { return send(cached.lines) }
+        reads.async {
+            let read = TerminalBridge.history(tty: tty)
+            let lines = read.map { Scrollback.lines(history: Redaction.secrets(in: $0.history), screen: Redaction.secrets(in: $0.screen)) }
+            DispatchQueue.main.async {
+                guard let lines else { return respond(.error(503, "Couldn't read that tab right now.")) }
+                let live = Set(self.store.sessions.map(\.tty))
+                self.historyCache = self.historyCache.filter { live.contains($0.key) }
+                self.historyCache[tty] = (Date(), lines)
+                send(lines)
+            }
+        }
+    }
+
+    private static let conversationTailBytes = 2 * 1024 * 1024
+
+    /// Conversation entries from the agent's transcript: the tail first, then what's new after `after`.
+    private func conversation(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
+        let tty = request.query["tty"] ?? ""
+        guard store.sessions.contains(where: { $0.tty == tty }) else { return respond(.error(404, "no such session")) }
+        guard let path = Self.hookState(for: tty)?.transcriptPath,
+              let checked = TranscriptReader.checkedURL(path, home: NSHomeDirectory()) else {
+            return respond(.error(404, "No transcript for this session. See the Terminal tab."))
+        }
+        let (url, format) = checked
+        let after = request.query["after"].flatMap { Int($0) }
+        reads.async {
+            let response: HTTPResponse
+            if let handle = try? FileHandle(forReadingFrom: url), let size = try? handle.seekToEnd() {
+                defer { try? handle.close() }
+                let fileSize = Int(size)
+                var start = after.map { min(max(0, $0), fileSize) } ?? max(0, fileSize - Self.conversationTailBytes)
+                if let after, after > fileSize { start = 0 }   // the file was replaced: start over
+                try? handle.seek(toOffset: UInt64(start))
+                var data = (try? handle.readToEnd()) ?? Data()
+                var skipped = 0
+                if after == nil, start > 0 {
+                    skipped = TranscriptReader.tailStart(data)
+                    data = data.subdata(in: (data.startIndex + skipped)..<data.endIndex)
+                }
+                let result = TranscriptReader.read(data, format: format)
+                response = .json(["tty": tty, "entries": result.entries.map(\.json),
+                                  "cursor": start + skipped + result.consumed,
+                                  "truncatedBefore": after == nil && start > 0,
+                                  "format": format == .claude ? "claude" : "codex"])
+            } else {
+                response = .error(503, "Couldn't read the transcript right now.")
+            }
+            DispatchQueue.main.async { respond(response) }
+        }
+    }
+
+    /// One tool call with its full output (up to 64 KB), for "Show all".
+    private func conversationTool(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
+        let tty = request.query["tty"] ?? "", id = request.query["id"] ?? ""
+        guard !id.isEmpty, store.sessions.contains(where: { $0.tty == tty }),
+              let path = Self.hookState(for: tty)?.transcriptPath,
+              let checked = TranscriptReader.checkedURL(path, home: NSHomeDirectory()) else {
+            return respond(.error(404, "not found"))
+        }
+        let (url, format) = checked
+        reads.async {
+            let data = (try? Data(contentsOf: url, options: .mappedIfSafe)) ?? Data()
+            let entry = TranscriptReader.read(data, format: format, outputLimit: 64 * 1024).entries
+                .first { $0.id == id && $0.kind == .tool }
+            DispatchQueue.main.async {
+                guard let entry else { return respond(.error(404, "not found")) }
+                respond(.json(["tty": tty, "entry": entry.json]))
             }
         }
     }
