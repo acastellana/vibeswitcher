@@ -63,6 +63,10 @@ and notifications when a session needs you or finishes. Optionally reply and pre
    The session view has quick replies (tap to send; ✎ edits the list, kept on that phone). While a
    session is showing a question or menu, a quick reply goes into the box instead of being sent:
    text doesn't answer a menu (use 1–3 / ↑↓ ⏎), it gets read as "let's discuss the question".
+4. A session's view has two tabs. **Terminal** is the live screen; scroll up for the tab's earlier output
+   (up to the last 5,000 lines). **Conversation** is the session as a clean timeline, read from Claude
+   Code's (or Codex's) own transcript: your prompts, the agent's replies and one row per tool call (tap
+   one for its output). It updates as the session moves.
 
 How it's kept safe:
 
