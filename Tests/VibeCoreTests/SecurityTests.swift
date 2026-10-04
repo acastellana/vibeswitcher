@@ -169,3 +169,34 @@ struct RequestFramingTests {
         #expect(decide("GET / HTTP/1.1\r\n\(me)") == .forward(sessionToken: "T"))
     }
 }
+
+struct RedactionReviewTests {
+    @Test func aKeyCutOffAtEitherEndIsStillMasked() {
+        // The screen shows the top of a key taller than the window…
+        let top = "$ cat id_ed25519\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ\nAAAAMwAAAAtzc2gtZW"
+        #expect(!Redaction.secrets(in: top).contains("b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQ"))
+        #expect(Redaction.secrets(in: top).hasPrefix("$ cat id_ed25519\n"))
+        // …or its end after the top scrolled off.
+        let bottom = "AAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACBkZXZp\n-----END OPENSSH PRIVATE KEY-----\n$ "
+        let masked = Redaction.secrets(in: bottom)
+        #expect(!masked.contains("QyNTUxOQAAACBkZXZp"))
+        #expect(masked.hasSuffix("\n$ "))
+    }
+
+    @Test func pgpPrivateKeyBlocksAreMasked() {
+        let pgp = "-----BEGIN PGP PRIVATE KEY BLOCK-----\nlQOYBF0Ar\n-----END PGP PRIVATE KEY BLOCK-----"
+        #expect(!Redaction.secrets(in: pgp).contains("lQOYBF0Ar"))
+    }
+
+    @Test func escapedQuotesDontEndAQuotedSecret() {
+        #expect(Redaction.secrets(in: #"password="a\"bcd" next"#) == #"password="•••" next"#)
+    }
+
+    @Test func longHyphenatedTextIsMaskedQuickly() {
+        let blob = String(repeating: "a-", count: 20_000) + " token=abc"
+        let start = Date()
+        let masked = Redaction.secrets(in: blob)
+        #expect(Date().timeIntervalSince(start) < 1)
+        #expect(masked.hasSuffix("token=•••"))
+    }
+}

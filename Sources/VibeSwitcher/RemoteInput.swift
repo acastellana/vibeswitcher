@@ -30,7 +30,7 @@ enum RemoteInput {
     }
 
     enum Failure: Error, Equatable, CustomStringConvertible {
-        case locked, noAccessibility, notInTerminal, focusFailed, invalidText, sessionChanged
+        case locked, noAccessibility, notInTerminal, focusFailed, invalidText, sessionChanged, notAllowed
         /// Another tab or app came to the front while typing. `typed`: part of the text is in the session's
         /// box (not sent).
         case focusMoved(typed: Bool)
@@ -43,6 +43,7 @@ enum RemoteInput {
             case .focusFailed: return "Couldn't bring that tab to the front on the Mac."
             case .invalidText: return "Text is empty or too long."
             case .sessionChanged: return "That session ended or another one took its tab. Nothing was typed."
+            case .notAllowed: return "Not sent: this phone was unpaired or replies were turned off."
             case .focusMoved(let typed):
                 return typed ? "Another tab came to the front on the Mac while typing, so it stopped. Part of the message is in the session's box, not sent."
                              : "Another tab came to the front on the Mac, so nothing was typed."
@@ -65,7 +66,10 @@ enum RemoteInput {
 
     /// Runs off the main thread (AppleScript and short pauses between key events). `agent` is the session's
     /// agent process: if it isn't running on `tty` any more, the tab holds something else and nothing is typed.
-    static func send(tty: String, agent: (pid: Int32, startedAt: Date), text: String?, submit: Bool, key: Key?) -> Failure? {
+    /// `stillAllowed` runs once any jump in progress is over, right before anything happens (pairing, the
+    /// replies switch and the session can change while waiting).
+    static func send(tty: String, agent: (pid: Int32, startedAt: Date), text: String?, submit: Bool, key: Key?,
+                     stillAllowed: () -> Bool) -> Failure? {
         if isScreenLocked { return .locked }
         guard AXIsProcessTrusted() else { return .noAccessibility }
         guard TerminalBridge.isValidTTY(tty), let terminal = TerminalBridge.app else { return .notInTerminal }
@@ -76,12 +80,14 @@ enum RemoteInput {
         }
         focusLock.lock()
         defer { focusLock.unlock() }
+        guard stillAllowed() else { return .notAllowed }
         guard SessionIdentity.isRunning(pid: agent.pid, startedAt: agent.startedAt),
               ProcessTable.info(pid: agent.pid)?.tty == tty else { return .sessionChanged }
         let active = HostApp.bringToFrontAndWait(terminal)
         let focus = TerminalBridge.focusReport(tty: tty, strict: true)
         let front = focus.ok ? TerminalBridge.frontTTY() : nil
-        guard focus.ok, front == tty, let window = frontWindowNumber(of: terminal.processIdentifier) else {
+        // The tab's own window (each Terminal tab is a window of its own): if another one comes in front, stop.
+        guard focus.ok, front == tty, let window = focus.windowID ?? frontWindowNumber(of: terminal.processIdentifier) else {
             FocusLog.record(tty: tty, source: "phone", steps: [
                 "activate Terminal: \(active ? "ok" : "timed out")", "select tab: \(focus.detail)",
                 "front tab before typing: \(front ?? "?")"])
@@ -104,14 +110,18 @@ enum RemoteInput {
         return .focusMoved(typed: typed)
     }
 
-    /// The window number of `pid`'s frontmost on-screen window (the one keystrokes go to).
+    /// The window number of `pid`'s frontmost real window (the one keystrokes go to). Skips the thin title-bar
+    /// strips and small helper windows full-screen Terminal windows come with.
     private static func frontWindowNumber(of pid: pid_t) -> Int? {
         guard let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
                 as? [[String: Any]] else { return nil }
         for window in windows {
             let owner = window[kCGWindowOwnerPID as String] as? Int32
             let layer = window[kCGWindowLayer as String] as? Int
-            if owner == pid, layer == 0 { return window[kCGWindowNumber as String] as? Int }
+            let alpha = window[kCGWindowAlpha as String] as? Double ?? 1
+            let bounds = (window[kCGWindowBounds as String] as? [String: Any]).flatMap { CGRect(dictionaryRepresentation: $0 as CFDictionary) }
+            guard owner == pid, layer == 0, alpha > 0, let bounds, bounds.height >= 200, bounds.width >= 200 else { continue }
+            return window[kCGWindowNumber as String] as? Int
         }
         return nil
     }

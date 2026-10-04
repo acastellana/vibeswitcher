@@ -70,9 +70,12 @@ function sessionQuery(tty = current) {
 }
 
 function shownSession() {
-  if (!state || !current) return null;
-  return state.sessions.find(s => s.tty === current && (!currentSid || s.sid === currentSid)) || null;
+  // No sid: the view was opened on a tty with no session (yet). Whatever turns up there is offered, not assumed.
+  if (!state || !current || !currentSid) return null;
+  return state.sessions.find(s => s.tty === current && s.sid === currentSid) || null;
 }
+
+let webVersion = null;
 
 function forgetToken() {
   token = null;
@@ -142,6 +145,11 @@ async function refreshList(render = true) {
     return;
   } finally {
     listBusy = false;
+  }
+  // The Mac now serves a newer app: load it (an old page would leave out what the Mac now expects).
+  if (state.web) {
+    if (webVersion && state.web !== webVersion) return location.reload();
+    webVersion = state.web;
   }
   if (!pushChecked) { pushChecked = true; syncPushSubscription(); }
   clockOffset = state.now - Date.now() / 1000;
@@ -776,7 +784,10 @@ async function send(payload, button) {
   if (!current) return false;
   if (button) button.disabled = true;
   try {
-    await api('/api/input', { method: 'POST', body: JSON.stringify({ tty: current, sid: currentSid, ...payload }) });
+    // Typing waits for a jump in progress on the Mac and takes a moment for long text: allow for it, and on a
+    // timeout say what's unknown rather than "unreachable" (a retry could type it twice).
+    await api('/api/input', { method: 'POST', body: JSON.stringify({ tty: current, sid: currentSid, ...payload }),
+                              timeout: 30000, timeoutMessage: "The Mac didn't confirm in time. Check the screen before sending again." });
     const label = button && button.classList.contains('quickChip') ? `“${payload.text}” sent ✓` : 'Sent ✓';
     setInputStatus(payload.text && payload.submit ? label : `${button ? button.textContent : 'Key'} ✓`);
     setTimeout(refreshScreen, 250);
@@ -901,15 +912,22 @@ document.addEventListener('DOMContentLoaded', () => {
   $('unpair').addEventListener('click', async () => {
     // Forget the token only once the Mac has removed this phone: otherwise a copy of it would keep working
     // while this screen says it's unpaired. (A 401 means it's already gone: api() forgets it then.)
+    const note = $('unpairNote');
     try {
       await api('/api/unpair', { method: 'POST', body: '{}' });
+      note.hidden = true;
       forgetToken();
     } catch (error) {
-      const note = $('unpairNote');
+      if (!token) { note.hidden = true; return; }   // 401: the Mac had already removed it (and api() forgot it)
       note.replaceChildren(`Couldn't reach the Mac, so this phone is still paired (${error.message}). Try again, or remove it on the Mac in Phone Access. `);
       const anyway = el('button', 'link', 'Forget it on this phone only');
       anyway.type = 'button';
-      anyway.addEventListener('click', forgetToken);
+      anyway.addEventListener('click', () => {
+        // Kept so that pairing this phone again retires the old token on the Mac.
+        localStorage.setItem('vs.previousToken', token);
+        note.hidden = true;
+        forgetToken();
+      });
       note.append(anyway);
       note.hidden = false;
     }

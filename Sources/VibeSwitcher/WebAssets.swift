@@ -1,3 +1,4 @@
+import CryptoKit
 import AppKit
 import VibeCore
 
@@ -12,6 +13,16 @@ enum WebAssets {
         "/sw.js": ("sw.js", "text/javascript; charset=utf-8"),
         "/manifest.webmanifest": ("manifest.webmanifest", "application/manifest+json"),
     ]
+
+    /// A short fingerprint of the web app's files: changes when an update serves a different app.
+    static let version: String = {
+        guard let directory else { return "" }
+        var data = Data()
+        for name in Set(files.values.map(\.name)).sorted() {
+            data.append((try? Data(contentsOf: directory.appendingPathComponent(name))) ?? Data())
+        }
+        return Base64URL.encode(Data(SHA256.hash(data: data)).prefix(9))
+    }()
 
     static func response(for path: String) -> HTTPResponse? {
         if path == "/icon-192.png" { return icon(192) }

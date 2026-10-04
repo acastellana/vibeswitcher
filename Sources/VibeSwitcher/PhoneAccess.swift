@@ -456,6 +456,8 @@ final class PhoneAccess: ObservableObject {
                       "projects": today.byProject().prefix(8).map { ["project": Redaction.secrets(in: $0.project), "working": $0.working,
                                                                       "waiting": $0.waiting, "background": $0.background] }],
             "inputAllowed": inputAllowed,
+            // The phone reloads when the Mac serves a newer web app (an old page wouldn't send what it needs).
+            "web": WebAssets.version,
             "devPagesAllowed": devPagesAllowed,
             "device": ["id": device.id, "name": device.name, "push": device.push != nil],
             "vapidPublicKey": Base64URL.encode(vapidKey.publicKey.x963Representation),
@@ -494,7 +496,9 @@ final class PhoneAccess: ObservableObject {
                 let live = Set(self.store.sessions.map(\.identity))
                 self.screenCache = self.screenCache.filter { live.contains($0.key) }
                 let response: HTTPResponse
-                if raw == nil {
+                if self.store.sessions.first(where: { $0.tty == tty })?.identity != key {
+                    response = .error(409, Self.sessionChanged)   // the tab changed hands during the read
+                } else if raw == nil {
                     response = .error(503, "Couldn't read that tab right now.")
                 } else {
                     self.screenCache[key] = (Date(), text)
@@ -519,6 +523,10 @@ final class PhoneAccess: ObservableObject {
         let before = request.query["before"].flatMap { Int($0) }
         let limit = request.query["limit"].flatMap { Int($0) } ?? Scrollback.pageLimit
         let send: ([String]?) -> Void = { lines in
+            // The tab may have changed hands since the request (or during the read): not this session's to show.
+            guard self.store.sessions.first(where: { $0.tty == tty })?.identity == key else {
+                return respond(.error(409, Self.sessionChanged))
+            }
             guard let lines else { return respond(.error(503, "Couldn't read that tab right now.")) }
             let page = Scrollback.page(lines, before: before, limit: limit)
             respond(.json(["tty": tty, "lines": page.lines.map { Redaction.secrets(in: $0) }, "start": page.start,
@@ -531,12 +539,18 @@ final class PhoneAccess: ObservableObject {
         }
         historyWaiters[key] = [send]
         transcriptReads.async {
-            let lines = TerminalBridge.history(tty: tty).map { Scrollback.lines(history: $0.history, screen: $0.screen) }
+            // Masked as a whole, before it's split into lines: a private key spans many lines.
+            let lines = TerminalBridge.history(tty: tty).map {
+                Scrollback.lines(history: Redaction.secrets(in: $0.history), screen: Redaction.secrets(in: $0.screen))
+            }
             DispatchQueue.main.async {
                 let waiters = self.historyWaiters.removeValue(forKey: key) ?? []
                 let live = Set(self.store.sessions.map(\.identity))
                 self.historyCache = self.historyCache.filter { live.contains($0.key) }
-                if let lines { self.historyCache[key] = (Date(), lines) }
+                // The tab may have changed hands during the read: then it's not this session's to keep.
+                if let lines, self.store.sessions.first(where: { $0.tty == tty })?.identity == key {
+                    self.historyCache[key] = (Date(), lines)
+                }
                 waiters.forEach { $0(lines) }
             }
         }
@@ -685,14 +699,15 @@ final class PhoneAccess: ObservableObject {
         work.async {
             // Queued work runs later: check again that the phone is still paired, replies are still on, and
             // the tty still holds that session, right before typing.
-            let allowed = DispatchQueue.main.sync {
-                self.state == .on && self.inputAllowed && self.devices.contains { $0.id == device.id }
-                    && self.store.sessions.first(where: { $0.tty == tty })?.identity == sid
+            // Checked inside `send`, after it waited for any jump in progress (which can take a second or two).
+            let stillAllowed = {
+                DispatchQueue.main.sync {
+                    self.state == .on && self.inputAllowed && self.devices.contains { $0.id == device.id }
+                        && self.store.sessions.first(where: { $0.tty == tty })?.identity == sid
+                }
             }
-            guard allowed else {
-                return DispatchQueue.main.async { respond(.error(409, "Not sent: this phone was unpaired, replies were turned off, or the session changed.")) }
-            }
-            let failure = RemoteInput.send(tty: tty, agent: (session.pid, session.startedAt), text: text, submit: submit, key: key)
+            let failure = RemoteInput.send(tty: tty, agent: (session.pid, session.startedAt), text: text, submit: submit,
+                                           key: key, stillAllowed: stillAllowed)
             DispatchQueue.main.async {
                 if let failure {
                     self.audit("input to \(session.displayName) from \(device.name) refused: \(failure)")

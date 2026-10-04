@@ -193,9 +193,9 @@ enum TerminalBridge {
     /// whether the window was minimized, and which tab was in front when it wasn't the target.
     /// `onCurrentDesktop`: the tab's window is on the desktop being shown (unknown counts as no). Only then is the check quick and
     /// the re-show fallback allowed; otherwise it waits up to 1.5 s for macOS to switch desktops.
-    static func focusReport(tty: String, strict: Bool = false, onCurrentDesktop: Bool = false) -> (ok: Bool, detail: String) {
-        guard isRunning else { return (false, "terminal not running") }
-        guard isValidTTY(tty) else { return (false, "invalid tty") }
+    static func focusReport(tty: String, strict: Bool = false, onCurrentDesktop: Bool = false) -> (ok: Bool, detail: String, windowID: Int?) {
+        guard isRunning else { return (false, "terminal not running", nil) }
+        guard isValidTTY(tty) else { return (false, "invalid tty", nil) }
         // A tab on another desktop (or an unknown one) gets time for the desktop switch and no re-show.
         let plan = FocusPlan.make(onCurrentDesktop: onCurrentDesktop, strict: strict)
         // Windows are addressed by id, not position: activating Terminal reorders its windows, so a
@@ -237,7 +237,7 @@ enum TerminalBridge {
                 try
                     if (tty of selected tab of front window) is target then
                         if checked > 1 then set extra to extra & " after " & checked & " checks"
-                        return "ok" & extra
+                        return "ok" & extra & " window=" & targetWindow
                     end if
                 end try
             end repeat
@@ -266,7 +266,10 @@ enum TerminalBridge {
         let detail = result.status == 0
             ? "\(output.replacingOccurrences(of: "/dev/", with: "")) (\(elapsed) ms)"
             : "script error \(result.status): \(result.error.trimmingCharacters(in: .whitespacesAndNewlines).prefix(160)) (\(elapsed) ms)"
-        return (ok, detail)
+        // The tab's window id (Terminal's AppleScript window id is the window server's number for it).
+        let windowID = output.range(of: #"window=([0-9]+)"#, options: .regularExpression)
+            .flatMap { Int(output[$0].dropFirst("window=".count)) }
+        return (ok, detail, windowID)
     }
 
     /// Minimizes the window running `tty` if that session is its only tab (minimizing a shared window
