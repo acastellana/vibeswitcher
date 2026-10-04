@@ -182,7 +182,7 @@ public final class PreviewProxy: @unchecked Sendable {
                     // Whatever else the client sends: the rest of a request body, or websocket frames.
                     // The client going away ends the exchange either way: a hung dev server must not keep
                     // both connections (and a slot's connection budget) forever.
-                    self?.pump(from: client, to: upstream, onEnd: { client.cancel(); upstream.cancel() })
+                    self?.pump(from: client, to: upstream, onEnd: { _ in client.cancel(); upstream.cancel() })
                 })
                 self?.forwardResponse(upstream, to: client, buffer: Data(), ended: false, target: target)
             case .waiting, .failed:
@@ -220,23 +220,26 @@ public final class PreviewProxy: @unchecked Sendable {
                 guard let self, error == nil else { client.cancel(); return }
                 if interim { return self.forwardResponse(upstream, to: client, buffer: rest, ended: ended, target: target) }
                 if ended { client.cancel(); return }
-                self.pump(from: upstream, to: client, onEnd: { client.cancel() })
+                // A dev server that fails mid-answer resets the phone's connection: closing it cleanly would
+                // make a cut-off response (no length, not chunked) look complete.
+                self.pump(from: upstream, to: client, onEnd: { failed in failed ? client.forceCancel() : client.cancel() })
             })
         }
     }
 
     /// Copies bytes until `source` ends. The next read waits for the previous write, so a slow phone
     /// slows the dev server down instead of filling memory.
-    private func pump(from source: NWConnection, to destination: NWConnection, onEnd: (() -> Void)?) {
+    /// `onEnd(failed)`: `failed` when `source` ended with an error rather than a clean close.
+    private func pump(from source: NWConnection, to destination: NWConnection, onEnd: @escaping (Bool) -> Void) {
         source.receive(minimumIncompleteLength: 1, maximumLength: 256 * 1024) { [weak self] data, _, isComplete, error in
             let ended = isComplete || error != nil
             guard let data, !data.isEmpty else {
-                if ended { onEnd?() } else { self?.pump(from: source, to: destination, onEnd: onEnd) }
+                if ended { onEnd(error != nil) } else { self?.pump(from: source, to: destination, onEnd: onEnd) }
                 return
             }
             destination.send(content: data, completion: .contentProcessed { sendError in
                 if sendError != nil { source.cancel(); destination.cancel(); return }
-                if ended { onEnd?() } else { self?.pump(from: source, to: destination, onEnd: onEnd) }
+                if ended { onEnd(error != nil) } else { self?.pump(from: source, to: destination, onEnd: onEnd) }
             })
         }
     }

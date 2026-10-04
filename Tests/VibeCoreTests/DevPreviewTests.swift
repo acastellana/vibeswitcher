@@ -283,6 +283,13 @@ final class FakeUpstream: @unchecked Sendable {
     private var heads: [String] = []
     var reply = Data("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".utf8)
     var echoAfterReply = false
+    /// More of the response, each sent after its delay (a streamed or chunked answer).
+    var stages: [(TimeInterval, Data)] = []
+    /// End the connection with a reset after the reply instead of closing it (a dev server that crashed).
+    var resetAfterReply = false
+    private var bodies: [Data] = []
+    /// Each request's body (read up to its Content-Length).
+    var recordedBodies: [Data] { queue.sync { bodies } }
     /// Wait this long before replying (a slow dev server).
     var delay: TimeInterval = 0
     private var closedCount = 0
@@ -323,10 +330,17 @@ final class FakeUpstream: @unchecked Sendable {
                 if !done { self.readHead(connection, buffer: buffer) }
                 return
             }
-            self.heads.append(String(decoding: buffer[buffer.startIndex..<end.lowerBound], as: UTF8.self))
+            let head = String(decoding: buffer[buffer.startIndex..<end.lowerBound], as: UTF8.self)
+            let length = head.split(separator: "\r\n").first { $0.lowercased().hasPrefix("content-length:") }
+                .flatMap { Int($0.split(separator: ":")[1].trimmingCharacters(in: .whitespaces)) } ?? 0
+            if buffer.count - end.upperBound < length, !done { return self.readHead(connection, buffer: buffer) }
+            self.heads.append(head)
+            self.bodies.append(Data(buffer[end.upperBound...]))
             let answer = {
                 connection.send(content: self.reply, completion: .contentProcessed { _ in
-                    if self.echoAfterReply { self.echo(connection) } else { connection.cancel() }
+                    if self.echoAfterReply { return self.echo(connection) }
+                    if self.resetAfterReply { return connection.forceCancel() }
+                    self.sendStages(self.stages, on: connection)
                 })
             }
             guard self.delay > 0 else { return answer() }
@@ -335,6 +349,15 @@ final class FakeUpstream: @unchecked Sendable {
                 if done || error != nil { self.closedCount += 1 }
             }
             self.queue.asyncAfter(deadline: .now() + self.delay, execute: answer)
+        }
+    }
+
+    private func sendStages(_ stages: [(TimeInterval, Data)], on connection: NWConnection) {
+        guard let (delay, data) = stages.first else { return connection.cancel() }
+        queue.asyncAfter(deadline: .now() + delay) {
+            connection.send(content: data, completion: .contentProcessed { _ in
+                self.sendStages(Array(stages.dropFirst()), on: connection)
+            })
         }
     }
 
@@ -368,6 +391,38 @@ func exchange(port: UInt16, _ request: String, timeout: TimeInterval = 5) async 
         connection.start(queue: queue)
         connection.send(content: Data(request.utf8), completion: .contentProcessed { _ in read() })
         queue.asyncAfter(deadline: .now() + timeout) { finish() }
+    }
+}
+
+/// Like `exchange`, but also reports whether the connection ended in an error (a reset) rather than a
+/// clean close, and when each piece of the response arrived (seconds after sending).
+func exchangeDetailed(port: UInt16, _ request: String, timeout: TimeInterval = 5) async
+    -> (data: Data, endedWithError: Bool, arrivals: [(TimeInterval, Data)]) {
+    await withCheckedContinuation { continuation in
+        let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+        let queue = DispatchQueue(label: "test-client-detailed")
+        let started = Date()
+        var received = Data()
+        var arrivals: [(TimeInterval, Data)] = []
+        var finished = false
+        func finish(error: Bool) {
+            guard !finished else { return }
+            finished = true
+            connection.cancel()
+            continuation.resume(returning: (received, error, arrivals))
+        }
+        func read() {
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 1 << 20) { data, _, done, error in
+                if let data, !data.isEmpty {
+                    received.append(data)
+                    arrivals.append((Date().timeIntervalSince(started), data))
+                }
+                if error != nil { finish(error: true) } else if done { finish(error: false) } else { read() }
+            }
+        }
+        connection.start(queue: queue)
+        connection.send(content: Data(request.utf8), completion: .contentProcessed { _ in read() })
+        queue.asyncAfter(deadline: .now() + timeout) { finish(error: false) }
     }
 }
 

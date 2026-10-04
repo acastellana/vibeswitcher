@@ -5,9 +5,9 @@ import VibeCore
 /// loopback proxies (127.0.0.1:47824–47827) and the `tailscale serve` mappings (:8444–8447) that reach
 /// them. Started and stopped by PhoneAccess on the main thread; the proxies call in from their queues.
 final class DevPreviews {
-    static let slotCount = 4
-    static func publicPort(_ slot: Int) -> Int { PhoneAccess.httpsPort + 1 + slot }
-    static func localPort(_ slot: Int) -> UInt16 { PhoneAccess.port + 1 + UInt16(slot) }
+    static let slotCount = PhonePorts.previewSlots
+    static func publicPort(_ slot: Int) -> Int { PhonePorts.previewPublic(slot) }
+    static func localPort(_ slot: Int) -> UInt16 { PhonePorts.previewLocal(slot) }
     static func localTarget(_ slot: Int) -> String { "http://127.0.0.1:\(localPort(slot))" }
     static var mappings: [Int: String] {
         Dictionary(uniqueKeysWithValues: (0..<slotCount).map { (publicPort($0), localTarget($0)) })

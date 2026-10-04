@@ -6,6 +6,8 @@ import Foundation
 /// on the old server can't see the new one.
 public struct PreviewSlots: Sendable {
     public static let ticketLifetime: TimeInterval = 60
+    /// A session nobody used for this long ends; the page has to be opened again from the phone.
+    public static let idleLimit: TimeInterval = 12 * 3600
 
     public struct Slot: Equatable, Sendable {
         public var target: PreviewTarget?
@@ -71,6 +73,11 @@ public struct PreviewSlots: Sendable {
     public mutating func target(slot: Int, sessionToken: String?, now: Date = Date()) -> PreviewTarget? {
         guard let sessionToken, slots.indices.contains(slot), let expected = slots[slot].sessionToken,
               RemoteAuth.constantTimeEquals(expected, sessionToken) else { return nil }
+        guard now.timeIntervalSince(slots[slot].lastUsed) <= Self.idleLimit else {
+            // Idle too long: the session ends (the page must be opened again from the phone).
+            slots[slot].sessionToken = nil
+            return nil
+        }
         slots[slot].lastUsed = now
         return slots[slot].target
     }

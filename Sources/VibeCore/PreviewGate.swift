@@ -35,12 +35,15 @@ public struct HTTPHead: Equatable, Sendable {
         guard length <= maxBytes else { return .tooLarge }
         guard let text = String(data: data[data.startIndex..<end.lowerBound], encoding: .isoLatin1) else { return .invalid }
         var lines = text.components(separatedBy: "\r\n")
+        // A lone CR or LF left inside a line could smuggle a second header past the rewriting.
+        guard !lines.contains(where: { $0.contains("\r") || $0.contains("\n") }) else { return .invalid }
         let start = lines.removeFirst()
         let parts = start.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false)
         switch kind {
         case .request:
             guard parts.count == 3, parts[2].hasPrefix("HTTP/1."), !parts[0].isEmpty,
-                  parts[0].allSatisfy({ $0.isLetter }), parts[1].hasPrefix("/") else { return .invalid }
+                  parts[0].allSatisfy({ $0.isLetter }), parts[1].hasPrefix("/"),
+                  !parts[1].unicodeScalars.contains(where: { $0.value <= 0x20 || $0.value == 0x7f }) else { return .invalid }
         case .response:
             guard parts.count >= 2, parts[0].hasPrefix("HTTP/1."), let code = Int(parts[1]),
                   (100...599).contains(code) else { return .invalid }
@@ -118,6 +121,12 @@ public enum PreviewGate {
             return .reject(status: 403, message: crossOriginMessage)
         }
         if head.path == enterPath, let ticket = head.query["t"], !ticket.isEmpty { return .enter(ticket: ticket) }
+        // Subresources and frames send no Origin. Another slot's page is another port of the same host, so
+        // the browser marks its requests same-site (and attaches every slot's cookie): only the page itself
+        // (same-origin) and the user (none) may use this slot's session.
+        if let site = head.value("sec-fetch-site")?.lowercased(), site == "same-site" || site == "cross-site" {
+            return .reject(status: 403, message: crossOriginMessage)
+        }
         guard let token = cookie(cookieName(publicPort: publicPort), in: head) else {
             return .reject(status: 403, message: expiredMessage)
         }
@@ -140,10 +149,10 @@ public enum PreviewGate {
             let name = $0.name.lowercased()
             return name.hasPrefix("tailscale-") || name.hasPrefix("x-forwarded-") || name == "forwarded"
         }
-        let ours = cookieName(publicPort: publicPort) + "="
+        // Every slot's cookie (cookies ignore ports), not just this one's: none of them is the dev server's.
         let kept = head.values("cookie").flatMap { $0.split(separator: ";") }
             .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty && !$0.hasPrefix(ours) }
+            .filter { !$0.isEmpty && !isSlotCookie($0) }
         head.remove("cookie")
         if !kept.isEmpty { head.set("Cookie", kept.joined(separator: "; ")) }
         head.set("Host", target.hostHeader)
@@ -167,15 +176,23 @@ public enum PreviewGate {
         if let location = head.value("location"), let path = localPath(location, port: target.port) {
             head.set("Location", path)
         }
+        // A dev server may not set (or overwrite) a slot's cookie.
+        head.fields.removeAll { $0.name.lowercased() == "set-cookie" && isSlotCookie($0.value) }
         for index in head.fields.indices where head.fields[index].name.lowercased() == "set-cookie" {
             head.fields[index].value = head.fields[index].value
                 .replacingOccurrences(of: #";\s*[Dd][Oo][Mm][Aa][Ii][Nn]=[^;]*"#, with: "", options: .regularExpression)
         }
-        if head.status != 101 {
+        // Interim heads (100 Continue, 103 Early Hints) and upgrades keep their connection.
+        if let status = head.status, status >= 200 {
             head.remove("keep-alive")
             head.set("Connection", "close")
         }
         return head
+    }
+
+    /// "vs_preview_8444=…" (any slot), whatever the case.
+    static func isSlotCookie(_ pair: String) -> Bool {
+        pair.trimmingCharacters(in: .whitespaces).lowercased().hasPrefix("vs_preview_")
     }
 
     /// "/login" for "http://localhost:3000/login" (or 127.0.0.1, [::1], *.localhost) on the target's port.

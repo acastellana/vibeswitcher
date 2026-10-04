@@ -15,8 +15,8 @@ import VibeCore
 ///   written to an audit log and announced on the Mac.
 /// - Credentials are masked in everything sent to the phone; notifications are end-to-end encrypted.
 final class PhoneAccess: ObservableObject {
-    static let port: UInt16 = 47823
-    static let httpsPort = 8443
+    static let port = PhonePorts.server
+    static let httpsPort = PhonePorts.https
     static let localTarget = "http://127.0.0.1:\(port)"
 
     enum State: Equatable {

@@ -26,7 +26,7 @@ public struct DevPage: Equatable, Sendable {
 
 public enum DevPages {
     /// VibeSwitcher's own local ports (the Phone Access API and the preview slots); never offered.
-    public static let reservedPorts: ClosedRange<Int> = 47823...47827
+    public static let reservedPorts: ClosedRange<Int> = Int(PhonePorts.server)...Int(PhonePorts.server) + PhonePorts.previewSlots
 
     /// The page for a Chrome tab, or nil unless it's plain http on this Mac (localhost, 127.0.0.1, [::1],
     /// *.localhost) on an unprivileged port that isn't ours.
