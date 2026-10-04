@@ -152,3 +152,14 @@ extension PreviewProxyTests {
         #expect(!result.endedWithError)
     }
 }
+
+struct ChromeReadFailureTests {
+    @Test func appleEventErrorsMapToWhatThePhoneShows() {
+        #expect(ChromeReadFailure(appleEventCode: -1743) == .notAllowed)
+        // Chrome quit while being read: it isn't running any more, not "error -609".
+        #expect(ChromeReadFailure(appleEventCode: -609) == .notRunning)
+        #expect(ChromeReadFailure(appleEventCode: -600) == .notRunning)
+        #expect(ChromeReadFailure(appleEventCode: -1712) == .failed("Chrome didn't answer in time"))
+        #expect(ChromeReadFailure(appleEventCode: -1728) == .failed("Apple Event error -1728"))
+    }
+}

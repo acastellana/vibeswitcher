@@ -253,9 +253,19 @@ final class PhoneAccess: ObservableObject {
         generation += 1
         healthTimer?.invalidate()
         server?.stop()
-        previews.shutdown()
-        guard enabled, let host = tailscale?.dnsName else { return }
-        TailscaleCLI.stopServing(host: host, localTarget: Self.localTarget, timeout: 3)
+        // One status read and one bounded wait for every mapping: quitting can't hang on a stuck CLI.
+        var mappings: [Int: String] = [:]
+        var host: String?
+        if let previewMappings = previews.shutdown() {
+            host = previewMappings.host
+            mappings = previewMappings.mappings
+        }
+        if enabled, let dnsName = tailscale?.dnsName {
+            host = dnsName
+            mappings[Self.httpsPort] = Self.localTarget
+        }
+        guard let host, !mappings.isEmpty else { return }
+        TailscaleCLI.stopServing(host: host, mappings: mappings, timeout: 4)
     }
 
     private func scheduleHealthChecks() {

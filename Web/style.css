@@ -163,3 +163,4 @@ select.chip-btn { appearance: none; -webkit-appearance: none; }
 .globe { flex: none; width: 24px; text-align: center; font-size: 17px; line-height: 24px; }
 .row:disabled { opacity: 0.5; }
 .devPage .detail { -webkit-line-clamp: 1; }
+.devPageLink { color: var(--accent); font-weight: 600; font-size: 15px; }

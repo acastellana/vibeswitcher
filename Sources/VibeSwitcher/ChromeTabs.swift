@@ -11,11 +11,7 @@ import VibeCore
 enum ChromeTabs {
     static let bundleID = "com.google.Chrome"
 
-    enum Failure: Error, Equatable {
-        case notRunning
-        case notAllowed
-        case failed(String)
-    }
+    typealias Failure = ChromeReadFailure
 
     /// The Chrome you use: a regular (Dock) app, not a background-only automation copy.
     static var userChrome: NSRunningApplication? {
@@ -40,12 +36,16 @@ enum ChromeTabs {
         }
         let catcher = ErrorCatcher()
         app.delegate = catcher
-        app.timeout = 8 * 60   // ticks (1/60 s)
-        // Two requests per window (every tab's URL, every tab's title), however many tabs there are.
+        app.timeout = 5 * 60   // ticks (1/60 s); the phone waits 20 s for the whole answer
+        // Three requests per window (its mode, every tab's URL, every tab's title), however many tabs there are.
+        // The first failed request ends the read: the rest would fail (or time out) the same way.
         var tabs: [(url: String, title: String)] = []
         let windows = app.value(forKey: "windows") as? SBElementArray ?? SBElementArray()
         for case let window as SBObject in windows {
-            guard let windowTabs = window.value(forKey: "tabs") as? SBElementArray else { continue }
+            guard catcher.code == nil else { break }
+            // Incognito windows stay private.
+            if (window.value(forKey: "mode") as? String) == "incognito" { continue }
+            guard catcher.code == nil, let windowTabs = window.value(forKey: "tabs") as? SBElementArray else { continue }
             let urls = windowTabs.value(forKey: "URL") as? [Any] ?? []
             let titles = windowTabs.value(forKey: "title") as? [Any] ?? []
             for (index, url) in urls.enumerated() {
@@ -54,11 +54,7 @@ enum ChromeTabs {
             }
         }
         guard let code = catcher.code else { return .success(DevPages.pages(fromTabs: tabs)) }
-        switch code {
-        case -1743: return .failure(.notAllowed)                 // errAEEventNotPermitted
-        case -1712: return .failure(.failed("timeout"))
-        default: return .failure(.failed("Apple Event error \(code)"))
-        }
+        return .failure(Failure(appleEventCode: code))
     }
 }
 

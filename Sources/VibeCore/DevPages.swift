@@ -96,3 +96,19 @@ public enum AutomationAccess: Equatable, Sendable {
         }
     }
 }
+
+/// Why Chrome's tabs couldn't be read, from the Apple Event error code.
+public enum ChromeReadFailure: Error, Equatable, Sendable {
+    case notRunning
+    case notAllowed
+    case failed(String)
+
+    public init(appleEventCode code: Int) {
+        switch code {
+        case -1743: self = .notAllowed                              // errAEEventNotPermitted
+        case -600, -609: self = .notRunning                         // procNotFound, connectionInvalid (Chrome quit mid-read)
+        case -1712: self = .failed("Chrome didn't answer in time")  // errAETimeout
+        default: self = .failed("Apple Event error \(code)")
+        }
+    }
+}

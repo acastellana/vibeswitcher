@@ -19,12 +19,14 @@ final class DevPreviews {
     private var slots = PreviewSlots(count: slotCount)
     private var context: (host: String, owner: String)?
     private var pageCache: (at: Date, result: Result<[DevPage], ChromeTabs.Failure>)?
+    /// Slots whose listener is up (a copy of `listening` for the health check, which runs off the main thread).
+    private var listeningSlots: Set<Int> = []
     // Main thread:
     private var proxies: [PreviewProxy] = []
     /// Slots whose listener came up: only these count for health (a port held by something else is
     /// skipped, not a reason to restart every preview each health check).
     private var listening: Set<Int> = []
-    private var running: String?
+    private var running: (host: String, owner: String)?
     private var generation = 0
 
     init(control: DispatchQueue) { self.control = control }
@@ -36,13 +38,13 @@ final class DevPreviews {
     }
 
     /// Starts the proxies and maps them on the tailnet. `completion(problem)` runs once every slot has been
-    /// tried: nil when at least one slot works. Calling it again for the same host does nothing.
+    /// tried: nil when at least one slot works. Calling it again for the same host and owner does nothing.
     func start(host: String, owner: String, completion: @escaping (String?) -> Void) {
-        guard running != host else { return completion(nil) }
+        if let running, running.host == host, running.owner == owner { return completion(nil) }
         stop()
         generation += 1
         let run = generation
-        running = host
+        running = (host, owner)
         withLock {
             context = (host, owner)
             slots = PreviewSlots(count: Self.slotCount)
@@ -55,6 +57,7 @@ final class DevPreviews {
             proxy.start(port: Self.localPort(slot), onReady: { [weak self] in
                 guard let self, self.generation == run else { return group.leave() }
                 self.listening.insert(slot)
+                self.withLock { _ = self.listeningSlots.insert(slot) }
                 self.control.async {
                     let failure = TailscaleCLI.startServing(host: host, httpsPort: Self.publicPort(slot),
                                                             localTarget: Self.localTarget(slot))
@@ -98,29 +101,44 @@ final class DevPreviews {
         listening = []
         withLock {
             context = nil
+            listeningSlots = []
             slots = PreviewSlots(count: Self.slotCount)
         }
-        guard let host = running else { return }
+        guard let host = running?.host else { return }
         running = nil
         control.async { TailscaleCLI.stopServing(host: host, mappings: Self.mappings) }
     }
 
-    /// On quit: synchronous, so nothing on the tailnet keeps pointing at ports we no longer own.
-    func shutdown() {
+    /// On quit: closes the proxies and returns the tailnet mappings to take down (with Phone Access's own,
+    /// in one bounded call), or nil when previews weren't running.
+    func shutdown() -> (host: String, mappings: [Int: String])? {
         generation += 1
         proxies.forEach { $0.stop() }
-        guard let host = running else { return }
-        TailscaleCLI.stopServing(host: host, mappings: Self.mappings, timeout: 3)
+        guard let host = running?.host else { return nil }
+        running = nil
+        return (host, Self.mappings)
     }
 
     var isHealthy: Bool { running == nil || listening.allSatisfy { proxies.indices.contains($0) && proxies[$0].isListening } }
 
-    /// On the control queue (PhoneAccess's health check): puts back mappings that went missing.
+    /// On the control queue (PhoneAccess's health check): puts back mappings that went missing, retries
+    /// slots whose mapping failed before (their port may be free now), and takes a slot out of use when
+    /// something else took its port.
     func repairMappings() {
-        let (host, available) = withLock { (context?.host, slots.slots.indices.filter { slots.slots[$0].available }) }
-        guard let host, !available.isEmpty, let served = TailscaleCLI.servedTargets(host: host) else { return }
-        for slot in available where served[Self.publicPort(slot)] != Self.localTarget(slot) {
-            _ = TailscaleCLI.startServing(host: host, httpsPort: Self.publicPort(slot), localTarget: Self.localTarget(slot))
+        let (host, listening) = withLock { (context?.host, listeningSlots) }
+        guard let host, !listening.isEmpty, let served = TailscaleCLI.servedTargets(host: host) else { return }
+        for slot in listening.sorted() {
+            let available: Bool
+            if served[Self.publicPort(slot)] == Self.localTarget(slot) {
+                available = true
+            } else {
+                available = TailscaleCLI.startServing(host: host, httpsPort: Self.publicPort(slot),
+                                                      localTarget: Self.localTarget(slot)) == nil
+            }
+            withLock {
+                guard context?.host == host, slots.slots.indices.contains(slot), slots.slots[slot].available != available else { return }
+                slots.setAvailable(slot, available)
+            }
         }
     }
 

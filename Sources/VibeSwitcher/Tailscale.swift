@@ -85,10 +85,14 @@ enum TailscaleCLI {
     }
 
     /// Removes our mappings (port → our local target), each only if it's still ours. One status read.
+    /// `timeout` bounds the whole call, not each command (quitting waits for it).
     static func stopServing(host: String, mappings: [Int: String], timeout: TimeInterval = 10) {
+        let deadline = Date().addingTimeInterval(timeout)
         guard let served = servedTargets(host: host, timeout: timeout) else { return }
-        for (port, target) in mappings where served[port] == target {
-            _ = run(["serve", "--https=\(port)", "off"], timeout: timeout)
+        for (port, target) in mappings.sorted(by: { $0.key < $1.key }) where served[port] == target {
+            let left = deadline.timeIntervalSinceNow
+            guard left > 0.2 else { return }
+            _ = run(["serve", "--https=\(port)", "off"], timeout: left)
         }
     }
 

@@ -29,6 +29,8 @@ async function api(path, options = {}, authToken = token) {
   try {
     response = await fetch(path, { ...options, headers, cache: 'no-store', credentials: 'omit', signal: controller.signal });
   } catch (error) {
+    // A slow answer the caller expected (reading Chrome's tabs) isn't the Mac being unreachable.
+    if (controller.signal.aborted && options.timeoutMessage) throw new Error(options.timeoutMessage);
     setOnline(false);
     throw new Error(UNREACHABLE);
   } finally {
@@ -202,13 +204,29 @@ async function refreshDevPages(force = false) {
   if (box.hidden || devPagesBusy || (!force && Date.now() - devPagesAt < 10000)) return;
   devPagesBusy = true;
   try {
-    renderDevPages(await api('/api/devpages'));
+    renderDevPages(await api('/api/devpages', { timeout: 20000, timeoutMessage: CHROME_SLOW }));
     devPagesAt = Date.now();
   } catch (error) {
     showDevPagesError(error.message);
   } finally {
     devPagesBusy = false;
   }
+}
+
+const CHROME_SLOW = "Chrome on your Mac didn't answer in time. Try again.";
+
+// A tap on a real link always opens a new tab, where window.open after a wait can be blocked.
+let devPageLinkUntil = 0;
+
+function showDevPageLink(url) {
+  devPageLinkUntil = Date.now() + 60000;
+  const link = el('a', 'devPageLink', 'Open the page');
+  link.href = url;
+  link.target = '_blank';
+  link.rel = 'noopener noreferrer';
+  link.addEventListener('click', () => { devPageLinkUntil = 0; $('devPagesHint').hidden = true; });
+  $('devPagesHint').replaceChildren(link, ' (works once, for a minute)');
+  $('devPagesHint').hidden = false;
 }
 
 function showDevPagesError(message) {
@@ -220,8 +238,10 @@ function renderDevPages(result) {
   showDevPagesError('');
   const pages = result.pages || [];
   const hint = result.hint || (pages.length ? '' : 'No localhost pages are open in Chrome on your Mac.');
-  $('devPagesHint').textContent = hint;
-  $('devPagesHint').hidden = !hint;
+  if (Date.now() >= devPageLinkUntil) {   // keep a link waiting for its tap
+    $('devPagesHint').textContent = hint;
+    $('devPagesHint').hidden = !hint;
+  }
   $('devPageRows').replaceChildren(...pages.map(page => {
     const row = el('button', 'row devPage');
     row.type = 'button';
@@ -239,11 +259,12 @@ function renderDevPages(result) {
 async function openDevPage(page, row) {
   row.disabled = true;
   try {
-    const result = await api('/api/preview', { method: 'POST', body: JSON.stringify({ id: page.id }) });
+    const result = await api('/api/preview', { method: 'POST', body: JSON.stringify({ id: page.id }),
+                                               timeout: 20000, timeoutMessage: CHROME_SLOW });
     // Opens outside the app (on Android, a Chrome tab); Back comes back here. The link works once, for a minute.
     const opened = window.open(result.open, '_blank');
     if (opened) opened.opener = null;
-    else location.href = result.open;
+    else showDevPageLink(result.open);   // blocked (the tap was before the wait): never navigate the app itself away
     devPagesAt = 0;
   } catch (error) {
     showDevPagesError(error.message);
