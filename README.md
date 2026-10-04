@@ -67,6 +67,18 @@ and notifications when a session needs you or finishes. Optionally reply and pre
    (up to the last 5,000 lines). **Conversation** is the session as a clean timeline, read from Claude
    Code's (or Codex's) own transcript: your prompts, the agent's replies and one row per tool call (tap
    one for its output). It updates as the session moves.
+5. **Dev pages**: turn on **Allow opening dev pages** to open, on the phone, the localhost pages that are open
+   in Chrome on your Mac (`http://localhost:5173/…`, `127.0.0.1`, `[::1]`, `*.localhost`): live, so taps,
+   typing and hot reload work. The first time, macOS asks whether VibeSwitcher may control Google Chrome;
+   the line under the toggle shows the answer (with **Open Settings…** if it was no).
+   - Only pages open in Chrome right now can be opened; your other local servers can't be reached.
+   - Each page gets its own HTTPS port on your tailnet (8444–8447) through a proxy in VibeSwitcher. Every
+     request must come from your own Tailscale account and carry a cookie that only the paired phone can
+     get, from a link that works once, for a minute.
+   - At most 4 pages at once (a fifth replaces the least recently used). Links hard-coded to
+     `http://localhost:…` inside the app won't work on the phone, dev servers that only serve HTTPS aren't
+     supported, and cookies a dev app sets are shared between its previews (browsers scope cookies by
+     host, not port).
 
 How it's kept safe:
 
