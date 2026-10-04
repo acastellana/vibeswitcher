@@ -156,7 +156,7 @@ enum TerminalBridge {
                 try
                     repeat with ti from 1 to (count of tabs of w)
                         if ((tty of tab ti of w) as text) is target then
-                            return ((history of tab ti of w) as text) & (character id 29) & ((contents of tab ti of w) as text)
+                            return ((history of tab ti of w) as text) & (character id 29) & "vibeswitcher-screen" & (character id 29) & ((contents of tab ti of w) as text)
                         end if
                     end repeat
                 end try
@@ -164,9 +164,8 @@ enum TerminalBridge {
         end tell
         return ""
         """, timeout: 8)
-        let parts = result.output.components(separatedBy: "\u{1D}")
-        guard result.status == 0, parts.count == 2 else { return nil }
-        return (parts[0], parts[1])
+        guard result.status == 0 else { return nil }
+        return Scrollback.split(result.output)
     }
 
     static var app: NSRunningApplication? {
