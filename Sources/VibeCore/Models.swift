@@ -50,6 +50,8 @@ public enum SessionStatus: String, Codable, Sendable {
 /// One live agent session, identified by the terminal (TTY) it runs in.
 public struct Session: Identifiable, Equatable, Sendable {
     public var id: String { tty }
+    /// This session and no other: a tty can later hold another session (see `SessionIdentity`).
+    public var identity: String { SessionIdentity.id(tty: tty, pid: pid, startedAt: startedAt) }
     public let tty: String
     public var agent: Agent
     public var pid: Int32

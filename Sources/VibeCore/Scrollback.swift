@@ -54,14 +54,3 @@ public enum Scrollback {
     }
 }
 
-extension Scrollback {
-    /// Between a tab's history and its screen in one AppleScript answer. Long enough that output can't
-    /// contain it by accident (a lone group separator, character 29, can turn up in a terminal).
-    public static let screenSeparator = "\u{1D}vibeswitcher-screen\u{1D}"
-
-    /// History and screen from one answer, or nil when the separator is missing.
-    public static func split(_ combined: String) -> (history: String, screen: String)? {
-        guard let range = combined.range(of: screenSeparator, options: .backwards) else { return nil }
-        return (String(combined[..<range.lowerBound]), String(combined[range.upperBound...]))
-    }
-}

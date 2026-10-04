@@ -353,18 +353,26 @@ final class PhoneAccess: ObservableObject {
             return respond(.error(401, "this device isn't paired"))
         }
         touch(device)
+        // Answers that arrive later (screen reads, transcripts, typing) go out only if the phone is still
+        // paired and Phone Access still on by then: removing a phone also stops what it already asked for.
+        let reply: (HTTPResponse) -> Void = { [weak self] response in
+            guard let self, self.state == .on, self.devices.contains(where: { $0.id == device.id }) else {
+                return respond(.error(401, "this device isn't paired"))
+            }
+            respond(response)
+        }
         switch (request.method, request.path) {
-        case ("GET", "/api/state"): respond(.json(stateObject(for: device)))
-        case ("GET", "/api/screen"): screen(request.query["tty"] ?? "", respond: respond)
-        case ("POST", "/api/input"): input(request, device: device, respond: respond)
-        case ("POST", "/api/pause"): respond(pause(request, device: device))
-        case ("POST", "/api/push"): respond(subscribe(request, device: device))
-        case ("POST", "/api/push/test"): respond(testPush(device))
-        case ("GET", "/api/history"): history(request, respond: respond)
-        case ("GET", "/api/conversation"): conversation(request, respond: respond)
-        case ("GET", "/api/conversation/tool"): conversationTool(request, respond: respond)
-        case ("GET", "/api/devpages"): devPages(respond: respond)
-        case ("POST", "/api/preview"): preview(request, device: device, respond: respond)
+        case ("GET", "/api/state"): reply(.json(stateObject(for: device)))
+        case ("GET", "/api/screen"): screen(request, respond: reply)
+        case ("POST", "/api/input"): input(request, device: device, respond: reply)
+        case ("POST", "/api/pause"): reply(pause(request, device: device))
+        case ("POST", "/api/push"): reply(subscribe(request, device: device))
+        case ("POST", "/api/push/test"): reply(testPush(device))
+        case ("GET", "/api/history"): history(request, respond: reply)
+        case ("GET", "/api/conversation"): conversation(request, respond: reply)
+        case ("GET", "/api/conversation/tool"): conversationTool(request, respond: reply)
+        case ("GET", "/api/devpages"): devPages(respond: reply)
+        case ("POST", "/api/preview"): preview(request, device: device, respond: reply)
         case ("POST", "/api/unpair"):
             remove(device)
             respond(.json(["ok": true]))
@@ -392,6 +400,12 @@ final class PhoneAccess: ObservableObject {
         }
         let rawName = (body(request)?["name"] as? String) ?? "Phone"
         let name = String(rawName.filter { !$0.isNewline }.prefix(40)).trimmingCharacters(in: .whitespaces)
+        // Pairing again from a phone that was paired before: its old token is retired here, in the same
+        // step (a separate unpair call could fail silently and leave the old token working).
+        if let previous = body(request)?["previous"] as? String,
+           let old = RemoteAuth.authenticate(authorization: "Bearer \(previous)", login: owner, devices: devices) {
+            remove(old)
+        }
         let token = RemoteAuth.newToken()
         let device = PairedDevice(id: Base64URL.encode(WebPush.randomBytes(9)), name: name.isEmpty ? "Phone" : name,
                                   tokenHash: RemoteAuth.hash(token), tailscaleLogin: owner, pairedAt: Date())
@@ -414,7 +428,8 @@ final class PhoneAccess: ObservableObject {
         let sessions: [[String: Any]] = store.sessions.enumerated().map { index, session in
             var row: [String: Any] = [
                 "tty": session.tty, "number": index + 1, "name": Redaction.secrets(in: session.displayName),
-                "project": session.project, "agent": session.agent.rawValue, "status": session.status.rawValue,
+                "sid": session.identity, "project": Redaction.secrets(in: session.project),
+                "agent": session.agent.rawValue, "status": session.status.rawValue,
                 "statusLabel": session.status.label, "inTerminal": session.inTerminalApp, "viewing": session.isCurrent,
             ]
             if session.statusSince > Date.distantPast.addingTimeInterval(1) { row["since"] = session.statusSince.timeIntervalSince1970 }
@@ -438,7 +453,7 @@ final class PhoneAccess: ObservableObject {
         return [
             "sessions": sessions,
             "today": ["agentsWorking": today.agentsWorking, "waitingOnYou": today.waitingOnYou,
-                      "projects": today.byProject().prefix(8).map { ["project": $0.project, "working": $0.working,
+                      "projects": today.byProject().prefix(8).map { ["project": Redaction.secrets(in: $0.project), "working": $0.working,
                                                                       "waiting": $0.waiting, "background": $0.background] }],
             "inputAllowed": inputAllowed,
             "devPagesAllowed": devPagesAllowed,
@@ -449,20 +464,24 @@ final class PhoneAccess: ObservableObject {
         ]
     }
 
-    private func screen(_ tty: String, respond: @escaping (HTTPResponse) -> Void) {
+    private func screen(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
+        let tty = request.query["tty"] ?? ""
         guard TerminalBridge.isValidTTY(tty), let session = store.sessions.first(where: { $0.tty == tty }) else {
             return respond(.error(404, "no such session"))
         }
         guard session.inTerminalApp else { return respond(.error(409, "This session isn't in a Terminal tab.")) }
-        if let cached = screenCache[tty], cached.at.timeIntervalSinceNow > -0.8 {
+        if let mismatch = sessionMismatch(request, session) { return respond(mismatch) }
+        // Cached per session, not per tty: a session that takes over the tab doesn't get the old one's screen.
+        let key = session.identity
+        if let cached = screenCache[key], cached.at.timeIntervalSinceNow > -0.8 {
             return respond(.json(["tty": tty, "text": cached.text]))
         }
         // Several phones (or a slow read) must not stack up AppleScript calls: join the one in flight.
-        if screenWaiters[tty] != nil {
-            screenWaiters[tty]?.append(respond)
+        if screenWaiters[key] != nil {
+            screenWaiters[key]?.append(respond)
             return
         }
-        screenWaiters[tty] = [respond]
+        screenWaiters[key] = [respond]
         reads.async {
             let raw = TerminalBridge.screens(for: [tty])[tty]
             // Visible screen only, credentials masked, trailing blank lines dropped.
@@ -470,15 +489,15 @@ final class PhoneAccess: ObservableObject {
             while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty { lines.removeLast() }
             let text = lines.joined(separator: "\n")
             DispatchQueue.main.async {
-                let waiters = self.screenWaiters.removeValue(forKey: tty) ?? []
+                let waiters = self.screenWaiters.removeValue(forKey: key) ?? []
                 // Forget screens of sessions that are gone.
-                let live = Set(self.store.sessions.map(\.tty))
+                let live = Set(self.store.sessions.map(\.identity))
                 self.screenCache = self.screenCache.filter { live.contains($0.key) }
                 let response: HTTPResponse
                 if raw == nil {
                     response = .error(503, "Couldn't read that tab right now.")
                 } else {
-                    self.screenCache[tty] = (Date(), text)
+                    self.screenCache[key] = (Date(), text)
                     response = .json(["tty": tty, "text": text])
                 }
                 waiters.forEach { $0(response) }
@@ -495,6 +514,8 @@ final class PhoneAccess: ObservableObject {
             return respond(.error(404, "no such session"))
         }
         guard session.inTerminalApp else { return respond(.error(409, "This session isn't in a Terminal tab.")) }
+        if let mismatch = sessionMismatch(request, session) { return respond(mismatch) }
+        let key = session.identity
         let before = request.query["before"].flatMap { Int($0) }
         let limit = request.query["limit"].flatMap { Int($0) } ?? Scrollback.pageLimit
         let send: ([String]?) -> Void = { lines in
@@ -503,26 +524,33 @@ final class PhoneAccess: ObservableObject {
             respond(.json(["tty": tty, "lines": page.lines.map { Redaction.secrets(in: $0) }, "start": page.start,
                            "total": page.total, "first": page.first]))
         }
-        if let cached = historyCache[tty], cached.at.timeIntervalSinceNow > -2 { return send(cached.lines) }
-        if historyWaiters[tty] != nil {
-            historyWaiters[tty]?.append(send)
+        if let cached = historyCache[key], cached.at.timeIntervalSinceNow > -2 { return send(cached.lines) }
+        if historyWaiters[key] != nil {
+            historyWaiters[key]?.append(send)
             return
         }
-        historyWaiters[tty] = [send]
+        historyWaiters[key] = [send]
         transcriptReads.async {
             let lines = TerminalBridge.history(tty: tty).map { Scrollback.lines(history: $0.history, screen: $0.screen) }
             DispatchQueue.main.async {
-                let waiters = self.historyWaiters.removeValue(forKey: tty) ?? []
-                let live = Set(self.store.sessions.map(\.tty))
+                let waiters = self.historyWaiters.removeValue(forKey: key) ?? []
+                let live = Set(self.store.sessions.map(\.identity))
                 self.historyCache = self.historyCache.filter { live.contains($0.key) }
-                if let lines { self.historyCache[tty] = (Date(), lines) }
+                if let lines { self.historyCache[key] = (Date(), lines) }
                 waiters.forEach { $0(lines) }
             }
         }
     }
 
     private static let conversationTailBytes = 2 * 1024 * 1024
+
+    /// When the phone says which session it means (`sid`) and the tty now holds another one: 409.
+    private func sessionMismatch(_ request: HTTPRequest, _ session: Session) -> HTTPResponse? {
+        guard let sid = request.query["sid"], sid != session.identity else { return nil }
+        return .error(409, Self.sessionChanged)
+    }
     private static let noTranscript = "No transcript for this session. See the Terminal tab."
+    static let sessionChanged = "That session ended or another one took its tab. Go back to the list."
 
     /// Short id of a transcript file: a cursor only continues in the file it came from.
     private static func transcriptID(_ url: URL) -> String {
@@ -535,6 +563,7 @@ final class PhoneAccess: ObservableObject {
     private func conversation(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
         let tty = request.query["tty"] ?? ""
         guard let session = store.sessions.first(where: { $0.tty == tty }) else { return respond(.error(404, "no such session")) }
+        if let mismatch = sessionMismatch(request, session) { return respond(mismatch) }
         guard let path = session.transcriptPath else { return respond(.error(404, Self.noTranscript)) }
         let after = request.query["after"].flatMap { Int($0) }
         let phoneFile = request.query["file"]
@@ -567,10 +596,11 @@ final class PhoneAccess: ObservableObject {
     /// call's id are parsed.
     private func conversationTool(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
         let tty = request.query["tty"] ?? "", id = request.query["id"] ?? ""
-        guard !id.isEmpty, id.count <= 200,
-              let path = store.sessions.first(where: { $0.tty == tty })?.transcriptPath else {
+        guard !id.isEmpty, id.count <= 200, let session = store.sessions.first(where: { $0.tty == tty }),
+              let path = session.transcriptPath else {
             return respond(.error(404, "not found"))
         }
+        if let mismatch = sessionMismatch(request, session) { return respond(mismatch) }
         transcriptReads.async {
             guard let (url, format) = TranscriptReader.checkedURL(path, home: NSHomeDirectory()) else {
                 return DispatchQueue.main.async { respond(.error(404, "not found")) }
@@ -640,6 +670,8 @@ final class PhoneAccess: ObservableObject {
         guard let session = store.sessions.first(where: { $0.tty == tty }), session.inTerminalApp else {
             return respond(.error(404, "no such session"))
         }
+        // The session the phone is showing, not whatever holds that tty now.
+        guard object["sid"] as? String == session.identity else { return respond(.error(409, Self.sessionChanged)) }
         let text = object["text"] as? String
         let submit = object["submit"] as? Bool ?? true
         var key: RemoteInput.Key?
@@ -649,8 +681,18 @@ final class PhoneAccess: ObservableObject {
         }
         guard text != nil || key != nil else { return respond(.error(400, "nothing to send")) }
         let summary = text.map { "“\(Redaction.secrets(in: String($0.prefix(60))))”" + (submit ? " ⏎" : "") } ?? key!.rawValue
+        let sid = session.identity
         work.async {
-            let failure = RemoteInput.send(tty: tty, text: text, submit: submit, key: key)
+            // Queued work runs later: check again that the phone is still paired, replies are still on, and
+            // the tty still holds that session, right before typing.
+            let allowed = DispatchQueue.main.sync {
+                self.state == .on && self.inputAllowed && self.devices.contains { $0.id == device.id }
+                    && self.store.sessions.first(where: { $0.tty == tty })?.identity == sid
+            }
+            guard allowed else {
+                return DispatchQueue.main.async { respond(.error(409, "Not sent: this phone was unpaired, replies were turned off, or the session changed.")) }
+            }
+            let failure = RemoteInput.send(tty: tty, agent: (session.pid, session.startedAt), text: text, submit: submit, key: key)
             DispatchQueue.main.async {
                 if let failure {
                     self.audit("input to \(session.displayName) from \(device.name) refused: \(failure)")
@@ -670,6 +712,7 @@ final class PhoneAccess: ObservableObject {
         guard let tty = object["tty"] as? String, let session = store.sessions.first(where: { $0.tty == tty }) else {
             return .error(404, "no such session")
         }
+        guard object["sid"] as? String == session.identity else { return .error(409, Self.sessionChanged) }
         switch object["duration"] as? String {
         case "resume": store.resume(session)
         case "hour": store.pause(session, for: .hours(1))

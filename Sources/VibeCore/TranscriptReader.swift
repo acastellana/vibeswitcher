@@ -134,7 +134,8 @@ public enum TranscriptReader {
                 let name = block["name"] as? String ?? "tool"
                 let input = block["input"] as? [String: Any] ?? [:]
                 entries.append(TranscriptEntry(kind: .tool, id: block["id"] as? String ?? "\(uuid).\(index)",
-                                               text: ToolActivity.describe(toolName: name, input: input), tool: name, at: at))
+                                               text: Redaction.secrets(in: ToolActivity.describe(toolName: name, input: input)),
+                                               tool: Redaction.secrets(in: name), at: at))
             case ("user", "tool_result"):
                 let (output, truncated) = bounded(resultText(block["content"]), limit: outputLimit)
                 entries.append(TranscriptEntry(kind: .toolResult, id: block["tool_use_id"] as? String ?? "", text: "",
@@ -174,7 +175,8 @@ public enum TranscriptReader {
                 input = ["command": raw]
             }
             let described = ToolActivity.describe(toolName: input["command"] != nil ? "shell" : name, input: input)
-            return [TranscriptEntry(kind: .tool, id: payload["call_id"] as? String ?? id, text: described, tool: name, at: at)]
+            return [TranscriptEntry(kind: .tool, id: payload["call_id"] as? String ?? id, text: Redaction.secrets(in: described),
+                                    tool: Redaction.secrets(in: name), at: at)]
         case "function_call_output", "custom_tool_call_output", "local_shell_call_output":
             let (output, truncated) = bounded(resultText(payload["output"]), limit: outputLimit)
             return [TranscriptEntry(kind: .toolResult, id: payload["call_id"] as? String ?? id, text: "",

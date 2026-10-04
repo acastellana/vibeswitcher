@@ -61,6 +61,19 @@ function setOnline(online, message = UNREACHABLE) {
   layoutSession();
 }
 
+// The session the view shows, not just its tty: when another session takes over the tab, the server
+// refuses requests meant for the old one (409) instead of answering for, or typing into, the new one.
+let currentSid = null;
+
+function sessionQuery(tty = current) {
+  return `tty=${encodeURIComponent(tty)}&sid=${encodeURIComponent(currentSid || '')}`;
+}
+
+function shownSession() {
+  if (!state || !current) return null;
+  return state.sessions.find(s => s.tty === current && (!currentSid || s.sid === currentSid)) || null;
+}
+
 function forgetToken() {
   token = null;
   localStorage.removeItem('vs.token');
@@ -299,6 +312,8 @@ function applyViewPrefs() {
 
 function openSession(tty) {
   current = tty;
+  const opened = state && state.sessions.find(s => s.tty === tty);
+  currentSid = opened ? opened.sid : null;
   history.replaceState(null, '', `#s=${tty}`);
   lastScreenText = null;
   resetOlder();
@@ -322,7 +337,7 @@ function step(delta) {
 }
 
 function renderSessionMeta() {
-  const session = state && state.sessions.find(s => s.tty === current);
+  const session = shownSession();
   const index = session ? state.sessions.indexOf(session) : -1;
   $('prev').disabled = index <= 0;
   $('next').disabled = index < 0 || index >= state.sessions.length - 1;
@@ -331,6 +346,15 @@ function renderSessionMeta() {
     $('sessionMeta').replaceChildren();
     $('composer').hidden = true;
     $('askCard').hidden = true;
+    // Another session in the same tab: offer it, never carry on as if it were this one.
+    const successor = state && state.sessions.find(s => s.tty === current);
+    $('subtitle').textContent = successor ? 'Another session is running in this tab now.' : '';
+    if (successor) {
+      const open = el('button', 'chip-btn', `Open ${successor.name}`);
+      open.type = 'button';
+      open.addEventListener('click', () => openSession(successor.tty));
+      $('sessionMeta').append(open);
+    }
     return;
   }
   $('title').textContent = session.name;
@@ -370,7 +394,7 @@ async function setPause(duration, control) {
   if (!current || !duration) return;
   control.disabled = true;
   try {
-    await api('/api/pause', { method: 'POST', body: JSON.stringify({ tty: current, duration }) });
+    await api('/api/pause', { method: 'POST', body: JSON.stringify({ tty: current, sid: currentSid, duration }) });
     setTimeout(() => refreshList(false), 300);
   } catch (error) {
     setInputStatus(error.message, true);
@@ -415,7 +439,7 @@ async function loadScreen() {
   const screen = $('screen');
   const stick = lastScreenText === null || isAtBottom();
   try {
-    const result = await api(`/api/screen?tty=${encodeURIComponent(current)}`);
+    const result = await api(`/api/screen?${sessionQuery()}`);
     if (result.tty !== current) return;   // switched sessions meanwhile
     if (result.text !== lastScreenText) {
       const first = lastScreenText === null;
@@ -480,7 +504,7 @@ async function loadEarlier() {
   const screen = $('screen');
   try {
     const before = fromTail ? '' : `&before=${older.start}`;
-    const page = await api(`/api/history?tty=${encodeURIComponent(tty)}${before}`);
+    const page = await api(`/api/history?${sessionQuery(tty)}${before}`);
     if (gen !== older.gen || tty !== current) return;
     // A cleared terminal is shorter than what we asked about: start over from its end.
     if (!fromTail && page.total < older.start) {
@@ -515,7 +539,7 @@ async function checkCleared() {
   older.checkedAt = Date.now();
   const gen = older.gen;
   try {
-    const page = await api(`/api/history?tty=${encodeURIComponent(current)}&limit=1`);
+    const page = await api(`/api/history?${sessionQuery()}&limit=1`);
     if (gen !== older.gen || page.total >= older.total) return;
     older.stale = true;
     loadEarlier();
@@ -614,7 +638,8 @@ function applyEntries(entries) {
 /// First open: the transcript's tail. Afterwards only what's new, and only when the session changed.
 async function refreshConversation(force = false) {
   if (!current || $('conversation').hidden || conversation.busy) return;
-  const session = state && state.sessions.find(s => s.tty === current);
+  const session = shownSession();
+  if (state && !session) return;   // that session ended: nothing more to read for it
   // A transcript can appear without a new hook event (Claude creates the file a moment after the session starts).
   const unchanged = session && session.eventAt === conversation.eventAt && session.status === conversation.status &&
     session.hasTranscript === conversation.hasTranscript;
@@ -637,7 +662,7 @@ async function refreshConversation(force = false) {
   const tty = current;
   try {
     const after = conversation.cursor === null ? '' : `&after=${conversation.cursor}&file=${encodeURIComponent(conversation.file)}`;
-    const result = await api(`/api/conversation?tty=${encodeURIComponent(tty)}${after}`);
+    const result = await api(`/api/conversation?${sessionQuery(tty)}${after}`);
     if (gen !== conversation.gen || tty !== current) return;
     // A fresh tail (first open, another transcript after /clear or /resume, or a big gap): start over.
     if (result.fresh) {
@@ -668,7 +693,7 @@ async function refreshConversation(force = false) {
 async function showFullTool(id, row) {
   const gen = conversation.gen;
   try {
-    const result = await api(`/api/conversation/tool?tty=${encodeURIComponent(current)}&id=${encodeURIComponent(id)}`);
+    const result = await api(`/api/conversation/tool?${sessionQuery()}&id=${encodeURIComponent(id)}`);
     if (gen !== conversation.gen) return;
     const node = entryNode(result.entry, true);
     node.open = true;
@@ -696,7 +721,7 @@ function renderQuickReplies() {
     const chip = el('button', 'quickChip', text);
     chip.type = 'button';
     chip.addEventListener('click', () => {
-      const session = state && state.sessions.find(s => s.tty === current);
+      const session = shownSession();
       // A question or menu is open: text doesn't answer it (1–3 / arrows do) and gets taken as
       // "let's discuss the question" instead. Put the reply in the box rather than sending it.
       if (session && session.status === 'needsInput') {
@@ -751,7 +776,7 @@ async function send(payload, button) {
   if (!current) return false;
   if (button) button.disabled = true;
   try {
-    await api('/api/input', { method: 'POST', body: JSON.stringify({ tty: current, ...payload }) });
+    await api('/api/input', { method: 'POST', body: JSON.stringify({ tty: current, sid: currentSid, ...payload }) });
     const label = button && button.classList.contains('quickChip') ? `“${payload.text}” sent ✓` : 'Sent ✓';
     setInputStatus(payload.text && payload.submit ? label : `${button ? button.textContent : 'Key'} ✓`);
     setTimeout(refreshScreen, 250);
@@ -773,11 +798,10 @@ async function pair(event) {
   try {
     const result = await api('/api/pair', {
       method: 'POST',
-      body: JSON.stringify({ code: $('code').value, name: $('deviceName').value || defaultName() }),
+      // Pairing again from a phone that was already paired: the Mac retires the old token in the same step.
+      body: JSON.stringify({ code: $('code').value, name: $('deviceName').value || defaultName(),
+                             previous: localStorage.getItem('vs.previousToken') || undefined }),
     });
-    // Pairing again from a phone that was already paired: retire the old entry on the Mac.
-    const previous = localStorage.getItem('vs.previousToken');
-    if (previous) api('/api/unpair', { method: 'POST', body: '{}' }, previous).catch(() => {});
     localStorage.removeItem('vs.previousToken');
     token = result.token;
     localStorage.setItem('vs.token', token);
@@ -875,8 +899,20 @@ document.addEventListener('DOMContentLoaded', () => {
   $('bell').addEventListener('click', enableNotifications);
   $('notifyOn').addEventListener('click', enableNotifications);
   $('unpair').addEventListener('click', async () => {
-    try { await api('/api/unpair', { method: 'POST', body: '{}' }); } catch (e) { /* already gone */ }
-    forgetToken();
+    // Forget the token only once the Mac has removed this phone: otherwise a copy of it would keep working
+    // while this screen says it's unpaired. (A 401 means it's already gone: api() forgets it then.)
+    try {
+      await api('/api/unpair', { method: 'POST', body: '{}' });
+      forgetToken();
+    } catch (error) {
+      const note = $('unpairNote');
+      note.replaceChildren(`Couldn't reach the Mac, so this phone is still paired (${error.message}). Try again, or remove it on the Mac in Phone Access. `);
+      const anyway = el('button', 'link', 'Forget it on this phone only');
+      anyway.type = 'button';
+      anyway.addEventListener('click', forgetToken);
+      note.append(anyway);
+      note.hidden = false;
+    }
   });
   for (const button of document.querySelectorAll('.keys button')) {
     button.addEventListener('click', () => button.dataset.key

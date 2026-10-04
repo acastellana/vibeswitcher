@@ -86,15 +86,6 @@ struct HistoryHardeningTests {
         #expect(TranscriptReader.read(jsonl(codex), format: .codex).entries.map(\.text) == ["<p>Make this bold</p>"])
     }
 
-    @Test func aGroupSeparatorInTheScrollbackDoesntBreakTheSplit() throws {
-        let history = "line one\n\u{1D}odd byte\nprompt $ "
-        let screen = "prompt $ "
-        let combined = history + Scrollback.screenSeparator + screen
-        let split = try #require(Scrollback.split(combined))
-        #expect(split.history == history)
-        #expect(split.screen == screen)
-        #expect(Scrollback.split("no separator") == nil)
-    }
 }
 
 struct TranscriptChunkTests {

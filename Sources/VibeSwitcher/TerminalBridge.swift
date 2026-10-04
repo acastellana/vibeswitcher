@@ -26,7 +26,6 @@ enum TerminalBridge {
     private static var knownPlacements: [Int: Spaces.Placement] = [:]
     /// Tab position within its window's tab bar, per window id (only touched from the scan queue).
     private static var knownTabIndices: [Int: Int] = [:]
-    private static let separator = "\u{1F}"
 
     static var isRunning: Bool {
         !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
@@ -46,39 +45,46 @@ enum TerminalBridge {
             set titles to custom title of every tab of every window
             set wnames to name of every window
         end tell
-        set sep to (character id 31)
-        set out to ""
+        -- Eight strings per tab, returned as a quoted list (osascript -s s): a title can contain any
+        -- character, and inside quotes it can't pass for another tab's fields.
+        set out to {}
         repeat with i from 1 to count of wids
             set tl to item i of ttys
             set b to item i of wbounds
             if class of tl is list and class of b is list then
                 set frameText to ((item 1 of b) as text) & "," & ((item 2 of b) as text) & "," & ((item 3 of b) as text) & "," & ((item 4 of b) as text)
                 repeat with j from 1 to count of tl
-                    set out to out & ((item i of wids) as text) & sep & j & sep & (item j of tl) & sep & ((item j of (item i of sels)) as text) & sep & i & sep & frameText & sep & (item i of wnames) & sep & (item j of (item i of titles)) & linefeed
+                    set end of out to ((item i of wids) as text)
+                    set end of out to (j as text)
+                    set end of out to ((item j of tl) as text)
+                    set end of out to ((item j of (item i of sels)) as text)
+                    set end of out to (i as text)
+                    set end of out to frameText
+                    set end of out to ((item i of wnames) as text)
+                    set end of out to ((item j of (item i of titles)) as text)
                 end repeat
             end if
         end repeat
         return out
         """
-        let result = runAppleScript(script)
+        let result = runAppleScript(script, sourceForm: true)
         if result.status != 0 {
             return ([:], result.error.contains("-1743") ? .denied : .unknown)
         }
+        guard let fields = AppleScriptStrings.parse(result.output), let records = TerminalTabRecords.parse(fields) else {
+            return ([:], .unknown)
+        }
         var tabs: [String: TerminalTab] = [:]
         var windowNames: [Int: String] = [:]
-        for line in result.output.split(separator: "\n") {
-            let parts = line.components(separatedBy: separator)
-            guard parts.count >= 8, let windowID = Int(parts[0]), let order = Int(parts[4]), let tabIndex = Int(parts[1])
-            else { continue }
-            windowNames[windowID] = parts[6]
-            let tty = parts[2].replacingOccurrences(of: "/dev/", with: "")
-            let title = parts[7...].joined(separator: separator)
-            let edges = parts[5].split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        for record in records {
+            windowNames[record.windowID] = record.windowName
+            let edges = record.bounds.split(separator: ",").compactMap { Double($0.trimmingCharacters(in: .whitespaces)) }
             let position = edges.count == 4
                 ? ScreenPosition(frame: CGRect(x: edges[0], y: edges[1], width: edges[2] - edges[0], height: edges[3] - edges[1]),
-                                 tabIndex: tabIndex)
+                                 tabIndex: record.tabIndex)
                 : nil
-            tabs[tty] = TerminalTab(windowID: windowID, title: title, position: position, isSelected: parts[3] == "true", windowOrder: order)
+            tabs[record.tty] = TerminalTab(windowID: record.windowID, title: record.title, position: position,
+                                           isSelected: record.isSelected, windowOrder: record.windowOrder)
         }
         // Which desktop each window is on (private API, may be unavailable: then positions stay desktop-less).
         // macOS briefly reports no desktop for a window during animations and full-screen transitions;
@@ -117,7 +123,7 @@ enum TerminalBridge {
         let list = ttys.map { "\"/dev/\($0)\"" }.joined(separator: ", ")
         let script = """
         set wanted to {\(list)}
-        set out to ""
+        set out to {}
         tell application "Terminal"
             repeat with w in windows
                 try
@@ -126,7 +132,8 @@ enum TerminalBridge {
                     repeat with ti from 1 to (count of tabs of w)
                         set ttyName to (tty of tab ti of w) as text
                         if wanted contains ttyName then
-                            set out to out & ttyName & (character id 29) & ((contents of tab ti of w) as text) & (character id 30)
+                            set end of out to ttyName
+                            set end of out to ((contents of tab ti of w) as text)
                         end if
                     end repeat
                 end try
@@ -134,14 +141,14 @@ enum TerminalBridge {
         end tell
         return out
         """
-        let result = runAppleScript(script)
-        guard result.status == 0 else { return [:] }
+        // Quoted list of (tty, screen) pairs: screen text can't forge another tab's entry.
+        let result = runAppleScript(script, sourceForm: true)
+        guard result.status == 0, let fields = AppleScriptStrings.parse(result.output), fields.count % 2 == 0 else { return [:] }
         var screens: [String: String] = [:]
-        for record in result.output.split(separator: "\u{1E}") {
-            let parts = record.split(separator: "\u{1D}", maxSplits: 1, omittingEmptySubsequences: false)
-            guard parts.count == 2 else { continue }
-            let tty = parts[0].trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "/dev/", with: "")
-            screens[tty] = String(parts[1])
+        for index in stride(from: 0, to: fields.count, by: 2) {
+            let tty = fields[index].replacingOccurrences(of: "/dev/", with: "")
+            guard ttys.contains(tty), screens[tty] == nil else { continue }
+            screens[tty] = fields[index + 1]
         }
         return screens
     }
@@ -156,16 +163,16 @@ enum TerminalBridge {
                 try
                     repeat with ti from 1 to (count of tabs of w)
                         if ((tty of tab ti of w) as text) is target then
-                            return ((history of tab ti of w) as text) & (character id 29) & "vibeswitcher-screen" & (character id 29) & ((contents of tab ti of w) as text)
+                            return {((history of tab ti of w) as text), ((contents of tab ti of w) as text)}
                         end if
                     end repeat
                 end try
             end repeat
         end tell
-        return ""
-        """, timeout: 8)
-        guard result.status == 0 else { return nil }
-        return Scrollback.split(result.output)
+        return {}
+        """, timeout: 8, sourceForm: true)
+        guard result.status == 0, let parts = AppleScriptStrings.parse(result.output), parts.count == 2 else { return nil }
+        return (parts[0], parts[1])
     }
 
     static var app: NSRunningApplication? {
@@ -308,10 +315,11 @@ enum TerminalBridge {
 
     /// Runs AppleScript through `osascript` so it is safe to call off the main thread.
     /// The Automation permission is still attributed to VibeSwitcher (the responsible process).
-    static func runAppleScript(_ source: String, timeout: TimeInterval = 4) -> (output: String, error: String, status: Int32) {
+    /// `sourceForm`: print the result as AppleScript source (`-s s`), so strings come back quoted (see `AppleScriptStrings`).
+    static func runAppleScript(_ source: String, timeout: TimeInterval = 4, sourceForm: Bool = false) -> (output: String, error: String, status: Int32) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", source]
+        process.arguments = (sourceForm ? ["-s", "s"] : []) + ["-e", source]
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
         process.standardError = err

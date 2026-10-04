@@ -366,6 +366,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             // Try the exact Terminal tab even if the last title scan missed it; fall back to the host app.
             var result = "terminal-tab"
             if session.inTerminalApp, let terminal = TerminalBridge.app {
+                // Not in the middle of a reply the phone is typing (that would move its keystrokes).
+                RemoteInput.focusLock.lock()
+                defer { RemoteInput.focusLock.unlock() }
                 var attempt = FocusLog.begin(session, source: source)
                 // Activate first, then pick the tab: raising a window while Terminal is in the background
                 // only reorders it, and Terminal re-fronts its previous key window when it activates.
