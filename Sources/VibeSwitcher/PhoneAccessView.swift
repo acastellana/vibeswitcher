@@ -32,6 +32,17 @@ struct PhoneAccessView: View {
                             .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                     }
                 }
+                Toggle(isOn: $access.devPagesAllowed) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Allow opening dev pages")
+                        Text("Localhost pages open in Chrome on this Mac can be opened from your paired phone.")
+                            .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        if access.devPagesAllowed { chromeAccessLine }
+                        if let problem = access.devPagesProblem {
+                            Text(problem).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
                 Toggle("Phone notifications only while I'm away from the Mac", isOn: $access.pushOnlyWhenAway)
                 devicesSection
                 activitySection
@@ -39,6 +50,33 @@ struct PhoneAccessView: View {
         }
         .padding(18)
         .frame(width: 460)
+    }
+
+    /// Whether macOS lets VibeSwitcher read Chrome's tabs, and the one action that fixes it if not.
+    @ViewBuilder private var chromeAccessLine: some View {
+        HStack(spacing: 6) {
+            switch access.chromeAccess {
+            case .allowed?:
+                Text("Chrome access: allowed ✓").foregroundStyle(.green)
+            case .denied?:
+                Text("Not allowed to read Chrome's tabs.").foregroundStyle(.red)
+                Button("Open Settings…") { NSWorkspace.shared.open(ChromeTabs.settingsURL) }.controlSize(.small)
+                Button("Check Again") { access.checkChromeAccess(ask: false) }.controlSize(.small)
+            case .notAsked?:
+                Text("Chrome access: not asked yet.").foregroundStyle(.secondary)
+                Button("Ask") { access.checkChromeAccess(ask: true) }.controlSize(.small)
+            case .appNotRunning?:
+                Text("Open Chrome once to finish setup.").foregroundStyle(.secondary)
+                Button("Check Again") { access.checkChromeAccess(ask: true) }.controlSize(.small)
+            case .unknown(let code)?:
+                Text("Couldn't check Chrome access (\(code)).").foregroundStyle(.secondary)
+                Button("Check Again") { access.checkChromeAccess(ask: true) }.controlSize(.small)
+            case nil:
+                Text("Checking Chrome access…").foregroundStyle(.secondary)
+            }
+        }
+        .font(.caption)
+        .onAppear { if access.chromeAccess == nil { access.checkChromeAccess(ask: false) } }
     }
 
     @ViewBuilder private var statusLine: some View {

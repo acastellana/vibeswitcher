@@ -46,6 +46,19 @@ final class PhoneAccess: ObservableObject {
         }
     }
     @Published var pushOnlyWhenAway: Bool { didSet { defaults.set(pushOnlyWhenAway, forKey: "phonePushOnlyWhenAway") } }
+    @Published var devPagesAllowed: Bool {
+        didSet {
+            guard devPagesAllowed != oldValue else { return }
+            defaults.set(devPagesAllowed, forKey: "phoneDevPagesAllowed")
+            audit("dev pages \(devPagesAllowed ? "allowed" : "blocked")")
+            if devPagesAllowed { checkChromeAccess(ask: true) }
+            syncPreviews()
+        }
+    }
+    /// Why previews couldn't start (shown under the toggle), or nil.
+    @Published private(set) var devPagesProblem: String?
+    /// Whether macOS lets VibeSwitcher read Chrome's tabs (shown under the toggle); nil until checked.
+    @Published private(set) var chromeAccess: AutomationAccess?
 
     /// Announces pairings and remote input on the Mac (title, body).
     var onEvent: ((String, String) -> Void)?
@@ -62,6 +75,7 @@ final class PhoneAccess: ObservableObject {
     /// Scrollback and transcript reads: their own queue, so a big read never holds up the live screen.
     private let transcriptReads = DispatchQueue(label: "vibeswitcher.phone-access.transcripts", qos: .userInitiated)
     private var failedAuth: [Date] = []
+    private lazy var previews = DevPreviews(control: control)
     /// Typing into tabs, one input at a time.
     private let work = DispatchQueue(label: "vibeswitcher.phone-access", qos: .userInitiated)
     /// Reading screens; separate so a slow Terminal read never holds up a key press.
@@ -74,6 +88,7 @@ final class PhoneAccess: ObservableObject {
         defaults.register(defaults: ["phonePushOnlyWhenAway": true])
         enabled = defaults.bool(forKey: "phoneAccessEnabled")
         inputAllowed = defaults.bool(forKey: "phoneInputAllowed")
+        devPagesAllowed = defaults.bool(forKey: "phoneDevPagesAllowed")
         pushOnlyWhenAway = defaults.bool(forKey: "phonePushOnlyWhenAway")
         devices = Self.loadDevices()
         recentActivity = Self.tailOfAuditLog()
@@ -180,12 +195,33 @@ final class PhoneAccess: ObservableObject {
                     self.state = .on
                     self.audit("phone access on (\(host))")
                 }
+                self.syncPreviews()
             }
+        }
+    }
+
+    /// Previews run exactly while Phone Access is on and dev pages are allowed.
+    private func syncPreviews() {
+        guard devPagesAllowed, state == .on, let host = tailscale?.dnsName, let owner = tailscale?.login else {
+            previews.stop()
+            devPagesProblem = nil
+            return
+        }
+        previews.start(host: host, owner: owner) { [weak self] problem in self?.devPagesProblem = problem }
+    }
+
+    /// Asks macOS whether VibeSwitcher may read Chrome's tabs; with `ask`, its dialog appears if it never
+    /// has. The answer shows under the toggle. (The dialog blocks its thread, so this runs off main.)
+    func checkChromeAccess(ask: Bool) {
+        DispatchQueue.global(qos: .userInitiated).async {
+            let access = ChromeTabs.access(ask: ask)
+            DispatchQueue.main.async { self.chromeAccess = access }
         }
     }
 
     /// Stays enabled: the health check retries (e.g. Tailscale connects a minute after login).
     private func fail(_ message: String) {
+        previews.stop()
         server?.stop()
         server = nil
         url = nil
@@ -199,6 +235,7 @@ final class PhoneAccess: ObservableObject {
         healthTimer = nil
         server?.stop()
         server = nil
+        previews.stop()
         pairing = nil
         state = .off
         url = nil
@@ -213,6 +250,7 @@ final class PhoneAccess: ObservableObject {
         generation += 1
         healthTimer?.invalidate()
         server?.stop()
+        previews.shutdown()
         guard enabled, let host = tailscale?.dnsName else { return }
         TailscaleCLI.stopServing(host: host, localTarget: Self.localTarget, timeout: 3)
     }
@@ -237,9 +275,11 @@ final class PhoneAccess: ObservableObject {
         let run = generation
         let listening = server?.isListening == true
         let known = tailscale
+        let previewsWanted = devPagesAllowed
         control.async {
             let status = TailscaleCLI.status()
             let served = (try? status.get()).flatMap { TailscaleCLI.servedTarget(host: $0.dnsName) }
+            if previewsWanted { self.previews.repairMappings() }
             DispatchQueue.main.async {
                 self.healthCheckRunning = false
                 guard self.isCurrent(run), self.state == .on else { return }
@@ -251,6 +291,11 @@ final class PhoneAccess: ObservableObject {
                     return self.start()
                 }
                 self.unhealthyChecks = 0
+                if previewsWanted, !self.previews.isHealthy {
+                    self.audit("dev pages restarting (a preview port stopped listening)")
+                    self.previews.stop()
+                    self.syncPreviews()
+                }
                 if served != Self.localTarget {
                     self.audit("tailscale serve mapping was missing; restored")
                     self.startServing(run: run, host: current.dnsName)
@@ -305,6 +350,8 @@ final class PhoneAccess: ObservableObject {
         case ("GET", "/api/history"): history(request, respond: respond)
         case ("GET", "/api/conversation"): conversation(request, respond: respond)
         case ("GET", "/api/conversation/tool"): conversationTool(request, respond: respond)
+        case ("GET", "/api/devpages"): devPages(respond: respond)
+        case ("POST", "/api/preview"): preview(request, device: device, respond: respond)
         case ("POST", "/api/unpair"):
             remove(device)
             respond(.json(["ok": true]))
@@ -382,6 +429,7 @@ final class PhoneAccess: ObservableObject {
                       "projects": today.byProject().prefix(8).map { ["project": $0.project, "working": $0.working,
                                                                       "waiting": $0.waiting, "background": $0.background] }],
             "inputAllowed": inputAllowed,
+            "devPagesAllowed": devPagesAllowed,
             "device": ["id": device.id, "name": device.name, "push": device.push != nil],
             "vapidPublicKey": Base64URL.encode(vapidKey.publicKey.x963Representation),
             "mac": Host.current().localizedName ?? "Mac",
@@ -532,6 +580,51 @@ final class PhoneAccess: ObservableObject {
             DispatchQueue.main.async {
                 guard let entry else { return respond(.error(404, "not found")) }
                 respond(.json(["tty": tty, "entry": entry.json]))
+            }
+        }
+    }
+
+    private static let devPagesOff = "Opening dev pages is off. Turn it on in VibeSwitcher › Phone Access."
+
+    private func devPages(respond: @escaping (HTTPResponse) -> Void) {
+        guard devPagesAllowed else { return respond(.error(403, Self.devPagesOff)) }
+        reads.async {
+            let result = self.previews.pages()
+            DispatchQueue.main.async {
+                switch result {
+                case .success(let pages):
+                    respond(.json(["pages": pages.map { page -> [String: Any] in
+                        ["id": DevPages.id(for: page), "title": Redaction.secrets(in: page.title),
+                         "label": Redaction.secrets(in: page.target.hostHeader + page.path),
+                         "open": self.previews.isOpen(page.target)]
+                    }]))
+                case .failure(.notRunning):
+                    respond(.json(["pages": [], "hint": "Open the page in Chrome on your Mac first."]))
+                case .failure(.notAllowed):
+                    respond(.json(["pages": [], "hint": "On the Mac, allow VibeSwitcher to control Google Chrome: "
+                                   + "Phone Access › Allow opening dev pages."]))
+                case .failure(.failed(let message)):
+                    respond(.error(503, "Couldn't read Chrome's tabs (\(message))."))
+                }
+            }
+        }
+    }
+
+    private func preview(_ request: HTTPRequest, device: PairedDevice, respond: @escaping (HTTPResponse) -> Void) {
+        guard devPagesAllowed else { return respond(.error(403, Self.devPagesOff)) }
+        guard let id = body(request)?["id"] as? String else { return respond(.error(400, "missing page")) }
+        reads.async {
+            // Fresh: only a page that is open in Chrome right now may be opened.
+            let result = self.previews.pages(fresh: true)
+            DispatchQueue.main.async {
+                guard case .success(let pages) = result, let page = pages.first(where: { DevPages.id(for: $0) == id }) else {
+                    return respond(.error(404, "That page isn't open in Chrome on your Mac anymore."))
+                }
+                guard let url = self.previews.open(page) else {
+                    return respond(.error(503, "No preview slot is available right now."))
+                }
+                self.audit("\(device.name) opened \(Redaction.secrets(in: page.target.hostHeader + page.path))")
+                respond(.json(["open": url.absoluteString]))
             }
         }
     }
