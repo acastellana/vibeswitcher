@@ -106,6 +106,26 @@ struct PreviewSlotsTests {
         #expect(takeover.sessionToken != viteSession)
     }
 
+    @Test func theFirstRedeemAfterATakeoverAsksToClearTheOldServersStorage() throws {
+        var slots = PreviewSlots(count: 1)
+        let tokens = counter()
+        let aResult = slots.open(vite, path: "/", now: t0, newToken: tokens)
+        let a = try #require(aResult)
+        let firstResult = slots.redeem(a.ticket, slot: 0, now: t0, newToken: tokens)
+        let first = try #require(firstResult)
+        #expect(first.clearSite)                          // nothing to keep from whatever used the port before
+        let againResult = slots.open(vite, path: "/x", now: t0, newToken: tokens)
+        let again = try #require(againResult)
+        let reusedResult = slots.redeem(again.ticket, slot: 0, now: t0, newToken: tokens)
+        let reused = try #require(reusedResult)
+        #expect(!reused.clearSite)
+        let bResult = slots.open(next, path: "/", now: t0, newToken: tokens)
+        let b = try #require(bResult)
+        let takeoverResult = slots.redeem(b.ticket, slot: 0, now: t0, newToken: tokens)
+        let takeover = try #require(takeoverResult)
+        #expect(takeover.clearSite)
+    }
+
     @Test func picksTheLeastRecentlyUsedSlotAndSkipsUnavailableOnes() throws {
         var slots = PreviewSlots(count: 3)
         let tokens = counter()
@@ -222,6 +242,17 @@ struct PreviewGateTests {
         #expect(upgrade.value("connection") == "Upgrade")
     }
 
+    @Test func forwardedHeadersFromTailscaleServeAreDropped() {
+        let target = PreviewTarget(connectHost: "localhost", hostHeader: "localhost:3000", port: 3000)
+        let rewritten = PreviewGate.upstreamRequest(requestHead(
+            "POST /action HTTP/1.1\r\nX-Forwarded-Host: mac.example.ts.net:8444\r\nX-Forwarded-Proto: https\r\n"
+            + "X-Forwarded-For: 100.64.0.2\r\nForwarded: for=100.64.0.2;proto=https\r\n"), target: target, ownOrigin: own, publicPort: 8444)
+        // Next.js compares Origin with X-Forwarded-Host; Express turns X-Forwarded-Proto into https redirects.
+        for name in ["x-forwarded-host", "x-forwarded-proto", "x-forwarded-for", "forwarded"] {
+            #expect(rewritten.value(name) == nil, "\(name)")
+        }
+    }
+
     @Test func rewritesDevServerRedirectsAndCookies() {
         let target = PreviewTarget(connectHost: "localhost", hostHeader: "localhost:3000", port: 3000)
         let response = PreviewGate.clientResponse(responseHead(
@@ -252,6 +283,10 @@ final class FakeUpstream: @unchecked Sendable {
     private var heads: [String] = []
     var reply = Data("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nok".utf8)
     var echoAfterReply = false
+    /// Wait this long before replying (a slow dev server).
+    var delay: TimeInterval = 0
+    private var closedCount = 0
+    var closed: Int { queue.sync { closedCount } }
 
     init(host: String = "127.0.0.1") throws {
         let parameters = NWParameters.tcp
@@ -289,9 +324,17 @@ final class FakeUpstream: @unchecked Sendable {
                 return
             }
             self.heads.append(String(decoding: buffer[buffer.startIndex..<end.lowerBound], as: UTF8.self))
-            connection.send(content: self.reply, completion: .contentProcessed { _ in
-                if self.echoAfterReply { self.echo(connection) } else { connection.cancel() }
-            })
+            let answer = {
+                connection.send(content: self.reply, completion: .contentProcessed { _ in
+                    if self.echoAfterReply { self.echo(connection) } else { connection.cancel() }
+                })
+            }
+            guard self.delay > 0 else { return answer() }
+            // While waiting, notice the proxy closing the connection.
+            connection.receive(minimumIncompleteLength: 1, maximumLength: 1) { _, _, done, error in
+                if done || error != nil { self.closedCount += 1 }
+            }
+            self.queue.asyncAfter(deadline: .now() + self.delay, execute: answer)
         }
     }
 
@@ -372,7 +415,7 @@ struct PreviewProxyTests {
     static let me = "Tailscale-User-Login: me@example.com\r\n"
     static let ours = "Cookie: vs_preview_8444=TOK\r\n"
 
-    func startProxy(target: PreviewTarget?, redeemed: (path: String, sessionToken: String)? = nil) async throws -> (PreviewProxy, UInt16) {
+    func startProxy(target: PreviewTarget?, redeemed: (path: String, sessionToken: String, clearSite: Bool)? = nil) async throws -> (PreviewProxy, UInt16) {
         let proxy = PreviewProxy(label: "test-proxy", context: {
             PreviewProxy.Context(owner: "me@example.com", ownOrigin: "https://mac.example.ts.net:8444",
                                  siblingOrigins: Set((8443...8447).map { "https://mac.example.ts.net:\($0)" }), publicPort: 8444)
@@ -386,8 +429,44 @@ struct PreviewProxyTests {
 
     func text(_ data: Data) -> String { String(decoding: data, as: UTF8.self) }
 
+    @Test func takingOverASlotClearsTheOldServersStorage() async throws {
+        let (proxy, port) = try await startProxy(target: nil, redeemed: ("/", "TOK", true))
+        defer { proxy.stop() }
+        let response = text(await exchange(port: port, "GET /__vibeswitcher/enter?t=TICKET HTTP/1.1\r\n\(Self.me)\r\n"))
+        #expect(response.contains("Clear-Site-Data: \"cache\", \"storage\"\r\n"))
+    }
+
+    @Test func manyConcurrentRequestsAllGetThrough() async throws {
+        let upstream = try FakeUpstream()
+        upstream.delay = 0.4
+        let upstreamPort = await upstream.start()
+        let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstreamPort)", port: Int(upstreamPort))
+        let (proxy, port) = try await startProxy(target: target)
+        defer { proxy.stop(); upstream.stop() }
+        // A cold Vite load: tailscale serve opens one backend connection per in-flight module request.
+        let ok = await withTaskGroup(of: Bool.self) { group in
+            for i in 0..<100 {
+                group.addTask { self.text(await exchange(port: port, "GET /m\(i).js HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n", timeout: 10)).hasSuffix("ok") }
+            }
+            return await group.reduce(0) { $0 + ($1 ? 1 : 0) }
+        }
+        #expect(ok == 100)
+    }
+
+    @Test func aRequestTheClientAbandonsReleasesTheDevServerConnection() async throws {
+        let upstream = try FakeUpstream()
+        upstream.delay = 30   // a hung dev server
+        let upstreamPort = await upstream.start()
+        let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstreamPort)", port: Int(upstreamPort))
+        let (proxy, port) = try await startProxy(target: target)
+        defer { proxy.stop(); upstream.stop() }
+        _ = await exchange(port: port, "GET /slow HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n", timeout: 1)   // gives up after 1 s
+        try await Task.sleep(nanoseconds: 1_000_000_000)
+        #expect(upstream.closed == 1)
+    }
+
     @Test func ticketSetsTheSlotCookieAndRedirects() async throws {
-        let (proxy, port) = try await startProxy(target: nil, redeemed: ("/app?x=1", "TOK"))
+        let (proxy, port) = try await startProxy(target: nil, redeemed: ("/app?x=1", "TOK", false))
         defer { proxy.stop() }
         let response = text(await exchange(port: port, "GET /__vibeswitcher/enter?t=TICKET HTTP/1.1\r\n\(Self.me)\r\n"))
         // Not a 302: a redirect continues the phone's cross-site navigation (Android opens the link from
@@ -396,6 +475,7 @@ struct PreviewProxyTests {
         #expect(response.hasPrefix("HTTP/1.1 200"))
         #expect(response.contains("Set-Cookie: vs_preview_8444=TOK; Path=/; Secure; HttpOnly; SameSite=Strict\r\n"))
         #expect(response.contains(#"<meta http-equiv="refresh" content="0;url=/app?x=1">"#))
+        #expect(!response.contains("Clear-Site-Data"))
         #expect(!response.contains("Location:"))
         let wrong = text(await exchange(port: port, "GET /__vibeswitcher/enter?t=WRONG HTTP/1.1\r\n\(Self.me)\r\n"))
         #expect(wrong.hasPrefix("HTTP/1.1 403"))

@@ -88,7 +88,7 @@ records `Android phone opened localhost:5173/settings`.
 | Automation denied | The list says how to allow it (System Settings › Privacy & Security › Automation). |
 | Dev server down | The proxy returns a small 502 page: "localhost:5173 isn't answering". |
 | Ticket expired or reused | A 403 page: "Open it again from VibeSwitcher". |
-| Slot taken over by another page | The old tab gets a 403 page with the same text on its next request. |
+| Slot taken over by another page | The port now shows the new page, also in a phone tab still open on the old one: cookies are per browser, not per tab, so the old tab sends the new cookie. On the first open after a takeover the port's cache, storage and service worker are cleared (`Clear-Site-Data`). Reopen the old page from the list. |
 | Tailscale port already in use | That slot is skipped, leaving one fewer slot. If no slot can be mapped, the toggle shows the reason. |
 
 ## Testing

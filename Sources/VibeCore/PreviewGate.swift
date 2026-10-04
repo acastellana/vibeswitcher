@@ -133,7 +133,13 @@ public enum PreviewGate {
     public static func upstreamRequest(_ head: HTTPHead, target: PreviewTarget, ownOrigin: String,
                                        publicPort: Int) -> HTTPHead {
         var head = head
-        head.fields.removeAll { $0.name.lowercased().hasPrefix("tailscale-") }
+        // Tailscale's identity headers, and the proxy headers tailscale serve adds: the dev server must see
+        // only its own address (Next.js checks Origin against X-Forwarded-Host; Express builds https
+        // redirects from X-Forwarded-Proto).
+        head.fields.removeAll {
+            let name = $0.name.lowercased()
+            return name.hasPrefix("tailscale-") || name.hasPrefix("x-forwarded-") || name == "forwarded"
+        }
         let ours = cookieName(publicPort: publicPort) + "="
         let kept = head.values("cookie").flatMap { $0.split(separator: ";") }
             .map { $0.trimmingCharacters(in: .whitespaces) }

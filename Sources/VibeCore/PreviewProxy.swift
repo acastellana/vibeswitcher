@@ -23,18 +23,20 @@ public final class PreviewProxy: @unchecked Sendable {
 
     private final class Flag { var value = false }
 
-    private static let maxConnections = 64
+    /// tailscale serve opens one backend connection per in-flight request (we close each after its
+    /// response), and a cold Vite load has well over 64 module requests in flight.
+    private static let maxConnections = 512
     private let queue: DispatchQueue
     private var listener: NWListener?
     /// Everything below is touched on `queue` only.
     private var clients: [ObjectIdentifier: NWConnection] = [:]
     private var upstreams: [ObjectIdentifier: NWConnection] = [:]   // keyed by their client
     private let context: () -> Context?
-    private let redeem: (String) -> (path: String, sessionToken: String)?
+    private let redeem: (String) -> (path: String, sessionToken: String, clearSite: Bool)?
     private let resolve: (String) -> PreviewTarget?
 
     public init(label: String, context: @escaping () -> Context?,
-                redeem: @escaping (String) -> (path: String, sessionToken: String)?,
+                redeem: @escaping (String) -> (path: String, sessionToken: String, clearSite: Bool)?,
                 resolve: @escaping (String) -> PreviewTarget?) {
         queue = DispatchQueue(label: label)
         self.context = context
@@ -86,9 +88,14 @@ public final class PreviewProxy: @unchecked Sendable {
     }
 
     private func accept(_ client: NWConnection) {
-        guard clients.count < Self.maxConnections, Self.isLoopback(client.endpoint) else {
+        guard Self.isLoopback(client.endpoint) else {
             client.cancel()
             return
+        }
+        guard clients.count < Self.maxConnections else {
+            // A clear answer rather than a reset connection.
+            client.start(queue: queue)
+            return reply(client, Self.page(503, "Too many requests at once. Try again."))
         }
         let id = ObjectIdentifier(client)
         clients[id] = client
@@ -138,7 +145,8 @@ public final class PreviewProxy: @unchecked Sendable {
         case .enter(let ticket):
             guard let entry = redeem(ticket) else { return reply(client, Self.page(403, PreviewGate.expiredMessage)) }
             reply(client, Self.enterPage(path: entry.path,
-                                         cookie: PreviewGate.setCookie(publicPort: context.publicPort, token: entry.sessionToken)))
+                                         cookie: PreviewGate.setCookie(publicPort: context.publicPort, token: entry.sessionToken),
+                                         clearSite: entry.clearSite))
         case .forward(let token):
             guard let target = resolve(token) else { return reply(client, Self.page(403, PreviewGate.expiredMessage)) }
             relay(head, rest: rest, client: client, target: target, context: context)
@@ -172,7 +180,9 @@ public final class PreviewProxy: @unchecked Sendable {
                 upstream.send(content: first, completion: .contentProcessed { error in
                     if error != nil { client.cancel(); return }
                     // Whatever else the client sends: the rest of a request body, or websocket frames.
-                    self?.pump(from: client, to: upstream, onEnd: upgrade ? { upstream.cancel() } : nil)
+                    // The client going away ends the exchange either way: a hung dev server must not keep
+                    // both connections (and a slot's connection budget) forever.
+                    self?.pump(from: client, to: upstream, onEnd: { client.cancel(); upstream.cancel() })
                 })
                 self?.forwardResponse(upstream, to: client, buffer: Data(), ended: false, target: target)
             case .waiting, .failed:
@@ -239,12 +249,16 @@ public final class PreviewProxy: @unchecked Sendable {
     /// phone's navigation, which Android starts outside the browser (cross-site), so the browser would
     /// withhold the SameSite=Strict cookie on the request that follows; a page navigating on its own
     /// makes that request same-site.
-    public static func enterPage(path: String, cookie: String) -> Data {
+    /// `clearSite`: the port now shows another server; drop the old one's cache, storage and service
+    /// worker (not its cookies: that would also log out the other slots, which share this host).
+    public static func enterPage(path: String, cookie: String, clearSite: Bool = false) -> Data {
         let link = escaped(path)
         let html = "<!doctype html><meta name=\"viewport\" content=\"width=device-width\">"
             + "<meta http-equiv=\"refresh\" content=\"0;url=\(link)\"><title>VibeSwitcher</title>"
             + "<body style=\"font:16px -apple-system,system-ui,sans-serif;padding:24px\"><a href=\"\(link)\">Open the page</a>"
-        return response(200, [("Content-Type", "text/html; charset=utf-8"), ("Set-Cookie", cookie)], body: Data(html.utf8))
+        var headers = [("Content-Type", "text/html; charset=utf-8"), ("Set-Cookie", cookie)]
+        if clearSite { headers.append(("Clear-Site-Data", "\"cache\", \"storage\"")) }
+        return response(200, headers, body: Data(html.utf8))
     }
 
     static func escaped(_ text: String) -> String {

@@ -21,6 +21,9 @@ final class DevPreviews {
     private var pageCache: (at: Date, result: Result<[DevPage], ChromeTabs.Failure>)?
     // Main thread:
     private var proxies: [PreviewProxy] = []
+    /// Slots whose listener came up: only these count for health (a port held by something else is
+    /// skipped, not a reason to restart every preview each health check).
+    private var listening: Set<Int> = []
     private var running: String?
     private var generation = 0
 
@@ -47,12 +50,11 @@ final class DevPreviews {
         }
         let group = DispatchGroup()
         var problems: [String] = []
-        for slot in 0..<Self.slotCount {
-            let proxy = makeProxy(slot)
-            proxies.append(proxy)
-            group.enter()
+        // A copy of the app that is still quitting can hold a port for a moment: retry like the main server.
+        func startSlot(_ slot: Int, proxy: PreviewProxy, attempt: Int) {
             proxy.start(port: Self.localPort(slot), onReady: { [weak self] in
                 guard let self, self.generation == run else { return group.leave() }
+                self.listening.insert(slot)
                 self.control.async {
                     let failure = TailscaleCLI.startServing(host: host, httpsPort: Self.publicPort(slot),
                                                             localTarget: Self.localTarget(slot))
@@ -64,10 +66,22 @@ final class DevPreviews {
                         group.leave()
                     }
                 }
-            }, onFailure: { message in
-                problems.append(message)
-                group.leave()
+            }, onFailure: { [weak self] message in
+                guard let self, self.generation == run, attempt < 5 else {
+                    problems.append(message)
+                    return group.leave()
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                    guard self.generation == run else { return group.leave() }
+                    startSlot(slot, proxy: proxy, attempt: attempt + 1)
+                }
             })
+        }
+        for slot in 0..<Self.slotCount {
+            let proxy = makeProxy(slot)
+            proxies.append(proxy)
+            group.enter()
+            startSlot(slot, proxy: proxy, attempt: 1)
         }
         group.notify(queue: .main) { [weak self] in
             guard let self, self.generation == run else { return }
@@ -81,6 +95,7 @@ final class DevPreviews {
         generation += 1
         proxies.forEach { $0.stop() }
         proxies = []
+        listening = []
         withLock {
             context = nil
             slots = PreviewSlots(count: Self.slotCount)
@@ -98,7 +113,7 @@ final class DevPreviews {
         TailscaleCLI.stopServing(host: host, mappings: Self.mappings, timeout: 3)
     }
 
-    var isHealthy: Bool { running == nil || proxies.allSatisfy(\.isListening) }
+    var isHealthy: Bool { running == nil || listening.allSatisfy { proxies.indices.contains($0) && proxies[$0].isListening } }
 
     /// On the control queue (PhoneAccess's health check): puts back mappings that went missing.
     func repairMappings() {

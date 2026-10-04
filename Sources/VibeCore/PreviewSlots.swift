@@ -53,15 +53,18 @@ public struct PreviewSlots: Sendable {
         return (index, ticket)
     }
 
-    /// Single use: the ticket is gone after this call, whatever the outcome.
-    public mutating func redeem(_ ticket: String, slot: Int, now: Date = Date(),
-                                newToken: () -> String = RemoteAuth.newToken) -> (path: String, sessionToken: String)? {
+    /// Single use: the ticket is gone after this call, whatever the outcome. `clearSite` is true on the
+    /// first redeem since the slot got its server: whatever the port showed before (its storage, cache,
+    /// service worker) must not leak into this one.
+    public mutating func redeem(_ ticket: String, slot: Int, now: Date = Date(), newToken: () -> String = RemoteAuth.newToken)
+        -> (path: String, sessionToken: String, clearSite: Bool)? {
         guard let entry = tickets.removeValue(forKey: ticket), entry.slot == slot, entry.expires > now,
               slots.indices.contains(slot), slots[slot].target != nil else { return nil }
+        let clearSite = slots[slot].sessionToken == nil
         let token = slots[slot].sessionToken ?? newToken()
         slots[slot].sessionToken = token
         slots[slot].lastUsed = now
-        return (entry.path, token)
+        return (entry.path, token, clearSite)
     }
 
     /// What a request on `slot` carrying `sessionToken` may reach, or nil.

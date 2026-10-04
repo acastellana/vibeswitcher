@@ -75,7 +75,8 @@ and notifications when a session needs you or finishes. Optionally reply and pre
    - Each page gets its own HTTPS port on your tailnet (8444–8447) through a proxy in VibeSwitcher. Every
      request must come from your own Tailscale account and carry a cookie that only the paired phone can
      get, from a link that works once, for a minute.
-   - At most 4 pages at once (a fifth replaces the least recently used). Links hard-coded to
+   - At most 4 pages at once. A fifth takes over the least recently used page's port: a phone tab still open
+     on the old page then shows the new one (its storage is cleared). Reopen the old one from the list. Links hard-coded to
      `http://localhost:…` inside the app won't work on the phone, dev servers that only serve HTTPS aren't
      supported, and cookies a dev app sets are shared between its previews (browsers scope cookies by
      host, not port).

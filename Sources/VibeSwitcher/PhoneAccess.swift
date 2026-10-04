@@ -76,6 +76,9 @@ final class PhoneAccess: ObservableObject {
     private let transcriptReads = DispatchQueue(label: "vibeswitcher.phone-access.transcripts", qos: .userInitiated)
     private var failedAuth: [Date] = []
     private lazy var previews = DevPreviews(control: control)
+    /// Reading Chrome's tabs: its own queue, so a slow Chrome (or a pending Automation prompt) never holds
+    /// up Terminal screen reads.
+    private let chromeReads = DispatchQueue(label: "vibeswitcher.phone-access.chrome", qos: .userInitiated)
     /// Typing into tabs, one input at a time.
     private let work = DispatchQueue(label: "vibeswitcher.phone-access", qos: .userInitiated)
     /// Reading screens; separate so a slow Terminal read never holds up a key press.
@@ -588,7 +591,7 @@ final class PhoneAccess: ObservableObject {
 
     private func devPages(respond: @escaping (HTTPResponse) -> Void) {
         guard devPagesAllowed else { return respond(.error(403, Self.devPagesOff)) }
-        reads.async {
+        chromeReads.async {
             let result = self.previews.pages()
             DispatchQueue.main.async {
                 switch result {
@@ -613,7 +616,7 @@ final class PhoneAccess: ObservableObject {
     private func preview(_ request: HTTPRequest, device: PairedDevice, respond: @escaping (HTTPResponse) -> Void) {
         guard devPagesAllowed else { return respond(.error(403, Self.devPagesOff)) }
         guard let id = body(request)?["id"] as? String else { return respond(.error(400, "missing page")) }
-        reads.async {
+        chromeReads.async {
             // Fresh: only a page that is open in Chrome right now may be opened.
             let result = self.previews.pages(fresh: true)
             DispatchQueue.main.async {
