@@ -1530,7 +1530,7 @@ swift build 2>&1 | grep -E "error|Build complete"
 S=$(mktemp -d) && cd "$S" && echo '<title>VS scratch</title>ok' > index.html
 python3 -m http.server 58123 --bind 127.0.0.1 >/dev/null 2>&1 & echo $! > "$S/pid"
 open -a "Google Chrome" "http://localhost:58123/?probe=1"; sleep 2
-cd /Users/albert/dev/vibeswitcher && .build/debug/VibeSwitcher --dev-pages
+cd "$(git rev-parse --show-toplevel)" && .build/debug/VibeSwitcher --dev-pages
 ```
 
 Expected: a line `localhost:58123/?probe=1	VS scratch	id …`. The first run may show the macOS Automation
