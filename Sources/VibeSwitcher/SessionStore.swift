@@ -144,6 +144,7 @@ final class SessionStore: ObservableObject {
             guard let self else { return }
             let now = Date()
             let raw = self.scanner.scan(now: now)
+            let transcripts = Self.transcripts(for: raw)
             var access: TerminalAccess?
             // AppleScript is the expensive part; query at most every 2s unless forced.
             if forceTerminal || now.timeIntervalSince(self.lastTerminalQuery) >= terminalInterval - 0.05 {
@@ -166,7 +167,7 @@ final class SessionStore: ObservableObject {
                     self.terminalAccess = access
                     AppStatus.write(sessions: self.sessions, terminalAccess: access)
                 }
-                self.apply(raw: raw, tabs: tabs, background: background, now: now)
+                self.apply(raw: raw, tabs: tabs, background: background, transcripts: transcripts, now: now)
                 self.scanning = false
                 if self.rescanRequested {
                     let force = self.forceTerminalRequested
@@ -186,10 +187,22 @@ final class SessionStore: ObservableObject {
         let raw = scanner.scan(now: now)
         let quiet = Set(raw.filter { $0.agent == .claude }.map(\.tty))
         let background = TerminalBridge.screens(for: quiet).compactMapValues { BackgroundWork.summary(fromScreen: $0) }
-        apply(raw: raw, tabs: result.tabs, background: background, now: now)
+        apply(raw: raw, tabs: result.tabs, background: background, transcripts: Self.transcripts(for: raw), now: now)
     }
 
-    private func apply(raw: [RawSession], tabs: [String: TerminalTab], background: [String: String], now: Date) {
+    /// Off the main thread: each session's transcript, if its hook named one inside the agents' folders.
+    private static func transcripts(for raw: [RawSession]) -> [String: String] {
+        var paths: [String: String] = [:]
+        for item in raw {
+            if let path = item.hook?.transcriptPath, let checked = TranscriptReader.checkedURL(path, home: NSHomeDirectory()) {
+                paths[item.tty] = checked.0.path
+            }
+        }
+        return paths
+    }
+
+    private func apply(raw: [RawSession], tabs: [String: TerminalTab], background: [String: String],
+                       transcripts: [String: String], now: Date) {
         var quiet: Set<String> = []
         var nudges: [(Session, Nudge)] = []
         let present = UserPresence.isPresent()
@@ -241,6 +254,8 @@ final class SessionStore: ObservableObject {
             session.isCurrent = viewing
             session.screenPosition = tab?.position
             session.terminalWindowID = tab?.windowID
+            session.eventAt = item.hook?.lastEventAt
+            session.transcriptPath = transcripts[item.tty]
             // Only the visible tab counts: a window full of session tabs sits on one desktop, but
             // you can only be looking at the selected one.
             session.onCurrentDesktop = tab?.isSelected == true && tab?.isOnScreenTab == true

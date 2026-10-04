@@ -429,10 +429,9 @@ final class PhoneAccess: ObservableObject {
                 row["paused"] = true
                 if until != .distantFuture { row["pausedUntil"] = until.timeIntervalSince1970 }
             }
-            if let hook = Self.hookState(for: session.tty) {
-                row["eventAt"] = hook.lastEventAt
-                row["hasTranscript"] = hook.transcriptPath.flatMap { TranscriptReader.checkedURL($0, home: NSHomeDirectory()) } != nil
-            }
+            // From the background scan: no file reads here, on every poll of every phone.
+            if let eventAt = session.eventAt { row["eventAt"] = eventAt }
+            row["hasTranscript"] = session.transcriptPath != nil
             return row
         }
         let today = store.today
@@ -487,11 +486,6 @@ final class PhoneAccess: ObservableObject {
         }
     }
 
-    private static func hookState(for tty: String) -> HookState? {
-        guard TerminalBridge.isValidTTY(tty) else { return nil }
-        return HookState.load(from: VibePaths.stateDir.appendingPathComponent("\(tty).json"))
-    }
-
     /// The tab's scrollback above the visible screen, a page at a time (the phone prepends pages as you
     /// scroll up). Read once and kept for 2 s, so paging quickly doesn't re-read a huge scrollback, and
     /// requests that arrive during a read share it.
@@ -528,6 +522,7 @@ final class PhoneAccess: ObservableObject {
     }
 
     private static let conversationTailBytes = 2 * 1024 * 1024
+    private static let noTranscript = "No transcript for this session. See the Terminal tab."
 
     /// Short id of a transcript file: a cursor only continues in the file it came from.
     private static func transcriptID(_ url: URL) -> String {
@@ -539,16 +534,17 @@ final class PhoneAccess: ObservableObject {
     /// `pending` that a line is still being written (ask again shortly).
     private func conversation(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
         let tty = request.query["tty"] ?? ""
-        guard store.sessions.contains(where: { $0.tty == tty }) else { return respond(.error(404, "no such session")) }
-        guard let path = Self.hookState(for: tty)?.transcriptPath,
-              let checked = TranscriptReader.checkedURL(path, home: NSHomeDirectory()) else {
-            return respond(.error(404, "No transcript for this session. See the Terminal tab."))
-        }
-        let (url, format) = checked
-        let file = Self.transcriptID(url)
+        guard let session = store.sessions.first(where: { $0.tty == tty }) else { return respond(.error(404, "no such session")) }
+        guard let path = session.transcriptPath else { return respond(.error(404, Self.noTranscript)) }
         let after = request.query["after"].flatMap { Int($0) }
-        let sameFile = request.query["file"] == file
+        let phoneFile = request.query["file"]
         transcriptReads.async {
+            // Checked again here (off the main thread): the file may have changed since the scan.
+            guard let (url, format) = TranscriptReader.checkedURL(path, home: NSHomeDirectory()) else {
+                return DispatchQueue.main.async { respond(.error(404, Self.noTranscript)) }
+            }
+            let file = Self.transcriptID(url)
+            let sameFile = phoneFile == file
             let response: HTTPResponse
             if let handle = try? FileHandle(forReadingFrom: url), let size = try? handle.seekToEnd() {
                 defer { try? handle.close() }
@@ -556,17 +552,9 @@ final class PhoneAccess: ObservableObject {
                 let plan = TranscriptWindow.plan(fileSize: fileSize, after: after, sameFile: sameFile,
                                                  tailBytes: Self.conversationTailBytes)
                 try? handle.seek(toOffset: UInt64(plan.start))
-                var data = (try? handle.readToEnd()) ?? Data()
-                var skipped = 0
-                if plan.fresh, plan.start > 0 {
-                    skipped = TranscriptReader.tailStart(data)
-                    data = data.subdata(in: (data.startIndex + skipped)..<data.endIndex)
-                }
-                let result = TranscriptReader.read(data, format: format)
-                let cursor = plan.start + skipped + result.consumed
-                response = .json(["tty": tty, "entries": result.entries.map(\.json), "cursor": cursor, "file": file,
-                                  "fresh": plan.fresh, "pending": cursor < fileSize,
-                                  "truncatedBefore": plan.fresh && plan.start > 0,
+                let chunk = TranscriptWindow.chunk((try? handle.readToEnd()) ?? Data(), plan: plan, fileSize: fileSize, format: format)
+                response = .json(["tty": tty, "entries": chunk.entries.map(\.json), "cursor": chunk.cursor, "file": file,
+                                  "fresh": plan.fresh, "pending": chunk.pending, "truncatedBefore": chunk.truncatedBefore,
                                   "format": format == .claude ? "claude" : "codex"])
             } else {
                 response = .error(503, "Couldn't read the transcript right now.")
@@ -579,13 +567,14 @@ final class PhoneAccess: ObservableObject {
     /// call's id are parsed.
     private func conversationTool(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
         let tty = request.query["tty"] ?? "", id = request.query["id"] ?? ""
-        guard !id.isEmpty, id.count <= 200, store.sessions.contains(where: { $0.tty == tty }),
-              let path = Self.hookState(for: tty)?.transcriptPath,
-              let checked = TranscriptReader.checkedURL(path, home: NSHomeDirectory()) else {
+        guard !id.isEmpty, id.count <= 200,
+              let path = store.sessions.first(where: { $0.tty == tty })?.transcriptPath else {
             return respond(.error(404, "not found"))
         }
-        let (url, format) = checked
         transcriptReads.async {
+            guard let (url, format) = TranscriptReader.checkedURL(path, home: NSHomeDirectory()) else {
+                return DispatchQueue.main.async { respond(.error(404, "not found")) }
+            }
             let data = (try? Data(contentsOf: url, options: .mappedIfSafe)) ?? Data()
             let entry = TranscriptReader.read(TranscriptReader.lines(mentioning: id, in: data), format: format,
                                               outputLimit: 64 * 1024).entries

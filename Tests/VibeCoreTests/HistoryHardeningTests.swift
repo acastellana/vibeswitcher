@@ -96,3 +96,39 @@ struct HistoryHardeningTests {
         #expect(Scrollback.split("no separator") == nil)
     }
 }
+
+struct TranscriptChunkTests {
+    let line1 = #"{"type":"user","uuid":"u1","message":{"role":"user","content":"one"}}"# + "\n"
+    let line2 = #"{"type":"user","uuid":"u2","message":{"role":"user","content":"two"}}"# + "\n"
+    let partial = #"{"type":"user","uuid":"u3","mess"#
+
+    @Test func aFreshTailSkipsThePartialFirstLineAndEndsAtTheFileEnd() {
+        let file = Data((line1 + line2).utf8)
+        // Start inside line 1: it's cut, so only line 2 counts.
+        let plan = TranscriptWindow.Plan(start: 10, fresh: true)
+        let chunk = TranscriptWindow.chunk(file.subdata(in: 10..<file.count), plan: plan, fileSize: file.count, format: .claude)
+        #expect(chunk.entries.map(\.text) == ["two"])
+        #expect(chunk.cursor == file.count)
+        #expect(!chunk.pending)
+        #expect(chunk.truncatedBefore)
+    }
+
+    @Test func aContinuationStartsAtTheCursorAndWaitsForAHalfWrittenLine() {
+        let file = Data((line1 + line2 + partial).utf8)
+        let after = line1.utf8.count
+        let plan = TranscriptWindow.Plan(start: after, fresh: false)
+        let chunk = TranscriptWindow.chunk(file.subdata(in: after..<file.count), plan: plan, fileSize: file.count, format: .claude)
+        #expect(chunk.entries.map(\.text) == ["two"])
+        #expect(chunk.cursor == after + line2.utf8.count)
+        #expect(chunk.pending)
+        #expect(!chunk.truncatedBefore)
+    }
+
+    @Test func aFreshReadFromTheStartReadsEverything() {
+        let file = Data((line1 + line2).utf8)
+        let chunk = TranscriptWindow.chunk(file, plan: TranscriptWindow.Plan(start: 0, fresh: true), fileSize: file.count, format: .claude)
+        #expect(chunk.entries.map(\.text) == ["one", "two"])
+        #expect(chunk.cursor == file.count)
+        #expect(!chunk.truncatedBefore)
+    }
+}

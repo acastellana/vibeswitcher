@@ -272,4 +272,29 @@ public enum TranscriptWindow {
         // just that newline instead of a whole complete line.
         return Plan(start: max(0, fileSize - tailBytes - 1), fresh: true)
     }
+
+    public struct Chunk: Sendable {
+        public var entries: [TranscriptEntry]
+        /// Where the phone's next read continues: just after the last complete line read.
+        public var cursor: Int
+        /// A line is still being written (ask again shortly).
+        public var pending: Bool
+        /// The timeline doesn't start at the beginning of the transcript.
+        public var truncatedBefore: Bool
+    }
+
+    /// Entries from `data`, the file's bytes from `plan.start` to its end (`fileSize`). A fresh read that
+    /// starts mid-file skips the partial first line.
+    public static func chunk(_ data: Data, plan: Plan, fileSize: Int, format: TranscriptReader.Format) -> Chunk {
+        var data = data
+        var skipped = 0
+        if plan.fresh, plan.start > 0 {
+            skipped = TranscriptReader.tailStart(data)
+            data = data.subdata(in: (data.startIndex + skipped)..<data.endIndex)
+        }
+        let result = TranscriptReader.read(data, format: format)
+        let cursor = plan.start + skipped + result.consumed
+        return Chunk(entries: result.entries, cursor: cursor, pending: cursor < fileSize,
+                     truncatedBefore: plan.fresh && plan.start > 0)
+    }
 }

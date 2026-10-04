@@ -83,6 +83,10 @@ public struct Session: Identifiable, Equatable, Sendable {
     /// The tool call it's running right now ("Run unit tests") and since when; nil between tool calls.
     public var activity: String?
     public var activitySince: Date?
+    /// When the agent's last hook event arrived (the phone re-reads the conversation when it changes).
+    public var eventAt: Double?
+    /// The agent's transcript, already checked to be inside its folders (`TranscriptReader.checkedURL`).
+    public var transcriptPath: String?
 
     public init(tty: String, agent: Agent, pid: Int32, startedAt: Date, cwd: String?, project: String, task: String?,
                 status: SessionStatus, statusSince: Date, detail: String?, hasHooks: Bool, inTerminalApp: Bool) {

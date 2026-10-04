@@ -420,6 +420,7 @@ async function loadScreen() {
       // Watching the bottom while output arrives: what scrolled off is newer than the loaded scrollback.
       if (stick && !first) older.stale = true;
       if (first) loadEarlier();   // the page above the screen, so there's something to scroll back to
+      else checkCleared();
     }
     $('screenError').hidden = true;
   } catch (error) {
@@ -446,11 +447,16 @@ function growReply() {
 // ---------- Terminal scrollback ----------
 
 // Named `older`, not `history`: that would shadow window.history (used for the #s= URL).
-const older = { start: null, first: 0, busy: false, stale: false };
+// `gen` changes with every reset (another session): an answer for the previous one is dropped, even
+// after going A → B → A while it was on its way.
+const older = { start: null, first: 0, total: 0, busy: false, stale: false, gen: 0, checkedAt: 0 };
 
 function resetOlder() {
+  older.gen += 1;
+  older.busy = false;
   older.start = null;
   older.first = 0;
+  older.total = 0;
   older.stale = false;
   $('scrollback').replaceChildren();
   $('live').replaceChildren();
@@ -464,12 +470,13 @@ async function loadEarlier() {
   const fromTail = older.start === null || older.stale;
   if (older.busy || !current || (!fromTail && older.start <= older.first)) return;
   older.busy = true;
+  const gen = older.gen;
   const tty = current;
   const screen = $('screen');
   try {
     const before = fromTail ? '' : `&before=${older.start}`;
     const page = await api(`/api/history?tty=${encodeURIComponent(tty)}${before}`);
-    if (tty !== current) return;
+    if (gen !== older.gen || tty !== current) return;
     // A cleared terminal is shorter than what we asked about: start over from its end.
     if (!fromTail && page.total < older.start) {
       older.stale = true;
@@ -484,21 +491,41 @@ async function loadEarlier() {
     screen.scrollTop = screen.scrollHeight - fromBottom;
     older.start = page.start;
     older.first = page.first;
+    older.total = page.total;
     $('earlier').hidden = false;
     $('earlier').textContent = page.start > page.first ? '↑ Scroll for earlier output' : 'Start of the scrollback';
   } catch (error) {
+    if (gen !== older.gen) return;
     $('screenError').textContent = error.message;
     $('screenError').hidden = false;
   } finally {
-    older.busy = false;
+    if (gen === older.gen) older.busy = false;
   }
+}
+
+/// While output changes, now and then: if the tab's history got shorter (⌘K, `clear`), the scrollback
+/// shown above the screen is gone on the Mac too, so it's reloaded from the new end.
+async function checkCleared() {
+  if (older.busy || older.start === null || Date.now() - older.checkedAt < 10000) return;
+  older.checkedAt = Date.now();
+  const gen = older.gen;
+  try {
+    const page = await api(`/api/history?tty=${encodeURIComponent(current)}&limit=1`);
+    if (gen !== older.gen || page.total >= older.total) return;
+    older.stale = true;
+    loadEarlier();
+  } catch (error) { /* the next check will tell */ }
 }
 
 // ---------- Conversation ----------
 
-const conversation = { cursor: null, file: null, eventAt: null, status: null, busy: false, loaded: false, retry: null };
+const conversation = { cursor: null, file: null, eventAt: null, status: null, busy: false, loaded: false, retry: null,
+                       gen: 0, errorAt: 0 };
 
 function resetConversation() {
+  conversation.gen += 1;
+  conversation.busy = false;
+  conversation.errorAt = 0;
   conversation.cursor = null;
   conversation.file = null;
   conversation.eventAt = null;
@@ -525,7 +552,8 @@ function timeLabel(at) {
   return at ? new Date(at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
 }
 
-function entryNode(entry) {
+// `full`: the output from "Show all" (still cut past 64 KB: say so instead of offering it again).
+function entryNode(entry, full = false) {
   if (entry.kind === 'tool') {
     const box = el('details', `toolRow${entry.failed ? ' failed' : ''}`);
     box.dataset.id = entry.id;
@@ -538,7 +566,9 @@ function entryNode(entry) {
     box.append(summary);
     if (entry.output !== undefined) {
       box.append(el('pre', 'toolOutput', entry.output));
-      if (entry.outputTruncated) {
+      if (entry.outputTruncated && full) {
+        box.append(el('p', 'muted small', 'Output cut at 64 KB. See the Terminal tab for the rest.'));
+      } else if (entry.outputTruncated) {
         const more = el('button', 'link', 'Show all');
         more.type = 'button';
         more.addEventListener('click', () => showFullTool(entry.id, box));
@@ -562,6 +592,7 @@ function mergeToolResult(row, result) {
 
 function applyEntries(entries) {
   const box = $('conversation');
+  if (entries.length) box.querySelectorAll('.emptyNote').forEach(node => node.remove());
   const stick = box.scrollHeight - box.scrollTop - box.clientHeight < 60;
   for (const entry of entries) {
     if (entry.kind === 'toolResult') {
@@ -578,40 +609,58 @@ function applyEntries(entries) {
 async function refreshConversation(force = false) {
   if (!current || $('conversation').hidden || conversation.busy) return;
   const session = state && state.sessions.find(s => s.tty === current);
-  if (!force && conversation.loaded && session && session.eventAt === conversation.eventAt &&
-      session.status === conversation.status) return;
+  const unchanged = session && session.eventAt === conversation.eventAt && session.status === conversation.status;
+  if (!force && conversation.loaded && unchanged) return;
+  if (!force && Date.now() - conversation.errorAt < 10000) return;   // after a failure, not on every poll
+  // No transcript (no hooks, or an agent that doesn't write one): say so without asking the Mac.
+  if (session && session.hasTranscript === false) {
+    if (!(conversation.loaded && unchanged && conversation.cursor === null)) {
+      $('conversation').replaceChildren(el('p', 'muted center', 'No transcript for this session. See the Terminal tab.'));
+    }
+    conversation.cursor = null;
+    conversation.eventAt = session.eventAt;
+    conversation.status = session.status;
+    conversation.loaded = true;
+    return;
+  }
   conversation.busy = true;
+  const gen = conversation.gen;
   const tty = current;
   try {
     const after = conversation.cursor === null ? '' : `&after=${conversation.cursor}&file=${encodeURIComponent(conversation.file)}`;
     const result = await api(`/api/conversation?tty=${encodeURIComponent(tty)}${after}`);
-    if (tty !== current) return;
+    if (gen !== conversation.gen || tty !== current) return;
     // A fresh tail (first open, another transcript after /clear or /resume, or a big gap): start over.
     if (result.fresh) {
       $('conversation').replaceChildren();
       if (result.truncatedBefore) $('conversation').append(el('p', 'muted small center', 'Earlier messages aren’t shown.'));
     }
     applyEntries(result.entries);
-    if (result.fresh && !result.entries.length) $('conversation').append(el('p', 'muted small center', 'Nothing yet.'));
+    if (result.fresh && !result.entries.length) $('conversation').append(el('p', 'muted small center emptyNote', 'Nothing yet.'));
     conversation.cursor = result.cursor;
     conversation.file = result.file;
     conversation.eventAt = session ? session.eventAt : null;
     conversation.status = session ? session.status : null;
     conversation.loaded = true;
+    conversation.errorAt = 0;
     // The agent is still writing a line: ask again shortly rather than waiting for the next hook event.
     clearTimeout(conversation.retry);
     if (result.pending) conversation.retry = setTimeout(() => refreshConversation(true), 1000);
   } catch (error) {
+    if (gen !== conversation.gen) return;
+    conversation.errorAt = Date.now();
     if (!conversation.loaded) $('conversation').replaceChildren(el('p', 'muted center', error.message));
   } finally {
-    conversation.busy = false;
+    if (gen === conversation.gen) conversation.busy = false;
   }
 }
 
 async function showFullTool(id, row) {
+  const gen = conversation.gen;
   try {
     const result = await api(`/api/conversation/tool?tty=${encodeURIComponent(current)}&id=${encodeURIComponent(id)}`);
-    const node = entryNode(result.entry);
+    if (gen !== conversation.gen) return;
+    const node = entryNode(result.entry, true);
     node.open = true;
     row.replaceWith(node);
   } catch (error) {
