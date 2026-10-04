@@ -172,6 +172,7 @@ function renderList() {
   }));
   $('empty').hidden = sessions.length > 0;
   renderToday();
+  refreshDevPages();
 }
 
 function renderToday() {
@@ -187,6 +188,68 @@ function renderToday() {
                el('span', p.waiting > p.working ? 'warn' : 'muted', `waited ${duration(p.waiting)}`));
     return row;
   }));
+}
+
+// ---------- Dev pages ----------
+
+let devPagesAt = 0;
+let devPagesBusy = false;
+
+/// Chrome's localhost tabs on the Mac. Refreshed with the list, at most every 10 s.
+async function refreshDevPages(force = false) {
+  const box = $('devPages');
+  box.hidden = !state || !state.devPagesAllowed;
+  if (box.hidden || devPagesBusy || (!force && Date.now() - devPagesAt < 10000)) return;
+  devPagesBusy = true;
+  try {
+    renderDevPages(await api('/api/devpages'));
+    devPagesAt = Date.now();
+  } catch (error) {
+    showDevPagesError(error.message);
+  } finally {
+    devPagesBusy = false;
+  }
+}
+
+function showDevPagesError(message) {
+  $('devPagesError').textContent = message;
+  $('devPagesError').hidden = !message;
+}
+
+function renderDevPages(result) {
+  showDevPagesError('');
+  const pages = result.pages || [];
+  const hint = result.hint || (pages.length ? '' : 'No localhost pages are open in Chrome on your Mac.');
+  $('devPagesHint').textContent = hint;
+  $('devPagesHint').hidden = !hint;
+  $('devPageRows').replaceChildren(...pages.map(page => {
+    const row = el('button', 'row devPage');
+    row.type = 'button';
+    const text = el('div', 'text');
+    const first = el('div', 'line1');
+    first.append(el('b', 'name', page.title));
+    if (page.open) first.append(el('span', 'when done', 'open'));
+    text.append(first, el('div', 'detail', page.label));
+    row.append(el('span', 'globe', '🌐'), text);
+    row.addEventListener('click', () => openDevPage(page, row));
+    return row;
+  }));
+}
+
+async function openDevPage(page, row) {
+  row.disabled = true;
+  try {
+    const result = await api('/api/preview', { method: 'POST', body: JSON.stringify({ id: page.id }) });
+    // Opens outside the app (on Android, a Chrome tab); Back comes back here. The link works once, for a minute.
+    const opened = window.open(result.open, '_blank');
+    if (opened) opened.opener = null;
+    else location.href = result.open;
+    devPagesAt = 0;
+  } catch (error) {
+    showDevPagesError(error.message);
+  } finally {
+    row.disabled = false;
+  }
 }
 
 // ---------- Session view ----------

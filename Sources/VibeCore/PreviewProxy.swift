@@ -137,8 +137,8 @@ public final class PreviewProxy: @unchecked Sendable {
             reply(client, Self.page(status, message))
         case .enter(let ticket):
             guard let entry = redeem(ticket) else { return reply(client, Self.page(403, PreviewGate.expiredMessage)) }
-            reply(client, Self.response(302, [("Location", entry.path),
-                                              ("Set-Cookie", PreviewGate.setCookie(publicPort: context.publicPort, token: entry.sessionToken))]))
+            reply(client, Self.enterPage(path: entry.path,
+                                         cookie: PreviewGate.setCookie(publicPort: context.publicPort, token: entry.sessionToken)))
         case .forward(let token):
             guard let target = resolve(token) else { return reply(client, Self.page(403, PreviewGate.expiredMessage)) }
             relay(head, rest: rest, client: client, target: target, context: context)
@@ -235,16 +235,32 @@ public final class PreviewProxy: @unchecked Sendable {
         client.send(content: data, completion: .contentProcessed { _ in client.cancel() })
     }
 
+    /// Sets the slot's cookie, then moves on to the page by itself. Not a redirect: a 302 continues the
+    /// phone's navigation, which Android starts outside the browser (cross-site), so the browser would
+    /// withhold the SameSite=Strict cookie on the request that follows; a page navigating on its own
+    /// makes that request same-site.
+    public static func enterPage(path: String, cookie: String) -> Data {
+        let link = escaped(path)
+        let html = "<!doctype html><meta name=\"viewport\" content=\"width=device-width\">"
+            + "<meta http-equiv=\"refresh\" content=\"0;url=\(link)\"><title>VibeSwitcher</title>"
+            + "<body style=\"font:16px -apple-system,system-ui,sans-serif;padding:24px\"><a href=\"\(link)\">Open the page</a>"
+        return response(200, [("Content-Type", "text/html; charset=utf-8"), ("Set-Cookie", cookie)], body: Data(html.utf8))
+    }
+
+    static func escaped(_ text: String) -> String {
+        text.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;").replacingOccurrences(of: "\"", with: "&quot;")
+    }
+
     static func page(_ status: Int, _ message: String) -> Data {
-        let escaped = message.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
-            .replacingOccurrences(of: ">", with: "&gt;")
+        let escaped = escaped(message)
         let html = "<!doctype html><meta name=\"viewport\" content=\"width=device-width\"><title>VibeSwitcher</title>"
             + "<body style=\"font:16px -apple-system,system-ui,sans-serif;padding:24px;line-height:1.4\"><p>\(escaped)</p>"
         return response(status, [("Content-Type", "text/html; charset=utf-8")], body: Data(html.utf8))
     }
 
     static func response(_ status: Int, _ headers: [(String, String)], body: Data = Data()) -> Data {
-        let reasons = [302: "Found", 400: "Bad Request", 403: "Forbidden", 431: "Request Header Fields Too Large",
+        let reasons = [200: "OK", 302: "Found", 400: "Bad Request", 403: "Forbidden", 431: "Request Header Fields Too Large",
                        502: "Bad Gateway", 503: "Service Unavailable"]
         var head = "HTTP/1.1 \(status) \(reasons[status] ?? "Status")\r\n"
         for (name, value) in headers { head += "\(name): \(value)\r\n" }

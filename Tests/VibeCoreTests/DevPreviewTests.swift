@@ -363,6 +363,12 @@ func upgradeExchange(port: UInt16, _ request: String, payload: Data) async -> (h
 struct ProxyStartFailure: Error { let message: String }
 
 struct PreviewProxyTests {
+    @Test func theOnwardLinkIsEscaped() {
+        let page = String(decoding: PreviewProxy.enterPage(path: "/a?b=\"><script>x</script>&c=1", cookie: "k=v"), as: UTF8.self)
+        #expect(!page.contains("<script>x"))
+        #expect(page.contains("&quot;&gt;&lt;script&gt;"))
+    }
+
     static let me = "Tailscale-User-Login: me@example.com\r\n"
     static let ours = "Cookie: vs_preview_8444=TOK\r\n"
 
@@ -384,9 +390,13 @@ struct PreviewProxyTests {
         let (proxy, port) = try await startProxy(target: nil, redeemed: ("/app?x=1", "TOK"))
         defer { proxy.stop() }
         let response = text(await exchange(port: port, "GET /__vibeswitcher/enter?t=TICKET HTTP/1.1\r\n\(Self.me)\r\n"))
-        #expect(response.hasPrefix("HTTP/1.1 302"))
-        #expect(response.contains("Location: /app?x=1\r\n"))
+        // Not a 302: a redirect continues the phone's cross-site navigation (Android opens the link from
+        // the app), so the browser would withhold the SameSite=Strict cookie on the next request. A page
+        // that moves on by itself makes that next request same-site.
+        #expect(response.hasPrefix("HTTP/1.1 200"))
         #expect(response.contains("Set-Cookie: vs_preview_8444=TOK; Path=/; Secure; HttpOnly; SameSite=Strict\r\n"))
+        #expect(response.contains(#"<meta http-equiv="refresh" content="0;url=/app?x=1">"#))
+        #expect(!response.contains("Location:"))
         let wrong = text(await exchange(port: port, "GET /__vibeswitcher/enter?t=WRONG HTTP/1.1\r\n\(Self.me)\r\n"))
         #expect(wrong.hasPrefix("HTTP/1.1 403"))
     }

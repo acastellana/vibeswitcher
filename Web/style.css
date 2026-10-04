@@ -157,3 +157,9 @@ select.chip-btn { appearance: none; -webkit-appearance: none; }
 .toolRow.failed .toolMeta { color: var(--warn); }
 .toolOutput { margin: 0; padding: 8px 10px; border-top: 1px solid var(--line); max-height: 40dvh; overflow: auto;
   font: 11.5px/1.35 ui-monospace, "SF Mono", Menlo, "Roboto Mono", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sectionTitle { margin: 18px 2px 8px; font-size: 12px; font-weight: 700; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.04em; }
+.sectionTitle span { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.globe { flex: none; width: 24px; text-align: center; font-size: 17px; line-height: 24px; }
+.row:disabled { opacity: 0.5; }
+.devPage .detail { -webkit-line-clamp: 1; }
