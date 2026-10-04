@@ -824,3 +824,14 @@ struct PauseStoreTests {
         #expect(PauseStore.nextMorning(after: date(28, 2), calendar: calendar) == date(28, 9))   // after midnight
     }
 }
+
+struct SidebarAnimationTests {
+    @Test func aSlideThatNeverFinishedStopsCountingAsRunning() {
+        let start = Date(timeIntervalSince1970: 1000)
+        #expect(!SidebarAnimation.isStale(startedAt: start, now: start.addingTimeInterval(0.16)))
+        #expect(!SidebarAnimation.isStale(startedAt: start, now: start.addingTimeInterval(0.9)))
+        #expect(SidebarAnimation.isStale(startedAt: start, now: start.addingTimeInterval(1.5)))
+        // No start recorded: nothing to wait for.
+        #expect(SidebarAnimation.isStale(startedAt: nil, now: start))
+    }
+}

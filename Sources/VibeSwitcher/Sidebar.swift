@@ -46,6 +46,10 @@ final class SidebarController {
     private var recentMisses: [String] = []
     private var lastMissRecorded = Date.distantPast
     private var lastWrittenVisits = -1
+    /// The last slide in/out steps (what the window really did), to explain the next "it didn't show".
+    private var trail: [String] = []
+    private var trailVersion = 0
+    private var lastWrittenTrail = -1
 
     init(content: AnyView) {
         panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -135,7 +139,10 @@ final class SidebarController {
         let screen = currentScreen()
         if isStrandedOffScreen {
             // Believed shown but it isn't: reset, then detect normally below.
-            recordMiss("healed: was stuck off screen", point: point, screen: screen)
+            let reason = animating ? "healed: animation never finished" : "healed: was stuck off screen"
+            recordMiss(reason, point: point, screen: screen)
+            note(reason)
+            animating = false
             revealed = false
             transition += 1
             panel.orderOut(nil)
@@ -201,8 +208,10 @@ final class SidebarController {
         totalPolls += 1
         // Only when something happened at the edge (or every 10 minutes): no steady disk writes.
         let visits = edgeHits + edgeMisses.values.reduce(0, +)
-        guard visits != lastWrittenVisits || now.timeIntervalSince(lastDebugWrite) > 600 else { return }
+        guard visits != lastWrittenVisits || trailVersion != lastWrittenTrail || now.timeIntervalSince(lastDebugWrite) > 600
+        else { return }
         lastWrittenVisits = visits
+        lastWrittenTrail = trailVersion
         lastDebugWrite = now
         let sorted = pollGaps.sorted()
         let object: [String: Any] = [
@@ -210,6 +219,7 @@ final class SidebarController {
             "polls": pollGaps.count, "gapMedian": sorted[sorted.count / 2], "gapMax": sorted.last ?? 0.0 as Double,
             "gapsOver1s": pollGaps.filter { $0 > 1 }.count, "gapsOver0_5s": pollGaps.filter { $0 > 0.5 }.count,
             "edgeHits": edgeHits, "edgeMisses": edgeMisses, "totalPolls": totalPolls, "recentMisses": recentMisses,
+            "trail": trail,
         ]
         if JSONSerialization.isValidJSONObject(object),
            let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
@@ -236,7 +246,18 @@ final class SidebarController {
 
     /// Bumped by every slide in/out; an animation's completion only acts if no newer one started.
     private var transition = 0
-    private var animating = false
+    private var animating = false {
+        didSet { animationStartedAt = animating ? Date() : nil }
+    }
+    private var animationStartedAt: Date?
+
+    private func note(_ step: String) {
+        let time = Date().formatted(date: .omitted, time: .standard)
+        let state = String(format: "visible %@, this desktop %@, x %.0f", panel.isVisible ? "yes" : "no",
+                           panel.isOnActiveSpace ? "yes" : "no", panel.frame.minX)
+        trail = Array((["\(time)  \(step)  (\(state))"] + trail).prefix(30))
+        trailVersion += 1
+    }
 
     private func reveal(on screen: NSScreen) {
         hideWork?.cancel()
@@ -246,6 +267,7 @@ final class SidebarController {
         // Absolute targets, never relative to the current frame: interrupted animations used to leave
         // the panel further off screen each time while we believed it was shown.
         let docked = dockedFrame(on: screen)
+        if !revealed { note(String(format: "reveal → x %.0f", docked.minX)) }
         revealed = true
         if !panel.isVisible {
             hostingView.rootView = content
@@ -262,9 +284,11 @@ final class SidebarController {
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().setFrame(docked, display: true)
         }, completionHandler: { [weak self] in
-            guard let self, self.transition == id else { return }
+            guard let self else { return }
+            guard self.transition == id else { return self.note("reveal #\(id) superseded") }
             self.animating = false
             if self.revealed { self.panel.setFrame(docked, display: true) }   // land exactly
+            self.note("reveal #\(id) done")
         })
     }
 
@@ -276,12 +300,15 @@ final class SidebarController {
         transition += 1
         let id = transition
         let hidden = dockedFrame(on: screen ?? currentScreen()).offsetBy(dx: Self.width, dy: 0)
+        note("conceal #\(id)\(animated ? "" : " (instant)")")
         let finish = { [weak self] in
-            guard let self, self.transition == id, !self.revealed else { return }
+            guard let self else { return }
+            guard self.transition == id, !self.revealed else { return self.note("conceal #\(id) superseded") }
             self.animating = false
             self.panel.orderOut(nil)
             self.panel.setFrame(hidden, display: false)
             self.hostingView.rootView = AnyView(EmptyView()) // no SwiftUI work while hidden
+            self.note("conceal #\(id) done")
         }
         guard animated else { return finish() }
         animating = true
@@ -292,9 +319,11 @@ final class SidebarController {
         }, completionHandler: finish)
     }
 
-    /// Safety net: "shown" but not actually on screen where it belongs (outside any animation).
+    /// Safety net: "shown" but not actually on screen where it belongs, outside any animation, or with
+    /// an animation that should have finished long ago (its completion was lost: it once stayed stuck so).
     private var isStrandedOffScreen: Bool {
-        guard revealed, !animating else { return false }
+        guard revealed else { return false }
+        if animating, !SidebarAnimation.isStale(startedAt: animationStartedAt, now: Date()) { return false }
         let docked = dockedFrame(on: screen ?? currentScreen())
         return !panel.isVisible || abs(panel.frame.minX - docked.minX) > 1
     }

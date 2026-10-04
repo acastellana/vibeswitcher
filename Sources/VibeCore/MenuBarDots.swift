@@ -1,3 +1,4 @@
+import Foundation
 import CoreGraphics
 
 /// Geometry of the menu bar image: one dot per session in list order, laid out row by row.
@@ -82,5 +83,16 @@ public enum SidebarHotZone {
         return point.x >= screen.maxX - edgeWidth
             && point.y >= screen.minY + margin
             && point.y <= screen.maxY - margin
+    }
+}
+
+/// The sidebar's slide in/out takes ~0.16 s. One that still counts as running a second later never
+/// finished (its completion was lost), and must not keep the "shown but not on screen" check waiting.
+public enum SidebarAnimation {
+    public static let staleAfter: TimeInterval = 1
+
+    public static func isStale(startedAt: Date?, now: Date) -> Bool {
+        guard let startedAt else { return true }
+        return now.timeIntervalSince(startedAt) > staleAfter
     }
 }
