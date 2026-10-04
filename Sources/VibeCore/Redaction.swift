@@ -6,6 +6,13 @@ public enum Redaction {
     static let mask = "•••"
 
     private static let rules: [(NSRegularExpression, String)] = [
+        // Private keys (PEM), whole: the body spans lines.
+        (#"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z0-9 ]*PRIVATE KEY-----"#, mask),
+        // Quoted values of secret-sounding names, up to the closing quote (they may contain spaces).
+        (#"(?i)(\b[a-z0-9_-]*(?:token|secret|passw(?:or)?d|passwd|api[_-]?key|access[_-]?key|private[_-]?key|credentials?)[a-z0-9_]*["']?\s*[=:]\s*)"[^"\n]*""#,
+         "$1\"\(mask)\""),
+        (#"(?i)(\b[a-z0-9_-]*(?:token|secret|passw(?:or)?d|passwd|api[_-]?key|access[_-]?key|private[_-]?key|credentials?)[a-z0-9_]*["']?\s*[=:]\s*)'[^'\n]*'"#,
+         "$1'\(mask)'"),
         // Authorization headers: keep the scheme, hide the credential.
         (#"(?i)(authorization:\s*(?:bearer|basic|token)?\s*)[^\s"']+"#, "$1\(mask)"),
         // NAME=value, NAME: value, "api_key": "value" for secret-sounding names.

@@ -104,6 +104,7 @@ public enum PreviewGate {
     public static let wrongAccountMessage = "This page is only for the Tailscale account that runs VibeSwitcher."
     public static let expiredMessage = "This preview has expired. Open it again from VibeSwitcher on your phone."
     public static let crossOriginMessage = "Blocked: another page tried to use this preview."
+    public static let badRequestMessage = "Bad request."
     public static func unreachableMessage(_ target: PreviewTarget) -> String {
         "\(target.hostHeader) isn't answering. Is the dev server still running?"
     }
@@ -120,6 +121,8 @@ public enum PreviewGate {
         if let origin = head.value("origin"), origin != ownOrigin, siblingOrigins.contains(origin) {
             return .reject(status: 403, message: crossOriginMessage)
         }
+        // One unambiguous body length: a dev server and this proxy must never disagree on where a request ends.
+        guard hasClearFraming(head) else { return .reject(status: 400, message: badRequestMessage) }
         if head.path == enterPath, let ticket = head.query["t"], !ticket.isEmpty { return .enter(ticket: ticket) }
         // Subresources and frames send no Origin. Another slot's page is another port of the same host, so
         // the browser marks its requests same-site (and attaches every slot's cookie): only the page itself
@@ -131,6 +134,21 @@ public enum PreviewGate {
             return .reject(status: 403, message: expiredMessage)
         }
         return .forward(sessionToken: token)
+    }
+
+    /// At most one Content-Length (digits only) or a single `Transfer-Encoding: chunked`, never both.
+    static func hasClearFraming(_ head: HTTPHead) -> Bool {
+        let lengths = head.values("content-length")
+        let encodings = head.values("transfer-encoding")
+        guard lengths.isEmpty || encodings.isEmpty else { return false }
+        if !lengths.isEmpty {
+            guard Set(lengths).count == 1, let length = lengths.first, !length.isEmpty,
+                  length.allSatisfy({ $0.isASCII && $0.isNumber }) else { return false }
+        }
+        if !encodings.isEmpty {
+            guard encodings.count == 1, encodings[0].lowercased() == "chunked" else { return false }
+        }
+        return true
     }
 
     public static func isUpgrade(_ head: HTTPHead) -> Bool {
