@@ -92,13 +92,25 @@ struct PopoverView: View {
         HStack(spacing: 12) {
             Text(isSidebar ? "Sessions" : "VibeSwitcher").font(.headline).lineLimit(1).fixedSize()
             newSessionMenu
-            Spacer()
+            Spacer(minLength: 8)
+            // With words ("2 background") when they fit; otherwise just the dots and numbers, so a busy
+            // header can't make the list wider than the popover (it was clipped on both sides).
+            ViewThatFits(in: .horizontal) {
+                if !isSidebar { statusCounts(words: true) }
+                statusCounts(words: false)
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 10)
+    }
+
+    private func statusCounts(words: Bool) -> some View {
+        HStack(spacing: 12) {
             ForEach([SessionStatus.needsInput, .working, .background, .done], id: \.self) { status in
                 let count = store.sessions.filter { $0.status == status && !$0.isPaused }.count
                 if count > 0 {
                     HStack(spacing: 4) {
                         Circle().fill(status.color).frame(width: 8, height: 8)
-                        Text(isSidebar ? "\(count)" : "\(count) \(status.label.lowercased())")
+                        Text(words ? "\(count) \(status.label.lowercased())" : "\(count)")
                             .font(.caption).foregroundStyle(.secondary).fixedSize()
                     }
                     .help("\(count) \(status.label.lowercased())")
@@ -108,13 +120,12 @@ struct PopoverView: View {
             if paused > 0 {
                 HStack(spacing: 3) {
                     Image(systemName: "pause.circle").imageScale(.small)
-                    Text(isSidebar ? "\(paused)" : "\(paused) paused").fixedSize()
+                    Text(words ? "\(paused) paused" : "\(paused)").fixedSize()
                 }
                 .font(.caption).foregroundStyle(.secondary)
                 .help("\(paused) paused: no notifications until you resume them")
             }
         }
-        .padding(.horizontal, 12).padding(.vertical, 10)
     }
 
     private var newSessionMenu: some View {
@@ -326,6 +337,7 @@ struct SessionRow: View {
                     if session.isCurrent, !compact {
                         Label("Viewing", systemImage: "eye.fill")
                             .font(.system(size: 10, weight: .semibold))
+                            .lineLimit(1).fixedSize()   // never "Viewi / ng": the desktop label gives way instead
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Capsule().fill(Color.primary.opacity(0.08)))
                             .help("The Terminal tab you're looking at right now")
