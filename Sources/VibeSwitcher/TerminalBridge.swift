@@ -185,9 +185,13 @@ enum TerminalBridge {
 
     /// `focus`, plus what happened, for the focus log: the script's verdict ("ok", "missing", …),
     /// whether the window was minimized, and which tab was in front when it wasn't the target.
-    static func focusReport(tty: String, strict: Bool = false) -> (ok: Bool, detail: String) {
+    /// `onCurrentDesktop`: the tab's window is on the desktop being shown. Only then is the check quick and
+    /// the re-show fallback allowed; otherwise it waits up to 1.5 s for macOS to switch desktops.
+    static func focusReport(tty: String, strict: Bool = false, onCurrentDesktop: Bool = false) -> (ok: Bool, detail: String) {
         guard isRunning else { return (false, "terminal not running") }
         guard isValidTTY(tty) else { return (false, "invalid tty") }
+        // A tab on another desktop (or an unknown one) gets time for the desktop switch and no re-show.
+        let plan = FocusPlan.make(onCurrentDesktop: onCurrentDesktop, strict: strict)
         // Windows are addressed by id, not position: activating Terminal reorders its windows, so a
         // positional reference ("window 16") can end up pointing at a neighbour. The final check
         // re-raises once if something else still ended up in front.
@@ -220,12 +224,22 @@ enum TerminalBridge {
             set selected tab of w to tab targetTab of w
             set index of w to 1
             activate
-            delay 0.05
-            if (tty of selected tab of front window) is target then return "ok" & extra
+            set checked to 0
+            repeat \(plan.checks) times
+                delay \(plan.interval)
+                set checked to checked + 1
+                try
+                    if (tty of selected tab of front window) is target then
+                        if checked > 1 then set extra to extra & " after " & checked & " checks"
+                        return "ok" & extra
+                    end if
+                end try
+            end repeat
             try
                 set extra to extra & " front=" & (tty of selected tab of front window)
             end try
             if \(strict) then return "unverified" & extra
+            if not \(plan.mayReshow) then return "ok-unverified" & extra
             -- Windows tiled side by side (macOS window tiling) keep their partner on top of
             -- `set index`; hiding and re-showing the window does reorder it.
             set visible of w to false
