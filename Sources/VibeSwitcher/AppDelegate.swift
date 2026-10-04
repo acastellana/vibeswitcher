@@ -372,7 +372,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 let activationStart = Date()
                 let active = HostApp.bringToFrontAndWait(terminal)
                 attempt.steps.append("activate Terminal: \(active ? "ok" : "timed out") (\(Int(Date().timeIntervalSince(activationStart) * 1000)) ms)")
-                let focus = TerminalBridge.focusReport(tty: session.tty, onCurrentDesktop: session.onCurrentDesktop)
+                let focus = TerminalBridge.focusReport(tty: session.tty, onCurrentDesktop: session.windowOnCurrentDesktop)
                 attempt.steps.append("select tab: \(focus.detail)")
                 if !focus.ok { result = "tab-not-found" }
                 else if !active { result = "terminal-tab (activation timed out)" }

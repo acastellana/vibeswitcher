@@ -285,8 +285,6 @@ final class FakeUpstream: @unchecked Sendable {
     var echoAfterReply = false
     /// More of the response, each sent after its delay (a streamed or chunked answer).
     var stages: [(TimeInterval, Data)] = []
-    /// End the connection with a reset after the reply instead of closing it (a dev server that crashed).
-    var resetAfterReply = false
     private var bodies: [Data] = []
     /// Each request's body (read up to its Content-Length).
     var recordedBodies: [Data] { queue.sync { bodies } }
@@ -339,7 +337,6 @@ final class FakeUpstream: @unchecked Sendable {
             let answer = {
                 connection.send(content: self.reply, completion: .contentProcessed { _ in
                     if self.echoAfterReply { return self.echo(connection) }
-                    if self.resetAfterReply { return connection.forceCancel() }
                     self.sendStages(self.stages, on: connection)
                 })
             }

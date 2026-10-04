@@ -263,8 +263,13 @@ async function openDevPage(page, row) {
                                                timeout: 20000, timeoutMessage: CHROME_SLOW });
     // Opens outside the app (on Android, a Chrome tab); Back comes back here. The link works once, for a minute.
     const opened = window.open(result.open, '_blank');
-    if (opened) opened.opener = null;
-    else showDevPageLink(result.open);   // blocked (the tap was before the wait): never navigate the app itself away
+    if (opened) {
+      opened.opener = null;
+      devPageLinkUntil = 0;   // an older link waiting for a tap is superseded
+      $('devPagesHint').hidden = true;
+    } else {
+      showDevPageLink(result.open);
+    }   // blocked (the tap was before the wait): never navigate the app itself away
     devPagesAt = 0;
   } catch (error) {
     showDevPagesError(error.message);
@@ -519,13 +524,14 @@ async function checkCleared() {
 
 // ---------- Conversation ----------
 
-const conversation = { cursor: null, file: null, eventAt: null, status: null, busy: false, loaded: false, retry: null,
-                       gen: 0, errorAt: 0 };
+const conversation = { cursor: null, file: null, eventAt: null, status: null, hasTranscript: null, busy: false,
+                       loaded: false, retry: null, gen: 0, errorAt: 0 };
 
 function resetConversation() {
   conversation.gen += 1;
   conversation.busy = false;
   conversation.errorAt = 0;
+  conversation.hasTranscript = null;
   conversation.cursor = null;
   conversation.file = null;
   conversation.eventAt = null;
@@ -609,7 +615,9 @@ function applyEntries(entries) {
 async function refreshConversation(force = false) {
   if (!current || $('conversation').hidden || conversation.busy) return;
   const session = state && state.sessions.find(s => s.tty === current);
-  const unchanged = session && session.eventAt === conversation.eventAt && session.status === conversation.status;
+  // A transcript can appear without a new hook event (Claude creates the file a moment after the session starts).
+  const unchanged = session && session.eventAt === conversation.eventAt && session.status === conversation.status &&
+    session.hasTranscript === conversation.hasTranscript;
   if (!force && conversation.loaded && unchanged) return;
   if (!force && Date.now() - conversation.errorAt < 10000) return;   // after a failure, not on every poll
   // No transcript (no hooks, or an agent that doesn't write one): say so without asking the Mac.
@@ -620,6 +628,7 @@ async function refreshConversation(force = false) {
     conversation.cursor = null;
     conversation.eventAt = session.eventAt;
     conversation.status = session.status;
+    conversation.hasTranscript = false;
     conversation.loaded = true;
     return;
   }
@@ -641,6 +650,7 @@ async function refreshConversation(force = false) {
     conversation.file = result.file;
     conversation.eventAt = session ? session.eventAt : null;
     conversation.status = session ? session.status : null;
+    conversation.hasTranscript = session ? session.hasTranscript : null;
     conversation.loaded = true;
     conversation.errorAt = 0;
     // The agent is still writing a line: ask again shortly rather than waiting for the next hook event.

@@ -78,6 +78,8 @@ public struct Session: Identifiable, Equatable, Sendable {
     public var screenPosition: ScreenPosition?
     /// It's the visible tab of a window on the desktop you're looking at now.
     public var onCurrentDesktop = false
+    /// Its Terminal window is on a desktop being shown (whichever tab is selected in it).
+    public var windowOnCurrentDesktop = false
     /// Terminal.app window id (also its window-server id), when the tab was found.
     public var terminalWindowID: Int?
     /// The tool call it's running right now ("Run unit tests") and since when; nil between tool calls.

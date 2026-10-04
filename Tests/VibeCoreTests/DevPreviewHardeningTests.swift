@@ -98,18 +98,56 @@ struct PhonePortsTests {
     }
 }
 
+/// A one-shot server that answers `reply` and then resets the connection (SO_LINGER 0): what the proxy
+/// sees when a dev server's connection breaks mid-answer. (Network.framework's forceCancel doesn't
+/// reliably send a reset.)
+final class ResettingServer: @unchecked Sendable {
+    let port: UInt16
+    private let socketFD: Int32
+
+    init(reply: Data) throws {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        var address = sockaddr_in()
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_addr.s_addr = inet_addr("127.0.0.1")
+        address.sin_port = 0
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        _ = withUnsafePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, length) } }
+        listen(fd, 1)
+        _ = withUnsafeMutablePointer(to: &address) { $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { getsockname(fd, $0, &length) } }
+        socketFD = fd
+        port = UInt16(bigEndian: address.sin_port)
+        Thread.detachNewThread {
+            let client = accept(fd, nil, nil)
+            guard client >= 0 else { return }
+            var buffer = [UInt8](repeating: 0, count: 65536)
+            var received = Data()
+            while received.range(of: Data("\r\n\r\n".utf8)) == nil {
+                let count = read(client, &buffer, buffer.count)
+                if count <= 0 { break }
+                received.append(contentsOf: buffer[0..<count])
+            }
+            _ = reply.withUnsafeBytes { write(client, $0.baseAddress, reply.count) }
+            usleep(100_000)
+            var linger = Darwin.linger(l_onoff: 1, l_linger: 0)
+            setsockopt(client, SOL_SOCKET, SO_LINGER, &linger, socklen_t(MemoryLayout<Darwin.linger>.size))
+            close(client)
+        }
+    }
+
+    func stop() { close(socketFD) }
+}
+
 extension PreviewProxyTests {
-    @Test func aDevServerThatDiesMidAnswerResetsThePhonesConnection() async throws {
-        let upstream = try FakeUpstream()
-        // Promises 100 bytes, sends 2, then crashes.
-        upstream.reply = Data("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nok".utf8)
-        upstream.resetAfterReply = true
-        let upstreamPort = await upstream.start()
-        let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstreamPort)", port: Int(upstreamPort))
+    @Test func aDevServerConnectionThatBreaksMidAnswerResetsThePhonesConnection() async throws {
+        // No length, not chunked: the end of the connection is the end of the file.
+        let upstream = try ResettingServer(reply: Data("HTTP/1.1 200 OK\r\nContent-Type: text/javascript\r\n\r\nexport const a".utf8))
+        let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstream.port)", port: Int(upstream.port))
         let (proxy, port) = try await startProxy(target: target)
         defer { proxy.stop(); upstream.stop() }
         let result = await exchangeDetailed(port: port, "GET /bundle.js HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n")
-        // Without a length, a clean close would make the cut-off file look complete.
+        #expect(text(result.data).hasSuffix("export const a"))
+        // Closing cleanly here would make the cut-off file look complete.
         #expect(result.endedWithError)
     }
 

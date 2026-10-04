@@ -71,10 +71,14 @@ and notifications when a session needs you or finishes. Optionally reply and pre
    in Chrome on your Mac (`http://localhost:5173/…`, `127.0.0.1`, `[::1]`, `*.localhost`): live, so taps,
    typing and hot reload work. The first time, macOS asks whether VibeSwitcher may control Google Chrome;
    the line under the toggle shows the answer (with **Open Settings…** if it was no).
-   - Only pages open in Chrome right now can be opened; your other local servers can't be reached.
+   - Only pages open in Chrome right now can be opened; your other local servers can't be reached. Pages
+     in incognito windows aren't listed.
    - Each page gets its own HTTPS port on your tailnet (8444–8447) through a proxy in VibeSwitcher. Every
      request must come from your own Tailscale account and carry a cookie that only the paired phone can
-     get, from a link that works once, for a minute.
+     get, from a link that works once, for a minute. A page left unused for 12 hours has to be opened
+     again from the list. Pages in one port can't use another port's session, and a dev server can't see
+     or set VibeSwitcher's cookies.
+   - If the phone's browser blocks the new tab, an **Open the page** link appears under the list; tap it.
    - At most 4 pages at once. A fifth takes over the least recently used page's port: a phone tab still open
      on the old page then shows the new one (its storage is cleared). Reopen the old one from the list. Links hard-coded to
      `http://localhost:…` inside the app won't work on the phone, dev servers that only serve HTTPS aren't

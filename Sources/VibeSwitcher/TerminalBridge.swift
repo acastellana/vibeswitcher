@@ -184,7 +184,7 @@ enum TerminalBridge {
 
     /// `focus`, plus what happened, for the focus log: the script's verdict ("ok", "missing", …),
     /// whether the window was minimized, and which tab was in front when it wasn't the target.
-    /// `onCurrentDesktop`: the tab's window is on the desktop being shown. Only then is the check quick and
+    /// `onCurrentDesktop`: the tab's window is on the desktop being shown (unknown counts as no). Only then is the check quick and
     /// the re-show fallback allowed; otherwise it waits up to 1.5 s for macOS to switch desktops.
     static func focusReport(tty: String, strict: Bool = false, onCurrentDesktop: Bool = false) -> (ok: Bool, detail: String) {
         guard isRunning else { return (false, "terminal not running") }
@@ -251,7 +251,7 @@ enum TerminalBridge {
         end tell
         """
         let start = Date()
-        let result = runAppleScript(script)
+        let result = runAppleScript(script, timeout: 4 + plan.waitLimit)
         let output = result.output.trimmingCharacters(in: .whitespacesAndNewlines)
         let verdict = output.split(separator: " ").first.map(String.init) ?? ""
         let ok = result.status == 0 && (strict ? verdict == "ok" : verdict.hasPrefix("ok"))

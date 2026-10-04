@@ -184,7 +184,7 @@ public final class PreviewProxy: @unchecked Sendable {
                     // both connections (and a slot's connection budget) forever.
                     self?.pump(from: client, to: upstream, onEnd: { _ in client.cancel(); upstream.cancel() })
                 })
-                self?.forwardResponse(upstream, to: client, buffer: Data(), ended: false, target: target)
+                self?.forwardResponse(upstream, to: client, buffer: Data(), ended: false, failed: false, target: target)
             case .waiting, .failed:
                 fail()
             default: break
@@ -194,8 +194,9 @@ public final class PreviewProxy: @unchecked Sendable {
         queue.asyncAfter(deadline: .now() + 5) { if !settled.value { fail() } }
     }
 
+    /// `failed`: the dev server's connection ended with an error (not a clean close).
     private func forwardResponse(_ upstream: NWConnection, to client: NWConnection, buffer: Data, ended: Bool,
-                                 target: PreviewTarget) {
+                                 failed: Bool, target: PreviewTarget) {
         switch HTTPHead.parse(buffer, kind: .response) {
         case .incomplete:
             guard !ended else {
@@ -205,7 +206,8 @@ public final class PreviewProxy: @unchecked Sendable {
             upstream.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
                 var buffer = buffer
                 if let data { buffer.append(data) }
-                self?.forwardResponse(upstream, to: client, buffer: buffer, ended: isComplete || error != nil, target: target)
+                self?.forwardResponse(upstream, to: client, buffer: buffer, ended: isComplete || error != nil,
+                                      failed: error != nil, target: target)
             }
         case .invalid, .tooLarge:
             upstream.cancel()
@@ -218,8 +220,9 @@ public final class PreviewProxy: @unchecked Sendable {
             if !interim { out.append(rest) }
             client.send(content: out, completion: .contentProcessed { [weak self] error in
                 guard let self, error == nil else { client.cancel(); return }
-                if interim { return self.forwardResponse(upstream, to: client, buffer: rest, ended: ended, target: target) }
-                if ended { client.cancel(); return }
+                if interim { return self.forwardResponse(upstream, to: client, buffer: rest, ended: ended, failed: failed, target: target) }
+                // Ended already (in the same read as the head): a crash must still look like one to the phone.
+                if ended { failed ? client.forceCancel() : client.cancel(); return }
                 // A dev server that fails mid-answer resets the phone's connection: closing it cleanly would
                 // make a cut-off response (no length, not chunked) look complete.
                 self.pump(from: upstream, to: client, onEnd: { failed in failed ? client.forceCancel() : client.cancel() })
