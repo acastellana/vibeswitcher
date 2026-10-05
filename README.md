@@ -82,7 +82,8 @@ and notifications when a session needs you or finishes. Optionally reply and pre
    - At most 4 pages at once. A fifth takes over the least recently used page's port: a phone tab still open
      on the old page then shows the new one (its storage is cleared). Reopen the old one from the list. Links hard-coded to
      `http://localhost:…` inside the app won't work on the phone, dev servers that only serve HTTPS aren't
-     supported, and cookies a dev app sets are shared between its previews (browsers scope cookies by
+     supported. A dev app's login cookies (HttpOnly) stay on the Mac, kept per opened page and sent only back
+     to that app; cookies its own scripts read are shared between the previews (browsers scope cookies by
      host, not port).
 
 How it's kept safe:

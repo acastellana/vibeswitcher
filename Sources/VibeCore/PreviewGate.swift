@@ -158,7 +158,7 @@ public enum PreviewGate {
     /// What the dev server sees: its own Host/Origin (Vite checks them), no Tailscale identity headers,
     /// no VibeSwitcher cookie, and one request per connection so every request is authenticated.
     public static func upstreamRequest(_ head: HTTPHead, target: PreviewTarget, ownOrigin: String,
-                                       publicPort: Int) -> HTTPHead {
+                                       publicPort: Int, jar: PreviewCookieJar = PreviewCookieJar()) -> HTTPHead {
         var head = head
         // Tailscale's identity headers, and the proxy headers tailscale serve adds: the dev server must see
         // only its own address (Next.js checks Origin against X-Forwarded-Host; Express builds https
@@ -168,11 +168,11 @@ public enum PreviewGate {
             return name.hasPrefix("tailscale-") || name.hasPrefix("x-forwarded-") || name == "forwarded"
         }
         // Every slot's cookie (cookies ignore ports), not just this one's: none of them is the dev server's.
-        let kept = head.values("cookie").flatMap { $0.split(separator: ";") }
+        let browser = head.values("cookie").flatMap { $0.split(separator: ";") }
             .map { $0.trimmingCharacters(in: .whitespaces) }
-            .filter { !$0.isEmpty && !isSlotCookie($0) }
+            .filter { !$0.isEmpty }
         head.remove("cookie")
-        if !kept.isEmpty { head.set("Cookie", kept.joined(separator: "; ")) }
+        if let cookies = jar.cookieHeader(browser: browser) { head.set("Cookie", cookies) }
         head.set("Host", target.hostHeader)
         let local = "http://\(target.hostHeader)"
         if head.value("origin") == ownOrigin { head.set("Origin", local) }
@@ -189,6 +189,19 @@ public enum PreviewGate {
 
     /// What the phone sees: redirects to the dev server's own address become paths, cookies lose a
     /// `Domain=localhost` the phone's browser would reject, and the connection closes after the response.
+    /// Like `clientResponse(_:target:)`, and the dev server's HttpOnly cookies go into `jar` instead of the
+    /// browser (scripts can't read those anyway, so the app works the same).
+    public static func clientResponse(_ head: HTTPHead, target: PreviewTarget, jar: inout PreviewCookieJar) -> HTTPHead {
+        var head = head
+        let httpOnly = head.fields.filter { field in
+            field.name.lowercased() == "set-cookie" && !isSlotCookie(field.value)
+                && field.value.split(separator: ";").dropFirst().contains { $0.trimmingCharacters(in: .whitespaces).lowercased() == "httponly" }
+        }
+        for field in httpOnly { jar.store(setCookie: field.value) }
+        head.fields.removeAll { field in httpOnly.contains(field) }
+        return clientResponse(head, target: target)
+    }
+
     public static func clientResponse(_ head: HTTPHead, target: PreviewTarget) -> HTTPHead {
         var head = head
         if let location = head.value("location"), let path = localPath(location, port: target.port) {

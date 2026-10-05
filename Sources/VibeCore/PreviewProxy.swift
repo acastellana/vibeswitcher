@@ -31,6 +31,9 @@ public final class PreviewProxy: @unchecked Sendable {
     /// Everything below is touched on `queue` only.
     private var clients: [ObjectIdentifier: NWConnection] = [:]
     private var upstreams: [ObjectIdentifier: NWConnection] = [:]   // keyed by their client
+    /// The dev server's HttpOnly cookies per preview session (see `PreviewCookieJar`), keyed by the session
+    /// token: a slot that shows another server gets a new token, and so an empty jar.
+    private var jars: [String: PreviewCookieJar] = [:]
     private let context: () -> Context?
     private let redeem: (String) -> (path: String, sessionToken: String, clearSite: Bool)?
     private let resolve: (String) -> PreviewTarget?
@@ -148,15 +151,20 @@ public final class PreviewProxy: @unchecked Sendable {
                                          cookie: PreviewGate.setCookie(publicPort: context.publicPort, token: entry.sessionToken),
                                          clearSite: entry.clearSite))
         case .forward(let token):
-            guard let target = resolve(token) else { return reply(client, Self.page(403, PreviewGate.expiredMessage)) }
-            relay(head, rest: rest, client: client, target: target, context: context)
+            guard let target = resolve(token) else {
+                jars[token] = nil
+                return reply(client, Self.page(403, PreviewGate.expiredMessage))
+            }
+            // Only the current session's jar is kept (the slot's token changes when it shows another server).
+            if jars[token] == nil { jars = [token: PreviewCookieJar()] }
+            relay(head, rest: rest, client: client, target: target, context: context, token: token)
         }
     }
 
-    private func relay(_ head: HTTPHead, rest: Data, client: NWConnection, target: PreviewTarget, context: Context) {
+    private func relay(_ head: HTTPHead, rest: Data, client: NWConnection, target: PreviewTarget, context: Context, token: String) {
         let upgrade = PreviewGate.isUpgrade(head)
         var first = PreviewGate.upstreamRequest(head, target: target, ownOrigin: context.ownOrigin,
-                                                publicPort: context.publicPort).serialized
+                                                publicPort: context.publicPort, jar: jars[token] ?? PreviewCookieJar()).serialized
         first.append(rest)
         // "localhost" lets the system try ::1 and 127.0.0.1, like the browser on the Mac did.
         let host: NWEndpoint.Host = target.connectHost == "localhost" ? .name("localhost", nil) : NWEndpoint.Host(target.connectHost)
@@ -184,7 +192,7 @@ public final class PreviewProxy: @unchecked Sendable {
                     // both connections (and a slot's connection budget) forever.
                     self?.pump(from: client, to: upstream, onEnd: { _ in client.cancel(); upstream.cancel() })
                 })
-                self?.forwardResponse(upstream, to: client, buffer: Data(), ended: false, failed: false, target: target)
+                self?.forwardResponse(upstream, to: client, buffer: Data(), ended: false, failed: false, target: target, token: token)
             case .waiting, .failed:
                 fail()
             default: break
@@ -196,7 +204,7 @@ public final class PreviewProxy: @unchecked Sendable {
 
     /// `failed`: the dev server's connection ended with an error (not a clean close).
     private func forwardResponse(_ upstream: NWConnection, to client: NWConnection, buffer: Data, ended: Bool,
-                                 failed: Bool, target: PreviewTarget) {
+                                 failed: Bool, target: PreviewTarget, token: String) {
         switch HTTPHead.parse(buffer, kind: .response) {
         case .incomplete:
             guard !ended else {
@@ -207,7 +215,7 @@ public final class PreviewProxy: @unchecked Sendable {
                 var buffer = buffer
                 if let data { buffer.append(data) }
                 self?.forwardResponse(upstream, to: client, buffer: buffer, ended: isComplete || error != nil,
-                                      failed: error != nil, target: target)
+                                      failed: error != nil, target: target, token: token)
             }
         case .invalid, .tooLarge:
             upstream.cancel()
@@ -216,11 +224,13 @@ public final class PreviewProxy: @unchecked Sendable {
             let status = head.status ?? 0
             let interim = (100...199).contains(status) && status != 101   // e.g. 100 Continue: the real head follows
             let rest = buffer.subdata(in: (buffer.startIndex + consumed)..<buffer.endIndex)
-            var out = PreviewGate.clientResponse(head, target: target).serialized
+            var jar = jars[token] ?? PreviewCookieJar()
+            var out = PreviewGate.clientResponse(head, target: target, jar: &jar).serialized
+            if jars[token] != nil { jars[token] = jar }   // not after the session ended meanwhile
             if !interim { out.append(rest) }
             client.send(content: out, completion: .contentProcessed { [weak self] error in
                 guard let self, error == nil else { client.cancel(); return }
-                if interim { return self.forwardResponse(upstream, to: client, buffer: rest, ended: ended, failed: failed, target: target) }
+                if interim { return self.forwardResponse(upstream, to: client, buffer: rest, ended: ended, failed: failed, target: target, token: token) }
                 // Ended already (in the same read as the head): a crash must still look like one to the phone.
                 if ended { failed ? client.forceCancel() : client.cancel(); return }
                 // A dev server that fails mid-answer resets the phone's connection: closing it cleanly would
