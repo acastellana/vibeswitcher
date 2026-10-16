@@ -7,6 +7,8 @@ import VibeCore
 struct ComposerActions {
     /// Types the message; false when it was refused (too long).
     var send: (String) -> Bool
+    /// Hands the message to the working agent at its next step, without stopping it.
+    var steer: (String) -> Bool
     /// Esc: stops the agent's turn.
     var stop: () -> Void
     /// shift+tab: the next permission mode.
@@ -21,6 +23,8 @@ struct ComposerView: View {
     let rowID: String
     let agent: Agent
     let working: Bool
+    /// Only steering (a Terminal session: nothing can be typed into it from here).
+    var steerOnly = false
     let actions: ComposerActions
     @State private var height: CGFloat = 22
     @State private var suggestions = Suggestions()
@@ -48,50 +52,61 @@ struct ComposerView: View {
                     .buttonStyle(.borderless).padding(.bottom, 9).help("Attach files or images")
                 ZStack(alignment: .topLeading) {
                     if text.wrappedValue.isEmpty {
-                        Text("Message \(agent.displayName)…  / for commands, @ for files")
+                        Text(working ? (steerOnly ? "Steer \(agent.displayName) while it works — ↩ sends it to its next step"
+                                                  : "Working — ↩ steers it now without stopping it, ⌥↩ queues for after")
+                                     : "Message \(agent.displayName)…  / for commands, @ for files")
                             .font(.system(size: 13)).foregroundStyle(.tertiary).padding(.leading, 5).padding(.top, 1)
                             .allowsHitTesting(false)
                     }
                     ComposerTextView(text: text, height: $height, suggestions: $suggestions, history: chat.log.prompts,
-                                     focusRequests: chat.focusComposerRequests, complete: complete, submit: submit)
+                                     focusRequests: chat.focusComposerRequests, complete: complete,
+                                     submit: { submit(queue: false) }, queue: { submit(queue: true) })
                         .frame(height: min(max(height, 22), 220))
                 }
                 .padding(.horizontal, 10).padding(.vertical, 8)
                 .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color(nsColor: .controlBackgroundColor)))
                 .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.secondary.opacity(0.3)))
-                if working {
+                if working && !steerOnly {
                     Button(action: actions.stop) {
                         Image(systemName: "stop.fill").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
                             .frame(width: 30, height: 30).background(Circle().fill(Color.red.opacity(0.85)))
                     }
                     .buttonStyle(.plain).padding(.bottom, 4).help("Stop (⌘.) — like pressing Esc in the terminal")
                 }
-                Button(action: submit) {
-                    Image(systemName: "arrow.up").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                Button { submit(queue: false) } label: {
+                    Image(systemName: working ? "arrow.turn.down.right" : "arrow.up").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
                         .frame(width: 30, height: 30)
                         .background(Circle().fill(text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                                  ? Color.secondary.opacity(0.4) : Color.accentColor))
+                                                  ? Color.secondary.opacity(0.4) : working ? Color.orange : Color.accentColor))
                 }
                 .buttonStyle(.plain).padding(.bottom, 4)
-                .help(working ? "Send (↩) — it's queued until the agent is ready" : "Send (↩)")
+                .help(working ? "Steer (↩): it gets this at its next step, without stopping. ⌥↩ queues it for after the turn." : "Send (↩)")
             }
-            ComposerChips(chat: chat, agent: agent, cycleMode: actions.cycleMode, notice: notice) { command in
-                _ = actions.send(command)
+            if !steerOnly {
+                ComposerChips(chat: chat, agent: agent, cycleMode: actions.cycleMode, notice: notice) { command in
+                    _ = actions.send(command)
+                }
+            } else if let notice {
+                Text(notice).font(.system(size: 11)).foregroundStyle(.red).padding(.leading, 30)
             }
         }
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
     }
 
-    private func submit() {
+    /// ↩: steers while the agent works, sends otherwise. ⌥↩ (`queue`): typed in for after the turn.
+    private func submit(queue: Bool) {
         let message = text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !message.isEmpty else { return }
-        guard message.utf8.count <= ComposerLimits.maxBytes else {
-            notice = "Too long to type into the terminal (\(message.utf8.count / 1024) KB). Save it to a file and mention it instead."
+        let steering = working && (steerOnly || !queue)
+        let limit = steering ? ComposerLimits.maxSteerCharacters : ComposerLimits.maxBytes
+        guard (steering ? message.count : message.utf8.count) <= limit else {
+            notice = "Too long to \(steering ? "steer" : "type into the terminal"). Save it to a file and mention it instead."
             return
         }
         notice = nil
-        if actions.send(message) {
-            if working { chat.sent(message) }
+        let accepted = steering ? actions.steer(message) : actions.send(message)
+        if accepted {
+            if working && !steering { chat.sent(message) }
             text.wrappedValue = ""
             suggestions = Suggestions()
         }
@@ -125,6 +140,8 @@ struct ComposerView: View {
 enum ComposerLimits {
     /// Larger messages don't fit the session host's frames once encoded; refuse rather than lose them.
     static let maxBytes = 200 * 1024
+    /// What a hook can hand Claude inline.
+    static let maxSteerCharacters = 8_000
 }
 
 struct Suggestion: Equatable {
@@ -333,6 +350,8 @@ private struct ComposerTextView: NSViewRepresentable {
     let focusRequests: Int
     let complete: (ComposerToken) -> [Suggestion]
     let submit: () -> Void
+    /// ⌥↩.
+    let queue: () -> Void
 
     func makeNSView(context: Context) -> NSScrollView {
         let textView = ComposerNSTextView()
@@ -456,9 +475,12 @@ private struct ComposerTextView: NSViewRepresentable {
                 }
             }
             switch selector {
-            case #selector(NSResponder.insertNewline(_:)):
-                if NSApp.currentEvent?.modifierFlags.contains(.shift) == true {
+            case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
+                let flags = NSApp.currentEvent?.modifierFlags ?? []
+                if flags.contains(.shift) {
                     textView.insertNewlineIgnoringFieldEditor(nil)
+                } else if flags.contains(.option) {
+                    parent.queue()
                 } else {
                     parent.submit()
                 }
@@ -499,7 +521,8 @@ private final class ComposerNSTextView: NSTextView {
         if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
             return insertPaths(urls)
         }
-        if board.string(forType: .string) == nil, let image = NSImage(pasteboard: board), let url = Attachments.save(image) {
+        // Image data wins over the text flavor that browsers, Preview and Slack copy along with it.
+        if board.availableType(from: [.png, .tiff]) != nil, let image = NSImage(pasteboard: board), let url = Attachments.save(image) {
             return insertPaths([url])
         }
         super.paste(sender)

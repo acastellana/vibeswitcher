@@ -113,6 +113,8 @@ public struct ChatTool: Equatable, Sendable {
 public struct ChatEntry: Equatable, Sendable, Identifiable {
     public enum Kind: Equatable, Sendable {
         case prompt(text: String, images: [ChatImage])
+        /// A message steered into a working agent (from you, or from the project lead).
+        case steered(text: String, fromLead: Bool)
         case reply(String)
         case tool(ChatTool)
     }
@@ -251,6 +253,14 @@ public enum ChatReader {
     static func claude(_ line: [String: Any], lineID: String) -> [ChatEvent] {
         if line["isSidechain"] as? Bool == true || line["isMeta"] as? Bool == true { return [] }
         let type = line["type"] as? String
+        if type == "attachment", let attachment = line["attachment"] as? [String: Any] {
+            let contents = (attachment["content"] as? [String]) ?? (attachment["content"] as? String).map { [$0] } ?? []
+            let at = date(line["timestamp"])
+            let uuid = line["uuid"] as? String ?? lineID
+            return contents.flatMap(SteerReply.messages(inContext:)).enumerated().map { index, message in
+                .entry(ChatEntry(id: "\(uuid).\(index)", at: at, kind: .steered(text: message.text, fromLead: message.fromLead)))
+            }
+        }
         guard type == "user" || type == "assistant", let message = line["message"] as? [String: Any] else { return [] }
         let at = date(line["timestamp"])
         let uuid = line["uuid"] as? String ?? lineID
@@ -529,17 +539,12 @@ public enum ChatReader {
 
     static func clip(_ text: String) -> String { text.count > contentLimit ? String(text.prefix(contentLimit)) : text }
 
-    /// Typed text only: injected context starts with a tag whose name has a `-` or `_`.
+    /// Typed (or pasted) text only; injected context and Claude's own notes are left out.
     static func humanText(_ text: String) -> String? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
+        guard let typed = TypedText.clean(text) else { return nil }
         // Claude's own notes in the user's turn ("[Request interrupted by user]", "… for tool use]").
-        if trimmed.hasPrefix("[Request interrupted by user") { return nil }
-        if trimmed.hasPrefix("<"), let close = trimmed.firstIndex(of: ">") {
-            let tag = trimmed[trimmed.index(after: trimmed.startIndex)..<close]
-            if tag.contains("-") || tag.contains("_") { return nil }
-        }
-        return trimmed
+        if typed.hasPrefix("[Request interrupted by user") { return nil }
+        return typed
     }
 
     static func date(_ value: Any?) -> Date? {

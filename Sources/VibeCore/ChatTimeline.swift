@@ -31,7 +31,7 @@ public enum ChatTimeline {
         }
         for (index, entry) in entries.enumerated() {
             switch entry.kind {
-            case .prompt: flush(); items.append(.prompt(entry))
+            case .prompt, .steered: flush(); items.append(.prompt(entry))
             case .reply: flush(); items.append(.reply(entry))
             case .tool(let tool): run.append(tool)
             }
@@ -101,7 +101,7 @@ public enum ChatSearch {
             switch item {
             case .prompt(let entry), .reply(let entry):
                 switch entry.kind {
-                case .prompt(let text, _), .reply(let text): return text.localizedCaseInsensitiveContains(needle)
+                case .prompt(let text, _), .reply(let text), .steered(let text, _): return text.localizedCaseInsensitiveContains(needle)
                 case .tool: return false
                 }
             case .tools(_, let tools):

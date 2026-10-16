@@ -35,6 +35,9 @@ final class ChatModel: ObservableObject {
     }
     /// Messages sent from the composer that the transcript doesn't show yet.
     @Published private(set) var pending: [PendingMessage] = []
+    /// Messages steered into the agent that it hasn't taken yet (and the terminal they went to).
+    @Published private(set) var steering: [SteerMessage] = []
+    private var steeringTTY: String?
     /// A numbered choice on the session's screen (permission prompt, question), and its permission mode.
     @Published var menu: ScreenMenu?
     @Published var mode: AgentMode?
@@ -97,6 +100,8 @@ final class ChatModel: ObservableObject {
         hasEarlier = false
         loadingEarlier = false
         pending = []
+        steering = []
+        steeringTTY = nil
         menu = nil
         mode = nil
         cursor = 0
@@ -213,6 +218,22 @@ final class ChatModel: ObservableObject {
         let count = ChatSearch.matches(items, query: searchQuery).count
         guard count > 0 else { return }
         searchIndex = ((min(searchIndex, count - 1) + delta) % count + count) % count
+    }
+
+    /// Shows a steered message until the agent's hook takes it.
+    func steered(_ message: SteerMessage, tty: String) {
+        steeringTTY = tty
+        steering.append(message)
+    }
+
+    /// Drops steered messages the agent has taken (they show from the transcript then).
+    func refreshSteering() {
+        guard let tty = steeringTTY, !steering.isEmpty else { return }
+        let delivered = SteerInbox.delivered(tty: tty)
+        let pending = Set(SteerInbox.pending(tty: tty).map(\.id))
+        // Taken, or gone from the inbox (a new agent on that terminal dropped it).
+        let left = steering.filter { !delivered.contains($0.id) && pending.contains($0.id) }
+        if left != steering { steering = left }
     }
 
     /// Records a message sent while the agent works, until the transcript shows it.

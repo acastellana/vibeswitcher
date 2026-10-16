@@ -30,9 +30,15 @@ struct ChatContainer: View {
                                      let sent = composer.send(text)
                                      if sent { chat.scrollToBottom() }
                                      return sent
-                                 }, stop: composer.stop, cycleMode: composer.cycleMode))
+                                 }, steer: composer.steer, stop: composer.stop, cycleMode: composer.cycleMode))
                     // A text box of its own per session: nothing typed for one can end up in another.
                     .id(row.id)
+                } else if let session = row.session, session.inTerminalApp, session.agent == .claude,
+                          [.working, .background].contains(session.status) {
+                    // Steering needs no typing, so it reaches a Terminal session too.
+                    ComposerView(chat: chat, rowID: row.id, agent: session.agent, working: true, steerOnly: true,
+                                 actions: ComposerActions(send: { _ in false }, steer: composer.steer, stop: {}, cycleMode: {}))
+                        .id(row.id)
                 } else if let session = row.session, session.inTerminalApp {
                     TerminalReplyHint(canMove: MoveToWindow.canMove(session)) { actions.moveToWindow(session) }
                 } else {
@@ -87,6 +93,17 @@ struct ChatView: View {
                                     item.id == current ? Color.yellow.opacity(0.18) : matches.contains(item.id) ? Color.yellow.opacity(0.07) : .clear))
                                 .onAppear { chat.visibleItems[item.id] = index }
                                 .onDisappear { chat.visibleItems[item.id] = nil }
+                        }
+                        ForEach(chat.steering) { message in
+                            Text(message.text).font(.system(size: 13.5)).foregroundStyle(.secondary)
+                                .padding(.horizontal, 13).padding(.vertical, 9)
+                                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.orange.opacity(0.5),
+                                                                                                         style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                                .overlay(alignment: .bottomTrailing) {
+                                    Text("steering… arrives at its next step").font(.system(size: 9.5)).foregroundStyle(.tertiary).offset(y: 14)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .padding(.leading, 60).padding(.bottom, 10)
                         }
                         ForEach(chat.pending) { message in
                             Text(message.text).font(.system(size: 13.5)).foregroundStyle(.secondary)
@@ -167,7 +184,19 @@ private struct ChatItemView: View {
     var body: some View {
         switch item {
         case .prompt(let entry):
-            if case .prompt(let text, let images) = entry.kind {
+            if case .steered(let text, let fromLead) = entry.kind {
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text(text).font(.system(size: CGFloat(chatFontSize))).lineSpacing(2).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 13).padding(.vertical, 9)
+                        .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.orange.opacity(0.13)))
+                    Label(fromLead ? "from the project lead, while it worked" : "steered while it worked", systemImage: "arrow.turn.down.right")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .padding(.leading, 60)
+                .contextMenu { Button("Copy") { Pasteboard.copy(text) } }
+            } else if case .prompt(let text, let images) = entry.kind {
                 VStack(alignment: .trailing, spacing: 4) {
                     VStack(alignment: .leading, spacing: 8) {
                         if !images.isEmpty {

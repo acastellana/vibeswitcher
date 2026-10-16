@@ -27,6 +27,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private lazy var chatHost = NSHostingView(rootView: ChatContainer(
         chat: chat, model: model, actions: actions,
         composer: ComposerActions(send: { [weak self] text in self?.sendToSelected(text) ?? false },
+                                  steer: { [weak self] text in self?.steerSelected(text) ?? false },
                                   stop: { [weak self] in self?.sendKeys([27]) },
                                   cycleMode: { [weak self] in self?.sendKeys(AgentMode.cycleKey) }),
         choose: { [weak self] index in self?.chooseMenuOption(index) },
@@ -206,6 +207,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
                 guard let self, self.window?.isVisible == true, !self.chatHost.isHidden else { return }
                 self.chat.poll()
+                self.chat.refreshSteering()
                 self.readScreen()
                 if self.window?.isKeyWindow == true { self.chat.markSeen() }
             }
@@ -244,6 +246,26 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         }
         write(ComposerText.writes(text, bracketed: pane.bracketedPaste(id)), to: id)
         return true
+    }
+
+    /// Hands the message to the selected session's agent at its next step: through its hook for Claude (window or
+    /// Terminal session alike), typed in for Codex (which takes input during a turn as steering).
+    private func steerSelected(_ text: String) -> Bool {
+        guard let row = model.selectedRow, let session = row.session else {
+            NSSound.beep()
+            return false
+        }
+        if session.agent == .codex { return row.hostID != nil ? sendToSelected(text) : false }
+        let message = SteerMessage(text: text, from: .user, agentPid: session.pid)
+        do {
+            try SteerInbox.post(message, tty: session.tty)
+            chat.steered(message, tty: session.tty)
+            chat.scrollToBottom()
+            return true
+        } catch {
+            NSSound.beep()
+            return false
+        }
     }
 
     /// Keys for the selected window session (Esc to stop, shift+tab for the mode).

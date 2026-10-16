@@ -1,7 +1,8 @@
 // Invoked by Claude Code / Codex hooks: `vibeswitcher-hook <claude|codex>` with the event JSON on stdin.
 //
 // Contract with the agents: print nothing (stdout from some hooks is fed back to the model) and
-// always exit 0 (a non-zero exit can block the agent). Every failure path just exits quietly.
+// always exit 0 (a non-zero exit can block the agent). Every failure path just exits quietly. The one
+// exception is a steered message (see `SteerInbox`): handed to Claude as JSON on the events that take it.
 import Darwin
 import Foundation
 import VibeCore
@@ -34,5 +35,14 @@ switch update {
 case .write(let state): try? state.save(to: stateURL)
 case .delete: try? FileManager.default.removeItem(at: stateURL)
 case .ignore: break
+}
+if lock >= 0 { flock(lock, LOCK_UN); close(lock) }
+
+// Messages sent to this agent while it works (Claude Code; Codex takes typed input mid-turn itself).
+if agent == .claude, let pid = agentPid, let event = payload["hook_event_name"] as? String, SteerReply.takesMessages(event: event) {
+    let messages = SteerInbox.take(tty: tty, agentPid: pid)
+    if let output = SteerReply.output(event: event, messages: messages) {
+        FileHandle.standardOutput.write(output)
+    }
 }
 exit(0)

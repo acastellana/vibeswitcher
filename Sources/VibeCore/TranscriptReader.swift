@@ -188,21 +188,14 @@ public enum TranscriptReader {
 
     // MARK: Helpers
 
-    /// Typed text only. Injected context starts with a tag whose name has a `-` or `_`
-    /// (`<task-notification>`, `<environment_context>`, `<command-name>`, `<system-reminder>`); pasted
-    /// HTML (`<div>`, `<!doctype html>`) is something the user typed.
+    /// Typed or pasted text only (see `TypedText`).
     private static func humanText(_ text: String) -> String? {
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isInjected(trimmed) else { return nil }
-        return bounded(trimmed, limit: textLimit).0
+        guard let typed = TypedText.clean(text) else { return nil }
+        return bounded(typed, limit: textLimit).0
     }
 
-    private static func isInjected(_ text: String) -> Bool {
-        guard text.hasPrefix("<") else { return false }
-        let name = text.dropFirst().prefix { $0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" }
-        let next = text.dropFirst(1 + name.count).first
-        return (name.contains("-") || name.contains("_")) && (next == ">" || next == " ")
-    }
+    static func humanTextForTesting(_ text: String) -> String? { humanText(text) }
+
 
     /// FNV-1a of the line: a short id that's the same for the same bytes.
     private static func stableID(_ line: Data.SubSequence) -> String {

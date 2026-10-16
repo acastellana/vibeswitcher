@@ -15,6 +15,9 @@ public enum ChatExport {
             case .prompt(let text, let images):
                 flush()
                 parts.append("**You**\n\n" + text + (images.isEmpty ? "" : "\n\n_(\(images.count) image\(images.count == 1 ? "" : "s"))_"))
+            case .steered(let text, let fromLead):
+                flush()
+                parts.append("**\(fromLead ? "Project lead" : "You") (while it worked)**\n\n" + text)
             case .reply(let text):
                 flush()
                 parts.append("**\(agent)**\n\n" + text)

@@ -179,3 +179,24 @@ struct ChatTranscriptReviewFixTests {
         #expect(log.entries.isEmpty)
     }
 }
+
+struct PastedAndCommandPromptTests {
+    @Test func pastedContentIsUnwrapped() {
+        #expect(ChatReader.humanText("<pasted_content id=\"be79\">\nok now going back\n</pasted_content id=\"be79\">") == "ok now going back")
+        #expect(ChatReader.humanText("look at this:\n<pasted_content id=\"a1\">\nerror line\n</pasted_content id=\"a1\">\nthanks")
+                == "look at this:\nerror line\nthanks")
+    }
+
+    @Test func commandBlocksAreStrippedKeepingTheTypedText() {
+        let text = "<command-name>/model</command-name>\n<command-message>model</command-message>\n<command-args></command-args>\n"
+            + "<local-command-stdout>Set model to Opus</local-command-stdout>\nnow fix the bug"
+        #expect(ChatReader.humanText(text) == "now fix the bug")
+        #expect(ChatReader.humanText("<command-name>/clear</command-name>\n<local-command-stdout></local-command-stdout>") == nil)
+    }
+
+    @Test func injectedContextIsStillDropped() {
+        #expect(ChatReader.humanText("<system-reminder>be careful</system-reminder>") == nil)
+        #expect(ChatReader.humanText("<task-notification>done</task-notification>") == nil)
+        #expect(TranscriptReader.humanTextForTesting("<pasted_content id=\"x\">\nhello\n</pasted_content id=\"x\">") == "hello")
+    }
+}
