@@ -29,6 +29,9 @@ public final class HostedSession {
     private var readSource: DispatchSourceRead?
     private var writeSource: DispatchSourceWrite?
     private var exitSource: DispatchSourceProcess?
+    /// Backs up `exitSource`, which misses a program that exits before it's registered (it's registered
+    /// asynchronously, and a process that already exited can't be watched).
+    private var exitPoll: DispatchSourceTimer?
     private var pendingInput = Data()
     private var closed = false
     static let maxPendingInput = 1 << 20
@@ -71,7 +74,7 @@ public final class HostedSession {
         var size = winsize(ws_row: UInt16(rows), ws_col: UInt16(cols), ws_xpixel: 0, ws_ypixel: 0)
         let args = arguments(shell: shell, command: request.command, keepShell: request.keepShell)
         let env = environment(base: baseEnvironment, extra: request.env, id: id)
-        guard let child = PTYFork.spawn(executable: shell, args: args, env: env, directory: request.cwd, size: &size) else {
+        guard let child = PTYSpawn.spawn(executable: shell, args: args, env: env, directory: request.cwd, size: &size) else {
             throw Failure.spawnFailed
         }
         let name = ptsname(child.masterFD).map { String(cString: $0) } ?? ""
@@ -108,6 +111,12 @@ public final class HostedSession {
         exit.setEventHandler { [weak self] in self?.reap() }
         exit.resume()
         exitSource = exit
+
+        let poll = DispatchSource.makeTimerSource(queue: queue)
+        poll.schedule(deadline: .now() + 0.05, repeating: 1, leeway: .milliseconds(200))
+        poll.setEventHandler { [weak self] in self?.reap() }
+        poll.resume()
+        exitPoll = poll
     }
 
     /// Reads what's available; never blocks (the PTY is nonblocking), so the program never waits on us.
@@ -137,6 +146,8 @@ public final class HostedSession {
         let code = signal == 0 ? (status >> 8) & 0xff : 128 + signal
         exitSource?.cancel()
         exitSource = nil
+        exitPoll?.cancel()
+        exitPoll = nil
         info.exit = .init(status: code, at: Date())
         onChange?(info)
     }
@@ -232,6 +243,7 @@ public final class HostedSession {
         readSource?.cancel()
         writeSource?.cancel()
         exitSource?.cancel()
+        exitPoll?.cancel()
         Darwin.close(masterFD)
     }
 }

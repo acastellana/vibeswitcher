@@ -17,6 +17,19 @@ final class SessionProbe {
     func locked(_ body: (SessionProbe) -> Void) { lock.lock(); body(self); lock.unlock() }
     var text: String { lock.lock(); defer { lock.unlock() }; return String(decoding: buffer, as: UTF8.self) }
     var lastChange: HostSession? { lock.lock(); defer { lock.unlock() }; return changes.last }
+
+    /// What was going on in a session, for failure messages.
+    func diagnosis(_ session: HostedSession) -> String {
+        let info = queue.sync { session.info }
+        let ps = Process()
+        ps.executableURL = URL(fileURLWithPath: "/bin/ps")
+        ps.arguments = ["-o", "pid,ppid,pgid,stat,wchan,command", "-t", info.tty]
+        let pipe = Pipe()
+        ps.standardOutput = pipe
+        try? ps.run()
+        ps.waitUntilExit()
+        return "info=\(info) output=\(text.debugDescription) ps=\n\(String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self))"
+    }
 }
 
 struct HostedSessionTests {
@@ -54,10 +67,10 @@ struct HostedSessionTests {
     @Test func runsTheCommandInThePTYAndRecordsTheExit() throws {
         let probe = SessionProbe()
         let session = try start("echo out:$PROBE; tty; exit 3", probe: probe)
-        #expect(eventually { probe.text.contains("out:yes") })
+        #expect(eventually { probe.text.contains("out:yes") }, "\(probe.diagnosis(session))")
         let tty = probe.queue.sync { session.info.tty }
         #expect(tty.hasPrefix("ttys"))
-        #expect(eventually { probe.text.contains("/dev/\(tty)") })   // the PTY is its terminal
+        #expect(eventually { probe.text.contains("/dev/\(tty)") }, "\(probe.diagnosis(session))")   // the PTY is its terminal
         #expect(eventually { probe.lastChange?.exit?.status == 3 })
         probe.queue.sync { session.close() }
     }
@@ -67,7 +80,7 @@ struct HostedSessionTests {
         let session = try start("read line; echo got:$line", probe: probe)
         Thread.sleep(forTimeInterval: 0.3)
         probe.queue.sync { session.write(Data("hello\r".utf8)) }
-        #expect(eventually { probe.text.contains("got:hello") })
+        #expect(eventually { probe.text.contains("got:hello") }, "\(probe.diagnosis(session))")
         probe.queue.sync { session.close() }
     }
 
@@ -77,9 +90,9 @@ struct HostedSessionTests {
         // gets the SIGWINCH (a shell `trap` wouldn't fire while `sleep` holds the terminal).
         let script = "perl -e '$|=1; $SIG{WINCH}=sub{print qq(winch\\n)}; print qq(ready\\n); sleep 1 while 1'"
         let session = try start(script, probe: probe)
-        #expect(eventually { probe.text.contains("ready") })
+        #expect(eventually { probe.text.contains("ready") }, "output: \(probe.text.debugDescription) change: \(String(describing: probe.lastChange))")
         probe.queue.sync { session.resize(cols: 100, rows: 30) }
-        #expect(eventually { probe.text.contains("winch") })
+        #expect(eventually { probe.text.contains("winch") }, "\(probe.diagnosis(session))")
         #expect(probe.queue.sync { (session.info.cols, session.info.rows) } == (100, 30))
         probe.queue.sync { session.terminate() }
         #expect(eventually(timeout: 8) { probe.lastChange?.exit != nil })
@@ -95,7 +108,7 @@ struct HostedSessionTests {
         let script = "echo mask=$(ps -o sigmask= -p $$ | tr -d ' '); sh -c 'kill -PIPE $$; echo pipe-ignored'; "
             + "sh -c 'kill -HUP $$; echo hup-ignored'; echo end"
         let session = try start(script, probe: probe)
-        #expect(eventually { probe.text.contains("end") })
+        #expect(eventually { probe.text.contains("end") }, "\(probe.diagnosis(session))")
         #expect(probe.text.contains("mask=0"))
         #expect(!probe.text.contains("pipe-ignored"))
         #expect(!probe.text.contains("hup-ignored"))
@@ -105,7 +118,7 @@ struct HostedSessionTests {
     @Test func titleAndScreenComeFromTheHeadlessTerminal() throws {
         let probe = SessionProbe()
         let session = try start("printf '\\033]0;My Title\\007line one\\nline two\\n'; sleep 5", probe: probe)
-        #expect(eventually { probe.lastChange?.title == "My Title" })
+        #expect(eventually { probe.lastChange?.title == "My Title" }, "output: \(probe.text.debugDescription) change: \(String(describing: probe.lastChange))")
         #expect(eventually { probe.queue.sync { session.screenText() }.contains("line two") })
         let history = probe.queue.sync { session.historyText(lines: 100) }
         #expect((history.history + "\n" + history.screen).contains("line one"))
@@ -117,7 +130,7 @@ struct HostedSessionTests {
         let probe = SessionProbe()
         let script = "stty raw -echo; printf '\\033[6n'; dd bs=1 count=6 2>/dev/null | od -c | head -1; stty sane; sleep 5"
         let session = try start(script, probe: probe)
-        #expect(eventually { probe.text.contains("033") })   // od printed the reply's ESC: answered
+        #expect(eventually { probe.text.contains("033") }, "\(probe.diagnosis(session))")   // od printed the reply's ESC: answered
         probe.queue.sync { session.terminate(); session.close() }
 
         let probe2 = SessionProbe()
@@ -131,7 +144,7 @@ struct HostedSessionTests {
     @Test func replayHoldsEarlierOutput() throws {
         let probe = SessionProbe()
         let session = try start("echo first; sleep 5", probe: probe)
-        #expect(eventually { probe.text.contains("first") })
+        #expect(eventually { probe.text.contains("first") }, "\(probe.diagnosis(session))")
         #expect(String(decoding: probe.queue.sync { session.replay() }, as: UTF8.self).contains("first"))
         probe.queue.sync { session.terminate(); session.close() }
     }
