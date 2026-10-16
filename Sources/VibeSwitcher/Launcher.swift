@@ -33,7 +33,11 @@ enum Launcher {
 
     /// Opens a new Terminal window in `directory` running `command`, and brings it to the front.
     static func launch(command: String, in directory: String) {
-        let line = RecentProjects.shellCommand(cd: directory, run: command)
+        launch(line: RecentProjects.shellCommand(cd: directory, run: command))
+    }
+
+    /// Opens a new Terminal window running a full shell line (see `LaunchPlan.terminalLine`).
+    static func launch(line: String) {
         let escaped = line.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
         DispatchQueue.global(qos: .userInitiated).async {
             let result = TerminalBridge.runAppleScript("tell application \"Terminal\" to do script \"\(escaped)\"")

@@ -12,7 +12,7 @@ final class TestHost {
     init(build: Int = 42) throws {
         lock = socket + ".lock"
         var config = HostServer.Config(socketPath: socket, lockPath: lock, shell: "/bin/sh",
-                                       baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: build)
+                                       launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: build)
         config.idleExit = nil
         config.ringCapacity = 1 << 20
         server = HostServer(config: config)
@@ -107,7 +107,7 @@ struct HostServerTests {
     @Test func aSecondHostRefusesToStart() throws {
         let host = try TestHost()
         let config = HostServer.Config(socketPath: scratchSocketPath(), lockPath: host.lock, shell: "/bin/sh",
-                                       baseEnvironment: [:], hostBuild: 1)
+                                       launcher: hostLauncher, baseEnvironment: [:], hostBuild: 1)
         #expect(throws: HostServer.Failure.alreadyRunning) { try HostServer(config: config).start() }
     }
 

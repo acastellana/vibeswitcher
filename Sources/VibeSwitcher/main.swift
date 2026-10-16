@@ -52,16 +52,18 @@ if let index = arguments.firstIndex(of: "--open"), arguments.indices.contains(in
                                                                  userInfo: nil, deliverImmediately: true)
     exit(0)
 }
-if let index = arguments.firstIndex(of: "--new"), arguments.indices.contains(index + 1),
-   let agent = Agent(rawValue: arguments[index + 1]) {
-    // Same as the popover's "New session" menu: a new Terminal window running the configured command.
-    let folder = arguments.indices.contains(index + 2) ? arguments[index + 2] : FileManager.default.currentDirectoryPath
-    let command = Preferences().command(for: agent)
-    Launcher.launch(command: command, in: (folder as NSString).expandingTildeInPath)
-    Thread.sleep(forTimeInterval: 2) // launch runs asynchronously
-    print("started \(command) in \(folder)")
+if let index = arguments.firstIndex(of: "--new"), arguments.indices.contains(index + 1) {
+    // `--new <preset name | claude | codex | shell> [folder] [--terminal]`: the running app starts it like ⊕ does.
+    let rest = arguments[(index + 2)...].filter { $0 != "--terminal" }
+    let folder = ((rest.first ?? FileManager.default.currentDirectoryPath) as NSString).expandingTildeInPath
+    DistributedNotificationCenter.default().postNotificationName(
+        AppStatus.newSessionNotification, object: nil,
+        userInfo: ["preset": arguments[index + 1], "folder": folder, "terminal": arguments.contains("--terminal")],
+        deliverImmediately: true)
+    print("asked VibeSwitcher to start \(arguments[index + 1]) in \(folder)")
     exit(0)
 }
+
 if arguments.contains("--dump") {
     let sessions = SessionScanner().scan()
     let screens = TerminalBridge.screens(for: Set(sessions.filter { $0.agent == .claude }.map(\.tty)))

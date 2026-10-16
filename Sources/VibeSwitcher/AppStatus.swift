@@ -14,6 +14,7 @@ enum AppStatus {
     static let windowNotification = Notification.Name("dev.vibeswitcher.window")
     static let captureNotification = Notification.Name("dev.vibeswitcher.capture-window")
     static let settingsNotification = Notification.Name("dev.vibeswitcher.settings")
+    static let newSessionNotification = Notification.Name("dev.vibeswitcher.new")
 
     static func write(sessions: [Session], terminalAccess: TerminalAccess, extra: [String: Any] = [:]) {
         guard enabled else { return }

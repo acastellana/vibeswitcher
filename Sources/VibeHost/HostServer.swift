@@ -8,6 +8,8 @@ public final class HostServer {
         public var socketPath: String
         public var lockPath: String
         public var shell: String
+        /// Starts each session's program (see `PTYSpawn`); the host's own executable.
+        public var launcher: String
         public var baseEnvironment: [String: String]
         public var hostBuild: Int
         public var ringCapacity = 8 << 20
@@ -17,8 +19,10 @@ public final class HostServer {
         public var keepEnded: TimeInterval = 24 * 3600
         public var housekeepingInterval: TimeInterval = 30
 
-        public init(socketPath: String, lockPath: String, shell: String, baseEnvironment: [String: String], hostBuild: Int) {
+        public init(socketPath: String, lockPath: String, shell: String, launcher: String, baseEnvironment: [String: String],
+                    hostBuild: Int) {
             self.socketPath = socketPath
+            self.launcher = launcher
             self.lockPath = lockPath
             self.shell = shell
             self.baseEnvironment = baseEnvironment
@@ -135,7 +139,7 @@ public final class HostServer {
             reply(.welcome(protocolVersion: HostProtocol.version, hostBuild: config.hostBuild, sessions: allInfo))
         case .spawn(let request):
             do {
-                let session = try HostedSession.spawn(request, shell: config.shell, baseEnvironment: config.baseEnvironment,
+                let session = try HostedSession.spawn(request, shell: config.shell, launcher: config.launcher, baseEnvironment: config.baseEnvironment,
                                                       ringCapacity: config.ringCapacity, queue: queue)
                 register(session)
                 reply(.spawned(session.info))

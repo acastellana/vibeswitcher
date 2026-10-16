@@ -13,7 +13,7 @@ struct FastExitTests {
             let request = SpawnRequest(cwd: "/tmp", command: "echo quick-\(i); exit 3", env: [:], cols: 80, rows: 24,
                                        keepShell: false, label: "T", agent: nil)
             let session = try? probes[i].queue.sync {
-                let session = try HostedSession.spawn(request, shell: "/bin/sh", baseEnvironment: ["PATH": "/usr/bin:/bin"],
+                let session = try HostedSession.spawn(request, shell: "/bin/sh", launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin"],
                                                       ringCapacity: 1 << 16, queue: probes[i].queue)
                 probes[i].attach(session)
                 return session

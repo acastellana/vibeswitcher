@@ -12,3 +12,11 @@ func eventually(timeout: TimeInterval = 5, _ condition: () -> Bool) -> Bool {
 
 /// A short, unique socket path (Unix socket paths are limited to 104 bytes).
 func scratchSocketPath() -> String { "/tmp/vsh-\(UUID().uuidString.prefix(8)).sock" }
+
+/// The built `vibeswitcher-host`, which starts each session's program (`--pty-exec`).
+let hostLauncher: String = {
+    // The test bundle sits in the build folder, next to the executables it depends on.
+    Bundle(for: TestBundleAnchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host").path
+}()
+
+private final class TestBundleAnchor {}

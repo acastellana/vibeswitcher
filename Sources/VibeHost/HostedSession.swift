@@ -63,7 +63,8 @@ public final class HostedSession {
         return env.map { "\($0.key)=\($0.value)" }.sorted()
     }
 
-    public static func spawn(_ request: SpawnRequest, shell: String, baseEnvironment: [String: String],
+    /// `launcher`: an executable that handles `--pty-exec` (see `PTYSpawn`), normally the host itself.
+    public static func spawn(_ request: SpawnRequest, shell: String, launcher: String, baseEnvironment: [String: String],
                              ringCapacity: Int, queue: DispatchQueue) throws -> HostedSession {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: request.cwd, isDirectory: &isDirectory), isDirectory.boolValue else {
@@ -74,7 +75,7 @@ public final class HostedSession {
         var size = winsize(ws_row: UInt16(rows), ws_col: UInt16(cols), ws_xpixel: 0, ws_ypixel: 0)
         let args = arguments(shell: shell, command: request.command, keepShell: request.keepShell)
         let env = environment(base: baseEnvironment, extra: request.env, id: id)
-        guard let child = PTYSpawn.spawn(executable: shell, args: args, env: env, directory: request.cwd, size: &size) else {
+        guard let child = PTYSpawn.spawn(launcher: launcher, executable: shell, args: args, env: env, directory: request.cwd, size: &size) else {
             throw Failure.spawnFailed
         }
         let name = ptsname(child.masterFD).map { String(cString: $0) } ?? ""

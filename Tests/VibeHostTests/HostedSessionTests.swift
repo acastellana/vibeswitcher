@@ -33,11 +33,12 @@ final class SessionProbe {
 }
 
 struct HostedSessionTests {
-    func start(_ command: String?, keepShell: Bool = false, cwd: String = "/tmp", probe: SessionProbe) throws -> HostedSession {
+    func start(_ command: String?, keepShell: Bool = false, cwd: String = "/tmp", shell: String = "/bin/sh",
+               probe: SessionProbe) throws -> HostedSession {
         let request = SpawnRequest(cwd: cwd, command: command, env: ["PROBE": "yes"], cols: 80, rows: 24,
                                    keepShell: keepShell, label: "Test", agent: nil)
         return try probe.queue.sync {
-            let session = try HostedSession.spawn(request, shell: "/bin/sh", baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()],
+            let session = try HostedSession.spawn(request, shell: shell, launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()],
                                                   ringCapacity: 1 << 20, queue: probe.queue)
             probe.attach(session)
             return session
@@ -72,6 +73,19 @@ struct HostedSessionTests {
         #expect(tty.hasPrefix("ttys"))
         #expect(eventually { probe.text.contains("/dev/\(tty)") }, "\(probe.diagnosis(session))")   // the PTY is its terminal
         #expect(eventually { probe.lastChange?.exit?.status == 3 })
+        probe.queue.sync { session.close() }
+    }
+
+    /// The session scan finds agents by their controlling terminal: the PTY must be it, not just stdin.
+    @Test func thePTYIsTheControllingTerminal() throws {
+        let probe = SessionProbe()
+        // zsh, the usual login shell, doesn't claim a terminal itself (bash does).
+        let session = try start("echo ctty=$(ps -o tty= -p $$) tpgid=$(ps -o tpgid= -p $$ | tr -d ' ')", shell: "/bin/zsh",
+                                probe: probe)
+        let tty = probe.queue.sync { session.info.tty }
+        #expect(eventually { probe.text.contains("tpgid=") }, "\(probe.diagnosis(session))")
+        #expect(probe.text.contains("ctty=\(tty)"), "\(probe.diagnosis(session))")
+        #expect(!probe.text.contains("tpgid=0"))
         probe.queue.sync { session.close() }
     }
 

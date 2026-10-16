@@ -99,8 +99,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                                onQuit: { NSApp.terminate(nil) },
                                onRename: { [weak self] in self?.rename($0) },
                                onResetName: { [weak self] in self?.store.rename($0, to: nil) },
-                               onNewSession: { [weak self] in self?.newSession(agent: $0, in: $1) },
-                               onEditCommands: { [weak self] in self?.editLaunchCommands() },
+                               onNewSession: { [weak self] preset, folder in self?.newSession(preset: preset, in: folder) },
+                               presetsFor: { [weak self] folder in self?.preferences.presets.presets(for: folder) ?? [] },
+                               onEditCommands: { [weak self] in self?.showSettings(tab: .launch) },
                                onPhoneAccess: { [weak self] in self?.showPhoneAccess() },
                                onPause: { [weak self] in self?.store.pause($0, for: $1) },
                                onResume: { [weak self] in self?.store.resume($0) },
@@ -116,7 +117,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             store: store, state: PopoverState(), preferences: preferences,
             onOpen: { [weak self] in self?.open($0, source: "sidebar") }, onInstallHooks: sidebarView.onInstallHooks, onQuit: sidebarView.onQuit,
             onRename: sidebarView.onRename, onResetName: sidebarView.onResetName,
-            onNewSession: sidebarView.onNewSession, onEditCommands: sidebarView.onEditCommands,
+            onNewSession: sidebarView.onNewSession, presetsFor: sidebarView.presetsFor,
+            onEditCommands: sidebarView.onEditCommands,
             onPhoneAccess: sidebarView.onPhoneAccess, onPause: sidebarView.onPause, onResume: sidebarView.onResume,
             isSidebar: true, onOpenWindow: { [weak self] in self?.showMainWindow() },
             onSettings: { [weak self] in self?.showSettings(tab: .general) })))
@@ -209,6 +211,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                                                             queue: .main) { [weak self] note in
             guard let path = note.object as? String else { return }
             self?.captureWindows(to: path)
+        }
+        DistributedNotificationCenter.default().addObserver(forName: AppStatus.newSessionNotification, object: nil,
+                                                            queue: .main) { [weak self] note in
+            guard let self, let name = note.userInfo?["preset"] as? String, let folder = note.userInfo?["folder"] as? String,
+                  FileManager.default.fileExists(atPath: folder) else { return }
+            let presets = self.preferences.presets.presets(for: folder)
+            guard var preset = presets.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame })
+                    ?? presets.first(where: { $0.kind.rawValue == name.lowercased() }) else { return }
+            if note.userInfo?["terminal"] as? Bool == true { preset.place = .terminal }
+            self.startSession(preset, in: folder)
         }
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.settingsNotification, object: nil,
                                                             queue: .main) { [weak self] note in
@@ -452,6 +464,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     }
 
     func startSession(_ preset: LaunchPreset, in folder: String) {
+        guard preset.place == .window else { return Launcher.launch(line: LaunchPlan.terminalLine(for: preset, in: folder)) }
         hostClient.spawn(SpawnRequest(cwd: folder, command: LaunchPlan.command(for: preset), env: preset.env,
                                       cols: 120, rows: 36, keepShell: preset.keepShell, label: preset.name,
                                       agent: preset.agent?.rawValue)) { [weak self] result in
@@ -459,11 +472,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             case .success(let session):
                 self?.showMainWindow(select: session.id)
             case .failure(let error):
-                let alert = NSAlert()
-                alert.messageText = "Couldn't start the session"
-                alert.informativeText = error.message
-                NSApp.activate()
-                alert.runModal()
+                // The window can't take it: start it in Terminal as before, and say why.
+                Launcher.launch(line: LaunchPlan.terminalLine(for: preset, in: folder))
+                self?.notifier?.postInfo(title: "Started in Terminal instead",
+                                         body: "The VibeSwitcher window couldn't start it: \(error.message)")
             }
         }
     }
@@ -621,36 +633,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         NSApp.activate()
         if alert.runModal() == .alertFirstButtonReturn {
             store.rename(session, to: field.stringValue)
-        }
-    }
-
-    private func newSession(agent: Agent, in directory: String?) {
-        popover.performClose(nil)
-        guard let folder = directory ?? Launcher.chooseFolder(startingAt: popoverState.recentProjects.first
-            .map { ($0.path as NSString).deletingLastPathComponent }) else { return }
-        Launcher.launch(command: preferences.command(for: agent), in: folder)
-    }
-
-    private func editLaunchCommands() {
-        popover.performClose(nil)
-        let alert = NSAlert()
-        alert.messageText = "Launch commands"
-        alert.informativeText = "What “New session” runs in the new Terminal window. Add flags you always use, e.g. --model."
-        let claude = NSTextField(string: preferences.claudeCommand)
-        let codex = NSTextField(string: preferences.codexCommand)
-        let stack = NSStackView(views: [NSTextField(labelWithString: "Claude Code"), claude,
-                                        NSTextField(labelWithString: "Codex"), codex])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.frame = NSRect(x: 0, y: 0, width: 300, height: 110)
-        [claude, codex].forEach { $0.widthAnchor.constraint(equalToConstant: 300).isActive = true }
-        alert.accessoryView = stack
-        alert.addButton(withTitle: "Save")
-        alert.addButton(withTitle: "Cancel")
-        NSApp.activate()
-        if alert.runModal() == .alertFirstButtonReturn {
-            preferences.claudeCommand = claude.stringValue
-            preferences.codexCommand = codex.stringValue
         }
     }
 

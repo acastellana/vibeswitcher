@@ -17,7 +17,9 @@ struct PopoverView: View {
     let onQuit: () -> Void
     var onRename: (Session) -> Void = { _ in }
     var onResetName: (Session) -> Void = { _ in }
-    var onNewSession: (Agent, String?) -> Void = { _, _ in }
+    var onNewSession: (LaunchPreset, String?) -> Void = { _, _ in }
+    /// A folder's presets, its default first (nil: other folder).
+    var presetsFor: (String?) -> [LaunchPreset] = { _ in LaunchPresets.builtIns().global }
     var onEditCommands: () -> Void = {}
     var onPhoneAccess: () -> Void = {}
     var onPause: (Session, PauseStore.Duration) -> Void = { _, _ in }
@@ -139,21 +141,24 @@ struct PopoverView: View {
                 Section("Recent projects") {
                     ForEach(state.recentProjects, id: \.path) { project in
                         Menu(Self.menuLabel(for: project.path)) {
-                            Button("Claude Code") { onNewSession(.claude, project.path) }
-                            Button("Codex") { onNewSession(.codex, project.path) }
+                            ForEach(presetsFor(project.path)) { preset in
+                                Button(preset.name) { onNewSession(preset, project.path) }
+                            }
                         }
                     }
                 }
             }
             Menu("Other Folder…") {
-                Button("Claude Code") { onNewSession(.claude, nil) }
-                Button("Codex") { onNewSession(.codex, nil) }
+                ForEach(presetsFor(nil)) { preset in
+                    Button(preset.name) { onNewSession(preset, nil) }
+                }
             }
             Divider()
-            Button("Launch Commands…", action: onEditCommands)
+            Button("Launch Presets…", action: onEditCommands)
         } label: {
             Image(systemName: "plus.circle")
         }
+
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()

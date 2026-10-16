@@ -5,6 +5,9 @@ import VibeHost
 // The session host: keeps the window's sessions running while VibeSwitcher quits, crashes or updates.
 // The app starts it detached (its own session); it exits by itself once idle. One per user.
 
+// First: as the launcher of a session's program (posix_spawned by the host itself), nothing else runs.
+PTYSpawn.execIfLaunched(CommandLine.arguments)
+
 signal(SIGPIPE, SIG_IGN)
 signal(SIGHUP, SIG_IGN)
 
@@ -24,6 +27,7 @@ var config = HostServer.Config(
     socketPath: value(after: "--socket") ?? VibePaths.hostSocket.path,
     lockPath: value(after: "--lock") ?? VibePaths.hostLock.path,
     shell: shell,
+    launcher: Bundle.main.executablePath ?? arguments[0],
     baseEnvironment: environment.filter { inherited.contains($0.key) },
     hostBuild: HostBuild.id(ofExecutableAt: Bundle.main.executablePath ?? arguments[0]))
 config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600
