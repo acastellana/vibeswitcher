@@ -81,8 +81,8 @@ sessions outlive the app.
   Every connection is checked with `getpeereid`: other users are refused. Only VibeSwitcher.app
   connects; the phone goes through the app as today.
 - **Spawning a session.** `forkpty` with the requested size, then in the child: `cd` to the project,
-  set the environment, `exec $SHELL -l -c '<command>'` (login shell, so PATH from nvm, Homebrew, etc.
-  matches Terminal). Environment adds `TERM=xterm-256color`, `COLORTERM=truecolor`,
+  set the environment, `exec $SHELL -l -i -c '<command>'` (interactive login shell, so PATH set up in
+  `.zprofile` *and* `.zshrc` — nvm, Homebrew, etc. — matches Terminal). Environment adds `TERM=xterm-256color`, `COLORTERM=truecolor`,
   `TERM_PROGRAM=VibeSwitcher`, `VIBESWITCHER_SESSION=<id>`, plus the preset's variables. If the
   preset says "keep a shell after the agent exits", the command becomes `<command>; exec $SHELL -l`.
   A plain shell session is `exec $SHELL -l`.
@@ -142,8 +142,8 @@ re-attach), `bell {id}`. A `HostSession` record: `id` (UUID), `tty`, `childPID`,
 - **`SessionStore`**: window sessions still appear through the existing scan (their agent process runs
   on the host's tty, and the hooks report that tty). The store gets the hosted ttys from `HostClient`
   and, for those, uses the host's title instead of a Terminal tab's, and the host's screen text for
-  Claude's footer (background work). `Session` gains `location: .window(hostID) | .terminalApp |
-  .other` (replacing the `inTerminalApp` bool's uses). "Viewing" for a window session = main window is
+  Claude's footer (background work). `Session` gains `hostID: UUID?` (set for window sessions; `inTerminalApp` keeps
+  its meaning) and `agentSessionID` (the agent's own session id, for Resume). "Viewing" for a window session = main window is
   key and that session is selected. The window's list is `store.sessions` plus the hosted sessions
   the scan hasn't matched to an agent: plain shells, sessions whose agent has exited (kept shell or
   ended), and sessions started a moment ago whose agent the 2 s scan hasn't seen yet (shown as
