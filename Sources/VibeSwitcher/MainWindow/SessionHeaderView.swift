@@ -32,6 +32,7 @@ struct SessionHeaderView: View {
                     .fixedSize()
                     .help("More")
             } else {
+                Label("Start page", systemImage: "house").font(.system(size: 14, weight: .semibold))
                 Spacer()
                 hostState
             }

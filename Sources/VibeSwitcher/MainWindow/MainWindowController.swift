@@ -16,6 +16,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private let actions: WindowActions
     private let split = NSSplitViewController()
     private var inspectorItem: NSSplitViewItem!
+    private let palette = CommandPaletteController()
     private lazy var endedBar = NSHostingView(rootView: EndedBar(model: model, actions: actions))
     private var shownID: String?
     private var cancellables: Set<AnyCancellable> = []
@@ -168,6 +169,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     func windowWillClose(_ notification: Notification) {
         store.windowViewingTTY = nil
+        palette.close()
         NSApp.dockTile.badgeLabel = nil
         pane.detachAll()
         shownID = nil
@@ -246,6 +248,57 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     @objc func showHomeAction(_ sender: Any?) { model.showHome() }
+
+    @objc func showPaletteAction(_ sender: Any?) {
+        guard let window else { return }
+        if palette.isShown { return palette.close() }
+        palette.show(over: window, items: paletteItems())
+    }
+
+    /// Sessions (in attention order), window commands, then "New <preset> in <project>" for recent projects.
+    private func paletteItems() -> [PaletteItem] {
+        let now = Date()
+        let sessions = WindowGroups.attention(model.sections).flatMap(\.rows).map { row in
+            let state = row.state(now: now)
+            var subtitle = "\(row.project) · \(state.text)"
+            if let since = state.since { subtitle += " · \(Durations.compact(now.timeIntervalSince(since)))" }
+            return PaletteItem(id: row.id, title: row.title, subtitle: subtitle, icon: .mark(row.markKind, row.statusColor)) {
+                [weak self] in self?.model.selectedID = row.id
+            }
+        }
+        func command(_ title: String, _ symbol: String, _ keys: String, _ action: Selector) -> PaletteItem {
+            PaletteItem(id: "cmd:\(title)", title: title, subtitle: keys, icon: .symbol(symbol)) {
+                NSApp.sendAction(action, to: nil, from: nil)
+            }
+        }
+        let folder = selectedFolder.map { ($0 as NSString).lastPathComponent }
+        var commands = [
+            command("Next Session Needing You", "exclamationmark.bubble", "⌘J", #selector(nextNeedingYou(_:))),
+            command(folder.map { "New Session in \($0)" } ?? "New Session…", "plus", "⌘N", #selector(newSessionAction(_:))),
+            command(folder.map { "New Shell in \($0)" } ?? "New Shell…", "terminal", "⌥⌘N", #selector(newShellAction(_:))),
+            command("Start Page", "house", "⇧⌘H", #selector(showHomeAction(_:))),
+            command("Group by Attention", "exclamationmark.circle", "⌃⌘1", #selector(groupByAttention(_:))),
+            command("Group by Project", "folder", "⌃⌘2", #selector(groupByProjects(_:))),
+            command("Filter Sessions", "line.3.horizontal.decrease", "⌥⌘F", #selector(focusFilterAction(_:))),
+            command("Toggle Inspector", "sidebar.right", "⌥⌘0", #selector(toggleInspectorAction(_:))),
+            command("Toggle Sidebar", "sidebar.left", "⌃⌘S", #selector(NSSplitViewController.toggleSidebar(_:))),
+        ]
+        if model.selectedRow?.session?.inTerminalApp == true {
+            commands.insert(command("Open in Terminal", "arrow.up.forward.app", "⌘O", #selector(openInTerminalAction(_:))), at: 1)
+        }
+        commands.append(PaletteItem(id: "cmd:settings", title: "Settings…", subtitle: "⌘,", icon: .symbol("gearshape")) {
+            [weak self] in self?.actions.settings()
+        })
+        let launches = model.recentProjects.prefix(12).flatMap { path in
+            actions.presets(path).map { preset in
+                PaletteItem(id: "new:\(path):\(preset.id)", title: "New \(preset.name) in \((path as NSString).lastPathComponent)",
+                            subtitle: path.replacingOccurrences(of: NSHomeDirectory(), with: "~"), icon: .symbol("play.circle")) {
+                    [weak self] in self?.actions.newSession(preset, path)
+                }
+            }
+        }
+        return sessions + commands + launches
+    }
     @objc func groupByAttention(_ sender: Any?) { model.grouping = .attention }
     @objc func groupByProjects(_ sender: Any?) { model.grouping = .projects }
     @objc func focusFilterAction(_ sender: Any?) { model.focusFilter() }

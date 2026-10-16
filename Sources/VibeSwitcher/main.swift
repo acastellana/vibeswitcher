@@ -41,8 +41,11 @@ if let index = arguments.firstIndex(of: "--settings") {
                                                                  userInfo: nil, deliverImmediately: true)
     exit(0)
 }
-if arguments.contains("--window") {
-    DistributedNotificationCenter.default().postNotificationName(AppStatus.windowNotification, object: nil,
+if let index = arguments.firstIndex(of: "--window") {
+    // `--window [palette | home | select:TEXT]`: opens the window, optionally with the command palette, the start
+    // page, or the first session whose title, project or task contains TEXT.
+    let extra = arguments.indices.contains(index + 1) ? arguments[index + 1] : nil
+    DistributedNotificationCenter.default().postNotificationName(AppStatus.windowNotification, object: extra,
                                                                  userInfo: nil, deliverImmediately: true)
     exit(0)
 }

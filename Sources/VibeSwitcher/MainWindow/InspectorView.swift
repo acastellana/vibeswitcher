@@ -57,12 +57,13 @@ private struct OverviewView: View {
                 Section("Place") {
                     if let cwd = row.cwd {
                         LabeledContent("Folder") {
-                            Button(cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~")) {
+                            Button {
                                 NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: cwd)
+                            } label: {
+                                Text(cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~")).lineLimit(1).truncationMode(.head)
                             }
                             .buttonStyle(.link)
-                            .lineLimit(1).truncationMode(.head)
-                            .help("Reveal in Finder")
+                            .help("Reveal \(cwd) in Finder")
                         }
                     }
                     if let branch { LabeledContent("Branch", value: branch) }

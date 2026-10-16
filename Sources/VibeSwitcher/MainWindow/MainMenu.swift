@@ -63,6 +63,8 @@ enum MainMenu {
             item("Clear Scrollback", #selector(MainWindowController.clearScrollbackAction(_:)), "k", [.command, .shift]),
         ])
         submenu("Session", [
+            item("Command Palette…", #selector(MainWindowController.showPaletteAction(_:)), "k"),
+            .separator(),
             item("Next Session", #selector(MainWindowController.nextSession(_:)), down, [.command, .option]),
             item("Previous Session", #selector(MainWindowController.previousSession(_:)), up, [.command, .option]),
             item("Next Needing You", #selector(MainWindowController.nextNeedingYou(_:)), "j"),

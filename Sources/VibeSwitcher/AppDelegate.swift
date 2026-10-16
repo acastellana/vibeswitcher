@@ -211,7 +211,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .store(in: &cancellables)
         NSApp.mainMenu = MainMenu.build()
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.windowNotification, object: nil,
-                                                            queue: .main) { [weak self] _ in self?.showMainWindow() }
+                                                            queue: .main) { [weak self] note in
+            self?.showMainWindow()
+            switch note.object as? String {
+            case "palette": self?.mainWindow?.showPaletteAction(nil)
+            case "home": self?.windowModel.showHome()
+            case let text? where text.hasPrefix("select:"):
+                guard let model = self?.windowModel else { return }
+                let query = String(text.dropFirst("select:".count))
+                if let row = WindowGroups.filter(model.sections, query: query).first?.rows.first { model.selectedID = row.id }
+            default: break
+            }
+        }
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.captureNotification, object: nil,
                                                             queue: .main) { [weak self] note in
             guard let path = note.object as? String else { return }
@@ -424,6 +435,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             view.cacheDisplay(in: view.bounds, to: bitmap)
             let file = index == 0 ? path : (path as NSString).deletingPathExtension + "-\(index + 1).png"
             try? bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file))
+            // The view tree beside it (class, frame, hidden; a terminal's colors and first lines): the picture
+            // misses some layer-drawn content, such as the terminals' text.
+            var tree = ""
+            func describe(_ view: NSView, _ depth: Int) {
+                guard depth < 14 else { return }
+                tree += String(repeating: "  ", count: depth) + "\(type(of: view)) \(NSStringFromRect(view.frame))\(view.isHidden ? " hidden" : "")\n"
+                if let terminal = view as? HostTerminalView {
+                    let text = String(decoding: terminal.getTerminal().getBufferAsData(), as: UTF8.self)
+                        .split(separator: "\n").prefix(3).joined(separator: " | ")
+                    tree += String(repeating: "  ", count: depth + 1)
+                        + "background \(terminal.nativeBackgroundColor) layer \(terminal.layer?.backgroundColor.map { "\($0)" } ?? "none") text: \(text)\n"
+                }
+                view.subviews.forEach { describe($0, depth + 1) }
+            }
+            describe(view, 0)
+            try? tree.write(toFile: (file as NSString).deletingPathExtension + ".txt", atomically: true, encoding: .utf8)
         }
     }
 
@@ -433,7 +460,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             controller.onFontSize = { [weak self] step in self?.changeFontSize(step) }
             controller.pane.configure = { [weak self] view in
                 guard let self else { return }
-                let dark = view.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                // A new view isn't in the window yet, and on its own it reports the light appearance.
+                let dark = (view.window ?? self.mainWindow?.window)?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
                 view.apply(self.preferences.appearance, darkMode: dark)
             }
             controller.pane.scrollbackLines = preferences.appearance.scrollbackLines

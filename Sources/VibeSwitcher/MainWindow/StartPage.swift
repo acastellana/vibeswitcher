@@ -46,7 +46,7 @@ private struct ProjectRow: View {
         HStack(spacing: 12) {
             Image(systemName: "folder.fill").font(.system(size: 18)).foregroundStyle(.secondary).frame(width: 20)
             VStack(alignment: .leading, spacing: 1) {
-                Text((path as NSString).lastPathComponent).font(.system(size: 13, weight: .semibold))
+                Text((path as NSString).lastPathComponent).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 Text(path.replacingOccurrences(of: NSHomeDirectory(), with: "~")).font(.system(size: 11)).foregroundStyle(.secondary)
                     .lineLimit(1).truncationMode(.middle)
             }

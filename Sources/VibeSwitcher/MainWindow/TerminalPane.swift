@@ -43,9 +43,11 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     static let inset = NSSize(width: 10, height: 6)
 
     override func loadView() {
-        view = NSView()
-        view.wantsLayer = true
+        view = MarginView()
     }
+
+    /// The margin around the terminal, painted in the terminal's background color.
+    private var margin: MarginView { view as! MarginView }
 
     var currentView: HostTerminalView? { current.flatMap { views[$0] } }
 
@@ -55,7 +57,7 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         views.values.forEach { $0.isHidden = true }
         let terminal = views[hostID] ?? makeView(for: hostID)
         terminal.isHidden = false
-        view.layer?.backgroundColor = terminal.nativeBackgroundColor.cgColor
+        margin.color = terminal.nativeBackgroundColor
         current = hostID
         recent.removeAll { $0 == hostID }
         recent.insert(hostID, at: 0)
@@ -68,7 +70,7 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         current = nil
         placeholder?.removeFromSuperview()
         let hosting = NSHostingView(rootView: content)
-        view.layer?.backgroundColor = nil
+        margin.color = nil
         pin(hosting)
         placeholder = hosting
     }
@@ -90,7 +92,7 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
 
     func reconfigureAll() {
         views.values.forEach(configure)
-        if let currentView { view.layer?.backgroundColor = currentView.nativeBackgroundColor.cgColor }
+        if let currentView { margin.color = currentView.nativeBackgroundColor }
     }
 
     func focus() {
@@ -170,6 +172,16 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     func scrolled(source: TerminalView, position: Double) {}
     func iTermContent(source: TerminalView, content: ArraySlice<UInt8>) {}
     func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
+}
+
+private final class MarginView: NSView {
+    var color: NSColor? { didSet { needsDisplay = true } }
+
+    override func draw(_ dirtyRect: NSRect) {
+        guard let color else { return }
+        color.setFill()
+        dirtyRect.fill()
+    }
 }
 
 /// Shown for a session that runs in Terminal.app: its screen, re-read every 2 s while shown, and a way
