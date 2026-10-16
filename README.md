@@ -38,8 +38,14 @@ desktop. It hides itself and slides in when the mouse touches the middle of the 
 mouse leaves (turn off auto-hide to keep it docked). Click a session to go to it, like the menu bar list.
 When you switch desktops it slides in for a moment, with the session(s) on the new desktop framed.
 
-**The window** (⌘-click the menu bar icon, the window button in the list, or `VibeSwitcher --window`): every
-session grouped by project on the left, the selected one's live terminal in the middle, details on the right.
+**The window** (⌘-click the menu bar icon, the window button in the list, or `VibeSwitcher --window`): a
+cockpit for all your sessions. The list on the left puts first what needs you (Needs you, Working, Ready, Idle,
+with how long each has been in that state), or groups by project; filter it with ⌥⌘F. The middle shows the
+selected session's live terminal, or for a session running in Terminal, a read-only mirror of its screen with
+Open in Terminal (⌘O). The right shows its Overview (status, folder and branch, times, session id) or its
+Activity: your prompts, the agent's replies and the tools it ran, from its transcript. ⌘K jumps to any session
+or command, or starts a preset in a recent project; ⌘J goes to the next session needing you, ⌘1–9 to a session,
+⇧⌘H to the start page (recent projects with their presets). The Dock badge counts sessions waiting on you.
 New sessions (⊕, ⌘N) start **in the window** by default: VibeSwitcher runs them itself, in a small background
 process (`vibeswitcher-host`) that keeps them going when VibeSwitcher quits, crashes or updates; reopening the
 window reattaches them. ⌥⌘N opens a plain shell in the same project. Sessions you still run in Terminal are
@@ -182,11 +188,12 @@ VibeSwitcher --open ttys012    # ask the running app to open a session (same pat
 VibeSwitcher --focus ttys012   # select a Terminal tab directly (no activation handling)
 VibeSwitcher --snapshot /tmp   # render popover + menu bar icon PNGs from live data
 VibeSwitcher --new claude ~/dev/app   # start a preset (name, or claude/codex/shell) there; --terminal: in Terminal
-VibeSwitcher --window                 # open the window
+VibeSwitcher --window [palette|home]  # open the window (with the command palette, or on the start page)
+VibeSwitcher --window select:genswap  # … and select the first session matching the text
 VibeSwitcher --settings launch        # open Settings (general, launch or terminal)
 VibeSwitcher --install-hooks | --uninstall-hooks
 cat ~/.vibeswitcher/app-status.json   # debug aid: what the running app currently sees
-VibeSwitcher --capture-window ~/w.png # debug aid: the running app draws its windows into PNGs
+VibeSwitcher --capture-window ~/w.png # debug aid: the running app draws its windows into PNGs (+ view tree .txt)
 ```
 
 (`VibeSwitcher` = `/Applications/VibeSwitcher.app/Contents/MacOS/VibeSwitcher`.)
