@@ -5,7 +5,7 @@ import VibeCore
 
 /// The main window: sessions by project | the selected session's terminal | inspector.
 /// While it's open the app is a regular app (Dock icon, ⌘-Tab); closing it goes back to menu bar only.
-final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate {
+final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolbarDelegate, NSMenuItemValidation {
     let model: WindowModel
     let pane: TerminalPaneController
     /// ⌘+ (1), ⌘− (−1), ⌘0 (0 = default size).
@@ -29,6 +29,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
                               styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
                               backing: .buffered, defer: false)
         window.title = "VibeSwitcher"
+        // The session bar shows the title; the window's title still names the session in ⌘` and Mission Control.
+        window.titleVisibility = .hidden
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 760, height: 420)
         super.init(window: window)
@@ -90,7 +92,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             view.translatesAutoresizingMaskIntoConstraints = false
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
-        header.heightAnchor.constraint(equalToConstant: 40).isActive = true
+        header.heightAnchor.constraint(equalToConstant: 52).isActive = true
         pane.view.setContentHuggingPriority(.defaultLow, for: .vertical)
         // The window's content runs under the toolbar; start below it.
         let container = NSView()
@@ -116,7 +118,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     private func showSelection() {
         guard window?.isVisible == true else { return }
-        defer { updateViewing() }
+        defer {
+            updateViewing()
+            updateTitleAndBadge()
+        }
         guard let row = model.selectedRow else {
             guard shownID != "" else { return }
             shownID = ""
@@ -131,6 +136,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             }))
         }
         shownID = row.id
+    }
+
+    /// The window's title names the selected session; the Dock badge counts sessions waiting on you.
+    private func updateTitleAndBadge() {
+        window?.title = model.selectedRow.map { "\($0.title) — \($0.project)" } ?? "VibeSwitcher"
+        guard window?.isVisible == true else { return }
+        let waiting = model.allRows.filter { $0.state(now: Date()).group == .needsYou }.count
+        NSApp.dockTile.badgeLabel = waiting > 0 ? "\(waiting)" : nil
     }
 
     private func updateViewing() {
@@ -149,6 +162,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     func windowWillClose(_ notification: Notification) {
         store.windowViewingTTY = nil
+        NSApp.dockTile.badgeLabel = nil
         pane.detachAll()
         shownID = nil
         NSApp.setActivationPolicy(.accessory)
@@ -203,6 +217,25 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         inspectorItem.animator().isCollapsed.toggle()
         // The animator proxy already reports the new value.
         UserDefaults.standard.set(inspectorItem.isCollapsed, forKey: "inspectorCollapsed")
+    }
+
+    func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(groupByAttention(_:)): menuItem.state = model.grouping == .attention ? .on : .off
+        case #selector(groupByProjects(_:)): menuItem.state = model.grouping == .projects ? .on : .off
+        case #selector(openInTerminalAction(_:)): return model.selectedRow?.session?.inTerminalApp == true
+        default: break
+        }
+        return true
+    }
+
+    @objc func groupByAttention(_ sender: Any?) { model.grouping = .attention }
+    @objc func groupByProjects(_ sender: Any?) { model.grouping = .projects }
+    @objc func focusFilterAction(_ sender: Any?) { model.focusFilter() }
+
+    @objc func openInTerminalAction(_ sender: Any?) {
+        guard let session = model.selectedRow?.session, session.inTerminalApp else { return NSSound.beep() }
+        actions.openInTerminal(session)
     }
 
     @objc func biggerFont(_ sender: Any?) { onFontSize(1) }

@@ -49,6 +49,10 @@ enum MainMenu {
                  tag: Int(NSFindPanelAction.setFindString.rawValue)),
         ])
         submenu("View", [
+            item("Group by Attention", #selector(MainWindowController.groupByAttention(_:)), "1", [.command, .control]),
+            item("Group by Project", #selector(MainWindowController.groupByProjects(_:)), "2", [.command, .control]),
+            item("Filter Sessions", #selector(MainWindowController.focusFilterAction(_:)), "f", [.command, .option]),
+            .separator(),
             item("Toggle Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "s", [.command, .control]),
             item("Toggle Inspector", #selector(MainWindowController.toggleInspectorAction(_:)), "0", [.command, .option]),
             .separator(),
@@ -56,12 +60,13 @@ enum MainMenu {
             item("Smaller", #selector(MainWindowController.smallerFont(_:)), "-"),
             item("Default Size", #selector(MainWindowController.actualSizeFont(_:)), "0"),
             .separator(),
-            item("Clear Scrollback", #selector(MainWindowController.clearScrollbackAction(_:)), "k"),
+            item("Clear Scrollback", #selector(MainWindowController.clearScrollbackAction(_:)), "k", [.command, .shift]),
         ])
         submenu("Session", [
             item("Next Session", #selector(MainWindowController.nextSession(_:)), down, [.command, .option]),
             item("Previous Session", #selector(MainWindowController.previousSession(_:)), up, [.command, .option]),
             item("Next Needing You", #selector(MainWindowController.nextNeedingYou(_:)), "j"),
+            item("Open in Terminal", #selector(MainWindowController.openInTerminalAction(_:)), "o"),
             .separator(),
         ] + (1...9).map { item("Session \($0)", #selector(MainWindowController.selectSessionByTag(_:)), "\($0)", tag: $0) })
         submenu("Window", [
