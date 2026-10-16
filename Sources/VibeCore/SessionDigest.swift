@@ -52,6 +52,7 @@ public enum SessionDigest {
 public enum HostCall {
     public struct Failure: Error, CustomStringConvertible {
         public var description: String
+        public init(description: String) { self.description = description }
     }
 
     /// The host's sessions (from its welcome).

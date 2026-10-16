@@ -9,7 +9,7 @@ APP="build/VibeSwitcher.app"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
-cp "$BIN/VibeSwitcher" "$BIN/vibeswitcher-hook" "$BIN/vibeswitcher-host" "$APP/Contents/MacOS/"
+cp "$BIN/VibeSwitcher" "$BIN/vibeswitcher-hook" "$BIN/vibeswitcher-host" "$BIN/vibeswitcher-mcp" "$APP/Contents/MacOS/"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 # The phone web app (Phone Access), served by the app itself.
 mkdir -p "$APP/Contents/Resources"
@@ -39,6 +39,7 @@ else
 fi
 codesign --force "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-hook"
 codesign --force "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-host"
+codesign --force "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-mcp"
 codesign --force "${IDENTITY[@]}" "$APP"
 echo "Built $APP"
 
