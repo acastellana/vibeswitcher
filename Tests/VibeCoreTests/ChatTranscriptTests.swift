@@ -84,7 +84,7 @@ struct ChatTranscriptTests {
             .edit(path: "/x/B.swift", changes: [ChatEditChange(old: "1", new: "2"), ChatEditChange(old: "3", new: "4")]),
             .write(path: "/x/C.md", content: "# Hi"),
             .read(path: "/x/D.swift"),
-            .questions([ChatQuestion(question: "Which?", options: ["A", "B"])]),
+            .questions([ChatQuestion(question: "Which?", options: ["A", "B"], header: "Pick")]),
             .agent(description: "Review", prompt: "Check it"),
             .fields([ChatField(name: "prompt", value: "sum"), ChatField(name: "url", value: "https://x.dev")]),
         ])

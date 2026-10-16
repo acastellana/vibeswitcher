@@ -44,7 +44,11 @@ final class ChatModel: ObservableObject {
     @Published private(set) var steering: [SteerMessage] = []
     private var steeringTTY: String?
     /// A numbered choice on the session's screen (permission prompt, question), and its permission mode.
-    @Published var menu: ScreenMenu?
+    @Published var menu: ScreenMenu? {
+        didSet { if menu != oldValue, oldValue != nil { answerNotice = nil } }
+    }
+    /// Shown on the answer card ("that question changed").
+    @Published var answerNotice: String?
     @Published var mode: AgentMode?
     /// What `/` and `@` complete to, for the session's folder.
     @Published private(set) var commands: [SlashCommand] = []

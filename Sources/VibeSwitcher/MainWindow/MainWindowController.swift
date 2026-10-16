@@ -30,7 +30,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
                                   steer: { [weak self] text in self?.steerSelected(text) ?? false },
                                   stop: { [weak self] in self?.sendKeys([27]) },
                                   cycleMode: { [weak self] in self?.sendKeys(AgentMode.cycleKey) }),
-        choose: { [weak self] index in self?.chooseMenuOption(index) },
+        choose: { [weak self] index, typing in self?.chooseMenuOption(index, typing: typing) },
+        moveTab: { [weak self] delta in
+            guard delta != 0 else { return }
+            self?.sendKeys(Array(repeating: delta > 0 ? [27, 91, 67] : [27, 91, 68], count: abs(delta)).flatMap { $0 })
+        },
         showTerminal: { [weak self] in self?.model.showsChat = false }))
     /// Follows the transcript while the chat is on screen.
     private var chatTimer: Timer?
@@ -276,12 +280,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     /// Answers the menu on screen: arrows from where its cursor is, then Enter.
-    private func chooseMenuOption(_ index: Int) {
+    private func chooseMenuOption(_ index: Int, typing: String? = nil) {
         guard let row = model.selectedRow, let id = row.hostID, let menu = chat.menu else { return }
-        // Read again right before: the menu may have changed or gone.
+        // Read again right before: the question may have changed or gone, and an answer must not land on another one.
         readScreen()
-        guard chat.menu == menu else { return NSSound.beep() }
-        write(menu.keys(toChoose: index), to: id)
+        guard chat.menu == menu else {
+            chat.answerNotice = chat.menu == nil ? "That question is gone." : "That question changed; here it is now."
+            return
+        }
+        write(typing.map { menu.keys(toChoose: index, typing: $0) } ?? menu.keys(toChoose: index), to: id)
         chat.menu = nil
         chat.scrollToBottom()
     }

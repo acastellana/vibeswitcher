@@ -9,8 +9,10 @@ struct ChatContainer: View {
     let actions: WindowActions
     /// Typing into the selected window session.
     let composer: ComposerActions
-    /// Picks option N of the menu on the session's screen.
-    let choose: (Int) -> Void
+    /// Picks option N of the menu on the session's screen (typing an answer for a free-text option).
+    let choose: (Int, String?) -> Void
+    /// Moves between a question's tabs (→ / ←).
+    let moveTab: (Int) -> Void
     let showTerminal: () -> Void
 
     var body: some View {
@@ -18,7 +20,7 @@ struct ChatContainer: View {
             if chat.searchActive { ChatSearchBar(chat: chat) }
             if let todos = chat.log.todos, todos.contains(where: { $0.status != .done }) { TodoPanel(todos: todos) }
             ChatView(chat: chat, row: model.selectedRow, live: model.selectedRow.map(actions.isLive) == true && model.selectedRow?.hostID != nil,
-                     showTerminal: showTerminal, choose: choose, resend: { _ = composer.send($0) })
+                     showTerminal: showTerminal, choose: choose, moveTab: moveTab, resend: { _ = composer.send($0) })
                 .id(chat.path ?? "")
                 .environment(\.chatFolder, model.selectedRow?.cwd)
             Divider()
@@ -58,7 +60,8 @@ struct ChatView: View {
     /// A window session you can type into (answer cards, Send Again).
     let live: Bool
     let showTerminal: () -> Void
-    let choose: (Int) -> Void
+    let choose: (Int, String?) -> Void
+    let moveTab: (Int) -> Void
     let resend: (String) -> Void
     @State private var atBottom = true
     @State private var viewing: ChatImage?
@@ -117,7 +120,8 @@ struct ChatView: View {
                                 .padding(.leading, 60).padding(.bottom, 10)
                         }
                         if live, let menu = chat.menu {
-                            AnswerCard(menu: menu, agent: row?.session?.agent.displayName ?? "The agent", choose: choose, showTerminal: showTerminal)
+                            AnswerCard(menu: menu, pending: chat.log.pendingQuestions, agent: row?.session?.agent.displayName ?? "The agent",
+                                       notice: chat.answerNotice, choose: choose, moveTab: moveTab, showTerminal: showTerminal)
                         } else if let row {
                             LiveStateView(row: row, showTerminal: showTerminal)
                         }
@@ -367,47 +371,135 @@ private struct TerminalReplyHint: View {
 }
 
 
-/// A numbered choice on the session's screen, as buttons: one click answers it in the terminal.
+/// A question on the session's screen (AskUserQuestion, a permission prompt, a picker), as buttons. What the
+/// screen shows decides the options; the question's own input adds headers and descriptions. One click answers it
+/// in the terminal, the way you would with the keys.
 private struct AnswerCard: View {
     let menu: ScreenMenu
+    /// The AskUserQuestion still waiting, when that's what's on screen.
+    let pending: [ChatQuestion]?
     let agent: String
-    let choose: (Int) -> Void
+    let notice: String?
+    let choose: (_ index: Int, _ typing: String?) -> Void
+    let moveTab: (_ delta: Int) -> Void
     let showTerminal: () -> Void
+    @State private var otherText = ""
+    @State private var typingOther = false
+
+    private var question: ChatQuestion? {
+        guard let pending else { return nil }
+        let questionTabs = menu.tabs.filter { $0.title != "Submit" }
+        return pending.indices.contains(menu.currentTab ?? 0) && !questionTabs.isEmpty ? pending[menu.currentTab ?? 0] : pending.first
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        let questionTabs = menu.tabs.filter { $0.title != "Submit" }
+        VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "questionmark.bubble.fill").foregroundStyle(Color.accentColor).font(.system(size: 15))
                 Text("\(agent) is asking").font(.system(size: 13, weight: .semibold))
+                if questionTabs.count > 1, let current = menu.currentTab {
+                    Text("Question \(min(current, questionTabs.count - 1) + 1) of \(questionTabs.count)")
+                        .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                }
                 Spacer()
-                Button("Show Terminal", action: showTerminal).buttonStyle(.borderless).font(.system(size: 11.5))
+                Button("Answer in Terminal", action: showTerminal).buttonStyle(.borderless).font(.system(size: 11.5))
             }
-            if !menu.question.isEmpty {
-                Text(menu.question).font(.system(size: 12.5)).foregroundStyle(.secondary).textSelection(.enabled)
+            if menu.tabs.count > 1 {
+                HStack(spacing: 6) {
+                    ForEach(Array(menu.tabs.enumerated()), id: \.offset) { index, tab in
+                        Button { moveTab(index - (menu.currentTab ?? 0)) } label: {
+                            Label(tab.title, systemImage: tab.done ? "checkmark.circle.fill" : "circle")
+                                .font(.system(size: 11.5, weight: index == menu.currentTab ? .semibold : .regular))
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(index == menu.currentTab ? Color.accentColor : .secondary)
+                    }
+                }
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                if let header = question?.header, menu.tabs.isEmpty {
+                    Text(header.uppercased()).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.secondary)
+                }
+                Text(question?.question ?? menu.question).font(.system(size: 14, weight: .semibold)).textSelection(.enabled)
                     .fixedSize(horizontal: false, vertical: true)
+                if question?.multiSelect == true {
+                    Text("Choose any that apply, then Submit.").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                }
             }
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(Array(menu.options.enumerated()), id: \.offset) { index, option in
-                    Button { choose(index) } label: {
-                        HStack(spacing: 8) {
-                            Text("\(index + 1)").font(.system(size: 11, weight: .bold).monospacedDigit())
-                                .frame(width: 18, height: 18).background(Circle().fill(Color.accentColor.opacity(0.18)))
-                            Text(option).font(.system(size: 12.5)).multilineTextAlignment(.leading)
-                            Spacer(minLength: 0)
+                    if isOther(option) {
+                        otherRow(index)
+                    } else if isChat(option) {
+                        Button { choose(index, nil) } label: {
+                            Label("Discuss it instead of answering", systemImage: "bubble.left.and.bubble.right").font(.system(size: 12))
                         }
-                        .padding(.horizontal, 10).padding(.vertical, 7)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(index == menu.selected ? Color.accentColor.opacity(0.12)
-                                                                                                  : Color.secondary.opacity(0.07)))
-                        .contentShape(Rectangle())
+                        .buttonStyle(.borderless).padding(.top, 2)
+                    } else {
+                        optionButton(index, option)
                     }
-                    .buttonStyle(.plain)
                 }
             }
+            if let notice {
+                Label(notice, systemImage: "exclamationmark.triangle").font(.system(size: 11.5)).foregroundStyle(.orange)
+            }
         }
-        .padding(14)
+        .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor.opacity(0.45)))
     }
+
+    private func optionButton(_ index: Int, _ option: String) -> some View {
+        let description = menu.descriptions.indices.contains(index) ? menu.descriptions[index] : nil
+        let fromInput = question.flatMap { q in q.options.firstIndex(of: option).flatMap { q.descriptions.indices.contains($0) ? q.descriptions[$0] : nil } }
+        let detail = description ?? fromInput
+        return Button { choose(index, nil) } label: {
+            HStack(alignment: .top, spacing: 10) {
+                Text("\(index + 1)").font(.system(size: 11, weight: .bold).monospacedDigit())
+                    .frame(width: 20, height: 20).background(Circle().fill(Color.accentColor.opacity(0.18)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(option).font(.system(size: 13, weight: .medium)).multilineTextAlignment(.leading)
+                    if let detail, detail != option {
+                        Text(detail).font(.system(size: 11.5)).foregroundStyle(.secondary).multilineTextAlignment(.leading)
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 9)
+            .background(RoundedRectangle(cornerRadius: 9).fill(index == menu.selected ? Color.accentColor.opacity(0.12)
+                                                                                      : Color.secondary.opacity(0.07)))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    @ViewBuilder private func otherRow(_ index: Int) -> some View {
+        if typingOther {
+            HStack(spacing: 8) {
+                TextField("Your answer", text: $otherText).textFieldStyle(.roundedBorder)
+                    .onSubmit { sendOther(index) }
+                Button("Answer") { sendOther(index) }.buttonStyle(.borderedProminent)
+                    .disabled(otherText.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        } else {
+            Button { typingOther = true } label: {
+                Label("Other…", systemImage: "square.and.pencil").font(.system(size: 12.5))
+            }
+            .buttonStyle(.borderless)
+        }
+    }
+
+    private func sendOther(_ index: Int) {
+        let text = otherText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        choose(index, text)
+        otherText = ""
+        typingOther = false
+    }
+
+    private func isOther(_ option: String) -> Bool { option.lowercased().hasPrefix("type something") }
+    private func isChat(_ option: String) -> Bool { option.lowercased().hasPrefix("chat about this") }
 }
 
 /// The current to-do list or plan steps, pinned above the conversation while any is open.

@@ -64,3 +64,43 @@ struct ScreenMenuTests {
         #expect(AgentMode.cycleKey == [27, 91, 90])
     }
 }
+
+struct QuestionScreenTests {
+    /// Exactly as the fruit question's screen reads (descriptions flush left, the last option under a rule).
+    let single = ["⏺ I'll ask you which fruit you want using the AskUserQuestion tool.",
+                  "────────────────────────────────────────", "☐ Fruit", "", "Which fruit do you want?", "",
+                  "❯ 1. Apple", "A crisp apple.", "2. Pear", "A sweet pear.", "3. Plum", "A juicy plum.", "4. Type something.",
+                  "────────────────────────────────────────", "5. Chat about this", "",
+                  "Enter to select · ↑/↓ to navigate · Esc to cancel"]
+
+    /// The first of two questions (descriptions indented, tabs on top).
+    let multi = ["⏺ I'll ask both questions in one prompt, then report back what you picked.",
+                 "────────────────────────────────────────", "←  ☐ Fruit  ☐ Toppings  ✔ Submit  →", "Which fruit?",
+                 "❯ 1. Apple", "Apple", "2. Pear", "Pear", "3. Plum", "Plum", "4. Type something.",
+                 "────────────────────────────────────────", "5. Chat about this",
+                 "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"]
+
+    @Test func optionsWithDescriptionsAndOneBelowARule() throws {
+        let menu = try #require(ScreenMenu.parse(single))
+        #expect(menu.options == ["Apple", "Pear", "Plum", "Type something.", "Chat about this"])
+        #expect(menu.descriptions == ["A crisp apple.", "A sweet pear.", "A juicy plum.", nil, nil])
+        #expect(menu.selected == 0)
+        #expect(menu.question == "☐ Fruit\nWhich fruit do you want?")
+    }
+
+    @Test func tabsTellWhichQuestionThisIs() throws {
+        let menu = try #require(ScreenMenu.parse(multi))
+        #expect(menu.options.first == "Apple")
+        #expect(menu.question == "Which fruit?")
+        #expect(menu.tabs == [ScreenMenu.Tab(title: "Fruit", done: false), ScreenMenu.Tab(title: "Toppings", done: false),
+                              ScreenMenu.Tab(title: "Submit", done: true)])
+        #expect(menu.currentTab == 0)
+        #expect(menu.hint == "Enter to select · Tab/Arrow keys to navigate · Esc to cancel")
+    }
+
+    @Test func freeTextAnswersNavigateThenTypeThenEnter() {
+        let menu = ScreenMenu(question: "", options: ["Apple", "Type something."], selected: 0)
+        let writes = menu.keys(toChoose: 1, typing: "Mango")
+        #expect(writes.map(\.bytes) == [[27, 91, 66], Array("Mango".utf8), [13]])
+    }
+}

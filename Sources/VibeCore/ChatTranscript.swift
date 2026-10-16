@@ -22,9 +22,16 @@ public struct ChatEditChange: Equatable, Sendable {
 public struct ChatQuestion: Equatable, Sendable {
     public var question: String
     public var options: [String]
-    public init(question: String, options: [String]) {
+    /// The short label Claude shows on the question's tab ("Fruit").
+    public var header: String?
+    public var descriptions: [String?]
+    public var multiSelect: Bool
+    public init(question: String, options: [String], header: String? = nil, descriptions: [String?]? = nil, multiSelect: Bool = false) {
         self.question = question
         self.options = options
+        self.header = header
+        self.descriptions = descriptions ?? Array(repeating: nil, count: options.count)
+        self.multiSelect = multiSelect
     }
 }
 
@@ -144,6 +151,16 @@ public struct ChatLog: Equatable, Sendable {
     private var countedMessages: Set<String> = []
 
     public init() {}
+
+    /// The questions of an AskUserQuestion still waiting for an answer (the last one without a result).
+    public var pendingQuestions: [ChatQuestion]? {
+        for entry in entries.reversed() {
+            if case .tool(let tool) = entry.kind, case .questions(let questions) = tool.detail {
+                return tool.result == nil ? questions : nil
+            }
+        }
+        return nil
+    }
 
     /// The latest to-do list or plan steps.
     public var todos: [ChatTodo]? {
@@ -351,8 +368,12 @@ public enum ChatReader {
         case "AskUserQuestion":
             if let questions = input["questions"] as? [[String: Any]] {
                 return .questions(questions.map { question in
-                    ChatQuestion(question: question["question"] as? String ?? "",
-                                 options: (question["options"] as? [[String: Any]] ?? []).compactMap { $0["label"] as? String })
+                    let options = question["options"] as? [[String: Any]] ?? []
+                    return ChatQuestion(question: question["question"] as? String ?? "",
+                                        options: options.compactMap { $0["label"] as? String },
+                                        header: question["header"] as? String,
+                                        descriptions: options.filter { $0["label"] is String }.map { $0["description"] as? String },
+                                        multiSelect: question["multiSelect"] as? Bool ?? false)
                 })
             }
         case "Task", "Agent":
