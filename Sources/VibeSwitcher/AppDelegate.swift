@@ -6,6 +6,8 @@ import VibeCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NSPopoverDelegate {
     private let store = SessionStore()
+    /// The session host that runs the window's sessions.
+    let hostClient = HostClient()
     private let popoverState = PopoverState()
     private let preferences = Preferences()
     /// Notifications need an app bundle; `swift run` (no bundle) runs without them instead of crashing.
@@ -42,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         terminationSignal?.resume()
         HookBinary.sync()
         VibePaths.ensurePrivateDirectories()
+        hostClient.connectIfRunning()
         preferences.setUpLoginItemOnFirstLaunch()
         notifier?.requestAuthorization()
         notifier?.onOpen = { [weak self] tty in
@@ -151,6 +154,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                     if self.popover.isShown { self.fitPopover() }
                 }
             }
+            .store(in: &cancellables)
+
+        hostClient.$state
+            .receive(on: RunLoop.main)
+            .sink { state in AppStatus.extras["host"] = "\(state)" }
             .store(in: &cancellables)
 
         hotKey = HotKey(keyCode: kVK_ANSI_V, modifiers: controlKey | optionKey) { [weak self] in
