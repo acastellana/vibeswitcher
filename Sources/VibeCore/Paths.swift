@@ -12,6 +12,12 @@ public enum VibePaths {
     public static var binDir: URL { root.appendingPathComponent("bin") }
     /// Stable location referenced from the Claude/Codex hook configs (independent of where the .app lives).
     public static var hookBinary: URL { binDir.appendingPathComponent("vibeswitcher-hook") }
+    /// The session host's socket, lock and log (see `HostServer`).
+    public static var hostSocket: URL { root.appendingPathComponent("host.sock") }
+    public static var hostLock: URL { root.appendingPathComponent("host.lock") }
+    public static var hostLog: URL { root.appendingPathComponent("host.log") }
+    /// Launch presets (see `LaunchPresets`).
+    public static var presetsFile: URL { root.appendingPathComponent("presets.json") }
 
     /// Creates `~/.vibeswitcher` and its state folder private to you (0700), fixing older installs too.
     public static func ensurePrivateDirectories() {

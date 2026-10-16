@@ -1,0 +1,238 @@
+import Foundation
+
+/// The app ⇄ session host protocol. See docs/superpowers/specs/2026-10-16-ide-window-session-host-design.md.
+public enum HostProtocol {
+    /// Bumped whenever a message changes shape; app and host talk only when theirs match.
+    public static let version = 1
+}
+
+/// Framing on the socket: a 4-byte big-endian length (kind byte + payload), the kind byte, the payload.
+public enum HostFrame {
+    public enum Kind: UInt8, Sendable {
+        /// A JSON `HostRequestEnvelope` (app → host) or `HostEventEnvelope` (host → app).
+        case control = 0
+        /// Bytes a session printed: 16-byte session UUID, then the bytes.
+        case output = 1
+    }
+
+    /// Largest payload a frame may carry (the kind byte not counted).
+    public static let maxPayload = 1 << 20
+
+    public static func encode(_ kind: Kind, _ payload: Data) -> Data {
+        precondition(payload.count <= maxPayload, "frame payload too large")
+        var length = UInt32(payload.count + 1).bigEndian
+        var frame = Data(bytes: &length, count: 4)
+        frame.append(kind.rawValue)
+        frame.append(payload)
+        return frame
+    }
+
+    /// One session's output as frames no larger than `maxPayload`. Nothing for no bytes.
+    public static func output(session: UUID, bytes: Data) -> [Data] {
+        let id = withUnsafeBytes(of: session.uuid) { Data($0) }
+        let room = maxPayload - id.count
+        var frames: [Data] = []
+        var start = bytes.startIndex
+        while start < bytes.endIndex {
+            let end = bytes.index(start, offsetBy: min(room, bytes.endIndex - start))
+            frames.append(encode(.output, id + bytes[start..<end]))
+            start = end
+        }
+        return frames
+    }
+
+    public static func parseOutput(_ payload: Data) -> (UUID, Data)? {
+        guard payload.count >= 16 else { return nil }
+        let b = [UInt8](payload.prefix(16))
+        let id = UUID(uuid: (b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7],
+                             b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]))
+        return (id, Data(payload.dropFirst(16)))
+    }
+}
+
+/// Collects bytes from the socket and hands out complete frames.
+public struct HostFrameDecoder {
+    /// The stream is corrupt: drop the connection.
+    public enum Failure: Error, Equatable {
+        case oversize(Int)
+        case badKind(UInt8)
+        case emptyFrame
+    }
+
+    private var buffer = Data()
+    private var offset = 0
+
+    public init() {}
+
+    public mutating func append(_ data: Data) {
+        // Compact once the consumed part is at least half of what's held: removing from the front copies.
+        if offset > 0, offset >= buffer.count / 2 {
+            buffer = Data(buffer.dropFirst(offset))
+            offset = 0
+        }
+        buffer.append(data)
+    }
+
+    /// The next complete frame, or nil until more bytes arrive.
+    public mutating func next() throws -> (kind: HostFrame.Kind, payload: Data)? {
+        guard buffer.count - offset >= 4 else { return nil }
+        let length = buffer[offset..<(offset + 4)].reduce(0) { $0 << 8 | Int($1) }
+        guard length >= 1 else { throw Failure.emptyFrame }
+        guard length - 1 <= HostFrame.maxPayload else { throw Failure.oversize(length) }
+        guard buffer.count - offset >= 4 + length else { return nil }
+        let kindByte = buffer[offset + 4]
+        guard let kind = HostFrame.Kind(rawValue: kindByte) else { throw Failure.badKind(kindByte) }
+        let payload = Data(buffer[(offset + 5)..<(offset + 4 + length)])
+        offset += 4 + length
+        return (kind, payload)
+    }
+}
+
+/// A session the host runs, as both sides see it.
+public struct HostSession: Codable, Equatable, Sendable, Identifiable {
+    public struct Exit: Codable, Equatable, Sendable {
+        /// The exit code, or 128 + signal number when it was killed.
+        public var status: Int32
+        public var at: Date
+        public init(status: Int32, at: Date) {
+            self.status = status
+            self.at = at
+        }
+    }
+
+    public var id: UUID
+    /// "ttys012": the agent's hooks and the process scan report this.
+    public var tty: String
+    /// The login shell the host started (process group leader).
+    public var childPID: Int32
+    public var cwd: String
+    /// The preset's command; nil for a plain shell.
+    public var command: String?
+    /// The preset it was started from, e.g. "Claude".
+    public var label: String
+    /// The agent the preset starts (`Agent.rawValue`), nil for a shell.
+    public var agent: String?
+    /// The terminal title the program set (OSC 0/2).
+    public var title: String
+    public var startedAt: Date
+    public var cols: Int
+    public var rows: Int
+    public var exit: Exit?
+
+    public var isLive: Bool { exit == nil }
+
+    public init(id: UUID, tty: String, childPID: Int32, cwd: String, command: String?, label: String, agent: String?,
+                title: String, startedAt: Date, cols: Int, rows: Int, exit: Exit?) {
+        self.id = id
+        self.tty = tty
+        self.childPID = childPID
+        self.cwd = cwd
+        self.command = command
+        self.label = label
+        self.agent = agent
+        self.title = title
+        self.startedAt = startedAt
+        self.cols = cols
+        self.rows = rows
+        self.exit = exit
+    }
+}
+
+public struct SpawnRequest: Codable, Equatable, Sendable {
+    public var cwd: String
+    /// Nil: a plain login shell.
+    public var command: String?
+    public var env: [String: String]
+    public var cols: Int
+    public var rows: Int
+    /// After the command exits, keep a shell in the session instead of ending it.
+    public var keepShell: Bool
+    public var label: String
+    public var agent: String?
+
+    public init(cwd: String, command: String?, env: [String: String], cols: Int, rows: Int, keepShell: Bool,
+                label: String, agent: String?) {
+        self.cwd = cwd
+        self.command = command
+        self.env = env
+        self.cols = cols
+        self.rows = rows
+        self.keepShell = keepShell
+        self.label = label
+        self.agent = agent
+    }
+}
+
+public enum HostRequest: Codable, Equatable, Sendable {
+    case hello(protocolVersion: Int, app: String)
+    case spawn(SpawnRequest)
+    case attach(id: UUID, cols: Int, rows: Int)
+    case detach(id: UUID)
+    /// `reply`: an automatic answer to a terminal query (cursor position, colors…), not typing.
+    case input(id: UUID, bytes: Data, reply: Bool)
+    case resize(id: UUID, cols: Int, rows: Int)
+    case screen(id: UUID)
+    case history(id: UUID, lines: Int)
+    case kill(id: UUID)
+    case remove(id: UUID)
+    /// Honoured only when no session is live.
+    case shutdown
+}
+
+public enum HostEvent: Codable, Equatable, Sendable {
+    /// `hostBuild`: identifies the host binary (see `HostBuild`), so the app can tell an outdated host.
+    case welcome(protocolVersion: Int, hostBuild: Int, sessions: [HostSession])
+    case spawned(HostSession)
+    /// Replay is over; live output follows.
+    case attached(id: UUID)
+    case screenText(id: UUID, text: String)
+    case historyText(id: UUID, history: String, screen: String)
+    case sessionChanged(HostSession)
+    case sessionRemoved(id: UUID)
+    /// This client fell behind and was detached; attach again.
+    case resync(id: UUID)
+    case bell(id: UUID)
+    case error(String)
+    case ok
+}
+
+public struct HostRequestEnvelope: Codable, Equatable, Sendable {
+    public var seq: Int
+    public var request: HostRequest
+    public init(seq: Int, request: HostRequest) {
+        self.seq = seq
+        self.request = request
+    }
+}
+
+public struct HostEventEnvelope: Codable, Equatable, Sendable {
+    /// The `seq` of the request this answers; nil for events nobody asked for.
+    public var replyTo: Int?
+    public var event: HostEvent
+    public init(replyTo: Int?, event: HostEvent) {
+        self.replyTo = replyTo
+        self.event = event
+    }
+}
+
+public enum HostCoding {
+    public static func encode<T: Encodable>(_ value: T) throws -> Data {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .secondsSince1970
+        return try encoder.encode(value)
+    }
+
+    public static func decode<T: Decodable>(_ type: T.Type, from data: Data) throws -> T {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .secondsSince1970
+        return try decoder.decode(type, from: data)
+    }
+}
+
+/// Identifies a host binary by its modification time: a rebuilt app bundles a newer one.
+public enum HostBuild {
+    public static func id(ofExecutableAt path: String) -> Int {
+        let date = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
+        return Int(date?.timeIntervalSince1970 ?? 0)
+    }
+}
