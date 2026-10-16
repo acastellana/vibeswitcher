@@ -18,7 +18,12 @@ final class WindowModel: ObservableObject {
     /// Folders you've recently run agents in, most recent first (for the start page and the palette).
     @Published var recentProjects: [String] = []
     /// The agent's own session id last seen in each window session, so it can be resumed once it ends.
-    private(set) var agentSessions: [UUID: (agent: Agent, sessionID: String)] = [:]
+    private(set) var agentSessions: [UUID: (agent: Agent, sessionID: String, transcript: String?)] = [:]
+    /// The middle pane shows the conversation (Chat) rather than the terminal, where there is one.
+    @Published var showsChat: Bool {
+        didSet { UserDefaults.standard.set(showsChat, forKey: Self.showsChatKey) }
+    }
+    private static let showsChatKey = "middleShowsChat"
     /// Selected to show the start page instead of a session.
     static let homeID = "home"
     var showsHome: Bool { selectedID == Self.homeID }
@@ -29,6 +34,7 @@ final class WindowModel: ObservableObject {
     init() {
         selectedID = UserDefaults.standard.string(forKey: Self.selectionKey)
         grouping = UserDefaults.standard.string(forKey: Self.groupingKey).flatMap(WindowGrouping.init(rawValue:)) ?? .attention
+        showsChat = UserDefaults.standard.object(forKey: Self.showsChatKey) as? Bool ?? true
     }
 
     /// Every row, whatever the grouping and filter.
@@ -44,11 +50,21 @@ final class WindowModel: ObservableObject {
 
     func focusFilter() { filterFocusRequests += 1 }
 
+    /// The transcript the row's chat reads: the agent's, or for an ended window session the one it last had.
+    func chatPath(for row: WindowRow) -> String? {
+        row.session?.transcriptPath ?? row.hostID.flatMap { agentSessions[$0]?.transcript }
+    }
+
+    /// Whether the middle pane shows the selected row's chat right now.
+    var chatShown: Bool { showsChat && selectedRow.map { chatPath(for: $0) != nil } == true }
+
     /// `hostAnswered`: false while the session host hasn't listed its sessions yet (at launch); a window
     /// session that was selected is kept until then.
     func update(sessions: [Session], hosted: [HostSession], hostAnswered: Bool = true) {
         for session in sessions {
-            if let host = session.hostID, let id = session.agentSessionID { agentSessions[host] = (session.agent, id) }
+            if let host = session.hostID, let id = session.agentSessionID {
+                agentSessions[host] = (session.agent, id, session.transcriptPath ?? agentSessions[host]?.transcript)
+            }
         }
         let known = Set(hosted.map(\.id))
         agentSessions = agentSessions.filter { known.contains($0.key) }

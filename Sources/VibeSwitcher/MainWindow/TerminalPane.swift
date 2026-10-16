@@ -103,6 +103,11 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         view.window?.makeFirstResponder(terminal)
     }
 
+    /// Whether the program in that session asked for bracketed paste (needs its view attached).
+    func bracketedPaste(_ id: UUID) -> Bool {
+        views[id]?.getTerminal().bracketedPasteMode ?? false
+    }
+
     func clearScrollback() {
         currentView?.feed(text: "\u{1b}[3J")
     }

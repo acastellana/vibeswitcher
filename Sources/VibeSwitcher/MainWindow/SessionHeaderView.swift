@@ -25,6 +25,15 @@ struct SessionHeaderView: View {
                 }
                 Spacer(minLength: 8)
                 hostState
+                if model.chatPath(for: row) != nil {
+                    Picker("View", selection: $model.showsChat) {
+                        Image(systemName: "terminal").help("Terminal (⌥⌘1)").tag(false)
+                        Image(systemName: "bubble.left.and.text.bubble.right").help("Chat (⌥⌘2)").tag(true)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                }
                 buttons(row)
                 Menu { RowMenu(row: row, actions: actions) } label: { Image(systemName: "ellipsis.circle") }
                     .menuStyle(.borderlessButton)
@@ -85,8 +94,9 @@ struct SessionHeaderView: View {
             let live = host.sessions.filter(\.isLive).count
             if compatible {
                 if live > 0 {
-                    Text(live == 1 ? "Older session host until its session ends" : "Older session host until its \(live) sessions end")
-                        .font(.caption).foregroundStyle(.secondary)
+                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 11)).foregroundStyle(.tertiary)
+                        .help(live == 1 ? "An older session host runs this window's session; it's replaced once that session ends."
+                                        : "An older session host runs this window's \(live) sessions; it's replaced once they end.")
                 }
             } else {
                 Button("Restart Session Host (ends \(live))") { host.restartHost() }

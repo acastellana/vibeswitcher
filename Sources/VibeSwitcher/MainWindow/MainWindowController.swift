@@ -22,6 +22,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private lazy var endedBar = NSHostingView(rootView: EndedBar(model: model, actions: actions))
     private var shownID: String?
     private var cancellables: Set<AnyCancellable> = []
+    /// The selected session's conversation, shown over the terminal (which stays attached underneath).
+    let chat = ChatModel()
+    private lazy var chatHost = NSHostingView(rootView: ChatContainer(
+        chat: chat, model: model, actions: actions,
+        send: { [weak self] text in self?.sendToSelected(text) },
+        showTerminal: { [weak self] in self?.model.showsChat = false }))
+    /// Follows the transcript while the chat is on screen.
+    private var chatTimer: Timer?
 
     init(store: SessionStore, host: HostClient, model: WindowModel, actions: WindowActions) {
         self.store = store
@@ -80,6 +88,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
                 }
             }
             .store(in: &cancellables)
+        model.$showsChat.removeDuplicates().receive(on: RunLoop.main)
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.updateChat() } }
+            .store(in: &cancellables)
         host.$sessions.receive(on: RunLoop.main)
             .sink { [weak self] sessions in
                 guard let self else { return }
@@ -100,17 +111,26 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         // pins the whole middle pane (and so the window) at its minimum width.
         header.sizingOptions = []
         endedBar.sizingOptions = []
-        let stack = NSStackView(views: [header, divider, pane.view, endedBar])
+        // The terminal and the chat share the space; the chat covers the terminal when shown.
+        let body = NSView()
+        chatHost.sizingOptions = []
+        for view in [pane.view, chatHost] {
+            view.frame = body.bounds
+            view.autoresizingMask = [.width, .height]
+            body.addSubview(view)
+        }
+        chatHost.isHidden = true
+        let stack = NSStackView(views: [header, divider, body, endedBar])
         stack.orientation = .vertical
         stack.spacing = 0
         stack.alignment = .leading
-        for view in [header, divider, pane.view, endedBar] {
+        for view in [header, divider, body, endedBar] {
             view.translatesAutoresizingMaskIntoConstraints = false
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         header.heightAnchor.constraint(equalToConstant: 52).isActive = true
         endedBar.heightAnchor.constraint(equalToConstant: 40).isActive = true
-        pane.view.setContentHuggingPriority(.defaultLow, for: .vertical)
+        body.setContentHuggingPriority(.defaultLow, for: .vertical)
         // The window's content runs under the toolbar; start below it.
         let container = NSView()
         container.addSubview(stack)
@@ -136,6 +156,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private func showSelection() {
         guard window?.isVisible == true else { return }
         defer {
+            updateChat()
             updateViewing()
             updateTitleAndBadge()
         }
@@ -157,6 +178,41 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             }, move: move)))
         }
         shownID = row.id
+    }
+
+    /// Shows the selected row's conversation over the terminal when Chat is chosen and it has one.
+    private func updateChat() {
+        let path = model.selectedRow.flatMap(model.chatPath(for:))
+        chat.show(path: path)
+        let shown = model.showsChat && path != nil
+        if chatHost.isHidden == shown {
+            chatHost.isHidden = !shown
+            if !shown { pane.focus() }
+        }
+        if shown, chatTimer == nil {
+            let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+                guard let self, self.window?.isVisible == true, !self.chatHost.isHidden else { return }
+                self.chat.poll()
+                if self.window?.isKeyWindow == true { self.chat.markSeen() }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            chatTimer = timer
+        } else if !shown {
+            chatTimer?.invalidate()
+            chatTimer = nil
+        }
+    }
+
+    /// The composer's message, typed into the selected window session (as a paste when its program asked for that).
+    private func sendToSelected(_ text: String) {
+        guard let row = model.selectedRow, let id = row.hostID, actions.isLive(row) else { return NSSound.beep() }
+        var at: TimeInterval = 0
+        for write in ComposerText.writes(text, bracketed: pane.bracketedPaste(id)) {
+            at += write.delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
+                self?.host.send(id, bytes: Data(write.bytes), reply: false)
+            }
+        }
     }
 
     /// The window's title names the selected session; the Dock badge counts sessions waiting on you.
@@ -184,6 +240,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     func windowWillClose(_ notification: Notification) {
         store.windowViewingTTY = nil
         palette.close()
+        chatTimer?.invalidate()
+        chatTimer = nil
         NSApp.dockTile.badgeLabel = nil
         pane.detachAll()
         // A hidden window keeps its views, and with them the mirror's reading loop: take it down.
@@ -257,6 +315,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         switch menuItem.action {
         case #selector(groupByAttention(_:)): menuItem.state = model.grouping == .attention ? .on : .off
         case #selector(groupByProjects(_:)): menuItem.state = model.grouping == .projects ? .on : .off
+        case #selector(showTerminalAction(_:)): menuItem.state = model.chatShown ? .off : .on
+        case #selector(showChatAction(_:)):
+            menuItem.state = model.chatShown ? .on : .off
+            return model.selectedRow.map { model.chatPath(for: $0) != nil } == true
         case #selector(openInTerminalAction(_:)): return model.selectedRow?.session?.inTerminalApp == true
         default: break
         }
@@ -264,6 +326,26 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     @objc func showHomeAction(_ sender: Any?) { model.showHome() }
+    @objc func showTerminalAction(_ sender: Any?) { model.showsChat = false }
+    @objc func showChatAction(_ sender: Any?) { model.showsChat = true }
+
+    /// ⌘F: searches the conversation in Chat, the terminal's scrollback in Terminal.
+    @objc func findAction(_ sender: Any?) {
+        if model.chatShown {
+            chat.searchActive = true
+        } else if let terminal = pane.currentView {
+            window?.makeFirstResponder(terminal)
+            terminal.performFindPanelAction(sender)
+        }
+    }
+
+    @objc func findNextAction(_ sender: Any?) {
+        if model.chatShown { chat.searchIndex += 1 } else { pane.currentView?.performFindPanelAction(sender) }
+    }
+
+    @objc func findPreviousAction(_ sender: Any?) {
+        if model.chatShown { chat.searchIndex = max(0, chat.searchIndex - 1) } else { pane.currentView?.performFindPanelAction(sender) }
+    }
 
     @objc func showPaletteAction(_ sender: Any?) {
         guard let window else { return }
