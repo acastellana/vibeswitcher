@@ -74,6 +74,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         HookBinary.sync()
         VibePaths.ensurePrivateDirectories()
         hostClient.connectIfRunning()
+        if UserDefaults.standard.bool(forKey: "windowWasOpen") {
+            DispatchQueue.main.async { [weak self] in self?.showMainWindow() }
+        }
         preferences.setUpLoginItemOnFirstLaunch()
         notifier?.requestAuthorization()
         notifier?.onOpen = { [weak self] tty in
@@ -619,6 +622,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Reopened at the next launch (an update relaunches the app: it shouldn't look like the window crashed).
+        UserDefaults.standard.set(mainWindow?.window?.isVisible == true, forKey: "windowWasOpen")
         // Never leave session windows hidden behind a closed app.
         SidebarWorkspace.restoreHiddenWindows()
         store.saveLedger()

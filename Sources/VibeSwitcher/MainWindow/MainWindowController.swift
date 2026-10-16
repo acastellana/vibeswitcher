@@ -156,7 +156,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         NSApp.setActivationPolicy(.regular)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+        // Right after becoming a regular app, a polite activate often doesn't take (the app lands last in ⌘-Tab,
+        // behind the frontmost one): ask again, firmly, on the next turn of the run loop.
         NSApp.activate()
+        DispatchQueue.main.async { [weak self] in
+            NSRunningApplication.current.activate(options: [.activateAllWindows])
+            self?.window?.makeKeyAndOrderFront(nil)
+        }
         shownID = nil
         showSelection()
     }
