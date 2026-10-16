@@ -14,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private lazy var notifier: Notifier? = Bundle.main.bundleIdentifier == nil ? nil : Notifier(preferences: preferences)
     private lazy var phoneAccess = PhoneAccess(store: store)
     private var phoneAccessWindow: NSWindow?
+    private var settingsWindow: SettingsWindowController?
     let windowModel = WindowModel()
     private var mainWindow: MainWindowController?
     private lazy var windowActions = WindowActions(
@@ -106,7 +107,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                                onOpenWindow: { [weak self] in
                                    self?.popover.performClose(nil)
                                    self?.showMainWindow()
-                               })
+                               },
+                               onSettings: { [weak self] in self?.showSettings(tab: .general) })
         makePopoverContent = { AnyView(view) }
         var sidebarView = view
         sidebarView.isSidebar = true
@@ -116,7 +118,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             onRename: sidebarView.onRename, onResetName: sidebarView.onResetName,
             onNewSession: sidebarView.onNewSession, onEditCommands: sidebarView.onEditCommands,
             onPhoneAccess: sidebarView.onPhoneAccess, onPause: sidebarView.onPause, onResume: sidebarView.onResume,
-            isSidebar: true, onOpenWindow: { [weak self] in self?.showMainWindow() })))
+            isSidebar: true, onOpenWindow: { [weak self] in self?.showMainWindow() },
+            onSettings: { [weak self] in self?.showSettings(tab: .general) })))
         // Windows hidden by the earlier sidebar mode (or a crash during it) always come back.
         DispatchQueue.global(qos: .utility).async { SidebarWorkspace.restoreHiddenWindows() }
         // Desktop switched: refresh which session is "here" and show the sidebar for a moment.
@@ -205,8 +208,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.captureNotification, object: nil,
                                                             queue: .main) { [weak self] note in
             guard let path = note.object as? String else { return }
-            self?.mainWindow?.capture(to: path)
+            self?.captureWindows(to: path)
         }
+        DistributedNotificationCenter.default().addObserver(forName: AppStatus.settingsNotification, object: nil,
+                                                            queue: .main) { [weak self] note in
+            self?.showSettings(tab: (note.object as? String).flatMap(SettingsTab.init(rawValue:)) ?? .general)
+        }
+        preferences.$appearance
+            .receive(on: RunLoop.main)
+            .sink { [weak self] appearance in
+                DispatchQueue.main.async {
+                    self?.mainWindow?.pane.scrollbackLines = appearance.scrollbackLines
+                    self?.mainWindow?.pane.reconfigureAll()
+                }
+            }
+            .store(in: &cancellables)
+        NSApp.publisher(for: \.effectiveAppearance)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.mainWindow?.pane.reconfigureAll() } }
+            .store(in: &cancellables)
+        if preferences.openWindowAtLaunch { showMainWindow() }
 
         hotKey = HotKey(keyCode: kVK_ANSI_V, modifiers: controlKey | optionKey) { [weak self] in
             self?.togglePopover()
@@ -363,33 +384,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         return false
     }
 
-    /// Filled in with the Settings window (part 1, task 10).
-    @objc func showSettings(_ sender: Any?) {}
+    @objc func showSettings(_ sender: Any?) { showSettings(tab: .general) }
+
+    func showSettings(tab: SettingsTab) {
+        popover.performClose(nil)
+        if settingsWindow == nil {
+            settingsWindow = SettingsWindowController(preferences: preferences) { [weak self] in
+                self?.popoverState.recentProjects.map(\.path) ?? []
+            }
+        }
+        loadRecentProjects()
+        settingsWindow?.show(tab: tab)
+    }
+
+    /// Debug aid (`VibeSwitcher --capture-window PATH`): each visible window drawn into a PNG (PATH, then
+    /// PATH-2.png…), without needing Screen Recording permission.
+    private func captureWindows(to path: String) {
+        let windows = NSApp.windows.filter { $0.isVisible && $0.frame.width > 300 && $0.frame.height > 200 }
+        for (index, window) in windows.enumerated() {
+            guard let view = window.contentView?.superview ?? window.contentView,
+                  let bitmap = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { continue }
+            view.cacheDisplay(in: view.bounds, to: bitmap)
+            let file = index == 0 ? path : (path as NSString).deletingPathExtension + "-\(index + 1).png"
+            try? bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file))
+        }
+    }
 
     func showMainWindow(select hostID: UUID? = nil) {
         if mainWindow == nil {
             let controller = MainWindowController(store: store, host: hostClient, model: windowModel, actions: windowActions)
             controller.onFontSize = { [weak self] step in self?.changeFontSize(step) }
+            controller.pane.configure = { [weak self] view in
+                guard let self else { return }
+                let dark = view.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                view.apply(self.preferences.appearance, darkMode: dark)
+            }
+            controller.pane.scrollbackLines = preferences.appearance.scrollbackLines
+            controller.pane.onBell = { [weak self] view in
+                switch self?.preferences.appearance.bell {
+                case .sound: NSSound.beep()
+                case .visual: view.flash()
+                default: break
+                }
+            }
             mainWindow = controller
         }
         if let hostID { windowModel.select(hostID: hostID) }
         mainWindow?.present()
     }
 
-    /// Part 1 placeholder until Settings (Task 10) stores the size: adjusts the open terminals only.
     private func changeFontSize(_ step: Int) {
-        guard let pane = mainWindow?.pane else { return }
-        pane.configure = { view in
-            let size = step == 0 ? 13 : max(8, min(36, view.font.pointSize + CGFloat(step)))
-            view.font = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
-        }
-        pane.reconfigureAll()
+        let current = preferences.appearance
+        preferences.appearance = step == 0 ? current.withFontSize(TerminalAppearance.defaultFontSize)
+                                           : current.withFontSize(current.fontSize + Double(step))
     }
 
-    /// Built-ins from the old launch commands until Task 10 stores presets.
     private func presets(for folder: String?) -> [LaunchPreset] {
-        LaunchPresets.builtIns(claudeCommand: preferences.claudeCommand, codexCommand: preferences.codexCommand)
-            .presets(for: folder)
+        preferences.presets.presets(for: folder)
     }
 
     private func newSession(preset: LaunchPreset?, in folder: String?) {

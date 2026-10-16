@@ -197,3 +197,48 @@ struct EmptySessionView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
+
+extension HostTerminalView {
+    func apply(_ appearance: TerminalAppearance, darkMode: Bool) {
+        let size = CGFloat(appearance.fontSize)
+        font = (appearance.fontName.isEmpty ? nil : NSFont(name: appearance.fontName, size: size))
+            ?? .monospacedSystemFont(ofSize: size, weight: .regular)
+        let palette = appearance.palette(darkMode: darkMode)
+        func color(_ hex: String) -> NSColor {
+            let rgb = RGB(hex: hex) ?? RGB(red: 0.5, green: 0.5, blue: 0.5)
+            return NSColor(srgbRed: rgb.red, green: rgb.green, blue: rgb.blue, alpha: 1)
+        }
+        nativeForegroundColor = color(palette.foreground)
+        nativeBackgroundColor = color(palette.background)
+        caretColor = color(palette.cursor)
+        selectedTextBackgroundColor = color(palette.selection)
+        installColors(palette.ansi.map { hex in
+            let rgb = RGB(hex: hex) ?? RGB(red: 0, green: 0, blue: 0)
+            return SwiftTerm.Color(red: UInt16(rgb.red * 65_535), green: UInt16(rgb.green * 65_535), blue: UInt16(rgb.blue * 65_535))
+        })
+        optionAsMetaKey = appearance.optionAsMeta
+        let style: CursorStyle
+        switch (appearance.cursorShape, appearance.cursorBlink) {
+        case (.block, true): style = .blinkBlock
+        case (.block, false): style = .steadyBlock
+        case (.underline, true): style = .blinkUnderline
+        case (.underline, false): style = .steadyUnderline
+        case (.bar, true): style = .blinkBar
+        case (.bar, false): style = .steadyBar
+        }
+        getTerminal().setCursorStyle(style)
+    }
+
+    /// A short flash over the terminal (Settings › Terminal › Bell: Visual).
+    func flash() {
+        let overlay = NSView(frame: bounds)
+        overlay.wantsLayer = true
+        overlay.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.25).cgColor
+        overlay.autoresizingMask = [.width, .height]
+        addSubview(overlay)
+        NSAnimationContext.runAnimationGroup({ context in
+            context.duration = 0.25
+            overlay.animator().alphaValue = 0
+        }, completionHandler: { overlay.removeFromSuperview() })
+    }
+}

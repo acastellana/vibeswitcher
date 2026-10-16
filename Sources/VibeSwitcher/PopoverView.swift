@@ -25,6 +25,7 @@ struct PopoverView: View {
     /// Rendered as the docked sidebar instead of the menu bar popover.
     var isSidebar = false
     var onOpenWindow: () -> Void = {}
+    var onSettings: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -231,6 +232,7 @@ struct PopoverView: View {
                 Divider()
                 Toggle("Launch at login", isOn: Binding(get: { preferences.launchAtLogin },
                                                         set: { preferences.setLaunchAtLogin($0) }))
+                Button("Settings…", action: onSettings)
                 Divider()
                 Button("Phone Access…", action: onPhoneAccess)
                 Button("Reinstall hooks", action: onInstallHooks)

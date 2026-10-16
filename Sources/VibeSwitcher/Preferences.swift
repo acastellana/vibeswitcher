@@ -31,6 +31,15 @@ final class Preferences: ObservableObject {
     @Published var floatingPanel: FloatingPanelMode {
         didSet { defaults.set(floatingPanel.rawValue, forKey: "floatingPanel") }
     }
+    /// Launch presets, in ~/.vibeswitcher/presets.json (the first load migrates the two launch commands).
+    @Published var presets: LaunchPresets {
+        didSet { try? presets.save(to: VibePaths.presetsFile) }
+    }
+    @Published var appearance: TerminalAppearance {
+        didSet { defaults.set(try? JSONEncoder().encode(appearance), forKey: "terminalAppearance") }
+    }
+    /// Show the window when VibeSwitcher starts.
+    @Published var openWindowAtLaunch: Bool { didSet { defaults.set(openWindowAtLaunch, forKey: "openWindowAtLaunch") } }
 
     init() {
         defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true, "playSound": true, "notifyReminders": true, "minimizeOnPause": true, "sidebarAutoHide": true,
@@ -47,11 +56,18 @@ final class Preferences: ObservableObject {
         codexCommand = defaults.string(forKey: "codexCommand") ?? "codex"
         launchAtLogin = SMAppService.mainApp.status == .enabled
         floatingPanel = FloatingPanelMode(rawValue: defaults.string(forKey: "floatingPanel") ?? "") ?? .automatic
+        // Locals, not the @Published properties: those can't be read before init finishes.
+        presets = LaunchPresets.load(from: VibePaths.presetsFile,
+                                     claudeCommand: defaults.string(forKey: "claudeCommand") ?? "claude",
+                                     codexCommand: defaults.string(forKey: "codexCommand") ?? "codex")
+        appearance = defaults.data(forKey: "terminalAppearance")
+            .flatMap { try? JSONDecoder().decode(TerminalAppearance.self, from: $0) } ?? TerminalAppearance()
+        openWindowAtLaunch = defaults.bool(forKey: "openWindowAtLaunch")
     }
 
     func command(for agent: Agent) -> String {
-        let command = (agent == .claude ? claudeCommand : codexCommand).trimmingCharacters(in: .whitespaces)
-        return command.isEmpty ? agent.rawValue : command
+        let kind: LaunchPreset.Kind = agent == .claude ? .claude : .codex
+        return presets.global.first { $0.kind == kind }.flatMap(LaunchPlan.command(for:)) ?? agent.rawValue
     }
 
     /// Registers the login item once, on first launch from an app bundle; after that the toggle decides.

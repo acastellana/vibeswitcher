@@ -34,6 +34,13 @@ if let index = arguments.firstIndex(of: "--capture-window"), arguments.indices.c
                                                                  userInfo: nil, deliverImmediately: true)
     exit(0)
 }
+if let index = arguments.firstIndex(of: "--settings") {
+    // Opens Settings in the running app, optionally on a tab: general, launch or terminal.
+    let tab = arguments.indices.contains(index + 1) ? arguments[index + 1] : "general"
+    DistributedNotificationCenter.default().postNotificationName(AppStatus.settingsNotification, object: tab,
+                                                                 userInfo: nil, deliverImmediately: true)
+    exit(0)
+}
 if arguments.contains("--window") {
     DistributedNotificationCenter.default().postNotificationName(AppStatus.windowNotification, object: nil,
                                                                  userInfo: nil, deliverImmediately: true)
