@@ -159,6 +159,28 @@ struct HostServerTests {
         #expect(sawResync)
     }
 
+    /// Scrollback of wide lines (3-byte box drawing) can exceed a frame: the reply is trimmed to fit,
+    /// never dropped (the phone would wait for it forever).
+    @Test func historyLargerThanAFrameIsTrimmedNotDropped() throws {
+        let host = try TestHost()
+        let client = try TestClient(host)
+        let seq0 = client.send(.spawn(SpawnRequest(cwd: "/tmp", command: "perl -CS -e 'print qq(\\x{2500}) x 900, qq(\\n) for 1..2000; print qq(wide-done\\n)'; sleep 30",
+                                                   env: [:], cols: 1000, rows: 24, keepShell: false, label: "Test", agent: nil)))
+        #expect(eventually { client.reply(to: seq0) != nil })
+        guard case .spawned(let session) = client.reply(to: seq0) else { Issue.record("no spawn"); return }
+        #expect(eventually(timeout: 20) {
+            let seq = client.send(.screen(id: session.id))
+            Thread.sleep(forTimeInterval: 0.2)
+            if case .screenText(_, let text) = client.reply(to: seq) { return text.contains("wide-done") }
+            return false
+        })
+        let seq = client.send(.history(id: session.id, lines: 5_000))
+        #expect(eventually(timeout: 10) { client.reply(to: seq) != nil })
+        guard case .historyText(_, let history, _) = client.reply(to: seq) else { Issue.record("no history reply"); return }
+        #expect(!history.isEmpty)
+        #expect(history.utf8.count < HostFrame.maxPayload)
+    }
+
     @Test func killEndsTheSessionAndRemoveForgetsIt() throws {
         let host = try TestHost()
         let client = try TestClient(host)

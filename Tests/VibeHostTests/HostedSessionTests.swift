@@ -129,6 +129,19 @@ struct HostedSessionTests {
         probe.queue.sync { session.close() }
     }
 
+    /// Ending a session stops what runs in it even if that ignores SIGHUP (the shell exits on it, the program
+    /// in its own foreground group may not): it must not keep running with the terminal after "ended".
+    @Test func endingStopsAProgramThatIgnoresSIGHUP() throws {
+        let probe = SessionProbe()
+        let session = try start("perl -e '$SIG{HUP}=q(IGNORE); $|=1; print qq(pid=$$\\n); sleep 60'; echo after", probe: probe)
+        #expect(eventually { probe.text.contains("pid=") }, "\(probe.diagnosis(session))")
+        let pid = probe.text.components(separatedBy: "pid=").last.flatMap { Int32($0.prefix { $0.isNumber }) } ?? 0
+        #expect(pid > 0)
+        probe.queue.sync { session.terminate() }
+        #expect(eventually(timeout: 9) { kill(pid, 0) != 0 }, "pid \(pid) still running")
+        probe.queue.sync { session.close() }
+    }
+
     @Test func titleAndScreenComeFromTheHeadlessTerminal() throws {
         let probe = SessionProbe()
         let session = try start("printf '\\033]0;My Title\\007line one\\nline two\\n'; sleep 5", probe: probe)

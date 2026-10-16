@@ -182,7 +182,7 @@ public final class HostServer {
         case .history(let id, let lines):
             guard let session = sessions[id] else { return reply(missing) }
             let text = session.historyText(lines: max(1, min(lines, 5_000)))
-            reply(.historyText(id: id, history: text.history, screen: text.screen))
+            reply(.historyText(id: id, history: Self.fitting(text.history, besides: text.screen), screen: text.screen))
         case .kill(let id):
             sessions[id]?.terminate()
             reply(.ok)
@@ -199,6 +199,20 @@ public final class HostServer {
                 self?.onExit?()
             }
         }
+    }
+
+    /// The newest part of `history` that fits in one frame next to the screen (wide lines of box drawing
+    /// can make 5,000 lines several megabytes; an oversized reply would never arrive).
+    static func fitting(_ history: String, besides screen: String) -> String {
+        let room = HostFrame.maxPayload - screen.utf8.count - 4_096   // JSON escaping and the envelope
+        guard history.utf8.count > room else { return history }
+        var lines = history.split(separator: "\n", omittingEmptySubsequences: false)
+        var size = history.utf8.count
+        // JSON escapes some characters; keep a margin by aiming at three quarters of the room.
+        while size > room * 3 / 4, !lines.isEmpty {
+            size -= lines.removeFirst().utf8.count + 1
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func register(_ session: HostedSession) {

@@ -64,9 +64,13 @@ final class SessionStore: ObservableObject {
     var requestHostScreens: (Set<String>) -> Void = { _ in }
     private var lastHostScreenRequest = Date.distantPast
 
+    /// Titles change many times a second while an agent works (its spinner); the regular scan picks them up,
+    /// so only a session starting or ending triggers a scan here.
     func updateHosted(_ sessions: [HostSession]) {
-        hosted = Dictionary(sessions.filter(\.isLive).map { ($0.tty, $0) }, uniquingKeysWith: { $1 })
-        refresh()
+        let fresh = Dictionary(sessions.filter(\.isLive).map { ($0.tty, $0) }, uniquingKeysWith: { $1 })
+        let changed = Set(fresh.keys) != Set(hosted.keys)
+        hosted = fresh
+        if changed { refresh() }
     }
 
     func start() {

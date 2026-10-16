@@ -52,11 +52,22 @@ public struct OutputRing: Sendable {
     }
 
     /// From the latest reset still held; else, once older output was dropped, from the first line start;
-    /// else everything.
-    public func replay() -> Data {
-        if let reset = resets.last { return Data(bytes.dropFirst(reset - base)) }
-        guard base > 0 else { return bytes }
-        guard let newline = bytes.firstIndex(of: 0x0a) else { return Data() }
-        return Data(bytes[bytes.index(after: newline)...])
+    /// else everything. At most `limit` bytes: beyond that it starts at the first line start inside the
+    /// last `limit` bytes (the program redraws its screen after a re-attach, so older output only feeds
+    /// scrollback, and feeding megabytes to a view takes seconds).
+    public func replay(limit: Int = .max) -> Data {
+        var start = 0
+        if let reset = resets.last {
+            start = reset - base
+        } else if base > 0 {
+            guard let newline = bytes.firstIndex(of: 0x0a) else { return Data() }
+            start = newline + 1
+        }
+        if bytes.count - start > limit {
+            let cut = bytes.count - limit
+            guard let newline = bytes[cut...].firstIndex(of: 0x0a), newline + 1 < bytes.count else { return Data() }
+            start = newline + 1
+        }
+        return Data(bytes[start...])
     }
 }

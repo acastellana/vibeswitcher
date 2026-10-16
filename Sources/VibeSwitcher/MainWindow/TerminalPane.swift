@@ -20,6 +20,8 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
 
     private let host: HostClient
     private var views: [UUID: HostTerminalView] = [:]
+    /// Holds back each view's answers to terminal queries while it's being replayed earlier output.
+    private var gates: [UUID: ReplayGate] = [:]
     private var recent: [UUID] = []
     private var placeholder: NSView?
     private(set) var current: UUID?
@@ -68,6 +70,7 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     /// Stops showing a session (evicted, removed or the window closed); the host keeps it running.
     func forget(_ id: UUID) {
         views.removeValue(forKey: id)?.removeFromSuperview()
+        gates[id] = nil
         recent.removeAll { $0 == id }
         host.detach(id)
         if current == id { current = nil }
@@ -95,16 +98,23 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     private func makeView(for id: UUID) -> HostTerminalView {
         let terminal = HostTerminalView(frame: view.bounds, font: nil, options: TerminalOptions(scrollback: scrollbackLines))
         terminal.terminalDelegate = self
-        terminal.onReply = { [weak self] data in self?.host.send(id, bytes: data, reply: true) }
+        terminal.onReply = { [weak self] data in
+            guard let self, self.gates[id]?.allowsReplies != false else { return }
+            self.host.send(id, bytes: data, reply: true)
+        }
         configure(terminal)
         pin(terminal)
         views[id] = terminal
+        gates[id, default: ReplayGate()].attaching()
         let size = terminal.getTerminal()
         host.attach(id, cols: size.cols, rows: size.rows, sink: .init(
             output: { [weak terminal] data in terminal?.feed(byteArray: [UInt8](data)[...]) },
-            attached: {},
+            attached: { [weak self] in self?.gates[id]?.attached() },
             // The host dropped our stream (we fell behind): start clean; a fresh replay follows.
-            resync: { [weak terminal] in terminal?.feed(text: "\u{1b}c") }))
+            resync: { [weak self, weak terminal] in
+                self?.gates[id]?.attaching()
+                terminal?.feed(text: "\u{1b}c")
+            }))
         return terminal
     }
 

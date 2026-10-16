@@ -47,6 +47,18 @@ struct OutputRingTests {
         #expect(ring.replay() == data("yy"))
     }
 
+    /// A long session's replay is capped (the program redraws its screen after a re-attach anyway):
+    /// it starts at the first line start inside the last `limit` bytes.
+    @Test func replayIsCappedAtALineStart() {
+        var ring = OutputRing(capacity: 1024)
+        ring.append(data("line-one\nline-two\nline-three\n"))   // 29 bytes, no reset
+        #expect(ring.replay(limit: 12) == data("line-three\n"))
+        #expect(ring.replay(limit: 1000) == data("line-one\nline-two\nline-three\n"))
+        ring.append(data("\u{1b}[2Jscreen\nmore\n"))
+        #expect(ring.replay(limit: 1000).starts(with: data("\u{1b}[2J")))
+        #expect(ring.replay(limit: 6) == data("more\n"))
+    }
+
     @Test func aResetMatchedInsideTheTailIsNotCountedTwice() {
         var ring = OutputRing(capacity: 1024)
         ring.append(data("x\u{1b}c"))

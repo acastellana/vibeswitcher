@@ -216,7 +216,12 @@ final class HostClient: ObservableObject {
             return
         }
         let seq = connection.send(request)
-        if let reply { replies[seq] = reply }
+        guard let reply else { return }
+        replies[seq] = reply
+        // A reply that never comes must not leave its caller (e.g. a phone request) waiting forever.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            self?.replies.removeValue(forKey: seq)?(.error("The session host didn't answer."))
+        }
     }
 
     func spawn(_ spawn: SpawnRequest, completion: @escaping (Result<HostSession, HostClientError>) -> Void) {

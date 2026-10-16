@@ -153,7 +153,8 @@ public final class HostedSession {
         onChange?(info)
     }
 
-    public func replay() -> Data { ring.replay() }
+    /// Replays at most 1 MB: the program redraws its screen on attach anyway (see `OutputRing.replay`).
+    public func replay() -> Data { ring.replay(limit: 1 << 20) }
 
     /// Writes to the program's input; what doesn't fit right now waits (up to 1 MB) for room.
     public func write(_ bytes: Data) {
@@ -226,14 +227,15 @@ public final class HostedSession {
         return (above.suffix(lines).joined(separator: "\n"), screenText())
     }
 
-    /// Like closing a Terminal tab: SIGHUP to the session's process group, SIGKILL after 5 s.
+    /// Like closing a Terminal tab: SIGHUP to the shell's process group and to the job in the foreground
+    /// (the agent runs in its own group). Then SIGKILL after 5 s to whichever of those groups still exists:
+    /// a program that ignores SIGHUP would otherwise outlive the session, detached, once the shell exits.
     public func terminate() {
-        guard info.isLive else { return }
-        let group = info.childPID
-        Darwin.kill(-group, SIGHUP)
-        queue.asyncAfter(deadline: .now() + 5) { [weak self] in
-            guard let self, self.info.isLive else { return }
-            Darwin.kill(-group, SIGKILL)
+        guard info.isLive || readSource != nil else { return }
+        let groups = Set([info.childPID, tcgetpgrp(masterFD)].filter { $0 > 0 })
+        groups.forEach { Darwin.kill(-$0, SIGHUP) }
+        queue.asyncAfter(deadline: .now() + 5) {
+            for group in groups where Darwin.kill(-group, 0) == 0 { Darwin.kill(-group, SIGKILL) }
         }
     }
 
