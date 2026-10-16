@@ -17,6 +17,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private let split = NSSplitViewController()
     private var inspectorItem: NSSplitViewItem!
     private let palette = CommandPaletteController()
+    /// Whether the mirror on screen offers Move to Window (rebuilt when that changes).
+    private var mirrorOffersMove = false
     private lazy var endedBar = NSHostingView(rootView: EndedBar(model: model, actions: actions))
     private var shownID: String?
     private var cancellables: Set<AnyCancellable> = []
@@ -39,7 +41,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         window.delegate = self
 
         let sidebar = NSSplitViewItem(sidebarWithViewController: NSHostingController(
-            rootView: SessionListView(model: model, host: host, actions: actions)))
+            rootView: SessionListView(model: model, actions: actions)))
         sidebar.minimumThickness = 260
         sidebar.maximumThickness = 380
         let middle = NSViewController()
@@ -70,7 +72,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             .sink { [weak self] _ in DispatchQueue.main.async { self?.showSelection() } }
             .store(in: &cancellables)
         model.$sections.receive(on: RunLoop.main)
-            .sink { [weak self] _ in DispatchQueue.main.async { self?.showSelection() } }
+            .sink { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.showSelection()
+                    // Also while minimized, when showSelection does nothing: that's when the Dock is looked at.
+                    self?.updateTitleAndBadge()
+                }
+            }
             .store(in: &cancellables)
         host.$sessions.receive(on: RunLoop.main)
             .sink { [weak self] sessions in
@@ -137,10 +145,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         endedBar.isHidden = row.hosted?.exit == nil
         if let id = row.hostID {
             if pane.current != id { pane.show(hostID: id) }
-        } else if let session = row.session, shownID != row.id {
-            pane.show(placeholder: AnyView(TerminalMirror(session: session) { [weak self] in
+        } else if let session = row.session, shownID != row.id || MoveToWindow.canMove(session) != mirrorOffersMove {
+            mirrorOffersMove = MoveToWindow.canMove(session)
+            let move: (() -> Void)? = MoveToWindow.canMove(session) ? { [weak self] in self?.actions.moveToWindow(session) } : nil
+            pane.show(placeholder: AnyView(TerminalMirror(session: session, open: { [weak self] in
                 self?.actions.openInTerminal(session)
-            }))
+            }, move: move)))
         }
         shownID = row.id
     }
@@ -148,7 +158,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     /// The window's title names the selected session; the Dock badge counts sessions waiting on you.
     private func updateTitleAndBadge() {
         window?.title = model.selectedRow.map { "\($0.title) — \($0.project)" } ?? "VibeSwitcher"
-        guard window?.isVisible == true else { return }
+        guard let window, window.isVisible || window.isMiniaturized else { return }
         let waiting = model.allRows.filter { $0.state(now: Date()).group == .needsYou }.count
         NSApp.dockTile.badgeLabel = waiting > 0 ? "\(waiting)" : nil
     }
@@ -172,6 +182,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         palette.close()
         NSApp.dockTile.badgeLabel = nil
         pane.detachAll()
+        // A hidden window keeps its views, and with them the mirror's reading loop: take it down.
+        pane.show(placeholder: AnyView(EmptyView()))
         shownID = nil
         NSApp.setActivationPolicy(.accessory)
     }

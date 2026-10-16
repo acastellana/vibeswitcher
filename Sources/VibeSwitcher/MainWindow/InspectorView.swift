@@ -20,7 +20,7 @@ struct InspectorView: View {
             Divider()
             if let row = model.selectedRow {
                 if tab == "activity" {
-                    ActivityView(session: row.session)
+                    ActivityView(session: row.session).id(row.id)
                 } else {
                     OverviewView(row: row, info: row.hostID.flatMap { id in host.sessions.first { $0.id == id } })
                 }

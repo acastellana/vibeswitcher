@@ -186,10 +186,38 @@ private final class MarginView: NSView {
 
 /// Shown for a session that runs in Terminal.app: its screen, re-read every 2 s while shown, and a way
 /// to go there. Read-only: nothing is typed into Terminal from here.
+/// A label style chosen at run time.
+struct AnyLabelStyle: LabelStyle {
+    private let make: (Configuration) -> AnyView
+    init<S: LabelStyle>(_ style: S) { make = { AnyView(style.makeBody(configuration: $0)) } }
+    func makeBody(configuration: Configuration) -> some View { make(configuration) }
+}
+
 struct TerminalMirror: View {
     let session: Session
     let open: () -> Void
+    /// Offered between turns: continue it in the window, in full color.
+    let move: (() -> Void)?
     @State private var screen: String?
+
+    @ViewBuilder private func buttons(labels: Bool) -> some View {
+        HStack(spacing: 8) {
+            if let move {
+                Button(action: move) {
+                    Label("Move to Window", systemImage: "arrow.down.right.and.arrow.up.left")
+                        .labelStyle(labels ? AnyLabelStyle(.titleAndIcon) : AnyLabelStyle(.iconOnly))
+                }
+                .buttonStyle(.borderedProminent)
+                .help("Quit it in Terminal and continue the same conversation here, in full color")
+            }
+            Button(action: open) {
+                Label("Open in Terminal", systemImage: "arrow.up.forward.app")
+                    .labelStyle(labels ? AnyLabelStyle(.titleAndIcon) : AnyLabelStyle(.iconOnly))
+            }
+            .help("Open in Terminal (⌘O)")
+        }
+        .fixedSize()
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -197,12 +225,15 @@ struct TerminalMirror: View {
                 Image(systemName: "macwindow").font(.system(size: 16)).foregroundStyle(.secondary)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Runs in Terminal").font(.system(size: 13, weight: .semibold))
-                    Text("Its screen, as of a moment ago. Answer it in Terminal.").font(.system(size: 11)).foregroundStyle(.secondary)
+                    Text(move != nil ? "Terminal shares only plain text. Move it here for full color."
+                                     : "Its screen as plain text, as of a moment ago. Answer it in Terminal.")
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
                 }
-                Spacer()
-                Button(action: open) { Label("Open in Terminal", systemImage: "arrow.up.forward.app") }
-                    .buttonStyle(.borderedProminent)
-                    .keyboardShortcut(.defaultAction)
+                Spacer(minLength: 8)
+                ViewThatFits(in: .horizontal) {
+                    buttons(labels: true)
+                    buttons(labels: false)
+                }
             }
             .padding(.horizontal, 14).padding(.vertical, 10)
             .background(.bar)

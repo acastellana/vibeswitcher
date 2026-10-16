@@ -42,7 +42,14 @@ extension WindowRow {
         switch content {
         case .hosted(let info):
             if let exit = info.exit { return RowState(text: "ended · exit \(exit.status)", since: exit.at, group: .idle) }
-            if info.agent != nil { return RowState(text: "starting", since: info.startedAt, group: .working) }
+            if info.agent != nil {
+                // An agent shows up in the scan within seconds. Still missing after a minute, it has quit and
+                // left the shell that a "keep a shell open" preset runs after it.
+                if now.timeIntervalSince(info.startedAt) < WindowGroups.startingFor {
+                    return RowState(text: "starting", since: info.startedAt, group: .working)
+                }
+                return RowState(text: "agent ended · shell", since: nil, group: .idle)
+            }
             return RowState(text: "shell", since: info.startedAt, group: .idle)
         case .agent(let session):
             if session.isPaused { return RowState(text: "paused", since: nil, group: .idle) }
@@ -83,6 +90,9 @@ extension WindowRow {
 }
 
 public enum WindowGroups {
+    /// How long a window session started for an agent counts as starting.
+    public static let startingFor: TimeInterval = 60
+
     /// The rows of `sections` regrouped by what they need from you. Within a group: needs-you longest
     /// waiting first, working earliest started first (so rows don't jump each turn), ready most recent
     /// first, idle in the given order. Empty groups are left out.

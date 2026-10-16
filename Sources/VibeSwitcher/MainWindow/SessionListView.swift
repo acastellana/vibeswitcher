@@ -4,7 +4,6 @@ import VibeCore
 /// The left pane: sessions grouped by what they need from you (or by project), a filter and a summary.
 struct SessionListView: View {
     @ObservedObject var model: WindowModel
-    @ObservedObject var host: HostClient
     let actions: WindowActions
     @FocusState private var filterFocused: Bool
 
@@ -146,6 +145,7 @@ struct RowMenu: View {
                 }
             }
             if session.inTerminalApp { Button("Open in Terminal") { actions.openInTerminal(session) } }
+            if MoveToWindow.canMove(session) { Button("Move to Window…") { actions.moveToWindow(session) } }
         }
         if row.hostID != nil {
             Divider()

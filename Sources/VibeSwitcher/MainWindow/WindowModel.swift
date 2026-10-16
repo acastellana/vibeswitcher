@@ -125,4 +125,6 @@ struct WindowActions {
     /// A command line that resumes the row's agent conversation in its folder; nil when its id isn't known.
     var resumeCommand: (WindowRow) -> String?
     var settings: () -> Void
+    /// Ends the agent in its Terminal tab and resumes the conversation in the window (asks first).
+    var moveToWindow: (Session) -> Void
 }

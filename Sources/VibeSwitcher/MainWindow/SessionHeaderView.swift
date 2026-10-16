@@ -39,7 +39,8 @@ struct SessionHeaderView: View {
         }
         .padding(.horizontal, 14)
         .frame(height: 52)
-        .task(id: model.selectedRow?.cwd) {
+        // Re-read as the agent works (it may switch branches).
+        .task(id: "\(model.selectedRow?.cwd ?? "")|\(model.selectedRow?.session?.eventAt ?? 0)") {
             guard let cwd = model.selectedRow?.cwd else { return branch = nil }
             branch = await Task.detached(priority: .utility) { GitBranch.current(in: cwd) }.value
         }
@@ -121,7 +122,7 @@ struct StatusPill: View {
         switch row.content {
         case .hosted(let info):
             if !info.isLive { return "Ended" }
-            return info.agent != nil ? "Starting" : "Shell"
+            return state.group == .working ? "Starting" : "Shell"
         case .agent(let session):
             return session.isPaused ? "Paused" : session.status.label
         }

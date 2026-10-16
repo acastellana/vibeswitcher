@@ -41,7 +41,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             return self.windowModel.agentSessions[id] != nil
         },
         resumeCommand: { [weak self] row in self?.resumeCommandLine(for: row) },
-        settings: { [weak self] in self?.showSettings(tab: .general) })
+        settings: { [weak self] in self?.showSettings(tab: .general) },
+        moveToWindow: { [weak self] in self?.moveToWindow($0) })
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var hotKey: HotKey?
@@ -216,6 +217,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             switch note.object as? String {
             case "palette": self?.mainWindow?.showPaletteAction(nil)
             case "home": self?.windowModel.showHome()
+            case let text? where text.hasPrefix("move:"):
+                let tty = String(text.dropFirst("move:".count))
+                if let session = self?.store.sessions.first(where: { $0.tty == tty }) { self?.moveToWindow(session, ask: false) }
             case let text? where text.hasPrefix("select:"):
                 guard let model = self?.windowModel else { return }
                 let query = String(text.dropFirst("select:".count))
@@ -442,8 +446,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 guard depth < 14 else { return }
                 tree += String(repeating: "  ", count: depth) + "\(type(of: view)) \(NSStringFromRect(view.frame))\(view.isHidden ? " hidden" : "")\n"
                 if let terminal = view as? HostTerminalView {
-                    let text = String(decoding: terminal.getTerminal().getBufferAsData(), as: UTF8.self)
-                        .split(separator: "\n").prefix(3).joined(separator: " | ")
+                    let screen = terminal.getTerminal()
+                    let visible = (0..<screen.rows).compactMap { screen.getLine(row: $0)?.translateToString(trimRight: true) }
+                    let text = Redaction.secrets(in: visible.filter { !$0.isEmpty }.prefix(4).joined(separator: " | "))
                     tree += String(repeating: "  ", count: depth + 1)
                         + "background \(terminal.nativeBackgroundColor) layer \(terminal.layer?.backgroundColor.map { "\($0)" } ?? "none") text: \(text)\n"
                 }
@@ -510,6 +515,51 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 Launcher.launch(line: LaunchPlan.terminalLine(for: preset, in: folder))
                 self?.notifier?.postInfo(title: "Started in Terminal instead",
                                          body: "The VibeSwitcher window couldn't start it: \(error.message)")
+            }
+        }
+    }
+
+    /// Stops the agent in its Terminal tab (between turns only) and resumes the same conversation in the window.
+    private func moveToWindow(_ session: Session, ask: Bool = true) {
+        guard MoveToWindow.canMove(session), let sessionID = session.agentSessionID, let cwd = session.cwd else { return NSSound.beep() }
+        if ask {
+            let alert = NSAlert()
+            alert.messageText = "Move “\(session.task ?? session.displayName)” to the window?"
+            alert.informativeText = "\(session.agent.displayName) quits in its Terminal tab and picks up the same conversation here, "
+                + "in a full-color terminal that keeps running when VibeSwitcher quits. The Terminal tab stays open."
+            alert.addButton(withTitle: "Move to Window")
+            alert.addButton(withTitle: "Cancel")
+            NSApp.activate()
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        // Still between turns, and still the same process (it may have started working while we asked).
+        guard let current = store.sessions.first(where: { $0.identity == session.identity }), MoveToWindow.canMove(current) else {
+            notifier?.postInfo(title: "Not moved", body: "It started working again; move it once it's done.")
+            return
+        }
+        let plan = MoveToWindow.plan(agent: session.agent, sessionID: sessionID, presets: presets(for: cwd))
+        let (pid, startedAt) = (session.pid, session.startedAt)
+        kill(pid, SIGTERM)
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // It has to be gone before the conversation is resumed elsewhere.
+            let deadline = Date().addingTimeInterval(5)
+            while SessionIdentity.isRunning(pid: pid, startedAt: startedAt), Date() < deadline { usleep(100_000) }
+            let stopped = !SessionIdentity.isRunning(pid: pid, startedAt: startedAt)
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard stopped else {
+                    self.notifier?.postInfo(title: "Not moved", body: "\(session.agent.displayName) didn't quit in Terminal, so it still runs there.")
+                    return
+                }
+                self.hostClient.spawn(SpawnRequest(cwd: cwd, command: plan.command, env: plan.env, cols: 120, rows: 36,
+                                                   keepShell: false, label: plan.label, agent: session.agent.rawValue)) { [weak self] result in
+                    switch result {
+                    case .success(let hosted): self?.showMainWindow(select: hosted.id)
+                    case .failure(let error):
+                        self?.notifier?.postInfo(title: "Couldn't resume it in the window",
+                                                 body: "\(error.message) Resume it in Terminal with: \(plan.command)")
+                    }
+                }
             }
         }
     }

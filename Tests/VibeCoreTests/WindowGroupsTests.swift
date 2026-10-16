@@ -20,8 +20,9 @@ struct WindowGroupsTests {
         return WindowRow(content: .hosted(info), project: project)
     }
 
+    /// At 30 s: the hosted sessions (started at 5) are still within their "starting" minute.
     func groups(_ rows: [WindowRow]) -> [String: [String]] {
-        let sections = WindowGroups.attention([WindowSection(project: "p", rows: rows)])
+        let sections = WindowGroups.attention([WindowSection(project: "p", rows: rows)], now: Date(timeIntervalSince1970: 30))
         return Dictionary(uniqueKeysWithValues: sections.map { ($0.project, $0.rows.map(\.id)) })
     }
 
@@ -104,9 +105,19 @@ struct WindowGroupsTests {
         #expect(busy.state(now: now).text == "Run tests")
         #expect(busy.state(now: now).since == Date(timeIntervalSince1970: 50))
         #expect(hosted(live: false).state(now: now).text == "ended · exit 1")
-        #expect(hosted(agent: "codex").state(now: now).text == "starting")
+        #expect(hosted(agent: "codex").state(now: Date(timeIntervalSince1970: 30)).text == "starting")
         #expect(hosted().state(now: now).text == "shell")
         #expect(agent("t", status: .unknown).state(now: now).since == nil)
+    }
+
+    /// A preset that keeps a shell open leaves a live session with an agent label after the agent quits: it
+    /// isn't "starting" for ever.
+    @Test func aWindowSessionWhoseAgentNeverShowsUpStopsBeingStarting() {
+        let row = hosted(agent: "claude")   // started at 5
+        #expect(row.state(now: Date(timeIntervalSince1970: 30)).group == .working)
+        let later = row.state(now: Date(timeIntervalSince1970: 5 + 61))
+        #expect(later.group == .idle)
+        #expect(later.text == "agent ended · shell")
     }
 
     @Test func summaryCountsWhatNeedsYouAndWhatWorks() {
