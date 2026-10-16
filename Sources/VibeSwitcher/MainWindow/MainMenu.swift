@@ -72,6 +72,8 @@ enum MainMenu {
             item("Previous Session", #selector(MainWindowController.previousSession(_:)), up, [.command, .option]),
             item("Next Needing You", #selector(MainWindowController.nextNeedingYou(_:)), "j"),
             item("Open in Terminal", #selector(MainWindowController.openInTerminalAction(_:)), "o"),
+            item("Stop", #selector(MainWindowController.stopAction(_:)), "."),
+            item("Export Chat…", #selector(MainWindowController.exportChatAction(_:)), "e", [.command, .shift]),
             item("Start Page", #selector(MainWindowController.showHomeAction(_:)), "h", [.command, .shift]),
             .separator(),
         ] + (1...9).map { item("Session \($0)", #selector(MainWindowController.selectSessionByTag(_:)), "\($0)", tag: $0) })

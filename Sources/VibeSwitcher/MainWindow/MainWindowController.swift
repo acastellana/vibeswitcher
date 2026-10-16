@@ -26,7 +26,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     let chat = ChatModel()
     private lazy var chatHost = NSHostingView(rootView: ChatContainer(
         chat: chat, model: model, actions: actions,
-        send: { [weak self] text in self?.sendToSelected(text) },
+        composer: ComposerActions(send: { [weak self] text in self?.sendToSelected(text) ?? false },
+                                  stop: { [weak self] in self?.sendKeys([27]) },
+                                  cycleMode: { [weak self] in self?.sendKeys(AgentMode.cycleKey) }),
+        choose: { [weak self] index in self?.chooseMenuOption(index) },
         showTerminal: { [weak self] in self?.model.showsChat = false }))
     /// Follows the transcript while the chat is on screen.
     private var chatTimer: Timer?
@@ -169,7 +172,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         }
         endedBar.isHidden = row.hosted?.exit == nil
         if let id = row.hostID {
-            if pane.current != id { pane.show(hostID: id) }
+            if pane.current != id { pane.show(hostID: id, focus: !model.chatShown) }
         } else if let session = row.session, shownID != row.id || MoveToWindow.canMove(session) != mirrorOffersMove {
             mirrorOffersMove = MoveToWindow.canMove(session)
             let move: (() -> Void)? = MoveToWindow.canMove(session) ? { [weak self] in self?.actions.moveToWindow(session) } : nil
@@ -182,17 +185,28 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     /// Shows the selected row's conversation over the terminal when Chat is chosen and it has one.
     private func updateChat() {
-        let path = model.selectedRow.flatMap(model.chatPath(for:))
-        chat.show(path: path)
+        let row = model.selectedRow
+        let path = row.flatMap(model.chatPath(for:))
         let shown = model.showsChat && path != nil
+        // Only read a conversation that's on screen.
+        let previous = chat.path
+        chat.show(path: shown ? path : nil)
+        if shown, chat.path != previous {
+            chat.loadCompletions(agent: row?.session?.agent ?? row?.hosted?.agent.flatMap(Agent.init(rawValue:)) ?? .claude,
+                                 folder: row?.cwd)
+            readScreen()
+        }
         if chatHost.isHidden == shown {
             chatHost.isHidden = !shown
-            if !shown { pane.focus() }
+            if shown { chat.focusComposer() } else { pane.focus() }
+        } else if shown, chat.path != previous {
+            chat.focusComposer()
         }
         if shown, chatTimer == nil {
             let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
                 guard let self, self.window?.isVisible == true, !self.chatHost.isHidden else { return }
                 self.chat.poll()
+                self.readScreen()
                 if self.window?.isKeyWindow == true { self.chat.markSeen() }
             }
             RunLoop.main.add(timer, forMode: .common)
@@ -203,11 +217,58 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         }
     }
 
+    func testSend(_ text: String) { _ = sendToSelected(text) } // TEMPORARY
+    func testChoose(_ index: Int) { chooseMenuOption(index) } // TEMPORARY
+
+    /// The menu and permission mode on the selected window session's screen, for the answer card and the mode chip.
+    private func readScreen() {
+        guard let row = model.selectedRow, let id = row.hostID, actions.isLive(row) else {
+            if chat.menu != nil { chat.menu = nil }
+            if chat.mode != nil { chat.mode = nil }
+            return
+        }
+        let lines = pane.screenLines(id)
+        let bottom = Array(lines.suffix(40))
+        // Only a menu that's waiting on you: the hooks say so, or the screen says how to choose.
+        let asking = row.session?.status == .needsInput
+            || bottom.suffix(6).contains { $0.contains("Enter to select") || $0.contains("Esc to cancel") || $0.contains("to navigate") }
+        let menu = asking ? ScreenMenu.parse(bottom) : nil
+        if chat.menu != menu { chat.menu = menu }
+        let mode = row.session?.agent == .codex ? nil : AgentMode.parse(Array(lines.suffix(6)))
+        if chat.mode != mode { chat.mode = mode }
+    }
+
     /// The composer's message, typed into the selected window session (as a paste when its program asked for that).
-    private func sendToSelected(_ text: String) {
+    private func sendToSelected(_ text: String) -> Bool {
+        guard let row = model.selectedRow, let id = row.hostID, actions.isLive(row) else {
+            NSSound.beep()
+            return false
+        }
+        write(ComposerText.writes(text, bracketed: pane.bracketedPaste(id)), to: id)
+        return true
+    }
+
+    /// Keys for the selected window session (Esc to stop, shift+tab for the mode).
+    private func sendKeys(_ bytes: [UInt8]) {
         guard let row = model.selectedRow, let id = row.hostID, actions.isLive(row) else { return NSSound.beep() }
+        write([HostInput.Write(bytes: bytes, delay: 0)], to: id)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.readScreen() }
+    }
+
+    /// Answers the menu on screen: arrows from where its cursor is, then Enter.
+    private func chooseMenuOption(_ index: Int) {
+        guard let row = model.selectedRow, let id = row.hostID, let menu = chat.menu else { return }
+        // Read again right before: the menu may have changed or gone.
+        readScreen()
+        guard chat.menu == menu else { return NSSound.beep() }
+        write(menu.keys(toChoose: index), to: id)
+        chat.menu = nil
+        chat.scrollToBottom()
+    }
+
+    private func write(_ writes: [HostInput.Write], to id: UUID) {
         var at: TimeInterval = 0
-        for write in ComposerText.writes(text, bracketed: pane.bracketedPaste(id)) {
+        for write in writes {
             at += write.delay
             DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
                 self?.host.send(id, bytes: Data(write.bytes), reply: false)
@@ -232,7 +293,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     func windowDidBecomeKey(_ notification: Notification) {
         updateViewing()
-        pane.focus()
+        if chatHost.isHidden { pane.focus() } else { chat.focusComposer() }
     }
 
     func windowDidResignKey(_ notification: Notification) { updateViewing() }
@@ -340,11 +401,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     @objc func findNextAction(_ sender: Any?) {
-        if model.chatShown { chat.searchIndex += 1 } else { pane.currentView?.performFindPanelAction(sender) }
+        if model.chatShown { chat.stepSearch(1) } else { pane.currentView?.performFindPanelAction(sender) }
     }
 
     @objc func findPreviousAction(_ sender: Any?) {
-        if model.chatShown { chat.searchIndex = max(0, chat.searchIndex - 1) } else { pane.currentView?.performFindPanelAction(sender) }
+        if model.chatShown { chat.stepSearch(-1) } else { pane.currentView?.performFindPanelAction(sender) }
     }
 
     @objc func showPaletteAction(_ sender: Any?) {
@@ -406,8 +467,24 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         actions.openInTerminal(session)
     }
 
-    @objc func biggerFont(_ sender: Any?) { onFontSize(1) }
-    @objc func smallerFont(_ sender: Any?) { onFontSize(-1) }
-    @objc func actualSizeFont(_ sender: Any?) { onFontSize(0) }
+    /// ⌘+ / ⌘− / ⌘0 size the chat's text while it's shown, the terminal's otherwise.
+    @objc func biggerFont(_ sender: Any?) { model.chatShown ? ChatFont.step(1) : onFontSize(1) }
+    @objc func smallerFont(_ sender: Any?) { model.chatShown ? ChatFont.step(-1) : onFontSize(-1) }
+    @objc func actualSizeFont(_ sender: Any?) { model.chatShown ? ChatFont.step(0) : onFontSize(0) }
+
+    @objc func stopAction(_ sender: Any?) {
+        guard let row = model.selectedRow, row.hostID != nil, actions.isLive(row) else { return NSSound.beep() }
+        sendKeys([27])
+    }
+
+    @objc func exportChatAction(_ sender: Any?) {
+        guard let row = model.selectedRow, model.chatPath(for: row) != nil, !chat.log.entries.isEmpty else { return NSSound.beep() }
+        let panel = NSSavePanel()
+        panel.nameFieldStringValue = row.title.replacingOccurrences(of: "/", with: "-") + ".md"
+        panel.allowedContentTypes = [.init(filenameExtension: "md") ?? .plainText]
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        let agent = row.session?.agent.displayName ?? "Agent"
+        try? ChatExport.markdown(chat.log.entries, agent: agent).write(to: url, atomically: true, encoding: .utf8)
+    }
     @objc func clearScrollbackAction(_ sender: Any?) { pane.clearScrollback() }
 }

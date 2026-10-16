@@ -64,6 +64,9 @@ struct ToolGroupView: View {
 enum ToolStyle {
     static func symbol(_ tool: ChatTool) -> String {
         switch tool.detail {
+        case .thought: return "brain"
+        case .todos: return "checklist"
+        case .plan: return "list.bullet.rectangle"
         case .command: return "terminal"
         case .edit, .patch: return "pencil"
         case .write: return "doc.badge.plus"
@@ -115,6 +118,13 @@ private struct ToolDetailView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             switch tool.detail {
+            case .thought(let text):
+                MarkdownView(text: text, fontSize: 12).foregroundStyle(.secondary).italic()
+            case .todos(let todos):
+                TodoListView(todos: todos)
+            case .plan(let plan):
+                MarkdownView(text: plan, fontSize: 12.5)
+                    .padding(12).background(RoundedRectangle(cornerRadius: 8).fill(Color.accentColor.opacity(0.07)))
             case .command(let command):
                 CodeBlockView(language: "bash", code: command, maxLines: 12)
                 output
@@ -177,6 +187,26 @@ private struct ToolDetailView: View {
     private func chosen(_ question: ChatQuestion) -> String? {
         guard let output = tool.result?.output else { return nil }
         return question.options.first { output.contains("=\"\($0)\"") }
+    }
+}
+
+/// A to-do list or plan steps, with their state.
+struct TodoListView: View {
+    let todos: [ChatTodo]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            ForEach(Array(todos.enumerated()), id: \.offset) { _, todo in
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    Image(systemName: todo.status == .done ? "checkmark.circle.fill" : todo.status == .active ? "circle.dotted.circle" : "circle")
+                        .foregroundStyle(todo.status == .done ? Color.green : todo.status == .active ? Color.accentColor : Color.secondary)
+                        .font(.system(size: 12))
+                    Text(todo.text).font(.system(size: 12.5, weight: todo.status == .active ? .semibold : .regular))
+                        .strikethrough(todo.status == .done, color: .secondary)
+                        .foregroundStyle(todo.status == .done ? .secondary : .primary)
+                }
+            }
+        }
     }
 }
 
@@ -297,42 +327,64 @@ private struct FlowChips: View {
     }
 }
 
-/// An image from the conversation, sized to a height; click to open it.
+/// An image from the conversation, sized to a height; click to open it. Decoded small, off the main thread.
 struct Thumbnail: View {
     let image: ChatImage
     let height: CGFloat
     let open: () -> Void
+    @State private var decoded: NSImage?
 
     var body: some View {
-        if let nsImage = ImageCache.image(image) {
-            Image(nsImage: nsImage).resizable().aspectRatio(contentMode: .fit).frame(height: height)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.25)))
-                .onTapGesture(perform: open)
-                .help("Open full size")
+        Group {
+            if let decoded {
+                Image(nsImage: decoded).resizable().aspectRatio(contentMode: .fit).frame(height: height)
+            } else {
+                RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)).frame(width: height * 1.5, height: height)
+            }
         }
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.25)))
+        .onTapGesture(perform: open)
+        .help("Open full size")
+        .task(id: image.id) { decoded = await ImageCache.thumbnail(image, maxPixels: Int(height * 2.5)) }
     }
 }
 
 enum ImageCache {
-    private static let cache: NSCache<NSString, NSImage> = {
+    /// Thumbnails by image id; bounded by memory (bytes of the decoded bitmaps).
+    private static let thumbnails: NSCache<NSString, NSImage> = {
         let cache = NSCache<NSString, NSImage>()
-        cache.countLimit = 80
+        cache.totalCostLimit = 150 * 1024 * 1024
         return cache
     }()
 
-    static func image(_ image: ChatImage) -> NSImage? {
-        if let hit = cache.object(forKey: image.id as NSString) { return hit }
-        guard let decoded = NSImage(data: image.data) else { return nil }
-        cache.setObject(decoded, forKey: image.id as NSString)
-        return decoded
+    static func thumbnail(_ image: ChatImage, maxPixels: Int) async -> NSImage? {
+        let key = "\(image.id)@\(maxPixels)" as NSString
+        if let hit = thumbnails.object(forKey: key) { return hit }
+        let data = image.data
+        let decoded: (NSImage, Int)? = await Task.detached(priority: .utility) {
+            guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
+            let options: [CFString: Any] = [kCGImageSourceCreateThumbnailFromImageAlways: true,
+                                            kCGImageSourceThumbnailMaxPixelSize: maxPixels,
+                                            kCGImageSourceShouldCacheImmediately: true,
+                                            kCGImageSourceCreateThumbnailWithTransform: true]
+            guard let cgImage = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
+            return (NSImage(cgImage: cgImage, size: NSSize(width: cgImage.width, height: cgImage.height)), cgImage.width * cgImage.height * 4)
+        }.value
+        guard let decoded else { return nil }
+        thumbnails.setObject(decoded.0, forKey: key, cost: decoded.1)
+        return decoded.0
     }
+
+    /// Full size, for the viewer only (not kept).
+    static func full(_ image: ChatImage) -> NSImage? { NSImage(data: image.data) }
 }
 
 /// Full-size image with Copy and Save.
 struct ImageViewer: View {
     let image: ChatImage
     let close: () -> Void
+    @State private var full: NSImage?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -340,7 +392,7 @@ struct ImageViewer: View {
                 Text(image.mediaType).font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
                 Button("Copy") {
-                    guard let nsImage = ImageCache.image(image) else { return }
+                    guard let nsImage = full else { return }
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.writeObjects([nsImage])
                 }
@@ -349,7 +401,7 @@ struct ImageViewer: View {
             }
             .padding(10)
             Divider()
-            if let nsImage = ImageCache.image(image) {
+            if let nsImage = full {
                 ScrollView([.horizontal, .vertical]) {
                     Image(nsImage: nsImage).resizable().aspectRatio(contentMode: .fit)
                         .frame(maxWidth: min(nsImage.size.width, 1400))
@@ -358,6 +410,10 @@ struct ImageViewer: View {
             }
         }
         .frame(minWidth: 640, idealWidth: 1000, minHeight: 420, idealHeight: 720)
+        .task(id: image.id) {
+            let data = image.data
+            full = await Task.detached(priority: .userInitiated) { NSImage(data: data) }.value
+        }
     }
 
     private func save() {

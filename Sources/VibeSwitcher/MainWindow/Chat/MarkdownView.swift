@@ -2,15 +2,41 @@ import AppKit
 import SwiftUI
 import VibeCore
 
+/// The chat's text size (⌘+ / ⌘− while the chat is shown).
+enum ChatFont {
+    static let key = "chatFontSize"
+    static let standard: Double = 13.5
+
+    static func step(_ delta: Int) {
+        let current = UserDefaults.standard.object(forKey: key) as? Double ?? standard
+        let next = delta == 0 ? standard : min(22, max(10, current + Double(delta)))
+        UserDefaults.standard.set(next, forKey: key)
+    }
+}
+
+private struct ChatFolderKey: EnvironmentKey { static let defaultValue: String? = nil }
+
+extension EnvironmentValues {
+    /// The session's folder: relative file paths in replies are resolved against it.
+    var chatFolder: String? {
+        get { self[ChatFolderKey.self] }
+        set { self[ChatFolderKey.self] = newValue }
+    }
+}
+
 /// A reply rendered as markdown blocks.
 struct MarkdownView: View {
     let text: String
-    var fontSize: CGFloat = 13.5
+    /// nil: the chat's text size.
+    var fontSize: CGFloat?
+    @AppStorage(ChatFont.key) private var chatFontSize = ChatFont.standard
+    @Environment(\.chatFolder) private var folder
 
     var body: some View {
+        let size = fontSize.map { $0 + CGFloat(chatFontSize - ChatFont.standard) } ?? CGFloat(chatFontSize)
         VStack(alignment: .leading, spacing: 10) {
             ForEach(Array(MarkdownCache.blocks(text).enumerated()), id: \.offset) { _, block in
-                BlockView(block: block, fontSize: fontSize)
+                BlockView(block: block, fontSize: size, folder: folder)
             }
         }
         .textSelection(.enabled)
@@ -31,38 +57,57 @@ enum MarkdownCache {
     }
 }
 
-/// Inline markdown (bold, italic, `code`, links) as styled text; plain text when it doesn't parse.
-func inlineMarkdown(_ text: String) -> AttributedString {
+/// Inline markdown (bold, italic, `code`, links) as styled text; plain text when it doesn't parse. Inline code
+/// naming a file that exists (relative to `folder`) becomes a link that opens it.
+func inlineMarkdown(_ text: String, folder: String? = nil, size: CGFloat = 13.5) -> AttributedString {
+    let key = "\(folder ?? "")|\(size)|\(text)" as NSString
+    if let hit = InlineCache.cache.object(forKey: key) { return hit.value }
     var options = AttributedString.MarkdownParsingOptions()
     options.interpretedSyntax = .inlineOnlyPreservingWhitespace
     options.failurePolicy = .returnPartiallyParsedIfPossible
     guard var attributed = try? AttributedString(markdown: text, options: options) else { return AttributedString(text) }
     // Inline code: monospaced on a faint background.
     for run in attributed.runs where run.inlinePresentationIntent?.contains(.code) == true {
-        attributed[run.range].font = .system(size: 12.5, design: .monospaced)
+        attributed[run.range].font = .system(size: size - 1, design: .monospaced)
         attributed[run.range].backgroundColor = Color.secondary.opacity(0.15)
+        if let path = PathLinks.target(String(attributed[run.range].characters), cwd: folder) {
+            attributed[run.range].link = URL(fileURLWithPath: path)
+        }
     }
+    InlineCache.cache.setObject(InlineCache.Box(attributed), forKey: key)
     return attributed
+}
+
+private enum InlineCache {
+    final class Box { let value: AttributedString; init(_ value: AttributedString) { self.value = value } }
+    static let cache: NSCache<NSString, Box> = {
+        let cache = NSCache<NSString, Box>()
+        cache.countLimit = 2000
+        return cache
+    }()
 }
 
 private struct BlockView: View {
     let block: MDBlock
     let fontSize: CGFloat
+    let folder: String?
+
+    private func inline(_ text: String) -> AttributedString { inlineMarkdown(text, folder: folder, size: fontSize) }
 
     var body: some View {
         switch block {
         case .heading(let level, let text):
-            Text(inlineMarkdown(text))
+            Text(inline(text))
                 .font(.system(size: level == 1 ? fontSize + 7 : level == 2 ? fontSize + 4 : fontSize + 1.5, weight: .bold))
                 .padding(.top, level <= 2 ? 6 : 2)
         case .paragraph(let text):
-            Text(inlineMarkdown(text)).font(.system(size: fontSize)).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
+            Text(inline(text)).font(.system(size: fontSize)).lineSpacing(3).fixedSize(horizontal: false, vertical: true)
         case .list(let ordered, let start, let items):
             VStack(alignment: .leading, spacing: 5) {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
                     HStack(alignment: .firstTextBaseline, spacing: 7) {
                         marker(ordered: ordered, number: start + index, item: item)
-                        Text(inlineMarkdown(item.text)).font(.system(size: fontSize)).lineSpacing(2)
+                        Text(inline(item.text)).font(.system(size: fontSize)).lineSpacing(2)
                             .fixedSize(horizontal: false, vertical: true)
                             .strikethrough(item.checked == true, color: .secondary)
                             .foregroundStyle(item.checked == true ? .secondary : .primary)
@@ -75,11 +120,11 @@ private struct BlockView: View {
         case .quote(let text):
             HStack(spacing: 10) {
                 RoundedRectangle(cornerRadius: 1.5).fill(Color.accentColor.opacity(0.6)).frame(width: 3)
-                Text(inlineMarkdown(text)).font(.system(size: fontSize)).foregroundStyle(.secondary)
+                Text(inline(text)).font(.system(size: fontSize)).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
         case .table(let header, let alignments, let rows):
-            TableBlock(header: header, alignments: alignments, rows: rows, fontSize: fontSize)
+            TableBlock(header: header, alignments: alignments, rows: rows, fontSize: fontSize, folder: folder)
         case .rule:
             Divider().padding(.vertical, 4)
         }
@@ -102,6 +147,7 @@ private struct TableBlock: View {
     let alignments: [MDAlign]
     let rows: [[String]]
     let fontSize: CGFloat
+    let folder: String?
 
     var body: some View {
         Grid(alignment: .leading, horizontalSpacing: 0, verticalSpacing: 0) {
@@ -132,7 +178,7 @@ private struct TableBlock: View {
         case .center: alignment = .center
         case .trailing: alignment = .trailing
         }
-        return Text(inlineMarkdown(text))
+        return Text(inlineMarkdown(text, folder: folder, size: fontSize - 1))
             .font(.system(size: fontSize - 1, weight: bold ? .semibold : .regular))
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: alignment)
@@ -192,7 +238,23 @@ struct CodeBlockView: View {
 }
 
 enum SyntaxColors {
+    private final class Box { let value: AttributedString; init(_ value: AttributedString) { self.value = value } }
+    private static let cache: NSCache<NSString, Box> = {
+        let cache = NSCache<NSString, Box>()
+        cache.countLimit = 300
+        return cache
+    }()
+
+    /// Colored code, cached (a long block would otherwise be re-tokenized on every update of the chat).
     static func attributed(_ code: String, language: String?) -> AttributedString {
+        let key = "\(language ?? "")|\(code)" as NSString
+        if let hit = cache.object(forKey: key) { return hit.value }
+        let value = tokenized(code, language: language)
+        cache.setObject(Box(value), forKey: key)
+        return value
+    }
+
+    private static func tokenized(_ code: String, language: String?) -> AttributedString {
         var out = AttributedString()
         for token in SyntaxHighlight.tokens(code, language: language) {
             var piece = AttributedString(code[token.range])

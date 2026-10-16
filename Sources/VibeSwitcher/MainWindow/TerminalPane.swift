@@ -54,7 +54,8 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
 
     var currentView: HostTerminalView? { current.flatMap { views[$0] } }
 
-    func show(hostID: UUID) {
+    /// `focus`: false while the chat covers the terminal (keys must not go to a terminal you can't see).
+    func show(hostID: UUID, focus takesFocus: Bool = true) {
         placeholder?.removeFromSuperview()
         placeholder = nil
         views.values.forEach { $0.isHidden = true }
@@ -65,7 +66,7 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         recent.removeAll { $0 == hostID }
         recent.insert(hostID, at: 0)
         for evicted in recent.dropFirst(Self.keepAttached) { forget(evicted) }
-        focus()
+        if takesFocus { focus() }
     }
 
     func show(placeholder content: AnyView) {
@@ -101,6 +102,19 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     func focus() {
         guard let terminal = currentView else { return }
         view.window?.makeFirstResponder(terminal)
+    }
+
+    /// The session's screen as text lines (wide characters kept whole), for reading menus and modes off it.
+    /// Blank lines at the bottom are dropped: a fresh program draws from the top of a tall screen.
+    func screenLines(_ id: UUID) -> [String] {
+        guard let terminal = views[id]?.getTerminal() else { return [] }
+        var lines = (0..<terminal.rows).compactMap { row in
+            terminal.getLine(row: row)?.translateToString(trimRight: false, skipNullCellsFollowingWide: true)
+                .replacingOccurrences(of: "\u{0}", with: " ")
+                .trimmingCharacters(in: .whitespaces)
+        }
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        return lines
     }
 
     /// Whether the program in that session asked for bracketed paste (needs its view attached).

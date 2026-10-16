@@ -26,6 +26,21 @@ final class ChatModel: ObservableObject {
     @Published var searchIndex = 0
     /// Bumped to scroll to the bottom (e.g. after you send something).
     @Published private(set) var scrollToBottomRequests = 0
+    /// Bumped to put the keyboard focus in the composer.
+    @Published private(set) var focusComposerRequests = 0
+    /// Unsent text per session (row id), so switching sessions never sends a draft to the wrong one. Kept on
+    /// disk, so a restart (or an update) doesn't lose what you were typing.
+    @Published var drafts: [String: String] = UserDefaults.standard.dictionary(forKey: "chatDrafts") as? [String: String] ?? [:] {
+        didSet { UserDefaults.standard.set(drafts.filter { !$0.value.isEmpty }, forKey: "chatDrafts") }
+    }
+    /// Messages sent from the composer that the transcript doesn't show yet.
+    @Published private(set) var pending: [PendingMessage] = []
+    /// A numbered choice on the session's screen (permission prompt, question), and its permission mode.
+    @Published var menu: ScreenMenu?
+    @Published var mode: AgentMode?
+    /// What `/` and `@` complete to, for the session's folder.
+    @Published private(set) var commands: [SlashCommand] = []
+    @Published private(set) var files: [String] = []
 
     static let pageBytes = 4 * 1024 * 1024
     private static let seenKey = "chatSeen"
@@ -54,6 +69,10 @@ final class ChatModel: ObservableObject {
         searchActive = false
         searchQuery = ""
         hasEarlier = false
+        loadingEarlier = false
+        pending = []
+        menu = nil
+        mode = nil
         cursor = 0
         earliest = 0
         reading = false
@@ -118,6 +137,7 @@ final class ChatModel: ObservableObject {
                 guard let read, !read.events.isEmpty || read.consumed > 0 else { return }
                 self.log.append(read.events)
                 self.cursor = cursor + read.skipped + read.consumed
+                if !self.pending.isEmpty { self.pending = PendingMessage.remaining(self.pending, prompts: self.log.prompts) }
             }
         }
     }
@@ -127,8 +147,15 @@ final class ChatModel: ObservableObject {
         let generation = self.generation, end = earliest, format = self.format
         loadingEarlier = true
         queue.async {
-            let start = max(0, end - Self.pageBytes)
-            let read = Self.read(url: url, from: start, to: end, skipPartialFirstLine: start > 0, format: format)
+            // A single line (a big screenshot) can be longer than a page: widen until a line fits.
+            var page = Self.pageBytes
+            var start = max(0, end - page)
+            var read = Self.read(url: url, from: start, to: end, skipPartialFirstLine: start > 0, format: format)
+            while let partial = read, start > 0, partial.skipped >= end - start, page < 256 * 1024 * 1024 {
+                page *= 2
+                start = max(0, end - page)
+                read = Self.read(url: url, from: start, to: end, skipPartialFirstLine: start > 0, format: format)
+            }
             DispatchQueue.main.async {
                 guard generation == self.generation else { return }
                 self.loadingEarlier = false
@@ -143,11 +170,57 @@ final class ChatModel: ObservableObject {
     /// Remembers the newest entry as seen (while the chat is on screen).
     func markSeen() {
         guard let path, let last = log.entries.last?.id, Self.seen[path] != last else { return }
-        var seen = Self.seen
-        seen[path] = last
-        // Keep the store small: the most recent few hundred conversations are plenty.
-        if seen.count > 400 { seen = Dictionary(uniqueKeysWithValues: seen.suffix(300).map { ($0.key, $0.value) }) }
-        UserDefaults.standard.set(seen, forKey: Self.seenKey)
+        var stored = UserDefaults.standard.dictionary(forKey: Self.seenKey) as? [String: [String: Any]] ?? [:]
+        stored[path] = ["id": last, "at": Date().timeIntervalSince1970]
+        // Keep the store small: the 300 most recently seen conversations.
+        if stored.count > 400 {
+            let keep = stored.sorted { ($0.value["at"] as? Double ?? 0) > ($1.value["at"] as? Double ?? 0) }.prefix(300)
+            stored = Dictionary(uniqueKeysWithValues: keep.map { ($0.key, $0.value) })
+        }
+        UserDefaults.standard.set(stored, forKey: Self.seenKey)
+    }
+
+    func focusComposer() { focusComposerRequests += 1 }
+
+    /// Steps through search matches, wrapping around.
+    func stepSearch(_ delta: Int) {
+        let count = ChatSearch.matches(items, query: searchQuery).count
+        guard count > 0 else { return }
+        searchIndex = ((min(searchIndex, count - 1) + delta) % count + count) % count
+    }
+
+    /// Records a message sent while the agent works, until the transcript shows it.
+    func sent(_ text: String) {
+        pending.append(PendingMessage(text: text, afterPrompts: log.prompts.count))
+    }
+
+    /// Loads what `/` and `@` offer for this folder (off the main thread; files are re-listed when asked again).
+    func loadCompletions(agent: Agent, folder: String?) {
+        let home = URL(fileURLWithPath: NSHomeDirectory())
+        DispatchQueue.global(qos: .utility).async {
+            var commandDirs: [URL] = [], skillDirs: [URL] = []
+            switch agent {
+            case .claude:
+                commandDirs = [home.appendingPathComponent(".claude/commands")]
+                skillDirs = [home.appendingPathComponent(".claude/skills")]
+                if let folder {
+                    commandDirs.append(URL(fileURLWithPath: folder).appendingPathComponent(".claude/commands"))
+                    skillDirs.append(URL(fileURLWithPath: folder).appendingPathComponent(".claude/skills"))
+                }
+            case .codex:
+                commandDirs = []
+            }
+            var commands = SlashCatalog.builtins(agent) + SlashCatalog.scan(commandDirs: commandDirs, skillDirs: skillDirs)
+            if agent == .codex {
+                commands += SlashCatalog.scan(commandDirs: [home.appendingPathComponent(".codex/prompts")], skillDirs: [])
+                    .map { SlashCommand(name: "prompts:\($0.name)", description: $0.description) }
+            }
+            let files = folder.map { FileIndex.files(in: $0) } ?? []
+            DispatchQueue.main.async {
+                self.commands = commands
+                self.files = files
+            }
+        }
     }
 
     func scrollToBottom() { scrollToBottomRequests += 1 }
@@ -157,7 +230,8 @@ final class ChatModel: ObservableObject {
     }
 
     private static var seen: [String: String] {
-        UserDefaults.standard.dictionary(forKey: seenKey) as? [String: String] ?? [:]
+        let stored = UserDefaults.standard.dictionary(forKey: seenKey) ?? [:]
+        return stored.compactMapValues { ($0 as? [String: Any])?["id"] as? String }
     }
 
     // MARK: Reading (off the main thread)

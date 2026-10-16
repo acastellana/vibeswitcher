@@ -7,21 +7,32 @@ struct ChatContainer: View {
     @ObservedObject var chat: ChatModel
     @ObservedObject var model: WindowModel
     let actions: WindowActions
-    /// Types the message into the selected window session.
-    let send: (String) -> Void
+    /// Typing into the selected window session.
+    let composer: ComposerActions
+    /// Picks option N of the menu on the session's screen.
+    let choose: (Int) -> Void
     let showTerminal: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
             if chat.searchActive { ChatSearchBar(chat: chat) }
-            ChatView(chat: chat, row: model.selectedRow, showTerminal: showTerminal)
+            if let todos = chat.log.todos, todos.contains(where: { $0.status != .done }) { TodoPanel(todos: todos) }
+            ChatView(chat: chat, row: model.selectedRow, live: model.selectedRow.map(actions.isLive) == true && model.selectedRow?.hostID != nil,
+                     showTerminal: showTerminal, choose: choose, resend: { _ = composer.send($0) })
+                .id(chat.path ?? "")
+                .environment(\.chatFolder, model.selectedRow?.cwd)
             Divider()
             if let row = model.selectedRow {
                 if row.hostID != nil, actions.isLive(row) {
-                    ComposerView(agent: row.markKind.name, history: chat.log.prompts) { text in
-                        send(text)
-                        chat.scrollToBottom()
-                    }
+                    ComposerView(chat: chat, rowID: row.id, agent: row.session?.agent ?? .claude,
+                                 working: [.working, .background].contains(row.session?.status),
+                                 actions: ComposerActions(send: { text in
+                                     let sent = composer.send(text)
+                                     if sent { chat.scrollToBottom() }
+                                     return sent
+                                 }, stop: composer.stop, cycleMode: composer.cycleMode))
+                    // A text box of its own per session: nothing typed for one can end up in another.
+                    .id(row.id)
                 } else if let session = row.session, session.inTerminalApp {
                     TerminalReplyHint(canMove: MoveToWindow.canMove(session)) { actions.moveToWindow(session) }
                 } else {
@@ -38,15 +49,20 @@ struct ChatContainer: View {
 struct ChatView: View {
     @ObservedObject var chat: ChatModel
     let row: WindowRow?
+    /// A window session you can type into (answer cards, Send Again).
+    let live: Bool
     let showTerminal: () -> Void
+    let choose: (Int) -> Void
+    let resend: (String) -> Void
     @State private var atBottom = true
     @State private var viewing: ChatImage?
     @State private var didInitialScroll = false
 
     var body: some View {
         let items = chat.items
-        let matches = chat.searchActive ? ChatSearch.matches(items, query: chat.searchQuery) : []
-        let current = matches.isEmpty ? nil : matches[min(chat.searchIndex, matches.count - 1)]
+        let matchList = chat.searchActive ? ChatSearch.matches(items, query: chat.searchQuery) : []
+        let matches = Set(matchList)
+        let current = matchList.isEmpty ? nil : matchList[min(chat.searchIndex, matchList.count - 1)]
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
@@ -63,13 +79,29 @@ struct ChatView: View {
                                 .buttonStyle(.borderless).frame(maxWidth: .infinity).disabled(chat.loadingEarlier)
                         }
                         ForEach(items) { item in
-                            ChatItemView(item: item, chat: chat, agent: row?.markKind ?? .agent(.claude)) { viewing = $0 }
+                            ChatItemView(item: item, chat: chat, agent: row?.markKind ?? .agent(.claude), rowID: row?.id,
+                                         canSend: live, resend: resend) { viewing = $0 }
                                 .id(item.id)
                                 .padding(6)
                                 .background(RoundedRectangle(cornerRadius: 10).fill(
                                     item.id == current ? Color.yellow.opacity(0.18) : matches.contains(item.id) ? Color.yellow.opacity(0.07) : .clear))
                         }
-                        if let row { LiveStateView(row: row, showTerminal: showTerminal) }
+                        ForEach(chat.pending) { message in
+                            Text(message.text).font(.system(size: 13.5)).foregroundStyle(.secondary)
+                                .padding(.horizontal, 13).padding(.vertical, 9)
+                                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.accentColor.opacity(0.4),
+                                                                                                         style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                                .overlay(alignment: .bottomTrailing) {
+                                    Text("queued").font(.system(size: 9.5)).foregroundStyle(.tertiary).offset(y: 14)
+                                }
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .padding(.leading, 60).padding(.bottom, 10)
+                        }
+                        if live, let menu = chat.menu {
+                            AnswerCard(menu: menu, agent: row?.session?.agent.displayName ?? "The agent", choose: choose, showTerminal: showTerminal)
+                        } else if let row {
+                            LiveStateView(row: row, showTerminal: showTerminal)
+                        }
                     }
                     Color.clear.frame(height: 1).id("bottom")
                         .onAppear { atBottom = true }
@@ -93,14 +125,13 @@ struct ChatView: View {
                 didInitialScroll = true
                 // Open at what's new since you looked, else at the end.
                 DispatchQueue.main.async {
-                    if chat.markerAfter != nil, items.contains(where: { $0.id == "new-marker" }) || chat.items.contains(where: { $0.id == "new-marker" }) {
+                    if chat.items.contains(where: { $0.id == "new-marker" }) {
                         proxy.scrollTo("new-marker", anchor: .top)
                     } else {
                         proxy.scrollTo("bottom", anchor: .bottom)
                     }
                 }
             }
-            .onChange(of: chat.path) { _, _ in didInitialScroll = chat.state == .ready ? false : didInitialScroll }
             .onChange(of: chat.log.entries.count) { _, _ in
                 if atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
             }
@@ -120,9 +151,13 @@ struct ChatView: View {
 }
 
 private struct ChatItemView: View {
+    @AppStorage(ChatFont.key) private var chatFontSize = ChatFont.standard
     let item: ChatItem
     @ObservedObject var chat: ChatModel
     let agent: MarkKind
+    let rowID: String?
+    let canSend: Bool
+    let resend: (String) -> Void
     let openImage: (ChatImage) -> Void
 
     var body: some View {
@@ -135,7 +170,7 @@ private struct ChatItemView: View {
                             HStack(spacing: 6) { ForEach(images) { image in Thumbnail(image: image, height: 90) { openImage(image) } } }
                         }
                         if !text.isEmpty {
-                            Text(text).font(.system(size: 13.5)).lineSpacing(2).textSelection(.enabled)
+                            Text(text).font(.system(size: CGFloat(chatFontSize))).lineSpacing(2).textSelection(.enabled)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -147,7 +182,16 @@ private struct ChatItemView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.leading, 60)
-                .contextMenu { Button("Copy") { Pasteboard.copy(text) } }
+                .contextMenu {
+                    Button("Copy") { Pasteboard.copy(text) }
+                    if canSend, let rowID {
+                        Button("Edit in Composer") {
+                            chat.drafts[rowID] = text
+                            chat.focusComposer()
+                        }
+                        Button("Send Again") { resend(text) }
+                    }
+                }
             }
         case .reply(let entry):
             if case .reply(let text) = entry.kind {
@@ -155,6 +199,7 @@ private struct ChatItemView: View {
                     AgentMark(kind: agent, size: 20).padding(.top, 1)
                     MarkdownView(text: text).frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .help(entry.at.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "")
                 .contextMenu { Button("Copy as Markdown") { Pasteboard.copy(text) } }
             }
         case .tools(let id, let tools):
@@ -253,10 +298,7 @@ private struct ChatSearchBar: View {
         .onChange(of: chat.searchQuery) { _, _ in chat.searchIndex = 0 }
     }
 
-    private func step(_ delta: Int, _ count: Int) {
-        guard count > 0 else { return }
-        chat.searchIndex = ((min(chat.searchIndex, count - 1) + delta) % count + count) % count
-    }
+    private func step(_ delta: Int, _ count: Int) { chat.stepSearch(delta) }
 
     private func close() {
         chat.searchActive = false
@@ -282,5 +324,79 @@ private struct TerminalReplyHint: View {
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
+    }
+}
+
+
+/// A numbered choice on the session's screen, as buttons: one click answers it in the terminal.
+private struct AnswerCard: View {
+    let menu: ScreenMenu
+    let agent: String
+    let choose: (Int) -> Void
+    let showTerminal: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "questionmark.bubble.fill").foregroundStyle(Color.accentColor).font(.system(size: 15))
+                Text("\(agent) is asking").font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Button("Show Terminal", action: showTerminal).buttonStyle(.borderless).font(.system(size: 11.5))
+            }
+            if !menu.question.isEmpty {
+                Text(menu.question).font(.system(size: 12.5)).foregroundStyle(.secondary).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(Array(menu.options.enumerated()), id: \.offset) { index, option in
+                    Button { choose(index) } label: {
+                        HStack(spacing: 8) {
+                            Text("\(index + 1)").font(.system(size: 11, weight: .bold).monospacedDigit())
+                                .frame(width: 18, height: 18).background(Circle().fill(Color.accentColor.opacity(0.18)))
+                            Text(option).font(.system(size: 12.5)).multilineTextAlignment(.leading)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.horizontal, 10).padding(.vertical, 7)
+                        .background(RoundedRectangle(cornerRadius: 8).fill(index == menu.selected ? Color.accentColor.opacity(0.12)
+                                                                                                  : Color.secondary.opacity(0.07)))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
+        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor.opacity(0.45)))
+    }
+}
+
+/// The current to-do list or plan steps, pinned above the conversation while any is open.
+private struct TodoPanel: View {
+    let todos: [ChatTodo]
+    @AppStorage("chatTodosOpen") private var open = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button { open.toggle() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "checklist").foregroundStyle(Color.accentColor)
+                    Text("Plan").font(.system(size: 12, weight: .semibold))
+                    Text("\(todos.filter { $0.status == .done }.count) of \(todos.count) done").font(.system(size: 11.5)).foregroundStyle(.secondary)
+                    if let active = todos.first(where: { $0.status == .active }), !open {
+                        Text("· \(active.text)").font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
+                        .rotationEffect(.degrees(open ? 0 : -90))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if open { TodoListView(todos: todos).padding(.leading, 4) }
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
     }
 }

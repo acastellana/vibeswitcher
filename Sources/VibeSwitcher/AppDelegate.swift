@@ -217,6 +217,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             switch note.object as? String {
             case "palette": self?.mainWindow?.showPaletteAction(nil)
             case "home": self?.windowModel.showHome()
+            case let text? where text.hasPrefix("scratchsend:"): // TEMPORARY test hook: scratch sessions only
+                guard let cwd = self?.windowModel.selectedRow?.cwd, cwd.hasSuffix("/tmp/vs-scratch") else { return }
+                self?.mainWindow?.testSend(String(text.dropFirst("scratchsend:".count)))
+            case let text? where text.hasPrefix("scratchchoose:"): // TEMPORARY test hook: scratch sessions only
+                guard let cwd = self?.windowModel.selectedRow?.cwd, cwd.hasSuffix("/tmp/vs-scratch"),
+                      let index = Int(text.dropFirst("scratchchoose:".count)) else { return }
+                self?.mainWindow?.testChoose(index)
             case let text? where text.hasPrefix("move:"):
                 let tty = String(text.dropFirst("move:".count))
                 if let session = self?.store.sessions.first(where: { $0.tty == tty }) { self?.moveToWindow(session, ask: false) }
@@ -447,8 +454,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 tree += String(repeating: "  ", count: depth) + "\(type(of: view)) \(NSStringFromRect(view.frame))\(view.isHidden ? " hidden" : "")\n"
                 if let terminal = view as? HostTerminalView {
                     let screen = terminal.getTerminal()
-                    let visible = (0..<screen.rows).compactMap { screen.getLine(row: $0)?.translateToString(trimRight: true) }
-                    let text = Redaction.secrets(in: visible.filter { !$0.isEmpty }.prefix(4).joined(separator: " | "))
+                    var visible = (0..<screen.rows).compactMap { row -> String? in
+                        screen.getLine(row: row)?.translateToString(trimRight: false, skipNullCellsFollowingWide: true)
+                            .replacingOccurrences(of: "\u{0}", with: " ").trimmingCharacters(in: .whitespaces)
+                    }
+                    while visible.last?.isEmpty == true { visible.removeLast() }
+                    let text = Redaction.secrets(in: visible.suffix(40).joined(separator: "\n"))
                     tree += String(repeating: "  ", count: depth + 1)
                         + "background \(terminal.nativeBackgroundColor) layer \(terminal.layer?.backgroundColor.map { "\($0)" } ?? "none") text: \(text)\n"
                 }
@@ -548,6 +559,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         }
         let plan = MoveToWindow.plan(agent: session.agent, sessionID: sessionID, presets: presets(for: cwd))
         let (pid, startedAt) = (session.pid, session.startedAt)
+        // The very process the scan saw, not a later one that got its pid.
+        guard SessionIdentity.isRunning(pid: pid, startedAt: startedAt) else { return }
         kill(pid, SIGTERM)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             // It has to be gone before the conversation is resumed elsewhere.
