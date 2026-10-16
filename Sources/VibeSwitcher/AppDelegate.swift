@@ -81,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         store.onNudge = { [weak self] session, nudge in self?.notifier?.post(nudge, for: session) }
         notifier?.onAlert = { [weak self] title, body, tty in self?.phoneAccess.notify(title: title, body: body, tty: tty) }
         phoneAccess.onEvent = { [weak self] title, body in self?.notifier?.postInfo(title: title, body: body) }
+        phoneAccess.hostClient = hostClient
         phoneAccess.startIfEnabled()
 
         if UserDefaults.standard.object(forKey: Self.positionKey) == nil {

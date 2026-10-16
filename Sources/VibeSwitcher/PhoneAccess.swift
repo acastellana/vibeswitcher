@@ -65,6 +65,8 @@ final class PhoneAccess: ObservableObject {
 
     private let defaults = UserDefaults.standard
     private let store: SessionStore
+    /// Screens, scrollback and replies of sessions in the window go through the session host.
+    weak var hostClient: HostClient?
     private var server: RemoteServer?
     private var tailscale: TailscaleCLI.Status?
     private lazy var vapidKey: P256.Signing.PrivateKey = Self.loadOrCreateVapidKey()
@@ -430,7 +432,7 @@ final class PhoneAccess: ObservableObject {
                 "tty": session.tty, "number": index + 1, "name": Redaction.secrets(in: session.displayName),
                 "sid": session.identity, "project": Redaction.secrets(in: session.project),
                 "agent": session.agent.rawValue, "status": session.status.rawValue,
-                "statusLabel": session.status.label, "inTerminal": session.inTerminalApp, "viewing": session.isCurrent,
+                "statusLabel": session.status.label, "inTerminal": session.inTerminalApp || session.inWindow, "inWindow": session.inWindow, "viewing": session.isCurrent,
             ]
             if session.statusSince > Date.distantPast.addingTimeInterval(1) { row["since"] = session.statusSince.timeIntervalSince1970 }
             if let task = session.task { row["task"] = Redaction.secrets(in: task) }
@@ -471,7 +473,7 @@ final class PhoneAccess: ObservableObject {
         guard TerminalBridge.isValidTTY(tty), let session = store.sessions.first(where: { $0.tty == tty }) else {
             return respond(.error(404, "no such session"))
         }
-        guard session.inTerminalApp else { return respond(.error(409, "This session isn't in a Terminal tab.")) }
+        guard session.inTerminalApp || session.inWindow else { return respond(.error(409, "This session isn't in a Terminal tab or the window.")) }
         if let mismatch = sessionMismatch(request, session) { return respond(mismatch) }
         // Cached per session, not per tty: a session that takes over the tab doesn't get the old one's screen.
         let key = session.identity
@@ -484,8 +486,7 @@ final class PhoneAccess: ObservableObject {
             return
         }
         screenWaiters[key] = [respond]
-        reads.async {
-            let raw = TerminalBridge.screens(for: [tty])[tty]
+        let finish: (String?) -> Void = { raw in
             // Visible screen only, credentials masked, trailing blank lines dropped.
             var lines = Redaction.secrets(in: raw ?? "").components(separatedBy: "\n")
             while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty { lines.removeLast() }
@@ -507,6 +508,12 @@ final class PhoneAccess: ObservableObject {
                 waiters.forEach { $0(response) }
             }
         }
+        if let hostID = session.hostID, let hostClient {
+            hostClient.screen(hostID) { raw in self.reads.async { finish(raw) } }
+        } else {
+            reads.async { finish(TerminalBridge.screens(for: [tty])[tty]) }
+        }
+
     }
 
     /// The tab's scrollback above the visible screen, a page at a time (the phone prepends pages as you
@@ -517,7 +524,7 @@ final class PhoneAccess: ObservableObject {
         guard TerminalBridge.isValidTTY(tty), let session = store.sessions.first(where: { $0.tty == tty }) else {
             return respond(.error(404, "no such session"))
         }
-        guard session.inTerminalApp else { return respond(.error(409, "This session isn't in a Terminal tab.")) }
+        guard session.inTerminalApp || session.inWindow else { return respond(.error(409, "This session isn't in a Terminal tab or the window.")) }
         if let mismatch = sessionMismatch(request, session) { return respond(mismatch) }
         let key = session.identity
         let before = request.query["before"].flatMap { Int($0) }
@@ -538,9 +545,9 @@ final class PhoneAccess: ObservableObject {
             return
         }
         historyWaiters[key] = [send]
-        transcriptReads.async {
+        let finish: ((history: String, screen: String)?) -> Void = { read in
             // Masked as a whole, before it's split into lines: a private key spans many lines.
-            let lines = TerminalBridge.history(tty: tty).map {
+            let lines = read.map {
                 Scrollback.lines(history: Redaction.secrets(in: $0.history), screen: Redaction.secrets(in: $0.screen))
             }
             DispatchQueue.main.async {
@@ -554,6 +561,12 @@ final class PhoneAccess: ObservableObject {
                 waiters.forEach { $0(lines) }
             }
         }
+        if let hostID = session.hostID, let hostClient {
+            hostClient.history(hostID, lines: 5_000) { read in self.transcriptReads.async { finish(read) } }
+        } else {
+            transcriptReads.async { finish(TerminalBridge.history(tty: tty)) }
+        }
+
     }
 
     private static let conversationTailBytes = 2 * 1024 * 1024
@@ -681,7 +694,7 @@ final class PhoneAccess: ObservableObject {
         }
         let object = body(request) ?? [:]
         let tty = object["tty"] as? String ?? ""
-        guard let session = store.sessions.first(where: { $0.tty == tty }), session.inTerminalApp else {
+        guard let session = store.sessions.first(where: { $0.tty == tty }), session.inTerminalApp || session.inWindow else {
             return respond(.error(404, "no such session"))
         }
         // The session the phone is showing, not whatever holds that tty now.
@@ -696,6 +709,36 @@ final class PhoneAccess: ObservableObject {
         guard text != nil || key != nil else { return respond(.error(400, "nothing to send")) }
         let summary = text.map { "“\(Redaction.secrets(in: String($0.prefix(60))))”" + (submit ? " ⏎" : "") } ?? key!.rawValue
         let sid = session.identity
+        if let hostID = session.hostID {
+            // Straight into the session's terminal: no focus changes, no Accessibility, nothing typed elsewhere.
+            let allowed = {
+                self.state == .on && self.inputAllowed && self.devices.contains { $0.id == device.id }
+                    && self.store.sessions.first(where: { $0.tty == tty })?.identity == sid
+                    && SessionIdentity.isRunning(pid: session.pid, startedAt: session.startedAt)
+                    && ProcessTable.info(pid: session.pid)?.tty == tty
+            }
+            guard allowed() else { return respond(.error(409, Self.sessionChanged)) }
+            var clean: String?
+            if let text {
+                guard let sanitized = RemoteInput.sanitized(text) else {
+                    return respond(.error(400, RemoteInput.Failure.invalidText.description))
+                }
+                clean = sanitized
+            }
+            var at: TimeInterval = 0
+            for write in HostInput.writes(text: clean, submit: submit, key: key?.rawValue) {
+                at += write.delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
+                    guard let self, allowed() else { return }
+                    self.hostClient?.send(hostID, bytes: Data(write.bytes), reply: false)
+                }
+            }
+            audit("\(device.name) typed into \(session.displayName): \(summary)")
+            onEvent?("\(device.name) typed into \(session.displayName)", summary)
+            DispatchQueue.main.asyncAfter(deadline: .now() + at + 0.1) { self.store.refresh() }
+            return respond(.json(["ok": true]))
+        }
+
         work.async {
             // Queued work runs later: check again that the phone is still paired, replies are still on, and
             // the tty still holds that session, right before typing.
