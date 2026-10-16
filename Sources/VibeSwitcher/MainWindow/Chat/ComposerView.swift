@@ -34,16 +34,23 @@ struct ComposerView: View {
         Binding(get: { chat.drafts[rowID] ?? "" }, set: { chat.drafts[rowID] = $0 })
     }
 
+    private var images: [String] { (chat.attachments[rowID] ?? []).filter { FileManager.default.fileExists(atPath: $0) } }
+
+    private func attachImage(_ url: URL) {
+        var list = chat.attachments[rowID] ?? []
+        if !list.contains(url.path) { list.append(url.path) }
+        chat.attachments[rowID] = list
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if !suggestions.items.isEmpty {
                 SuggestionList(suggestions: $suggestions)
             }
-            let images = AttachedImages.paths(in: text.wrappedValue)
             if !images.isEmpty {
                 HStack(spacing: 8) {
                     ForEach(images, id: \.self) { path in
-                        AttachedThumbnail(path: path) { text.wrappedValue = AttachedImages.removing(path, from: text.wrappedValue) }
+                        AttachedThumbnail(path: path) { chat.attachments[rowID]?.removeAll { $0 == path } }
                     }
                 }
             }
@@ -60,7 +67,7 @@ struct ComposerView: View {
                     }
                     ComposerTextView(text: text, height: $height, suggestions: $suggestions, history: chat.log.prompts,
                                      focusRequests: chat.focusComposerRequests, complete: complete,
-                                     submit: { submit(queue: false) }, queue: { submit(queue: true) })
+                                     submit: { submit(queue: false) }, queue: { submit(queue: true) }, attachImage: attachImage)
                         .frame(height: min(max(height, 22), 220))
                 }
                 .padding(.horizontal, 10).padding(.vertical, 8)
@@ -76,7 +83,7 @@ struct ComposerView: View {
                 Button { submit(queue: false) } label: {
                     Image(systemName: working ? "arrow.turn.down.right" : "arrow.up").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
                         .frame(width: 30, height: 30)
-                        .background(Circle().fill(text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        .background(Circle().fill(text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty
                                                   ? Color.secondary.opacity(0.4) : working ? Color.orange : Color.accentColor))
                 }
                 .buttonStyle(.plain).padding(.bottom, 4)
@@ -95,7 +102,10 @@ struct ComposerView: View {
 
     /// ↩: steers while the agent works, sends otherwise. ⌥↩ (`queue`): typed in for after the turn.
     private func submit(queue: Bool) {
-        let message = text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let typed = text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Attached images go as their paths (that's how the agent reads them); the box only showed thumbnails.
+        let paths = images.map(RecentProjects.shellQuote).joined(separator: " ")
+        let message = [typed, paths].filter { !$0.isEmpty }.joined(separator: typed.isEmpty ? "" : "\n\n")
         guard !message.isEmpty else { return }
         let steering = working && (steerOnly || !queue)
         let limit = steering ? ComposerLimits.maxSteerCharacters : ComposerLimits.maxBytes
@@ -108,6 +118,7 @@ struct ComposerView: View {
         if accepted {
             if working && !steering { chat.sent(message) }
             text.wrappedValue = ""
+            chat.attachments[rowID] = []
             suggestions = Suggestions()
         }
     }
@@ -117,7 +128,10 @@ struct ComposerView: View {
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = true
         guard panel.runModal() == .OK else { return }
-        let paths = panel.urls.map { RecentProjects.shellQuote($0.path) }.joined(separator: " ")
+        let (pictures, others) = AttachedImages.split(panel.urls)
+        pictures.forEach(attachImage)
+        guard !others.isEmpty else { return chat.focusComposer() }
+        let paths = others.map { RecentProjects.shellQuote($0.path) }.joined(separator: " ")
         let current = text.wrappedValue
         text.wrappedValue = current + (current.isEmpty || current.hasSuffix(" ") ? "" : " ") + paths + " "
         chat.focusComposer()
@@ -316,6 +330,12 @@ enum AttachedImages {
         return found
     }
 
+    /// Image files (attached as thumbnails) and everything else (written as paths).
+    static func split(_ urls: [URL]) -> (images: [URL], others: [URL]) {
+        let images = urls.filter { extensions.contains($0.pathExtension.lowercased()) }
+        return (images, urls.filter { !extensions.contains($0.pathExtension.lowercased()) })
+    }
+
     static func removing(_ path: String, from text: String) -> String {
         text.replacingOccurrences(of: RecentProjects.shellQuote(path) + " ", with: "")
             .replacingOccurrences(of: RecentProjects.shellQuote(path), with: "")
@@ -352,9 +372,12 @@ private struct ComposerTextView: NSViewRepresentable {
     let submit: () -> Void
     /// ⌥↩.
     let queue: () -> Void
+    /// A pasted or dropped image (saved to a file): attached, not written into the text.
+    let attachImage: (URL) -> Void
 
     func makeNSView(context: Context) -> NSScrollView {
         let textView = ComposerNSTextView()
+        textView.attachImage = attachImage
         textView.delegate = context.coordinator
         textView.font = .systemFont(ofSize: 13)
         textView.isRichText = false
@@ -383,6 +406,7 @@ private struct ComposerTextView: NSViewRepresentable {
     func updateNSView(_ scroll: NSScrollView, context: Context) {
         context.coordinator.parent = self
         guard let textView = scroll.documentView as? NSTextView else { return }
+        (textView as? ComposerNSTextView)?.attachImage = attachImage
         if textView.string != text {
             textView.string = text
             textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
@@ -516,6 +540,8 @@ private struct ComposerTextView: NSViewRepresentable {
 
 /// Pastes images as saved files and drops files as their paths.
 private final class ComposerNSTextView: NSTextView {
+    var attachImage: (URL) -> Void = { _ in }
+
     /// A plain-text view only enables Paste for clipboards it can read: without these, an image-only clipboard
     /// leaves ⌘V disabled and `paste(_:)` is never called.
     override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
@@ -532,11 +558,11 @@ private final class ComposerNSTextView: NSTextView {
     override func paste(_ sender: Any?) {
         let board = NSPasteboard.general
         if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
-            return insertPaths(urls)
+            return take(urls)
         }
         // Image data wins over the text flavor that browsers, Preview and Slack copy along with it.
         if board.availableType(from: [.png, .tiff]) != nil, let image = NSImage(pasteboard: board), let url = Attachments.save(image) {
-            return insertPaths([url])
+            return attachImage(url)
         }
         super.paste(sender)
     }
@@ -544,14 +570,22 @@ private final class ComposerNSTextView: NSTextView {
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         let board = sender.draggingPasteboard
         if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
-            insertPaths(urls)
+            take(urls)
             return true
         }
         if let image = NSImage(pasteboard: board), let url = Attachments.save(image) {
-            insertPaths([url])
+            attachImage(url)
             return true
         }
         return super.performDragOperation(sender)
+    }
+
+    /// Images become attachments; other files are written as their paths.
+    private func take(_ urls: [URL]) {
+        let (images, others) = AttachedImages.split(urls)
+        images.forEach(attachImage)
+        if !others.isEmpty { insertPaths(others) }
+        window?.makeFirstResponder(self)
     }
 
     private func insertPaths(_ urls: [URL]) {

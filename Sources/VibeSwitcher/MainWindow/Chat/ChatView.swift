@@ -196,11 +196,17 @@ private struct ChatItemView: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.leading, 60)
                 .contextMenu { Button("Copy") { Pasteboard.copy(text) } }
-            } else if case .prompt(let text, let images) = entry.kind {
+            } else if case .prompt(let rawText, let images) = entry.kind {
+                // Images attached from the composer travel as quoted paths: show them as pictures, not as text.
+                let files = AttachedImages.paths(in: rawText)
+                let text = files.reduce(rawText) { AttachedImages.removing($1, from: $0) }.trimmingCharacters(in: .whitespacesAndNewlines)
                 VStack(alignment: .trailing, spacing: 4) {
                     VStack(alignment: .leading, spacing: 8) {
-                        if !images.isEmpty {
-                            HStack(spacing: 6) { ForEach(images) { image in Thumbnail(image: image, height: 90) { openImage(image) } } }
+                        if !images.isEmpty || !files.isEmpty {
+                            HStack(spacing: 6) {
+                                ForEach(images) { image in Thumbnail(image: image, height: 90) { openImage(image) } }
+                                ForEach(files, id: \.self) { path in FileThumbnail(path: path, height: 90) }
+                            }
                         }
                         if !text.isEmpty {
                             Text(text).font(.system(size: CGFloat(chatFontSize))).lineSpacing(2).textSelection(.enabled)
@@ -431,5 +437,22 @@ private struct TodoPanel: View {
         .padding(.horizontal, 16).padding(.vertical, 10)
         .background(.bar)
         .overlay(alignment: .bottom) { Divider() }
+    }
+}
+
+
+/// An image file referenced by a prompt (attached from the composer); click to open it.
+private struct FileThumbnail: View {
+    let path: String
+    let height: CGFloat
+
+    var body: some View {
+        if let image = NSImage(contentsOfFile: path) {
+            Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(height: height)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Color.secondary.opacity(0.25)))
+                .onTapGesture { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+                .help(path)
+        }
     }
 }

@@ -33,6 +33,11 @@ final class ChatModel: ObservableObject {
     @Published var drafts: [String: String] = UserDefaults.standard.dictionary(forKey: "chatDrafts") as? [String: String] ?? [:] {
         didSet { UserDefaults.standard.set(drafts.filter { !$0.value.isEmpty }, forKey: "chatDrafts") }
     }
+    /// Images attached to each session's draft (paths), shown as thumbnails and sent with the message.
+    @Published var attachments: [String: [String]] = UserDefaults.standard.dictionary(forKey: "chatAttachments") as? [String: [String]] ?? [:] {
+        didSet { UserDefaults.standard.set(attachments.filter { !$0.value.isEmpty }, forKey: "chatAttachments") }
+    }
+
     /// Messages sent from the composer that the transcript doesn't show yet.
     @Published private(set) var pending: [PendingMessage] = []
     /// Messages steered into the agent that it hasn't taken yet (and the terminal they went to).
