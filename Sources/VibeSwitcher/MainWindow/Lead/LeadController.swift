@@ -121,6 +121,12 @@ final class LeadController: ObservableObject {
         guard let pid = board.leadPid, let tty = board.leadTTY else { return }
         let session = board.leadSession.flatMap(UUID.init(uuidString:))
         try? LeadDelivery.deliver(text, from: sender, to: LeadAgent(pid: pid, tty: tty, session: board.leadSession),
+                                  inputIsEmpty: session.map { id in {
+                                      if case .screenText(_, let screen)? = try? HostCall.request(.screen(id: id), timeout: 2) {
+                                          return TerminalInput.isEmpty(screen)
+                                      }
+                                      return false
+                                  } },
                                   typeInto: session.map { id in { [weak self] typed in
                                       self?.type(typed, into: id)
                                       return true
@@ -134,7 +140,7 @@ final class LeadController: ObservableObject {
                 if case .screenText(_, let text)? = try? HostCall.request(.screen(id: id)) { return text }
                 return nil
             }, send: { writes in
-                for write in writes { _ = try? HostCall.request(.input(id: id, bytes: Data(write.bytes), reply: false)) }
+                for write in writes { try? HostCall.send(.input(id: id, bytes: Data(write.bytes), reply: false)) }
             })
         }
     }

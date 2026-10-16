@@ -26,10 +26,12 @@ public enum LeadDelivery {
 extension LeadDelivery {
     /// Steers the message in, or types it when the agent is idle and `typeInto` can reach its terminal (a window
     /// session); a steer waits in the inbox otherwise and arrives with the agent's next prompt.
+    /// `inputIsEmpty`: whether the agent's input box is empty right now (typing over a draft would mix the two;
+    /// the steer then rides along with the user's own next prompt).
     public static func deliver(_ text: String, from sender: SteerMessage.Sender, to agent: LeadAgent,
-                               typeInto: ((String) -> Bool)?) throws {
+                               inputIsEmpty: (() -> Bool)? = nil, typeInto: ((String) -> Bool)?) throws {
         let state = HookState.load(from: VibePaths.stateFile(tty: agent.tty))
-        if way(for: state) == .type, let typeInto, typeInto(typed(text, from: sender)) { return }
+        if way(for: state) == .type, inputIsEmpty?() ?? false, let typeInto, typeInto(typed(text, from: sender)) { return }
         try SteerInbox.post(SteerMessage(text: text, from: sender, agentPid: agent.pid), tty: agent.tty)
     }
 }

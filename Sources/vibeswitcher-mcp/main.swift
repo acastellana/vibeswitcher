@@ -34,7 +34,7 @@ final class HostRuntime: LeadRuntime {
             }, send: { writes in
                 for write in writes {
                     if write.delay > 0 { usleep(useconds_t(write.delay * 1_000_000)) }
-                    _ = try? HostCall.request(.input(id: session.id, bytes: Data(write.bytes), reply: false))
+                    try? HostCall.send(.input(id: session.id, bytes: Data(write.bytes), reply: false))
                 }
             })
             return session.id.uuidString
@@ -45,7 +45,7 @@ final class HostRuntime: LeadRuntime {
 
     func kill(_ session: String) {
         guard let id = UUID(uuidString: session) else { return }
-        _ = try? HostCall.request(.kill(id: id))
+        _ = try? HostCall.request(.kill(id: id), timeout: 3)
     }
 
     func type(_ session: String, text: String) {
@@ -53,7 +53,7 @@ final class HostRuntime: LeadRuntime {
         // Claude Code takes bracketed paste; Enter follows as its own write.
         for write in ComposerText.writes(text, bracketed: true) {
             if write.delay > 0 { usleep(useconds_t(write.delay * 1_000_000)) }
-            _ = try? HostCall.request(.input(id: id, bytes: Data(write.bytes), reply: false))
+            try? HostCall.send(.input(id: id, bytes: Data(write.bytes), reply: false))
         }
     }
 
@@ -69,7 +69,10 @@ final class HostRuntime: LeadRuntime {
             agent = LeadAgent(pid: pid, tty: tty, session: id)
         }
         let session = agent.session ?? ((try? HostCall.sessions()) ?? []).first { $0.tty == agent.tty && $0.isLive }?.id.uuidString
-        try LeadDelivery.deliver(text, from: sender, to: agent, typeInto: session.map { id in { [weak self] text in
+        try LeadDelivery.deliver(text, from: sender, to: agent, inputIsEmpty: session.flatMap(UUID.init(uuidString:)).map { id in {
+            if case .screenText(_, let screen)? = try? HostCall.request(.screen(id: id)) { return TerminalInput.isEmpty(screen) }
+            return false
+        } }, typeInto: session.map { id in { [weak self] text in
             self?.type(id, text: text)
             return true
         } })

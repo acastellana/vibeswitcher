@@ -222,3 +222,20 @@ struct HostServerTests {
         #expect(stat(host.socket, &info) == 0 && info.st_mode & 0o777 == 0o600)
     }
 }
+
+struct HostCallTests {
+    @Test func inputIsSentWithoutWaitingForAReplyThatNeverComes() throws {
+        let host = try TestHost()
+        let client = try TestClient(host)
+        let session = try client.spawn("cat")
+        client.attach(session.id)
+        let started = Date()
+        try HostCall.send(.input(id: session.id, bytes: Data("ping\n".utf8), reply: false), socket: host.socket)
+        #expect(Date().timeIntervalSince(started) < 1)
+        #expect(eventually { client.text(session.id).contains("ping") })
+        // A request the host doesn't answer still times out through `request`, so callers must use `send` for it.
+        #expect(throws: HostCall.Failure.self) {
+            try HostCall.request(.input(id: session.id, bytes: Data(), reply: false), socket: host.socket, timeout: 0.3)
+        }
+    }
+}

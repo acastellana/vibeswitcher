@@ -37,7 +37,9 @@ struct LeadBoardTests {
         #expect(Slug.make("../../etc", taken: []) == "etc")
         #expect(Slug.make("Ünïcode ✨ title", taken: []) == "unicode-title")
         #expect(Slug.make("!!!", taken: []) == "task")
-        #expect(Slug.make(String(repeating: "long ", count: 30), taken: []).count <= 40)
+        #expect(Slug.make(String(repeating: "long ", count: 30), taken: []).count <= 24)
+        // Branch and worktree names stay short: the first few words.
+        #expect(Slug.make("Add an add.sh script that sums two integers and prints the result", taken: []) == "add-an-add-sh")
     }
 
     @Test func theFolderIsExcludedFromGitOnce() throws {

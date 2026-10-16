@@ -218,8 +218,11 @@ public enum Slug {
         }
         if !current.isEmpty { words.append(current) }
         var base = ""
-        for word in words where (base.isEmpty ? word.count : base.count + 1 + word.count) <= 40 {
-            base += (base.isEmpty ? "" : "-") + word
+        // The first few words, short enough for a branch name.
+        for (index, word) in words.enumerated() {
+            let next = base.isEmpty ? String(word.prefix(24)) : base + "-" + word
+            guard index < 4, next.count <= 24 else { break }
+            base = next
         }
         if base.isEmpty { base = "task" }
         var slug = base

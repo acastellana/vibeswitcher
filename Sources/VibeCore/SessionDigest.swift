@@ -68,7 +68,13 @@ public enum HostCall {
         return reply
     }
 
-    private static func exchange(_ request: HostRequest?, socket: String, timeout: TimeInterval) throws -> (sessions: [HostSession], reply: HostEvent?) {
+    /// Sends a request the host doesn't answer (`input`, `resize`): returns once it's written.
+    public static func send(_ request: HostRequest, socket: String = VibePaths.hostSocket.path, timeout: TimeInterval = 5) throws {
+        _ = try exchange(request, socket: socket, timeout: timeout, expectsReply: false)
+    }
+
+    private static func exchange(_ request: HostRequest?, socket: String, timeout: TimeInterval,
+                                 expectsReply: Bool = true) throws -> (sessions: [HostSession], reply: HostEvent?) {
         let queue = DispatchQueue(label: "vibeswitcher.host-call")
         let connection = try HostConnection(path: socket, queue: queue)
         defer { queue.sync { connection.close() } }
@@ -84,7 +90,13 @@ public enum HostCall {
         connection.onEvent = { envelope in
             if case .welcome(_, _, let list) = envelope.event, sessions == nil {
                 sessions = list
-                if let request { waitingFor = connection.send(request) } else { done.signal() }
+                if let request {
+                    waitingFor = connection.send(request)
+                    // Nothing comes back for it: give the write a moment to leave, then we're done.
+                    if !expectsReply { queue.asyncAfter(deadline: .now() + 0.05) { done.signal() } }
+                } else {
+                    done.signal()
+                }
             } else if let waitingFor, envelope.replyTo == waitingFor {
                 reply = envelope.event
                 done.signal()
