@@ -50,11 +50,36 @@ or command, or starts a preset in a recent project; ⌘J goes to the next sessio
 **Chat** (⌥⌘2; ⌥⌘1 back to the terminal): any Claude or Codex session as a readable conversation, built from
 its transcript. Replies are rendered markdown (tables, lists, code with syntax colors and Copy); the tool calls
 between two messages fold into one line ("Ran 3 commands · edited 2 files") that opens to each command and its
-output, colored diffs of edits, written files, questions and agents; screenshots the tools took show inline
-(click for full size). It follows the session live, marks what's new since you last looked, and ⌘F searches it.
-For window sessions the composer types into the session: ↩ sends, ⇧↩ adds a line, ↑ recalls earlier prompts,
-and pasted images or dropped files become paths the agent can read. A Terminal session can be moved into the
-window between turns (Move to Window) to reply from here, in full color.
+output, colored diffs of edits, written files, thinking, questions and agents; screenshots the tools took show
+inline (click for full size). Paths in replies open the file. It follows the session live, marks what's new since
+you last looked, shows the agent's to-do list and plan over the composer, and ⌘F searches it; export it as
+markdown. When the agent asks a question (AskUserQuestion, a permission or plan prompt), the chat shows it as a
+card you answer with a click. For window sessions the composer types into the session: ↩ sends, ⇧↩ adds a line,
+↑ recalls earlier prompts, / completes commands and @ files, pasted or dropped images and files are attached
+(thumbnails), and the chips under it show and switch the mode and model and how full the context is. While the
+agent works, ↩ **steers** it: the message reaches it at its next step without stopping it (through the hooks);
+⌥↩ queues it for when the turn ends instead, and ■ stops the turn. Drafts, attachments and queued messages are
+kept per session. A Terminal session can be moved into the window between turns (Move to Window) to reply from
+here, in full color.
+
+**Project lead** (a project's ⊕ menu › Project Lead, the start page, ⌘K, or `VibeSwitcher --lead FOLDER [--goal …]`):
+one Claude session per repository that you talk to about the project, and that runs a small team for you. You
+tell it what you want; it plans the work into tasks, each with a contract (goal, acceptance checks, boundaries),
+and starts up to three **workers**, each a Claude session in its own git worktree (`.vibeswitcher/worktrees/<task>`
+on `agent/<task>`). When a worker reports, the lead starts a read-only **verifier** that checks the work against
+the contract with real commands (and tries to break it); only work the verifier passes is rebased on main, tested
+(the workflow's `test_command`) and fast-forwarded into main, never with a merge commit or a force. Then the lead
+removes the worktree and branch, and tells you what landed in a few lines. The grunt work stays out of your way:
+workers and verifiers fold under their lead in the list, and the lead's chat shows a strip with the team's state.
+It only asks you what's really yours to decide; its questions show as cards you answer without stopping it (the
+answer reaches it at its next step), and you can message it any time the same way. VibeSwitcher is its witness:
+it tells the lead when a worker waits for input, stops without reporting, or dies. The Team tab in the inspector
+has each task's contract and verdict, your answers, the results, and the lead's files. All of it lives in the
+repository, git-ignored: `.vibeswitcher/board.json` (tasks, questions, updates), `workflow.md` (limits, test and
+setup commands, the verifier's model; edit it), `decisions.md` and `progress.md`. The lead and verifiers can't
+edit files or write to git; workers can't push, merge, rebase or touch main. Their tools come from
+`vibeswitcher-mcp`, a tool server bundled with the app.
+
 New sessions (⊕, ⌘N) start **in the window** by default: VibeSwitcher runs them itself, in a small background
 process (`vibeswitcher-host`) that keeps them going when VibeSwitcher quits, crashes or updates; reopening the
 window reattaches them. ⌥⌘N opens a plain shell in the same project. Sessions you still run in Terminal are
@@ -201,6 +226,7 @@ VibeSwitcher --window [palette|home]  # open the window (with the command palett
 VibeSwitcher --window select:genswap  # … and select the first session matching the text
 VibeSwitcher --window move:ttys012    # move that Terminal session into the window (between turns)
 VibeSwitcher --settings launch        # open Settings (general, launch or terminal)
+VibeSwitcher --lead ~/dev/app --goal "add a login page"  # start (or message) the project lead of that repository
 VibeSwitcher --install-hooks | --uninstall-hooks
 cat ~/.vibeswitcher/app-status.json   # debug aid: what the running app currently sees
 VibeSwitcher --capture-window ~/w.png # debug aid: the running app draws its windows into PNGs (+ view tree .txt)
@@ -228,4 +254,5 @@ Run the app through `build-app.sh` rather than `swift run`: notifications, the l
 Automation permission all need a real `.app` bundle.
 
 `Sources/VibeCore` holds the testable logic (status rules, hook reducer, process table, installer),
-`Sources/VibeSwitcher` the AppKit/SwiftUI app, and `Sources/vibeswitcher-hook` the hook binary.
+`Sources/VibeSwitcher` the AppKit/SwiftUI app, `Sources/vibeswitcher-hook` the hook binary,
+`Sources/vibeswitcher-host` the session host, and `Sources/vibeswitcher-mcp` the project lead's tool server.
