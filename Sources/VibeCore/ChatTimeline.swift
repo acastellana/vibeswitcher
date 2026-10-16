@@ -46,11 +46,14 @@ public enum ChatTimeline {
 
     /// "Ran 3 commands · edited 2 files · read 4 files · searched twice · used 1 tool · 1 failed".
     public static func summary(_ tools: [ChatTool]) -> String {
-        var commands = 0, searches = 0, others = 0, failed = 0
+        var commands = 0, searches = 0, others = 0, failed = 0, thoughts = 0, todoUpdates = 0, plans = 0
         var edited = Set<String>(), read = Set<String>()
         for tool in tools {
             if tool.result?.failed == true { failed += 1 }
             switch (tool.name, tool.detail) {
+            case (_, .thought): thoughts += 1
+            case (_, .todos): todoUpdates += 1
+            case (_, .plan): plans += 1
             case (_, .edit(let path, _)), (_, .write(let path, _)): edited.insert(path)
             case (_, .patch): edited.insert(tool.id)
             case (_, .read(let path)): read.insert(path)
@@ -68,7 +71,10 @@ public enum ChatTimeline {
         if !read.isEmpty { parts.append("read \(count(read.count, "file"))") }
         if searches > 0 { parts.append("searched \(searches == 1 ? "once" : searches == 2 ? "twice" : "\(searches) times")") }
         if others > 0 { parts.append("used \(count(others, "tool"))") }
+        if todoUpdates > 0 { parts.append("updated the to-dos") }
+        if plans > 0 { parts.append("wrote a plan") }
         if failed > 0 { parts.append("\(failed) failed") }
+        if parts.isEmpty, thoughts > 0 { return "Thought" }
         return capitalized(parts.joined(separator: " · "))
     }
 

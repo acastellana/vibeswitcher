@@ -75,7 +75,8 @@ public enum MarkdownBlocks {
                     i += 1
                 }
                 blocks.append(.quote(quoted.joined(separator: "\n")))
-            } else if i + 1 < lines.count, trimmed.contains("|"), let alignments = delimiterRow(lines[i + 1]) {
+            } else if i + 1 < lines.count, trimmed.contains("|"), let alignments = delimiterRow(lines[i + 1]),
+                      alignments.count == cells(trimmed).count {
                 flush()
                 let header = cells(trimmed)
                 var rows: [[String]] = []
@@ -121,6 +122,8 @@ public enum MarkdownBlocks {
                         guard j < lines.count, let item = listItem(lines[j]), item.ordered == first.ordered || item.indent > (indents.first ?? 0)
                         else { break }
                         i = j
+                    } else if fenceMarker(nextTrimmed) != nil {
+                        break
                     } else if next.first?.isWhitespace == true, !items.isEmpty {
                         items[items.count - 1].text += " " + nextTrimmed
                         i += 1

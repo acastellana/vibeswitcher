@@ -37,8 +37,46 @@ public struct ChatField: Equatable, Sendable {
     }
 }
 
+public struct ChatTodo: Equatable, Sendable {
+    public enum Status: Sendable { case pending, active, done }
+    public var text: String
+    public var status: Status
+    public init(text: String, status: Status) {
+        self.text = text
+        self.status = status
+    }
+
+    init(text: String, statusName: String) {
+        self.text = text
+        switch statusName {
+        case "completed", "done": status = .done
+        case "in_progress", "in-progress", "active": status = .active
+        default: status = .pending
+        }
+    }
+}
+
+/// Model and token counts, as of the latest reply.
+public struct ChatUsage: Equatable, Sendable {
+    public var model: String?
+    /// Tokens the last request sent (what fills the context).
+    public var contextTokens: Int?
+    /// The model's context size, when the transcript says (Codex does).
+    public var contextWindow: Int?
+    /// Codex: share of the rate limit used.
+    public var rateLimitPercent: Double?
+    /// Output tokens of one reply (Claude; counted once per message id) …
+    var outputTokens = 0
+    var messageID: String?
+    /// … or the conversation's running total (Codex).
+    var outputTotal: Int?
+}
+
 /// What a tool call did, in the shape the chat shows it.
 public enum ToolDetail: Equatable, Sendable {
+    case thought(String)
+    case todos([ChatTodo])
+    case plan(String)
     case command(String)
     case edit(path: String, changes: [ChatEditChange])
     case write(path: String, content: String)
@@ -86,6 +124,7 @@ public struct ChatEntry: Equatable, Sendable, Identifiable {
 
 public enum ChatEvent: Sendable {
     case entry(ChatEntry)
+    case usage(ChatUsage)
     /// A tool's result, for a call in this read or an earlier one.
     case result(toolID: String, ChatResult)
 }
@@ -96,8 +135,35 @@ public struct ChatLog: Equatable, Sendable {
     private var toolIndex: [String: Int] = [:]
     /// Results whose call hasn't been read yet (it's in an earlier part of the file).
     private var orphans: [String: ChatResult] = [:]
+    /// The latest model and context figures.
+    public private(set) var usage: ChatUsage?
+    /// Output tokens over the conversation (as far as it's loaded, for Claude).
+    public private(set) var outputTokens = 0
+    private var countedMessages: Set<String> = []
 
     public init() {}
+
+    /// The latest to-do list or plan steps.
+    public var todos: [ChatTodo]? {
+        for entry in entries.reversed() {
+            if case .tool(let tool) = entry.kind, case .todos(let todos) = tool.detail { return todos }
+        }
+        return nil
+    }
+
+    private mutating func record(_ new: ChatUsage) {
+        var merged = usage ?? ChatUsage()
+        if let model = new.model { merged.model = model }
+        if let tokens = new.contextTokens { merged.contextTokens = tokens }
+        if let window = new.contextWindow { merged.contextWindow = window }
+        if let percent = new.rateLimitPercent { merged.rateLimitPercent = percent }
+        usage = merged
+        if let total = new.outputTotal {
+            outputTokens = total
+        } else if new.outputTokens > 0, let id = new.messageID, countedMessages.insert(id).inserted {
+            outputTokens += new.outputTokens
+        }
+    }
 
     /// Your prompts, oldest first (for the composer's history).
     public var prompts: [String] {
@@ -111,10 +177,11 @@ public struct ChatLog: Equatable, Sendable {
             switch event {
             case .entry(let entry): added.append(entry)
             case .result(let id, let result): results.append((id, result))
+            case .usage(let usage): record(usage)
             }
         }
-        let known = Set(entries.map(\.id))
-        entries += added.filter { !known.contains($0.id) }
+        var known = Set(entries.map(\.id))
+        entries += added.filter { known.insert($0.id).inserted }
         reindex()
         results.forEach { complete($0.0, $0.1) }
     }
@@ -123,14 +190,18 @@ public struct ChatLog: Equatable, Sendable {
     public mutating func prepend(_ events: [ChatEvent]) {
         var added: [ChatEntry] = []
         var results: [(String, ChatResult)] = []
+        let latest = usage
         for event in events {
             switch event {
             case .entry(let entry): added.append(entry)
             case .result(let id, let result): results.append((id, result))
+            // Earlier replies add to the token count but don't replace the latest figures.
+            case .usage(let usage): record(usage)
             }
         }
-        let known = Set(entries.map(\.id))
-        entries = added.filter { !known.contains($0.id) } + entries
+        if let latest { usage = latest }
+        var known = Set(entries.map(\.id))
+        entries = added.filter { known.insert($0.id).inserted } + entries
         reindex()
         results.forEach { complete($0.0, $0.1) }
     }
@@ -183,12 +254,19 @@ public enum ChatReader {
         guard type == "user" || type == "assistant", let message = line["message"] as? [String: Any] else { return [] }
         let at = date(line["timestamp"])
         let uuid = line["uuid"] as? String ?? lineID
+        var usageEvents: [ChatEvent] = []
+        if type == "assistant", let usage = message["usage"] as? [String: Any] {
+            let context = ["input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens"].compactMap { usage[$0] as? Int }.reduce(0, +)
+            usageEvents.append(.usage(ChatUsage(model: message["model"] as? String, contextTokens: context > 0 ? context : nil,
+                                                outputTokens: usage["output_tokens"] as? Int ?? 0,
+                                                messageID: message["id"] as? String ?? uuid)))
+        }
         if let text = message["content"] as? String {
             guard type == "user", let prompt = humanText(text) else { return [] }
             return [.entry(ChatEntry(id: uuid, at: at, kind: .prompt(text: prompt, images: [])))]
         }
-        guard let blocks = message["content"] as? [[String: Any]] else { return [] }
-        var events: [ChatEvent] = []
+        guard let blocks = message["content"] as? [[String: Any]] else { return usageEvents }
+        var events: [ChatEvent] = usageEvents
         var promptText: [String] = []
         var promptImages: [ChatImage] = []
         for (index, block) in blocks.enumerated() {
@@ -200,6 +278,10 @@ public enum ChatReader {
             case ("assistant", "text"):
                 if let text = block["text"] as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     events.append(.entry(ChatEntry(id: "\(uuid).\(index)", at: at, kind: .reply(text))))
+                }
+            case ("assistant", "thinking"):
+                if let text = block["thinking"] as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    events.append(.entry(thought(text, id: "\(uuid).\(index)", at: at)))
                 }
             case ("assistant", "tool_use"):
                 let name = block["name"] as? String ?? "tool"
@@ -228,7 +310,8 @@ public enum ChatReader {
             }
         }
         if !promptText.isEmpty || !promptImages.isEmpty {
-            events.insert(.entry(ChatEntry(id: uuid, at: at, kind: .prompt(text: promptText.joined(separator: "\n"), images: promptImages))), at: 0)
+            events.insert(.entry(ChatEntry(id: uuid, at: at, kind: .prompt(text: promptText.joined(separator: "\n"), images: promptImages))),
+                          at: usageEvents.count)
         }
         return events
     }
@@ -261,6 +344,12 @@ public enum ChatReader {
             }
         case "Task", "Agent":
             return .agent(description: text("description") ?? "", prompt: clip(text("prompt") ?? ""))
+        case "TodoWrite":
+            if let todos = input["todos"] as? [[String: Any]] {
+                return .todos(todos.map { ChatTodo(text: $0["content"] as? String ?? "", statusName: $0["status"] as? String ?? "") })
+            }
+        case "ExitPlanMode":
+            if let plan = text("plan") { return .plan(clip(plan)) }
         default:
             break
         }
@@ -277,6 +366,17 @@ public enum ChatReader {
     // MARK: Codex
 
     static func codex(_ line: [String: Any], lineID: String) -> [ChatEvent] {
+        if line["type"] as? String == "turn_context", let model = (line["payload"] as? [String: Any])?["model"] as? String {
+            return [.usage(ChatUsage(model: model))]
+        }
+        if line["type"] as? String == "event_msg", let payload = line["payload"] as? [String: Any], payload["type"] as? String == "token_count",
+           let info = payload["info"] as? [String: Any] {
+            let last = info["last_token_usage"] as? [String: Any]
+            let total = info["total_token_usage"] as? [String: Any]
+            let limits = (payload["rate_limits"] as? [String: Any])?["primary"] as? [String: Any]
+            return [.usage(ChatUsage(contextTokens: last?["input_tokens"] as? Int, contextWindow: info["model_context_window"] as? Int,
+                                     rateLimitPercent: limits?["used_percent"] as? Double, outputTotal: total?["output_tokens"] as? Int))]
+        }
         guard line["type"] as? String == "response_item", let payload = line["payload"] as? [String: Any] else { return [] }
         let at = date(line["timestamp"])
         let id = payload["id"] as? String ?? payload["call_id"] as? String ?? lineID
@@ -298,6 +398,10 @@ public enum ChatReader {
             default:
                 return []
             }
+        case "reasoning":
+            let text = (payload["summary"] as? [[String: Any]] ?? []).compactMap { $0["text"] as? String }.joined(separator: "\n")
+            guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
+            return [.entry(thought(text, id: id, at: at))]
         case "function_call", "custom_tool_call", "local_shell_call":
             let name = payload["name"] as? String ?? "shell"
             let callID = payload["call_id"] as? String ?? id
@@ -307,7 +411,9 @@ public enum ChatReader {
                let parsed = (try? JSONSerialization.jsonObject(with: Data(arguments.utf8))) as? [String: Any] {
                 input = parsed
                 let command = parsed["cmd"] ?? parsed["command"]
-                if let command = command as? String { detail = .command(command) }
+                if name == "update_plan", let steps = parsed["plan"] as? [[String: Any]] {
+                    detail = .todos(steps.map { ChatTodo(text: $0["step"] as? String ?? "", statusName: $0["status"] as? String ?? "") })
+                } else if let command = command as? String { detail = .command(command) }
                 else if let argv = command as? [String] { detail = .command(argv.joined(separator: " ")) }
                 else { detail = fields(parsed) }
             } else if let raw = payload["input"] as? String {
@@ -395,6 +501,15 @@ public enum ChatReader {
 
     // MARK: Helpers
 
+    /// Thinking shows as a step of the tool run around it, already "done".
+    static func thought(_ text: String, id: String, at: Date?) -> ChatEntry {
+        let first = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? text
+        let title = first.trimmingCharacters(in: CharacterSet(charactersIn: "*# ").union(.whitespaces))
+        let tool = ChatTool(id: id, name: "Thinking", title: String(title.prefix(120)), detail: .thought(clip(text)), at: at,
+                            result: ChatResult(output: "", truncated: false, failed: false, at: at, images: []))
+        return ChatEntry(id: id, at: at, kind: .tool(tool))
+    }
+
     static func result(_ text: String, failed: Bool, at: Date?, images: [ChatImage]) -> ChatResult {
         let cut = text.count > outputLimit
         return ChatResult(output: cut ? String(text.prefix(outputLimit)) : text, truncated: cut, failed: failed, at: at, images: images)
@@ -418,6 +533,8 @@ public enum ChatReader {
     static func humanText(_ text: String) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
+        // Claude's own notes in the user's turn ("[Request interrupted by user]", "… for tool use]").
+        if trimmed.hasPrefix("[Request interrupted by user") { return nil }
         if trimmed.hasPrefix("<"), let close = trimmed.firstIndex(of: ">") {
             let tag = trimmed[trimmed.index(after: trimmed.startIndex)..<close]
             if tag.contains("-") || tag.contains("_") { return nil }

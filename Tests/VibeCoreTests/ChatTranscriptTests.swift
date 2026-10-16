@@ -34,7 +34,7 @@ struct ChatTranscriptTests {
             claudeUser("<system-reminder>injected</system-reminder>", uuid: "u2"),
             ["type": "user", "uuid": "u3", "isMeta": true, "message": ["role": "user", "content": "meta"]],
             ["type": "assistant", "uuid": "s1", "isSidechain": true, "message": ["role": "assistant", "content": [["type": "text", "text": "side"]]]],
-            claudeAssistant([["type": "thinking", "thinking": "hmm"], ["type": "text", "text": "Done **now**."]]),
+            claudeAssistant([["type": "thinking", "thinking": " "], ["type": "text", "text": "Done **now**."]]),
         ])
         #expect(chat.entries.map(\.kind) == [.prompt(text: "Fix the build", images: []), .reply("Done **now**.")])
         #expect(chat.prompts == ["Fix the build"])
@@ -155,5 +155,27 @@ struct ChatTranscriptTests {
         guard case .tool(let tool) = chat.entries[0].kind else { Issue.record("no tool"); return }
         #expect(tool.result?.truncated == true)
         #expect(tool.result?.output.count == ChatReader.outputLimit)
+    }
+}
+
+struct ChatTranscriptReviewFixTests {
+    func lines(_ objects: [[String: Any]]) -> Data {
+        var data = Data()
+        for object in objects { data.append(try! JSONSerialization.data(withJSONObject: object)); data.append(0x0A) }
+        return data
+    }
+
+    @Test func duplicateIdsInOneReadAppearOnce() {
+        let line: [String: Any] = ["type": "user", "uuid": "same", "message": ["role": "user", "content": "hi"]]
+        var log = ChatLog()
+        log.append(ChatReader.read(lines([line, line]), format: .claude).events)
+        #expect(log.entries.count == 1)
+    }
+
+    @Test func interruptionNoticesAreNotPrompts() {
+        let line: [String: Any] = ["type": "user", "uuid": "u", "message": ["role": "user", "content": [["type": "text", "text": "[Request interrupted by user]"]]]]
+        var log = ChatLog()
+        log.append(ChatReader.read(lines([line]), format: .claude).events)
+        #expect(log.entries.isEmpty)
     }
 }

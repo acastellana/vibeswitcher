@@ -53,3 +53,17 @@ struct MarkdownBlocksTests {
         #expect(MarkdownBlocks.parse("|a|\n|:-:|\n|x|") == [.table(header: ["a"], alignments: [.center], rows: [["x"]])])
     }
 }
+
+struct MarkdownReviewFixTests {
+    @Test func aPipeLineBeforeARuleIsNotATable() {
+        #expect(MarkdownBlocks.parse("a | b\n---\nafter") == [.paragraph("a | b"), .rule, .paragraph("after")])
+    }
+
+    @Test func aFenceInsideAListItemIsACodeBlock() {
+        #expect(MarkdownBlocks.parse("1. Run:\n   ```bash\n   swift test\n   ```\n2. Done") == [
+            .list(ordered: true, start: 1, items: [MDListItem(text: "Run:", depth: 0)]),
+            .code(language: "bash", text: "   swift test"),
+            .list(ordered: true, start: 2, items: [MDListItem(text: "Done", depth: 0)]),
+        ])
+    }
+}
