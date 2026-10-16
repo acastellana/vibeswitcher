@@ -96,6 +96,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         let divider = NSBox()
         divider.boxType = .separator
         endedBar.isHidden = true
+        // Their size comes from the stack. Left to their content, an empty bar asks to be zero wide, which
+        // pins the whole middle pane (and so the window) at its minimum width.
+        header.sizingOptions = []
+        endedBar.sizingOptions = []
         let stack = NSStackView(views: [header, divider, pane.view, endedBar])
         stack.orientation = .vertical
         stack.spacing = 0

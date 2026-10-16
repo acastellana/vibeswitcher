@@ -455,6 +455,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 view.subviews.forEach { describe($0, depth + 1) }
             }
             describe(view, 0)
+            tree += "\nwindow frame \(NSStringFromRect(window.frame)) minSize \(NSStringFromSize(window.minSize)) maxSize \(NSStringFromSize(window.maxSize)) contentMaxSize \(NSStringFromSize(window.contentMaxSize))\n"
+            if let split = window.contentViewController as? NSSplitViewController {
+                for item in split.splitViewItems {
+                    tree += "pane \(type(of: item.viewController.view)) width \(item.viewController.view.frame.width) min \(item.minimumThickness) max \(item.maximumThickness) holding \(item.holdingPriority.rawValue)\n"
+                    for constraint in item.viewController.view.constraintsAffectingLayout(for: .horizontal) {
+                        tree += "  \(constraint)\n"
+                    }
+                }
+            }
             try? tree.write(toFile: (file as NSString).deletingPathExtension + ".txt", atomically: true, encoding: .utf8)
         }
     }
