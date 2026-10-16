@@ -217,13 +217,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             switch note.object as? String {
             case "palette": self?.mainWindow?.showPaletteAction(nil)
             case "home": self?.windowModel.showHome()
-            case let text? where text.hasPrefix("scratchsend:"): // TEMPORARY test hook: scratch sessions only
-                guard let cwd = self?.windowModel.selectedRow?.cwd, cwd.hasSuffix("/tmp/vs-scratch") else { return }
-                self?.mainWindow?.testSend(String(text.dropFirst("scratchsend:".count)))
-            case let text? where text.hasPrefix("scratchchoose:"): // TEMPORARY test hook: scratch sessions only
-                guard let cwd = self?.windowModel.selectedRow?.cwd, cwd.hasSuffix("/tmp/vs-scratch"),
-                      let index = Int(text.dropFirst("scratchchoose:".count)) else { return }
-                self?.mainWindow?.testChoose(index)
             case let text? where text.hasPrefix("move:"):
                 let tty = String(text.dropFirst("move:".count))
                 if let session = self?.store.sessions.first(where: { $0.tty == tty }) { self?.moveToWindow(session, ask: false) }

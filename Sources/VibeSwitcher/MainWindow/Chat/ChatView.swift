@@ -78,13 +78,15 @@ struct ChatView: View {
                             Button(chat.loadingEarlier ? "Loading…" : "Load earlier") { chat.loadEarlier() }
                                 .buttonStyle(.borderless).frame(maxWidth: .infinity).disabled(chat.loadingEarlier)
                         }
-                        ForEach(items) { item in
+                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                             ChatItemView(item: item, chat: chat, agent: row?.markKind ?? .agent(.claude), rowID: row?.id,
                                          canSend: live, resend: resend) { viewing = $0 }
                                 .id(item.id)
                                 .padding(6)
                                 .background(RoundedRectangle(cornerRadius: 10).fill(
                                     item.id == current ? Color.yellow.opacity(0.18) : matches.contains(item.id) ? Color.yellow.opacity(0.07) : .clear))
+                                .onAppear { chat.visibleItems[item.id] = index }
+                                .onDisappear { chat.visibleItems[item.id] = nil }
                         }
                         ForEach(chat.pending) { message in
                             Text(message.text).font(.system(size: 13.5)).foregroundStyle(.secondary)
@@ -104,8 +106,8 @@ struct ChatView: View {
                         }
                     }
                     Color.clear.frame(height: 1).id("bottom")
-                        .onAppear { atBottom = true }
-                        .onDisappear { atBottom = false }
+                        .onAppear { atBottom = true; chat.atBottom = true }
+                        .onDisappear { atBottom = false; chat.atBottom = false }
                 }
                 .padding(.horizontal, 22).padding(.vertical, 16)
                 .frame(maxWidth: 900)
@@ -123,9 +125,11 @@ struct ChatView: View {
             .onChange(of: chat.state) { _, state in
                 guard state == .ready, !didInitialScroll else { return }
                 didInitialScroll = true
-                // Open at what's new since you looked, else at the end.
+                // Open where you were reading, else at what's new since you looked, else at the end.
                 DispatchQueue.main.async {
-                    if chat.items.contains(where: { $0.id == "new-marker" }) {
+                    if let anchor = chat.restoreAnchor, chat.items.contains(where: { $0.id == anchor }) {
+                        proxy.scrollTo(anchor, anchor: .top)
+                    } else if chat.items.contains(where: { $0.id == "new-marker" }) {
                         proxy.scrollTo("new-marker", anchor: .top)
                     } else {
                         proxy.scrollTo("bottom", anchor: .bottom)

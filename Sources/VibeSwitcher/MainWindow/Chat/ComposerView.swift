@@ -356,7 +356,8 @@ private struct ComposerTextView: NSViewRepresentable {
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.borderType = .noBorder
-        context.coordinator.lastFocusRequest = focusRequests
+        // A new box (another session) takes the focus once it's on screen.
+        context.coordinator.lastFocusRequest = focusRequests - 1
         return scroll
     }
 
@@ -370,7 +371,11 @@ private struct ComposerTextView: NSViewRepresentable {
         }
         if focusRequests != context.coordinator.lastFocusRequest {
             context.coordinator.lastFocusRequest = focusRequests
-            DispatchQueue.main.async { textView.window?.makeFirstResponder(textView) }
+            DispatchQueue.main.async {
+                // Never while the chat is hidden behind the terminal: the keys belong to the terminal then.
+                guard !scroll.isHiddenOrHasHiddenAncestor else { return }
+                textView.window?.makeFirstResponder(textView)
+            }
         }
         if let index = suggestions.acceptIndex {
             DispatchQueue.main.async { context.coordinator.accept(index, in: textView) }

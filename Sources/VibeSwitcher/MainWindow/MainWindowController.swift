@@ -217,8 +217,6 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         }
     }
 
-    func testSend(_ text: String) { _ = sendToSelected(text) } // TEMPORARY
-    func testChoose(_ index: Int) { chooseMenuOption(index) } // TEMPORARY
 
     /// The menu and permission mode on the selected window session's screen, for the answer card and the mode chip.
     private func readScreen() {

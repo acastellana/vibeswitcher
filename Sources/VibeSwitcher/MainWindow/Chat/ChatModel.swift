@@ -59,15 +59,41 @@ final class ChatModel: ObservableObject {
 
     var items: [ChatItem] { ChatTimeline.items(log.entries, newAfter: markerAfter) }
 
+    /// What you left each conversation with (opened tool runs, search, where you were reading), restored when you
+    /// come back to it; one conversation's state never shows in another.
+    private struct Kept {
+        var expanded: Set<String>
+        var searchActive: Bool
+        var searchQuery: String
+        var searchIndex: Int
+        /// The item at the top of the view when you left; nil when you were at the end.
+        var anchor: String?
+    }
+    private var kept: [String: Kept] = [:]
+    /// Items on screen right now (kept current by the view), to know where you were reading.
+    var visibleItems: [String: Int] = [:]
+    var atBottom = true
+    /// Where to scroll when the conversation opens (set from what was kept).
+    private(set) var restoreAnchor: String?
+
     /// Shows the conversation in `path` (nil: none). Same path: nothing changes.
     func show(path: String?) {
         guard path != self.path else { return }
+        if let old = self.path {
+            let anchor = atBottom ? nil : visibleItems.min { $0.value < $1.value }?.key
+            kept[old] = Kept(expanded: expanded, searchActive: searchActive, searchQuery: searchQuery, searchIndex: searchIndex, anchor: anchor)
+        }
         generation += 1
         self.path = path
         log = ChatLog()
-        expanded = []
-        searchActive = false
-        searchQuery = ""
+        let restored = path.flatMap { kept[$0] }
+        expanded = restored?.expanded ?? []
+        searchActive = restored?.searchActive ?? false
+        searchQuery = restored?.searchQuery ?? ""
+        searchIndex = restored?.searchIndex ?? 0
+        restoreAnchor = restored?.anchor
+        visibleItems = [:]
+        atBottom = true
         hasEarlier = false
         loadingEarlier = false
         pending = []
