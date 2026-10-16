@@ -39,7 +39,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             guard let self, let id = row.hostID, self.hostClient.sessions.first(where: { $0.id == id })?.isLive == false
             else { return false }
             return self.windowModel.agentSessions[id] != nil
-        })
+        },
+        resumeCommand: { [weak self] row in self?.resumeCommandLine(for: row) },
+        settings: { [weak self] in self?.showSettings(tab: .general) })
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var hotKey: HotKey?
@@ -445,6 +447,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             mainWindow = controller
         }
         if let hostID { windowModel.select(hostID: hostID) }
+        loadRecentProjects()
         mainWindow?.present()
     }
 
@@ -495,6 +498,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         hostClient.kill(id)
+    }
+
+    private func resumeCommandLine(for row: WindowRow) -> String? {
+        guard let cwd = row.cwd else { return nil }
+        if let session = row.session, let id = session.agentSessionID {
+            let base = row.hostID.flatMap { host in hostClient.sessions.first { $0.id == host }?.command }
+            return RecentProjects.shellCommand(cd: cwd, run: LaunchPlan.resumeCommand(base: base, agent: session.agent, sessionID: id))
+        }
+        guard let host = row.hostID, let agentSession = windowModel.agentSessions[host] else { return nil }
+        let base = hostClient.sessions.first { $0.id == host }?.command
+        return RecentProjects.shellCommand(cd: cwd, run: LaunchPlan.resumeCommand(base: base, agent: agentSession.agent,
+                                                                                    sessionID: agentSession.sessionID))
     }
 
     private func resumeSession(_ row: WindowRow) {
@@ -617,7 +632,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         let observed = store.observedProjects
         DispatchQueue.global(qos: .userInitiated).async {
             let recents = Launcher.recentProjects(observed: observed)
-            DispatchQueue.main.async { self.popoverState.recentProjects = recents }
+            DispatchQueue.main.async {
+                self.popoverState.recentProjects = recents
+                self.windowModel.recentProjects = recents.map(\.path)
+            }
         }
     }
 

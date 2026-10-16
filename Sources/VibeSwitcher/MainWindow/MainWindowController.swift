@@ -36,7 +36,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
         let sidebar = NSSplitViewItem(sidebarWithViewController: NSHostingController(
             rootView: SessionListView(model: model, host: host, actions: actions)))
-        sidebar.minimumThickness = 220
+        sidebar.minimumThickness = 260
         sidebar.maximumThickness = 420
         let middle = NSViewController()
         middle.view = makeMiddle()

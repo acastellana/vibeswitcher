@@ -1,95 +1,130 @@
 import SwiftUI
 import VibeCore
 
-/// The left pane: sessions grouped by project.
+/// The left pane: sessions grouped by what they need from you (or by project), a filter and a summary.
 struct SessionListView: View {
     @ObservedObject var model: WindowModel
     @ObservedObject var host: HostClient
     let actions: WindowActions
+    @FocusState private var filterFocused: Bool
 
     var body: some View {
+        let sections = model.displayedSections
         List(selection: $model.selectedID) {
-            ForEach(model.sections) { section in
+            ForEach(sections) { section in
                 Section {
                     ForEach(section.rows) { row in
-                        WindowRowView(row: row, info: row.hostID.flatMap { id in host.sessions.first { $0.id == id } })
+                        WindowRowView(row: row, showProject: model.grouping == .attention)
                             .tag(row.id as String?)
                             .contextMenu { RowMenu(row: row, actions: actions) }
                     }
                 } header: {
-                    HStack {
+                    HStack(spacing: 6) {
                         Text(section.project)
+                        Text("\(section.rows.count)").foregroundStyle(.tertiary).monospacedDigit()
                         Spacer()
-                        NewSessionMenu(folder: section.rows.first?.cwd, actions: actions)
+                        if model.grouping == .projects {
+                            NewSessionMenu(folder: section.rows.first?.cwd, actions: actions)
+                        }
                     }
                 }
             }
         }
         .listStyle(.sidebar)
         .overlay {
-            if model.sections.isEmpty {
-                VStack(spacing: 8) {
-                    Text("No sessions").foregroundStyle(.secondary)
-                    NewSessionMenu(folder: nil, actions: actions, title: "New Session")
+            if sections.isEmpty {
+                if model.sections.isEmpty {
+                    VStack(spacing: 8) {
+                        Text("No sessions").foregroundStyle(.secondary)
+                        NewSessionMenu(folder: nil, actions: actions, title: "New Session")
+                    }
+                } else {
+                    Text("No matches").foregroundStyle(.secondary)
                 }
             }
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            Picker("Group", selection: $model.grouping) {
+                Text("Attention").tag(WindowGrouping.attention)
+                Text("Projects").tag(WindowGrouping.projects)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(alignment: .leading, spacing: 6) {
+                Divider()
+                HStack(spacing: 6) {
+                    Image(systemName: "line.3.horizontal.decrease").foregroundStyle(.secondary)
+                    TextField("Filter", text: $model.filter)
+                        .textFieldStyle(.plain)
+                        .focused($filterFocused)
+                        .onExitCommand { model.filter = ""; filterFocused = false }
+                    if !model.filter.isEmpty {
+                        Button { model.filter = "" } label: { Image(systemName: "xmark.circle.fill") }
+                            .buttonStyle(.borderless).foregroundStyle(.secondary)
+                    }
+                }
+                .font(.system(size: 12))
+                .padding(.horizontal, 7).padding(.vertical, 4)
+                .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.6)))
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    let summary = WindowGroups.summary(model.allRows, now: context.date)
+                    Text(summary.isEmpty ? countText : summary)
+                        .font(.system(size: 11)).foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 8)
+        }
+        .onChange(of: model.filterFocusRequests) { filterFocused = true }
+    }
+
+    private var countText: String {
+        let count = model.allRows.count
+        return count == 1 ? "1 session" : "\(count) sessions"
     }
 }
 
 struct WindowRowView: View {
     let row: WindowRow
-    /// The session host's record, for window sessions.
-    let info: HostSession?
+    /// The project on the second line (the Attention grouping mixes projects).
+    let showProject: Bool
 
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
-            Circle().fill(dotColor).frame(width: 8, height: 8).padding(.top, 5)
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1).layoutPriority(1)
-                    Spacer(minLength: 0)
-                    if let agent = row.session?.agent ?? info?.agent.flatMap(Agent.init(rawValue:)) { AgentBadge(agent: agent).fixedSize() }
-                    if row.session?.inTerminalApp == true {
-                        Image(systemName: "terminal").font(.caption2).foregroundStyle(.secondary)
-                            .help("Runs in Terminal")
+        TimelineView(.periodic(from: .now, by: 30)) { context in
+            let state = row.state(now: context.date)
+            HStack(spacing: 9) {
+                AgentMark(kind: row.markKind, status: row.statusColor, hollow: row.statusIsHollow)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(row.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                        Spacer(minLength: 4)
+                        if let since = state.since {
+                            Text(Durations.compact(context.date.timeIntervalSince(since)))
+                                .font(.system(size: 11).monospacedDigit()).foregroundStyle(.tertiary)
+                        }
                     }
-                }
-                if let subtitle {
-                    Text(subtitle).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    HStack(spacing: 4) {
+                        if showProject {
+                            Text(row.project).foregroundStyle(.secondary)
+                            Text("·").foregroundStyle(.tertiary)
+                        }
+                        Text(state.text).foregroundStyle(state.group == .needsYou ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                        Spacer(minLength: 0)
+                        if row.session?.inTerminalApp == true {
+                            Image(systemName: "macwindow").foregroundStyle(.tertiary).help("Runs in Terminal")
+                        }
+                    }
+                    .font(.system(size: 11))
+                    .lineLimit(1)
                 }
             }
+            .padding(.vertical, 3)
+            .opacity(row.isDimmed ? 0.55 : 1)
         }
-        .padding(.vertical, 2)
-        .opacity(isEnded || row.session?.isPaused == true ? 0.55 : 1)
-    }
-
-    private var isEnded: Bool { info?.isLive == false }
-
-    private var title: String {
-        if let session = row.session { return session.customName ?? session.task ?? session.displayName }
-        if let info, !info.title.isEmpty { return info.title }
-        return info?.label ?? "Session"
-    }
-
-    private var subtitle: String? {
-        if let exit = info?.exit {
-            return "ended \(Durations.short(Date().timeIntervalSince(exit.at))) ago · exit \(exit.status)"
-        }
-        if let session = row.session {
-            if let activity = session.activity, let since = session.activitySince {
-                return "⚙ \(activity) · \(Durations.short(Date().timeIntervalSince(since)))"
-            }
-            return session.detail ?? session.status.label
-        }
-        if info?.agent != nil { return "Starting…" }
-        return info.map { SessionNaming.name(forProjectRoot: $0.cwd) }.map { "Shell · \($0)" }
-    }
-
-    private var dotColor: Color {
-        if isEnded { return .gray.opacity(0.5) }
-        if let session = row.session { return session.isPaused ? Color(nsColor: Session.pausedNSColor) : session.status.color }
-        return info?.agent != nil ? .orange.opacity(0.6) : .secondary
     }
 }
 
@@ -121,10 +156,22 @@ struct RowMenu: View {
                 Button("Remove") { actions.remove(row) }
             }
         }
+        if row.session?.agentSessionID != nil || actions.resumeCommand(row) != nil {
+            Divider()
+            if let id = row.session?.agentSessionID { Button("Copy Session ID") { Pasteboard.copy(id) } }
+            if let command = actions.resumeCommand(row) { Button("Copy Resume Command") { Pasteboard.copy(command) } }
+        }
         if let cwd = row.cwd {
             Divider()
             Button("Reveal in Finder") { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: cwd) }
         }
+    }
+}
+
+enum Pasteboard {
+    static func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
     }
 }
 
