@@ -16,6 +16,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private let actions: WindowActions
     private let split = NSSplitViewController()
     private var inspectorItem: NSSplitViewItem!
+    private lazy var endedBar = NSHostingView(rootView: EndedBar(model: model, actions: actions))
     private var shownID: String?
     private var cancellables: Set<AnyCancellable> = []
 
@@ -39,18 +40,19 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         let sidebar = NSSplitViewItem(sidebarWithViewController: NSHostingController(
             rootView: SessionListView(model: model, host: host, actions: actions)))
         sidebar.minimumThickness = 260
-        sidebar.maximumThickness = 420
+        sidebar.maximumThickness = 380
         let middle = NSViewController()
         middle.view = makeMiddle()
         let content = NSSplitViewItem(viewController: middle)
         content.minimumThickness = 420
         inspectorItem = NSSplitViewItem(inspectorWithViewController: NSHostingController(
             rootView: InspectorView(model: model, host: host)))
-        inspectorItem.minimumThickness = 220
-        inspectorItem.maximumThickness = 420
+        inspectorItem.minimumThickness = 240
+        inspectorItem.maximumThickness = 380
         inspectorItem.isCollapsed = UserDefaults.standard.object(forKey: "inspectorCollapsed") as? Bool ?? false
         split.splitViewItems = [sidebar, content, inspectorItem]
-        split.splitView.autosaveName = "MainWindowSplit"
+        // Renamed when the pane limits changed, so widths saved under the old limits don't squeeze the terminal.
+        split.splitView.autosaveName = "MainWindowSplit2"
         window.contentViewController = split
         // Setting the content view controller sizes the window to its view's initial frame.
         window.setContentSize(NSSize(width: 1280, height: 800))
@@ -84,15 +86,17 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         let header = NSHostingView(rootView: SessionHeaderView(model: model, host: host, actions: actions))
         let divider = NSBox()
         divider.boxType = .separator
-        let stack = NSStackView(views: [header, divider, pane.view])
+        endedBar.isHidden = true
+        let stack = NSStackView(views: [header, divider, pane.view, endedBar])
         stack.orientation = .vertical
         stack.spacing = 0
         stack.alignment = .leading
-        for view in [header, divider, pane.view] {
+        for view in [header, divider, pane.view, endedBar] {
             view.translatesAutoresizingMaskIntoConstraints = false
             view.widthAnchor.constraint(equalTo: stack.widthAnchor).isActive = true
         }
         header.heightAnchor.constraint(equalToConstant: 52).isActive = true
+        endedBar.heightAnchor.constraint(equalToConstant: 40).isActive = true
         pane.view.setContentHuggingPriority(.defaultLow, for: .vertical)
         // The window's content runs under the toolbar; start below it.
         let container = NSView()
@@ -125,13 +129,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         guard let row = model.selectedRow else {
             guard shownID != "" else { return }
             shownID = ""
-            pane.show(placeholder: AnyView(EmptySessionView { [weak self] in self?.actions.newSession(nil, nil) }))
+            endedBar.isHidden = true
+            pane.show(placeholder: AnyView(StartPage(model: model, actions: actions)))
             return
         }
+        endedBar.isHidden = row.hosted?.exit == nil
         if let id = row.hostID {
             if pane.current != id { pane.show(hostID: id) }
         } else if let session = row.session, shownID != row.id {
-            pane.show(placeholder: AnyView(TerminalAppPlaceholder(session: session) { [weak self] in
+            pane.show(placeholder: AnyView(TerminalMirror(session: session) { [weak self] in
                 self?.actions.openInTerminal(session)
             }))
         }
@@ -171,9 +177,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     // MARK: Toolbar
 
     private static let newItem = NSToolbarItem.Identifier("newSession")
+    private static let homeItem = NSToolbarItem.Identifier("startPage")
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
-        [.toggleSidebar, .sidebarTrackingSeparator, .flexibleSpace, Self.newItem, .inspectorTrackingSeparator,
+        [.toggleSidebar, .sidebarTrackingSeparator, Self.homeItem, .flexibleSpace, Self.newItem, .inspectorTrackingSeparator,
          .flexibleSpace, .toggleInspector]
     }
 
@@ -183,6 +190,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     func toolbar(_ toolbar: NSToolbar, itemForItemIdentifier identifier: NSToolbarItem.Identifier,
                  willBeInsertedIntoToolbar flag: Bool) -> NSToolbarItem? {
+        if identifier == Self.homeItem {
+            let item = NSToolbarItem(itemIdentifier: identifier)
+            item.label = "Start Page"
+            item.toolTip = "Recent projects and shortcuts (⇧⌘H)"
+            item.image = NSImage(systemSymbolName: "house", accessibilityDescription: "Start Page")
+            item.target = self
+            item.action = #selector(showHomeAction(_:))
+            return item
+        }
         guard identifier == Self.newItem else { return nil }
         let item = NSToolbarItem(itemIdentifier: identifier)
         item.label = "New Session"
@@ -229,6 +245,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         return true
     }
 
+    @objc func showHomeAction(_ sender: Any?) { model.showHome() }
     @objc func groupByAttention(_ sender: Any?) { model.grouping = .attention }
     @objc func groupByProjects(_ sender: Any?) { model.grouping = .projects }
     @objc func focusFilterAction(_ sender: Any?) { model.focusFilter() }

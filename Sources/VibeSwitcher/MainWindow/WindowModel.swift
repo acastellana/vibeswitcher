@@ -19,6 +19,10 @@ final class WindowModel: ObservableObject {
     @Published var recentProjects: [String] = []
     /// The agent's own session id last seen in each window session, so it can be resumed once it ends.
     private(set) var agentSessions: [UUID: (agent: Agent, sessionID: String)] = [:]
+    /// Selected to show the start page instead of a session.
+    static let homeID = "home"
+    var showsHome: Bool { selectedID == Self.homeID }
+    func showHome() { selectedID = Self.homeID }
     private static let selectionKey = "windowSelection"
     private static let groupingKey = "windowGrouping"
 
@@ -52,7 +56,7 @@ final class WindowModel: ObservableObject {
         if fresh != sections { sections = fresh }
         // Keep the selection while its row exists (or before anything has loaded).
         let all = allRows
-        guard !all.isEmpty, !all.contains(where: { $0.id == selectedID }) else { return }
+        guard !all.isEmpty, !showsHome, !all.contains(where: { $0.id == selectedID }) else { return }
         if selectedID?.hasPrefix("host:") == true, !hostAnswered { return }
         selectedID = (rows.first ?? all.first)?.id
     }

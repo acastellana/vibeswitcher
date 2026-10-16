@@ -39,8 +39,12 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
+    /// Space between the pane's edges and the terminal text; it takes the terminal's background color.
+    static let inset = NSSize(width: 10, height: 6)
+
     override func loadView() {
         view = NSView()
+        view.wantsLayer = true
     }
 
     var currentView: HostTerminalView? { current.flatMap { views[$0] } }
@@ -51,6 +55,7 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         views.values.forEach { $0.isHidden = true }
         let terminal = views[hostID] ?? makeView(for: hostID)
         terminal.isHidden = false
+        view.layer?.backgroundColor = terminal.nativeBackgroundColor.cgColor
         current = hostID
         recent.removeAll { $0 == hostID }
         recent.insert(hostID, at: 0)
@@ -63,6 +68,7 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         current = nil
         placeholder?.removeFromSuperview()
         let hosting = NSHostingView(rootView: content)
+        view.layer?.backgroundColor = nil
         pin(hosting)
         placeholder = hosting
     }
@@ -84,6 +90,7 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
 
     func reconfigureAll() {
         views.values.forEach(configure)
+        if let currentView { view.layer?.backgroundColor = currentView.nativeBackgroundColor.cgColor }
     }
 
     func focus() {
@@ -103,7 +110,7 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
             self.host.send(id, bytes: data, reply: true)
         }
         configure(terminal)
-        pin(terminal)
+        pin(terminal, inset: Self.inset)
         views[id] = terminal
         gates[id, default: ReplayGate()].attaching()
         let size = terminal.getTerminal()
@@ -118,8 +125,8 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         return terminal
     }
 
-    private func pin(_ subview: NSView) {
-        subview.frame = view.bounds
+    private func pin(_ subview: NSView, inset: NSSize = .zero) {
+        subview.frame = view.bounds.insetBy(dx: inset.width, dy: inset.height)
         subview.autoresizingMask = [.width, .height]
         view.addSubview(subview)
     }
@@ -165,46 +172,62 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     func rangeChanged(source: TerminalView, startY: Int, endY: Int) {}
 }
 
-/// Shown for a session that runs in Terminal.app: its current screen and a way to go there.
-struct TerminalAppPlaceholder: View {
+/// Shown for a session that runs in Terminal.app: its screen, re-read every 2 s while shown, and a way
+/// to go there. Read-only: nothing is typed into Terminal from here.
+struct TerminalMirror: View {
     let session: Session
     let open: () -> Void
     @State private var screen: String?
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("This session runs in Terminal.").font(.headline)
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "macwindow").font(.system(size: 16)).foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Runs in Terminal").font(.system(size: 13, weight: .semibold))
+                    Text("Its screen, as of a moment ago. Answer it in Terminal.").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
                 Spacer()
-                Button("Open in Terminal", action: open).keyboardShortcut(.defaultAction)
+                Button(action: open) { Label("Open in Terminal", systemImage: "arrow.up.forward.app") }
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
             }
-            ScrollView {
-                Text(screen ?? "Reading its screen…")
-                    .font(.system(.body, design: .monospaced))
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14).padding(.vertical, 10)
+            .background(.bar)
+            Divider()
+            ScrollViewReader { proxy in
+                ScrollView([.horizontal, .vertical]) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text(screen ?? "Reading its screen…")
+                            .font(.system(size: 12, design: .monospaced))
+                            .fixedSize()
+                            .textSelection(.enabled)
+                        Color.clear.frame(width: 1, height: 1).id("end")
+                    }
+                    .padding(14)
+                }
+                .onChange(of: screen) { proxy.scrollTo("end", anchor: .bottomLeading) }
             }
         }
-        .padding(16)
         .task(id: session.identity) {
             let tty = session.tty
-            let text = await Task.detached { TerminalBridge.screens(for: [tty])[tty] }.value
-            screen = text ?? "Couldn't read its Terminal tab."
+            while !Task.isCancelled {
+                if NSApp.isActive || screen == nil {
+                    let text = await Task.detached { TerminalBridge.screens(for: [tty])[tty] }.value
+                    let shown = (text ?? "Couldn't read its Terminal tab.").trimmingTrailingBlankLines
+                    if shown != screen { screen = shown }
+                }
+                try? await Task.sleep(for: .seconds(2))
+            }
         }
     }
 }
 
-/// Nothing selected.
-struct EmptySessionView: View {
-    let newSession: () -> Void
-
-    var body: some View {
-        VStack(spacing: 10) {
-            Text("No session selected").font(.title3).foregroundStyle(.secondary)
-            Button("New Session", action: newSession)
-            Text("⌘N").font(.caption).foregroundStyle(.tertiary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+private extension String {
+    var trimmingTrailingBlankLines: String {
+        var lines = split(separator: "\n", omittingEmptySubsequences: false)
+        while let last = lines.last, last.allSatisfy(\.isWhitespace) { lines.removeLast() }
+        return lines.joined(separator: "\n")
     }
 }
 

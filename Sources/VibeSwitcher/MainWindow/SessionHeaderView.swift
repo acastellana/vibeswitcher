@@ -15,7 +15,7 @@ struct SessionHeaderView: View {
                 TimelineView(.periodic(from: .now, by: 30)) { context in
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 8) {
-                            Text(row.title).font(.system(size: 14, weight: .semibold)).lineLimit(1)
+                            Text(row.title).font(.system(size: 14, weight: .semibold)).lineLimit(1).layoutPriority(1)
                                 .onTapGesture(count: 2) { if let session = row.session { actions.rename(session) } }
                                 .help(row.session != nil ? "Double-click to rename" : "")
                             StatusPill(row: row, now: context.date)
@@ -45,26 +45,18 @@ struct SessionHeaderView: View {
     }
 
     private func details(_ row: WindowRow) -> some View {
-        HStack(spacing: 6) {
-            if let cwd = row.cwd {
-                Text(cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~")).truncationMode(.head)
-            }
-            if let branch {
-                Label(branch, systemImage: "arrow.triangle.branch").labelStyle(.titleAndIcon)
-            }
-            if let activity = row.session?.activity {
-                Label(activity, systemImage: "gearshape").labelStyle(.titleAndIcon)
-            }
-            if row.session?.inTerminalApp == true {
-                Label("Terminal", systemImage: "macwindow").labelStyle(.titleAndIcon)
-            }
-        }
+        var parts: [String] = []
+        if let cwd = row.cwd { parts.append(cwd.replacingOccurrences(of: NSHomeDirectory(), with: "~")) }
+        if let branch { parts.append("⎇ \(branch)") }
+        if row.session?.inTerminalApp == true { parts.append("in Terminal") }
+        if let activity = row.session?.activity { parts.append(activity) }
+        return Text(parts.joined(separator: "  ·  "))
     }
 
     @ViewBuilder private func buttons(_ row: WindowRow) -> some View {
         if let session = row.session, session.inTerminalApp {
-            Button { actions.openInTerminal(session) } label: { Label("Open in Terminal", systemImage: "arrow.up.forward.app") }
-                .help("Go to its Terminal tab (⌘O)")
+            Button { actions.openInTerminal(session) } label: { Image(systemName: "arrow.up.forward.app") }
+                .help("Open in Terminal (⌘O)")
         }
         if row.hostID != nil {
             if actions.isLive(row) {
@@ -72,8 +64,8 @@ struct SessionHeaderView: View {
                     .help("End this session (⌘W)")
             } else {
                 if actions.canResume(row) {
-                    Button { actions.resume(row) } label: { Label("Resume", systemImage: "arrow.clockwise") }
-                        .help("Start the agent again on this conversation")
+                    Button { actions.resume(row) } label: { Image(systemName: "arrow.clockwise") }
+                        .help("Resume: start the agent again on this conversation")
                 }
                 Button { actions.remove(row) } label: { Image(systemName: "trash") }
                     .help("Remove from the list")
