@@ -8,7 +8,31 @@ enum TypedText {
     /// Pasted text is wrapped (`<pasted_content id="…">…</pasted_content id="…">`): it's the user's, so it stays.
     private static let pasted = try! NSRegularExpression(pattern: "<pasted_content[^>]*>\\n?([\\s\\S]*?)\\n?</pasted_content[^>]*>")
 
+    /// A message another agent sent this session (a cross-session message, a subagent's report): not the user's
+    /// words. Returns who sent it and its text.
+    public static func agentMessage(_ text: String) -> (from: String, body: String)? {
+        var rest = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let intro = "Another Claude session sent a message:"
+        if rest.hasPrefix(intro) { rest = rest.dropFirst(intro.count).trimmingCharacters(in: .whitespacesAndNewlines) }
+        for tag in ["cross-session-message", "agent-message"] where rest.hasPrefix("<\(tag)") {
+            guard let close = rest.firstIndex(of: ">") else { return nil }
+            let header = rest[..<close]
+            let from = attribute("from-name", in: header) ?? attribute("from", in: header) ?? "another agent"
+            var body = rest[rest.index(after: close)...]
+            if let end = body.range(of: "</\(tag)>") { body = body[..<end.lowerBound] }
+            return (from, body.trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        return nil
+    }
+
+    private static func attribute(_ name: String, in header: Substring) -> String? {
+        guard let start = header.range(of: " \(name)=\"") else { return nil }
+        let value = header[start.upperBound...]
+        return value.firstIndex(of: "\"").map { String(value[..<$0]) }
+    }
+
     static func clean(_ text: String) -> String? {
+        if agentMessage(text) != nil { return nil }
         var result = text
         result = commandBlock.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "")
         result = pasted.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "$1")

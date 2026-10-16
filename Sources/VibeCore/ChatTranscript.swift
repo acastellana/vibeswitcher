@@ -272,6 +272,9 @@ public enum ChatReader {
                                                 messageID: message["id"] as? String ?? uuid)))
         }
         if let text = message["content"] as? String {
+            if type == "user", let other = TypedText.agentMessage(text) {
+                return [.entry(ChatEntry(id: uuid, at: at, kind: .steered(text: other.body, fromLead: true)))]
+            }
             guard type == "user", let prompt = humanText(text) else { return [] }
             return [.entry(ChatEntry(id: uuid, at: at, kind: .prompt(text: prompt, images: [])))]
         }

@@ -190,7 +190,7 @@ private struct ChatItemView: View {
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 13).padding(.vertical, 9)
                         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.orange.opacity(0.13)))
-                    Label(fromLead ? "from the project lead, while it worked" : "steered while it worked", systemImage: "arrow.turn.down.right")
+                    Label(fromLead ? "from another agent (not you)" : "steered while it worked", systemImage: fromLead ? "person.2" : "arrow.turn.down.right")
                         .font(.system(size: 10)).foregroundStyle(.secondary)
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)

@@ -63,9 +63,12 @@ public enum SessionNaming {
     /// Prompts that are not something the user typed: background-task notices and other injected
     /// system messages arrive through UserPromptSubmit as XML-ish blocks.
     public static func isSystemPrompt(_ prompt: String) -> Bool {
+        // Messages from other sessions and subagents arrive as prompts too; they aren't the user's.
+        if TypedText.agentMessage(prompt) != nil { return true }
         let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("<"), let close = trimmed.firstIndex(of: ">") else { return false }
-        let tag = trimmed[trimmed.index(after: trimmed.startIndex)..<close]
+        // The tag's name (attributes may follow it).
+        let tag = trimmed[trimmed.index(after: trimmed.startIndex)..<close].prefix { $0 != " " }
         return !tag.isEmpty && tag.allSatisfy { $0.isLetter || $0 == "-" || $0 == "_" }
     }
 }

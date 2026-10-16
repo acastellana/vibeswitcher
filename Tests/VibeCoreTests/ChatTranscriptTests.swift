@@ -200,3 +200,30 @@ struct PastedAndCommandPromptTests {
         #expect(TranscriptReader.humanTextForTesting("<pasted_content id=\"x\">\nhello\n</pasted_content id=\"x\">") == "hello")
     }
 }
+
+struct MessagesFromOtherAgentsTests {
+    let crossSession = "Another Claude session sent a message:\n<cross-session-message from=\"uds:/tmp/cc-socks/1.sock\" from-name=\"vibeswitcher-d5\" from-mode=\"prompting\">\nImage paste works now.\n</cross-session-message>"
+    let handBack = "<agent-message from=\"adb98e7da9c83f502\">\n[Subagent hand-back] report text\n</agent-message>"
+
+    @Test func theyAreNotTheUsersPrompts() {
+        var data = Data()
+        for (uuid, text) in [("a", crossSession), ("b", handBack), ("c", "my own words")] {
+            let line: [String: Any] = ["type": "user", "uuid": uuid, "message": ["role": "user", "content": text]]
+            data.append(try! JSONSerialization.data(withJSONObject: line)); data.append(0x0A)
+        }
+        var log = ChatLog()
+        log.append(ChatReader.read(data, format: .claude).events)
+        #expect(log.entries.map(\.kind) == [.steered(text: "Image paste works now.", fromLead: true),
+                                            .steered(text: "[Subagent hand-back] report text", fromLead: true),
+                                            .prompt(text: "my own words", images: [])])
+        #expect(log.prompts == ["my own words"])
+    }
+
+    @Test func hooksAndThePhoneDontTakeThemForPrompts() {
+        #expect(SessionNaming.isSystemPrompt(crossSession))
+        #expect(SessionNaming.isSystemPrompt(handBack))
+        #expect(SessionNaming.isSystemPrompt("fix the build") == false)
+        #expect(TranscriptReader.humanTextForTesting(crossSession) == nil)
+        #expect(TranscriptReader.humanTextForTesting(handBack) == nil)
+    }
+}
