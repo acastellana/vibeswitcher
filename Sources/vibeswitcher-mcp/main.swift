@@ -25,7 +25,19 @@ final class HostRuntime: LeadRuntime {
     func spawn(cwd: String, command: String, label: String, agent: String) throws -> String {
         let request = SpawnRequest(cwd: cwd, command: command, env: [:], cols: 120, rows: 40, keepShell: false, label: label, agent: agent)
         switch try HostCall.request(.spawn(request)) {
-        case .spawned(let session): return session.id.uuidString
+        case .spawned(let session):
+            // A worktree is a new folder to Claude: answer its trust question for that folder (the user started
+            // the lead in this repository).
+            TrustPrompt.answer(folder: cwd, readScreen: {
+                if case .screenText(_, let text)? = try? HostCall.request(.screen(id: session.id)) { return text }
+                return nil
+            }, send: { writes in
+                for write in writes {
+                    if write.delay > 0 { usleep(useconds_t(write.delay * 1_000_000)) }
+                    _ = try? HostCall.request(.input(id: session.id, bytes: Data(write.bytes), reply: false))
+                }
+            })
+            return session.id.uuidString
         case .error(let message): throw HostCall.Failure(description: message)
         default: throw HostCall.Failure(description: "The session host didn't start the session.")
         }

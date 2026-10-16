@@ -12,7 +12,7 @@ public enum LeadLaunch {
         public var settingsFile: String
     }
 
-    static let readOnly = ["Edit", "Write", "MultiEdit", "NotebookEdit"]
+    static let readOnly = ["Edit", "Write", "NotebookEdit"]
     static let gitWrites = ["Bash(git commit:*)", "Bash(git add:*)", "Bash(git push:*)", "Bash(git merge:*)", "Bash(git rebase:*)",
                             "Bash(git reset:*)", "Bash(git checkout:*)", "Bash(git switch:*)", "Bash(git stash:*)", "Bash(git branch -D:*)",
                             "Bash(git branch -d:*)", "Bash(git worktree:*)", "Bash(git tag:*)"]

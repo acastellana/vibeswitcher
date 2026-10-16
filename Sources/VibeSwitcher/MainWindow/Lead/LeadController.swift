@@ -89,6 +89,8 @@ final class LeadController: ObservableObject {
                 switch result {
                 case .success(let session):
                     try? boardStore.update { board in board.leadSession = session.id.uuidString }
+                    // You chose to start the lead here: answer Claude's trust question for this folder.
+                    self?.answerTrust(session.id, folder: root)
                     if show { self?.select(session.id) }
                     self?.refresh()
                 case .failure(let error):
@@ -123,6 +125,24 @@ final class LeadController: ObservableObject {
                                       self?.type(typed, into: id)
                                       return true
                                   } })
+    }
+
+    /// Watches the new session's screen for 15 seconds and answers yes to the trust question about `folder`.
+    private func answerTrust(_ id: UUID, folder: String, attempt: Int = 0) {
+        guard attempt < 40 else { return }
+        host.screen(id) { [weak self] screen in
+            guard let self else { return }
+            if let screen, TrustPrompt.isAsking(screen, about: folder) {
+                var at: TimeInterval = 0
+                for write in TrustPrompt.yesKeys {
+                    at += write.delay
+                    DispatchQueue.main.asyncAfter(deadline: .now() + at) { self.host.send(id, bytes: Data(write.bytes), reply: false) }
+                }
+                return
+            }
+            if attempt > 8, let screen, screen.contains("Claude Code"), !screen.contains("trust") { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { self.answerTrust(id, folder: folder, attempt: attempt + 1) }
+        }
     }
 
     private func type(_ text: String, into id: UUID) {

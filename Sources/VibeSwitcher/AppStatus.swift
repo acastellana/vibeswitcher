@@ -13,6 +13,7 @@ enum AppStatus {
     static let openNotification = Notification.Name("dev.vibeswitcher.open")
     static let windowNotification = Notification.Name("dev.vibeswitcher.window")
     static let leadNotification = Notification.Name("dev.vibeswitcher.lead")
+    static let screenNotification = Notification.Name("dev.vibeswitcher.screen")
     static let captureNotification = Notification.Name("dev.vibeswitcher.capture-window")
     static let settingsNotification = Notification.Name("dev.vibeswitcher.settings")
     static let newSessionNotification = Notification.Name("dev.vibeswitcher.new")

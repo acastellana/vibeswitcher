@@ -41,6 +41,13 @@ if let index = arguments.firstIndex(of: "--settings") {
                                                                  userInfo: nil, deliverImmediately: true)
     exit(0)
 }
+if let index = arguments.firstIndex(of: "--screen"), arguments.indices.contains(index + 2) {
+    // Debug aid: `--screen TEXT PATH` writes the screen of the first window session whose label contains TEXT.
+    DistributedNotificationCenter.default().postNotificationName(AppStatus.screenNotification, object: arguments[index + 1],
+                                                                 userInfo: ["path": (arguments[index + 2] as NSString).expandingTildeInPath],
+                                                                 deliverImmediately: true)
+    exit(0)
+}
 if let index = arguments.firstIndex(of: "--lead"), arguments.indices.contains(index + 1) {
     // `--lead FOLDER [--goal TEXT]`: starts the project lead for the repository holding FOLDER (or tells the running
     // one the goal), without taking over the window's selection.
