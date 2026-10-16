@@ -135,14 +135,15 @@ public enum Worktrees {
         }
     }
 
-    /// Removes a finished worker's worktree and its (merged) branch. Refuses if either holds unmerged work.
-    public static func remove(root: String, slug: String) throws {
+    /// Removes a worker's worktree and its branch. Without `force` it refuses when either holds work that isn't
+    /// merged or committed; `force` is for leftovers of merged work, or work the lead chose to abandon.
+    public static func remove(root: String, slug: String, force: Bool = false) throws {
         let path = path(root: root, slug: slug)
         if FileManager.default.fileExists(atPath: path) {
-            let removed = Git.run(["worktree", "remove", path], in: root)
+            let removed = Git.run(["worktree", "remove"] + (force ? ["--force"] : []) + [path], in: root)
             guard removed.ok else { throw Failure(description: removed.error) }
         }
-        let deleted = Git.run(["branch", "-d", branch(slug)], in: root)
+        let deleted = Git.run(["branch", force ? "-D" : "-d", branch(slug)], in: root)
         guard deleted.ok else { throw Failure(description: deleted.error) }
     }
 

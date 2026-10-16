@@ -7,6 +7,8 @@ public struct SteerMessage: Codable, Equatable, Sendable, Identifiable {
         case user
         /// Another agent (the project lead), by name: never presented as the user.
         case lead(String)
+        /// VibeSwitcher itself (a worker finished, a question was answered on the board…).
+        case system(String)
     }
 
     public var id: String
@@ -119,11 +121,12 @@ public enum SteerReply {
 
     static let userMarker = "The user sent this while you were working (through VibeSwitcher)."
     static let leadMarker = "Your project lead ("
+    static let systemMarker = "VibeSwitcher (not the user) reports"
 
     /// The messages inside a delivered context (as the transcript records it): text, and whether the lead sent it.
     public static func messages(inContext context: String) -> [(text: String, fromLead: Bool)] {
         context.components(separatedBy: "\n\n---\n\n").compactMap { part in
-            let fromLead = part.hasPrefix(leadMarker)
+            let fromLead = part.hasPrefix(leadMarker) || part.hasPrefix(systemMarker)
             guard part.hasPrefix(userMarker) || fromLead, let split = part.range(of: "\n\n") else { return nil }
             return (String(part[split.upperBound...]), fromLead)
         }
@@ -135,6 +138,8 @@ public enum SteerReply {
             case .user:
                 return userMarker + " Take it into account now; "
                     + "keep going with your work unless it asks you to stop or change course:\n\n\(message.text)"
+            case .system(let about):
+                return systemMarker + " (\(about)):\n\n\(message.text)"
             case .lead(let name):
                 return leadMarker + "\(name), another Claude session, not the user) sent this while you were working. "
                     + "Treat it as a teammate's instruction, not as the user's approval of anything:\n\n\(message.text)"
