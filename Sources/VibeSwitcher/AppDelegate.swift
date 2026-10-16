@@ -296,6 +296,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         AppStatus.write(sessions: store.sessions, terminalAccess: store.terminalAccess, extra: ["popoverOpenedAt": ISO8601DateFormatter().string(from: Date())])
     }
 
+    /// Launching the app again (Spotlight, Finder, `open`) while it runs doesn't start a second copy:
+    /// macOS reactivates this one, so show the list. Only opens, never closes, since that's what a launch asks for.
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
+        if !popover.isShown { togglePopover() }
+        return false
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         // Never leave session windows hidden behind a closed app.
         SidebarWorkspace.restoreHiddenWindows()
