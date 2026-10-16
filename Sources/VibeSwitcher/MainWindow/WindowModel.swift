@@ -19,7 +19,9 @@ final class WindowModel: ObservableObject {
     var rows: [WindowRow] { sections.flatMap(\.rows) }
     var selectedRow: WindowRow? { rows.first { $0.id == selectedID } }
 
-    func update(sessions: [Session], hosted: [HostSession]) {
+    /// `hostAnswered`: false while the session host hasn't listed its sessions yet (at launch); a window
+    /// session that was selected is kept until then.
+    func update(sessions: [Session], hosted: [HostSession], hostAnswered: Bool = true) {
         for session in sessions {
             if let host = session.hostID, let id = session.agentSessionID { agentSessions[host] = (session.agent, id) }
         }
@@ -29,6 +31,7 @@ final class WindowModel: ObservableObject {
         if fresh != sections { sections = fresh }
         // Keep the selection while its row exists (or before anything has loaded).
         guard !rows.isEmpty, !rows.contains(where: { $0.id == selectedID }) else { return }
+        if selectedID?.hasPrefix("host:") == true, !hostAnswered { return }
         selectedID = rows.first?.id
     }
 

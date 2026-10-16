@@ -48,9 +48,13 @@ struct SessionHeaderView: View {
             Text("Connecting…").font(.caption).foregroundStyle(.orange)
         case .failed(let reason):
             Text(reason).font(.caption).foregroundStyle(.red).lineLimit(1)
-        case .outdated(let live, let compatible):
+        case .outdated(_, let compatible):
+            let live = host.sessions.filter(\.isLive).count
             if compatible {
-                Text("Older session host until its \(live) session\(live == 1 ? "" : "s") end").font(.caption).foregroundStyle(.secondary)
+                if live > 0 {
+                    Text(live == 1 ? "Older session host until its session ends" : "Older session host until its \(live) sessions end")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             } else {
                 Button("Restart Session Host (ends \(live))") { host.restartHost() }
             }

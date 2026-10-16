@@ -162,7 +162,8 @@ final class HostClient: ObservableObject {
             let bundled = HostBuild.id(ofExecutableAt: Self.hostExecutable.path)
             if version == HostProtocol.version, build == bundled || bundled == 0 {
                 state = .connected
-            } else if live == 0 {
+            } else if list.isEmpty {
+                // Only an empty host is replaced: ended sessions stay listed (and resumable) for their day.
                 return replaceHost()
             } else {
                 state = .outdated(live: live, compatible: version == HostProtocol.version)
@@ -174,6 +175,7 @@ final class HostClient: ObservableObject {
         case .sessionRemoved(let id):
             sessions.removeAll { $0.id == id }
             sinks[id] = nil
+            if case .outdated = state, sessions.isEmpty { replaceHost() }
         case .resync(let id):
             guard let entry = sinks[id] else { return }
             entry.sink.resync()
@@ -188,7 +190,7 @@ final class HostClient: ObservableObject {
     private func upsert(_ session: HostSession) {
         if let index = sessions.firstIndex(where: { $0.id == session.id }) { sessions[index] = session } else { sessions.append(session) }
         if !session.isLive { screens[session.tty] = nil }
-        if case .outdated = state, !sessions.contains(where: \.isLive) { replaceHost() }
+        if case .outdated = state, sessions.isEmpty { replaceHost() }
         else if restartWhenEnded, !sessions.contains(where: \.isLive) { restartWhenEnded = false; replaceHost() }
     }
 
@@ -275,7 +277,9 @@ final class HostClient: ObservableObject {
 
     func remove(_ id: UUID) {
         request(.remove(id: id)) { [weak self] event in
-            if case .ok = event { self?.sessions.removeAll { $0.id == id } }
+            guard let self, case .ok = event else { return }
+            self.sessions.removeAll { $0.id == id }
+            if case .outdated = self.state, self.sessions.isEmpty { self.replaceHost() }
         }
     }
 

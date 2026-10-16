@@ -56,6 +56,11 @@ if let index = arguments.firstIndex(of: "--new"), arguments.indices.contains(ind
     // `--new <preset name | claude | codex | shell> [folder] [--terminal]`: the running app starts it like ⊕ does.
     let rest = arguments[(index + 2)...].filter { $0 != "--terminal" }
     let folder = ((rest.first ?? FileManager.default.currentDirectoryPath) as NSString).expandingTildeInPath
+    var isFolder: ObjCBool = false
+    guard FileManager.default.fileExists(atPath: folder, isDirectory: &isFolder), isFolder.boolValue else {
+        print("error: no such folder: \(folder)")
+        exit(1)
+    }
     DistributedNotificationCenter.default().postNotificationName(
         AppStatus.newSessionNotification, object: nil,
         userInfo: ["preset": arguments[index + 1], "folder": folder, "terminal": arguments.contains("--terminal")],

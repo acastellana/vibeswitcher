@@ -39,6 +39,16 @@ struct WindowRowsTests {
         #expect(sections[1].rows[0].hostID == windowID)
     }
 
+    /// At launch the scan can list an agent before the store learns its tty is a window session's: the row
+    /// must still be the window session's (same id), or the window loses its selection.
+    @Test func anAgentOnAHostedTTYGetsTheHostIDBeforeTheStoreKnows() {
+        let shell = hosted("ttys009", cwd: "/x/alpha")
+        let sections = WindowRows.sections(sessions: [agent("ttys009", project: "alpha")], hosted: [shell],
+                                           projectName: { ($0 as NSString).lastPathComponent })
+        #expect(sections.flatMap(\.rows).map(\.id) == ["host:\(shell.id)"])
+        #expect(sections.first?.rows.first?.hostID == shell.id)
+    }
+
     @Test func aWindowSessionKeepsItsRowIDWhenItsAgentEnds() {
         let id = UUID()
         let running = WindowRow(content: .agent(agent("ttys001", project: "a", host: id)), project: "a")

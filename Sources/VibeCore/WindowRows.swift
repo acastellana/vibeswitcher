@@ -54,7 +54,12 @@ public enum WindowRows {
             if rows[row.project] == nil { order.append(row.project) }
             rows[row.project, default: []].append(row)
         }
-        sessions.forEach { add(WindowRow(content: .agent($0), project: $0.project)) }
+        // The scan can list an agent before the store learns its tty is a window session's.
+        let liveHosted = Dictionary(hosted.filter(\.isLive).map { ($0.tty, $0.id) }, uniquingKeysWith: { $1 })
+        for var session in sessions {
+            if session.hostID == nil { session.hostID = liveHosted[session.tty] }
+            add(WindowRow(content: .agent(session), project: session.project))
+        }
         let extras = extras(hosted: hosted, agentTTYs: Set(sessions.map(\.tty))).sorted {
             if $0.isLive != $1.isLive { return $0.isLive }
             return $0.startedAt < $1.startedAt

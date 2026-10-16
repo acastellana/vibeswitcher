@@ -201,9 +201,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .receive(on: RunLoop.main)
             .sink { [weak self] sessions in self?.store.updateHosted(sessions) }
             .store(in: &cancellables)
-        store.$sessions.combineLatest(hostClient.$sessions)
+        store.$sessions.combineLatest(hostClient.$sessions, hostClient.$state)
             .receive(on: RunLoop.main)
-            .sink { [weak self] sessions, hosted in self?.windowModel.update(sessions: sessions, hosted: hosted) }
+            .sink { [weak self] sessions, hosted, state in
+                self?.windowModel.update(sessions: sessions, hosted: hosted, hostAnswered: state != .connecting)
+            }
             .store(in: &cancellables)
         NSApp.mainMenu = MainMenu.build()
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.windowNotification, object: nil,

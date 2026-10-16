@@ -38,6 +38,15 @@ desktop. It hides itself and slides in when the mouse touches the middle of the 
 mouse leaves (turn off auto-hide to keep it docked). Click a session to go to it, like the menu bar list.
 When you switch desktops it slides in for a moment, with the session(s) on the new desktop framed.
 
+**The window** (⌘-click the menu bar icon, the window button in the list, or `VibeSwitcher --window`): every
+session grouped by project on the left, the selected one's live terminal in the middle, details on the right.
+New sessions (⊕, ⌘N) start **in the window** by default: VibeSwitcher runs them itself, in a small background
+process (`vibeswitcher-host`) that keeps them going when VibeSwitcher quits, crashes or updates; reopening the
+window reattaches them. ⌥⌘N opens a plain shell in the same project. Sessions you still run in Terminal are
+listed too and open there. Settings (⌘,) has launch presets (per project: command, flags, environment, window or
+Terminal) and the terminal's font, colors, cursor, scrollback and bell. Tools run inside window sessions ask for
+privacy permissions (Desktop, Documents…) as VibeSwitcher rather than Terminal.
+
 **Today** (at the bottom of the list): how long agents were working today (in a turn; background jobs are
 listed per project, since a leftover dev server isn't work), and how long sessions were waiting on you:
 a question or permission prompt, or a finished turn you hadn't looked at (its first 30 minutes; after that
@@ -172,9 +181,12 @@ VibeSwitcher --toggle          # open/close the popover of the running app (bind
 VibeSwitcher --open ttys012    # ask the running app to open a session (same path as clicking its row)
 VibeSwitcher --focus ttys012   # select a Terminal tab directly (no activation handling)
 VibeSwitcher --snapshot /tmp   # render popover + menu bar icon PNGs from live data
-VibeSwitcher --new claude ~/dev/app   # new Terminal window running the configured command there
+VibeSwitcher --new claude ~/dev/app   # start a preset (name, or claude/codex/shell) there; --terminal: in Terminal
+VibeSwitcher --window                 # open the window
+VibeSwitcher --settings launch        # open Settings (general, launch or terminal)
 VibeSwitcher --install-hooks | --uninstall-hooks
 cat ~/.vibeswitcher/app-status.json   # debug aid: what the running app currently sees
+VibeSwitcher --capture-window ~/w.png # debug aid: the running app draws its windows into PNGs
 ```
 
 (`VibeSwitcher` = `/Applications/VibeSwitcher.app/Contents/MacOS/VibeSwitcher`.)
