@@ -46,6 +46,15 @@ Open in Terminal (⌘O). The right shows its Overview (status, folder and branch
 Activity: your prompts, the agent's replies and the tools it ran, from its transcript. ⌘K jumps to any session
 or command, or starts a preset in a recent project; ⌘J goes to the next session needing you, ⌘1–9 to a session,
 ⇧⌘H to the start page (recent projects with their presets). The Dock badge counts sessions waiting on you.
+
+**Chat** (⌥⌘2; ⌥⌘1 back to the terminal): any Claude or Codex session as a readable conversation, built from
+its transcript. Replies are rendered markdown (tables, lists, code with syntax colors and Copy); the tool calls
+between two messages fold into one line ("Ran 3 commands · edited 2 files") that opens to each command and its
+output, colored diffs of edits, written files, questions and agents; screenshots the tools took show inline
+(click for full size). It follows the session live, marks what's new since you last looked, and ⌘F searches it.
+For window sessions the composer types into the session: ↩ sends, ⇧↩ adds a line, ↑ recalls earlier prompts,
+and pasted images or dropped files become paths the agent can read. A Terminal session can be moved into the
+window between turns (Move to Window) to reply from here, in full color.
 New sessions (⊕, ⌘N) start **in the window** by default: VibeSwitcher runs them itself, in a small background
 process (`vibeswitcher-host`) that keeps them going when VibeSwitcher quits, crashes or updates; reopening the
 window reattaches them. ⌥⌘N opens a plain shell in the same project. Sessions you still run in Terminal are
@@ -190,6 +199,7 @@ VibeSwitcher --snapshot /tmp   # render popover + menu bar icon PNGs from live d
 VibeSwitcher --new claude ~/dev/app   # start a preset (name, or claude/codex/shell) there; --terminal: in Terminal
 VibeSwitcher --window [palette|home]  # open the window (with the command palette, or on the start page)
 VibeSwitcher --window select:genswap  # … and select the first session matching the text
+VibeSwitcher --window move:ttys012    # move that Terminal session into the window (between turns)
 VibeSwitcher --settings launch        # open Settings (general, launch or terminal)
 VibeSwitcher --install-hooks | --uninstall-hooks
 cat ~/.vibeswitcher/app-status.json   # debug aid: what the running app currently sees
