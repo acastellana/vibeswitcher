@@ -23,7 +23,32 @@ struct TrustPromptTests {
         #expect(!TrustPrompt.isAsking("Welcome to Claude Code", about: "/tmp/vs-scratch/lead-demo"))
     }
 
-    @Test func answersYes() {
-        #expect(TrustPrompt.yesKeys.map(\.bytes) == [[27, 91, 66], [13]])
+}
+
+struct TrustCursorTests {
+    @Test func enterOnlyWhenTheCursorIsOnYes() {
+        #expect(TrustPrompt.cursorOnYes(" ❯ No, exit\n   Yes, I trust this folder") == false)
+        #expect(TrustPrompt.cursorOnYes("   No, exit\n ❯ Yes, I trust this folder") == true)
+        #expect(TrustPrompt.cursorOnYes("nothing here") == false)
+    }
+
+    @Test func answeringWaitsForTheCursorBeforeEnter() {
+        var screens = ["/tmp/x\n ❯ No, exit\n   Yes, I trust this folder",      // asked
+                       "/tmp/x\n ❯ No, exit\n   Yes, I trust this folder",      // the first down was lost
+                       "/tmp/x\n   No, exit\n ❯ Yes, I trust this folder"]      // second down took
+        var sent: [[UInt8]] = []
+        let answered = TrustPrompt.answer(folder: "/tmp/x", timeout: 5, pause: 0,
+                                          readScreen: { screens.count > 1 ? screens.removeFirst() : screens.first },
+                                          send: { sent += $0.map(\.bytes) })
+        #expect(answered)
+        #expect(sent == [[27, 91, 66], [27, 91, 66], [13]])
+    }
+
+    @Test func neverEnterOnNo() {
+        let stuck = "/tmp/x\n ❯ No, exit\n   Yes, I trust this folder"
+        var sent: [[UInt8]] = []
+        let answered = TrustPrompt.answer(folder: "/tmp/x", timeout: 1, pause: 0, readScreen: { stuck }, send: { sent += $0.map(\.bytes) })
+        #expect(!answered)
+        #expect(!sent.contains([13]))
     }
 }

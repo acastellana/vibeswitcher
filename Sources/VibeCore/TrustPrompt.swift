@@ -11,9 +11,6 @@ public enum TrustPrompt {
         return flat.components(separatedBy: "\n").contains { canonical($0.trimmingCharacters(in: .whitespaces)) == wanted }
     }
 
-    /// Down to "Yes, I trust this folder", then Enter.
-    public static let yesKeys = [HostInput.Write(bytes: [27, 91, 66], delay: 0), HostInput.Write(bytes: [13], delay: 0.15)]
-
     /// The same folder however it's written: `/tmp/x` and `/private/tmp/x` are one place on macOS.
     private static func canonical(_ path: String) -> String {
         var standard = (path as NSString).standardizingPath
@@ -25,22 +22,45 @@ public enum TrustPrompt {
 }
 
 extension TrustPrompt {
-    /// Watches a new session's screen for a while; answers yes if it asks about `folder`. Returns whether it did.
-    /// `readScreen` and `send` are synchronous (the tool server's host calls).
+    /// The menu's cursor (❯) is on "Yes, I trust this folder".
+    public static func cursorOnYes(_ screen: String) -> Bool {
+        screen.components(separatedBy: "\n").contains { line in
+            let trimmed = line.replacingOccurrences(of: "\u{0}", with: " ").trimmingCharacters(in: .whitespaces)
+            return (trimmed.hasPrefix("❯") || trimmed.hasPrefix("›") || trimmed.hasPrefix(">")) && trimmed.contains("Yes, I trust")
+        }
+    }
+
+    /// Watches a new session's screen; when it asks about `folder`, moves to "Yes" and presses Enter only once the
+    /// screen shows the cursor there (keys sent before the menu takes input are lost, and Enter on the default
+    /// "No, exit" would end the session). Never presses Enter otherwise. Returns whether it answered.
     @discardableResult
-    public static func answer(folder: String, timeout: TimeInterval = 15, readScreen: () -> String?,
-                              send: ([HostInput.Write]) -> Void) -> Bool {
+    public static func answer(folder: String, timeout: TimeInterval = 15, pause: TimeInterval = 0.5,
+                              readScreen: () -> String?, send: ([HostInput.Write]) -> Void) -> Bool {
+        let down = HostInput.Write(bytes: [27, 91, 66], delay: 0)
         let start = Date()
+        var asked = false
         while Date().timeIntervalSince(start) < timeout {
             if let screen = readScreen() {
-                if isAsking(screen, about: folder) {
-                    send(yesKeys)
-                    return true
+                if asked || isAsking(screen, about: folder) {
+                    if !asked {
+                        asked = true
+                        // Let the menu start taking keys.
+                        if pause > 0 { usleep(useconds_t(pause * 1_000_000)) }
+                        send([down])
+                    } else if cursorOnYes(screen) {
+                        send([HostInput.Write(bytes: [13], delay: 0)])
+                        return true
+                    } else if isAsking(screen, about: folder) {
+                        send([down])
+                    } else {
+                        return false
+                    }
+                } else if Date().timeIntervalSince(start) > 3, screen.contains("Claude Code"), !screen.contains("trust") {
+                    // Up and not asking: nothing to answer.
+                    return false
                 }
-                // Claude is up and not asking: nothing to answer.
-                if Date().timeIntervalSince(start) > 3, screen.contains("Claude Code"), !screen.contains("trust") { return false }
             }
-            usleep(400_000)
+            if pause > 0 { usleep(useconds_t(min(pause, 0.4) * 1_000_000)) }
         }
         return false
     }
