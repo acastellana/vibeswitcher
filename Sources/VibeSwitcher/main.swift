@@ -41,6 +41,16 @@ if let index = arguments.firstIndex(of: "--settings") {
                                                                  userInfo: nil, deliverImmediately: true)
     exit(0)
 }
+if let index = arguments.firstIndex(of: "--lead"), arguments.indices.contains(index + 1) {
+    // `--lead FOLDER [--goal TEXT]`: starts the project lead for the repository holding FOLDER (or tells the running
+    // one the goal), without taking over the window's selection.
+    let folder = (arguments[index + 1] as NSString).expandingTildeInPath
+    let goal = arguments.firstIndex(of: "--goal").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
+    DistributedNotificationCenter.default().postNotificationName(AppStatus.leadNotification, object: folder,
+                                                                 userInfo: goal.map { ["goal": $0] }, deliverImmediately: true)
+    print("asked VibeSwitcher to start the project lead for \(folder)")
+    exit(0)
+}
 if let index = arguments.firstIndex(of: "--window") {
     // `--window [palette | home | select:TEXT | move:TTY]`: opens the window, optionally with the command palette,
     // the start page, the first session whose title, project or task contains TEXT, or moving the Terminal session

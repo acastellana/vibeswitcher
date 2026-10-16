@@ -17,6 +17,10 @@ final class WindowModel: ObservableObject {
     @Published private(set) var filterFocusRequests = 0
     /// Folders you've recently run agents in, most recent first (for the start page and the palette).
     @Published var recentProjects: [String] = []
+    /// Window sessions' labels ("Lead · acme", "Worker: …"), by host id: they say who's on a lead's team.
+    @Published private(set) var hostLabels: [UUID: String] = [:]
+    /// Leads (row ids) whose team is shown under them.
+    @Published var expandedTeams: Set<String> = []
     /// The agent's own session id last seen in each window session, so it can be resumed once it ends.
     private(set) var agentSessions: [UUID: (agent: Agent, sessionID: String, transcript: String?)] = [:]
     /// The middle pane shows the conversation (Chat) rather than the terminal, where there is one.
@@ -41,7 +45,22 @@ final class WindowModel: ObservableObject {
     var allRows: [WindowRow] { sections.flatMap(\.rows) }
     /// The sections as the sidebar shows them: grouped, then filtered.
     var displayedSections: [WindowSection] {
-        WindowGroups.filter(grouping == .attention ? WindowGroups.attention(sections) : sections, query: filter)
+        WindowGroups.filter(arranged.sections, query: filter)
+    }
+
+    /// The list with each lead's team folded under it (the grunt work stays out of sight unless you open it).
+    var arranged: LeadTeams.Arranged {
+        LeadTeams.arrange(grouping == .attention ? WindowGroups.attention(sections) : sections, label: label(of:), expanded: expandedTeams)
+    }
+
+    func label(of row: WindowRow) -> String? {
+        row.hosted?.label ?? row.hostID.flatMap { hostLabels[$0] }
+    }
+
+    func role(of row: WindowRow) -> LeadLaunch.Role? { LeadTeams.role(label: label(of: row)) }
+
+    func toggleTeam(_ lead: String) {
+        if expandedTeams.contains(lead) { expandedTeams.remove(lead) } else { expandedTeams.insert(lead) }
     }
     /// The rows in the order shown; what ⌘1–9 and ⌥⌘↑/↓ follow.
     var rows: [WindowRow] { displayedSections.flatMap(\.rows) }
@@ -68,6 +87,8 @@ final class WindowModel: ObservableObject {
         }
         let known = Set(hosted.map(\.id))
         agentSessions = agentSessions.filter { known.contains($0.key) }
+        let labels = Dictionary(uniqueKeysWithValues: hosted.map { ($0.id, $0.label) })
+        if labels != hostLabels { hostLabels = labels }
         let fresh = WindowRows.sections(sessions: sessions, hosted: hosted) { SessionNaming.name(forProjectRoot: $0) }
         if fresh != sections { sections = fresh }
         // Keep the selection while its row exists (or before anything has loaded).
@@ -111,19 +132,6 @@ final class WindowModel: ObservableObject {
     }
 }
 
-extension WindowRow {
-    var session: Session? {
-        if case .agent(let session) = content { return session }
-        return nil
-    }
-
-    var hosted: HostSession? {
-        if case .hosted(let session) = content { return session }
-        return nil
-    }
-
-    var cwd: String? { session?.cwd ?? hosted?.cwd }
-}
 
 /// What the window asks the app to do.
 struct WindowActions {
@@ -143,4 +151,6 @@ struct WindowActions {
     var settings: () -> Void
     /// Ends the agent in its Terminal tab and resumes the conversation in the window (asks first).
     var moveToWindow: (Session) -> Void
+    /// Starts the project lead for the repository holding this folder (or shows the running one).
+    var startLead: (String) -> Void
 }

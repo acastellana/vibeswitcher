@@ -17,7 +17,7 @@ struct StartPage: View {
                     VStack(spacing: 0) {
                         ForEach(Array(model.recentProjects.prefix(8).enumerated()), id: \.element) { index, path in
                             if index > 0 { Divider().padding(.leading, 44) }
-                            ProjectRow(path: path, presets: actions.presets(path)) { actions.newSession($0, path) }
+                            ProjectRow(path: path, presets: actions.presets(path), startLead: { actions.startLead(path) }) { actions.newSession($0, path) }
                         }
                     }
                     .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.35)))
@@ -40,6 +40,7 @@ struct StartPage: View {
 private struct ProjectRow: View {
     let path: String
     let presets: [LaunchPreset]
+    let startLead: () -> Void
     let start: (LaunchPreset) -> Void
 
     var body: some View {
@@ -51,6 +52,8 @@ private struct ProjectRow: View {
                     .lineLimit(1).truncationMode(.middle)
             }
             Spacer(minLength: 8)
+            Button(action: startLead) { Label("Lead", systemImage: "person.3") }.controlSize(.small)
+                .help("Start the project lead: you talk to it, it runs workers and merges what passes review")
             ForEach(Array(presets.prefix(3).enumerated()), id: \.element.id) { index, preset in
                 if index == 0 {
                     Button(preset.name) { start(preset) }.buttonStyle(.borderedProminent).controlSize(.small)
@@ -68,6 +71,7 @@ private struct Shortcuts: View {
     private let keys: [(String, String)] = [
         ("⌘K", "Jump to any session or command"), ("⌘J", "Next session needing you"), ("⌘1–9", "Go to a session"),
         ("⌘N", "New session in this project"), ("⌥⌘F", "Filter the list"), ("⇧⌘H", "This page"),
+        ("Lead", "A project lead: tell it what to build; it runs workers, checks their work, merges"),
     ]
 
     var body: some View {

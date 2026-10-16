@@ -12,7 +12,11 @@ final class HostRuntime: LeadRuntime {
     }
 
     func claudeCommand(root: String) -> String {
-        let presets = LaunchPresets.load(from: VibePaths.presetsFile, claudeCommand: "claude", codexCommand: "codex")
+        // The same command the app starts Claude with (its preferences), so workers run like your own sessions.
+        let preferences = UserDefaults(suiteName: "dev.vibeswitcher.VibeSwitcher")
+        let presets = LaunchPresets.load(from: VibePaths.presetsFile,
+                                         claudeCommand: preferences?.string(forKey: "claudeCommand") ?? "claude",
+                                         codexCommand: preferences?.string(forKey: "codexCommand") ?? "codex")
         let preset = presets.presets(for: root).first { $0.agent == .claude && $0.place == .window }
             ?? presets.presets(for: root).first { $0.agent == .claude }
         return preset.flatMap(LaunchPlan.command(for:)) ?? "claude"
@@ -52,7 +56,11 @@ final class HostRuntime: LeadRuntime {
             }
             agent = LeadAgent(pid: pid, tty: tty, session: id)
         }
-        try SteerInbox.post(SteerMessage(text: text, from: sender, agentPid: agent.pid), tty: agent.tty)
+        let session = agent.session ?? ((try? HostCall.sessions()) ?? []).first { $0.tty == agent.tty && $0.isLive }?.id.uuidString
+        try LeadDelivery.deliver(text, from: sender, to: agent, typeInto: session.map { id in { [weak self] text in
+            self?.type(id, text: text)
+            return true
+        } })
     }
 
     func sessions() -> [LeadSessionInfo] {

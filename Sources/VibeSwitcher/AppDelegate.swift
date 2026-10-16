@@ -42,7 +42,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         },
         resumeCommand: { [weak self] row in self?.resumeCommandLine(for: row) },
         settings: { [weak self] in self?.showSettings(tab: .general) },
-        moveToWindow: { [weak self] in self?.moveToWindow($0) })
+        moveToWindow: { [weak self] in self?.moveToWindow($0) },
+        startLead: { [weak self] folder in
+            self?.showMainWindow()
+            self?.leadController.startLead(in: folder)
+        })
+    private(set) lazy var leadController: LeadController = {
+        let controller = LeadController(host: hostClient, store: store) { [weak self] root in
+            let presets = self?.presets(for: root) ?? []
+            let preset = presets.first { $0.agent == .claude && $0.place == .window } ?? presets.first { $0.agent == .claude }
+            return preset.flatMap(LaunchPlan.command(for:)) ?? "claude"
+        }
+        controller.notify = { [weak self] title, body in self?.notifier?.postInfo(title: title, body: body) }
+        controller.select = { [weak self] id in self?.showMainWindow(select: id) }
+        return controller
+    }()
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var hotKey: HotKey?
@@ -74,6 +88,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         HookBinary.sync()
         VibePaths.ensurePrivateDirectories()
         hostClient.connectIfRunning()
+        // Leads' witness and questions work with the window closed too.
+        _ = leadController
         if UserDefaults.standard.bool(forKey: "windowWasOpen") {
             DispatchQueue.main.async { [weak self] in self?.showMainWindow() }
         }
@@ -229,6 +245,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 if let row = WindowGroups.filter(model.sections, query: query).first?.rows.first { model.selectedID = row.id }
             default: break
             }
+        }
+        DistributedNotificationCenter.default().addObserver(forName: AppStatus.leadNotification, object: nil,
+                                                            queue: .main) { [weak self] note in
+            guard let folder = note.object as? String else { return }
+            self?.leadController.startLead(in: folder, goal: note.userInfo?["goal"] as? String, show: false)
         }
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.captureNotification, object: nil,
                                                             queue: .main) { [weak self] note in
@@ -477,7 +498,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
 
     func showMainWindow(select hostID: UUID? = nil) {
         if mainWindow == nil {
-            let controller = MainWindowController(store: store, host: hostClient, model: windowModel, actions: windowActions)
+            let controller = MainWindowController(store: store, host: hostClient, model: windowModel, actions: windowActions,
+                                                  leads: leadController)
             controller.onFontSize = { [weak self] step in self?.changeFontSize(step) }
             controller.pane.configure = { [weak self] view in
                 guard let self else { return }

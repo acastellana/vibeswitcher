@@ -8,12 +8,15 @@ struct SessionListView: View {
     @FocusState private var filterFocused: Bool
 
     var body: some View {
-        let sections = model.displayedSections
+        let arranged = model.arranged
+        let sections = WindowGroups.filter(arranged.sections, query: model.filter)
         List(selection: $model.selectedID) {
             ForEach(sections) { section in
                 Section {
                     ForEach(section.rows) { row in
-                        WindowRowView(row: row, showProject: model.grouping == .attention)
+                        WindowRowView(row: row, showProject: model.grouping == .attention, role: model.role(of: row),
+                                      team: arranged.teams[row.id], nested: arranged.nested.contains(row.id),
+                                      teamOpen: model.expandedTeams.contains(row.id)) { model.toggleTeam(row.id) }
                             .tag(row.id as String?)
                             .contextMenu { RowMenu(row: row, actions: actions) }
                     }
@@ -91,15 +94,30 @@ struct WindowRowView: View {
     let row: WindowRow
     /// The project on the second line (the Attention grouping mixes projects).
     let showProject: Bool
+    var role: LeadLaunch.Role?
+    /// A lead's team (folded under it).
+    var team: [WindowRow]?
+    /// A team row shown under its lead.
+    var nested = false
+    var teamOpen = false
+    var toggleTeam: () -> Void = {}
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
             let state = row.state(now: context.date)
             HStack(spacing: 9) {
-                AgentMark(kind: row.markKind, status: row.statusColor, hollow: row.statusIsHollow)
+                if nested {
+                    Image(systemName: role == .verifier ? "checkmark.seal" : "hammer").font(.system(size: 10)).foregroundStyle(.tertiary)
+                        .frame(width: 12).padding(.leading, 8)
+                }
+                AgentMark(kind: row.markKind, status: row.statusColor, hollow: row.statusIsHollow, size: nested ? 18 : 22)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 4) {
-                        Text(row.title).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                        if role == .lead {
+                            Text("LEAD").font(.system(size: 9, weight: .bold)).padding(.horizontal, 4).padding(.vertical, 1)
+                                .foregroundStyle(.white).background(Capsule().fill(Color.accentColor))
+                        }
+                        Text(row.title).font(.system(size: nested ? 12 : 13, weight: .medium)).lineLimit(1)
                         Spacer(minLength: 4)
                         if let since = state.since {
                             Text(Durations.compact(context.date.timeIntervalSince(since)))
@@ -107,11 +125,22 @@ struct WindowRowView: View {
                         }
                     }
                     HStack(spacing: 4) {
-                        if showProject {
+                        if showProject, !nested {
                             Text(row.project).foregroundStyle(.secondary)
                             Text("·").foregroundStyle(.tertiary)
                         }
                         Text(state.text).foregroundStyle(state.group == .needsYou ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                        if let team, !team.isEmpty {
+                            Text("·").foregroundStyle(.tertiary)
+                            Button(action: toggleTeam) {
+                                HStack(spacing: 2) {
+                                    Text(Self.summary(team, now: context.date))
+                                    Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold)).rotationEffect(.degrees(teamOpen ? 90 : 0))
+                                }
+                            }
+                            .buttonStyle(.plain).foregroundStyle(Color.accentColor)
+                            .help(teamOpen ? "Hide the team" : "Show the team")
+                        }
                         Spacer(minLength: 0)
                         if row.session?.inTerminalApp == true {
                             Image(systemName: "macwindow").foregroundStyle(.tertiary).help("Runs in Terminal")
@@ -124,6 +153,20 @@ struct WindowRowView: View {
             .padding(.vertical, 3)
             .opacity(row.isDimmed ? 0.55 : 1)
         }
+    }
+}
+
+extension WindowRowView {
+    /// "2 working · 1 needs you" for a lead's team.
+    static func summary(_ team: [WindowRow], now: Date) -> String {
+        let groups = team.map { $0.state(now: now).group }
+        var parts: [String] = []
+        let waiting = groups.filter { $0 == .needsYou }.count, working = groups.filter { $0 == .working }.count
+        if waiting > 0 { parts.append("\(waiting) need\(waiting == 1 ? "s" : "") you") }
+        if working > 0 { parts.append("\(working) working") }
+        let rest = team.count - waiting - working
+        if rest > 0 { parts.append("\(rest) idle") }
+        return "team: " + parts.joined(separator: " · ")
     }
 }
 
@@ -185,6 +228,10 @@ struct NewSessionMenu: View {
         Menu {
             ForEach(actions.presets(folder)) { preset in
                 Button(preset.name) { actions.newSession(preset, folder) }
+            }
+            if let folder {
+                Divider()
+                Button("Project Lead") { actions.startLead(folder) }
             }
         } label: {
             if let title { Text(title) } else { Image(systemName: "plus") }

@@ -5,11 +5,14 @@ import VibeCore
 struct InspectorView: View {
     @ObservedObject var model: WindowModel
     @ObservedObject var host: HostClient
+    @ObservedObject var leads: LeadController
     @AppStorage("inspectorTab") private var tab = "overview"
 
     var body: some View {
+        let lead = model.selectedRow.flatMap(leads.lead(for:))
         VStack(spacing: 0) {
             Picker("Inspector", selection: $tab) {
+                if lead != nil { Text("Team").tag("team") }
                 Text("Overview").tag("overview")
                 Text("Activity").tag("activity")
             }
@@ -19,7 +22,11 @@ struct InspectorView: View {
             .padding(.vertical, 8)
             Divider()
             if let row = model.selectedRow {
-                if tab == "activity" {
+                if tab == "team", let lead {
+                    LeadTeamView(root: lead.root, board: lead.board) { task in
+                        if let id = task.worker.flatMap(UUID.init(uuidString:)) { model.select(hostID: id) }
+                    }
+                } else if tab == "activity" {
                     ActivityView(session: row.session).id(row.id)
                 } else {
                     OverviewView(row: row, info: row.hostID.flatMap { id in host.sessions.first { $0.id == id } })

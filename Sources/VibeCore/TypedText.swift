@@ -12,6 +12,12 @@ enum TypedText {
     /// words. Returns who sent it and its text.
     public static func agentMessage(_ text: String) -> (from: String, body: String)? {
         var rest = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Typed in by VibeSwitcher for an idle agent (see `LeadDelivery.typed`).
+        if rest.hasPrefix(LeadDelivery.prefix), let close = rest.firstIndex(of: "]") {
+            let from = rest[rest.index(rest.startIndex, offsetBy: LeadDelivery.prefix.count)..<close]
+                .trimmingCharacters(in: CharacterSet(charactersIn: " ·"))
+            return (from, rest[rest.index(after: close)...].trimmingCharacters(in: .whitespacesAndNewlines))
+        }
         let intro = "Another Claude session sent a message:"
         if rest.hasPrefix(intro) { rest = rest.dropFirst(intro.count).trimmingCharacters(in: .whitespacesAndNewlines) }
         for tag in ["cross-session-message", "agent-message"] where rest.hasPrefix("<\(tag)") {

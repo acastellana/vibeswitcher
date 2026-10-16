@@ -6,6 +6,7 @@ import VibeCore
 struct ChatContainer: View {
     @ObservedObject var chat: ChatModel
     @ObservedObject var model: WindowModel
+    @ObservedObject var leads: LeadController
     let actions: WindowActions
     /// Typing into the selected window session.
     let composer: ComposerActions
@@ -18,8 +19,17 @@ struct ChatContainer: View {
     var body: some View {
         VStack(spacing: 0) {
             if chat.searchActive { ChatSearchBar(chat: chat) }
-            if let todos = chat.log.todos, todos.contains(where: { $0.status != .done }) { TodoPanel(todos: todos) }
+            let lead = model.selectedRow.flatMap(leads.lead(for:))
+            if let lead {
+                TeamStrip(board: lead.board) { task in
+                    if let id = task.worker.flatMap(UUID.init(uuidString:)) { model.select(hostID: id) }
+                }
+            } else if let todos = chat.log.todos, todos.contains(where: { $0.status != .done }) {
+                TodoPanel(todos: todos)
+            }
             ChatView(chat: chat, row: model.selectedRow, live: model.selectedRow.map(actions.isLive) == true && model.selectedRow?.hostID != nil,
+                     leadQuestions: lead?.board.questions.filter { $0.answer == nil } ?? [],
+                     answerLead: { question, text in if let lead { leads.answer(question, root: lead.root, with: text) } },
                      showTerminal: showTerminal, choose: choose, moveTab: moveTab, resend: { _ = composer.send($0) })
                 .id(chat.path ?? "")
                 .environment(\.chatFolder, model.selectedRow?.cwd)
@@ -59,6 +69,9 @@ struct ChatView: View {
     let row: WindowRow?
     /// A window session you can type into (answer cards, Send Again).
     let live: Bool
+    /// The lead's open questions, when this is a project lead.
+    var leadQuestions: [LeadQuestion] = []
+    var answerLead: (LeadQuestion, String) -> Void = { _, _ in }
     let showTerminal: () -> Void
     let choose: (Int, String?) -> Void
     let moveTab: (Int) -> Void
@@ -119,6 +132,7 @@ struct ChatView: View {
                                 .frame(maxWidth: .infinity, alignment: .trailing)
                                 .padding(.leading, 60).padding(.bottom, 10)
                         }
+                        LeadQuestionCards(questions: leadQuestions, answer: answerLead)
                         if live, let menu = chat.menu {
                             AnswerCard(menu: menu, pending: chat.log.pendingQuestions, agent: row?.session?.agent.displayName ?? "The agent",
                                        notice: chat.answerNotice, choose: choose, moveTab: moveTab, showTerminal: showTerminal)

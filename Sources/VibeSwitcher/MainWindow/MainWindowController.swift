@@ -25,7 +25,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     /// The selected session's conversation, shown over the terminal (which stays attached underneath).
     let chat = ChatModel()
     private lazy var chatHost = NSHostingView(rootView: ChatContainer(
-        chat: chat, model: model, actions: actions,
+        chat: chat, model: model, leads: leads, actions: actions,
         composer: ComposerActions(send: { [weak self] text in self?.sendToSelected(text) ?? false },
                                   steer: { [weak self] text in self?.steerSelected(text) ?? false },
                                   stop: { [weak self] in self?.sendKeys([27]) },
@@ -39,7 +39,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     /// Follows the transcript while the chat is on screen.
     private var chatTimer: Timer?
 
-    init(store: SessionStore, host: HostClient, model: WindowModel, actions: WindowActions) {
+    let leads: LeadController
+
+    init(store: SessionStore, host: HostClient, model: WindowModel, actions: WindowActions, leads: LeadController) {
+        self.leads = leads
         self.store = store
         self.host = host
         self.model = model
@@ -65,7 +68,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         let content = NSSplitViewItem(viewController: middle)
         content.minimumThickness = 420
         inspectorItem = NSSplitViewItem(inspectorWithViewController: NSHostingController(
-            rootView: InspectorView(model: model, host: host)))
+            rootView: InspectorView(model: model, host: host, leads: leads)))
         inspectorItem.minimumThickness = 240
         inspectorItem.maximumThickness = 380
         inspectorItem.isCollapsed = UserDefaults.standard.object(forKey: "inspectorCollapsed") as? Bool ?? false
@@ -481,6 +484,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         commands.append(PaletteItem(id: "cmd:settings", title: "Settings…", subtitle: "⌘,", icon: .symbol("gearshape")) {
             [weak self] in self?.actions.settings()
         })
+        let leadFolders = ([selectedFolder].compactMap { $0 } + model.recentProjects.prefix(6)).reduce(into: [String]()) { list, path in
+            if !list.contains(path) { list.append(path) }
+        }
+        commands += leadFolders.map { path in
+            PaletteItem(id: "lead:\(path)", title: "Start Project Lead in \((path as NSString).lastPathComponent)",
+                        subtitle: "A lead that runs workers, has their work verified, and merges", icon: .symbol("person.3")) {
+                [weak self] in self?.actions.startLead(path)
+            }
+        }
         let launches = model.recentProjects.prefix(12).flatMap { path in
             actions.presets(path).map { preset in
                 PaletteItem(id: "new:\(path):\(preset.id)", title: "New \(preset.name) in \((path as NSString).lastPathComponent)",
