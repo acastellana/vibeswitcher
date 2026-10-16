@@ -516,6 +516,19 @@ private struct ComposerTextView: NSViewRepresentable {
 
 /// Pastes images as saved files and drops files as their paths.
 private final class ComposerNSTextView: NSTextView {
+    /// A plain-text view only enables Paste for clipboards it can read: without these, an image-only clipboard
+    /// leaves ⌘V disabled and `paste(_:)` is never called.
+    override var readablePasteboardTypes: [NSPasteboard.PasteboardType] {
+        super.readablePasteboardTypes + [.fileURL, .png, .tiff]
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(paste(_:)), NSPasteboard.general.availableType(from: [.fileURL, .png, .tiff]) != nil {
+            return isEditable
+        }
+        return super.validateUserInterfaceItem(item)
+    }
+
     override func paste(_ sender: Any?) {
         let board = NSPasteboard.general
         if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
