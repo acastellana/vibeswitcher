@@ -24,6 +24,7 @@ struct PopoverView: View {
     var onResume: (Session) -> Void = { _ in }
     /// Rendered as the docked sidebar instead of the menu bar popover.
     var isSidebar = false
+    var onOpenWindow: () -> Void = {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -92,6 +93,9 @@ struct PopoverView: View {
         HStack(spacing: 12) {
             Text(isSidebar ? "Sessions" : "VibeSwitcher").font(.headline).lineLimit(1).fixedSize()
             newSessionMenu
+            Button { onOpenWindow() } label: { Image(systemName: "macwindow") }
+                .buttonStyle(.borderless)
+                .help("Open the VibeSwitcher window (⌘-click the menu bar icon)")
             Spacer(minLength: 8)
             // With words ("2 background") when they fit; otherwise just the dots and numbers, so a busy
             // header can't make the list wider than the popover (it was clipped on both sides).
@@ -454,7 +458,7 @@ private struct NumberBadge: View {
     }
 }
 
-private struct AgentBadge: View {
+struct AgentBadge: View {
     let agent: Agent
     var body: some View {
         Text(agent == .claude ? "Claude" : "Codex")

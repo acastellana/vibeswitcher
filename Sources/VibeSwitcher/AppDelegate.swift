@@ -14,6 +14,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private lazy var notifier: Notifier? = Bundle.main.bundleIdentifier == nil ? nil : Notifier(preferences: preferences)
     private lazy var phoneAccess = PhoneAccess(store: store)
     private var phoneAccessWindow: NSWindow?
+    let windowModel = WindowModel()
+    private var mainWindow: MainWindowController?
+    private lazy var windowActions = WindowActions(
+        newSession: { [weak self] preset, folder in self?.newSession(preset: preset, in: folder) },
+        endSession: { [weak self] row in self?.endSession(row) },
+        resume: { [weak self] row in self?.resumeSession(row) },
+        remove: { [weak self] row in
+            guard let id = row.hostID else { return }
+            self?.mainWindow?.pane.forget(id)
+            self?.hostClient.remove(id)
+        },
+        rename: { [weak self] in self?.rename($0) },
+        pause: { [weak self] in self?.store.pause($0, for: $1) },
+        resumePaused: { [weak self] in self?.store.resume($0) },
+        openInTerminal: { [weak self] in self?.open($0, source: "window") },
+        presets: { [weak self] folder in self?.presets(for: folder) ?? [] },
+        isLive: { [weak self] row in
+            guard let id = row.hostID else { return row.session != nil }
+            return self?.hostClient.sessions.first { $0.id == id }?.isLive ?? (row.session != nil)
+        },
+        canResume: { [weak self] row in
+            guard let self, let id = row.hostID, self.hostClient.sessions.first(where: { $0.id == id })?.isLive == false
+            else { return false }
+            return self.windowModel.agentSessions[id] != nil
+        })
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var hotKey: HotKey?
@@ -77,7 +102,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                                onEditCommands: { [weak self] in self?.editLaunchCommands() },
                                onPhoneAccess: { [weak self] in self?.showPhoneAccess() },
                                onPause: { [weak self] in self?.store.pause($0, for: $1) },
-                               onResume: { [weak self] in self?.store.resume($0) })
+                               onResume: { [weak self] in self?.store.resume($0) },
+                               onOpenWindow: { [weak self] in
+                                   self?.popover.performClose(nil)
+                                   self?.showMainWindow()
+                               })
         makePopoverContent = { AnyView(view) }
         var sidebarView = view
         sidebarView.isSidebar = true
@@ -87,7 +116,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             onRename: sidebarView.onRename, onResetName: sidebarView.onResetName,
             onNewSession: sidebarView.onNewSession, onEditCommands: sidebarView.onEditCommands,
             onPhoneAccess: sidebarView.onPhoneAccess, onPause: sidebarView.onPause, onResume: sidebarView.onResume,
-            isSidebar: true)))
+            isSidebar: true, onOpenWindow: { [weak self] in self?.showMainWindow() })))
         // Windows hidden by the earlier sidebar mode (or a crash during it) always come back.
         DispatchQueue.global(qos: .utility).async { SidebarWorkspace.restoreHiddenWindows() }
         // Desktop switched: refresh which session is "here" and show the sidebar for a moment.
@@ -166,6 +195,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .receive(on: RunLoop.main)
             .sink { [weak self] sessions in self?.store.updateHosted(sessions) }
             .store(in: &cancellables)
+        store.$sessions.combineLatest(hostClient.$sessions)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] sessions, hosted in self?.windowModel.update(sessions: sessions, hosted: hosted) }
+            .store(in: &cancellables)
+        NSApp.mainMenu = MainMenu.build()
+        DistributedNotificationCenter.default().addObserver(forName: AppStatus.windowNotification, object: nil,
+                                                            queue: .main) { [weak self] _ in self?.showMainWindow() }
+        DistributedNotificationCenter.default().addObserver(forName: AppStatus.captureNotification, object: nil,
+                                                            queue: .main) { [weak self] note in
+            guard let path = note.object as? String else { return }
+            self?.mainWindow?.capture(to: path)
+        }
 
         hotKey = HotKey(keyCode: kVK_ANSI_V, modifiers: controlKey | optionKey) { [weak self] in
             self?.togglePopover()
@@ -189,6 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     /// Left-click on a dot jumps straight to that session; right-click (or ⌃-click), a click beside the
     /// dots, or the counts/empty icon opens the list.
     @objc private func statusItemClicked(_ sender: NSStatusBarButton) {
+        if NSApp.currentEvent?.modifierFlags.contains(.command) == true { return showMainWindow() }
         let event = NSApp.currentEvent
         let secondary = event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true
         if !secondary, let event, let index = dotIndex(at: event, in: sender), store.sessions.indices.contains(index) {
@@ -313,8 +355,93 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     /// Launching the app again (Spotlight, Finder, `open`) while it runs doesn't start a second copy:
     /// macOS reactivates this one, so show the list. Only opens, never closes, since that's what a launch asks for.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
-        if !popover.isShown { togglePopover() }
+        if let window = mainWindow?.window, window.isVisible || window.isMiniaturized {
+            mainWindow?.present()
+        } else if !popover.isShown {
+            togglePopover()
+        }
         return false
+    }
+
+    /// Filled in with the Settings window (part 1, task 10).
+    @objc func showSettings(_ sender: Any?) {}
+
+    func showMainWindow(select hostID: UUID? = nil) {
+        if mainWindow == nil {
+            let controller = MainWindowController(store: store, host: hostClient, model: windowModel, actions: windowActions)
+            controller.onFontSize = { [weak self] step in self?.changeFontSize(step) }
+            mainWindow = controller
+        }
+        if let hostID { windowModel.select(hostID: hostID) }
+        mainWindow?.present()
+    }
+
+    /// Part 1 placeholder until Settings (Task 10) stores the size: adjusts the open terminals only.
+    private func changeFontSize(_ step: Int) {
+        guard let pane = mainWindow?.pane else { return }
+        pane.configure = { view in
+            let size = step == 0 ? 13 : max(8, min(36, view.font.pointSize + CGFloat(step)))
+            view.font = NSFont.monospacedSystemFont(ofSize: size, weight: .regular)
+        }
+        pane.reconfigureAll()
+    }
+
+    /// Built-ins from the old launch commands until Task 10 stores presets.
+    private func presets(for folder: String?) -> [LaunchPreset] {
+        LaunchPresets.builtIns(claudeCommand: preferences.claudeCommand, codexCommand: preferences.codexCommand)
+            .presets(for: folder)
+    }
+
+    private func newSession(preset: LaunchPreset?, in folder: String?) {
+        popover.performClose(nil)
+        guard let folder = folder ?? Launcher.chooseFolder(startingAt: popoverState.recentProjects.first
+            .map { ($0.path as NSString).deletingLastPathComponent }) else { return }
+        guard let preset = preset ?? presets(for: folder).first else { return }
+        startSession(preset, in: folder)
+    }
+
+    func startSession(_ preset: LaunchPreset, in folder: String) {
+        hostClient.spawn(SpawnRequest(cwd: folder, command: LaunchPlan.command(for: preset), env: preset.env,
+                                      cols: 120, rows: 36, keepShell: preset.keepShell, label: preset.name,
+                                      agent: preset.agent?.rawValue)) { [weak self] result in
+            switch result {
+            case .success(let session):
+                self?.showMainWindow(select: session.id)
+            case .failure(let error):
+                let alert = NSAlert()
+                alert.messageText = "Couldn't start the session"
+                alert.informativeText = error.message
+                NSApp.activate()
+                alert.runModal()
+            }
+        }
+    }
+
+    private func endSession(_ row: WindowRow) {
+        guard let id = row.hostID else { return }
+        if let session = row.session, [.working, .needsInput, .background].contains(session.status) {
+            let alert = NSAlert()
+            alert.messageText = "End “\(session.displayName)”?"
+            alert.informativeText = "\(session.agent.displayName) is \(session.status.label.lowercased()). Ending the session stops it, like closing its Terminal tab."
+            alert.addButton(withTitle: "End Session")
+            alert.addButton(withTitle: "Cancel")
+            NSApp.activate()
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        hostClient.kill(id)
+    }
+
+    private func resumeSession(_ row: WindowRow) {
+        guard let id = row.hostID, let info = hostClient.sessions.first(where: { $0.id == id }),
+              let agentSession = windowModel.agentSessions[id] else { return }
+        let command = LaunchPlan.resumeCommand(base: info.command, agent: agentSession.agent, sessionID: agentSession.sessionID)
+        hostClient.spawn(SpawnRequest(cwd: info.cwd, command: command, env: [:], cols: info.cols, rows: info.rows,
+                                      keepShell: false, label: info.label, agent: agentSession.agent.rawValue)) { [weak self] result in
+            guard case .success(let session) = result else { return }
+            self?.mainWindow?.pane.forget(id)
+            self?.hostClient.remove(id)
+            self?.showMainWindow(select: session.id)
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -379,6 +506,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     }
 
     private func open(_ session: Session, source: String = "list") {
+        if let hostID = session.hostID {
+            popover.performClose(nil)
+            store.acknowledge(session)
+            notifier?.clear(tty: session.tty)
+            if preferences.sidebarMode { sidebar.dismissAfterSelection() }
+            showMainWindow(select: hostID)
+            return
+        }
         popover.performClose(nil)
         store.acknowledge(session)
         notifier?.clear(tty: session.tty)
