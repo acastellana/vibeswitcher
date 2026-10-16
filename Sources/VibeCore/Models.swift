@@ -91,6 +91,11 @@ public struct Session: Identifiable, Equatable, Sendable {
     public var eventAt: Double?
     /// The agent's transcript, already checked to be inside its folders (`TranscriptReader.checkedURL`).
     public var transcriptPath: String?
+    /// The session host's id for it when it runs in VibeSwitcher's window; nil in Terminal.app or elsewhere.
+    public var hostID: UUID?
+    public var inWindow: Bool { hostID != nil }
+    /// The agent's own session id (from its hooks): what `--resume` takes.
+    public var agentSessionID: String?
 
     public init(tty: String, agent: Agent, pid: Int32, startedAt: Date, cwd: String?, project: String, task: String?,
                 status: SessionStatus, statusSince: Date, detail: String?, hasHooks: Bool, inTerminalApp: Bool) {

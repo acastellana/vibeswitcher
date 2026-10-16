@@ -55,6 +55,20 @@ final class SessionStore: ObservableObject {
     private(set) var observedProjects: [String: Date] =
         (UserDefaults.standard.dictionary(forKey: "observedProjects") as? [String: Date]) ?? [:]
 
+    /// Live window sessions by tty, from the session host.
+    private var hosted: [String: HostSession] = [:]
+    /// The window session shown in the (key) main window; it counts as being looked at.
+    var windowViewingTTY: String? { didSet { if windowViewingTTY != oldValue { refresh() } } }
+    /// Window sessions' screen text by tty (Claude's footer shows background work), and how to ask for fresh text.
+    var hostScreens: () -> [String: String] = { [:] }
+    var requestHostScreens: (Set<String>) -> Void = { _ in }
+    private var lastHostScreenRequest = Date.distantPast
+
+    func updateHosted(_ sessions: [HostSession]) {
+        hosted = Dictionary(sessions.filter(\.isLive).map { ($0.tty, $0) }, uniquingKeysWith: { $1 })
+        refresh()
+    }
+
     func start() {
         refreshHookStatus()
         refresh()
@@ -137,6 +151,13 @@ final class SessionStore: ObservableObject {
         }
         scanning = true
         let quiet = quietClaudeTTYs
+        let hosted = self.hosted
+        let hostQuiet = quiet.intersection(hosted.keys)
+        if !hostQuiet.isEmpty, forceTerminal || Date().timeIntervalSince(lastHostScreenRequest) >= 6 {
+            lastHostScreenRequest = Date()
+            requestHostScreens(hostQuiet)
+        }
+        let hostScreens = self.hostScreens()
         // While you're in Terminal, check which tab you're on every second so the "viewing" ring keeps up.
         let terminalInterval: TimeInterval =
             NSWorkspace.shared.frontmostApplication?.bundleIdentifier == TerminalBridge.bundleID ? 1.5 : 4
@@ -161,13 +182,16 @@ final class SessionStore: ObservableObject {
                 }
             }
             let tabs = self.tabs
-            let background = self.backgroundWork
+            var background = self.backgroundWork
+            for (tty, screen) in hostScreens where hosted[tty] != nil {
+                background[tty] = BackgroundWork.summary(fromScreen: screen)
+            }
             DispatchQueue.main.async {
                 if let access, access != self.terminalAccess {
                     self.terminalAccess = access
                     AppStatus.write(sessions: self.sessions, terminalAccess: access)
                 }
-                self.apply(raw: raw, tabs: tabs, background: background, transcripts: transcripts, now: now)
+                self.apply(raw: raw, tabs: tabs, hosted: hosted, background: background, transcripts: transcripts, now: now)
                 self.scanning = false
                 if self.rescanRequested {
                     let force = self.forceTerminalRequested
@@ -187,7 +211,7 @@ final class SessionStore: ObservableObject {
         let raw = scanner.scan(now: now)
         let quiet = Set(raw.filter { $0.agent == .claude }.map(\.tty))
         let background = TerminalBridge.screens(for: quiet).compactMapValues { BackgroundWork.summary(fromScreen: $0) }
-        apply(raw: raw, tabs: result.tabs, background: background, transcripts: Self.transcripts(for: raw), now: now)
+        apply(raw: raw, tabs: result.tabs, hosted: [:], background: background, transcripts: Self.transcripts(for: raw), now: now)
     }
 
     /// Off the main thread: each session's transcript, if its hook named one inside the agents' folders.
@@ -201,8 +225,8 @@ final class SessionStore: ObservableObject {
         return paths
     }
 
-    private func apply(raw: [RawSession], tabs: [String: TerminalTab], background: [String: String],
-                       transcripts: [String: String], now: Date) {
+    private func apply(raw: [RawSession], tabs: [String: TerminalTab], hosted: [String: HostSession],
+                       background: [String: String], transcripts: [String: String], now: Date) {
         var quiet: Set<String> = []
         var nudges: [(Session, Nudge)] = []
         let present = UserPresence.isPresent()
@@ -211,7 +235,8 @@ final class SessionStore: ObservableObject {
         var result: [Session] = []
         for item in raw {
             let tab = tabs[item.tty]
-            let parsed = tab.map { StatusRules.parseTitle($0.title) }
+            let window = hosted[item.tty]
+            let parsed = (tab?.title ?? window?.title).map { StatusRules.parseTitle($0) }
             // Claude uses ✳ (idle) and spinners (busy); Codex only shows a braille spinner while busy.
             let activity: TitleActivity = item.agent == .claude ? (parsed?.activity ?? .none)
                 : (parsed?.activity == .busy ? .busy : .none)
@@ -229,7 +254,8 @@ final class SessionStore: ObservableObject {
             observed[item.tty] = (resolved, since)
 
             // Looking at the tab right now counts as having seen it.
-            let viewing = terminalFront && tab.map { $0.isSelected && $0.isOnScreenTab && $0.windowOrder == 1 } == true
+            let viewing = (terminalFront && tab.map { $0.isSelected && $0.isOnScreenTab && $0.windowOrder == 1 } == true)
+                || (window != nil && windowViewingTTY == item.tty)
             if viewing { acknowledged[item.tty] = now }
             let seenAt = acknowledged[item.tty] ?? launchedAt
             var status: SessionStatus = (resolved == .done && since <= seenAt) ? .idle : resolved
@@ -256,6 +282,8 @@ final class SessionStore: ObservableObject {
             session.terminalWindowID = tab?.windowID
             session.eventAt = item.hook?.lastEventAt
             session.transcriptPath = transcripts[item.tty]
+            session.hostID = window?.id
+            session.agentSessionID = item.hook?.sessionId
             // Only the visible tab counts: a window full of session tabs sits on one desktop, but
             // you can only be looking at the selected one.
             session.windowOnCurrentDesktop = tab?.position?.desktop.map { currentDesktops.contains($0) } ?? false

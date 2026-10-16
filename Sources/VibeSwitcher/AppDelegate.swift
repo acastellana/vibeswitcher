@@ -160,6 +160,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .receive(on: RunLoop.main)
             .sink { state in AppStatus.extras["host"] = "\(state)" }
             .store(in: &cancellables)
+        store.hostScreens = { [weak self] in self?.hostClient.screens ?? [:] }
+        store.requestHostScreens = { [weak self] ttys in self?.hostClient.refreshScreens(ttys: ttys) }
+        hostClient.$sessions
+            .receive(on: RunLoop.main)
+            .sink { [weak self] sessions in self?.store.updateHosted(sessions) }
+            .store(in: &cancellables)
 
         hotKey = HotKey(keyCode: kVK_ANSI_V, modifiers: controlKey | optionKey) { [weak self] in
             self?.togglePopover()
