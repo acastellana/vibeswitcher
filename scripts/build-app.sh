@@ -9,11 +9,13 @@ APP="build/VibeSwitcher.app"
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
-cp "$BIN/VibeSwitcher" "$BIN/vibeswitcher-hook" "$APP/Contents/MacOS/"
+cp "$BIN/VibeSwitcher" "$BIN/vibeswitcher-hook" "$BIN/vibeswitcher-host" "$APP/Contents/MacOS/"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 # The phone web app (Phone Access), served by the app itself.
 mkdir -p "$APP/Contents/Resources"
 cp -R Web "$APP/Contents/Resources/Web"
+# SwiftPM resource bundles (SwiftTerm's Metal shaders); found through Bundle.main.resourceURL.
+for bundle in "$BIN"/*.bundle; do [[ -e "$bundle" ]] && cp -R "$bundle" "$APP/Contents/Resources/"; done
 # Sign with the stable local identity if it exists (scripts/setup-signing.sh), so macOS keeps granted
 # permissions across rebuilds; otherwise ad-hoc, which changes identity on every build.
 SIGNING_DIR="$HOME/.vibeswitcher/signing"
@@ -36,6 +38,7 @@ else
     IDENTITY=(--sign -)
 fi
 codesign --force "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-hook"
+codesign --force "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-host"
 codesign --force "${IDENTITY[@]}" "$APP"
 echo "Built $APP"
 
