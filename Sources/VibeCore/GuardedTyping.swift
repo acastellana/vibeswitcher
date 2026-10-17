@@ -6,13 +6,16 @@ import Foundation
 /// them. The tab is verified before typing starts; this keeps verifying while it types: a cheap check
 /// (Terminal still frontmost, same window) before every chunk, the full check (the selected tab is
 /// still the session's) at least every `fullCheckEvery` seconds and always right before Enter or a
-/// key, which is what would approve something. On any change it stops: a cut-off message may be left
-/// in a box, but it is never sent anywhere else.
+/// key, which is what would approve something. The screen lock is checked before every chunk and every
+/// key too: nothing is typed into a locked Mac. On any change it stops: a cut-off message may be left in a
+/// box, but it is never sent anywhere else.
 public enum GuardedTyping {
     public enum Outcome: Equatable, Sendable {
         case done
         /// The focus moved. `typed`: some text was already typed (into the right tab, up to the check before it).
         case stopped(typed: Bool)
+        /// The Mac locked. `typed`: some text was already typed, before it locked.
+        case locked(typed: Bool)
     }
 
     /// Text as UTF-16 chunks for key events, never splitting a surrogate pair.
@@ -29,13 +32,16 @@ public enum GuardedTyping {
         return chunks
     }
 
-    /// `finish`: what follows the text (Enter, a key), each guarded by both checks.
-    public static func run(chunks: [[UInt16]], finish: [() -> Void], stillFocused: () -> Bool, stillFrontTab: () -> Bool,
+    /// `finish`: what follows the text (Enter, a key), each guarded by both checks. `screenLocked` runs right
+    /// before every chunk and every step of `finish`.
+    public static func run(chunks: [[UInt16]], finish: [() -> Void], screenLocked: () -> Bool = { false },
+                           stillFocused: () -> Bool, stillFrontTab: () -> Bool,
                            clock: () -> TimeInterval, fullCheckEvery: TimeInterval,
                            post: ([UInt16]) -> Void, pause: (TimeInterval) -> Void) -> Outcome {
         var typed = false
         var lastFullCheck = clock()
         for chunk in chunks {
+            guard !screenLocked() else { return .locked(typed: typed) }
             guard stillFocused() else { return .stopped(typed: typed) }
             if clock() - lastFullCheck >= fullCheckEvery {
                 guard stillFrontTab() else { return .stopped(typed: typed) }
@@ -48,6 +54,7 @@ public enum GuardedTyping {
         for step in finish {
             // A separate, slightly later Enter: sent with the text it would count as part of a paste.
             if typed { pause(0.12) }
+            guard !screenLocked() else { return .locked(typed: typed) }
             guard stillFocused(), stillFrontTab() else { return .stopped(typed: typed) }
             step()
         }

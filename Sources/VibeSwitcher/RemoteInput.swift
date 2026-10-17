@@ -101,15 +101,23 @@ enum RemoteInput {
         if let key { finish.append { post(key: key, to: pid) } }
         let outcome = GuardedTyping.run(
             chunks: GuardedTyping.chunks(cleanText ?? ""), finish: finish,
+            // Before every chunk and key: the Mac may lock while typing.
+            screenLocked: { isScreenLocked },
             // Cheap, before every chunk: Terminal still frontmost with the same window in front.
             stillFocused: { NSWorkspace.shared.frontmostApplication?.processIdentifier == pid && frontWindowNumber(of: pid) == window },
             // Full: the selected tab of the front window is still this session's.
             stillFrontTab: { TerminalBridge.frontTTY() == tty },
             clock: { ProcessInfo.processInfo.systemUptime }, fullCheckEvery: 0.4,
             post: { post(chunk: $0, to: pid) }, pause: { usleep(useconds_t($0 * 1_000_000)) })
-        guard case .stopped(let typed) = outcome else { return nil }
-        FocusLog.record(tty: tty, source: "phone", steps: ["focus moved while typing", typed ? "stopped after some text" : "nothing typed"])
-        return .focusMoved(typed: typed)
+        switch outcome {
+        case .done:
+            return nil
+        case .locked:
+            return .locked
+        case .stopped(let typed):
+            FocusLog.record(tty: tty, source: "phone", steps: ["focus moved while typing", typed ? "stopped after some text" : "nothing typed"])
+            return .focusMoved(typed: typed)
+        }
     }
 
     /// The window number of `pid`'s frontmost real window (the one keystrokes go to). Skips the thin title-bar

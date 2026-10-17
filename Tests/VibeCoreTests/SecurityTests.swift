@@ -66,6 +66,40 @@ struct GuardedTypingTests {
         #expect(log.events.isEmpty)
     }
 
+    @Test func theMacLockingMidwayStopsTypingAndNeverPressesEnter() {
+        let log = Recorder()
+        var locked = false
+        let outcome = GuardedTyping.run(chunks: chunks(5), finish: [{ log.events.append("enter") }],
+                                        screenLocked: { log.events.append("lock?"); return locked },
+                                        stillFocused: { true }, stillFrontTab: { true },
+                                        clock: { log.time }, fullCheckEvery: 0.4,
+                                        post: { log.events.append("chunk\($0[0])"); if $0[0] == 66 { locked = true } },
+                                        pause: { log.time += $0 })
+        #expect(outcome == .locked(typed: true))
+        // Checked before every chunk: the one after the Mac locked is never posted.
+        #expect(log.events == ["lock?", "chunk65", "lock?", "chunk66", "lock?"])
+    }
+
+    @Test func theMacLockingBeforeEnterDropsEnter() {
+        let log = Recorder()
+        var locked = false
+        let outcome = GuardedTyping.run(chunks: chunks(2), finish: [{ log.events.append("enter") }],
+                                        screenLocked: { locked }, stillFocused: { true }, stillFrontTab: { true },
+                                        clock: { log.time }, fullCheckEvery: 0.4, post: { _ in },
+                                        pause: { log.time += $0; if $0 > 0.1 { locked = true } })   // locks in the pause before Enter
+        #expect(outcome == .locked(typed: true))
+        #expect(!log.events.contains("enter"))
+    }
+
+    @Test func aLockedMacGetsNoKeyAtAll() {
+        let log = Recorder()
+        let outcome = GuardedTyping.run(chunks: [], finish: [{ log.events.append("escape") }], screenLocked: { true },
+                                        stillFocused: { true }, stillFrontTab: { true },
+                                        clock: { log.time }, fullCheckEvery: 0.4, post: { _ in }, pause: { log.time += $0 })
+        #expect(outcome == .locked(typed: false))
+        #expect(log.events.isEmpty)
+    }
+
     @Test func chunksNeverSplitASurrogatePair() {
         let pieces = GuardedTyping.chunks("abcdefghijklmno😀xyz", size: 16)
         #expect(pieces.allSatisfy { !UTF16.isLeadSurrogate($0.last!) })
