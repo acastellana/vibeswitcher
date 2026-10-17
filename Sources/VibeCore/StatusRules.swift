@@ -8,7 +8,9 @@ public enum TitleActivity: Equatable, Sendable {
 
 public enum StatusRules {
     /// Tools that block on the human, so a PreToolUse for them means "needs input", not "working".
-    public static let questionTools: Set<String> = ["AskUserQuestion", "ExitPlanMode", "request_user_input"]
+    public static let questionTools: Set<String> = ["AskUserQuestion", "ExitPlanMode", "request_user_input", asyncQuestionTool]
+    /// Codex's question that doesn't block the turn: it stays open (`HookState.openQuestion`) after the call and the turn.
+    public static let asyncQuestionTool = "request_user_input_async"
 
     /// Status implied by the last hook event alone.
     public static func status(for state: HookState) -> SessionStatus {
@@ -21,8 +23,12 @@ public enum StatusRules {
             return state.notificationType == "idle_prompt" ? .done : .needsInput
         case "PreToolUse":
             return questionTools.contains(state.toolName ?? "") ? .needsInput : .working
-        case "Stop", "Interrupt":
+        case "Stop":
+            return state.openQuestion != nil ? .needsInput : .done
+        case "Interrupt":
             return .done
+        case "PostToolUse" where state.toolName == asyncQuestionTool && state.openQuestion != nil:
+            return .needsInput
         default: // UserPromptSubmit, PostToolUse, PreCompact, …
             return .working
         }

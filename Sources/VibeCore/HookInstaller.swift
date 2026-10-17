@@ -8,7 +8,8 @@ public enum HookInstaller {
     static let claudeEvents = ["SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "PostToolUse",
                                "PermissionRequest", "Notification", "Stop", "PreCompact"]
     static let codexEvents = ["SessionStart", "SessionEnd", "UserPromptSubmit", "PreToolUse", "PostToolUse",
-                              "PermissionRequest", "Stop", "Interrupt", "PreCompact"]
+                              "PermissionRequest", "Stop", "Interrupt", "PreCompact", "PostCompact",
+                              "SubagentStart", "SubagentStop"]
     static let toolEvents: Set<String> = ["PreToolUse", "PostToolUse", "PermissionRequest"]
 
     public static func configURL(for agent: Agent) -> URL {
@@ -64,6 +65,15 @@ public enum HookInstaller {
         return config
     }
 
+    /// Ours on every event this version listens to: an install from an older version (Codex hooks without
+    /// PostCompact or the subagent events) asks to be installed again.
+    public static func isComplete(in config: [String: Any], agent: Agent) -> Bool {
+        let hooks = config["hooks"] as? [String: Any] ?? [:]
+        return (agent == .claude ? claudeEvents : codexEvents).allSatisfy { event in
+            (hooks[event] as? [[String: Any]])?.contains(where: groupIsOurs) ?? false
+        }
+    }
+
     static func groupIsOurs(_ group: [String: Any]) -> Bool {
         guard let handlers = group["hooks"] as? [[String: Any]] else { return false }
         return handlers.contains { ($0["command"] as? String)?.contains(marker) ?? false }
@@ -72,7 +82,7 @@ public enum HookInstaller {
     // MARK: File IO
 
     public static func isInstalled(agent: Agent) -> Bool {
-        isInstalled(in: readConfig(configURL(for: agent)) ?? [:])
+        isComplete(in: readConfig(configURL(for: agent)) ?? [:], agent: agent)
     }
 
     /// Installs (or reinstalls) our hooks. The previous file is kept once as `<name>.vibeswitcher-backup`.

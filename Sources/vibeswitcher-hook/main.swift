@@ -45,8 +45,12 @@ let stateURL = VibePaths.stateFile(tty: tty)
 let lock = open(stateURL.path + ".lock", O_CREAT | O_RDWR, 0o600)
 if lock >= 0 { flock(lock, LOCK_EX) }
 
+// Codex's async questions don't hold the turn: at its end, the rollout says whether one is still open.
+let rolloutQuestion = agent == .codex && payload["hook_event_name"] as? String == "Stop"
+    ? (payload["transcript_path"] as? String).flatMap { TranscriptReader.openAsyncQuestion(atPath: $0, home: NSHomeDirectory()) }
+    : nil
 let update = HookState.reduce(current: HookState.load(from: stateURL), payload: payload, agent: agent,
-                              tty: tty, agentPid: agentPid, now: Date().timeIntervalSince1970)
+                              tty: tty, agentPid: agentPid, now: Date().timeIntervalSince1970, rolloutQuestion: rolloutQuestion)
 switch update {
 case .write(let state): try? state.save(to: stateURL)
 case .delete: try? FileManager.default.removeItem(at: stateURL)

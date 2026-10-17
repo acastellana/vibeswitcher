@@ -55,20 +55,136 @@ public enum TranscriptReader {
 
     /// The transcript file, if `path` really is a regular `.jsonl` file inside the agents' own folders
     /// (after resolving symlinks and `..`, the folders' own included), and which format it is.
+    ///
+    /// Codex compresses cold rollouts in place (`rollout-….jsonl` → `rollout-….jsonl.zst`, and back when one is
+    /// resumed), so either name finds whichever exists. A compressed one is read through a decompressed copy in
+    /// `~/.vibeswitcher/transcripts` (made once per version of the file): callers keep reading plain JSONL by offset.
     public static func checkedURL(_ path: String, home: String) -> (URL, Format)? {
         let resolved = URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath()
-        guard resolved.pathExtension == "jsonl",
+        var candidates = [resolved]
+        if resolved.pathExtension == "jsonl" {
+            candidates.append(resolved.appendingPathExtension("zst"))
+        } else if isCompressed(resolved) {
+            candidates.append(resolved.deletingPathExtension())
+        }
+        for candidate in candidates {
+            if let found = checkedFile(candidate.resolvingSymlinksInPath(), home: home) { return found }
+        }
+        return nil
+    }
+
+    private static func isCompressed(_ url: URL) -> Bool {
+        url.pathExtension == "zst" && url.deletingPathExtension().pathExtension == "jsonl"
+    }
+
+    private static func checkedFile(_ resolved: URL, home: String) -> (URL, Format)? {
+        let compressed = isCompressed(resolved)
+        guard resolved.pathExtension == "jsonl" || compressed,
               // Not a directory, FIFO or device: reading one of those could block the reading queue.
               (try? FileManager.default.attributesOfItem(atPath: resolved.path)[.type] as? FileAttributeType) == .typeRegular
         else { return nil }
         let homeURL = URL(fileURLWithPath: home).standardizedFileURL
-        let roots: [(String, Format)] = [(".claude/projects", .claude), (".codex/sessions", .codex)]
+        let roots: [(String, Format)] = compressed ? [(".codex/sessions", .codex)]
+            : [(".claude/projects", .claude), (".codex/sessions", .codex), (decompressedFolder, .codex)]
         for (folder, format) in roots {
             // ~/.claude may itself be a link (dotfiles setups): compare against where it really is.
             let root = homeURL.appendingPathComponent(folder).resolvingSymlinksInPath().path
-            if resolved.path.hasPrefix(root + "/") { return (resolved, format) }
+            guard resolved.path.hasPrefix(root + "/") else { continue }
+            if !compressed { return (resolved, format) }
+            return decompressedCopy(of: resolved, home: homeURL).map { ($0, format) }
         }
         return nil
+    }
+
+    /// Decompressed copies of compressed rollouts, private to you like the rollouts themselves.
+    static let decompressedFolder = ".vibeswitcher/transcripts"
+    /// Bigger compressed files aren't opened (a rollout is a few MB; this is a guard, not a budget).
+    static let compressedLimit = 64 << 20
+    static let decompressedLimit = 512 << 20
+
+    /// `<path hash>-<version hash>.jsonl`: a new version of the file (size, modification time) gets a new copy (so a
+    /// reader's cursor in the old one is "another file") and the old copy goes.
+    private static func decompressedCopy(of source: URL, home: URL) -> URL? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: source.path),
+              let size = (attributes[.size] as? NSNumber)?.intValue, size <= compressedLimit,
+              let modified = attributes[.modificationDate] as? Date else { return nil }
+        let folder = home.appendingPathComponent(decompressedFolder)
+        let key = fnv(Data(source.path.utf8))
+        let target = folder.appendingPathComponent("\(key)-\(fnv(Data("\(size)|\(modified.timeIntervalSince1970)".utf8))).jsonl")
+        if FileManager.default.fileExists(atPath: target.path) { return target }
+        guard let compressed = try? Data(contentsOf: source),
+              let plain = try? Zstd.decompress(compressed, limit: decompressedLimit) else { return nil }
+        let fm = FileManager.default
+        do {
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+            try plain.write(to: target, options: .atomic)
+            try fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: target.path)
+        } catch { return nil }
+        for old in (try? fm.contentsOfDirectory(atPath: folder.path)) ?? []
+        where old.hasPrefix(key + "-") && old != target.lastPathComponent {
+            try? fm.removeItem(at: folder.appendingPathComponent(old))
+        }
+        return target
+    }
+
+    private static func fnv(_ data: Data) -> String {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in data { hash = (hash ^ UInt64(byte)) &* 0x100000001b3 }
+        return String(hash, radix: 16)
+    }
+
+    // MARK: Codex's async questions
+
+    /// The question a Codex rollout's `request_user_input_async` left open: asked (the call), and not answered since
+    /// (a message you typed). Nil when there is none or it was answered.
+    ///
+    /// No real rollout with this call has been seen yet (Codex 0.160/0.163 TUIs don't offer the tool): the shapes are
+    /// Codex's own: a `response_item` `function_call` like every tool call in its rollouts, arguments
+    /// `{"questions": [{"title", "options"}]}` (codex-app-server-protocol 0.163.0, `AsyncUserInputQuestion`), and an
+    /// `item_completed` agent message carrying `questions` (`AgentMessageThreadItem.questions`).
+    public static func openAsyncQuestion(in data: Data) -> String? {
+        var open: String?
+        for line in data.split(separator: 0x0A) {
+            // Cheap filter first: most lines are tool output.
+            guard line.range(of: Data("questions".utf8)) != nil || line.range(of: Data("\"user".utf8)) != nil,
+                  let object = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
+                  let payload = object["payload"] as? [String: Any] else { continue }
+            switch (object["type"] as? String, payload["type"] as? String) {
+            case ("response_item", "function_call"?), ("response_item", "custom_tool_call"?):
+                guard payload["name"] as? String == StatusRules.asyncQuestionTool else { continue }
+                let arguments = (payload["arguments"] as? String).flatMap {
+                    (try? JSONSerialization.jsonObject(with: Data($0.utf8))) as? [String: Any]
+                } ?? [:]
+                open = HookState.question(toolName: StatusRules.asyncQuestionTool, input: arguments) ?? "Asked you something"
+            case ("event_msg", "item_completed"?):
+                guard let item = payload["item"] as? [String: Any],
+                      let questions = item["questions"] as? [[String: Any]], !questions.isEmpty else { continue }
+                open = HookState.question(toolName: StatusRules.asyncQuestionTool, input: ["questions": questions]) ?? open
+            case ("response_item", "message"?):
+                guard payload["role"] as? String == "user" else { continue }
+                let text = (payload["content"] as? [[String: Any]] ?? []).compactMap { $0["text"] as? String }.joined(separator: "\n")
+                if humanText(text) != nil { open = nil }
+            case ("event_msg", "user_message"?):
+                open = nil
+            default:
+                continue
+            }
+        }
+        return open
+    }
+
+    /// `openAsyncQuestion` over the end of a live (uncompressed) rollout, for the hook at a Codex Stop.
+    public static func openAsyncQuestion(atPath path: String, home: String, tailBytes: Int = 256 << 10) -> String? {
+        guard let (url, format) = checkedURL(path, home: home), format == .codex, url.pathExtension == "jsonl",
+              !url.path.contains("/" + decompressedFolder + "/"),
+              let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd() else { return nil }
+        let start = size > UInt64(tailBytes) ? size - UInt64(tailBytes) : 0
+        try? handle.seek(toOffset: start)
+        guard var data = try? handle.readToEnd() else { return nil }
+        if start > 0 { data = data.subdata(in: (data.startIndex + tailStart(data))..<data.endIndex) }
+        return openAsyncQuestion(in: data)
     }
 
     /// For a read that starts in the middle of a file: the offset of the first complete line.

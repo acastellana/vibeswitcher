@@ -25,6 +25,13 @@ public struct HookState: Codable, Equatable, Sendable {
     /// The agent's own transcript of this session (Claude Code and Codex pass it to every hook).
     /// Not trusted as-is: `TranscriptReader.checkedURL` validates it before anything reads it.
     public var transcriptPath: String?
+    /// A question Codex asked without waiting (`request_user_input_async`): the turn goes on or ends, the question
+    /// stays open until you answer.
+    public var openQuestion: String?
+    /// Where the session was when a manual compaction started (Codex sends PreCompact/PostCompact for `/compact` and
+    /// no Stop after), so PostCompact can put it back.
+    public var eventBeforeCompact: String?
+    public var eventBeforeCompactAt: Double?
 
     public init(agent: Agent, tty: String, lastEvent: String, lastEventAt: Double) {
         self.agent = agent
@@ -57,12 +64,19 @@ extension HookState {
     static let meaningfulNotifications: Set<String> = ["permission_prompt", "elicitation_dialog", "idle_prompt"]
 
     /// Folds one hook payload (the JSON Claude Code / Codex pipe to the hook on stdin) into the stored state.
+    /// `rolloutQuestion`: at a Codex Stop, an async question still open in its rollout (`TranscriptReader.openAsyncQuestion`).
     public static func reduce(current: HookState?, payload: [String: Any], agent: Agent, tty: String,
-                              agentPid: Int32?, now: Double) -> HookUpdate {
+                              agentPid: Int32?, now: Double, rolloutQuestion: String? = nil) -> HookUpdate {
         guard let event = payload["hook_event_name"] as? String else { return .ignore }
+        // A subagent's events (they carry its `agent_id`) are part of the main session's turn: they don't start,
+        // end or finish it, and its session id and transcript aren't the session's.
+        let subagent = !((payload["agent_id"] as? String) ?? "").isEmpty
+        if subagent, ["SessionStart", "SessionEnd", "UserPromptSubmit", "Stop"].contains(event) { return .ignore }
         if event == "SessionEnd" { return .delete }
+        // A subagent that finishes after the turn did doesn't make it work again.
+        if event == "SubagentStop", let current, ["Stop", "Interrupt"].contains(current.lastEvent) { return .ignore }
 
-        let sessionId = payload["session_id"] as? String
+        let sessionId = subagent ? nil : payload["session_id"] as? String
         var state: HookState
         if let current, current.agent == agent,
            sessionId == nil || current.sessionId == nil || current.sessionId == sessionId,
@@ -70,12 +84,19 @@ extension HookState {
             state = current
         } else {
             state = HookState(agent: agent, tty: tty, lastEvent: event, lastEventAt: now)
+            // A fork carries on the conversation it came from (Codex `/fork`, `codex fork`): keep its label.
+            if event == "SessionStart", payload["source"] as? String == "fork", let current, current.agent == agent,
+               agentPid == nil || current.agentPid == agentPid {
+                state.firstPrompt = current.firstPrompt
+            }
         }
         state.sessionId = sessionId ?? state.sessionId
         state.agentPid = agentPid ?? state.agentPid
-        if let cwd = payload["cwd"] as? String, !cwd.isEmpty { state.cwd = cwd }
-        if let path = payload["transcript_path"] as? String, !path.isEmpty, path.utf8.count <= 1024 {
-            state.transcriptPath = path
+        if !subagent {
+            if let cwd = payload["cwd"] as? String, !cwd.isEmpty { state.cwd = cwd }
+            if let path = payload["transcript_path"] as? String, !path.isEmpty, path.utf8.count <= 1024 {
+                state.transcriptPath = path
+            }
         }
 
         switch event {
@@ -87,9 +108,13 @@ extension HookState {
             if type == "idle_prompt", ["Stop", "Interrupt"].contains(state.lastEvent) { return .ignore }
             state.notificationType = type
             state.notice = message
+        case "SessionStart":
+            state.openQuestion = nil
         case "UserPromptSubmit":
             state.notice = nil
             state.request = nil
+            // Your next message is the answer.
+            state.openQuestion = nil
             // Background-task notices also arrive as prompts; they start a turn but aren't what you asked.
             let prompt = payload["prompt"] as? String ?? ""
             if !SessionNaming.isSystemPrompt(prompt) {
@@ -103,10 +128,11 @@ extension HookState {
             state.toolDetail = tool.map { ToolActivity.describe(toolName: $0, input: payload["tool_input"] as? [String: Any] ?? [:]) }
             state.toolStartedAt = now
             state.request = tool.flatMap { Self.question(toolName: $0, input: payload["tool_input"] as? [String: Any] ?? [:]) }
+            if tool == StatusRules.asyncQuestionTool { state.openQuestion = state.request ?? "Asked you something" }
         case "PostToolUse":
             state.toolName = payload["tool_name"] as? String
             state.toolStartedAt = nil
-            state.request = nil
+            state.request = state.toolName == StatusRules.asyncQuestionTool ? state.openQuestion : nil
         case "PermissionRequest":
             let tool = payload["tool_name"] as? String
             state.toolName = tool
@@ -119,11 +145,26 @@ extension HookState {
                 state.request = tool.map { Self.permission(toolName: $0, input: input) }
             }
         case "Stop":
-            state.request = nil
+            state.openQuestion = rolloutQuestion ?? state.openQuestion
+            state.request = state.openQuestion
             state.lastMessage = clip(payload["last_assistant_message"] as? String) ?? state.lastMessage
+        case "PreCompact":
+            if payload["trigger"] as? String == "manual", state.lastEvent != "PreCompact" {
+                (state.eventBeforeCompact, state.eventBeforeCompactAt) = (state.lastEvent, state.lastEventAt)
+            }
+        case "PostCompact":
+            // `/compact` between turns: back to where it was (done, idle), not "working" until the next prompt.
+            if payload["trigger"] as? String == "manual", let before = state.eventBeforeCompact,
+               let at = state.eventBeforeCompactAt, state.lastEvent == "PreCompact" {
+                (state.eventBeforeCompact, state.eventBeforeCompactAt) = (nil, nil)
+                state.lastEvent = before
+                state.lastEventAt = at
+                return .write(state)
+            }
         default:
             break
         }
+        if event != "PreCompact" { (state.eventBeforeCompact, state.eventBeforeCompactAt) = (nil, nil) }
         if event != "PreToolUse", event != "PermissionRequest", event != "Notification" { state.toolStartedAt = nil }
         state.lastEvent = event
         state.lastEventAt = now
@@ -133,8 +174,10 @@ extension HookState {
     /// The question behind tools that stop and ask you something; nil for every other tool.
     static func question(toolName: String, input: [String: Any]) -> String? {
         switch toolName {
-        case "AskUserQuestion", "request_user_input":
-            let questions = (input["questions"] as? [[String: Any]] ?? []).compactMap { $0["question"] as? String }
+        case "AskUserQuestion", "request_user_input", StatusRules.asyncQuestionTool:
+            // request_user_input_async names each question `title` (codex-app-server-protocol 0.163.0,
+            // `AsyncUserInputQuestion { title, options }`).
+            let questions = (input["questions"] as? [[String: Any]] ?? []).compactMap { $0["question"] as? String ?? $0["title"] as? String }
             guard let first = clip(questions.first, to: 200) else { return nil }
             return questions.count > 1 ? "\(first) (+\(questions.count - 1) more)" : first
         case "ExitPlanMode":
