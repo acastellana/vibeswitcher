@@ -57,12 +57,15 @@ extension LeadDelivery {
         guard way(for: state) == .type,
               SteerInbox.pending(tty: agent.tty, root: root).contains(where: { $0.agentPid == agent.pid }),
               inputIsEmpty() else { return false }
-        let messages = SteerInbox.take(tty: agent.tty, agentPid: agent.pid, root: root)
-        guard let first = messages.first else { return false }
-        // The first becomes the prompt (marked as its sender's); the rest go back, and the prompt's own hook
-        // hands them to the agent with it. Not typed: all of them wait, in order, for the next try.
-        let typedIt = typeInto(typed(first.text, from: first.from))
-        for message in typedIt ? Array(messages.dropFirst()) : messages { try? SteerInbox.post(message, tty: agent.tty, root: root) }
+        // The first becomes the prompt (marked as its sender's) and is the only one marked delivered; the rest stay
+        // first in line, and the prompt's own hook hands them to the agent with it. Not typed: all of them wait, in
+        // order, for the next try, none marked delivered.
+        var typedIt = false
+        SteerInbox.deliver(tty: agent.tty, agentPid: agent.pid, root: root) { messages in
+            guard let first = messages.first, typeInto(typed(first.text, from: first.from)) else { return 0 }
+            typedIt = true
+            return 1
+        }
         return typedIt
     }
 }

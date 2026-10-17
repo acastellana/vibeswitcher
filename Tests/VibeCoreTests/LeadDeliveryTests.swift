@@ -51,12 +51,19 @@ struct LeadDeliveryTests {
         // Typing fails: they stay for the next try.
         #expect(!LeadDelivery.flush(agent, state: state("Stop"), inputIsEmpty: { true }, typeInto: { _ in false }, root: root))
         #expect(SteerInbox.pending(tty: agent.tty, root: root).count == 2)
+        // Nothing went in, so nothing is marked delivered.
+        #expect(SteerInbox.delivered(tty: agent.tty, root: root).isEmpty)
         #expect(LeadDelivery.flush(agent, state: state("Stop"), inputIsEmpty: { true }, typeInto: { typed.append($0); return true }, root: root))
         // The first is typed, marked as the witness's; your answer isn't put under that mark but goes with it
         // through the prompt's hook.
         #expect(typed.count == 1)
         #expect(typed[0].hasPrefix("[VibeSwitcher") && typed[0].hasSuffix("first") && !typed[0].contains("second"))
         #expect(SteerInbox.pending(tty: agent.tty, root: root).map(\.text) == ["second"])
+        // Only the typed one is marked delivered, once.
+        let ids = SteerInbox.delivered(tty: agent.tty, root: root)
+        #expect(ids.count == 1 && !SteerInbox.pending(tty: agent.tty, root: root).contains { ids.contains($0.id) })
+        let log = try String(contentsOf: root.appendingPathComponent("steer/\(agent.tty).delivered"), encoding: .utf8)
+        #expect(log.split(separator: "\n").count == 1)
     }
 }
 
