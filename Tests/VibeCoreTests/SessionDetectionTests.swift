@@ -61,6 +61,25 @@ struct ArgumentCacheTests {
         #expect(ProcessTable.agent(pid: 7, start: 1, comm: process.comm, tty: nil, arguments: cache) == nil)
         #expect(process.reads == 0)
     }
+
+    /// Codex 0.163's background daemon and its updater loop, as `ps` showed them on this Mac (no tty under launchd):
+    /// even if one ever ran on a terminal, it's the same `codex` binary but no session.
+    @Test func codexAppServerIsNeverASession() {
+        let binary = "/Users/me/.codex/packages/app-server-daemon/releases/0.163.0-aarch64-apple-darwin/bin/codex"
+        let daemons = [[binary, "app-server", "--listen", "unix://", "--analytics-default-enabled", "--managed-daemon"],
+                       [binary, "app-server", "daemon", "pid-update-loop"],
+                       ["codex", "app-server"],
+                       ["codex", "-c", "model=\"o3\"", "app-server", "--listen", "unix://"]]
+        for (index, argv) in daemons.enumerated() {
+            let cache = ArgumentCache { _ in argv }
+            #expect(ProcessTable.agent(pid: Int32(100 + index), start: 1, comm: "codex", tty: "ttys009", arguments: cache) == nil)
+            #expect(ProcessTable.agent(pid: Int32(100 + index), start: 1, comm: "codex", tty: nil, arguments: cache) == nil)
+        }
+        for argv in [["codex"], ["codex", "resume", "--last"], ["codex", "explain the app-server"]] {
+            let cache = ArgumentCache { _ in argv }
+            #expect(ProcessTable.agent(pid: 200, start: 1, comm: "codex", tty: "ttys009", arguments: cache) == .codex)
+        }
+    }
 }
 
 /// Hook-less sessions, status read off the tab title alone.

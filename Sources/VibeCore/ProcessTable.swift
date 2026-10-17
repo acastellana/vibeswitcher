@@ -110,8 +110,19 @@ public enum ProcessTable {
     static func agent(pid: Int32, start: Int, comm: String, tty: String?, arguments: ArgumentCache) -> Agent? {
         // Only terminal-attached processes can be sessions; skipping the rest keeps snapshots cheap.
         guard tty != nil else { return nil }
-        return Agent(comm: comm) ?? arguments.arguments(pid: pid, start: start, comm: comm).first
+        if let agent = Agent(comm: comm) {
+            // Codex's app server (its background daemon, the daemon's pid-update-loop, a stdio server someone
+            // started by hand) is the same `codex` binary but runs threads for sessions elsewhere: never one itself.
+            return agent == .codex && isCodexAppServer(arguments.arguments(pid: pid, start: start, comm: comm)) ? nil : agent
+        }
+        return arguments.arguments(pid: pid, start: start, comm: comm).first
             .map { ($0 as NSString).lastPathComponent }.flatMap(Agent.init(comm:))
+    }
+
+    /// `codex [options] app-server …`: `--listen unix:// --managed-daemon`, `daemon pid-update-loop`, plain stdio.
+    /// (A prompt is one argument, so a session's argv never holds a bare "app-server".)
+    public static func isCodexAppServer(_ arguments: [String]) -> Bool {
+        arguments.dropFirst().contains("app-server")
     }
 
     /// A process's argv (see `ArgumentCache`).
