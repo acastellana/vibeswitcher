@@ -288,13 +288,21 @@ struct LeadTeamPane: View {
     let notices: [String: String]
     @ObservedObject var summaries: TeamSummaryModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    private let timer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+    /// Counts 5-second ticks while it's on screen (a `.task`, so a re-render of the window doesn't restart it).
+    @State private var tick = 0
 
     var body: some View {
         LeadTeamView(root: root, board: board, seen: seen, open: open, answer: answer, notices: notices, decisions: decisions,
                      summary: { summaries.line($0) }, decisionSummary: { summaries.line($0) })
             .onAppear(perform: request)
-            .onReceive(timer) { _ in request() }
+            .onChange(of: tick) { request() }
+            .onChange(of: summaries.enabled) { request() }
+            .task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(5))
+                    tick += 1
+                }
+            }
     }
 
     private func request() {

@@ -138,6 +138,17 @@ struct TeamSummariesTests {
         #expect(ClaudeHeadless.run(executable: "/nonexistent/claude", args: [], timeout: 5) == nil)
     }
 
+    /// One real `claude -p` call on made-up text, only with `TEAM_SUMMARY_LIVE=1 swift test --filter TeamSummariesTests`.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["TEAM_SUMMARY_LIVE"] != nil)) func aRealSummaryIsOneShortLine() throws {
+        let prompt = SummaryPrompts.task(title: "Make the credential masker fast on huge inputs", role: "software agent",
+                                         checkpoints: [LeadCheckpoint(text: "Rules rewritten without backtracking", at: 0)],
+                                         steps: [TranscriptEntry(kind: .tool, id: "1", text: "swift test --filter Redaction", tool: "Bash"),
+                                                 TranscriptEntry(kind: .reply, id: "2", text: "The 40 KB case now takes 3 ms; checking the 1 MB case")])
+        let line = try #require(ClaudeHeadless.summarize(prompt).flatMap(Summarizer.clean))
+        print("summary: \(line)")
+        #expect(line.count <= Summarizer.limit && !line.contains("\n"))
+    }
+
     // MARK: Decisions
 
     @Test func decisionsReadFromTheirFileOldAndNewStamps() throws {
