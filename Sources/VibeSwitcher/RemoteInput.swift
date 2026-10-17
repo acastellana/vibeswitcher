@@ -81,6 +81,8 @@ enum RemoteInput {
         focusLock.lock()
         defer { focusLock.unlock() }
         guard stillAllowed() else { return .notAllowed }
+        // Again after the wait: the Mac may have locked during a jump.
+        if isScreenLocked { return .locked }
         guard SessionIdentity.isRunning(pid: agent.pid, startedAt: agent.startedAt),
               ProcessTable.info(pid: agent.pid)?.tty == tty else { return .sessionChanged }
         let active = HostApp.bringToFrontAndWait(terminal)

@@ -105,6 +105,7 @@ public enum PreviewGate {
     public static let expiredMessage = "This preview has expired. Open it again from VibeSwitcher on your phone."
     public static let crossOriginMessage = "Blocked: another page tried to use this preview."
     public static let badRequestMessage = "Bad request."
+    public static let wrongHostMessage = "This address isn't VibeSwitcher's."
     public static func unreachableMessage(_ target: PreviewTarget) -> String {
         "\(target.hostHeader) isn't answering. Is the dev server still running?"
     }
@@ -115,8 +116,14 @@ public enum PreviewGate {
         "\(cookieName(publicPort: publicPort))=\(token); Path=/; Secure; HttpOnly; SameSite=Strict"
     }
 
+    /// `accepts`: whether a session token is live. A request can carry several cookies of the slot's name
+    /// (a page on another port can plant one with a longer `Path`, which the browser sends first): the
+    /// live one wins.
     public static func decide(_ head: HTTPHead, owner: String, ownOrigin: String, siblingOrigins: Set<String>,
-                              publicPort: Int) -> Decision {
+                              publicPort: Int, accepts: (String) -> Bool = { _ in true }) -> Decision {
+        // Only the slot's own tailnet address (what `tailscale serve` passes on): a page that rebinds its
+        // name to 127.0.0.1 sends its own.
+        guard hostMatches(head, ownOrigin: ownOrigin) else { return .reject(status: 421, message: wrongHostMessage) }
         guard head.value("tailscale-user-login") == owner else { return .reject(status: 403, message: wrongAccountMessage) }
         if let origin = head.value("origin"), origin != ownOrigin, siblingOrigins.contains(origin) {
             return .reject(status: 403, message: crossOriginMessage)
@@ -130,10 +137,17 @@ public enum PreviewGate {
         if let site = head.value("sec-fetch-site")?.lowercased(), site == "same-site" || site == "cross-site" {
             return .reject(status: 403, message: crossOriginMessage)
         }
-        guard let token = cookie(cookieName(publicPort: publicPort), in: head) else {
-            return .reject(status: 403, message: expiredMessage)
-        }
-        return .forward(sessionToken: token)
+        let tokens = cookies(cookieName(publicPort: publicPort), in: head)
+        guard let first = tokens.first else { return .reject(status: 403, message: expiredMessage) }
+        return .forward(sessionToken: tokens.first(where: accepts) ?? first)
+    }
+
+    /// Exactly one `Host`, naming `ownOrigin`'s host and port.
+    static func hostMatches(_ head: HTTPHead, ownOrigin: String) -> Bool {
+        let hosts = head.values("host")
+        guard hosts.count == 1, let origin = URLComponents(string: ownOrigin), let host = origin.host,
+              let port = origin.port else { return false }
+        return RemoteGate.hostMatches(hosts[0], host: host, port: port)
     }
 
     /// At most one Content-Length (digits only) or a single `Transfer-Encoding: chunked`, never both.
@@ -238,13 +252,11 @@ public enum PreviewGate {
         return DevPages.safePath(path)
     }
 
-    static func cookie(_ name: String, in head: HTTPHead) -> String? {
-        for value in head.values("cookie") {
-            for pair in value.split(separator: ";") {
-                let pair = pair.trimmingCharacters(in: .whitespaces)
-                if pair.hasPrefix("\(name)=") { return String(pair.dropFirst(name.count + 1)) }
-            }
-        }
-        return nil
+    /// Every value of cookie `name`, in the order the browser sent them.
+    static func cookies(_ name: String, in head: HTTPHead) -> [String] {
+        head.values("cookie").flatMap { $0.split(separator: ";") }
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.hasPrefix("\(name)=") }
+            .map { String($0.dropFirst(name.count + 1)) }
     }
 }

@@ -133,3 +133,118 @@ public enum HTTPParser {
                                      headers: headers, body: Data(body)))
     }
 }
+
+/// Checks on every Phone Access request before the token is looked at.
+public enum RemoteGate {
+    /// Whether `Host` names this Mac's tailnet address (what `tailscale serve` passes on), optionally with
+    /// `port`. A page that rebinds its own name to 127.0.0.1 sends its own name here, so it's refused.
+    public static func hostMatches(_ header: String?, host: String, port: Int) -> Bool {
+        guard let header = header?.lowercased(), !header.isEmpty, !host.isEmpty else { return false }
+        let expected = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        var name = Substring(header)
+        if let colon = header.lastIndex(of: ":") {
+            guard header[header.index(after: colon)...] == "\(port)" else { return false }
+            name = header[..<colon]
+        }
+        if name.hasSuffix(".") { name = name.dropLast() }
+        return name == expected
+    }
+
+    /// Who a failed attempt is counted against: the account and the tailnet address `tailscale serve`
+    /// reports for the device (`X-Forwarded-For`). One noisy source can't throttle anyone else.
+    public static func source(login: String?, forwardedFor: String?) -> String {
+        let address = forwardedFor?.split(separator: ",").first?.trimmingCharacters(in: .whitespaces) ?? ""
+        return "\(login ?? "")|\(address.isEmpty ? "local" : address)"
+    }
+}
+
+/// Failed token checks per source. A request with a valid token is never throttled (the caller checks
+/// the token first), so failures from one place can't lock the paired phones out.
+public struct FailureThrottle: Sendable {
+    public let limit: Int
+    public let window: TimeInterval
+    /// Sources kept at most (the oldest go first): rotating sources can't grow this without bound.
+    public let maxSources: Int
+    private var failures: [String: [Date]] = [:]
+
+    public init(limit: Int = 20, window: TimeInterval = 60, maxSources: Int = 256) {
+        self.limit = limit
+        self.window = window
+        self.maxSources = maxSources
+    }
+
+    public func isThrottled(_ source: String, now: Date = Date()) -> Bool {
+        (failures[source] ?? []).filter { now.timeIntervalSince($0) < window }.count >= limit
+    }
+
+    public mutating func recordFailure(_ source: String, now: Date = Date()) {
+        failures = failures.compactMapValues { dates in
+            let recent = dates.filter { now.timeIntervalSince($0) < window }
+            return recent.isEmpty ? nil : recent
+        }
+        failures[source, default: []].append(now)
+        if failures[source]!.count > limit { failures[source]!.removeFirst(failures[source]!.count - limit) }
+        while failures.count > maxSources,
+              let oldest = failures.filter({ $0.key != source })
+                .min(by: { ($0.value.last ?? .distantPast) < ($1.value.last ?? .distantPast) })?.key {
+            failures[oldest] = nil
+        }
+    }
+}
+
+/// Whether a reply from the phone may be typed now. Checked when it arrives and again right before each
+/// write (a reply to a window session is several writes, a moment apart): the Mac can lock, the phone be
+/// removed or replies turned off in between.
+public enum RemoteInputGate {
+    public enum Verdict: Equatable, Sendable {
+        case allowed
+        /// The Mac is locked: nothing is typed (423).
+        case locked
+        /// Phone Access off, replies off, or the phone unpaired.
+        case notAllowed
+        /// The session ended or another one took its terminal.
+        case sessionChanged
+    }
+
+    public struct Conditions: Sendable {
+        public var screenLocked: Bool
+        public var accessOn: Bool
+        public var inputAllowed: Bool
+        public var devicePaired: Bool
+        public var sameSession: Bool
+
+        public init(screenLocked: Bool, accessOn: Bool, inputAllowed: Bool, devicePaired: Bool, sameSession: Bool) {
+            self.screenLocked = screenLocked
+            self.accessOn = accessOn
+            self.inputAllowed = inputAllowed
+            self.devicePaired = devicePaired
+            self.sameSession = sameSession
+        }
+    }
+
+    public static func verdict(_ conditions: Conditions) -> Verdict {
+        if conditions.screenLocked { return .locked }
+        guard conditions.accessOn, conditions.inputAllowed, conditions.devicePaired else { return .notAllowed }
+        guard conditions.sameSession else { return .sessionChanged }
+        return .allowed
+    }
+
+    /// Runs `writes` one after another (`after` waits that long, then runs the block), asking `check`
+    /// right before each one. The first verdict that isn't `.allowed` stops it: that write and the ones
+    /// after it are dropped, and `stopped` gets the verdict and how many writes went out.
+    public static func deliver(_ writes: [HostInput.Write], check: @escaping () -> Verdict,
+                               after: @escaping (TimeInterval, @escaping () -> Void) -> Void,
+                               send: @escaping ([UInt8]) -> Void,
+                               stopped: @escaping (Verdict, _ sent: Int) -> Void = { _, _ in }) {
+        func step(_ index: Int) {
+            guard index < writes.count else { return }
+            after(writes[index].delay) {
+                let verdict = check()
+                guard verdict == .allowed else { return stopped(verdict, index) }
+                send(writes[index].bytes)
+                step(index + 1)
+            }
+        }
+        step(0)
+    }
+}

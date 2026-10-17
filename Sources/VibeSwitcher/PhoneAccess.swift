@@ -76,7 +76,10 @@ final class PhoneAccess: ObservableObject {
     private var historyWaiters: [String: [([String]?) -> Void]] = [:]
     /// Scrollback and transcript reads: their own queue, so a big read never holds up the live screen.
     private let transcriptReads = DispatchQueue(label: "vibeswitcher.phone-access.transcripts", qos: .userInitiated)
-    private var failedAuth: [Date] = []
+    /// Failed token checks, per source (see `RemoteGate.source`).
+    private var failedAuth = FailureThrottle()
+    /// Whether the Mac's screen is locked; replaceable so the lock rule can be exercised without locking.
+    var screenLocked: () -> Bool = { RemoteInput.isScreenLocked }
     private lazy var previews = DevPreviews(control: control)
     /// Reading Chrome's tabs: its own queue, so a slow Chrome (or a pending Automation prompt) never holds
     /// up Terminal screen reads.
@@ -336,22 +339,35 @@ final class PhoneAccess: ObservableObject {
     func remove(_ device: PairedDevice) {
         devices.removeAll { $0.id == device.id }
         saveDevices()
+        // Its open dev pages too: their sessions belong to the device.
+        previews.revoke(device: device.id)
         audit("removed \(device.name)")
     }
 
     // MARK: - Routing (main thread)
 
     private func route(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
-        guard state == .on, let owner = tailscale?.login else { return respond(.error(503, "phone access is off")) }
+        guard state == .on, let owner = tailscale?.login, let host = tailscale?.dnsName else {
+            return respond(.error(503, "phone access is off"))
+        }
+        // Only this Mac's tailnet name, the one `tailscale serve` passes on: a page in a browser on the Mac
+        // that rebinds its own name to 127.0.0.1 sends its own name, and gets nothing (not even the app).
+        guard RemoteGate.hostMatches(request.header("host"), host: host, port: Self.httpsPort) else {
+            return respond(.error(421, "wrong host"))
+        }
         // Only requests relayed by `tailscale serve` for this Mac's own account.
         guard request.header("tailscale-user-login") == owner else { return respond(.error(403, "not your tailnet account")) }
         if request.method == "GET", let asset = WebAssets.response(for: request.path) { return respond(asset) }
         if request.method == "POST", request.path == "/api/pair" { return respond(pair(request, owner: owner)) }
         guard request.path.hasPrefix("/api/") else { return respond(.error(404, "not found")) }
-        if isThrottled { return respond(.error(429, "too many failed attempts; wait a minute")) }
+        // A valid token always gets in; only the source of failed attempts is slowed down (so nothing can
+        // lock the paired phones out by sending bad tokens).
         guard let device = RemoteAuth.authenticate(authorization: request.header("authorization"),
                                                    login: request.header("tailscale-user-login"), devices: devices) else {
-            failedAuth.append(Date())
+            let source = RemoteGate.source(login: request.header("tailscale-user-login"),
+                                           forwardedFor: request.header("x-forwarded-for"))
+            if failedAuth.isThrottled(source) { return respond(.error(429, "too many failed attempts; wait a minute")) }
+            failedAuth.recordFailure(source)
             return respond(.error(401, "this device isn't paired"))
         }
         touch(device)
@@ -380,11 +396,6 @@ final class PhoneAccess: ObservableObject {
             respond(.json(["ok": true]))
         default: respond(.error(404, "not found"))
         }
-    }
-
-    private var isThrottled: Bool {
-        failedAuth = failedAuth.filter { $0.timeIntervalSinceNow > -60 }
-        return failedAuth.count >= 20
     }
 
     private func body(_ request: HTTPRequest) -> [String: Any]? {
@@ -679,7 +690,7 @@ final class PhoneAccess: ObservableObject {
                 guard case .success(let pages) = result, let page = pages.first(where: { DevPages.id(for: $0) == id }) else {
                     return respond(.error(404, "That page isn't open in Chrome on your Mac anymore."))
                 }
-                guard let url = self.previews.open(page) else {
+                guard let url = self.previews.open(page, device: device.id) else {
                     return respond(.error(503, "No preview slot is available right now."))
                 }
                 self.audit("\(device.name) opened \(Redaction.secrets(in: page.target.hostHeader + page.path))")
@@ -711,13 +722,24 @@ final class PhoneAccess: ObservableObject {
         let sid = session.identity
         if let hostID = session.hostID {
             // Straight into the session's terminal: no focus changes, no Accessibility, nothing typed elsewhere.
-            let allowed = {
-                self.state == .on && self.inputAllowed && self.devices.contains { $0.id == device.id }
-                    && self.store.sessions.first(where: { $0.tty == tty })?.identity == sid
-                    && SessionIdentity.isRunning(pid: session.pid, startedAt: session.startedAt)
-                    && ProcessTable.info(pid: session.pid)?.tty == tty
+            // The same rules as the Terminal path (the lock included), before each write.
+            let check = { [weak self] () -> RemoteInputGate.Verdict in
+                guard let self else { return .notAllowed }
+                return RemoteInputGate.verdict(.init(
+                    screenLocked: self.screenLocked(), accessOn: self.state == .on, inputAllowed: self.inputAllowed,
+                    devicePaired: self.devices.contains { $0.id == device.id },
+                    sameSession: self.store.sessions.first(where: { $0.tty == tty })?.identity == sid
+                        && SessionIdentity.isRunning(pid: session.pid, startedAt: session.startedAt)
+                        && ProcessTable.info(pid: session.pid)?.tty == tty))
             }
-            guard allowed() else { return respond(.error(409, Self.sessionChanged)) }
+            switch check() {
+            case .allowed: break
+            case .locked:
+                audit("input to \(session.displayName) from \(device.name) refused: \(RemoteInput.Failure.locked)")
+                return respond(.error(423, RemoteInput.Failure.locked.description))
+            case .notAllowed: return respond(.error(409, RemoteInput.Failure.notAllowed.description))
+            case .sessionChanged: return respond(.error(409, Self.sessionChanged))
+            }
             var clean: String?
             if let text {
                 guard let sanitized = RemoteInput.sanitized(text) else {
@@ -725,14 +747,15 @@ final class PhoneAccess: ObservableObject {
                 }
                 clean = sanitized
             }
-            var at: TimeInterval = 0
-            for write in HostInput.writes(text: clean, submit: submit, key: key?.rawValue) {
-                at += write.delay
-                DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
-                    guard let self, allowed() else { return }
-                    self.hostClient?.send(hostID, bytes: Data(write.bytes), reply: false)
-                }
-            }
+            let writes = HostInput.writes(text: clean, submit: submit, key: key?.rawValue)
+            let at = writes.reduce(0) { $0 + $1.delay }
+            RemoteInputGate.deliver(writes, check: check, after: { delay, block in
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: block)
+            }, send: { [weak self] bytes in
+                self?.hostClient?.send(hostID, bytes: Data(bytes), reply: false)
+            }, stopped: { [weak self] verdict, sent in
+                self?.audit("input to \(session.displayName) from \(device.name) stopped after \(sent) of \(writes.count) writes: \(verdict)")
+            })
             audit("\(device.name) typed into \(session.displayName): \(summary)")
             onEvent?("\(device.name) typed into \(session.displayName)", summary)
             DispatchQueue.main.asyncAfter(deadline: .now() + at + 0.1) { self.store.refresh() }

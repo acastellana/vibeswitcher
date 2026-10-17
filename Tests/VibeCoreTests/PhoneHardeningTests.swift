@@ -1,0 +1,230 @@
+import Foundation
+import Testing
+@testable import VibeCore
+
+/// F-P1: replies to window sessions obey the screen lock, before every write.
+struct RemoteInputGateTests {
+    func conditions(locked: Bool = false, on: Bool = true, input: Bool = true, paired: Bool = true,
+                    same: Bool = true) -> RemoteInputGate.Conditions {
+        .init(screenLocked: locked, accessOn: on, inputAllowed: input, devicePaired: paired, sameSession: same)
+    }
+
+    @Test func aLockedMacRefusesWhateverElseHolds() {
+        #expect(RemoteInputGate.verdict(conditions()) == .allowed)
+        #expect(RemoteInputGate.verdict(conditions(locked: true)) == .locked)
+        #expect(RemoteInputGate.verdict(conditions(locked: true, paired: false, same: false)) == .locked)
+        #expect(RemoteInputGate.verdict(conditions(on: false)) == .notAllowed)
+        #expect(RemoteInputGate.verdict(conditions(input: false)) == .notAllowed)
+        #expect(RemoteInputGate.verdict(conditions(paired: false)) == .notAllowed)
+        #expect(RemoteInputGate.verdict(conditions(same: false)) == .sessionChanged)
+    }
+
+    /// Runs the delayed writes by hand, so the lock can change between them.
+    final class Harness {
+        var locked = false
+        var pending: [() -> Void] = []
+        var sent: [[UInt8]] = []
+        var stopped: (RemoteInputGate.Verdict, Int)?
+
+        func deliver(_ writes: [HostInput.Write]) {
+            RemoteInputGate.deliver(writes, check: { [unowned self] in
+                RemoteInputGate.verdict(.init(screenLocked: self.locked, accessOn: true, inputAllowed: true,
+                                              devicePaired: true, sameSession: true))
+            }, after: { [unowned self] _, block in self.pending.append(block) },
+               send: { [unowned self] in self.sent.append($0) },
+               stopped: { [unowned self] in self.stopped = ($0, $1) })
+        }
+
+        func runNext() { if !pending.isEmpty { pending.removeFirst()() } }
+    }
+
+    @Test func lockingBetweenTheTextAndEnterDropsEnter() {
+        let harness = Harness()
+        harness.deliver(HostInput.writes(text: "rm -rf build", submit: true, key: nil))
+        harness.runNext()                       // the text goes out
+        #expect(harness.sent == [Array("rm -rf build".utf8)])
+        harness.locked = true                   // the Mac locks before Enter
+        harness.runNext()
+        #expect(harness.sent.count == 1)        // Enter never reaches the session
+        #expect(harness.stopped?.0 == .locked)
+        #expect(harness.stopped?.1 == 1)
+        #expect(harness.pending.isEmpty)        // and nothing else is queued
+    }
+
+    @Test func lockedFromTheStartNothingIsWritten() {
+        let harness = Harness()
+        harness.locked = true
+        harness.deliver(HostInput.writes(text: "hello", submit: true, key: nil))
+        while !harness.pending.isEmpty { harness.runNext() }
+        #expect(harness.sent.isEmpty)
+        #expect(harness.stopped?.0 == .locked)
+    }
+
+    @Test func unlockedEveryWriteGoesOutInOrder() {
+        let harness = Harness()
+        harness.deliver(HostInput.writes(text: "yes", submit: true, key: nil))
+        while !harness.pending.isEmpty { harness.runNext() }
+        #expect(harness.sent == [Array("yes".utf8), [13]])
+        #expect(harness.stopped == nil)
+    }
+}
+
+/// F-P2: only the tailnet name gets in, and failures are counted per source.
+struct RemoteGateTests {
+    let host = "mac.tail1234.ts.net"
+
+    @Test func onlyTheTailnetNameIsServed() {
+        #expect(RemoteGate.hostMatches("mac.tail1234.ts.net:8443", host: host, port: 8443))
+        #expect(RemoteGate.hostMatches("MAC.tail1234.ts.net.:8443", host: host, port: 8443))
+        #expect(RemoteGate.hostMatches("mac.tail1234.ts.net", host: host, port: 8443))
+        // DNS rebinding: the attacker's own name, or loopback.
+        #expect(!RemoteGate.hostMatches("evil.example:8443", host: host, port: 8443))
+        #expect(!RemoteGate.hostMatches("evil.example", host: host, port: 8443))
+        #expect(!RemoteGate.hostMatches("127.0.0.1:47823", host: host, port: 8443))
+        #expect(!RemoteGate.hostMatches("localhost:47823", host: host, port: 8443))
+        #expect(!RemoteGate.hostMatches("mac.tail1234.ts.net.evil.example:8443", host: host, port: 8443))
+        #expect(!RemoteGate.hostMatches("mac.tail1234.ts.net:8444", host: host, port: 8443))
+        #expect(!RemoteGate.hostMatches(nil, host: host, port: 8443))
+        #expect(!RemoteGate.hostMatches("", host: host, port: 8443))
+    }
+
+    @Test func badTokensFromOneSourceDontThrottleAnother() {
+        var throttle = FailureThrottle(limit: 20, window: 60)
+        let t0 = Date(timeIntervalSince1970: 1000)
+        let attacker = RemoteGate.source(login: "me@example.com", forwardedFor: nil)
+        let phone = RemoteGate.source(login: "me@example.com", forwardedFor: "100.64.0.7")
+        #expect(attacker != phone)
+        for i in 0..<20 { throttle.recordFailure(attacker, now: t0.addingTimeInterval(Double(i))) }
+        #expect(throttle.isThrottled(attacker, now: t0.addingTimeInterval(21)))
+        #expect(!throttle.isThrottled(phone, now: t0.addingTimeInterval(21)))
+        // A minute later the attacker's failures have aged out.
+        #expect(!throttle.isThrottled(attacker, now: t0.addingTimeInterval(81)))
+    }
+
+    @Test func aValidTokenAuthenticatesWhileItsSourceIsThrottled() {
+        // The server checks the token first and only consults the throttle when it fails.
+        let token = RemoteAuth.newToken()
+        let device = PairedDevice(id: "p", name: "Pixel", tokenHash: RemoteAuth.hash(token),
+                                  tailscaleLogin: "me@example.com", pairedAt: Date())
+        var throttle = FailureThrottle()
+        let source = RemoteGate.source(login: "me@example.com", forwardedFor: "100.64.0.7")
+        for _ in 0..<50 { throttle.recordFailure(source) }
+        #expect(throttle.isThrottled(source))
+        #expect(RemoteAuth.authenticate(authorization: "Bearer \(token)", login: "me@example.com", devices: [device]) == device)
+    }
+
+    @Test func rotatingSourcesCantGrowTheTableForever() {
+        var throttle = FailureThrottle(limit: 20, window: 60, maxSources: 8)
+        let t0 = Date(timeIntervalSince1970: 1000)
+        for i in 0..<1000 { throttle.recordFailure("s\(i)", now: t0) }
+        for i in 0..<20 { throttle.recordFailure("loud", now: t0.addingTimeInterval(Double(i) / 100)) }
+        #expect(throttle.isThrottled("loud", now: t0.addingTimeInterval(1)))
+    }
+
+    @Test func theSourceIsTheFirstForwardedAddress() {
+        #expect(RemoteGate.source(login: "me", forwardedFor: "100.64.0.7, 127.0.0.1") == "me|100.64.0.7")
+        #expect(RemoteGate.source(login: nil, forwardedFor: "") == "|local")
+    }
+
+    @Test func previewPortsOnlyAnswerTheirOwnTailnetAddress() {
+        let own = "https://mac.example.ts.net:8444"
+        func decide(_ raw: String) -> PreviewGate.Decision {
+            PreviewGate.decide(requestHead(raw), owner: "me@example.com", ownOrigin: own, siblingOrigins: [], publicPort: 8444)
+        }
+        let rest = "Tailscale-User-Login: me@example.com\r\nCookie: vs_preview_8444=T\r\n"
+        let wrong = PreviewGate.Decision.reject(status: 421, message: PreviewGate.wrongHostMessage)
+        #expect(decide("GET / HTTP/1.1\r\nHost: mac.example.ts.net:8444\r\n\(rest)") == .forward(sessionToken: "T"))
+        #expect(decide("GET / HTTP/1.1\r\nHost: evil.example:8444\r\n\(rest)") == wrong)
+        #expect(decide("GET / HTTP/1.1\r\nHost: 127.0.0.1:47824\r\n\(rest)") == wrong)
+        #expect(decide("GET / HTTP/1.1\r\nHost: mac.example.ts.net:8445\r\n\(rest)") == wrong)
+        #expect(decide("GET / HTTP/1.1\r\n\(rest)") == wrong)
+        #expect(decide("GET / HTTP/1.1\r\nHost: mac.example.ts.net:8444\r\nHost: evil.example\r\n\(rest)") == wrong)
+        // The ticket link too.
+        #expect(decide("GET /__vibeswitcher/enter?t=abc HTTP/1.1\r\nHost: evil.example\r\nTailscale-User-Login: me@example.com\r\n") == wrong)
+    }
+}
+
+/// F-D1: preview sessions belong to the device that opened them.
+struct PreviewDeviceTests {
+    let vite = PreviewTarget(connectHost: "localhost", hostHeader: "localhost:5173", port: 5173)
+    let t0 = Date(timeIntervalSince1970: 1000)
+
+    func counter() -> () -> String {
+        var n = 0
+        return { n += 1; return "token\(n)" }
+    }
+
+    @Test func unpairingADeviceEndsItsSessions() throws {
+        var slots = PreviewSlots(count: 1)
+        let tokens = counter()
+        let openedA = slots.open(vite, path: "/", device: "A", now: t0, newToken: tokens)
+        let a = try #require(openedA)
+        let redeemedA = slots.redeem(a.ticket, slot: a.slot, now: t0, newToken: tokens)
+        let sessionA = try #require(redeemedA).sessionToken
+        let openedB = slots.open(vite, path: "/", device: "B", now: t0, newToken: tokens)
+        let b = try #require(openedB)
+        let redeemedB = slots.redeem(b.ticket, slot: b.slot, now: t0, newToken: tokens)
+        let sessionB = try #require(redeemedB).sessionToken
+        // Each phone has its own session on the slot.
+        #expect(sessionA != sessionB)
+        #expect(redeemedB?.clearSite == true)
+        let ended = slots.revoke(device: "A")
+        #expect(ended.map(\.token) == [sessionA])
+        let afterA = slots.target(slot: 0, sessionToken: sessionA, now: t0)
+        #expect(afterA == nil)
+        #expect(!slots.isLive(slot: 0, sessionToken: sessionA, now: t0))
+        // The other phone keeps working.
+        let afterB = slots.target(slot: 0, sessionToken: sessionB, now: t0)
+        #expect(afterB == vite)
+    }
+
+    @Test func anUnpairedDevicesUnusedTicketIsDeadToo() throws {
+        var slots = PreviewSlots(count: 1)
+        let opened = slots.open(vite, path: "/", device: "A", now: t0, newToken: counter())
+        let ticket = try #require(opened).ticket
+        slots.revoke(device: "A")
+        let redeemed = slots.redeem(ticket, slot: 0, now: t0)
+        #expect(redeemed == nil)
+    }
+
+    @Test func aSessionInConstantUseStillEndsAfterItsLifetime() throws {
+        var slots = PreviewSlots(count: 1)
+        let tokens = counter()
+        let opened = slots.open(vite, path: "/", device: "A", now: t0, newToken: tokens)
+        let ticket = try #require(opened).ticket
+        let redeemed = slots.redeem(ticket, slot: 0, now: t0, newToken: tokens)
+        let session = try #require(redeemed).sessionToken
+        // Used every hour, never idle…
+        var at = t0
+        while at.timeIntervalSince(t0) < PreviewSlots.lifetime - 3600 {
+            at = at.addingTimeInterval(3600)
+            let used = slots.target(slot: 0, sessionToken: session, now: at)
+            #expect(used == vite)
+        }
+        // …but past its lifetime it's over.
+        let late = slots.target(slot: 0, sessionToken: session, now: t0.addingTimeInterval(PreviewSlots.lifetime + 1))
+        #expect(late == nil)
+        // Opening the page again gives a fresh session.
+        let again = slots.open(vite, path: "/", device: "A", now: t0.addingTimeInterval(PreviewSlots.lifetime + 2), newToken: tokens)
+        let againTicket = try #require(again).ticket
+        let fresh = slots.redeem(againTicket, slot: 0, now: t0.addingTimeInterval(PreviewSlots.lifetime + 2), newToken: tokens)
+        #expect(fresh?.sessionToken != session)
+        #expect(fresh?.clearSite == true)
+    }
+}
+
+/// F-D2: a cookie planted by another port's page can't shadow the slot's own.
+struct PreviewShadowCookieTests {
+    @Test func theLiveSessionWinsOverAShadowCookie() {
+        let raw = "GET /app/x HTTP/1.1\r\nHost: mac.example.ts.net:8444\r\nTailscale-User-Login: me@example.com\r\n"
+            + "Cookie: vs_preview_8444=bad; theme=dark; vs_preview_8444=good\r\n"
+        let decision = PreviewGate.decide(requestHead(raw), owner: "me@example.com", ownOrigin: "https://mac.example.ts.net:8444",
+                                          siblingOrigins: [], publicPort: 8444, accepts: { $0 == "good" })
+        #expect(decision == .forward(sessionToken: "good"))
+        // Spread over two Cookie fields as well.
+        let split = "GET /app/x HTTP/1.1\r\nHost: mac.example.ts.net:8444\r\nTailscale-User-Login: me@example.com\r\n"
+            + "Cookie: vs_preview_8444=bad\r\nCookie: vs_preview_8444=good\r\n"
+        #expect(PreviewGate.decide(requestHead(split), owner: "me@example.com", ownOrigin: "https://mac.example.ts.net:8444",
+                                   siblingOrigins: [], publicPort: 8444, accepts: { $0 == "good" }) == .forward(sessionToken: "good"))
+    }
+}

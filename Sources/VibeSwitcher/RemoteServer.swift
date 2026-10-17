@@ -23,7 +23,7 @@ struct HTTPResponse {
 
     func serialized() -> Data {
         let reason = [200: "OK", 204: "No Content", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden",
-                      404: "Not Found", 409: "Conflict", 413: "Payload Too Large", 423: "Locked",
+                      404: "Not Found", 409: "Conflict", 413: "Payload Too Large", 421: "Misdirected Request", 423: "Locked",
                       429: "Too Many Requests", 500: "Internal Server Error", 503: "Service Unavailable"][status] ?? "Status"
         var head = "HTTP/1.1 \(status) \(reason)\r\n"
         head += "Content-Type: \(contentType)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n"

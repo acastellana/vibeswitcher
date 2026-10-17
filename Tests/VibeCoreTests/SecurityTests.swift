@@ -148,7 +148,7 @@ struct TerminalTabRecordsTests {
 }
 
 struct RequestFramingTests {
-    let me = "Tailscale-User-Login: me@example.com\r\nCookie: vs_preview_8444=T\r\n"
+    let me = "Host: mac.example.ts.net:8444\r\nTailscale-User-Login: me@example.com\r\nCookie: vs_preview_8444=T\r\n"
 
     func decide(_ raw: String) -> PreviewGate.Decision {
         PreviewGate.decide(requestHead(raw), owner: "me@example.com", ownOrigin: "https://mac.example.ts.net:8444",

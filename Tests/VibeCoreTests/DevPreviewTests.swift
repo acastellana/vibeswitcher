@@ -55,14 +55,14 @@ struct PreviewSlotsTests {
     @Test func ticketsWorkOnceOnTheirOwnSlotWithinAMinute() throws {
         var slots = PreviewSlots(count: 2)
         let tokens = counter()
-        let firstResult = slots.open(vite, path: "/a", now: t0, newToken: tokens)
+        let firstResult = slots.open(vite, path: "/a", device: "phone", now: t0, newToken: tokens)
         let first = try #require(firstResult)
         // Presented on the wrong slot, a ticket is burned.
         let wrongSlot = slots.redeem(first.ticket, slot: first.slot == 0 ? 1 : 0, now: t0, newToken: tokens)
         #expect(wrongSlot == nil)
         let afterBurn = slots.redeem(first.ticket, slot: first.slot, now: t0, newToken: tokens)
         #expect(afterBurn == nil)
-        let secondResult = slots.open(vite, path: "/b", now: t0, newToken: tokens)
+        let secondResult = slots.open(vite, path: "/b", device: "phone", now: t0, newToken: tokens)
         let second = try #require(secondResult)
         let entryResult = slots.redeem(second.ticket, slot: second.slot, now: t0.addingTimeInterval(59), newToken: tokens)
         let entry = try #require(entryResult)
@@ -75,7 +75,7 @@ struct PreviewSlotsTests {
         #expect(wrongToken == nil)
         let noToken = slots.target(slot: second.slot, sessionToken: nil, now: t0)
         #expect(noToken == nil)
-        let lateResult = slots.open(vite, path: "/c", now: t0, newToken: tokens)
+        let lateResult = slots.open(vite, path: "/c", device: "phone", now: t0, newToken: tokens)
         let late = try #require(lateResult)
         let expired = slots.redeem(late.ticket, slot: late.slot, now: t0.addingTimeInterval(61), newToken: tokens)
         #expect(expired == nil)
@@ -84,19 +84,19 @@ struct PreviewSlotsTests {
     @Test func reusesASlotPerServerAndTakesOverTheLeastRecentlyUsed() throws {
         var slots = PreviewSlots(count: 1)
         let tokens = counter()
-        let firstResult = slots.open(vite, path: "/", now: t0, newToken: tokens)
+        let firstResult = slots.open(vite, path: "/", device: "phone", now: t0, newToken: tokens)
         let first = try #require(firstResult)
         let viteSessionResult = slots.redeem(first.ticket, slot: 0, now: t0, newToken: tokens)
         let viteSession = try #require(viteSessionResult).sessionToken
         // The same server again: same slot, same session, so tabs already open keep working.
-        let secondResult = slots.open(vite, path: "/x", now: t0, newToken: tokens)
+        let secondResult = slots.open(vite, path: "/x", device: "phone", now: t0, newToken: tokens)
         let second = try #require(secondResult)
         #expect(second.slot == 0)
         let againResult = slots.redeem(second.ticket, slot: 0, now: t0, newToken: tokens)
         let again = try #require(againResult)
         #expect(again.sessionToken == viteSession)
         // Another server takes the only slot: the old session stops working and never sees the new server.
-        let thirdResult = slots.open(next, path: "/", now: t0.addingTimeInterval(1), newToken: tokens)
+        let thirdResult = slots.open(next, path: "/", device: "phone", now: t0.addingTimeInterval(1), newToken: tokens)
         let third = try #require(thirdResult)
         #expect(third.slot == 0)
         let oldTab = slots.target(slot: 0, sessionToken: viteSession, now: t0)
@@ -109,17 +109,17 @@ struct PreviewSlotsTests {
     @Test func theFirstRedeemAfterATakeoverAsksToClearTheOldServersStorage() throws {
         var slots = PreviewSlots(count: 1)
         let tokens = counter()
-        let aResult = slots.open(vite, path: "/", now: t0, newToken: tokens)
+        let aResult = slots.open(vite, path: "/", device: "phone", now: t0, newToken: tokens)
         let a = try #require(aResult)
         let firstResult = slots.redeem(a.ticket, slot: 0, now: t0, newToken: tokens)
         let first = try #require(firstResult)
         #expect(first.clearSite)                          // nothing to keep from whatever used the port before
-        let againResult = slots.open(vite, path: "/x", now: t0, newToken: tokens)
+        let againResult = slots.open(vite, path: "/x", device: "phone", now: t0, newToken: tokens)
         let again = try #require(againResult)
         let reusedResult = slots.redeem(again.ticket, slot: 0, now: t0, newToken: tokens)
         let reused = try #require(reusedResult)
         #expect(!reused.clearSite)
-        let bResult = slots.open(next, path: "/", now: t0, newToken: tokens)
+        let bResult = slots.open(next, path: "/", device: "phone", now: t0, newToken: tokens)
         let b = try #require(bResult)
         let takeoverResult = slots.redeem(b.ticket, slot: 0, now: t0, newToken: tokens)
         let takeover = try #require(takeoverResult)
@@ -130,21 +130,21 @@ struct PreviewSlotsTests {
         var slots = PreviewSlots(count: 3)
         let tokens = counter()
         slots.setAvailable(2, false)
-        let aResult = slots.open(vite, path: "/", now: t0, newToken: tokens)
+        let aResult = slots.open(vite, path: "/", device: "phone", now: t0, newToken: tokens)
         let a = try #require(aResult)
-        let bResult = slots.open(next, path: "/", now: t0.addingTimeInterval(1), newToken: tokens)
+        let bResult = slots.open(next, path: "/", device: "phone", now: t0.addingTimeInterval(1), newToken: tokens)
         let b = try #require(bResult)
         #expect(a.slot == 0)
         #expect(b.slot == 1)
         let aSessionResult = slots.redeem(a.ticket, slot: a.slot, now: t0, newToken: tokens)
         let aSession = try #require(aSessionResult).sessionToken
         _ = slots.target(slot: a.slot, sessionToken: aSession, now: t0.addingTimeInterval(2))   // slot 0 used last
-        let cResult = slots.open(other, path: "/", now: t0.addingTimeInterval(3), newToken: tokens)
+        let cResult = slots.open(other, path: "/", device: "phone", now: t0.addingTimeInterval(3), newToken: tokens)
         let c = try #require(cResult)
         #expect(c.slot == 1)
         slots.setAvailable(0, false)
         slots.setAvailable(1, false)
-        let none = slots.open(vite, path: "/", now: t0, newToken: tokens)
+        let none = slots.open(vite, path: "/", device: "phone", now: t0, newToken: tokens)
         #expect(none == nil)
     }
 }
@@ -196,16 +196,16 @@ struct HTTPHeadTests {
 struct PreviewGateTests {
     let own = "https://mac.example.ts.net:8444"
     let siblings: Set<String> = Set((8443...8447).map { "https://mac.example.ts.net:\($0)" })
-    let me = "Tailscale-User-Login: me@example.com\r\n"
+    let me = "Host: mac.example.ts.net:8444\r\nTailscale-User-Login: me@example.com\r\n"
 
     func decide(_ raw: String) -> PreviewGate.Decision {
         PreviewGate.decide(requestHead(raw), owner: "me@example.com", ownOrigin: own, siblingOrigins: siblings, publicPort: 8444)
     }
 
     @Test func decidesWhoGetsThrough() {
-        #expect(decide("GET / HTTP/1.1\r\nCookie: vs_preview_8444=T\r\n")
+        #expect(decide("GET / HTTP/1.1\r\nHost: mac.example.ts.net:8444\r\nCookie: vs_preview_8444=T\r\n")
                 == .reject(status: 403, message: PreviewGate.wrongAccountMessage))
-        #expect(decide("GET / HTTP/1.1\r\nTailscale-User-Login: other@example.com\r\nCookie: vs_preview_8444=T\r\n")
+        #expect(decide("GET / HTTP/1.1\r\nHost: mac.example.ts.net:8444\r\nTailscale-User-Login: other@example.com\r\nCookie: vs_preview_8444=T\r\n")
                 == .reject(status: 403, message: PreviewGate.wrongAccountMessage))
         #expect(decide("GET /__vibeswitcher/enter?t=abc HTTP/1.1\r\n\(me)") == .enter(ticket: "abc"))
         #expect(decide("GET /x HTTP/1.1\r\n\(me)Cookie: a=1; vs_preview_8444=T\r\n") == .forward(sessionToken: "T"))
@@ -222,7 +222,7 @@ struct PreviewGateTests {
     @Test func rewritesRequestsForTheDevServer() {
         let target = PreviewTarget(connectHost: "localhost", hostHeader: "localhost:5173", port: 5173)
         let rewritten = PreviewGate.upstreamRequest(requestHead(
-            "GET /src/main.ts HTTP/1.1\r\nHost: mac.example.ts.net:8444\r\n\(me)Tailscale-User-Name: Me\r\n"
+            "GET /src/main.ts HTTP/1.1\r\n\(me)Tailscale-User-Name: Me\r\n"
             + "Origin: \(own)\r\nReferer: \(own)/settings\r\nCookie: theme=dark; vs_preview_8444=T\r\n"
             + "Connection: keep-alive\r\nKeep-Alive: timeout=5\r\n"), target: target, ownOrigin: own, publicPort: 8444)
         #expect(rewritten.startLine == "GET /src/main.ts HTTP/1.1")
@@ -496,7 +496,7 @@ struct PreviewProxyTests {
         #expect(page.contains("&quot;&gt;&lt;script&gt;"))
     }
 
-    static let me = "Tailscale-User-Login: me@example.com\r\n"
+    static let me = "Host: mac.example.ts.net:8444\r\nTailscale-User-Login: me@example.com\r\n"
     static let ours = "Cookie: vs_preview_8444=TOK\r\n"
 
     func startProxy(target: PreviewTarget?, redeemed: (path: String, sessionToken: String, clearSite: Bool)? = nil) async throws -> (PreviewProxy, UInt16) {
@@ -580,7 +580,7 @@ struct PreviewProxyTests {
         let (proxy, port) = try await startProxy(target: target)
         defer { proxy.stop(); upstream.stop() }
         let response = text(await exchange(port: port,
-            "GET /x?y=1 HTTP/1.1\r\nHost: mac.example.ts.net:8444\r\n\(Self.me)Tailscale-User-Name: Me\r\n"
+            "GET /x?y=1 HTTP/1.1\r\n\(Self.me)Tailscale-User-Name: Me\r\n"
             + "Origin: https://mac.example.ts.net:8444\r\nCookie: theme=dark; vs_preview_8444=TOK\r\nConnection: keep-alive\r\n\r\n"))
         let seen = try #require(upstream.recorded.first)
         #expect(seen.hasPrefix("GET /x?y=1 HTTP/1.1\r\n"))
@@ -601,7 +601,7 @@ struct PreviewProxyTests {
         let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstreamPort)", port: Int(upstreamPort))
         let (proxy, port) = try await startProxy(target: target)
         defer { proxy.stop(); upstream.stop() }
-        let other = text(await exchange(port: port, "GET / HTTP/1.1\r\nTailscale-User-Login: someone@else.com\r\n\(Self.ours)\r\n"))
+        let other = text(await exchange(port: port, "GET / HTTP/1.1\r\nHost: mac.example.ts.net:8444\r\nTailscale-User-Login: someone@else.com\r\n\(Self.ours)\r\n"))
         #expect(other.hasPrefix("HTTP/1.1 403"))
         let stale = text(await exchange(port: port, "GET / HTTP/1.1\r\n\(Self.me)Cookie: vs_preview_8444=OLD\r\n\r\n"))
         #expect(stale.hasPrefix("HTTP/1.1 403"))

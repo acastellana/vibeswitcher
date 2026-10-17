@@ -8,7 +8,7 @@ import Testing
 struct PreviewGateHardeningTests {
     let own = "https://mac.example.ts.net:8444"
     let siblings: Set<String> = Set((8443...8447).map { "https://mac.example.ts.net:\($0)" })
-    let me = "Tailscale-User-Login: me@example.com\r\n"
+    let me = "Host: mac.example.ts.net:8444\r\nTailscale-User-Login: me@example.com\r\n"
     let target = PreviewTarget(connectHost: "localhost", hostHeader: "localhost:5173", port: 5173)
 
     func decide(_ raw: String) -> PreviewGate.Decision {
@@ -74,7 +74,7 @@ struct PreviewSessionExpiryTests {
 
     @Test func anIdleSessionExpires() throws {
         var slots = PreviewSlots(count: 1)
-        let opened = slots.open(vite, path: "/", now: t0, newToken: { "ticket" })
+        let opened = slots.open(vite, path: "/", device: "phone", now: t0, newToken: { "ticket" })
         let ticket = try #require(opened).ticket
         let redeemed = slots.redeem(ticket, slot: 0, now: t0, newToken: { "session" })
         #expect(redeemed?.sessionToken == "session")

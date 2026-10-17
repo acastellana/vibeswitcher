@@ -155,11 +155,19 @@ final class DevPreviews {
         withLock { slots.slots.contains { $0.target == target } }
     }
 
-    /// A one-time link (60 s) that opens `page` in a slot, or nil when no slot is available.
-    func open(_ page: DevPage) -> URL? {
+    /// A one-time link (60 s) that opens `page` in a slot for `device`, or nil when no slot is available.
+    func open(_ page: DevPage, device: String) -> URL? {
         withLock {
-            guard let host = context?.host, let opened = slots.open(page.target, path: page.path) else { return nil }
+            guard let host = context?.host, let opened = slots.open(page.target, path: page.path, device: device) else { return nil }
             return URL(string: "https://\(host):\(Self.publicPort(opened.slot))\(PreviewGate.enterPath)?t=\(opened.ticket)")
+        }
+    }
+
+    /// Main thread. Ends `device`'s preview sessions (it was unpaired) and closes what they have open.
+    func revoke(device: String) {
+        let ended = withLock { slots.revoke(device: device) }
+        for slot in Set(ended.map(\.slot)) where proxies.indices.contains(slot) {
+            proxies[slot].end(sessions: Set(ended.filter { $0.slot == slot }.map(\.token)))
         }
     }
 
@@ -179,6 +187,9 @@ final class DevPreviews {
         }, resolve: { [weak self] token in
             guard let self else { return nil }
             return self.withLock { self.slots.target(slot: slot, sessionToken: token) }
+        }, isLive: { [weak self] token in
+            guard let self else { return false }
+            return self.withLock { self.slots.isLive(slot: slot, sessionToken: token) }
         })
     }
 }

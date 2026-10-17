@@ -31,20 +31,26 @@ public final class PreviewProxy: @unchecked Sendable {
     /// Everything below is touched on `queue` only.
     private var clients: [ObjectIdentifier: NWConnection] = [:]
     private var upstreams: [ObjectIdentifier: NWConnection] = [:]   // keyed by their client
+    /// The preview session each forwarded client connection belongs to (to close a session's live reload).
+    private var sessionOf: [ObjectIdentifier: String] = [:]
     /// The dev server's HttpOnly cookies per preview session (see `PreviewCookieJar`), keyed by the session
     /// token: a slot that shows another server gets a new token, and so an empty jar.
     private var jars: [String: PreviewCookieJar] = [:]
     private let context: () -> Context?
     private let redeem: (String) -> (path: String, sessionToken: String, clearSite: Bool)?
     private let resolve: (String) -> PreviewTarget?
+    /// Whether a session token is still live, without counting as use.
+    private let isLive: (String) -> Bool
 
     public init(label: String, context: @escaping () -> Context?,
                 redeem: @escaping (String) -> (path: String, sessionToken: String, clearSite: Bool)?,
-                resolve: @escaping (String) -> PreviewTarget?) {
+                resolve: @escaping (String) -> PreviewTarget?,
+                isLive: @escaping (String) -> Bool = { _ in true }) {
         queue = DispatchQueue(label: label)
         self.context = context
         self.redeem = redeem
         self.resolve = resolve
+        self.isLive = isLive
     }
 
     /// Exactly one callback runs, on `callbackQueue`. Port 0: any free port (see `port`).
@@ -78,6 +84,16 @@ public final class PreviewProxy: @unchecked Sendable {
     }
 
     public var port: UInt16? { listener?.port?.rawValue }
+
+    /// Closes what these sessions still have open (a page's live-reload socket, a request in flight) and
+    /// forgets their cookie jars: their phone was unpaired.
+    public func end(sessions tokens: Set<String>) {
+        guard !tokens.isEmpty else { return }
+        queue.async {
+            for (id, token) in self.sessionOf where tokens.contains(token) { self.clients[id]?.cancel() }
+            self.jars = self.jars.filter { !tokens.contains($0.key) }
+        }
+    }
     public var isListening: Bool { listener?.state == .ready }
 
     /// Stops listening and closes every open preview connection (live reload included).
@@ -107,6 +123,7 @@ public final class PreviewProxy: @unchecked Sendable {
             case .failed: client.cancel()
             case .cancelled:
                 self?.clients[id] = nil
+                self?.sessionOf[id] = nil
                 self?.upstreams.removeValue(forKey: id)?.cancel()
             default: break
             }
@@ -142,7 +159,7 @@ public final class PreviewProxy: @unchecked Sendable {
     private func handle(_ head: HTTPHead, rest: Data, client: NWConnection) {
         guard let context = context() else { return reply(client, Self.page(503, "Dev pages are off.")) }
         switch PreviewGate.decide(head, owner: context.owner, ownOrigin: context.ownOrigin,
-                                  siblingOrigins: context.siblingOrigins, publicPort: context.publicPort) {
+                                  siblingOrigins: context.siblingOrigins, publicPort: context.publicPort, accepts: isLive) {
         case .reject(let status, let message):
             reply(client, Self.page(status, message))
         case .enter(let ticket):
@@ -155,8 +172,12 @@ public final class PreviewProxy: @unchecked Sendable {
                 jars[token] = nil
                 return reply(client, Self.page(403, PreviewGate.expiredMessage))
             }
-            // Only the current session's jar is kept (the slot's token changes when it shows another server).
-            if jars[token] == nil { jars = [token: PreviewCookieJar()] }
+            // One jar per live session (each phone has its own; the tokens change when the slot shows another server).
+            if jars[token] == nil {
+                jars = jars.filter { isLive($0.key) }
+                jars[token] = PreviewCookieJar()
+            }
+            sessionOf[ObjectIdentifier(client)] = token
             relay(head, rest: rest, client: client, target: target, context: context, token: token)
         }
     }
