@@ -118,8 +118,9 @@ struct RedactionLeakTests {
     }
 }
 
-/// 200 KB of input built to make the patterns work hardest (long runs, repeated prefixes, unterminated
-/// quotes and keys, floods of each rule's trigger) is masked well inside 50 ms each.
+/// 200 KB of input built to make the rules work hardest (long runs, repeated prefixes, unterminated quotes and
+/// keys, floods of each rule's trigger, a letter and every word starting with it) is masked well inside 50 ms
+/// each (about 12 ms at worst unoptimised, on its own).
 @Suite(.serialized) struct RedactionSpeedTests {
     static let size = 200_000
 
@@ -137,11 +138,27 @@ struct RedactionLeakTests {
         "glpat-", "xoxb-", "AKIA", "AIza", "AGE-SECRET-KEY-1", "npm_", "pypi-AgE", "hf_", "SG.", "eyJ",
         "eyJaaaaaaaa.", "hooks.slack.com/services/", "discord.com/api/webhooks/1/", "Aa1/",
         String(repeating: "a", count: 39) + "A1 ", "ghp_" + String(repeating: "a", count: 36) + "\n",
-        String(repeating: "a", count: 40) + "\n",
+        String(repeating: "a", count: 40) + "\n", "ppasswordprivatepwdpk-pypi-", "eyJ-", "SG.a", "AKIAAKIAAKIAAKIAAKIA",
+        "p password private pwd pk- pypi- ", "s secret sk- sshpass ", "a api auth access age- aiza akia ",
     ].map(flood) + [
         "token=\"" + flood("a"), "--" + flood("a"), "-----BEGIN RSA PRIVATE KEY-----\n" + flood("A"),
-        flood("a-") + " token=abc", "Cookie: " + flood("a"),
-    ]
+        flood("a-") + " token=abc", "Cookie: " + flood("a"), flood(allWords),
+    ] + letterFloods
+
+    /// One letter, and every secret word starting with it: 200 KB of `p` around password, private_key, pwd, pk-
+    /// and pypi-, and so on (each rule starting with that letter has its word, and a flood of its first letter).
+    static let letterFloods: [String] = [
+        ("p", "password private_key pwd pk- pypi-AgE passphrase"), ("a", "api_key access_key auth authorization: AKIA AIza AGE-SECRET-KEY-1"),
+        ("s", "secret sk- sshpass SG. sk_live_"), ("t", "token token="), ("c", "cookie cookie: credential"),
+        ("k", "key-data k- k_live_"), ("m", "mysql mariadb"), ("g", "ghp_ github_pat_ glpat-"), ("h", "hf_ hooks.slack.com/"),
+    ].flatMap { letter, words in
+        let fill = String(repeating: letter, count: size - words.count - 1)
+        return [fill + " " + words, words + " " + fill, words + fill]
+    } + [allWords + String(repeating: "a", count: size - allWords.count)]
+
+    static let allWords = "password private_key pwd pk- pypi-AgE api_key access_key auth authorization: AKIA AIza secret sk- "
+        + "sshpass SG. token cookie: credential key-data mysql mariadb -u --user :// -----BEGIN -----END bearer ghp_ "
+        + "github_pat_ glpat- hf_ hooks.slack.com/ xoxb- npm_ eyJ discord.com/api/webhooks/ "
 
     @Test(arguments: inputs.indices) func hostileInputIsMaskedQuickly(_ index: Int) {
         let input = Self.inputs[index]
@@ -152,6 +169,8 @@ struct RedactionLeakTests {
             _ = Redaction.secrets(in: input)
             best = min(best, Date().timeIntervalSince(start))
         }
+        // One line per case, to compare runs.
+        print("RedactionSpeed #\(index) \(input.prefix(24).debugDescription) \(String(format: "%.1f", best * 1000)) ms")
         #expect(best < 0.05, "\(input.prefix(24).debugDescription): \(Int(best * 1000)) ms")
     }
 }
