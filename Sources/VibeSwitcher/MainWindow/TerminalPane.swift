@@ -121,6 +121,12 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
 
     var attachedIDs: [UUID] { Array(views.keys) }
 
+    /// For `--idle-bench`: the attached views whose layer holds a drawing, and roughly its size.
+    var backingStores: (views: Int, bytes: Int) {
+        let held = views.values.compactMap(\.layer).filter { $0.contents != nil }
+        return (held.count, held.reduce(0) { $0 + Int($1.bounds.width * $1.bounds.height * $1.contentsScale * $1.contentsScale * 4) })
+    }
+
     func reconfigureAll() {
         views.values.forEach(configure)
         if let currentView { setMargin(currentView.nativeBackgroundColor) }

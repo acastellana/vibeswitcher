@@ -183,7 +183,11 @@ enum IdleBench {
             let attach = { [weak self] in
                 guard let self else { return }
                 self.model.showsChat = false
-                for id in self.shells { self.model.selectedID = "host:\(id)" ; self.window?.pane.show(hostID: id, focus: false) }
+                for id in self.shells {
+                    self.model.selectedID = "host:\(id)"
+                    self.window?.pane.show(hostID: id, focus: false)
+                    self.window?.window?.displayIfNeeded()
+                }
             }
             if transcriptSource != nil {
                 steps.append(("window open, chat", { [weak self] in
@@ -233,12 +237,20 @@ enum IdleBench {
                                  self.sessionPublishes - publishes.0, self.sectionPublishes - publishes.1,
                                  Double(after.rss) / 1_048_576, Double(after.footprint) / 1_048_576))
                     if let window = self.window?.window, window.isVisible {
-                        print("  window drawn: \(window.occlusionState.contains(.visible) ? "yes" : "no (occluded)")")
+                        self.printTerminals(window)
                     }
                     fflush(stdout)
                     self.run(steps.dropFirst())
                 }
             }
+        }
+
+        private func printTerminals(_ window: NSWindow) {
+            guard let pane = self.window?.pane else { return }
+            let stores: (views: Int, bytes: Int) = pane.backingStores
+            let drawn = window.occlusionState.contains(.visible) ? "yes" : "no (occluded)"
+            print("  window drawn: \(drawn), terminals attached \(pane.attachedIDs.count), holding a drawing \(stores.views)"
+                  + String(format: " (%.1f MB)", Double(stores.bytes) / 1_048_576))
         }
 
         private func finish() {
