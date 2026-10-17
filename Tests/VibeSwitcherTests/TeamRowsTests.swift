@@ -157,8 +157,28 @@ struct TeamRowsTests {
         let hosted = HostSession(id: id, tty: "ttys0", childPID: 1, cwd: "/r/.vibeswitcher/worktrees/fix", command: "claude", label: "Worker: Fix",
                                  agent: "claude", title: "Worker: Fix", startedAt: Self.now - 10, cols: 120, rows: 40, exit: nil)
         let seen = TeamRows.seen([WindowRow(content: .hosted(hosted), project: "fix")], now: Self.now)
+        // Started, its agent not shown up yet: being briefed, not idle.
+        #expect(seen[id.uuidString]?.live == true)
+        #expect(seen[id.uuidString]?.working == true)
         #expect(seen[id.uuidString]?.activity == "Starting…")
         #expect(seen[id.uuidString]?.startedAt == Self.now - 10)
+    }
+
+    @Test func endedSessionsOfFinishedTasksAreHistory() {
+        func row(_ slug: String, exit: Bool) -> WindowRow {
+            let info = HostSession(id: UUID(), tty: "ttys0", childPID: 1, cwd: "/r/.vibeswitcher/worktrees/\(slug)", command: "claude", label: "Worker: \(slug)",
+                                   agent: "claude", title: slug, startedAt: Self.now - 10, cols: 120, rows: 40,
+                                   exit: exit ? HostSession.Exit(status: 129, at: Self.now - 5) : nil)
+            return WindowRow(content: .hosted(info), project: slug)
+        }
+        var board = LeadBoard()
+        var merged = Self.task("merged", .done)
+        merged.worktree = nil
+        board.tasks = [merged, Self.task("running", .running)]
+        let boards = ["/r": board]
+        #expect(TeamRows.isHistory(row("merged", exit: true), boards: boards, now: Self.now))
+        #expect(!TeamRows.isHistory(row("running", exit: true), boards: boards, now: Self.now))
+        #expect(!TeamRows.isHistory(row("merged", exit: false), boards: boards, now: Self.now))
     }
 
     // MARK: Decisions
