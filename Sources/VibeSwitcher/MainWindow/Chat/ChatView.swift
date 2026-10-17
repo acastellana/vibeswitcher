@@ -402,7 +402,9 @@ private struct LiveStateView: View {
 
     var body: some View {
         if let session = row.session, !session.isPaused {
-            TimelineView(.periodic(from: .now, by: 1)) { context in
+            // From a fixed date: one from `.now` is a new schedule on every redraw of the chat, and the window then
+            // laid out about 20 times a second for as long as the line was there.
+            TimelineView(.periodic(from: session.statusSince, by: 1)) { context in
                 switch session.status {
                 case .working:
                     HStack(spacing: 8) {
