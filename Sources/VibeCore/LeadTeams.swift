@@ -99,12 +99,15 @@ public enum LeadTeams {
                 word = "in review"
             } else if groups.contains(.working) {
                 word = "working"
+            } else if rows.contains(where: { $0.session?.status == .unknown }) {
+                // Nothing to read its state from (no hook state): not known to be idle.
+                word = "unknown"
             } else {
                 word = "idle"
             }
             counts[word, default: 0] += 1
         }
-        let parts = ["needs you", "working", "in review", "done", "idle"].compactMap { word -> String? in
+        let parts = ["needs you", "working", "in review", "done", "idle", "unknown"].compactMap { word -> String? in
             guard let count = counts[word] else { return nil }
             return word == "needs you" ? (count == 1 ? "1 needs you" : "\(count) need you") : "\(count) \(word)"
         }

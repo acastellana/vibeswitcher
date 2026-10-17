@@ -123,6 +123,9 @@ struct LeadTeamsTests {
         // Without the board, a live verifier still means the task is in review; an idle worker is idle.
         let plain = [member("Worker: G", agentRow(wt + "g", status: .idle)), member("Verifier: H", agentRow(wt + "h", status: .idle))]
         #expect(LeadTeams.summary(plain, label: { labels[$0.id] }, board: nil, now: now) == "team: 1 in review · 1 idle")
+        // A live worker with no state to read (its hooks' file gone) isn't counted as idle.
+        let unread = [member("Worker: I", agentRow(wt + "i", status: .working)), member("Worker: J", agentRow(wt + "j", status: .unknown))]
+        #expect(LeadTeams.summary(unread, label: { labels[$0.id] }, board: nil, now: now) == "team: 1 working · 1 unknown")
         #expect(LeadTeams.summary(Array(team[4..<18]), label: { labels[$0.id] }, board: board, now: now) == "team: none running")
     }
 }
