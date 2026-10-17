@@ -95,7 +95,9 @@ is), rebases exactly the audited commit in a worktree no agent works in, runs th
 fast-forwards to exactly what was tested. Verifiers start without the branch's project settings, hooks and MCP servers, and
 VibeSwitcher doesn't answer Claude's trust question for a branch that changes them. Messages reach the lead quoted
 under a line naming their sender, so a worker's report can't pass for the user's words, and only the app sends as
-the user. Claude Code permission rules add a second layer: the lead and verifiers are denied file edits, shell
+the user. They reach the lead's own conversation, never a subagent it started (a subagent's tool calls fire the same
+hooks; the message waits for the lead's next step), and count as delivered only once they're in it; `status` also
+lists every report that came in since the lead last asked. Claude Code permission rules add a second layer: the lead and verifiers are denied file edits, shell
 file writes and git writes, workers pushing, merging, rebasing, moving refs and switching to the lead's branch.
 Their tools come from `vibeswitcher-mcp`, a tool server bundled with the app.
 
