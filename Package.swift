@@ -24,6 +24,8 @@ let package = Package(
         .testTarget(name: "VibeCoreTests", dependencies: ["VibeCore"]),
         // Depends on the host executable too: sessions are started through it (`--pty-exec`).
         .testTarget(name: "VibeHostTests", dependencies: ["VibeHost", "VibeCore", "vibeswitcher-host"]),
+        // The app's menus and window commands.
+        .testTarget(name: "VibeSwitcherTests", dependencies: ["VibeSwitcher", "VibeCore"]),
     ],
     swiftLanguageModes: [.v5]
 )
