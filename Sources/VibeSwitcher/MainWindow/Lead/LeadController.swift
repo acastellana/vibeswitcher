@@ -89,11 +89,7 @@ final class LeadController: ObservableObject {
         let project = (root as NSString).lastPathComponent
         let boardStore = BoardStore(root: root)
         do {
-            try boardStore.ensureExcluded()
-            let workflowPath = (boardStore.folder as NSString).appendingPathComponent("workflow.md")
-            if !FileManager.default.fileExists(atPath: workflowPath) {
-                try LeadWorkflow.template.write(toFile: workflowPath, atomically: true, encoding: .utf8)
-            }
+            let workflowPath = try boardStore.prepare()
             let workflow = LeadWorkflow.parse((try? String(contentsOfFile: workflowPath, encoding: .utf8)) ?? "")
             let launch = try LeadLaunch.prepare(
                 role: .lead, root: root, task: nil, base: claudeCommand(root),

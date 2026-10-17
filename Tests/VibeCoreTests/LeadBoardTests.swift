@@ -85,3 +85,20 @@ struct BoardSafetyTests {
     }
 }
 
+struct LeadSetupTests {
+    @Test func aRepositoryWithNoLeadFolderYetIsSetUp() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("setup-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let root = url.resolvingSymlinksInPath().path
+        Git.run(["init", "-q", "-b", "main"], in: root)
+        let workflow = try BoardStore(root: root).prepare()
+        #expect(workflow == root + "/.vibeswitcher/workflow.md")
+        #expect(try String(contentsOfFile: workflow, encoding: .utf8) == LeadWorkflow.template)
+        #expect(Git.run(["check-ignore", "-q", ".vibeswitcher/workflow.md"], in: root).ok)
+        // Your edits stay.
+        try "---\nmax_workers: 1\n---".write(toFile: workflow, atomically: true, encoding: .utf8)
+        _ = try BoardStore(root: root).prepare()
+        #expect(try String(contentsOfFile: workflow, encoding: .utf8).contains("max_workers: 1"))
+    }
+}
+

@@ -84,12 +84,7 @@ public final class LeadToolset: MCPToolset {
 
     /// The lead records where it runs, so answers and worker events reach it; it also sets up the folder.
     private func introduceLead() {
-        try? store.ensureExcluded()
-        let workflowPath = (store.folder as NSString).appendingPathComponent("workflow.md")
-        try? FileManager.default.createDirectory(atPath: store.folder, withIntermediateDirectories: true)
-        if !FileManager.default.fileExists(atPath: workflowPath) {
-            try? LeadWorkflow.template.write(toFile: workflowPath, atomically: true, encoding: .utf8)
-        }
+        try? store.prepare()
         guard let me = runtime.currentAgent() else { return }
         try? store.update { board in
             board.leadPid = me.pid

@@ -214,6 +214,19 @@ public final class BoardStore: @unchecked Sendable {
         try append("## \(Self.stamp()) \(decision)\n\n\(why)\n\n", to: "decisions.md", header: "# Decisions\n\n")
     }
 
+    /// Sets a repository up for a lead: the `.vibeswitcher` folder, kept out of git, with the workflow notes (a
+    /// template the first time; yours are never overwritten). Returns the workflow file's path.
+    @discardableResult
+    public func prepare() throws -> String {
+        try ensureFolder()
+        try ensureExcluded()
+        let workflow = (folder as NSString).appendingPathComponent("workflow.md")
+        if !FileManager.default.fileExists(atPath: workflow) {
+            try LeadWorkflow.template.write(toFile: workflow, atomically: true, encoding: .utf8)
+        }
+        return workflow
+    }
+
     /// `.vibeswitcher/` in `.git/info/exclude`: ignored without changing the repo's own files.
     public func ensureExcluded() throws {
         // Where git keeps it: `.git/info/exclude`, or the main repository's when `.git` is a file (a worktree).
