@@ -1,0 +1,3 @@
+16:32:04.612 bench: blocking the main thread for 4 s
+16:32:06.693 main thread stuck since 2026-10-17 14:32:04 +0000; sampling into hang-20261017-163204.txt
+16:32:10.352 main thread answered again after 4.0 s

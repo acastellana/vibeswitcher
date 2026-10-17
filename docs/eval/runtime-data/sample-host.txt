@@ -1,0 +1,11 @@
+# sample 4086 5 (vibeswitcher-host)
+    4353 Thread_6808740: Main Thread   DispatchQueue_<multiple>
+    4353 Thread_8266425
+    4350 Thread_8083512
+    4348 Thread_8140836
+    8 Thread_<multiple>   DispatchQueue_31: vibeswitcher.host  (serial)
+Sort by top of stack, same collapsed (when >= 5):
+        __workq_kernreturn  (in libsystem_kernel.dylib)        13050
+        __sigsuspend_nocancel  (in libsystem_kernel.dylib)        4353
+
+Binary Images:

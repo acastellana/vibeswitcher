@@ -1,0 +1,132 @@
+16:20:06 app-status updatedAt=2026-10-17T14:19:52Z app=10 dump=11 missing_in_app=['ttys006'] extra_in_app=[]
+   ttys000 app=done       hooks=False dump=no hooks 
+   ttys002 app=working    hooks=True  dump=PostToolUse (2s ago) 
+   ttys003 app=working    hooks=True  dump=PostToolUse (0s ago) [shells: kill $PID ) · 17s]
+   ttys004 app=working    hooks=True  dump=PostToolUse (0s ago) [shells: 2 shells · oldest 6m: $S/sample.sh $S/samples.csv 78]
+   ttys007 app=idle       hooks=True  dump=Stop (56393s ago) 
+   ttys009 app=idle       hooks=True  dump=SessionStart (3665s ago) 
+   ttys012 app=background hooks=True  dump=Notification (10138s ago) [shells: npx next start -p 3000 · 6h 5m]
+   ttys013 app=idle       hooks=True  dump=Stop (20505s ago) 
+   ttys014 app=background hooks=True  dump=SessionStart (17252s ago) [shells: python3 - · 14h 46m]
+   ttys017 app=idle       hooks=True  dump=Stop (23120s ago) 
+16:20:37 app-status updatedAt=2026-10-17T14:20:33Z app=10 dump=11 missing_in_app=['ttys006'] extra_in_app=[]
+   ttys000 app=done       hooks=False dump=no hooks 
+   ttys002 app=working    hooks=True  dump=PostToolUse (4s ago) 
+   ttys003 app=working    hooks=True  dump=PreToolUse (1s ago) [shells: 2 shells · oldest 47s: kill $PID )]
+   ttys004 app=background hooks=True  dump=Stop (3s ago) [shells: 3 shells · oldest 6m: $S/sample.sh $S/samples.csv 78]
+   ttys007 app=idle       hooks=True  dump=Stop (56423s ago) 
+   ttys009 app=idle       hooks=True  dump=SessionStart (3696s ago) 
+   ttys012 app=background hooks=True  dump=Notification (10169s ago) [shells: npx next start -p 3000 · 6h 6m]
+   ttys013 app=idle       hooks=True  dump=Stop (20535s ago) 
+   ttys014 app=background hooks=True  dump=SessionStart (17282s ago) [shells: python3 - · 14h 47m]
+   ttys017 app=idle       hooks=True  dump=Stop (23151s ago) 
+16:21:07 app-status updatedAt=2026-10-17T14:21:01Z app=10 dump=11 missing_in_app=['ttys006'] extra_in_app=[]
+   ttys000 app=done       hooks=False dump=no hooks 
+   ttys002 app=done       hooks=True  dump=Stop (6s ago) 
+   ttys003 app=working    hooks=True  dump=PostToolUse (2s ago) [shells: kill $PID ) · 1m]
+   ttys004 app=background hooks=True  dump=Stop (34s ago) [shells: 3 shells · oldest 7m: $S/sample.sh $S/samples.csv 78]
+   ttys007 app=idle       hooks=True  dump=Stop (56454s ago) 
+   ttys009 app=idle       hooks=True  dump=SessionStart (3726s ago) 
+   ttys012 app=background hooks=True  dump=Notification (10199s ago) [shells: npx next start -p 3000 · 6h 6m]
+   ttys013 app=idle       hooks=True  dump=Stop (20565s ago) 
+   ttys014 app=background hooks=True  dump=SessionStart (17312s ago) [shells: python3 - · 14h 47m]
+   ttys017 app=idle       hooks=True  dump=Stop (23181s ago) 
+16:21:37 app-status updatedAt=2026-10-17T14:21:01Z app=10 dump=11 missing_in_app=['ttys006'] extra_in_app=[]
+   ttys000 app=done       hooks=False dump=no hooks 
+   ttys002 app=done       hooks=True  dump=Stop (36s ago) 
+   ttys003 app=working    hooks=True  dump=PostToolUse (15s ago) [shells: kill $PID ) · 1m]
+   ttys004 app=background hooks=True  dump=Stop (64s ago) [shells: 3 shells · oldest 7m: $S/sample.sh $S/samples.csv 78]
+   ttys007 app=idle       hooks=True  dump=Stop (56484s ago) 
+   ttys009 app=idle       hooks=True  dump=SessionStart (3756s ago) 
+   ttys012 app=background hooks=True  dump=Notification (10229s ago) [shells: npx next start -p 3000 · 6h 7m]
+   ttys013 app=idle       hooks=True  dump=Stop (20596s ago) 
+   ttys014 app=background hooks=True  dump=SessionStart (17342s ago) [shells: python3 - · 14h 48m]
+   ttys017 app=idle       hooks=True  dump=Stop (23211s ago) 
+16:22:07 app-status updatedAt=2026-10-17T14:21:01Z app=10 dump=11 missing_in_app=['ttys006'] extra_in_app=[]
+   ttys000 app=done       hooks=False dump=no hooks 
+   ttys002 app=done       hooks=True  dump=Stop (66s ago) 
+   ttys003 app=working    hooks=True  dump=PostToolUse (8s ago) [shells: kill $PID ) · 2m]
+   ttys004 app=background hooks=True  dump=Stop (94s ago) [shells: 3 shells · oldest 8m: $S/sample.sh $S/samples.csv 78]
+   ttys007 app=idle       hooks=True  dump=Stop (56514s ago) 
+   ttys009 app=idle       hooks=True  dump=SessionStart (3786s ago) 
+   ttys012 app=background hooks=True  dump=Notification (10259s ago) [shells: npx next start -p 3000 · 6h 7m]
+   ttys013 app=idle       hooks=True  dump=Stop (20626s ago) 
+   ttys014 app=background hooks=True  dump=SessionStart (17373s ago) [shells: python3 - · 14h 48m]
+   ttys017 app=idle       hooks=True  dump=Stop (23241s ago) 
+16:22:37 app-status updatedAt=2026-10-17T14:21:01Z app=10 dump=11 missing_in_app=['ttys006'] extra_in_app=[]
+   ttys000 app=done       hooks=False dump=no hooks 
+   ttys002 app=done       hooks=True  dump=Stop (96s ago) 
+   ttys003 app=working    hooks=True  dump=PostToolUse (1s ago) [shells: kill $PID ) · 2m]
+   ttys004 app=background hooks=True  dump=Stop (124s ago) [shells: 3 shells · oldest 8m: $S/sample.sh $S/samples.csv 78]
+   ttys007 app=idle       hooks=True  dump=Stop (56544s ago) 
+   ttys009 app=idle       hooks=True  dump=SessionStart (3816s ago) 
+   ttys012 app=background hooks=True  dump=Notification (10289s ago) [shells: npx next start -p 3000 · 6h 8m]
+   ttys013 app=idle       hooks=True  dump=Stop (20656s ago) 
+   ttys014 app=background hooks=True  dump=SessionStart (17403s ago) [shells: python3 - · 14h 49m]
+   ttys017 app=idle       hooks=True  dump=Stop (23271s ago) 
+16:23:08 app-status updatedAt=2026-10-17T14:21:01Z app=10 dump=11 missing_in_app=['ttys006'] extra_in_app=[]
+   ttys000 app=done       hooks=False dump=no hooks 
+   ttys002 app=done       hooks=True  dump=Stop (126s ago) 
+   ttys003 app=working    hooks=True  dump=PreToolUse (1s ago) [shells: 2 shells · oldest 3m: kill $PID )]
+   ttys004 app=background hooks=True  dump=Stop (154s ago) [shells: 3 shells · oldest 9m: $S/sample.sh $S/samples.csv 78]
+   ttys007 app=idle       hooks=True  dump=Stop (56574s ago) 
+   ttys009 app=idle       hooks=True  dump=SessionStart (3847s ago) 
+   ttys012 app=background hooks=True  dump=Notification (10320s ago) [shells: npx next start -p 3000 · 6h 8m]
+   ttys013 app=idle       hooks=True  dump=Stop (20686s ago) 
+   ttys014 app=background hooks=True  dump=SessionStart (17433s ago) [shells: python3 - · 14h 49m]
+   ttys017 app=idle       hooks=True  dump=Stop (23302s ago) 
+16:23:38 app-status updatedAt=2026-10-17T14:21:01Z app=10 dump=11 missing_in_app=['ttys006'] extra_in_app=[]
+   ttys000 app=done       hooks=False dump=no hooks 
+   ttys002 app=done       hooks=True  dump=Stop (156s ago) 
+   ttys003 app=working    hooks=True  dump=PostToolUse (1s ago) [shells: kill $PID ) · 3m]
+   ttys004 app=background hooks=True  dump=Stop (185s ago) [shells: 3 shells · oldest 9m: $S/sample.sh $S/samples.csv 78]
+   ttys007 app=idle       hooks=True  dump=Stop (56605s ago) 
+   ttys009 app=idle       hooks=True  dump=SessionStart (3877s ago) 
+   ttys012 app=background hooks=True  dump=Notification (10350s ago) [shells: npx next start -p 3000 · 6h 9m]
+   ttys013 app=idle       hooks=True  dump=Stop (20716s ago) 
+   ttys014 app=background hooks=True  dump=SessionStart (17463s ago) [shells: python3 - · 14h 50m]
+   ttys017 app=idle       hooks=True  dump=Stop (23332s ago) 
+16:24:08 app-status updatedAt=2026-10-17T14:24:05Z app=10 dump=11 missing_in_app=['ttys006'] extra_in_app=[]
+   ttys000 app=done       hooks=False dump=no hooks 
+   ttys002 app=idle       hooks=True  dump=Stop (187s ago) 
+   ttys003 app=working    hooks=True  dump=PostToolUse (3s ago) 
+   ttys004 app=background hooks=True  dump=Stop (215s ago) [shells: 3 shells · oldest 10m: $S/sample.sh $S/samples.csv 7]
+   ttys007 app=idle       hooks=True  dump=Stop (56635s ago) 
+   ttys009 app=idle       hooks=True  dump=SessionStart (3907s ago) 
+   ttys012 app=background hooks=True  dump=Notification (10380s ago) [shells: npx next start -p 3000 · 6h 9m]
+   ttys013 app=idle       hooks=True  dump=Stop (20747s ago) 
+   ttys014 app=background hooks=True  dump=SessionStart (17493s ago) [shells: python3 - · 14h 50m]
+   ttys017 app=idle       hooks=True  dump=Stop (23362s ago) 
+16:24:38 app-status updatedAt=2026-10-17T14:24:05Z app=10 dump=11 missing_in_app=['ttys006'] extra_in_app=[]
+   ttys000 app=done       hooks=False dump=no hooks 
+   ttys002 app=idle       hooks=True  dump=Stop (217s ago) 
+   ttys003 app=working    hooks=True  dump=PostToolUse (1s ago) 
+   ttys004 app=background hooks=True  dump=Stop (245s ago) [shells: 3 shells · oldest 10m: $S/sample.sh $S/samples.csv 7]
+   ttys007 app=idle       hooks=True  dump=Stop (56665s ago) 
+   ttys009 app=idle       hooks=True  dump=SessionStart (3937s ago) 
+   ttys012 app=background hooks=True  dump=Notification (10410s ago) [shells: npx next start -p 3000 · 6h 10m]
+   ttys013 app=idle       hooks=True  dump=Stop (20777s ago) 
+   ttys014 app=background hooks=True  dump=SessionStart (17524s ago) [shells: python3 - · 14h 51m]
+   ttys017 app=idle       hooks=True  dump=Stop (23392s ago) 
+16:25:08 app-status updatedAt=2026-10-17T14:24:52Z app=10 dump=11 missing_in_app=['ttys006'] extra_in_app=[]
+   ttys000 app=done       hooks=False dump=no hooks 
+   ttys002 app=idle       hooks=True  dump=Stop (247s ago) 
+   ttys003 app=working    hooks=True  dump=PreToolUse (0s ago) 
+   ttys004 app=background hooks=True  dump=Stop (275s ago) [shells: 3 shells · oldest 11m: $S/sample.sh $S/samples.csv 7]
+   ttys007 app=idle       hooks=True  dump=Stop (56695s ago) 
+   ttys009 app=idle       hooks=True  dump=SessionStart (3967s ago) 
+   ttys012 app=background hooks=True  dump=Notification (10440s ago) [shells: npx next start -p 3000 · 6h 10m]
+   ttys013 app=idle       hooks=True  dump=Stop (20807s ago) 
+   ttys014 app=background hooks=True  dump=SessionStart (17554s ago) [shells: python3 - · 14h 51m]
+   ttys017 app=idle       hooks=True  dump=Stop (23422s ago) 
+16:25:39 app-status updatedAt=2026-10-17T14:25:30Z app=10 dump=11 missing_in_app=['ttys006'] extra_in_app=[]
+   ttys000 app=done       hooks=False dump=no hooks 
+   ttys002 app=idle       hooks=True  dump=Stop (277s ago) 
+   ttys003 app=working    hooks=True  dump=PostToolUse (8s ago) 
+   ttys004 app=background hooks=True  dump=Stop (305s ago) [shells: 3 shells · oldest 11m: $S/sample.sh $S/samples.csv 7]
+   ttys007 app=idle       hooks=True  dump=Stop (56725s ago) 
+   ttys009 app=idle       hooks=True  dump=SessionStart (3998s ago) 
+   ttys012 app=background hooks=True  dump=Notification (10471s ago) [shells: npx next start -p 3000 · 6h 11m]
+   ttys013 app=idle       hooks=True  dump=Stop (20837s ago) 
+   ttys014 app=background hooks=True  dump=SessionStart (17584s ago) [shells: python3 - · 14h 52m]
+   ttys017 app=idle       hooks=True  dump=Stop (23453s ago) 

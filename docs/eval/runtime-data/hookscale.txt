@@ -1,0 +1,6 @@
+    10000 B  prompt(words)=    20.6  prompt(xxxx)=    17.6  stop.last_msg=    16.2  post.tool_response=     7.1  pre.Write.content=     8.7 ms
+   100000 B  prompt(words)=    85.4  prompt(xxxx)=    94.9  stop.last_msg=    86.0  post.tool_response=     7.5  pre.Write.content=     8.9 ms
+   250000 B  prompt(words)=   198.7  prompt(xxxx)=   223.8  stop.last_msg=   208.8  post.tool_response=    10.8  pre.Write.content=    11.2 ms
+   500000 B  prompt(words)=   438.8  prompt(xxxx)=   457.7  stop.last_msg=   394.0  post.tool_response=    11.5  pre.Write.content=    12.8 ms
+  1000000 B  prompt(words)=   784.5  prompt(xxxx)=   865.8  stop.last_msg=   819.9  post.tool_response=    15.5  pre.Write.content=    16.5 ms
+  2000000 B  prompt(words)=  1544.0  prompt(xxxx)=  1769.2  stop.last_msg=  3233.6  post.tool_response=    44.9  pre.Write.content=    40.6 ms

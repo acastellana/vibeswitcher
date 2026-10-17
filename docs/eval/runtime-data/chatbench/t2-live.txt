@@ -1,0 +1,37 @@
+  scrolled to 5423 of 10846 in 0.02s
+t=1s cpu=0.4s state=ready items=89 shown=89 worst stall=0.13s
+  resized to 1100 in 0.00s
+  scrolled to 8806 of 8806 in 0.01s
+t=2s cpu=0.4s state=ready items=89 shown=89 worst stall=0.03s
+  scrolled to 0 of 7848 in 0.04s
+t=3s cpu=0.5s state=ready items=89 shown=89 worst stall=0.02s
+  resized to 640 in 0.01s
+  scrolled to 7474 of 14948 in 0.01s
+t=4s cpu=0.5s state=ready items=89 shown=89 worst stall=0.05s
+  scrolled to 12813 of 12813 in 0.03s
+t=5s cpu=0.6s state=ready items=89 shown=89 worst stall=0.02s
+  resized to 1100 in 0.02s
+  scrolled to 0 of 8041 in 0.04s
+t=6s cpu=0.7s state=ready items=89 shown=89 worst stall=0.04s
+  scrolled to 5842 of 11685 in 0.01s
+t=7s cpu=0.7s state=ready items=89 shown=89 worst stall=0.07s
+  resized to 640 in 0.02s
+  scrolled to 8261 of 8261 in 0.05s
+t=8s cpu=0.8s state=ready items=89 shown=89 worst stall=0.02s
+  scrolled to 0 of 9426 in 0.03s
+t=9s cpu=0.9s state=ready items=89 shown=89 worst stall=0.08s
+  resized to 1100 in 0.01s
+  scrolled to 6202 of 12405 in 0.01s
+t=10s cpu=0.9s state=ready items=89 shown=89 worst stall=0.04s
+  scrolled to 11376 of 11376 in 0.03s
+t=11s cpu=0.9s state=ready items=89 shown=89 worst stall=0.03s
+  resized to 640 in 0.02s
+  scrolled to 0 of 3632 in 0.02s
+t=12s cpu=1.0s state=ready items=89 shown=89 worst stall=0.04s
+  scrolled to 5559 of 11118 in 0.01s
+t=13s cpu=1.0s state=ready items=89 shown=89 worst stall=0.05s
+  resized to 1100 in 0.02s
+  scrolled to 8129 of 8129 in 0.05s
+t=14s cpu=1.1s state=ready items=89 shown=89 worst stall=0.02s
+  scrolled to 0 of 9108 in 0.03s
+t=15s cpu=1.1s state=ready items=89 shown=89 worst stall=0.08s

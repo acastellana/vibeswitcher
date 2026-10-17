@@ -1,0 +1,32 @@
+Main thread stuck since 2026-10-17 14:26:14 +0000
+
+State:
+host state=outdated(live: 8, compatible: true) sessions=16 live=11
+scanned sessions=10
+window visible=true key=true frame={{0, 64}, {1728, 1014}} mounted=true
+selected=host:108ECE1F-EABE-45D4-8842-B047A8DDE91F project=vibeswitcher showsChat=true chatShown=true terminalHidden=true
+chat path=/Users/albert/.claude/projects/-Users-albert-dev-vibeswitcher/6d824633-4242-4e59-b4b2-5f2a95ae034d.jsonl state=ready entries=62 items=30 shownLimit=120 atBottom=false pending=0 menu=false draft=0 chars
+attached terminals=3 current=108ECE1F-EABE-45D4-8842-B047A8DDE91F
+
+Latest events:
+14:23:46.528 app: launched 0.1.0 build 1792239825
+14:23:46.538 app: reopening the window it had open
+14:23:46.596 host: welcome v1 build 1792178869, 13 sessions
+14:23:46.645 window: present
+14:23:46.880 window: select host:7F217038-A59B-4C17-A4D3-44D0A79EC78E (genlayer-website)
+14:23:47.040 chat: show fe119a5d-54fd-4d0a-823b-f6ecd51d6f8e.jsonl
+14:23:47.137 chat: loaded 60 entries, 36 items from fe119a5d-54fd-4d0a-823b-f6ecd51d6f8e.jsonl
+14:25:13.912 window: select host:108ECE1F-EABE-45D4-8842-B047A8DDE91F (vibeswitcher)
+14:25:13.913 chat: show 6d824633-4242-4e59-b4b2-5f2a95ae034d.jsonl
+14:25:13.961 chat: loaded 31 entries, 14 items from 6d824633-4242-4e59-b4b2-5f2a95ae034d.jsonl
+14:25:29.239 chat: show none
+14:28:29.471 chat: show 6d824633-4242-4e59-b4b2-5f2a95ae034d.jsonl
+14:28:29.516 chat: loaded 34 entries, 17 items from 6d824633-4242-4e59-b4b2-5f2a95ae034d.jsonl
+14:28:41.512 chat: show none
+14:28:43.453 window: select host:87E95919-AF54-4027-82AD-E3DD9F80029F (vibeswitcher)
+16:11:11.415 window: select host:108ECE1F-EABE-45D4-8842-B047A8DDE91F (vibeswitcher)
+16:19:39.357 window: select host:87E95919-AF54-4027-82AD-E3DD9F80029F (vibeswitcher)
+16:19:49.386 window: select host:108ECE1F-EABE-45D4-8842-B047A8DDE91F (vibeswitcher)
+16:26:12.594 chat: show 6d824633-4242-4e59-b4b2-5f2a95ae034d.jsonl
+16:26:12.686 chat: loaded 62 entries, 30 items from 6d824633-4242-4e59-b4b2-5f2a95ae034d.jsonl
+16:26:16.423 main thread stuck since 2026-10-17 14:26:14 +0000; sampling into hang-20261017-162614.txt

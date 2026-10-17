@@ -1,0 +1,37 @@
+  scrolled to -377 of -755 in 0.00s
+t=1s cpu=0.1s state=failed("No conversation for this session yet.") items=0 shown=0 worst stall=0.03s
+  resized to 1100 in 0.00s
+  scrolled to -755 of -755 in 0.00s
+t=2s cpu=0.1s state=failed("No conversation for this session yet.") items=0 shown=0 worst stall=0.02s
+  scrolled to 0 of -755 in 0.00s
+t=3s cpu=0.1s state=failed("No conversation for this session yet.") items=0 shown=0 worst stall=0.02s
+  resized to 640 in 0.00s
+  scrolled to -377 of -755 in 0.00s
+t=4s cpu=0.1s state=failed("No conversation for this session yet.") items=0 shown=0 worst stall=4.01s
+  scrolled to -755 of -755 in 0.00s
+t=5s cpu=0.1s state=failed("No conversation for this session yet.") items=0 shown=0 worst stall=0.02s
+  resized to 1100 in 0.00s
+  scrolled to 0 of -755 in 0.00s
+t=6s cpu=0.1s state=failed("No conversation for this session yet.") items=0 shown=0 worst stall=0.02s
+  scrolled to -377 of -755 in 0.00s
+t=7s cpu=0.1s state=failed("No conversation for this session yet.") items=0 shown=0 worst stall=0.02s
+  resized to 640 in 0.00s
+  scrolled to -755 of -755 in 0.00s
+t=8s cpu=0.1s state=failed("No conversation for this session yet.") items=0 shown=0 worst stall=0.02s
+  scrolled to 0 of -755 in 0.00s
+t=9s cpu=0.1s state=failed("No conversation for this session yet.") items=0 shown=0 worst stall=0.02s
+  resized to 1100 in 0.00s
+  scrolled to -377 of -755 in 0.00s
+t=10s cpu=0.1s state=failed("No conversation for this session yet.") items=0 shown=0 worst stall=0.02s
+  scrolled to -755 of -755 in 0.00s
+t=11s cpu=0.1s state=failed("No conversation for this session yet.") items=0 shown=0 worst stall=0.02s
+  resized to 640 in 0.00s
+  scrolled to 0 of -755 in 0.00s
+t=12s cpu=0.1s state=failed("No conversation for this session yet.") items=0 shown=0 worst stall=0.09s
+  scrolled to -377 of -755 in 0.00s
+t=13s cpu=0.1s state=failed("No conversation for this session yet.") items=0 shown=0 worst stall=0.02s
+  resized to 1100 in 0.00s
+  scrolled to -755 of -755 in 0.00s
+t=14s cpu=0.1s state=failed("No conversation for this session yet.") items=0 shown=0 worst stall=0.02s
+  scrolled to 0 of -755 in 0.00s
+t=15s cpu=0.1s state=failed("No conversation for this session yet.") items=0 shown=0 worst stall=0.02s

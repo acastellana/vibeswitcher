@@ -1,0 +1,25 @@
+fake home: $TMPDIR/vshook-XXXX state files: ['ttys004.json']
+ALL n=400 p50=16.4 p95=24.0 p99=37.5 max=44.3 mean=17.0 ms
+  SessionStart       n= 50 p50=15.0 p95=28.0 max=35.5
+  UserPromptSubmit   n= 50 p50=17.7 p95=27.8 max=36.8
+  PreToolUse         n=100 p50=17.3 p95=24.4 max=39.0
+  PostToolUse        n= 50 p50=14.5 p95=21.3 max=37.5
+  PermissionRequest  n= 50 p50=16.5 p95=19.6 max=37.6
+  Notification       n= 50 p50=14.9 p95=21.7 max=35.7
+  Stop               n= 50 p50=17.8 p95=35.9 max=44.3
+baseline /usr/bin/true n=100 p50=3.2 p95=5.0 ms
+  edge empty stdin            rc=0     5.4 ms stdout=0B stderr=b'' state_size=1155
+  edge whitespace             rc=0     5.3 ms stdout=0B stderr=b'' state_size=1155
+  edge truncated json         rc=0     5.4 ms stdout=0B stderr=b'' state_size=1155
+  edge json array             rc=0     5.2 ms stdout=0B stderr=b'' state_size=1155
+  edge json string            rc=0     5.5 ms stdout=0B stderr=b'' state_size=1155
+  edge no hook_event_name     rc=0     8.3 ms stdout=0B stderr=b'' state_size=1155
+  edge unknown event          rc=0    10.4 ms stdout=0B stderr=b'' state_size=1157
+  edge wrong types            rc=0     8.6 ms stdout=0B stderr=b'' state_size=1144
+  edge binary garbage         rc=0     5.5 ms stdout=0B stderr=b'' state_size=1144
+  edge huge prompt 5MB        rc=0  9725.6 ms stdout=0B stderr=b'' state_size=898
+  edge deep nesting           rc=0     6.1 ms stdout=0B stderr=b'' state_size=898
+  edge transcript_path 5KB    rc=0     7.7 ms stdout=0B stderr=b'' state_size=887
+  edge no agent arg           rc=0     8.6 ms stdout=0B stderr=b'' state_size=815
+  edge codex arg              rc=0     8.5 ms stdout=0B stderr=b'' state_size=781
+final state files: [('ttys004.json', 781), ('ttys004.json.lock', 0)]
