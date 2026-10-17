@@ -17,6 +17,8 @@ final class ChatModel: ObservableObject {
     }
     /// The conversation as the view shows it, worked out once per change (not on every redraw).
     @Published private(set) var items: [ChatItem] = []
+    /// How many of the newest items are laid out (see `ChatWindow`); Show Earlier adds a page.
+    @Published private(set) var shownLimit = ChatWindow.page
     @Published private(set) var state = State.none
     /// Part of the file before what's loaded.
     @Published private(set) var hasEarlier = false
@@ -77,7 +79,10 @@ final class ChatModel: ObservableObject {
 
     private func updateItems() {
         let new = ChatTimeline.items(log.entries, newAfter: markerAfter)
-        if new != items { items = new }
+        guard new != items else { return }
+        // Reading further up: what arrives grows the window, so nothing you're looking at moves out of it.
+        if !atBottom, new.count > items.count, !items.isEmpty { shownLimit += new.count - items.count }
+        items = new
     }
 
     /// What you left each conversation with (opened tool runs, search, where you were reading), restored when you
@@ -115,6 +120,7 @@ final class ChatModel: ObservableObject {
         restoreAnchor = restored?.anchor
         visibleItems = [:]
         atBottom = true
+        shownLimit = ChatWindow.page
         hasEarlier = false
         loadingEarlier = false
         pending = []
@@ -151,6 +157,9 @@ final class ChatModel: ObservableObject {
                 self.hasEarlier = read.start > 0
                 // Nothing new since you looked: no marker.
                 if self.markerAfter == log.entries.last?.id { self.markerAfter = nil }
+                // Lay out enough to reach where you were reading, or what's new if it isn't far back.
+                self.widen(toInclude: self.restoreAnchor)
+                self.widen(toInclude: "new-marker", atMost: 3 * ChatWindow.page)
                 self.state = .ready
             }
         }
@@ -231,6 +240,14 @@ final class ChatModel: ObservableObject {
     }
 
     func focusComposer() { focusComposerRequests += 1 }
+
+    func showEarlier() { shownLimit += ChatWindow.page }
+
+    private func widen(toInclude id: String?, atMost: Int = .max) {
+        guard let id, let index = items.firstIndex(where: { $0.id == id }) else { return }
+        let needed = items.count - index + 5
+        if needed <= atMost { shownLimit = max(shownLimit, needed) }
+    }
 
     /// Steps through search matches, wrapping around.
     func stepSearch(_ delta: Int) {

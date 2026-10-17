@@ -141,3 +141,19 @@ public enum ComposerText {
         return [HostInput.Write(bytes: body, delay: 0), HostInput.Write(bytes: [13], delay: 0.06)]
     }
 }
+
+/// The part of a conversation the chat lays out: the newest items. A long session has thousands, and a lazy stack
+/// still walks them all on every layout pass (the window hung for many seconds on one).
+public enum ChatWindow {
+    public static let page = 120
+
+    /// The newest `limit` items, widened to reach `including` (a search match, where you were reading) with a few
+    /// items of context before it. `hidden`: how many earlier items aren't shown.
+    public static func shown(_ items: [ChatItem], limit: Int, including wanted: String?) -> (items: ArraySlice<ChatItem>, hidden: Int) {
+        var start = max(0, items.count - limit)
+        if let wanted, let index = items.firstIndex(where: { $0.id == wanted }), index < start {
+            start = max(0, index - 5)
+        }
+        return (items[start...], start)
+    }
+}

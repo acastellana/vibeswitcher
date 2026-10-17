@@ -60,14 +60,25 @@ final class LeadController: ObservableObject {
     /// Starts the project lead for the repository holding `folder`, or shows the one already running. A `goal`
     /// goes into its first prompt (or to the running lead); `show: false` leaves the window's selection alone.
     func startLead(in folder: String, goal: String? = nil, show: Bool = true) {
-        let top = Git.run(["rev-parse", "--show-toplevel"], in: folder)
-        guard top.ok, !top.output.isEmpty else {
-            return alert("A project lead needs a git repository.", "\(folder) isn't in one. Run git init (and make a first commit) first.")
+        // git can be slow (a network volume, a git shim): find the repository off the main thread.
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let top = Git.run(["rev-parse", "--show-toplevel"], in: folder)
+            let root = (top.output as NSString).standardizingPath
+            let hasCommits = top.ok && !top.output.isEmpty && Git.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: root).ok
+            DispatchQueue.main.async {
+                guard let self else { return }
+                guard top.ok, !top.output.isEmpty else {
+                    return self.alert("A project lead needs a git repository.", "\(folder) isn't in one. Run git init (and make a first commit) first.")
+                }
+                guard hasCommits else {
+                    return self.alert("The repository has no commits yet.", "Workers branch from main: make a first commit in \(root), then start the lead.")
+                }
+                self.startLead(root: root, goal: goal, show: show)
+            }
         }
-        let root = (top.output as NSString).standardizingPath
-        guard Git.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: root).ok else {
-            return alert("The repository has no commits yet.", "Workers branch from main: make a first commit in \(root), then start the lead.")
-        }
+    }
+
+    private func startLead(root: String, goal: String?, show: Bool) {
         if let running = leadSessions[root] {
             if let goal { deliver("New goal from the user: \(goal)", from: .user, to: BoardStore(root: root).load()) }
             if show { select(running.id) }

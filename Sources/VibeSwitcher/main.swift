@@ -27,10 +27,21 @@ if arguments.contains("--toggle") {
                                                                  userInfo: nil, deliverImmediately: true)
     exit(0)
 }
+/// A debug aid's output file: absolute, and only in a scratch place (see `DebugOutput`).
+func debugPath(_ argument: String) -> String {
+    let expanded = (argument as NSString).expandingTildeInPath
+    let path = expanded.hasPrefix("/") ? expanded : (FileManager.default.currentDirectoryPath as NSString).appendingPathComponent(expanded)
+    guard DebugOutput.allowed(path) else {
+        FileHandle.standardError.write(Data("Debug output goes to /tmp, the temporary folder or ~/.vibeswitcher only.\n".utf8))
+        exit(1)
+    }
+    return path
+}
+
 if let index = arguments.firstIndex(of: "--capture-window"), arguments.indices.contains(index + 1) {
     // Debug aid: the running app draws its window into this PNG.
     DistributedNotificationCenter.default().postNotificationName(AppStatus.captureNotification,
-                                                                 object: (arguments[index + 1] as NSString).expandingTildeInPath,
+                                                                 object: debugPath(arguments[index + 1]),
                                                                  userInfo: nil, deliverImmediately: true)
     exit(0)
 }
@@ -44,7 +55,7 @@ if let index = arguments.firstIndex(of: "--settings") {
 if let index = arguments.firstIndex(of: "--screen"), arguments.indices.contains(index + 2) {
     // Debug aid: `--screen TEXT PATH` writes the screen of the first window session whose label contains TEXT.
     DistributedNotificationCenter.default().postNotificationName(AppStatus.screenNotification, object: arguments[index + 1],
-                                                                 userInfo: ["path": (arguments[index + 2] as NSString).expandingTildeInPath],
+                                                                 userInfo: ["path": debugPath(arguments[index + 2])],
                                                                  deliverImmediately: true)
     exit(0)
 }

@@ -17,14 +17,25 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private let split = NSSplitViewController()
     private var inspectorItem: NSSplitViewItem!
     private let palette = CommandPaletteController()
-    /// Whether the mirror on screen offers Move to Window (rebuilt when that changes).
-    private var mirrorOffersMove = false
-    private lazy var endedBar = NSHostingView(rootView: EndedBar(model: model, actions: actions))
+    /// What the middle shows for a Terminal session: its mirror (with or without Move to Window), or nothing while
+    /// the chat covers it (the mirror reads Terminal every few seconds). Rebuilt when that changes.
+    private var mirrorState: String?
+    private var endedBar: NSView { endedHost }
     private var shownID: String?
     private var cancellables: Set<AnyCancellable> = []
     /// The selected session's conversation, shown over the terminal (which stays attached underneath).
     let chat = ChatModel()
-    private lazy var chatHost = NSHostingView(rootView: ChatContainer(
+    private lazy var chatHost = NSHostingView(rootView: AnyView(EmptyView()))
+    private lazy var endedHost = NSHostingView(rootView: AnyView(EmptyView()))
+    private let sidebarHost = NSHostingController(rootView: AnyView(EmptyView()))
+    private let inspectorHost = NSHostingController(rootView: AnyView(EmptyView()))
+    private let headerHost = NSHostingView(rootView: AnyView(EmptyView()))
+    /// Whether the window's SwiftUI views are in place. A closed window keeps its views, and with them their
+    /// observers and tasks (git runs, transcript reads on every hook event): they come down on close.
+    private var mounted = false
+
+    private func makeChat() -> AnyView {
+        AnyView(ChatContainer(
         chat: chat, model: model, leads: leads, actions: actions,
         composer: ComposerActions(send: { [weak self] text in self?.sendToSelected(text) ?? false },
                                   steer: { [weak self] text in self?.steerSelected(text) ?? false },
@@ -36,6 +47,25 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             self?.sendKeys(Array(repeating: delta > 0 ? [27, 91, 67] : [27, 91, 68], count: abs(delta)).flatMap { $0 })
         },
         showTerminal: { [weak self] in self?.model.showsChat = false }))
+    }
+
+    private func mountViews() {
+        guard !mounted else { return }
+        mounted = true
+        sidebarHost.rootView = AnyView(SessionListView(model: model, actions: actions))
+        inspectorHost.rootView = AnyView(InspectorView(model: model, host: host, leads: leads))
+        headerHost.rootView = AnyView(SessionHeaderView(model: model, host: host, actions: actions))
+        endedHost.rootView = AnyView(EndedBar(model: model, actions: actions))
+        chatHost.rootView = makeChat()
+    }
+
+    private func unmountViews() {
+        guard mounted else { return }
+        mounted = false
+        for host in [sidebarHost, inspectorHost] { host.rootView = AnyView(EmptyView()) }
+        for host in [headerHost, endedHost, chatHost] { host.rootView = AnyView(EmptyView()) }
+    }
+
     /// Follows the transcript while the chat is on screen.
     private var chatTimer: Timer?
 
@@ -59,16 +89,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         super.init(window: window)
         window.delegate = self
 
-        let sidebar = NSSplitViewItem(sidebarWithViewController: NSHostingController(
-            rootView: SessionListView(model: model, actions: actions)))
+        let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarHost)
         sidebar.minimumThickness = 260
         sidebar.maximumThickness = 380
         let middle = NSViewController()
         middle.view = makeMiddle()
         let content = NSSplitViewItem(viewController: middle)
         content.minimumThickness = 420
-        inspectorItem = NSSplitViewItem(inspectorWithViewController: NSHostingController(
-            rootView: InspectorView(model: model, host: host, leads: leads)))
+        inspectorItem = NSSplitViewItem(inspectorWithViewController: inspectorHost)
         inspectorItem.minimumThickness = 240
         inspectorItem.maximumThickness = 380
         inspectorItem.isCollapsed = UserDefaults.standard.object(forKey: "inspectorCollapsed") as? Bool ?? false
@@ -100,7 +128,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             }
             .store(in: &cancellables)
         model.$showsChat.removeDuplicates().receive(on: RunLoop.main)
-            .sink { [weak self] _ in DispatchQueue.main.async { self?.updateChat() } }
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.showSelection() } }
             .store(in: &cancellables)
         host.$sessions.receive(on: RunLoop.main)
             .sink { [weak self] sessions in
@@ -114,14 +142,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     required init?(coder: NSCoder) { fatalError("not used") }
 
     private func makeMiddle() -> NSView {
-        let header = NSHostingView(rootView: SessionHeaderView(model: model, host: host, actions: actions))
+        let header = headerHost
         let divider = NSBox()
         divider.boxType = .separator
         endedBar.isHidden = true
         // Their size comes from the stack. Left to their content, an empty bar asks to be zero wide, which
         // pins the whole middle pane (and so the window) at its minimum width.
         header.sizingOptions = []
-        endedBar.sizingOptions = []
+        endedHost.sizingOptions = []
         // The terminal and the chat share the space; the chat covers the terminal when shown.
         let body = NSView()
         chatHost.sizingOptions = []
@@ -156,6 +184,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     func present() {
+        mountViews()
         NSApp.setActivationPolicy(.regular)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
@@ -192,12 +221,20 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         endedBar.isHidden = row.hosted?.exit == nil
         if let id = row.hostID {
             if pane.current != id { pane.show(hostID: id, focus: !model.chatShown) }
-        } else if let session = row.session, shownID != row.id || MoveToWindow.canMove(session) != mirrorOffersMove {
-            mirrorOffersMove = MoveToWindow.canMove(session)
-            let move: (() -> Void)? = MoveToWindow.canMove(session) ? { [weak self] in self?.actions.moveToWindow(session) } : nil
-            pane.show(placeholder: AnyView(TerminalMirror(session: session, open: { [weak self] in
-                self?.actions.openInTerminal(session)
-            }, move: move)))
+        } else if let session = row.session {
+            let covered = model.showsChat && model.chatPath(for: row) != nil
+            let wanted = covered ? "covered" : MoveToWindow.canMove(session) ? "mirror+move" : "mirror"
+            if shownID != row.id || wanted != mirrorState {
+                mirrorState = wanted
+                if covered {
+                    pane.show(placeholder: AnyView(EmptyView()))
+                } else {
+                    let move: (() -> Void)? = MoveToWindow.canMove(session) ? { [weak self] in self?.actions.moveToWindow(session) } : nil
+                    pane.show(placeholder: AnyView(TerminalMirror(session: session, open: { [weak self] in
+                        self?.actions.openInTerminal(session)
+                    }, move: move)))
+                }
+            }
         }
         shownID = row.id
     }
@@ -352,6 +389,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         // A hidden window keeps its views, and with them the mirror's reading loop: take it down.
         pane.show(placeholder: AnyView(EmptyView()))
         shownID = nil
+        mirrorState = nil
+        chat.show(path: nil)
+        unmountViews()
         NSApp.setActivationPolicy(.accessory)
     }
 

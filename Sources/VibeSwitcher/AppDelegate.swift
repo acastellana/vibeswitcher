@@ -248,10 +248,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         }
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.screenNotification, object: nil,
                                                             queue: .main) { [weak self] note in
-            guard let self, let text = note.object as? String, let path = note.userInfo?["path"] as? String,
+            guard let self, let text = note.object as? String, let path = note.userInfo?["path"] as? String, DebugOutput.allowed(path),
                   let session = self.hostClient.sessions.first(where: { $0.label.contains(text) && $0.isLive }) else { return }
             self.hostClient.screen(session.id) { screen in
-                try? (screen ?? "(no screen)").write(toFile: path, atomically: true, encoding: .utf8)
+                try? Redaction.secrets(in: screen ?? "(no screen)").write(toFile: path, atomically: true, encoding: .utf8)
             }
         }
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.leadNotification, object: nil,
@@ -261,7 +261,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         }
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.captureNotification, object: nil,
                                                             queue: .main) { [weak self] note in
-            guard let path = note.object as? String else { return }
+            guard let path = note.object as? String, DebugOutput.allowed(path) else { return }
             self?.captureWindows(to: path)
         }
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.newSessionNotification, object: nil,

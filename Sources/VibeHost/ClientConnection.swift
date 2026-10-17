@@ -43,6 +43,9 @@ final class ClientConnection {
 
     func send(_ envelope: HostEventEnvelope) {
         guard let payload = try? HostCoding.encode(envelope), payload.count <= HostFrame.maxPayload else { return }
+        // A client that stopped reading (a hung app) would collect status changes forever: let it go; it
+        // reconnects and gets a fresh welcome.
+        guard queuedBytes <= Self.maxQueued * 4 else { return close() }
         enqueue(Pending(data: HostFrame.encode(.control, payload), session: nil))
     }
 

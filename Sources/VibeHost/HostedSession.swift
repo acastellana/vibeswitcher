@@ -243,11 +243,18 @@ public final class HostedSession {
     public func close() {
         guard !closed else { return }
         closed = true
-        readSource?.cancel()
-        writeSource?.cancel()
+        // The PTY closes once its watchers are done with it (closing first could hand its number to a new
+        // session's PTY while an old watcher still looks at it).
+        let done = DispatchGroup()
+        for source in [readSource as DispatchSourceProtocol?, writeSource].compactMap({ $0 }) where !source.isCancelled {
+            done.enter()
+            source.setCancelHandler { done.leave() }
+            source.cancel()
+        }
         exitSource?.cancel()
         exitPoll?.cancel()
-        Darwin.close(masterFD)
+        let fd = masterFD
+        done.notify(queue: queue) { Darwin.close(fd) }
     }
 }
 

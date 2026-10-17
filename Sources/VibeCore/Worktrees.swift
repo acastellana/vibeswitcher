@@ -18,7 +18,7 @@ public enum Git {
 /// Runs a program and captures its output.
 public enum Shell {
     public static func run(executable: String, args: [String], in directory: String, env: [String: String] = [:],
-                           timeout: TimeInterval = 120) -> Git.Result {
+                           timeout: TimeInterval = 120, grace: TimeInterval = 5) -> Git.Result {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
@@ -42,21 +42,39 @@ public enum Shell {
         while process.isRunning, Date() < deadline { usleep(20_000) }
         if process.isRunning {
             // Out of time: its children (a test runner's workers) go too, or they'd keep running in the worktree.
-            let table = ProcessTable.snapshot()
-            var family = [process.processIdentifier]
-            var index = 0
-            while index < family.count {
-                let parent = family[index]
-                family += table.values.filter { $0.ppid == parent }.map(\.pid)
-                index += 1
-            }
-            for pid in family.reversed() { kill(pid, SIGTERM) }
+            // Asked first; whatever is still there after `grace` (it ignores TERM) is killed.
+            let asked = signalFamily(of: process.processIdentifier, SIGTERM)
+            let end = Date().addingTimeInterval(grace)
+            while process.isRunning, Date() < end { usleep(50_000) }
+            signalFamily(of: process.processIdentifier, SIGKILL, also: asked)
         }
         process.waitUntilExit()
         group.wait()
         return Git.Result(status: process.terminationStatus,
                           output: String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines),
                           error: String(decoding: errors, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+}
+
+extension Shell {
+    /// Signals a process and its descendants (plus `also`, an earlier walk: a descendant whose parent died since
+    /// has moved to launchd), children first, each matched by pid and start time (so a pid reused meanwhile isn't
+    /// hit). Returns who it signalled.
+    @discardableResult
+    static func signalFamily(of root: Int32, _ signal: Int32, also earlier: [ProcInfo] = []) -> [ProcInfo] {
+        let table = ProcessTable.snapshot()
+        var family = table[root].map { [$0] } ?? []
+        family += earlier.filter { member in !family.contains { $0.pid == member.pid } }
+        var index = 0
+        while index < family.count {
+            let parent = family[index].pid
+            family += table.values.filter { child in child.ppid == parent && child.pid != parent && !family.contains { $0.pid == child.pid } }
+            index += 1
+        }
+        for member in family.reversed() where ProcessTable.info(pid: member.pid)?.startTime == member.startTime {
+            kill(member.pid, signal)
+        }
+        return family
     }
 }
 

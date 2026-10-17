@@ -75,3 +75,28 @@ struct ChatTimelineTests {
         #expect(ComposerText.writes(" \n\u{7}", bracketed: true).isEmpty)
     }
 }
+
+struct ChatWindowTests {
+    func items(_ count: Int) -> [ChatItem] {
+        (0..<count).map { ChatItem.tools(id: "t\($0)", []) }
+    }
+
+    @Test func onlyTheNewestItemsAreShown() {
+        let all = items(500)
+        let window = ChatWindow.shown(all, limit: 120, including: nil)
+        #expect(window.items.count == 120)
+        #expect(window.items.first?.id == "t380")
+        #expect(window.hidden == 380)
+        #expect(ChatWindow.shown(items(50), limit: 120, including: nil).hidden == 0)
+    }
+
+    @Test func aWantedItemWidensTheWindow() {
+        let all = items(500)
+        // A search match, or where you were reading: shown, with a little before it.
+        let window = ChatWindow.shown(all, limit: 120, including: "t100")
+        #expect(window.items.contains { $0.id == "t100" })
+        #expect(window.items.last?.id == "t499")
+        #expect(window.hidden <= 100)
+        #expect(ChatWindow.shown(all, limit: 120, including: "missing").hidden == 380)
+    }
+}

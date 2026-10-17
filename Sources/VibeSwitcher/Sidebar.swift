@@ -20,7 +20,7 @@ final class SidebarController {
     private(set) var isEnabled = false
     /// Slide in on the right edge (true) or stay docked (false).
     var autoHide = true {
-        didSet { if isEnabled, autoHide != oldValue { autoHide ? conceal(animated: true) : reveal(on: currentScreen()) } }
+        didSet { if isEnabled, autoHide != oldValue { autoHide ? conceal(animated: true) : currentScreen().map { reveal(on: $0) } } }
     }
     private var revealed = false
     /// After picking a session the mouse is still near the edge; don't pop back until it has moved away.
@@ -65,8 +65,8 @@ final class SidebarController {
         panel.contentView = hostingView
         let center = NotificationCenter.default
         center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
-            guard let self, self.revealed else { return }
-            self.panel.setFrame(self.dockedFrame(on: self.screen ?? self.currentScreen()), display: true)
+            guard let self, self.revealed, let screen = self.screen ?? self.currentScreen() else { return }
+            self.panel.setFrame(self.dockedFrame(on: screen), display: true)
         }
         // Keep the sidebar open while one of its menus (⊕, ⚙︎, right-click) is open.
         center.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
@@ -100,7 +100,7 @@ final class SidebarController {
                 self?.mouseMoved()
             }
             pollTimer?.tolerance = 0.05
-            if !autoHide { reveal(on: currentScreen()) }
+            if !autoHide, let screen = currentScreen() { reveal(on: screen) }
         } else {
             monitors.forEach(NSEvent.removeMonitor)
             monitors.removeAll()
@@ -113,8 +113,9 @@ final class SidebarController {
     /// After a desktop switch: slide in for a moment (highlighting the session there), then slide out.
     func flash(for duration: TimeInterval = 2.5) {
         guard isEnabled, autoHide else { return }
+        guard let screen = currentScreen() else { return }
         flashing = true
-        reveal(on: currentScreen())
+        reveal(on: screen)
         let work = DispatchWorkItem { [weak self] in
             guard let self else { return }
             self.hideWork = nil
@@ -136,7 +137,8 @@ final class SidebarController {
     private func mouseMoved() {
         guard isEnabled, autoHide else { return }
         let point = NSEvent.mouseLocation
-        let screen = currentScreen()
+        // No display at all (unplugged, or mid-reconfiguration): nothing to slide in on.
+        guard let screen = currentScreen() else { return }
         if isStrandedOffScreen {
             // Believed shown but it isn't: reset, then detect normally below.
             let reason = animating ? "healed: animation never finished" : "healed: was stuck off screen"
@@ -234,9 +236,10 @@ final class SidebarController {
         }
     }
 
-    private func currentScreen() -> NSScreen {
+    /// The display under the pointer; nil when there's no display at all.
+    private func currentScreen() -> NSScreen? {
         let point = NSEvent.mouseLocation
-        return NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens[0]
+        return NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) } ?? NSScreen.main ?? NSScreen.screens.first
     }
 
     private func dockedFrame(on screen: NSScreen) -> NSRect {
@@ -299,7 +302,8 @@ final class SidebarController {
         revealed = false
         transition += 1
         let id = transition
-        let hidden = dockedFrame(on: screen ?? currentScreen()).offsetBy(dx: Self.width, dy: 0)
+        guard let target = screen ?? currentScreen() else { return }
+        let hidden = dockedFrame(on: target).offsetBy(dx: Self.width, dy: 0)
         note("conceal #\(id)\(animated ? "" : " (instant)")")
         let finish = { [weak self] in
             guard let self else { return }
@@ -324,7 +328,8 @@ final class SidebarController {
     private var isStrandedOffScreen: Bool {
         guard revealed else { return false }
         if animating, !SidebarAnimation.isStale(startedAt: animationStartedAt, now: Date()) { return false }
-        let docked = dockedFrame(on: screen ?? currentScreen())
+        guard let target = screen ?? currentScreen() else { return false }
+        let docked = dockedFrame(on: target)
         return !panel.isVisible || abs(panel.frame.minX - docked.minX) > 1
     }
 }

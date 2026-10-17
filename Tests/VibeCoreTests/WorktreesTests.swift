@@ -134,4 +134,37 @@ struct ShellTests {
         }
         #expect(gone)
     }
+
+    @Test func aCommandThatIgnoresTermIsKilled() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("shell-\(UUID().uuidString)").path
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let started = Date()
+        _ = Shell.run(executable: "/bin/sh", args: ["-c", "trap '' TERM; sleep 60 & echo $! > child; wait"], in: dir, timeout: 1, grace: 1)
+        #expect(Date().timeIntervalSince(started) < 10)
+        let child = Int32((try String(contentsOfFile: dir + "/child", encoding: .utf8)).trimmingCharacters(in: .whitespacesAndNewlines))!
+        var gone = false
+        for _ in 0..<50 where !gone {
+            gone = kill(child, 0) != 0
+            if !gone { usleep(100_000) }
+        }
+        #expect(gone)
+    }
+
+    @Test func aChildLeftBehindByItsParentIsKilledToo() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("shell-\(UUID().uuidString)").path
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        // The shell dies on TERM; the child it started ignores TERM and is left to launchd (still holding the output
+        // pipe, so the call would wait for it).
+        let started = Date()
+        _ = Shell.run(executable: "/bin/sh", args: ["-c", "(trap '' TERM; exec sleep 60) & echo $! > child; wait"], in: dir, timeout: 1, grace: 1)
+        #expect(Date().timeIntervalSince(started) < 10)
+        let child = Int32((try String(contentsOfFile: dir + "/child", encoding: .utf8)).trimmingCharacters(in: .whitespacesAndNewlines))!
+        var gone = false
+        for _ in 0..<50 where !gone {
+            gone = kill(child, 0) != 0
+            if !gone { usleep(100_000) }
+        }
+        #expect(gone)
+    }
 }
+

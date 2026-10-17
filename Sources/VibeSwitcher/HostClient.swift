@@ -41,7 +41,13 @@ final class HostClient: ObservableObject {
     private var whenReady: [(String?) -> Void] = []
     private var replacing = false
     private var restartWhenEnded = false
-    private var hostProcess: DispatchSourceProcess?
+    /// Hosts this app started, by pid, reaped when they exit (a replaced host can still be running when the new
+    /// one starts).
+    private var hostProcesses: [pid_t: DispatchSourceProcess] = [:]
+    /// Reconnect attempts since the connection was lost; reset by a welcome.
+    private var reconnectAttempt = 0
+    /// The connection was lost before a welcome while sessions waited for the host: start it once more.
+    private var restartedForWaiting = false
 
     static var hostExecutable: URL {
         Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host")
@@ -62,6 +68,8 @@ final class HostClient: ObservableObject {
     /// Connects (starting the host if it isn't running) and calls `ready` with nil, or why it couldn't.
     func ensureHost(_ ready: @escaping (String?) -> Void) {
         if isUsable { return ready(nil) }
+        // Connected to a host that can't serve us: say so now (waiting would wait forever).
+        if case .outdated(_, false) = state { return ready("The session host is out of date. Restart it from the window.") }
         whenReady.append(ready)
         guard connection == nil else { return }   // a welcome is on its way
         if connect() { return }
@@ -128,14 +136,14 @@ final class HostClient: ObservableObject {
         source.setEventHandler { [weak self] in
             var status: Int32 = 0
             waitpid(pid, &status, WNOHANG)
-            self?.hostProcess?.cancel()
-            self?.hostProcess = nil
+            self?.hostProcesses.removeValue(forKey: pid)?.cancel()
         }
         source.resume()
-        hostProcess = source
+        hostProcesses[pid] = source
     }
 
     private func connectionLost() {
+        let welcomed = state != .connecting
         connection = nil
         let pending = replies
         replies = [:]
@@ -145,11 +153,41 @@ final class HostClient: ObservableObject {
             try? startHost()
             return retryConnect(attempts: 30)
         }
-        // A host that's gone took its sessions with it.
-        sessions = []
+        // Closed before its welcome while a new session waits (an idle host quitting just as we connected): start
+        // one and try again, rather than giving up.
+        if !welcomed, !whenReady.isEmpty, !restartedForWaiting {
+            restartedForWaiting = true
+            try? startHost()
+            return retryConnect(attempts: 30)
+        }
+        // Keep the sessions and their terminals as they are (the last output is what you want to read now) and
+        // try to get back to the host; only when it's really gone are its sessions marked ended.
+        state = .connecting
+        reconnect()
+    }
+
+    private func reconnect() {
+        let delays: [TimeInterval] = [0.2, 0.5, 1, 2, 3, 5]
+        guard reconnectAttempt < delays.count else { return hostGone() }
+        let delay = delays[reconnectAttempt]
+        reconnectAttempt += 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.connection == nil else { return }
+            if !self.connect() { self.reconnect() }
+        }
+    }
+
+    /// The host is gone and took its sessions with it: they stay listed as ended, with their last screen.
+    private func hostGone() {
+        reconnectAttempt = 0
+        let now = Date()
+        sessions = sessions.map { session in
+            var ended = session
+            if ended.isLive { ended.exit = HostSession.Exit(status: -1, at: now) }
+            return ended
+        }
         screens = [:]
         state = .notRunning
-        sinks.values.forEach { $0.sink.resync() }
         finishWaiting("The session host stopped.")
     }
 
@@ -157,6 +195,8 @@ final class HostClient: ObservableObject {
         if let seq = envelope.replyTo, let reply = replies.removeValue(forKey: seq) { reply(envelope.event) }
         switch envelope.event {
         case .welcome(let version, let build, let list):
+            reconnectAttempt = 0
+            restartedForWaiting = false
             sessions = list
             let live = list.filter(\.isLive).count
             let bundled = HostBuild.id(ofExecutableAt: Self.hostExecutable.path)
@@ -169,7 +209,13 @@ final class HostClient: ObservableObject {
                 state = .outdated(live: live, compatible: version == HostProtocol.version)
             }
             finishWaiting(isUsable ? nil : "The session host is out of date. Restart it from the window.")
-            for (id, entry) in sinks { sendAttach(id, cols: entry.cols, rows: entry.rows) }
+            // Back after losing the connection: the views still show what they had; start them over from the
+            // host's replay (views of sessions it no longer has are dropped with them).
+            for (id, entry) in sinks {
+                guard list.contains(where: { $0.id == id }) else { sinks[id] = nil; continue }
+                entry.sink.resync()
+                sendAttach(id, cols: entry.cols, rows: entry.rows)
+            }
         case .spawned(let session), .sessionChanged(let session):
             upsert(session)
         case .sessionRemoved(let id):
@@ -258,7 +304,14 @@ final class HostClient: ObservableObject {
     }
 
     func send(_ id: UUID, bytes: Data, reply: Bool) {
-        request(.input(id: id, bytes: bytes, reply: reply))
+        // A message has a size limit (a big paste is larger): send it in pieces, in order.
+        let piece = 256 * 1024
+        var start = bytes.startIndex
+        repeat {
+            let end = bytes.index(start, offsetBy: piece, limitedBy: bytes.endIndex) ?? bytes.endIndex
+            request(.input(id: id, bytes: bytes.subdata(in: start..<end), reply: reply))
+            start = end
+        } while start < bytes.endIndex
     }
 
     func resize(_ id: UUID, cols: Int, rows: Int) {
@@ -281,6 +334,11 @@ final class HostClient: ObservableObject {
     func kill(_ id: UUID) { request(.kill(id: id)) }
 
     func remove(_ id: UUID) {
+        // Left over from a host that's gone: nothing to ask.
+        guard connection != nil else {
+            sessions.removeAll { $0.id == id }
+            return
+        }
         request(.remove(id: id)) { [weak self] event in
             guard let self, case .ok = event else { return }
             self.sessions.removeAll { $0.id == id }

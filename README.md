@@ -231,7 +231,7 @@ VibeSwitcher --settings launch        # open Settings (general, launch or termin
 VibeSwitcher --lead ~/dev/app --goal "add a login page"  # start (or message) the project lead of that repository
 VibeSwitcher --install-hooks | --uninstall-hooks
 cat ~/.vibeswitcher/app-status.json   # debug aid: what the running app currently sees
-VibeSwitcher --capture-window ~/w.png # debug aid: the running app draws its windows into PNGs (+ view tree .txt)
+VibeSwitcher --capture-window /tmp/w.png # debug aid: the running app draws its windows into PNGs (+ view tree .txt; /tmp or ~/.vibeswitcher only)
 ```
 
 (`VibeSwitcher` = `/Applications/VibeSwitcher.app/Contents/MacOS/VibeSwitcher`.)

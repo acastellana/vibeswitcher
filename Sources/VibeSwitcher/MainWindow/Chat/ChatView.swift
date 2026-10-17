@@ -85,6 +85,8 @@ struct ChatView: View {
         let matchList = chat.searchActive ? ChatSearch.matches(items, query: chat.searchQuery) : []
         let matches = Set(matchList)
         let current = matchList.isEmpty ? nil : matchList[min(chat.searchIndex, matchList.count - 1)]
+        // Only the newest part is laid out (a search match further back widens it).
+        let window = ChatWindow.shown(items, limit: chat.shownLimit, including: current)
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 16) {
@@ -96,11 +98,14 @@ struct ChatView: View {
                     case .none:
                         Text("No conversation").foregroundStyle(.secondary).frame(maxWidth: .infinity).padding(40)
                     case .ready:
-                        if chat.hasEarlier {
+                        if window.hidden > 0 {
+                            Button("Show \(min(window.hidden, ChatWindow.page)) earlier") { chat.showEarlier() }
+                                .buttonStyle(.borderless).frame(maxWidth: .infinity)
+                        } else if chat.hasEarlier {
                             Button(chat.loadingEarlier ? "Loading…" : "Load earlier") { chat.loadEarlier() }
                                 .buttonStyle(.borderless).frame(maxWidth: .infinity).disabled(chat.loadingEarlier)
                         }
-                        ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                        ForEach(Array(window.items.enumerated()), id: \.element.id) { offset, item in
                             ChatItemView(item: item, chat: chat, expanded: item.isTools ? chat.expanded : [],
                                          agent: row?.markKind ?? .agent(.claude), rowID: row?.id,
                                          canSend: live, resend: resend) { viewing = $0 }
@@ -109,7 +114,7 @@ struct ChatView: View {
                                 .padding(6)
                                 .background(RoundedRectangle(cornerRadius: 10).fill(
                                     item.id == current ? Color.yellow.opacity(0.18) : matches.contains(item.id) ? Color.yellow.opacity(0.07) : .clear))
-                                .onAppear { chat.visibleItems[item.id] = index }
+                                .onAppear { chat.visibleItems[item.id] = window.hidden + offset }
                                 .onDisappear { chat.visibleItems[item.id] = nil }
                         }
                         ForEach(chat.steering) { message in
