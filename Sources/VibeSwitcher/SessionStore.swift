@@ -171,8 +171,9 @@ final class SessionStore: ObservableObject {
             let raw = self.scanner.scan(now: now)
             let transcripts = Self.transcripts(for: raw)
             // AppleScript is the expensive part; query at most every `terminalInterval` unless forced.
-            let access = self.terminal.poll(now: now, interval: terminalInterval, quiet: quiet, force: forceTerminal,
-                                            bridge: self.bridge)?.access
+            let inTerminal = Set(raw.filter(\.inTerminalApp).map(\.tty))
+            let access = self.terminal.poll(now: now, interval: terminalInterval, terminalTTYs: inTerminal, quiet: quiet,
+                                            force: forceTerminal, bridge: self.bridge)?.access
             let tabs = self.terminal.tabs
             var background = self.terminal.backgroundWork
             for (tty, screen) in hostScreens where hosted[tty] != nil {
@@ -201,7 +202,8 @@ final class SessionStore: ObservableObject {
         let raw = scanner.scan(now: now)
         let quiet = Set(raw.filter { $0.agent == .claude }.map(\.tty))
         var terminal = TerminalPoll<TerminalTab>()
-        terminalAccess = terminal.poll(now: now, interval: 0, quiet: quiet, force: true, bridge: bridge)?.access ?? .unknown
+        terminalAccess = terminal.poll(now: now, interval: 0, terminalTTYs: Set(raw.filter(\.inTerminalApp).map(\.tty)),
+                                       quiet: quiet, force: true, bridge: bridge)?.access ?? .unknown
         apply(raw: raw, tabs: terminal.tabs, hosted: [:], background: terminal.backgroundWork,
               transcripts: Self.transcripts(for: raw), now: now)
     }

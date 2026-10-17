@@ -148,6 +148,7 @@ private final class FakeTerminal: @unchecked Sendable {
 
 struct TerminalPollTests {
     private let titles = ["ttys001": "✳ Fix login bug", "ttys002": "◐ Write docs", "ttys003": "✳ Review"]
+    private let inTerminal: Set<String> = ["ttys001", "ttys002", "ttys003"]
 
     /// The ⌃1–9 order: what the list would show for these tabs.
     private func order(_ tabs: [String: FakeTerminal.Tab]) -> [String] {
@@ -170,7 +171,7 @@ struct TerminalPollTests {
         var witness = TurnWitness()
         _ = witness.observe(tty: "ttys001", pid: 1, title: .busy)   // ttys001 was seen finishing a turn
         for tick in 0..<3 {
-            poll.poll(now: Date(timeIntervalSince1970: Double(tick * 4)), interval: 4, quiet: [], force: false,
+            poll.poll(now: Date(timeIntervalSince1970: Double(tick * 4)), interval: 4, terminalTTYs: inTerminal, quiet: [], force: false,
                       bridge: terminal.bridge)
             orders.append(order(poll.tabs))
             let title = poll.tabs["ttys001"].map { StatusRules.parseTitle($0.title).activity } ?? .none
@@ -189,8 +190,8 @@ struct TerminalPollTests {
         let terminal = FakeTerminal()
         terminal.tabReads = [.tabs(FakeTerminal.tabs(titles)), .failed]
         var poll = TerminalPoll<FakeTerminal.Tab>()
-        poll.poll(now: Date(timeIntervalSince1970: 0), interval: 4, quiet: [], force: false, bridge: terminal.bridge)
-        poll.poll(now: Date(timeIntervalSince1970: 4), interval: 4, quiet: [], force: true, bridge: terminal.bridge)
+        poll.poll(now: Date(timeIntervalSince1970: 0), interval: 4, terminalTTYs: inTerminal, quiet: [], force: false, bridge: terminal.bridge)
+        poll.poll(now: Date(timeIntervalSince1970: 4), interval: 4, terminalTTYs: inTerminal, quiet: [], force: true, bridge: terminal.bridge)
         #expect(poll.tabs.mapValues(\.title) == titles)
     }
 
@@ -199,8 +200,8 @@ struct TerminalPollTests {
             let terminal = FakeTerminal()
             terminal.tabReads = [.tabs(FakeTerminal.tabs(titles)), gone]
             var poll = TerminalPoll<FakeTerminal.Tab>()
-            poll.poll(now: Date(timeIntervalSince1970: 0), interval: 4, quiet: [], force: false, bridge: terminal.bridge)
-            poll.poll(now: Date(timeIntervalSince1970: 4), interval: 4, quiet: [], force: false, bridge: terminal.bridge)
+            poll.poll(now: Date(timeIntervalSince1970: 0), interval: 4, terminalTTYs: inTerminal, quiet: [], force: false, bridge: terminal.bridge)
+            poll.poll(now: Date(timeIntervalSince1970: 4), interval: 4, terminalTTYs: inTerminal, quiet: [], force: false, bridge: terminal.bridge)
             #expect(poll.tabs.isEmpty)
         }
     }
@@ -210,9 +211,9 @@ struct TerminalPollTests {
         terminal.tabReads = [.tabs(FakeTerminal.tabs(titles)), .tabs(FakeTerminal.tabs(titles))]
         terminal.screenReads = [["ttys001": "✳ done\n\n⏵⏵ bypass permissions on · 1 shell"], nil]
         var poll = TerminalPoll<FakeTerminal.Tab>()
-        poll.poll(now: Date(timeIntervalSince1970: 0), interval: 4, quiet: ["ttys001"], force: false, bridge: terminal.bridge)
+        poll.poll(now: Date(timeIntervalSince1970: 0), interval: 4, terminalTTYs: inTerminal, quiet: ["ttys001"], force: false, bridge: terminal.bridge)
         #expect(poll.backgroundWork == ["ttys001": "1 shell"])
-        poll.poll(now: Date(timeIntervalSince1970: 8), interval: 4, quiet: ["ttys001"], force: false, bridge: terminal.bridge)
+        poll.poll(now: Date(timeIntervalSince1970: 8), interval: 4, terminalTTYs: inTerminal, quiet: ["ttys001"], force: false, bridge: terminal.bridge)
         #expect(terminal.screenCalls == 2)
         #expect(poll.backgroundWork == ["ttys001": "1 shell"])
     }
@@ -221,10 +222,147 @@ struct TerminalPollTests {
         let terminal = FakeTerminal()
         var poll = TerminalPoll<FakeTerminal.Tab>()
         for tick in 0..<10 {   // 2 s scans for 20 s
-            poll.poll(now: Date(timeIntervalSince1970: Double(tick * 2)), interval: 4, quiet: ["ttys001"], force: false,
+            poll.poll(now: Date(timeIntervalSince1970: Double(tick * 2)), interval: 4, terminalTTYs: inTerminal, quiet: ["ttys001"], force: false,
                       bridge: terminal.bridge)
         }
         #expect(terminal.tabCalls == 5)
         #expect(terminal.screenCalls == 3)
+    }
+}
+
+struct TerminalPollingCostTests {
+    /// `osascript` runs over two minutes of 2 s scans with three quiet Claude sessions.
+    private func spawns(terminalTTYs: Set<String>, interval: TimeInterval) -> Int {
+        let terminal = FakeTerminal()
+        var poll = TerminalPoll<FakeTerminal.Tab>()
+        for tick in 0..<60 {
+            terminal.tabReads.append(.tabs([:]))
+            terminal.screenReads.append([:])
+            poll.poll(now: Date(timeIntervalSince1970: Double(tick * 2)), interval: interval, terminalTTYs: terminalTTYs,
+                      quiet: ["ttys010", "ttys011", "ttys012"], force: false, bridge: terminal.bridge)
+        }
+        return terminal.tabCalls + terminal.screenCalls
+    }
+
+    @Test func onlyWindowSessionsNeverAskTerminal() {
+        // Before the gate: 45 with Terminal in the background, 80 with it in front.
+        #expect(spawns(terminalTTYs: [], interval: 4) == 0)
+        #expect(spawns(terminalTTYs: [], interval: 1.5) == 0)
+    }
+
+    @Test func switchingAppsDoesNotAskTerminalEither() {
+        // Activating any app forces a read.
+        let terminal = FakeTerminal()
+        var poll = TerminalPoll<FakeTerminal.Tab>()
+        poll.poll(now: Date(), interval: 4, terminalTTYs: [], quiet: ["ttys010"], force: true, bridge: terminal.bridge)
+        #expect(terminal.tabCalls + terminal.screenCalls == 0)
+    }
+
+    @Test func aTerminalSessionIsStillPolled() {
+        #expect(spawns(terminalTTYs: ["ttys010"], interval: 4) == 45)
+    }
+
+    @Test func screensAreOnlyReadForTerminalSessions() {
+        let terminal = FakeTerminal()
+        var asked: [Set<String>] = []
+        let counting = TerminalPoll<FakeTerminal.Tab>.Bridge(tabs: { .tabs([:]) }, screens: { ttys in
+            asked.append(ttys)
+            return terminal.bridge.screens(ttys)
+        })
+        var poll = TerminalPoll<FakeTerminal.Tab>()
+        poll.poll(now: Date(), interval: 4, terminalTTYs: ["ttys001"], quiet: ["ttys001", "ttys010"], force: true,
+                  bridge: counting)
+        #expect(asked == [["ttys001"]])
+    }
+
+    @Test func aTerminalTabThatChangedHandsIsDroppedOnAFailedRead() {
+        // ttys002 was a Terminal tab; it closed and the host reused the tty for a window session.
+        let terminal = FakeTerminal()
+        terminal.tabReads = [.tabs(FakeTerminal.tabs(["ttys001": "✳ a", "ttys002": "✳ b"])), .failed]
+        var poll = TerminalPoll<FakeTerminal.Tab>()
+        poll.poll(now: Date(timeIntervalSince1970: 0), interval: 4, terminalTTYs: ["ttys001", "ttys002"], quiet: [],
+                  force: false, bridge: terminal.bridge)
+        poll.poll(now: Date(timeIntervalSince1970: 4), interval: 4, terminalTTYs: ["ttys001"], quiet: [],
+                  force: false, bridge: terminal.bridge)
+        #expect(Set(poll.tabs.keys) == ["ttys001"])
+    }
+}
+
+/// The scanner over a fake process table and a temporary state folder (never `~/.vibeswitcher`).
+final class SessionScannerTests {
+    private let stateDir: URL
+
+    init() throws {
+        stateDir = FileManager.default.temporaryDirectory.appendingPathComponent("scanner-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+    }
+
+    deinit { try? FileManager.default.removeItem(at: stateDir) }
+
+    private func proc(_ pid: Int32, _ ppid: Int32, _ comm: String, tty: String? = nil, agent: Agent? = nil,
+                      start: Double = 1000) -> ProcInfo {
+        ProcInfo(pid: pid, ppid: ppid, tty: tty, comm: comm, startTime: Date(timeIntervalSince1970: start), agent: agent)
+    }
+
+    /// Terminal → login → zsh → claude on ttys001; the session host → claude on ttys010.
+    private var table: [Int32: ProcInfo] {
+        let procs = [
+            proc(730, 1, "Terminal"), proc(836, 730, "login", tty: "ttys001"), proc(840, 836, "zsh", tty: "ttys001"),
+            proc(900, 840, "2.1.302", tty: "ttys001", agent: .claude),
+            proc(4086, 1, "vibeswitcher-hos"), proc(950, 4086, "2.1.302", tty: "ttys010", agent: .claude),
+            proc(960, 1, "iTermServer-3.5"), proc(961, 960, "zsh", tty: "ttys020"),
+            proc(962, 961, "codex", tty: "ttys020", agent: .codex),
+        ]
+        return Dictionary(uniqueKeysWithValues: procs.map { ($0.pid, $0) })
+    }
+
+    private func scanner(_ procs: @escaping () -> [Int32: ProcInfo]?) -> SessionScanner {
+        SessionScanner(processes: procs, stateDir: { [stateDir] in stateDir }, cwd: { _ in "/tmp/project" },
+                       arguments: { _ in [] })
+    }
+
+    @Test func knowsWhichSessionsRunInTerminal() {
+        let sessions = scanner { self.table }.scan(now: Date(timeIntervalSince1970: 2000))
+        let inTerminal = Dictionary(uniqueKeysWithValues: sessions.map { ($0.tty, $0.inTerminalApp) })
+        #expect(inTerminal == ["ttys001": true, "ttys010": false, "ttys020": false])
+    }
+
+    @Test func joinsHookStateAndDropsStaleFiles() throws {
+        var state = HookState(agent: .claude, tty: "ttys001", lastEvent: "Stop", lastEventAt: 1500)
+        state.agentPid = 900
+        try state.save(to: stateDir.appendingPathComponent("ttys001.json"))
+        let stale = HookState(agent: .claude, tty: "ttys009", lastEvent: "Stop", lastEventAt: 10)
+        let staleURL = stateDir.appendingPathComponent("ttys009.json")
+        try stale.save(to: staleURL)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)], ofItemAtPath: staleURL.path)
+
+        let sessions = scanner { self.table }.scan()
+        #expect(sessions.first { $0.tty == "ttys001" }?.hook?.lastEvent == "Stop")
+        #expect(sessions.first { $0.tty == "ttys010" }?.hook == nil)
+        #expect(!FileManager.default.fileExists(atPath: staleURL.path))
+    }
+
+    @Test func aStateFileFromAnOlderProcessIsIgnored() throws {
+        // Written before this Claude started on the terminal.
+        try HookState(agent: .claude, tty: "ttys001", lastEvent: "Stop", lastEventAt: 500)
+            .save(to: stateDir.appendingPathComponent("ttys001.json"))
+        let sessions = scanner { self.table }.scan()
+        #expect(sessions.first { $0.tty == "ttys001" }?.hook == nil)
+    }
+
+    @Test func theFirstAgentOnATerminalIsTheSession() {
+        var procs = table
+        procs[901] = proc(901, 900, "codex", tty: "ttys001", agent: .codex, start: 1200)   // `codex exec` as a tool
+        let session = scanner { procs }.scan().first { $0.tty == "ttys001" }
+        #expect(session?.pid == 900)
+        #expect(session?.agent == .claude)
+    }
+
+    @Test func anUnreadableProcessTableKeepsTheLastScan() {
+        var readable = true
+        let scanner = scanner { readable ? self.table : nil }
+        #expect(scanner.scan().count == 3)
+        readable = false
+        #expect(scanner.scan().count == 3)
     }
 }
