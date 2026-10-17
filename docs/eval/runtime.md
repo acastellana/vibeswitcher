@@ -1,12 +1,5 @@
 # VibeSwitcher runtime evaluation
 
-Measured on 2026-10-17, 16:13–16:37 CEST, against the installed app (`/Applications/VibeSwitcher.app`, app build
-1792239825 = 14:23 today, which includes e992e0a; session host build 1792178869 = 2026-10-16 21:27). Machine: Mac15,7
-(12 cores, 36 GB), macOS 15.7.3. The app (pid 33127) had been running for 1 h 50 min with its window open on a live
-session and the sidebar enabled. 11 Claude sessions ran in `vibeswitcher-host` (pid 4086), three of them evaluation
-workers that were busy the whole time. Nothing was reinstalled, relaunched, killed or reconfigured. No input went to
-any session. Raw data, scripts and trimmed stacks are in [`runtime-data/`](runtime-data/).
-
 ## Summary
 
 | Metric | Measured | Target for an AAA menu bar app | Verdict |
@@ -28,6 +21,13 @@ any session. Raw data, scripts and trimmed stacks are in [`runtime-data/`](runti
 | `--chat-bench`, 3 largest transcripts (82–129 MB) × plain / LIVE / STACK | worst stall 0.10–0.26 s, first layout 0.10–0.15 s, RSS 104–121 MB | worst stall < 0.1 s | WARN |
 | Hang watchdog (`VIBESWITCHER_BENCH_STALL=1`) | detects at 2.08 s, writes `hang-*.txt` + `.log`, logs "answered again after 4.0 s" | works | PASS |
 | `osascript` processes spawned by the app | about 15/min for Terminal tabs and up to 10/min for screen text (4 s and 6 s cadence; every 1.5 s while Terminal is frontmost) | event-driven, ~0 when nothing changes | **FAIL** |
+
+Measured on 2026-10-17, 16:13–16:37 CEST, against the installed app (`/Applications/VibeSwitcher.app`, app build
+1792239825 = 14:23 today, which includes e992e0a; session host build 1792178869 = 2026-10-16 21:27). Machine: Mac15,7
+(12 cores, 36 GB), macOS 15.7.3. The app (pid 33127) had been running for 1 h 50 min with its window open on a live
+session and the sidebar enabled. 11 Claude sessions ran in `vibeswitcher-host` (pid 4086), three of them evaluation
+workers that were busy the whole time. Nothing was reinstalled, relaunched, killed or reconfigured. No input went to
+any session. Raw data, scripts and trimmed stacks are in [`runtime-data/`](runtime-data/).
 
 The session host is lean and stable. The app is not: it hangs, misses sessions, and burns roughly a seventh of a
 core while doing nothing the user can see.
