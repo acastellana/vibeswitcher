@@ -33,6 +33,7 @@ struct ChatContainer: View {
                      showTerminal: showTerminal, choose: choose, moveTab: moveTab, resend: { _ = composer.send($0) })
                 .id(chat.path ?? "")
                 .environment(\.chatFolder, model.selectedRow?.cwd)
+                .environment(\.chatRunner, chat.runner)
             Divider()
             if let row = model.selectedRow {
                 if row.hostID != nil, actions.isLive(row) {

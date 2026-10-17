@@ -15,12 +15,27 @@ enum ChatFont {
 }
 
 private struct ChatFolderKey: EnvironmentKey { static let defaultValue: String? = nil }
+private struct ChatRunnerKey: EnvironmentKey { static let defaultValue: ChatRunner? = nil }
+
+/// Runs a command from a code block in the selected session (Run, next to Copy). One object for the chat's
+/// lifetime: what changes is only whether the session takes it now.
+final class ChatRunner: ObservableObject {
+    /// A window session you can type into is selected.
+    @Published var canRun = false
+    /// Types the prompt into it; false when it couldn't.
+    var run: (String) -> Bool = { _ in false }
+}
 
 extension EnvironmentValues {
     /// The session's folder: relative file paths in replies are resolved against it.
     var chatFolder: String? {
         get { self[ChatFolderKey.self] }
         set { self[ChatFolderKey.self] = newValue }
+    }
+
+    var chatRunner: ChatRunner? {
+        get { self[ChatRunnerKey.self] }
+        set { self[ChatRunnerKey.self] = newValue }
     }
 }
 
@@ -190,6 +205,28 @@ extension Array {
     subscript(safe index: Int) -> Element? { indices.contains(index) ? self[index] : nil }
 }
 
+/// Runs a code block's command in the session: typed in as `! command`, so it runs in the session's shell and the
+/// output joins the conversation. Shown only while a window session you can type into is selected.
+private struct RunButton: View {
+    @ObservedObject var runner: ChatRunner
+    let prompt: String
+    @State private var sent = false
+
+    var body: some View {
+        if runner.canRun {
+            Button {
+                guard runner.run(prompt) else { return NSSound.beep() }
+                sent = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { sent = false }
+            } label: {
+                Label(sent ? "Sent" : "Run", systemImage: sent ? "checkmark" : "play.fill").font(.system(size: 10.5))
+            }
+            .buttonStyle(.borderless)
+            .help("Runs it in this session: \(prompt)")
+        }
+    }
+}
+
 /// A code block: language label, Copy, syntax colors, scrolls sideways instead of wrapping.
 struct CodeBlockView: View {
     let language: String?
@@ -198,6 +235,7 @@ struct CodeBlockView: View {
     var maxLines: Int? = 40
     @State private var showAll = false
     @State private var copied = false
+    @Environment(\.chatRunner) private var runner
 
     var body: some View {
         let lines = code.split(separator: "\n", omittingEmptySubsequences: false)
@@ -207,6 +245,9 @@ struct CodeBlockView: View {
             HStack {
                 Text(language?.lowercased() ?? "code").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.secondary)
                 Spacer()
+                if let runner, let prompt = RunnableCommand.prompt(code: code, language: language) {
+                    RunButton(runner: runner, prompt: prompt)
+                }
                 Button {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(code, forType: .string)

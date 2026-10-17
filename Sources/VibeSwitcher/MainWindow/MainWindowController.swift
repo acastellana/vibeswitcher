@@ -115,6 +115,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         if !window.setFrameUsingName("MainWindow") { window.center() }
         window.setFrameAutosaveName("MainWindow")
 
+        chat.runner.run = { [weak self] prompt in
+            guard let self else { return false }
+            let working = self.model.selectedRow?.session?.status == .working
+            guard self.sendToSelected(prompt) else { return false }
+            Breadcrumbs.shared.note("chat: ran a code block (\(prompt.count) chars)")
+            self.chat.sent(prompt, expectsSoon: !working)
+            self.chat.scrollToBottom()
+            return true
+        }
         model.$selectedID.removeDuplicates().receive(on: RunLoop.main)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.showSelection() } }
             .store(in: &cancellables)
@@ -296,6 +305,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     /// The menu and permission mode on the selected window session's screen, for the answer card and the mode chip.
     private func readScreen() {
+        // Run on code blocks: for a Claude window session you can type into (`!` runs a command there).
+        let canRun = model.selectedRow.map { $0.hostID != nil && actions.isLive($0) && $0.session?.agent == .claude } == true && host.isUsable
+        if chat.runner.canRun != canRun { chat.runner.canRun = canRun }
         // Messages steered to this session that are still waiting (also from before a relaunch), and whether its
         // agent is idle (then they won't be taken by themselves).
         if let session = model.selectedRow?.session, session.agent == .claude {

@@ -72,6 +72,8 @@ final class ChatModel: ObservableObject {
     /// Unsent text and attachments per session. Its own object: typing changes it on every key, and that mustn't
     /// redraw the conversation.
     let composer = ComposerDrafts()
+    /// Run, on code blocks.
+    let runner = ChatRunner()
 
     /// Messages sent from the composer that the transcript doesn't show yet.
     @Published private(set) var pending: [PendingMessage] = []
