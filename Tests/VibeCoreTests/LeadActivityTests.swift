@@ -311,6 +311,31 @@ struct LeadDeliveryByActivityTests {
         #expect(LeadDelivery.box(in: screen("fix the\nlogin")) == .draft("fix the\nlogin"))
         if case .dialog = LeadDelivery.box(in: "Do you want to proceed?\n❯ 1. Yes") {} else { Issue.record("no box is a dialog") }
     }
+
+    /// With how the screen is drawn, what's dim in the box isn't typed (see StyledScreenTests for Claude's own bytes).
+    @Test func whatsDrawnDimInTheBoxIsntTyped() {
+        let shown = screen("delete the old lane renders")   // the box is row 2, the text from column 2
+        let row = 2
+        #expect(LeadDelivery.box(in: shown) == .draft("delete the old lane renders"))
+        #expect(LeadDelivery.box(in: shown, runs: []) == .draft("delete the old lane renders"))
+        #expect(LeadDelivery.box(in: shown, runs: [ScreenRun(row: row, column: 2, length: 27, faint: true)]) == .empty)
+        // Grey instead of faint, in each colour form; a caret painted on the first character.
+        for color in [ScreenRun.Color.rgb(153, 153, 153), .palette(8), .palette(244)] {
+            #expect(LeadDelivery.box(in: shown, runs: [ScreenRun(row: row, column: 2, length: 1, inverse: true),
+                                                         ScreenRun(row: row, column: 3, length: 26, color: color)]) == .empty)
+        }
+        // Coloured, not grey: typed (a highlighted @file, say).
+        #expect(LeadDelivery.box(in: shown, runs: [ScreenRun(row: row, column: 2, length: 27, color: .rgb(153, 204, 255))])
+                == .draft("delete the old lane renders"))
+        // A caret on typed text is typed text.
+        #expect(LeadDelivery.box(in: shown, runs: [ScreenRun(row: row, column: 2, length: 1, inverse: true)]) == .draft("delete the old lane renders"))
+        // A command's dim argument hint follows what's typed.
+        let command = screen("/review <pr>")
+        #expect(LeadDelivery.box(in: command, runs: [ScreenRun(row: row, column: 9, length: 5, faint: true)]) == .draft("/review"))
+        // Knowing how it's drawn, words that look like the placeholder but aren't dim are typed.
+        #expect(LeadDelivery.box(in: screen("Try \"x\""), runs: []) == .draft("Try \"x\""))
+        #expect(LeadDelivery.box(in: screen("Try \"x\"")) == .empty)
+    }
 }
 
 struct LeadWitnessStopsAndErrorsTests {

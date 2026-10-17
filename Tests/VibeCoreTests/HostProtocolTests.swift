@@ -73,7 +73,7 @@ struct HostMessageTests {
                                 label: "Shell", agent: nil)),
             .attach(id: id, cols: 80, rows: 24), .detach(id: id),
             .input(id: id, bytes: Data([0x1b, 0x5b, 0x41]), reply: false), .resize(id: id, cols: 100, rows: 30),
-            .screen(id: id), .history(id: id, lines: 500), .kill(id: id), .remove(id: id), .shutdown,
+            .screen(id: id), .styledScreen(id: id), .history(id: id, lines: 500), .kill(id: id), .remove(id: id), .shutdown,
         ]
         for request in requests {
             let data = try HostCoding.encode(HostRequestEnvelope(seq: 7, request: request))
@@ -81,7 +81,11 @@ struct HostMessageTests {
         }
         let events: [HostEvent] = [
             .welcome(protocolVersion: 1, hostBuild: 123, sessions: [session]), .spawned(session), .attached(id: id),
-            .screenText(id: id, text: "hi"), .historyText(id: id, history: "a\nb", screen: "c"),
+            .screenText(id: id, text: "hi"),
+            .styledScreenText(id: id, text: "❯ hi", runs: [ScreenRun(row: 0, column: 2, length: 2, faint: true),
+                                                         ScreenRun(row: 0, column: 0, length: 1, inverse: true, color: .rgb(153, 153, 153)),
+                                                         ScreenRun(row: 1, column: 0, length: 3, color: .palette(244))]),
+            .historyText(id: id, history: "a\nb", screen: "c"),
             .sessionChanged(session), .sessionRemoved(id: id), .resync(id: id), .bell(id: id), .error("nope"), .ok,
         ]
         for event in events {

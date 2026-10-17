@@ -109,3 +109,71 @@ struct StyledScreenTests {
         #expect(SteerInbox.pending(tty: agent.tty, root: root).map(\.text) == ["a"])
     }
 }
+
+/// Scratch programs only (`/bin/sh -c …`).
+struct StyledScreenHostTests {
+    @Test func theHostAnswersWithHowTheScreenIsDrawn() throws {
+        let host = try TestHost()
+        let client = try TestClient(host)
+        let session = try client.spawn("printf 'typed \\033[2mfaint\\033[22m\\n'; sleep 5")
+        var screen: LeadDelivery.Screen?
+        #expect(eventually {
+            screen = HostCall.styledScreen(session.id, socket: host.socket)
+            return screen?.text.contains("faint") == true
+        })
+        let row = screen?.text.components(separatedBy: "\n").firstIndex { $0.hasPrefix("typed faint") }
+        #expect(screen?.runs?.contains(ScreenRun(row: row ?? -1, column: 6, length: 5, faint: true)) == true)
+        #expect(screen?.runs?.contains { $0.row == row && $0.column < 6 } == false)
+    }
+
+    /// A host older than `styledScreen` says it doesn't know the request: the plain screen is read.
+    @Test func anOlderHostGivesThePlainScreen() throws {
+        let path = scratchSocketPath()
+        let listener = try UnixSocket.listen(path: path)
+        defer {
+            close(listener)
+            unlink(path)
+        }
+        Thread.detachNewThread {
+            for _ in 0..<2 {
+                var fd: Int32 = -1
+                let deadline = Date().addingTimeInterval(5)
+                while fd < 0, Date() < deadline {
+                    fd = accept(listener, nil, nil)
+                    if fd < 0 { usleep(5_000) }
+                }
+                guard fd >= 0 else { return }
+                _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
+                func answer(_ seq: Int, _ event: HostEvent) {
+                    guard let payload = try? HostCoding.encode(HostEventEnvelope(replyTo: seq, event: event)) else { return }
+                    let frame = HostFrame.encode(.control, payload)
+                    _ = frame.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+                }
+                var decoder = HostFrameDecoder()
+                var buffer = [UInt8](repeating: 0, count: 65_536)
+                var done = false
+                while !done {
+                    let count = read(fd, &buffer, buffer.count)
+                    guard count > 0 else { break }
+                    decoder.append(Data(buffer[0..<count]))
+                    while let frame = try? decoder.next() {
+                        guard let envelope = try? HostCoding.decode(HostRequestEnvelope.self, from: frame.payload) else { continue }
+                        switch envelope.request {
+                        case .hello: answer(envelope.seq, .welcome(protocolVersion: HostProtocol.version, hostBuild: 0, sessions: []))
+                        case .styledScreen:
+                            answer(envelope.seq, .error("This session host doesn't know that request; it may be older than the app."))
+                            done = true
+                        case .screen(let id):
+                            answer(envelope.seq, .screenText(id: id, text: "❯ plain"))
+                            done = true
+                        default: break
+                        }
+                    }
+                }
+                usleep(50_000)
+                close(fd)
+            }
+        }
+        #expect(HostCall.styledScreen(UUID(), socket: path) == LeadDelivery.Screen(text: "❯ plain", runs: nil))
+    }
+}
