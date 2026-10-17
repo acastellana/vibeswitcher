@@ -166,13 +166,16 @@ and notifications when a session needs you or finishes. Optionally reply and pre
    - Only pages open in Chrome right now can be opened; your other local servers can't be reached. Pages
      in incognito windows aren't listed.
    - Each page gets its own HTTPS port on your tailnet (8444–8447) through a proxy in VibeSwitcher. Every
-     request must come from your own Tailscale account and carry a cookie that only the paired phone can
-     get, from a link that works once, for a minute. A page left unused for 12 hours has to be opened
-     again from the list. Pages in one port can't use another port's session, and a dev server can't see
-     or set VibeSwitcher's cookies.
+     request must name the Mac's tailnet address, come from your own Tailscale account and carry a cookie
+     that the paired phone gets from a link that works once, for a minute. Each phone has its own session
+     per page: removing the phone ends its sessions (open live-reload connections included). A page left
+     unused for 12 hours, or opened more than 24 hours ago, has to be opened again from the list. Pages in
+     one port can't use another port's session (a cookie they plant can't push the real one aside), and a
+     dev server can't see or set VibeSwitcher's cookies.
    - If the phone's browser blocks the new tab, an **Open the page** link appears under the list; tap it.
    - At most 4 pages at once. A fifth takes over the least recently used page's port: a phone tab still open
-     on the old page then shows the new one (its storage is cleared). Reopen the old one from the list. Links hard-coded to
+     on the old page stops working (it never sees the new one, whose storage starts empty). Reopen the old
+     one from the list. Links hard-coded to
      `http://localhost:…` inside the app won't work on the phone, dev servers that only serve HTTPS aren't
      supported. A dev app's login cookies (HttpOnly) stay on the Mac, kept per opened page and sent only back
      to that app; cookies its own scripts read are shared between the previews (browsers scope cookies by
@@ -181,15 +184,23 @@ and notifications when a session needs you or finishes. Optionally reply and pre
 How it's kept safe:
 
 - **Tailnet only.** The server listens on `127.0.0.1`; `tailscale serve` (never Funnel) is the only way in,
-  over HTTPS. Requests must come from this Mac's own Tailscale account, which Tailscale vouches for.
+  over HTTPS. Requests must name this Mac's tailnet address (`<mac>.<tailnet>.ts.net`, which `tailscale
+  serve` passes on), so a web page that points its own name at `127.0.0.1` gets nothing, and must come from
+  this Mac's own Tailscale account, which Tailscale vouches for.
 - **Paired devices only.** Every request needs a device token, handed out once per pairing with a
   one-time code shown on the Mac (10 minutes, one use, 5 attempts). Only a hash of each token is kept.
-  Remove a device on the Mac or unpair it from the phone; its token stops working immediately.
+  Remove a device on the Mac or unpair it from the phone; its token and its dev-page sessions stop working
+  immediately. Wrong tokens are throttled per source (20 a minute), and a valid token is never turned away,
+  so nobody can lock your phones out.
 - **Replies are remote control.** Your sessions can run commands, so typing is a separate switch. The tab is
-  brought to the front and verified before anything is typed, keys go to Terminal only, and nothing is
-  typed while the Mac is locked. Every pairing and input is written to `~/.vibeswitcher/remote/audit.log`
+  brought to the front and verified before anything is typed, keys go to Terminal only (or straight into a
+  window session's terminal), and nothing is typed while the Mac is locked: the lock is checked again right
+  before every keystroke batch, so a reply that's under way stops when the Mac locks. Every pairing and input is written to `~/.vibeswitcher/remote/audit.log`
   and announced on the Mac.
-- **Minimal data.** Credentials are masked in everything sent to the phone. Notifications are end-to-end
+- **Minimal data.** Credentials are masked in everything sent to the phone: tokens of the common services
+  (OpenAI, Anthropic, GitHub, GitLab, Slack, Stripe, AWS, Google, npm, PyPI, Hugging Face, SendGrid, age),
+  webhook URLs, private keys, cookies, bearer tokens, passwords in commands and secret-named values, even a
+  token the terminal wrapped onto the next row. Notifications are end-to-end
   encrypted (Web Push, RFC 8291): Google's push service relays them but can't read them. By default the
   phone is notified only while you're away from the Mac. No page content is cached on the phone.
 
@@ -216,8 +227,9 @@ state, and can be skipped; Settings (⌘,) › General › **Show Welcome…** b
    One reminder follows if a session has waited on you for 10 minutes (looking at its tab restarts the
    clock), or if a working session has shown no progress for 15 minutes, which usually means it's stuck.
    Reminders wait while you're away from the Mac. Choose which you get in Settings › General. Credentials in
-   commands and messages (tokens, passwords, API keys, `Authorization` headers, `user:pass@` URLs) are masked
-   before they are stored or shown.
+   commands and messages (tokens, passwords, API keys, `Authorization`, `Cookie` and bearer headers,
+   `user:pass@` URLs, `curl -u`, `mysql -p…`, private keys, webhook URLs) are masked before they are stored
+   or shown.
 4. **Open at login**: on unless you switch it off; nothing is registered until you click Done. Change it in
    Settings › General.
 
