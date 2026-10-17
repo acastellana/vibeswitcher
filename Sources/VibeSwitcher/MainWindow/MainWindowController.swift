@@ -52,7 +52,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private func mountViews() {
         guard !mounted else { return }
         mounted = true
-        sidebarHost.rootView = AnyView(SessionListView(model: model, actions: actions))
+        sidebarHost.rootView = AnyView(SessionListView(model: model, leads: leads, actions: actions))
         inspectorHost.rootView = AnyView(InspectorView(model: model, host: host, leads: leads))
         headerHost.rootView = AnyView(SessionHeaderView(model: model, host: host, actions: actions))
         endedHost.rootView = AnyView(EndedBar(model: model, actions: actions))

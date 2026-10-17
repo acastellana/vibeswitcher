@@ -5,7 +5,8 @@ import Testing
 @testable import VibeSwitcher
 
 /// Pictures of a lead's group in the window list (the lead row with its team open), drawn offscreen from
-/// `WindowRowView` and `LeadTeams`. Only with `LEAD_SNAPSHOT_DIR=/some/folder swift test --filter LeadGroupSnapshots`
+/// `WindowRowView` and `LeadTeams`: fourteen workers and verifiers of merged tasks that ended at cleanup (the host
+/// forgets them, as `LeadController` has it do), four tasks under way, one worker whose agent quit, one stopped. Only with `LEAD_SNAPSHOT_DIR=/some/folder swift test --filter LeadGroupSnapshots`
 /// (`LEAD_SNAPSHOT_NAME` names the files, default "lead-group").
 @MainActor
 struct LeadGroupSnapshots {
@@ -28,23 +29,36 @@ struct LeadGroupSnapshots {
         add(Self.agent("Worker: Phone input on remote", slug: "phone-input", status: .done, activity: nil, since: now - 600, now: now))
         add(Self.agent("Verifier: Phone input on remote", slug: "phone-input", status: .working, activity: "Reading the diff", since: now - 120, now: now))
         add(Self.hosted("Worker: Phone and remote", slug: "phone-and-remote", started: now - 1_800, exit: nil))
+        // Stopped by the lead (stop_worker): the task waits, its worker's row stays.
+        add(Self.hosted("Worker: Menu shortcuts", slug: "menu-shortcuts", started: now - 3_000, exit: HostSession.Exit(status: 129, at: now - 2_400)))
         let finished = ["greet-sh", "menu-bar", "hang-watchdog", "start-page", "composer-undo", "trust-prompt", "palette"]
         for (index, slug) in finished.enumerated() {
             let at = now - Double(14 + index) * 3_600
             add(Self.hosted("Worker: \(slug)", slug: slug, started: at - 1_200, exit: HostSession.Exit(status: 129, at: at)))
             add(Self.hosted("Verifier: \(slug)", slug: slug, started: at - 600, exit: HostSession.Exit(status: 129, at: at)))
         }
+        var board = LeadBoard()
+        func task(_ slug: String, _ status: LeadTask.Status) -> LeadTask {
+            var task = LeadTask(slug: slug, title: slug, contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""), status: status)
+            task.worktree = status == .done ? nil : Worktrees.path(root: Self.root, slug: slug)
+            return task
+        }
+        board.tasks = [task("ended-sessions-of", .running), task("task-progress-at-a", .running), task("phone-input", .review),
+                       task("phone-and-remote", .running), task("menu-shortcuts", .blocked)] + finished.map { task($0, .done) }
+        let forgotten = Set(LeadTeams.finished(rows.compactMap(\.hosted), root: Self.root, board: board).map { "host:\($0)" })
+        rows.removeAll { forgotten.contains($0.id) }
         let arranged = LeadTeams.arrange([WindowSection(project: "vibeswitcher", rows: rows)], label: { labels[$0.id] }, expanded: [lead.row.id])
         let team = arranged.teams[lead.row.id] ?? []
         for scheme in [ColorScheme.light, .dark] {
             let view = VStack(alignment: .leading, spacing: 2) {
-                WindowRowView(row: lead.row, showProject: false, role: .lead, team: team, teamOpen: true)
+                WindowRowView(row: lead.row, showProject: false, role: .lead, team: team, board: board, label: { labels[$0.id] },
+                              teamOpen: true)
                 ForEach(team) { row in
                     WindowRowView(row: row, showProject: false, role: LeadTeams.role(label: labels[row.id]), nested: true)
                 }
             }
             .padding(10)
-            .frame(width: 320, alignment: .leading)
+            .frame(width: 360, alignment: .leading)
             .background(scheme == .dark ? Color(white: 0.17) : Color(white: 0.94))
             .environment(\.colorScheme, scheme)
             let renderer = ImageRenderer(content: view)

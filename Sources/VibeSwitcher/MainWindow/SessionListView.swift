@@ -4,6 +4,8 @@ import VibeCore
 /// The left pane: sessions grouped by what they need from you (or by project), a filter and a summary.
 struct SessionListView: View {
     @ObservedObject var model: WindowModel
+    /// Leads' boards, for their team's summary.
+    @ObservedObject var leads: LeadController
     let actions: WindowActions
     @FocusState private var filterFocused: Bool
 
@@ -15,7 +17,8 @@ struct SessionListView: View {
                 Section {
                     ForEach(section.rows) { row in
                         WindowRowView(row: row, showProject: model.grouping == .attention, role: model.role(of: row),
-                                      team: arranged.teams[row.id], nested: arranged.nested.contains(row.id),
+                                      team: arranged.teams[row.id], board: arranged.teams[row.id] == nil ? nil : leads.lead(for: row)?.board,
+                                      label: model.label(of:), nested: arranged.nested.contains(row.id),
                                       teamOpen: model.expandedTeams.contains(row.id)) { model.toggleTeam(row.id) }
                             .tag(row.id as String?)
                             .contextMenu { RowMenu(row: row, actions: actions) }
@@ -97,6 +100,10 @@ struct WindowRowView: View {
     var role: LeadLaunch.Role?
     /// A lead's team (folded under it).
     var team: [WindowRow]?
+    /// The lead's board: what its team's tasks are at.
+    var board: LeadBoard?
+    /// Window sessions' labels (who's a verifier).
+    var label: (WindowRow) -> String? = { $0.hosted?.label }
     /// A team row shown under its lead.
     var nested = false
     var teamOpen = false
@@ -104,7 +111,8 @@ struct WindowRowView: View {
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 30)) { context in
-            let state = row.state(now: context.date)
+            // A worker's or verifier's normal end doesn't read as a failure.
+            let state = nested ? LeadTeams.state(of: row, now: context.date) : row.state(now: context.date)
             HStack(spacing: 9) {
                 if nested {
                     Image(systemName: role == .verifier ? "checkmark.seal" : "hammer").font(.system(size: 10)).foregroundStyle(.tertiary)
@@ -134,7 +142,7 @@ struct WindowRowView: View {
                             Text("·").foregroundStyle(.tertiary)
                             Button(action: toggleTeam) {
                                 HStack(spacing: 2) {
-                                    Text(Self.summary(team, now: context.date))
+                                    Text(LeadTeams.summary(team, label: label, board: board, now: context.date))
                                     Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold)).rotationEffect(.degrees(teamOpen ? 90 : 0))
                                 }
                             }
@@ -153,20 +161,6 @@ struct WindowRowView: View {
             .padding(.vertical, 3)
             .opacity(row.isDimmed ? 0.55 : 1)
         }
-    }
-}
-
-extension WindowRowView {
-    /// "2 working · 1 needs you" for a lead's team.
-    static func summary(_ team: [WindowRow], now: Date) -> String {
-        let groups = team.map { $0.state(now: now).group }
-        var parts: [String] = []
-        let waiting = groups.filter { $0 == .needsYou }.count, working = groups.filter { $0 == .working }.count
-        if waiting > 0 { parts.append("\(waiting) need\(waiting == 1 ? "s" : "") you") }
-        if working > 0 { parts.append("\(working) working") }
-        let rest = team.count - waiting - working
-        if rest > 0 { parts.append("\(rest) idle") }
-        return "team: " + parts.joined(separator: " · ")
     }
 }
 

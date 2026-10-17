@@ -19,6 +19,8 @@ final class LeadController: ObservableObject {
     private var seenQuestions: Set<String> = []
     /// Witness events already told, so each is told once.
     private var told: Set<String> = []
+    /// Ended team sessions the host has been asked to drop.
+    private var forgetting: Set<UUID> = []
     /// Terminals being flushed, and when a message was last typed into each (its hooks need a moment to say it's
     /// working again; until then another flush would type a second prompt).
     private var flushing: Set<String> = []
@@ -215,20 +217,35 @@ final class LeadController: ObservableObject {
             }
             witness(root: root, board: board)
         }
+        forgetFinished(loaded)
+    }
+
+    /// A task merged or abandoned: its ended workers and verifiers leave the session list (everywhere it's shown:
+    /// the host drops them). The lead's cleanup does this too; this catches tasks finished some other way.
+    private func forgetFinished(_ boards: [String: LeadBoard]) {
+        forgetting.formIntersection(host.sessions.map(\.id))
+        for (root, board) in boards {
+            for id in LeadTeams.finished(host.sessions, root: root, board: board) where forgetting.insert(id).inserted {
+                host.remove(id)
+            }
+        }
     }
 
     /// Tells the lead what its team can't (see `LeadWitness`), and types waiting messages into idle team members.
     private func witness(root: String, board: LeadBoard) {
         let hosted = Dictionary(uniqueKeysWithValues: host.sessions.map { ($0.id.uuidString, $0) })
         var seen: [String: LeadWitness.Seen] = [:]
+        let now = Date()
         for id in board.tasks.flatMap({ [$0.worker, $0.verifier] }).compactMap({ $0 }) {
             guard let info = hosted[id] else { continue }
             let session = store.sessions.first { $0.hostID?.uuidString == id }
+            // No agent in the scan a minute on: "agent ended · shell", as good as ended.
             seen[id] = LeadWitness.Seen(live: info.isLive, exit: info.exit?.status, status: session?.status,
-                                        since: session?.statusSince, detail: session?.detail)
+                                        since: session?.statusSince, detail: session?.detail,
+                                        agentQuit: session == nil && info.agentQuit(now: now))
             if info.isLive, let session { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
         }
-        for event in LeadWitness.events(board: board, seen: seen) where told.insert("\(root)|\(event.key)").inserted {
+        for event in LeadWitness.events(board: board, seen: seen, now: now) where told.insert("\(root)|\(event.key)").inserted {
             deliver(event.text, from: .system("witness"), to: board, root: root)
         }
         // A lead runs again: what was held for it goes now.
