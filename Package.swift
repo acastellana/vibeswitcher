@@ -22,8 +22,10 @@ let package = Package(
         // The project lead's tool server (MCP over stdio) for the lead, its workers and its verifiers.
         .executableTarget(name: "vibeswitcher-mcp", dependencies: ["VibeCore"]),
         .testTarget(name: "VibeCoreTests", dependencies: ["VibeCore"]),
-        // Depends on the host executable too: sessions are started through it (`--pty-exec`).
-        .testTarget(name: "VibeHostTests", dependencies: ["VibeHost", "VibeCore", "vibeswitcher-host"]),
+        // Depends on the host executable too: sessions are started through it (`--pty-exec`). Fixtures: terminal
+        // output captured from scratch programs.
+        .testTarget(name: "VibeHostTests", dependencies: ["VibeHost", "VibeCore", "vibeswitcher-host"],
+                    resources: [.copy("Fixtures")]),
         // The app's menus and window commands.
         .testTarget(name: "VibeSwitcherTests", dependencies: ["VibeSwitcher", "VibeCore"]),
     ],

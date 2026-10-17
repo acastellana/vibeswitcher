@@ -1,0 +1,67 @@
+7[r8[?25h[?25l[?2004h[?2031h[?1004h
+[38;2;255;193;7m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[39m
+[2G[38;2;255;193;7m[1mAccessing[12Gworkspace:[22m[39m
+
+[2G[1m/private/tmp/claude-501/-Users-albert-dev-vibeswitcher--vibeswitcher-worktrees-claude-s-grey-prompt/6cf113d1-727a-42d6[22m
+[2G[1m-8b52-20c5e76db54d/scratchpad/cwd[22m
+
+[2GQuick[8Gsafety[15Gcheck:[22GIs[25Gthis[30Ga[32Gproject[40Gyou[44Gcreated[52Gor[55Gone[59Gyou[63Gtrust?[70G(Like[76Gyour[81Gown[85Gcode,[91Ga[93Gwell-known[104Gopen[109Gsource
+[2Gproject,[11Gor[14Gwork[19Gfrom[24Gyour[29Gteam).[36GIf[39Gnot,[44Gtake[49Ga[51Gmoment[58Gto[61Greview[68Gwhat's[75Gin[78Gthis[83Gfolder[90Gfirst.
+
+[2GClaude[9GCode'll[17Gbe[20Gable[25Gto[28Gread,[34Gedit,[40Gand[44Gexecute[52Gfiles[58Ghere.
+
+[2G[38;2;153;153;153mSecurity[11Gguide[39m
+
+[2G[38;2;177;185;249m❯[4GNo,[8Gexit[39m
+[4GYes,[9GI[11Gtrust[17Gthis[22Gfolder
+
+[2G[38;2;153;153;153mEnter[8Gto[11Gconfirm[19G·[21GEsc[25Gto[28Gcancel[39m
+[1C[4A[>0q[?u]7501;?[c(B[?2004h[1D[4B[1C[4A [4GNo, exit[1C[1B[38;2;177;185;249m❯[4GYes, I trust this folder[39m
+
+
+[1C[3A[>4m[<u[?1004l[?2031l[?2004l[1D[3B[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[1A[2K[G[1A[K[1B[K[1B[K[1B[K[1B[K[1B[K[1B[K[1B[K[1B[K[1B[K[1B[K[1B[K[1B[K[1B[K[1B[K[1B[K[1B[K[1B[K[17A[?2004h[?2031h[?1004h]0;✳ Claude Code[38;2;215;119;87m ▐[48;2;0;0;0m▛███▛█[12G[39m[49m[1mClaude[19GCode[24G[22m[38;2;153;153;153mv2.1.302[39m
+[38;2;215;119;87m▝▜[48;2;0;0;0m█████[49m█▀[12G[38;2;153;153;153mOpus[17G5.5[21G·[23GAPI[27GUsage[33GBilling[39m
+[38;2;215;119;87m ▝▝[7G▝▝[12G[38;2;153;153;153m/…/6cf113d1-727a-42d6-8b52-20c5e76db54d/scratchpad/cwd[39m
+
+[38;2;215;119;87m▎[3G[39m[1mAuto[8Gmode[13Gis[16Gnow[20GClaude[27GCode's[34Gdefault[42Gpermission[53Gmode.[22m
+[38;2;215;119;87m▎[3G[38;2;153;153;153mAuto[8Gmode[13Glets[18GClaude[25Ghandle[32Gpermission[43Gprompts[51Gautomatically.[66GClaude[73Gchecks[80Geach[85Gtool[90Gcall[95Gfor[99Grisky[105Gactions[113Gand[39m
+[38;2;215;119;87m▎[3G[38;2;153;153;153mprompt[10Ginjection[20Gbefore[27Gexecuting,[38Gruns[43Gthe[47Gones[52Git[55Gassesses[64Gas[67Glower-risk,[79Gand[83Gblocks[90Gthe[94Grest.[39m
+[38;2;215;119;87m▎[3G[38;2;153;153;153mhttps://code.claude.com/docs/en/permission-modes[39m
+
+[38;2;136;136;136m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[39m
+❯ [7mT[27m[2mry[7G"how[12Gdo[15GI[17Glog[21Gan[24Gerror?"[22m
+[38;2;136;136;136m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[39m
+[3G[38;2;255;193;7m⏵⏵[6Gauto[11Gmode[16Gon[38;2;153;153;153m (shift+tab[30Gto[33Gcycle)[40G·[42G←[44Gfor[48Gagents[93G[38;2;255;107;128mNot[97Glogged[104Gin[107G·[109GRun[113G/login[39m
+[101G[38;2;153;153;153m◐[103Gmedium[110G·[112G/effort[39m
+[2C[4A[>0q[c(B[?2004h[2D[4B[2C[4AReply with only the word apple.[7m [38C[2B[27m               
+
+[33C[4A[33D[4B[5A[48;2;55;55;55m[38;2;153;153;153m❯ [38;2;255;255;255mReply with only the word apple.[39m                                                                                       [1B[49m[38;2;153;153;153m  ⎿  [38;2;255;107;128mNot logged in · Please run /login[1B[39m[K[1B[38;2;153;153;153m✻[3GBrewed for 0s ·[19Gdone 11:06[30GPM[39m[K[100C[1B[K
+[38;2;136;136;136m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[39m
+❯ [7m [27m
+[38;2;136;136;136m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[39m
+[3G[38;2;255;193;7m⏵⏵[6Gauto[11Gmode[16Gon[38;2;153;153;153m (shift+tab[30Gto[33Gcycle)[40G·[42G←[44Gfor[48Gagents[93G[38;2;255;107;128mNot[97Glogged[104Gin[107G·[109GRun[113G/login[39m
+[101G[38;2;153;153;153m◐[103Gmedium[110G·[112G/effort[39m
+[2C[4A[2D[4B[2K[G[1A[K[2C[3A[2D[3B[38C[1A               
+[2C[3A[2D[3B[2C[3AReply[9Gwith[14Gonly[19Gthe[23Gword[28Gpear.[7m [27m
+
+
+[32C[3A]0;◐ Claude Code[32D[3B[4A[48;2;55;55;55m[38;2;153;153;153m❯ [38;2;255;255;255mReply with only the word pear.[39m                                                                                        [1B[49m[K[1B[38;2;215;119;87m✶[39m [38;2;215;119;87mBlanching… [39m[K[1B[38;2;153;153;153m  ⎿  Tip: Start with small features or bug fixes, tell Claude to propose a plan, and verify its suggested edits[39m[K
+
+[38;2;136;136;136m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[39m
+[38;2;153;153;153m❯ [39m[7m [27m
+[38;2;136;136;136m────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────[39m
+[3G[38;2;255;193;7m⏵⏵[6Gauto[11Gmode[16Gon[38;2;153;153;153m (shift+tab[30Gto[33Gcycle)[40G·[42Gesc[46Gto[49Ginterrupt[93G[38;2;255;107;128mNot[97Glogged[104Gin[107G·[109GRun[113G/login[39m
+[2C[3A]0;✳ Claude Code[2D[3B[8A[38;2;153;153;153m  ⎿  [38;2;255;107;128mNot logged in · Please run /login[1B[39m[K[1B[38;2;153;153;153m✻[39m [38;2;153;153;153mBrewed for 0s[17G· done 11:06 PM[39m[K[3B❯ [38C[2B                   
+[2C[3A(B[?2004h[2D[3B[2C[3A[Pasted[11Gtext[16G#1[19G+39[23Glines][7m [2C[2B[27m[38;2;153;153;153mpaste again to expand[39m               
+[28C[3A[28D[3B[2C[3A[7m [27m[K[2C[2B[38;2;153;153;153mPress[9GCtrl-C again to exit[39m
+[2C[3A[2D[3B[2C[1A[38;2;153;153;153mpaste[9Gagain to expand[39m     
+[2C[3A[2D[3B[2C[3A[Image[10G#2][7m [2C[2B[27m[38;2;153;153;153mP[7Ging…[39m             
+[12C[3A[12D[3B[2C[1A[38;2;153;153;153mp[7Ge again to expand[39m
+[12C[3A[12D[3B[2C[1A[38;2;255;193;7m⏵⏵ auto mode on[38;2;153;153;153m (shift+tab to cycle)[39m
+[12C[3A[12D[3B[2C[3A[7m [27m[K[2C[2B[38;2;153;153;153mPress Ctrl-C again to exit[39m          
+[2C[3A[2D[3B[2C[1A[38;2;255;193;7m⏵⏵ auto mode on[38;2;153;153;153m (shift+tab to cycle)[39m
+[2C[3A[2D[3B[2C[1A[38;2;153;153;153mPress Ctrl-C again to exit[39m          
+[2C[3A[2D[3B[2C[1A[38;2;255;193;7m⏵⏵ auto mode on[38;2;153;153;153m (shift+tab to cycle)[39m
+[2C[3A[2D[3B[2C[1A[38;2;153;153;153mPress Ctrl-C again to exit[39m          
+[2C[3A[2D[3B[2C[1A[38;2;255;193;7m⏵⏵ auto mode on[38;2;153;153;153m (shift+tab to cycle)[39m
+[2C[3A

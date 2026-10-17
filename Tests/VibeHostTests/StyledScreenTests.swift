@@ -4,10 +4,21 @@ import Testing
 @testable import VibeCore
 @testable import VibeHost
 
-/// Claude Code's idle screen as a scratch Claude Code 2.1.302 PTY drew it (120 columns), fed to the host's headless
-/// terminal. Claude moves the cursor between words (`ESC[<col>G`) instead of printing spaces, and draws its
-/// placeholder and its suggested next prompt with `chalk.dim` (SGR 2), inverting the first character when it paints
-/// its caret there; what's typed is plain.
+/// Claude Code 2.1.302's screen at 120×40, fed to the host's headless terminal. Which is which:
+///
+/// Captured byte for byte from scratch PTYs (never a real session), the whole output replayed up to a moment
+/// (`Capture`): `suggested`, a session after three one-word turns, its project's settings only plus
+/// `promptSuggestionEnabled`; and `paintedCaret`, a logged-out session with a scratch HOME. Claude draws its
+/// suggested next prompt faint (`ESC[2m…ESC[22m`, one run, spaces included), its placeholder faint too, a
+/// `[Pasted text #N +M lines]` or `[Image #N]` pill plain like typed text. Either the terminal's cursor stands on
+/// the box (`suggested`; the first letter shows inverted on screen, but that's the terminal) or Claude paints its
+/// own caret, an inverted cell (`paintedCaret`: on the placeholder's first letter, after a pill).
+/// `placeholder` and `typed` below are also captured, from a session's whole first frame, where Claude moves the
+/// cursor between words (`ESC[<col>G`) instead of printing spaces.
+///
+/// Reconstructed, not captured: the 2026-10-17 incident's box. `incidentReplayed` is `suggested` with only the
+/// suggestion's words swapped for the incident's; `incident`, `incidentNoCaret` and `typedCaretFirst` are
+/// written by hand in a whole frame's encoding, `incident` with the caret painted on its first letter.
 enum ClaudeScreens {
     static let e = "\u{1B}"
     static let rule = "\(e)[38;2;136;136;136m" + String(repeating: "─", count: 120) + "\(e)[39m"
@@ -20,22 +31,60 @@ enum ClaudeScreens {
 
     static func idle(box: String) -> String { turn + rule + "\r\n❯\u{a0}" + box + "\r\n" + rule + "\r\n" + footer }
 
-    /// 2026-10-17: merges-name-the-failing's box after it asked the lead a question, with the caret painted.
+    /// Reconstructed: merges-name-the-failing's box after it asked the lead a question, with the caret painted.
     static let incident = idle(box: "\(e)[7mb\(e)[27m\(e)[2mring\(e)[9Gthe\(e)[13Gbranch\(e)[20Gup\(e)[23Gto\(e)[26Gdate"
                                     + "\(e)[31Gwith\(e)[36Gproject-lead\(e)[49Gyourself\(e)[22m")
-    /// The same, unfocused: no caret.
+    /// Reconstructed: the same, the terminal's cursor on the box.
     static let incidentNoCaret = idle(box: "\(e)[2mbring\(e)[9Gthe\(e)[13Gbranch\(e)[20Gup\(e)[23Gto\(e)[26Gdate"
                                            + "\(e)[31Gwith\(e)[36Gproject-lead\(e)[49Gyourself\(e)[22m")
-    /// Captured byte for byte: the placeholder in a new session's box.
+    /// Captured: the placeholder in a new session's box.
     static let placeholder = idle(box: "\(e)[2mTry\(e)[7G\"how\(e)[12Gdoes\(e)[17G<filepath>\(e)[28Gwork?\"\(e)[22m")
     /// Captured: "hello draft" typed into the box.
     static let typed = idle(box: "hello\(e)[9Gdraft")
-    /// Typed with the caret back on its first character.
+    /// Reconstructed: typed, with the caret painted back on its first character.
     static let typedCaretFirst = idle(box: "\(e)[7mh\(e)[27mello\(e)[9Gdraft")
 
-    static func shown(_ bytes: String) -> LeadDelivery.Screen {
+    /// A scratch session's whole output, and the byte offsets of the moments the capture marked.
+    struct Capture {
+        let bytes: [UInt8]
+        let marks: [String: Int]
+
+        init(_ name: String, marks: [String: Int]) {
+            let url = Bundle.module.url(forResource: name, withExtension: "raw", subdirectory: "Fixtures")!
+            bytes = Array(try! Data(contentsOf: url))
+            self.marks = marks
+        }
+
+        func upTo(_ mark: String) -> [UInt8] { Array(bytes[0..<marks[mark]!]) }
+        func at(_ mark: String) -> LeadDelivery.Screen { ClaudeScreens.shown(upTo(mark)) }
+    }
+
+    /// Logged in: `turn1`–`turn3` the replies (apple, pear, plum); `suggestion` "Reply with only the word
+    /// cherry."; `pasted` a 40-line paste; `pastedTyped` " and more" typed after it; `cleared` after ^C;
+    /// `image` an image's path pasted.
+    static let suggested = Capture("claude-2.1.302-suggestion", marks: [
+        "ready": 1792, "turn3": 15941, "suggestion": 16026, "unfocused": 16038, "pasted": 16165, "pastedTyped": 16224,
+        "cleared": 16462, "image": 16643, "end": 17381,
+    ])
+    /// Logged out, so no turn ends in a suggestion: `ready` the placeholder with the caret painted on it; `turn1`
+    /// "Reply with only the word apple." sent; `pasted`, `cleared` and `image` as above.
+    static let paintedCaret = Capture("claude-2.1.302-painted-caret", marks: [
+        "ready": 4148, "turn1": 5808, "pasted": 7825, "cleared": 8010, "image": 8307,
+    ])
+
+    /// Reconstructed from `suggested`: the incident's suggestion drawn exactly as Claude drew cherry's.
+    static var incidentReplayed: LeadDelivery.Screen {
+        let drawn = String(decoding: suggested.bytes[suggested.marks["turn3"]!..<suggested.marks["suggestion"]!], as: UTF8.self)
+        precondition(drawn.contains("\(e)[2mReply with only the word cherry.\(e)[22m"))
+        let swapped = drawn.replacingOccurrences(of: "Reply with only the word cherry.", with: "bring the branch up to date with project-lead yourself")
+        return shown(suggested.upTo("turn3") + Array(swapped.utf8))
+    }
+
+    static func shown(_ bytes: String) -> LeadDelivery.Screen { shown(Array(bytes.utf8)) }
+
+    static func shown(_ bytes: [UInt8]) -> LeadDelivery.Screen {
         let terminal = Terminal(delegate: HeadlessDelegate(), options: TerminalOptions(cols: 120, rows: 40, scrollback: 100))
-        terminal.feed(byteArray: Array(bytes.utf8))
+        terminal.feed(byteArray: bytes)
         let screen = HostedSession.styledScreen(of: terminal)
         return LeadDelivery.Screen(text: screen.text, runs: screen.runs)
     }
@@ -73,22 +122,86 @@ struct StyledScreenTests {
         #expect(LeadDelivery.box(in: ClaudeScreens.shown(ClaudeScreens.incident).text) == .draft("bring the branch up to date with project-lead yourself"))
     }
 
+    /// Captured: what Claude drew after a turn, focused or not, and again once ^C emptied the box.
+    @Test func aCapturedSuggestionIsAnEmptyBox() {
+        for mark in ["suggestion", "unfocused", "cleared", "end"] {
+            #expect(LeadDelivery.box(in: ClaudeScreens.suggested.at(mark)) == .empty, "\(mark)")
+        }
+        let screen = ClaudeScreens.suggested.at("suggestion")
+        let row = screen.text.components(separatedBy: "\n").lastIndex { $0.hasPrefix("❯") }!
+        #expect(screen.runs?.filter { $0.row == row } == [ScreenRun(row: row, column: 2, length: 32, faint: true)])
+        // By its text alone it's a draft: what held the incident's messages.
+        #expect(LeadDelivery.box(in: screen.text) == .draft("Reply with only the word cherry."))
+    }
+
+    @Test func theIncidentDrawnAsClaudeDrawsASuggestionIsAnEmptyBox() {
+        let screen = ClaudeScreens.incidentReplayed
+        #expect(LeadDelivery.box(in: screen) == .empty)
+        #expect(LeadDelivery.box(in: screen.text) == .draft("bring the branch up to date with project-lead yourself"))
+    }
+
+    /// Captured: a pasted text's or an image's pill is drawn plain, so a box holding only a pill holds a draft.
+    @Test func aPillIsADraft() {
+        for capture in [ClaudeScreens.suggested, ClaudeScreens.paintedCaret] {
+            #expect(LeadDelivery.box(in: capture.at("pasted")) == .draft("[Pasted text #1 +39 lines]"))
+            #expect(LeadDelivery.box(in: capture.at("image")) == .draft("[Image #2]"))
+        }
+        #expect(LeadDelivery.box(in: ClaudeScreens.suggested.at("pastedTyped")) == .draft("[Pasted text #1 +39 lines] and more"))
+    }
+
+    /// Captured: Claude's own caret painted on the placeholder's first letter, and alone in an empty box.
+    @Test func aPaintedCaretIsntADraft() {
+        let screen = ClaudeScreens.paintedCaret.at("ready")
+        let row = screen.text.components(separatedBy: "\n").lastIndex { $0.hasPrefix("❯") }!
+        #expect(screen.runs?.filter { $0.row == row }.prefix(2) == [ScreenRun(row: row, column: 2, length: 1, inverse: true),
+                                                                     ScreenRun(row: row, column: 3, length: 2, faint: true)])
+        #expect(LeadDelivery.box(in: screen) == .empty)
+        #expect(LeadDelivery.box(in: ClaudeScreens.paintedCaret.at("cleared")) == .empty)
+    }
+
+    /// A wide character fills two cells, the second an empty character in the text: runs count cells, so what's
+    /// drawn after it keeps its place.
+    @Test func aWideCharacterBeforeTheSuggestion() {
+        let e = ClaudeScreens.e
+        let screen = ClaudeScreens.shown(ClaudeScreens.idle(box: "日本🙂\(e)[2m bring the branch up to date\(e)[22m"))
+        let line = Array(screen.text.components(separatedBy: "\n").last { $0.hasPrefix("❯") }!)
+        #expect(Array(line[2...5]) == ["日", "\u{0}", "本", "\u{0}"] && line[7] == "\u{0}")
+        let faint = screen.runs!.filter(\.faint)
+        #expect(faint.map(\.column) == [8] && faint.map(\.length) == [28])
+        #expect(String(line[8..<36]) == " bring the branch up to date")
+        // The empty cell after a wide character reads as a space, as on the plain screen (and SwiftTerm gives an
+        // emoji's cell as a space).
+        #expect(LeadDelivery.box(in: screen) == .draft("日 本"))
+        #expect(LeadDelivery.box(in: ClaudeScreens.shown(ClaudeScreens.idle(box: "\(e)[2m日本 bring the branch\(e)[22m"))) == .empty)
+    }
+
     @Test func typedTextIsADraft() {
         #expect(LeadDelivery.box(in: ClaudeScreens.shown(ClaudeScreens.typed)) == .draft("hello draft"))
         #expect(LeadDelivery.box(in: ClaudeScreens.shown(ClaudeScreens.typedCaretFirst)) == .draft("hello draft"))
     }
 
     @Test func messageTypesOverTheSuggestion() throws {
+        for screen in [ClaudeScreens.incidentReplayed, ClaudeScreens.shown(ClaudeScreens.incident), ClaudeScreens.suggested.at("suggestion")] {
+            let root = scratch()
+            let agent = LeadAgent(pid: 7, tty: "ttys905", session: "s")
+            var typed: [String] = []
+            let delivered = try LeadDelivery.deliver("bring the branch up to date with project-lead yourself", from: .lead("lead of vibeswitcher"),
+                                                     to: agent, activity: .idle(background: nil), styledScreen: { screen },
+                                                     typeInto: { typed.append($0); return true }, root: root)
+            #expect(delivered == .typed)
+            #expect(typed.count == 1 && typed[0].hasSuffix("] bring the branch up to date with project-lead yourself"))
+            #expect(SteerInbox.pending(tty: agent.tty, root: root).isEmpty)
+        }
+    }
+
+    @Test func messageWaitsBehindAPill() throws {
         let root = scratch()
-        let agent = LeadAgent(pid: 7, tty: "ttys905", session: "s")
+        let agent = LeadAgent(pid: 7, tty: "ttys907", session: "s")
         var typed: [String] = []
-        let delivered = try LeadDelivery.deliver("bring the branch up to date with project-lead yourself", from: .lead("lead of vibeswitcher"),
-                                                 to: agent, activity: .idle(background: nil),
-                                                 styledScreen: { ClaudeScreens.shown(ClaudeScreens.incident) },
-                                                 typeInto: { typed.append($0); return true }, root: root)
-        #expect(delivered == .typed)
-        #expect(typed.count == 1 && typed[0].hasSuffix("] bring the branch up to date with project-lead yourself"))
-        #expect(SteerInbox.pending(tty: agent.tty, root: root).isEmpty)
+        #expect(try LeadDelivery.deliver("a", from: .lead("lead"), to: agent, activity: .idle(background: nil),
+                                         styledScreen: { ClaudeScreens.suggested.at("image") }, typeInto: { typed.append($0); return true },
+                                         root: root) == .behindDraft("[Image #2]"))
+        #expect(typed.isEmpty && SteerInbox.pending(tty: agent.tty, root: root).map(\.text) == ["a"])
     }
 
     @Test func messageStillWaitsBehindATypedDraft() throws {
