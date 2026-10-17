@@ -6,6 +6,10 @@ import VibeCore
 /// auto-hides: it slides in when the mouse touches the middle of the right edge (see `SidebarHotZone`)
 /// and slides out once the mouse leaves.
 /// It's a switcher: picking a session goes to it (its own desktop) exactly like the menu bar list.
+///
+/// The pointer is followed with tracking areas, not by watching the mouse: a see-through strip on each right edge's
+/// hot zone says when it gets there. While the sidebar is out, the pointer is looked at every quarter second until
+/// it's gone (it can't be tracked outside the panel); while it's hidden, nothing runs.
 final class SidebarController {
     static let width: CGFloat = 320
     /// How far the mouse may stray outside the sidebar before it starts hiding, and for how long.
@@ -15,41 +19,37 @@ final class SidebarController {
     private let panel: NSPanel
     private let hostingView: NSHostingView<AnyView>
     private let content: AnyView
+    private let tracker = PointerTracker()
+    /// One per stretch of right edge that reveals the sidebar; only while it auto-hides.
+    private var strips: [EdgeStrip] = []
 
     /// Sidebar mode on/off.
     private(set) var isEnabled = false
     /// Slide in on the right edge (true) or stay docked (false).
     var autoHide = true {
-        didSet { if isEnabled, autoHide != oldValue { autoHide ? conceal(animated: true) : currentScreen().map { reveal(on: $0) } } }
+        didSet {
+            guard isEnabled, autoHide != oldValue else { return }
+            updateStrips()
+            autoHide ? conceal(animated: true) : currentScreen().map { reveal(on: $0) }
+        }
     }
     private var revealed = false
-    /// After picking a session the mouse is still near the edge; don't pop back until it has moved away.
+    /// After picking a session the mouse can still be on the edge; don't pop back until it has left it.
     private var suppressedUntilAway = false
     private var menuOpen = false
     /// Shown briefly after a desktop switch; stays for the whole period unless the mouse takes over.
     private var flashing = false
     private var hideWork: DispatchWorkItem?
-    private var monitors: [Any] = []
-    /// Safety net: mouse-moved events can be missed (fast flicks into the edge, moments the system
-    /// doesn't deliver them), so the pointer is also checked a few times a second while enabled.
-    private var pollTimer: Timer?
     private var screen: NSScreen?
-    // Diagnostics in ~/.vibeswitcher/sidebar-debug.json: how late the pointer checks run, and why
-    // visits to the right edge didn't open the sidebar (counted per pointer check, not per visit).
-    private var lastPoll = Date()
-    private var pollGaps: [Double] = []
-    private var edgeMisses: [String: Int] = [:]
+    // Diagnostics in ~/.vibeswitcher/sidebar-debug.json: visits to the edge, and the last slide in/out steps.
     private var edgeHits = 0
-    private var lastDebugWrite = Date()
-    private var totalPolls = 0
+    private var edgeMisses: [String: Int] = [:]
     /// Last misses with time and height, to match a "it just didn't open" report.
     private var recentMisses: [String] = []
     private var lastMissRecorded = Date.distantPast
-    private var lastWrittenVisits = -1
     /// The last slide in/out steps (what the window really did), to explain the next "it didn't show".
     private var trail: [String] = []
-    private var trailVersion = 0
-    private var lastWrittenTrail = -1
+    private var debugWritePending = false
 
     init(content: AnyView) {
         panel = NSPanel(contentRect: .zero, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: true)
@@ -59,23 +59,31 @@ final class SidebarController {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.hidesOnDeactivate = false
-        panel.acceptsMouseMovedEvents = true // moves over the sidebar itself reach the local monitor
         self.content = content
         hostingView = FirstMouseHostingView(rootView: AnyView(EmptyView()))
-        panel.contentView = hostingView
+        // The tracking area sits on a plain container: the hosting view manages its own.
+        let container = NSView()
+        hostingView.autoresizingMask = [.width, .height]
+        container.addSubview(hostingView)
+        container.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                                 owner: tracker, userInfo: nil))
+        panel.contentView = container
+        tracker.entered = { [weak self] in self?.pointerEnteredSidebar() }
+        tracker.exited = { [weak self] in self?.pointerLeftSidebar() }
         let center = NotificationCenter.default
         center.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
-            guard let self, self.revealed, let screen = self.screen ?? self.currentScreen() else { return }
+            guard let self else { return }
+            self.updateStrips()
+            guard self.revealed, let screen = self.screen ?? self.currentScreen() else { return }
             self.panel.setFrame(self.dockedFrame(on: screen), display: true)
         }
         // Keep the sidebar open while one of its menus (⊕, ⚙︎, right-click) is open.
         center.addObserver(forName: NSMenu.didBeginTrackingNotification, object: nil, queue: .main) { [weak self] _ in
             self?.menuOpen = true
-            self?.hideWork?.cancel()
         }
         center.addObserver(forName: NSMenu.didEndTrackingNotification, object: nil, queue: .main) { [weak self] _ in
             self?.menuOpen = false
-            self?.mouseMoved()
+            if self?.flashing == false { self?.watchPointer() }
         }
     }
 
@@ -84,28 +92,10 @@ final class SidebarController {
     func setEnabled(_ enabled: Bool) {
         guard enabled != isEnabled else { return }
         isEnabled = enabled
+        updateStrips()
         if enabled {
-            // Global monitors see mouse moves over other apps (no permission needed for mouse events);
-            // the local one covers moves over our own panel.
-            let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged]
-            if let global = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] _ in self?.mouseMoved() }) {
-                monitors.append(global)
-            }
-            if let local = NSEvent.addLocalMonitorForEvents(matching: mask, handler: { [weak self] event in
-                self?.mouseMoved()
-                return event
-            }) { monitors.append(local) }
-            pollTimer = Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
-                self?.recordPoll()
-                self?.mouseMoved()
-            }
-            pollTimer?.tolerance = 0.05
             if !autoHide, let screen = currentScreen() { reveal(on: screen) }
         } else {
-            monitors.forEach(NSEvent.removeMonitor)
-            monitors.removeAll()
-            pollTimer?.invalidate()
-            pollTimer = nil
             conceal(animated: false)
         }
     }
@@ -120,119 +110,123 @@ final class SidebarController {
             guard let self else { return }
             self.hideWork = nil
             self.flashing = false
-            let inside = self.panel.frame.insetBy(dx: -Self.leaveMargin, dy: -Self.leaveMargin).contains(NSEvent.mouseLocation)
-            if !inside, !self.menuOpen { self.conceal(animated: true) }
+            // The pointer on it: it stays, and leaving hides it as usual.
+            self.watchPointer(after: 0)
         }
         hideWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + duration, execute: work)
     }
 
-    /// Called after a session was picked: get out of the way until the mouse leaves and comes back.
+    /// Called after a session was picked: get out of the way until the mouse leaves the edge and comes back.
     func dismissAfterSelection() {
         guard isEnabled, autoHide else { return }
-        suppressedUntilAway = true
+        let point = NSEvent.mouseLocation
+        suppressedUntilAway = strips.contains { $0.frame.contains(point) }
         conceal(animated: true)
     }
 
-    private func mouseMoved() {
+    // MARK: Pointer
+
+    /// The pointer reached a strip on `screen`'s right edge.
+    private func pointerReachedEdge(of screen: NSScreen) {
         guard isEnabled, autoHide else { return }
-        let point = NSEvent.mouseLocation
-        // No display at all (unplugged, or mid-reconfiguration): nothing to slide in on.
-        guard let screen = currentScreen() else { return }
-        if isStrandedOffScreen {
-            // Believed shown but it isn't: reset, then detect normally below.
-            let reason = animating ? "healed: animation never finished" : "healed: was stuck off screen"
-            recordMiss(reason, point: point, screen: screen)
-            note(reason)
-            animating = false
-            revealed = false
-            transition += 1
-            panel.orderOut(nil)
-            hostingView.rootView = AnyView(EmptyView())
+        healIfStranded(on: screen)
+        guard !revealed else { return }
+        if suppressedUntilAway { return recordMiss("suppressed", point: NSEvent.mouseLocation, screen: screen) }
+        edgeHits += 1
+        reveal(on: screen)
+    }
+
+    private func pointerLeftEdge() {
+        suppressedUntilAway = false
+    }
+
+    private func pointerEnteredSidebar() {
+        guard isEnabled, autoHide, revealed, flashing else { return }
+        // Entering the sidebar during a flash makes it stay (until the pointer leaves).
+        flashing = false
+        watchPointer()
+    }
+
+    /// Leaving: hide in `hideDelay` (unless it's back by then), not at the next look.
+    private func pointerLeftSidebar() {
+        guard isEnabled, autoHide, revealed, !flashing else { return }
+        watchPointer()
+    }
+
+    /// While the sidebar is out (auto-hiding, not flashing), where the pointer is, every `hideDelay`: it hides once
+    /// the pointer is more than `leaveMargin` outside it and none of its menus is open. A tracking area can't follow
+    /// the pointer out there, and one that appeared under a still pointer may never hear it leave.
+    private func watchPointer(after delay: TimeInterval = SidebarController.hideDelay) {
+        hideWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.hideWork = nil
+            guard self.isEnabled, self.autoHide, self.revealed, !self.flashing else { return }
+            let near = self.panel.frame.insetBy(dx: -Self.leaveMargin, dy: -Self.leaveMargin).contains(NSEvent.mouseLocation)
+            if near || self.menuOpen { return self.watchPointer() }
+            self.conceal(animated: true)
         }
-        if revealed {
-            let inside = panel.frame.insetBy(dx: -Self.leaveMargin, dy: -Self.leaveMargin).contains(point)
-            if flashing {
-                // Mouse moves elsewhere don't cut a flash short; entering the sidebar makes it stay.
-                if inside {
-                    flashing = false
-                    hideWork?.cancel()
-                    hideWork = nil
-                }
-                return
+        hideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    /// Believed shown but it isn't (an animation never finished, or it got stuck off screen): start over.
+    private func healIfStranded(on screen: NSScreen) {
+        guard isStrandedOffScreen else { return }
+        let reason = animating ? "healed: animation never finished" : "healed: was stuck off screen"
+        recordMiss(reason, point: NSEvent.mouseLocation, screen: screen)
+        note(reason)
+        animating = false
+        revealed = false
+        transition += 1
+        panel.orderOut(nil)
+        hostingView.rootView = AnyView(EmptyView())
+    }
+
+    /// Strips on every right edge's hot zone while the sidebar auto-hides; none otherwise.
+    private func updateStrips() {
+        strips.forEach { $0.close() }
+        strips = []
+        guard isEnabled, autoHide else { return }
+        let frames = NSScreen.screens.map(\.frame)
+        for screen in NSScreen.screens {
+            for frame in SidebarHotZone.strips(on: screen.frame, screens: frames) {
+                strips.append(EdgeStrip(frame: frame, entered: { [weak self, weak screen] in
+                    if let screen { self?.pointerReachedEdge(of: screen) }
+                }, exited: { [weak self] in self?.pointerLeftEdge() }))
             }
-            if inside || menuOpen {
-                hideWork?.cancel()
-                hideWork = nil
-            } else if hideWork == nil {
-                let work = DispatchWorkItem { [weak self] in
-                    self?.hideWork = nil
-                    self?.conceal(animated: true)
-                }
-                hideWork = work
-                DispatchQueue.main.asyncAfter(deadline: .now() + Self.hideDelay, execute: work)
-            }
-            return
         }
-        let atEdge = point.x >= screen.frame.maxX - 8
-        if suppressedUntilAway {
-            // After picking a session: re-arm as soon as the pointer has left the edge for a moment.
-            if point.x < screen.frame.maxX - 40 { suppressedUntilAway = false }
-            if atEdge { recordMiss("suppressed", point: point, screen: screen) }
-            return
-        }
-        if SidebarHotZone.contains(point, screen: screen.frame), isOuterRightEdge(of: screen, at: point.y) {
-            edgeHits += 1
-            reveal(on: screen)
-        } else if atEdge {
-            let reason = !SidebarHotZone.contains(point, screen: screen.frame)
-                ? (point.x < screen.frame.maxX - SidebarHotZone.edgeWidth ? "x=\(Int(screen.frame.maxX - point.x))pt short" : "outside band")
-                : "not outer edge"
-            recordMiss(reason, point: point, screen: screen)
-        }
+        note("watching \(strips.count) edge strip(s)")
     }
 
     private func recordMiss(_ reason: String, point: NSPoint, screen: NSScreen) {
         edgeMisses[reason, default: 0] += 1
-        // One entry per visit (not per pointer check): at most every 2 s.
+        // One entry per visit: at most every 2 s.
         guard Date().timeIntervalSince(lastMissRecorded) > 2 else { return }
         lastMissRecorded = Date()
         let height = Int(((point.y - screen.frame.minY) / screen.frame.height * 100).rounded())
         let time = Date().formatted(date: .omitted, time: .standard)
         recentMisses = Array(([String(format: "%@  %@  (x %.1f, %d%% up)", time, reason, point.x, height)] + recentMisses).prefix(30))
+        writeDebugSoon()
     }
 
-    private func recordPoll() {
-        let now = Date()
-        pollGaps.append(now.timeIntervalSince(lastPoll))
-        lastPoll = now
-        if pollGaps.count > 3000 { pollGaps.removeFirst(pollGaps.count - 3000) }
-        totalPolls += 1
-        // Only when something happened at the edge (or every 10 minutes): no steady disk writes.
-        let visits = edgeHits + edgeMisses.values.reduce(0, +)
-        guard visits != lastWrittenVisits || trailVersion != lastWrittenTrail || now.timeIntervalSince(lastDebugWrite) > 600
-        else { return }
-        lastWrittenVisits = visits
-        lastWrittenTrail = trailVersion
-        lastDebugWrite = now
-        let sorted = pollGaps.sorted()
-        let object: [String: Any] = [
-            "updatedAt": ISO8601DateFormatter().string(from: now),
-            "polls": pollGaps.count, "gapMedian": sorted[sorted.count / 2], "gapMax": sorted.last ?? 0.0 as Double,
-            "gapsOver1s": pollGaps.filter { $0 > 1 }.count, "gapsOver0_5s": pollGaps.filter { $0 > 0.5 }.count,
-            "edgeHits": edgeHits, "edgeMisses": edgeMisses, "totalPolls": totalPolls, "recentMisses": recentMisses,
-            "trail": trail,
-        ]
-        if JSONSerialization.isValidJSONObject(object),
-           let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
-            try? data.write(to: VibePaths.root.appendingPathComponent("sidebar-debug.json"))
-        }
-    }
-
-    /// False where another display continues to the right: the pointer just crosses over there.
-    private func isOuterRightEdge(of screen: NSScreen, at y: CGFloat) -> Bool {
-        !NSScreen.screens.contains { other in
-            other != screen && abs(other.frame.minX - screen.frame.maxX) < 1 && other.frame.minY <= y && y <= other.frame.maxY
+    /// Only when something happened, and at most every 2 s: no steady disk writes.
+    private func writeDebugSoon() {
+        guard !debugWritePending else { return }
+        debugWritePending = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self else { return }
+            self.debugWritePending = false
+            let object: [String: Any] = [
+                "updatedAt": ISO8601DateFormatter().string(from: Date()),
+                "edgeHits": self.edgeHits, "edgeMisses": self.edgeMisses, "recentMisses": self.recentMisses, "trail": self.trail,
+                "strips": self.strips.map { NSStringFromRect($0.frame) },
+            ]
+            if JSONSerialization.isValidJSONObject(object),
+               let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
+                try? data.write(to: VibePaths.root.appendingPathComponent("sidebar-debug.json"))
+            }
         }
     }
 
@@ -259,7 +253,7 @@ final class SidebarController {
         let state = String(format: "visible %@, this desktop %@, x %.0f", panel.isVisible ? "yes" : "no",
                            panel.isOnActiveSpace ? "yes" : "no", panel.frame.minX)
         trail = Array((["\(time)  \(step)  (\(state))"] + trail).prefix(30))
-        trailVersion += 1
+        writeDebugSoon()
     }
 
     private func reveal(on screen: NSScreen) {
@@ -272,6 +266,7 @@ final class SidebarController {
         let docked = dockedFrame(on: screen)
         if !revealed { note(String(format: "reveal → x %.0f", docked.minX)) }
         revealed = true
+        if autoHide, !flashing { watchPointer() }
         if !panel.isVisible {
             hostingView.rootView = content
             panel.setFrame(docked.offsetBy(dx: Self.width, dy: 0), display: false)   // start just off screen
@@ -332,6 +327,47 @@ final class SidebarController {
         let docked = dockedFrame(on: target)
         return !panel.isVisible || abs(panel.frame.minX - docked.minX) > 1
     }
+}
+
+
+/// Says when the pointer comes into and leaves a tracking area it owns.
+private final class PointerTracker: NSResponder {
+    var entered: () -> Void = {}
+    var exited: () -> Void = {}
+
+    override func mouseEntered(with event: NSEvent) { entered() }
+    override func mouseExited(with event: NSEvent) { exited() }
+}
+
+/// A see-through strip over a stretch of a screen's right edge whose tracking area says when the pointer gets there,
+/// on every desktop and over full-screen apps, as the sidebar is.
+private final class EdgeStrip {
+    let frame: NSRect
+    private let panel: NSPanel
+    private let tracker = PointerTracker()
+
+    init(frame: NSRect, entered: @escaping () -> Void, exited: @escaping () -> Void) {
+        self.frame = frame
+        panel = NSPanel(contentRect: frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        // Under the sidebar, which covers it while shown.
+        panel.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue - 1)
+        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
+        panel.isOpaque = false
+        panel.hasShadow = false
+        panel.hidesOnDeactivate = false
+        // Not quite clear: the window server sends no mouse events to a fully transparent window.
+        panel.backgroundColor = NSColor(white: 0, alpha: 0.01)
+        let view = NSView(frame: NSRect(origin: .zero, size: frame.size))
+        view.addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+                                            owner: tracker, userInfo: nil))
+        panel.contentView = view
+        tracker.entered = entered
+        tracker.exited = exited
+        panel.setFrame(frame, display: false)
+        panel.orderFrontRegardless()
+    }
+
+    func close() { panel.orderOut(nil) }
 }
 
 /// Earlier versions of sidebar mode hid the other session windows. This only remains as a safety net:

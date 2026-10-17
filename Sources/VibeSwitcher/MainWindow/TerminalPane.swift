@@ -54,13 +54,22 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
 
     var currentView: HostTerminalView? { current.flatMap { views[$0] } }
 
+    /// The chat covers the pane: its terminal leaves the screen too (and keeps reading the session).
+    var covered = false {
+        didSet {
+            guard covered != oldValue else { return }
+            view.isHidden = covered
+            if let currentView { covered ? park(currentView) : unpark(currentView) }
+        }
+    }
+
     /// `focus`: false while the chat covers the terminal (keys must not go to a terminal you can't see).
     func show(hostID: UUID, focus takesFocus: Bool = true) {
         placeholder?.removeFromSuperview()
         placeholder = nil
-        views.values.forEach { $0.isHidden = true }
+        for (id, other) in views where id != hostID { park(other) }
         let terminal = views[hostID] ?? makeView(for: hostID)
-        terminal.isHidden = false
+        covered ? park(terminal) : unpark(terminal)
         setMargin(terminal.nativeBackgroundColor)
         current = hostID
         // Hidden views don't resize their sessions (each would redraw on every step of a window drag): the one on
@@ -74,13 +83,27 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     }
 
     func show(placeholder content: AnyView) {
-        views.values.forEach { $0.isHidden = true }
+        views.values.forEach(park)
         current = nil
         placeholder?.removeFromSuperview()
         let hosting = NSHostingView(rootView: content)
         setMargin(nil)
         pin(hosting)
         placeholder = hosting
+    }
+
+    /// A view that's not on screen leaves the view tree, so its layer gives back its backing store (the size of the pane,
+    /// several MB each); its terminal goes on reading the session, and it's drawn again when it's shown.
+    private func park(_ terminal: HostTerminalView) {
+        guard terminal.superview != nil else { return }
+        terminal.removeFromSuperview()
+        terminal.layer?.contents = nil
+    }
+
+    private func unpark(_ terminal: HostTerminalView) {
+        guard terminal.superview == nil else { return }
+        pin(terminal, inset: Self.inset)
+        terminal.needsDisplay = true
     }
 
     /// Stops showing a session (evicted, removed or the window closed); the host keeps it running.
