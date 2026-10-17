@@ -104,10 +104,15 @@ enum ChatBench {
         }
         var second = 0
         var reopenedAt: Int?
+        // When the conversation opened again had loaded (a big transcript on a busy machine can take seconds): AT
+        // scrolls then, and the run lasts long enough after it to tell settling from a slow load.
+        var readyAt: Int?
         let tick = Timer(timeInterval: 1, repeats: true) { _ in
             second += 1
             if stall, second == 3 { Breadcrumbs.shared.note("bench: blocking the main thread for 4 s"); sleep(4) }
             chat.poll()
+            let justReady = reopenedAt != nil && readyAt == nil && chat.state == .ready && !chat.items.isEmpty
+            if justReady { readyAt = second }
             let sweeping = ProcessInfo.processInfo.environment["VIBESWITCHER_BENCH_SWEEP"] != nil
             if ticks, chat.state == .ready {
                 chat.runner.canRun = whole
@@ -132,7 +137,7 @@ enum ChatBench {
                     reopenedAt = second
                     print("  reopened, anchor \(chat.restoreAnchor ?? "none")")
                 }
-                if second == 4, let at, let scroll = Self.scrollView(in: host) { Self.scroll(scroll, to: at, host: host) }
+                if justReady, let at, let scroll = Self.scrollView(in: host) { Self.scroll(scroll, to: at, host: host) }
             } else if !sweeping {
                 // A width change (sidebar or inspector toggled, the window dragged): every row is measured again.
                 if second % 2 == 0 {
@@ -155,11 +160,17 @@ enum ChatBench {
             fflush(stdout)
             probe.nextSecond()
             worst = 0
+            // Opened again: the same time after it had loaded as after the reopen when it loads at once (at most 30 s more).
+            if let reopenedAt, second >= seconds, second < seconds + 30, readyAt.map({ second - $0 < seconds - reopenedAt - 1 }) ?? true { return }
             if second >= seconds {
                 // Opened and left alone, the content must have settled: no height changes in the last 3 seconds.
                 if let reopenedAt {
+                    guard let readyAt else {
+                        print("FAIL: the conversation never loaded \(second - reopenedAt) s after opening")
+                        exit(3)
+                    }
                     let verdict = probe.changedRecently(seconds: 3) ? "FAIL: the content height still changes" : "settled"
-                    print("\(verdict) \(second - reopenedAt) s after opening: height=\(probe.heights.last ?? 0) heights=\(probe.heights.count) "
+                    print("\(verdict) \(second - reopenedAt) s after opening (loaded after \(readyAt - reopenedAt) s): height=\(probe.heights.last ?? 0) heights=\(probe.heights.count) "
                         + "range=\(probe.range) layouts=\(probe.layouts) last 3 s: \(probe.layoutsRecently) layouts")
                     exit(probe.changedRecently(seconds: 3) ? 3 : 0)
                 }
