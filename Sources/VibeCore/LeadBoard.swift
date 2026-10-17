@@ -131,6 +131,10 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// The worker's last "done" report.
     public var report: String?
     public var merged: LeadMergeRecord?
+    /// When its worker asked the lead something (ask_lead) that the lead hasn't answered with a message yet.
+    public var leadQuestionAt: Double?
+    /// The witness's latest word that its worker stopped making progress (see `LeadStall`); cleared once it moves.
+    public var stall: LeadStall?
 
     public static let keptCheckpoints = 40
 
@@ -313,6 +317,31 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     public init() {}
 
     public func task(_ id: String) -> LeadTask? { tasks.first { $0.id == id || $0.slug == id } }
+
+    /// Keeps the witness's stalls (by task id) on the tasks, and clears the rest: a stall already noted for the same
+    /// episode keeps when it was first noticed. Returns whether anything changed.
+    @discardableResult
+    public mutating func noteStalls(_ found: [String: LeadStall]) -> Bool {
+        var changed = false
+        for index in tasks.indices {
+            let old = tasks[index].stall
+            var new = found[tasks[index].id]
+            if let old, let fresh = new, old.reason == fresh.reason, old.lastActivity == fresh.lastActivity,
+               old.waitingSince == fresh.waitingSince {
+                new = old
+            }
+            if new != old {
+                tasks[index].stall = new
+                changed = true
+            }
+        }
+        return changed
+    }
+
+    /// The tasks whose workers are stalled now, the longest quiet first.
+    public var stalled: [LeadTask] {
+        tasks.filter { $0.stall != nil && $0.status == .running }.sorted { $0.stall!.lastActivity < $1.stall!.lastActivity }
+    }
     public func taskIndex(_ id: String) -> Int? { tasks.firstIndex { $0.id == id || $0.slug == id } }
 
     // MARK: Questions

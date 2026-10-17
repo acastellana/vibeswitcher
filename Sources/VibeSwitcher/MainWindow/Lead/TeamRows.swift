@@ -208,6 +208,13 @@ enum TeamRows {
                 red(.stalled, "Stalled", "The worker ended without reporting.", since: nil)
                 return row
             }
+            // The witness saw it stop making progress, whatever its screen says: "Stalled 2h", since it last did something.
+            if let stall = task.stall, worker?.live ?? false {
+                let why = stall.why()
+                red(.stalled, "Stalled", why.prefix(1).uppercased() + why.dropFirst() + ".", since: Date(timeIntervalSince1970: stall.lastActivity))
+                row.agent = task.worker
+                return row
+            }
             row.group = .working
             row.mark = rework > 0 ? .rework : .working
             row.state = rework > 0 ? "Rework \(rework)" : "Working"

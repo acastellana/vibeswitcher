@@ -110,6 +110,16 @@ public struct LeadObserver {
         return (LeadActivity.resolve(hook: hook, transcript: tail, background: background), tail)
     }
 
+    /// What the witness reads: the activity and the tail, with what the transcript says about progress (when it was
+    /// last written to, whether it ends at a compaction; see `TranscriptProgress`).
+    public func watching(_ session: HostSession, agentPid: Int32?, background: String? = nil)
+        -> (activity: LeadActivity, tail: TranscriptTail?, progress: TranscriptProgress?) {
+        let hook = hook(session, agentPid: agentPid)
+        let url = transcript(session, hook: hook).map { URL(fileURLWithPath: $0) }
+        let tail = url.flatMap(TranscriptTail.read(url:))
+        return (LeadActivity.resolve(hook: hook, transcript: tail, background: background), tail, url.flatMap(TranscriptProgress.read(url:)))
+    }
+
     /// For an agent outside the window (no session to search by): its hooks' state, if it's this agent's, and the
     /// transcript they name.
     public func activity(of agent: LeadAgent) -> LeadActivity {

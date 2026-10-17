@@ -439,6 +439,10 @@ public final class LeadToolset: MCPToolset {
         guard let worker = store.load().task(slug)?.worker else { throw Problem(text: "\(slug) has no worker.") }
         let clear = arguments["clear_draft"] as? Bool ?? false
         let delivered = try runtime.steer(.session(worker), from: .lead("lead of \(project)"), text: text, clearDraft: clear)
+        try store.update { board in
+            guard let index = board.taskIndex(slug), board.tasks[index].worker == worker else { return }
+            board.tasks[index].leadQuestionAt = nil
+        }
         // Telling a failed or blocked task's live worker what to do sends it back to work: a failed one starts a
         // rework round (its setback stays to say why).
         if runtime.sessions().contains(where: { $0.id == worker && $0.live }) {
@@ -779,6 +783,11 @@ public final class LeadToolset: MCPToolset {
         guard try tellLead("The worker on \(slug) asks: \(question)\nAnswer with message(\(slug), …).", about: "worker \(slug)") else {
             throw Problem(text: "There's no lead running to ask. Decide what you can within your contract, or report blocked.")
         }
+        // Waiting on the answer isn't a stall (see `LeadStall`); the lead's next message answers it.
+        try store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            board.tasks[index].leadQuestionAt = Date().timeIntervalSince1970
+        }
         return MCPToolResult(text: "Asked the lead. Keep working; the answer arrives as a message.")
     }
 
@@ -840,6 +849,15 @@ public final class LeadToolset: MCPToolset {
         let workflow = self.workflow
         var lines = ["Project \(project) on branch \(workflow.base) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once."]
         lines += workflowWarnings(workflow)
+        // Stalled workers first: VibeSwitcher's witness noticed them stop making progress, whatever their screens say.
+        let stalled = board.stalled
+        if !stalled.isEmpty {
+            let now = Date()
+            lines.append("\nStalled (\(stalled.count)):")
+            lines += stalled.map { task in
+                "- \(task.slug): \(task.stall!.text(now: now)). \(task.stall!.advice(slug: task.slug))"
+            }
+        }
         for state in LeadTask.Status.allCases {
             let tasks = board.tasks.filter { $0.status == state }
             guard !tasks.isEmpty else { continue }

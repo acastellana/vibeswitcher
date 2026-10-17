@@ -260,30 +260,66 @@ final class LeadController: ObservableObject {
         let hosted = Dictionary(uniqueKeysWithValues: host.sessions.map { ($0.id.uuidString, $0) })
         var seen: [String: LeadWitness.Seen] = [:]
         let now = Date()
+        let workers = Set(board.tasks.compactMap(\.worker))
+        // The process table, read once and only when a quiet worker's shells are in question.
+        var processes: [Int32: ProcInfo]??
         for id in board.tasks.flatMap({ [$0.worker, $0.verifier] }).compactMap({ $0 }) {
             guard let info = hosted[id] else { continue }
             let session = store.sessions.first { $0.hostID?.uuidString == id }
-            // A turn that ended on an API error reads as finished or waiting; its transcript says which it was.
+            // A turn that ended on an API error reads as finished or waiting; its transcript says which it was. A
+            // worker's transcript is read whatever it shows: a stall is one that reads as working too (see `LeadStall`).
             var apiError: (text: String, at: Double?)?
-            if info.isLive, let session, session.status != .working {
-                let reading = observer.reading(info, agentPid: session.pid)
-                if case .apiError(let error) = reading.activity { apiError = (error, reading.tail?.at) }
+            var watched: (activity: LeadActivity, tail: TranscriptTail?, progress: TranscriptProgress?)?
+            var shellRunning = false
+            var held: SteerMessage?
+            if info.isLive, let session, session.status != .working || workers.contains(id) {
+                let reading = observer.watching(info, agentPid: session.pid)
+                watched = reading
+                if session.status != .working, case .apiError(let error) = reading.activity { apiError = (error, reading.tail?.at) }
+                if workers.contains(id) {
+                    if let last = reading.progress?.lastWritten, now.timeIntervalSince1970 - last >= LeadStall.silentAfter {
+                        if processes == nil { processes = .some(ProcessTable.trySnapshot()) }
+                        if let table = processes ?? nil {
+                            shellRunning = !BackgroundJobs.jobs(forAgent: session.pid, in: table, arguments: {
+                                ProcessTable.arguments(pid: $0.pid, start: Int($0.startTime.timeIntervalSince1970), comm: $0.comm)
+                            }).isEmpty
+                        } else {
+                            shellRunning = true  // Unknown: not taken for silence.
+                        }
+                    }
+                    held = SteerInbox.pending(tty: session.tty).filter { $0.agentPid == session.pid }.min { $0.at < $1.at }
+                }
             }
             // No agent in the scan a minute on: "agent ended · shell", as good as ended.
             seen[id] = LeadWitness.Seen(live: info.isLive, exit: info.exit?.status, status: session?.status,
                                         since: session?.statusSince, detail: session?.detail,
                                         agentQuit: session == nil && info.agentQuit(now: now), apiError: apiError?.text,
-                                        apiErrorAt: apiError?.at)
+                                        apiErrorAt: apiError?.at, activity: watched?.activity,
+                                        lastActivity: watched?.progress?.lastWritten, compactedAt: watched?.progress?.compactedAt,
+                                        shellRunning: shellRunning, heldSince: held?.at, heldFrom: held.map { Self.sender($0.from) })
             if info.isLive, let session { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
         }
         for event in LeadWitness.events(board: board, seen: seen, now: now) where told.insert("\(root)|\(event.key)").inserted {
             deliver(event.text, from: .system("witness"), to: board, root: root)
         }
+        // On the board too, for status and the Team view, until the worker moves again.
+        let stalls = LeadWitness.stalls(board: board, seen: seen, now: now)
+        var noted = board
+        if noted.noteStalls(stalls) { try? BoardStore(root: root).update { $0.noteStalls(stalls) } }
         // A lead runs again: what was held for it goes now.
         if let waiting = held.removeValue(forKey: root) {
             for message in waiting { deliver(message.text, from: message.sender, to: board, root: root) }
         }
         if let pid = board.leadPid, let tty = board.leadTTY { flush(LeadAgent(pid: pid, tty: tty, session: board.leadSession)) }
+    }
+
+    /// Who a waiting message is from, in words.
+    private static func sender(_ sender: SteerMessage.Sender) -> String {
+        switch sender {
+        case .user: return "the user"
+        case .lead(let name): return name
+        case .system(let about): return "VibeSwitcher (\(about))"
+        }
     }
 
     private func alert(_ title: String, _ text: String) {

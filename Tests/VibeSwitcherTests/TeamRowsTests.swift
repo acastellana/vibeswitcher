@@ -87,6 +87,22 @@ struct TeamRowsTests {
         #expect(row.line(summary: "Making a database") == "Which database?")
     }
 
+    @Test func aStalledWorkerIsRedWhateverItsScreenSays() {
+        // It reads as working (a compaction summary looks like a prompt), but the witness saw it stop two hours ago.
+        var task = Self.task("fix", .running)
+        task.stall = LeadStall(reason: .compacted, lastActivity: Self.now.timeIntervalSince1970 - 2 * 3600,
+                               at: Self.now.timeIntervalSince1970 - 3600)
+        let row = row(task, ["w-fix": Self.working])
+        #expect(row.mark == .stalled && row.group == .needsYou)
+        #expect(row.stateText(now: Self.now) == "Stalled 2h")
+        #expect(row.line(summary: "Fixing the layout") == "Its transcript ends at a context-compaction summary and nothing followed.")
+        // Once it's in review or the worker ended, the stall is no longer what the row says.
+        task.status = .review
+        #expect(self.row(task, ["w-fix": Self.working]).state != "Stalled")
+        task.status = .running
+        #expect(self.row(task, ["w-fix": Self.ended]).problem == "The worker ended without reporting.")
+    }
+
     @Test func otherStates() {
         #expect(row(Self.task("q", .planned)).stateText(now: Self.now) == "Queued")
         var blocked = Self.task("b", .blocked)
