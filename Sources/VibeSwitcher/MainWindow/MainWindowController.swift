@@ -230,6 +230,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         showSelection()
     }
 
+    /// `--idle-bench`: the window up but off screen, without a Dock icon or taking the keyboard.
+    func presentOffscreen() {
+        mountViews()
+        window?.setFrame(NSRect(x: -20_000, y: -20_000, width: 1280, height: 800), display: false)
+        window?.orderFrontRegardless()
+        window?.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+        shownID = nil
+        showSelection()
+    }
+
     private func showSelection() {
         guard window?.isVisible == true else { return }
         defer {

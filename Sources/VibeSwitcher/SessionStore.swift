@@ -19,7 +19,7 @@ final class SessionStore: ObservableObject {
     /// Set from Preferences; changing it re-sorts on the next refresh.
     var order: SessionOrder = .screen { didSet { if order != oldValue { refresh() } } }
 
-    private let scanner = SessionScanner()
+    private let scanner: SessionScanner
     private let queue = DispatchQueue(label: "vibeswitcher.scan", qos: .utility)
     private var timer: Timer?
     private var watcher: DispatchSourceFileSystemObject?
@@ -63,6 +63,11 @@ final class SessionStore: ObservableObject {
     var hostScreens: () -> [String: String] = { [:] }
     var requestHostScreens: (Set<String>) -> Void = { _ in }
     private var lastHostScreenRequest = Date.distantPast
+
+    /// `scanner`: the Mac's processes; `--idle-bench` passes made-up ones.
+    init(scanner: SessionScanner = SessionScanner()) {
+        self.scanner = scanner
+    }
 
     /// Titles change many times a second while an agent works (its spinner); the regular scan picks them up,
     /// so only a session starting or ending triggers a scan here.

@@ -7,6 +7,11 @@ if let index = arguments.firstIndex(of: "--chat-bench"), arguments.indices.conta
     // Debug aid: the chat view offscreen in this process on a transcript, timing its layouts (see `ChatBench`).
     ChatBench.run(path: arguments[index + 1])
 }
+if let index = arguments.firstIndex(of: "--idle-bench") {
+    // Debug aid: the app's window, list and timers on made-up sessions in this process, measuring what it costs
+    // while nothing changes (see `IdleBench`). Needs CFFIXED_USER_HOME set to a scratch folder.
+    IdleBench.run(arguments: Array(arguments[(index + 1)...]))
+}
 if arguments.contains("--install-hooks") {
     let problems = HookSetup.installAll()
     problems.forEach { print("problem: \($0)") }

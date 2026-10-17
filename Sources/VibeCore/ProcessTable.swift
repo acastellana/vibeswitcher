@@ -11,6 +11,15 @@ public struct ProcInfo: Sendable {
     public let startTime: Date
     /// Set for terminal-attached `claude` / `codex` processes.
     public let agent: Agent?
+
+    public init(pid: Int32, ppid: Int32, tty: String?, comm: String, startTime: Date, agent: Agent?) {
+        self.pid = pid
+        self.ppid = ppid
+        self.tty = tty
+        self.comm = comm
+        self.startTime = startTime
+        self.agent = agent
+    }
 }
 
 /// Reads the kernel process table directly via sysctl (no `ps` subprocess, so it is cheap to poll).
