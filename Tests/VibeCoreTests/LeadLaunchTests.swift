@@ -46,6 +46,27 @@ struct LeadLaunchTests {
         #expect(launch.promptFile.contains("/.vibeswitcher/run/worker-add-login/"))
     }
 
+    @Test func theCapabilityGoesToTheToolServerOnlyInPrivateFiles() throws {
+        let root = try root()
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("run-\(UUID().uuidString)/verify-x")
+        let launch = try LeadLaunch.prepare(role: .verifier, root: root, task: "x", base: "claude", prompt: "p", start: "Check.",
+                                            server: "/s", name: "verify-x", capability: "secret", folder: folder)
+        #expect(launch.mcpFile.hasPrefix(folder.path))
+        let mcp = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.mcpFile))) as? [String: Any]
+        let entry = (mcp?["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any]
+        #expect((entry?["env"] as? [String: String])?[LeadVault.environmentKey] == "secret")
+        // Never on the command line (other processes see that).
+        #expect(!launch.command.contains("secret"))
+        for file in [launch.mcpFile, launch.promptFile, launch.settingsFile] {
+            #expect((try FileManager.default.attributesOfItem(atPath: file)[.posixPermissions] as? Int) == 0o600, "\(file)")
+        }
+        #expect((try FileManager.default.attributesOfItem(atPath: folder.path)[.posixPermissions] as? Int) == 0o700)
+        // A verifier doesn't load the branch's project settings or MCP servers.
+        #expect(launch.command.contains("--setting-sources user --strict-mcp-config"))
+        let worker = try LeadLaunch.prepare(role: .worker, root: root, task: "x", base: "claude", prompt: "p", start: "Go.", server: "/s", name: "worker-x")
+        #expect(!worker.command.contains("--setting-sources"))
+    }
+
     @Test func theVerifierIsReadOnlyAndMayUseAnotherModel() throws {
         let launch = try LeadLaunch.prepare(role: .verifier, root: try root(), task: "x", base: "claude", prompt: "p", start: "Check.",
                                             server: "/s", name: "verify-x", model: "sonnet")
