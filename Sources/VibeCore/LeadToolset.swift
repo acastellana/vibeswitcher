@@ -250,10 +250,24 @@ public final class LeadToolset: MCPToolset {
                             properties: ["task": task], required: ["task"]),
                 MCPToolInfo(name: "cleanup", description: "End a task's sessions and remove its worktree and branch (after merging, or force to abandon it).",
                             properties: ["task": task, "force": P(type: "boolean", description: "Also discard unmerged work")], required: ["task"]),
-                MCPToolInfo(name: "ask_user", description: "Ask the user something. It doesn't block: keep working; the answer arrives as a message.",
+                MCPToolInfo(name: "ask_user", description: "Ask the user something. It doesn't block: keep working; the answer arrives as a message. Your open questions are a queue the user answers in any order: revise one when you learn something (revise_question), withdraw one that no longer applies (withdraw_question).",
                             properties: ["question": P(type: "string", description: "One clear question"),
-                                         "options": P(type: "array", description: "Suggested answers (the user can also write their own)", items: "string")],
+                                         "options": P(type: "array", description: "Suggested answers (the user can also write their own)", items: "string"),
+                                         "priority": P(type: "string", description: "blocking (work waits on it; it badges the Dock), important (the default), or whenever",
+                                                       options: LeadQuestion.Priority.allCases.map(\.rawValue)),
+                                         "why_now": P(type: "string", description: "One line: why you need it now (shown with the question)")],
                             required: ["question"]),
+                MCPToolInfo(name: "revise_question", description: "Reword an open question when you've learned something: it keeps its place and id, the user sees what changed and why, and an answer to the earlier wording says so.",
+                            properties: ["id": P(type: "string", description: "The question's id (its first 8 characters will do)"),
+                                         "text": P(type: "string", description: "The new wording"),
+                                         "options": P(type: "array", description: "New suggested answers (an empty list removes them)", items: "string"),
+                                         "note": P(type: "string", description: "What changed and why, in one line (shown on the card)")],
+                            required: ["id", "note"]),
+                MCPToolInfo(name: "withdraw_question", description: "Withdraw an open question that no longer applies (settled another way, overtaken): it stops waiting on the user.",
+                            properties: ["id": P(type: "string", description: "The question's id (its first 8 characters will do)"),
+                                         "reason": P(type: "string", description: "Why, in one line (the user sees it)")],
+                            required: ["id", "reason"]),
+                MCPToolInfo(name: "questions", description: "Your questions to the user: open ones (most important first), answered and withdrawn ones, each with its earlier wordings."),
                 MCPToolInfo(name: "post_update", description: "Show the user a result: what changed, how it was checked, screenshots.",
                             properties: ["title": P(type: "string", description: "One line"), "body": P(type: "string", description: "Markdown"),
                                          "images": P(type: "array", description: "Absolute paths of screenshots", items: "string")],
@@ -291,6 +305,9 @@ public final class LeadToolset: MCPToolset {
             case "merge": return try merge(try taskSlug(arguments))
             case "cleanup": return try cleanup(try taskSlug(arguments), force: arguments["force"] as? Bool ?? false)
             case "ask_user": return try askUser(arguments)
+            case "revise_question": return try reviseQuestion(arguments)
+            case "withdraw_question": return try withdrawQuestion(arguments)
+            case "questions": return MCPToolResult(text: questionsText())
             case "post_update": return try postUpdate(arguments)
             case "record_decision": return try recordDecision(arguments)
             case "sessions": return MCPToolResult(text: sessionsText())
@@ -613,12 +630,42 @@ public final class LeadToolset: MCPToolset {
 
     private func askUser(_ arguments: [String: Any]) throws -> MCPToolResult {
         guard let question = arguments["question"] as? String, !question.isEmpty else { throw Problem(text: "Ask something.") }
-        let asked = try store.update { board -> LeadQuestion in
-            let asked = LeadQuestion(text: question, options: strings(arguments["options"]))
-            board.questions.append(asked)
-            return asked
+        let priority = try self.priority(arguments["priority"])
+        let whyNow = (arguments["why_now"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let asked = try store.update { board in board.ask(question, options: strings(arguments["options"]), priority: priority, whyNow: whyNow) }
+        return MCPToolResult(text: "Asked (\(asked.short), \(asked.rank.rawValue)). Keep working; the answer arrives as a message. If it stops applying, withdraw_question(\(asked.short)); if you learn something, revise_question.")
+    }
+
+    private func priority(_ value: Any?) throws -> LeadQuestion.Priority? {
+        guard let text = value as? String, !text.isEmpty else { return nil }
+        guard let priority = LeadQuestion.Priority(rawValue: text.lowercased()) else {
+            throw Problem(text: "priority must be blocking, important or whenever.")
         }
-        return MCPToolResult(text: "Asked (\(asked.id.prefix(8))). Keep working; the answer arrives as a message.")
+        return priority
+    }
+
+    private func reviseQuestion(_ arguments: [String: Any]) throws -> MCPToolResult {
+        guard let id = arguments["id"] as? String, !id.isEmpty else { throw Problem(text: "Which question? Give its id.") }
+        let note = (arguments["note"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !note.isEmpty else { throw Problem(text: "Say what changed and why (note): the user sees it on the card.") }
+        let text = arguments["text"] as? String
+        let options = arguments["options"].map { strings($0) }
+        guard text?.isEmpty == false || options != nil else { throw Problem(text: "Give the new text, new options, or both.") }
+        let revised = try boardChange { board in try board.revise(id, text: text, options: options, note: note) }
+        return MCPToolResult(text: "Revised \(revised.short) (now version \(revised.version)). The user sees the new wording and your note; an answer to an earlier wording says which one it was.")
+    }
+
+    private func withdrawQuestion(_ arguments: [String: Any]) throws -> MCPToolResult {
+        guard let id = arguments["id"] as? String, !id.isEmpty else { throw Problem(text: "Which question? Give its id.") }
+        let reason = (arguments["reason"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reason.isEmpty else { throw Problem(text: "Say why (reason): the user sees it.") }
+        let withdrawn = try boardChange { board in try board.withdraw(id, reason: reason) }
+        return MCPToolResult(text: "Withdrew \(withdrawn.short) “\(withdrawn.text)”. It no longer waits on the user.")
+    }
+
+    /// A board change whose refusal (`BoardError`) is the lead's to read, not a failure.
+    private func boardChange<T>(_ change: (inout LeadBoard) throws -> T) throws -> T {
+        do { return try store.update(change) } catch let error as BoardError { throw Problem(text: error.text) }
     }
 
     private func postUpdate(_ arguments: [String: Any]) throws -> MCPToolResult {
@@ -808,20 +855,75 @@ public final class LeadToolset: MCPToolset {
                 lines.append(line)
             }
         }
-        let open = board.questions.filter { $0.answer == nil }
+        let open = board.openQuestions
         if !open.isEmpty {
-            lines.append("\nWaiting on the user:")
-            lines += open.map { "- \($0.text)" }
+            let now = Date().timeIntervalSince1970
+            lines.append("\nWaiting on the user (\(open.count) question\(open.count == 1 ? "" : "s"), most important first):")
+            lines += open.map { question in
+                var line = "- \(question.short) [\(question.rank.rawValue), asked \(Self.age(now - question.askedAt)) ago"
+                if question.version > 1 { line += ", revised \(Self.age(now - question.updatedAt)) ago" }
+                line += "] \(question.text)"
+                if now - question.updatedAt > LeadBoard.staleQuestion {
+                    line += " — still relevant? Over an hour open: revise_question or withdraw_question if it's changed or settled."
+                }
+                return line
+            }
         }
         if let reports = try? newReports(), !reports.isEmpty {
             lines.append("\nReports since your last status:")
             lines += reports.map { "- \($0.about): " + ($0.text.count > 4_000 ? String($0.text.prefix(4_000)) + "…" : $0.text) }
         }
-        let answered = board.questions.filter { $0.answer != nil }.suffix(5)
+        let answered = board.questions.filter { $0.state == .answered }.suffix(5)
         if !answered.isEmpty {
             lines.append("\nRecent answers:")
-            lines += answered.map { "- \($0.text) → \($0.answer ?? "")" }
+            lines += answered.map { question in
+                let saw = question.answeredVersion ?? question.version
+                let wording = question.wording(saw).text
+                return "- \(wording) → \(question.answer ?? "")" + (saw < question.version ? " (to version \(saw) of \(question.version))" : "")
+            }
         }
+        return lines.joined(separator: "\n")
+    }
+
+    /// "4 min", "2 h 5 min", "3 d".
+    static func age(_ seconds: Double) -> String {
+        let minutes = max(0, Int(seconds / 60))
+        if minutes < 60 { return "\(minutes) min" }
+        if minutes < 24 * 60 { return minutes % 60 == 0 ? "\(minutes / 60) h" : "\(minutes / 60) h \(minutes % 60) min" }
+        return "\(minutes / (24 * 60)) d"
+    }
+
+    /// Every question, open first (as status orders them), then answered and withdrawn ones, each with its history.
+    private func questionsText() -> String {
+        let board = store.load()
+        guard !board.questions.isEmpty else { return "No questions to the user yet." }
+        let now = Date().timeIntervalSince1970
+        func block(_ question: LeadQuestion) -> [String] {
+            var lines = ["- \(question.short) [\(question.rank.rawValue), \(question.state.rawValue), asked \(Self.age(now - question.askedAt)) ago] \(question.text)"]
+            if !question.options.isEmpty { lines.append("  options: \(question.options.joined(separator: " | "))") }
+            if let why = question.whyNow { lines.append("  why now: \(why)") }
+            for (index, revision) in (question.revisions ?? []).enumerated() {
+                lines.append("  version \(index + 1) (until \(LeadBoard.clock(revision.at))): \(revision.text)"
+                             + (revision.options.isEmpty ? "" : " [\(revision.options.joined(separator: " | "))]") + " — changed: \(revision.note)")
+            }
+            if let answer = question.answer {
+                let saw = question.answeredVersion ?? question.version
+                lines.append("  answered \(Self.age(now - (question.answeredAt ?? now))) ago" + (question.version > 1 ? " (to version \(saw) of \(question.version))" : "")
+                             + (question.state == .withdrawn ? " after you withdrew it" : "") + ": \(answer)")
+            }
+            if question.state == .withdrawn {
+                lines.append("  withdrawn \(Self.age(now - (question.withdrawnAt ?? now))) ago: \(question.withdrawReason ?? "")")
+            }
+            return lines
+        }
+        var lines: [String] = []
+        let open = board.openQuestions
+        lines.append(open.isEmpty ? "Open: none." : "Open (\(open.count), most important first):")
+        lines += open.flatMap(block)
+        let answered = board.questions.filter { $0.state == .answered }
+        if !answered.isEmpty { lines += ["", "Answered:"] + answered.reversed().flatMap(block) }
+        let withdrawn = board.questions.filter { $0.state == .withdrawn }
+        if !withdrawn.isEmpty { lines += ["", "Withdrawn:"] + withdrawn.reversed().flatMap(block) }
         return lines.joined(separator: "\n")
     }
 

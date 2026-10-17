@@ -147,20 +147,116 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
-/// Something the lead asked you; the answer is steered back into it.
+/// Something the lead asked you; the answer is steered back into it. The lead's questions are a queue it keeps up:
+/// it can revise one (the question keeps its id, and its earlier wordings), withdraw one that no longer applies, and
+/// say how much each matters.
 public struct LeadQuestion: Codable, Equatable, Sendable, Identifiable {
+    /// How much it matters: blocking holds up work (the Dock badge counts these), important is the default,
+    /// whenever can wait.
+    public enum Priority: String, Codable, Sendable, CaseIterable, Comparable {
+        case blocking, important, whenever
+
+        var rank: Int { Self.allCases.firstIndex(of: self)! }
+        public static func < (a: Priority, b: Priority) -> Bool { a.rank < b.rank }
+    }
+
+    public enum State: String, Sendable { case open, answered, withdrawn }
+
+    /// A wording the question had before a revision, and why it changed.
+    public struct Revision: Codable, Equatable, Sendable {
+        /// The wording it replaced.
+        public var text: String
+        public var options: [String]
+        /// Why the lead changed it.
+        public var note: String
+        /// When it changed.
+        public var at: Double
+
+        public init(text: String, options: [String], note: String, at: Double = Date().timeIntervalSince1970) {
+            self.text = text
+            self.options = options
+            self.note = note
+            self.at = at
+        }
+    }
+
     public var id: String
+    /// The current wording.
     public var text: String
     public var options: [String]
     public var answer: String?
     public var askedAt: Double
     public var answeredAt: Double?
+    // The fields below are optional: older boards have none of them.
+    public var priority: Priority?
+    /// Why the lead asks it now.
+    public var whyNow: String?
+    /// Its earlier wordings, oldest first: version n's wording is `revisions[n - 1]`, the current one is the last version.
+    public var revisions: [Revision]?
+    /// The version the user saw when answering.
+    public var answeredVersion: Int?
+    public var withdrawnAt: Double?
+    public var withdrawReason: String?
 
-    public init(id: String = UUID().uuidString, text: String, options: [String]) {
+    public init(id: String = UUID().uuidString, text: String, options: [String], priority: Priority? = nil, whyNow: String? = nil,
+                at: Double = Date().timeIntervalSince1970) {
         self.id = id
         self.text = text
         self.options = options
-        self.askedAt = Date().timeIntervalSince1970
+        self.priority = priority
+        self.whyNow = whyNow
+        self.askedAt = at
+    }
+
+    /// Old questions (no priority) count as important.
+    public var rank: Priority { priority ?? .important }
+    /// 1 for the first wording, one more for each revision.
+    public var version: Int { (revisions?.count ?? 0) + 1 }
+    /// The latest revision: when the current wording came, and why.
+    public var lastRevision: Revision? { revisions?.last }
+    /// A withdrawn question stays withdrawn, even if an answer came in late.
+    public var state: State { withdrawnAt != nil ? .withdrawn : answer != nil ? .answered : .open }
+    public var isOpen: Bool { state == .open }
+    public var short: String { String(id.prefix(8)) }
+
+    /// The wording of a version (1-based): an earlier one from the revisions, the latest the current text.
+    public func wording(_ version: Int) -> (text: String, options: [String]) {
+        if let revisions, version >= 1, version <= revisions.count { return (revisions[version - 1].text, revisions[version - 1].options) }
+        return (text, options)
+    }
+
+    /// When it was last asked or reworded.
+    public var updatedAt: Double { lastRevision?.at ?? askedAt }
+}
+
+/// What happened to an answer (see `LeadBoard.answer`).
+public enum LeadAnswerOutcome: Equatable, Sendable {
+    /// Recorded; `saw` is the version the user answered, which is older than the current one when the lead revised
+    /// the question meanwhile.
+    case answered(LeadQuestion, saw: Int)
+    /// The lead had withdrawn it; the answer is kept on it, the question stays withdrawn.
+    case withdrawn(LeadQuestion)
+    /// It was answered already (another window, the phone).
+    case alreadyAnswered(LeadQuestion)
+    case missing
+
+    /// The message for the lead, if any: the answer tied to the wording the user saw.
+    public func message(given text: String) -> String? {
+        func clock(_ at: Double) -> String { LeadBoard.clock(at) }
+        switch self {
+        case .answered(let question, let saw) where saw < question.version:
+            let seen = question.wording(saw)
+            return "Answer to your question \(question.short), version \(saw) of \(question.version) (the user saw “\(seen.text)”, "
+                + "before your revision at \(clock(question.lastRevision?.at ?? question.askedAt)) to “\(question.text)”): \(text)\n"
+                + "Check it still answers the current wording; ask again (ask_user) if it doesn't."
+        case .answered(let question, _):
+            return "Answer to your question \(question.short) “\(question.text)”: \(text)"
+        case .withdrawn(let question):
+            return "The user answered your withdrawn question \(question.short) “\(question.text)” (withdrawn: \(question.withdrawReason ?? "no reason")) anyway: \(text)\n"
+                + "Take it as a note; nothing waits on it."
+        case .alreadyAnswered, .missing:
+            return nil
+        }
     }
 }
 
@@ -218,6 +314,98 @@ public struct LeadBoard: Codable, Equatable, Sendable {
 
     public func task(_ id: String) -> LeadTask? { tasks.first { $0.id == id || $0.slug == id } }
     public func taskIndex(_ id: String) -> Int? { tasks.firstIndex { $0.id == id || $0.slug == id } }
+
+    // MARK: Questions
+
+    /// An open question older than this (since asked or last revised) is flagged for the lead to re-check.
+    public static let staleQuestion: Double = 3_600
+
+    /// The open questions, most important first, then oldest first.
+    public var openQuestions: [LeadQuestion] {
+        questions.filter(\.isOpen).sorted { ($0.rank, $0.askedAt) < ($1.rank, $1.askedAt) }
+    }
+
+    /// Open questions that hold up work: what the Dock badge counts.
+    public var blockingQuestions: Int { questions.filter { $0.isOpen && $0.rank == .blocking }.count }
+
+    /// The question with this id, or the one id it begins with (the lead is shown the first 8 characters).
+    public func questionIndex(_ id: String) throws -> Int {
+        let wanted = id.trimmingCharacters(in: .whitespaces).uppercased()
+        if let exact = questions.firstIndex(where: { $0.id.uppercased() == wanted }) { return exact }
+        let matches = questions.indices.filter { !wanted.isEmpty && questions[$0].id.uppercased().hasPrefix(wanted) }
+        guard matches.count == 1, let index = matches.first else {
+            throw BoardError(text: matches.isEmpty ? "No question \(id) on the board. The questions tool lists them."
+                                                  : "\(id) begins \(matches.count) questions' ids; give more of it.")
+        }
+        return index
+    }
+
+    @discardableResult
+    public mutating func ask(_ text: String, options: [String], priority: LeadQuestion.Priority?, whyNow: String?,
+                             at: Double = Date().timeIntervalSince1970) -> LeadQuestion {
+        let question = LeadQuestion(text: text, options: options, priority: priority, whyNow: whyNow, at: at)
+        questions.append(question)
+        return question
+    }
+
+    /// Rewords an open question (text, options, or both), keeping its id and the wording it replaces.
+    @discardableResult
+    public mutating func revise(_ id: String, text: String?, options: [String]?, note: String,
+                                at: Double = Date().timeIntervalSince1970) throws -> LeadQuestion {
+        let index = try questionIndex(id)
+        var question = questions[index]
+        guard question.isOpen else { throw BoardError(text: Self.closed(question)) }
+        let newText = text.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 } ?? question.text
+        let newOptions = options ?? question.options
+        guard newText != question.text || newOptions != question.options else {
+            throw BoardError(text: "That's the wording it has already; nothing changed.")
+        }
+        question.revisions = (question.revisions ?? []) + [LeadQuestion.Revision(text: question.text, options: question.options, note: note, at: at)]
+        question.text = newText
+        question.options = newOptions
+        questions[index] = question
+        return question
+    }
+
+    @discardableResult
+    public mutating func withdraw(_ id: String, reason: String, at: Double = Date().timeIntervalSince1970) throws -> LeadQuestion {
+        let index = try questionIndex(id)
+        guard questions[index].isOpen else { throw BoardError(text: Self.closed(questions[index])) }
+        questions[index].withdrawnAt = at
+        questions[index].withdrawReason = reason
+        return questions[index]
+    }
+
+    /// The user's answer to the version of the question they saw. It's tied to that version, so when the lead
+    /// revised it meanwhile the lead learns which wording was answered; a withdrawn question keeps the answer but
+    /// stays withdrawn.
+    public mutating func answer(_ id: String, with text: String, saw version: Int, at: Double = Date().timeIntervalSince1970) -> LeadAnswerOutcome {
+        guard let index = questions.firstIndex(where: { $0.id == id }) else { return .missing }
+        switch questions[index].state {
+        case .answered: return .alreadyAnswered(questions[index])
+        case .open, .withdrawn: break
+        }
+        let saw = min(max(version, 1), questions[index].version)
+        questions[index].answer = text
+        questions[index].answeredAt = at
+        questions[index].answeredVersion = saw
+        return questions[index].state == .withdrawn ? .withdrawn(questions[index]) : .answered(questions[index], saw: saw)
+    }
+
+    private static func closed(_ question: LeadQuestion) -> String {
+        switch question.state {
+        case .withdrawn: return "Question \(question.short) is withdrawn already (\(question.withdrawReason ?? "no reason"))."
+        case .answered: return "The user answered question \(question.short) already: \(question.answer ?? ""). Ask a new one if you need more."
+        case .open: return ""
+        }
+    }
+
+    /// "17:42": the local time of day.
+    public static func clock(_ at: Double) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: Date(timeIntervalSince1970: at))
+    }
 }
 
 public struct BoardError: Error, CustomStringConvertible {
