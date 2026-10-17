@@ -82,7 +82,7 @@ enum ChatBench {
             var usage = rusage()
             getrusage(RUSAGE_SELF, &usage)
             let cpu = Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1e6 + Double(usage.ru_stime.tv_sec) + Double(usage.ru_stime.tv_usec) / 1e6
-            print("t=\(second)s cpu=\(String(format: "%.1f", cpu))s state=\(chat.state) items=\(chat.items.count) shown=\(min(chat.items.count, chat.shownLimit)) worst stall=\(String(format: "%.2f", worst))s")
+            print("t=\(second)s cpu=\(String(format: "%.1f", cpu))s state=\(chat.state) items=\(chat.items.count) shown=\(min(chat.items.count, chat.shownLimit)) worst stall=\(String(format: "%.2f", worst))s atEnd=\(chat.atBottom) top=\(Int(chat.visibleTop)) rows=\(chat.rowTops.count) anchor=\(ChatWindow.anchor(tops: chat.rowTops, visibleTop: chat.visibleTop) ?? "-")")
             fflush(stdout)
             worst = 0
             if second >= seconds { exit(0) }

@@ -100,3 +100,22 @@ struct ChatWindowTests {
         #expect(ChatWindow.shown(all, limit: 120, including: "missing").hidden == 380)
     }
 }
+
+struct ChatScrollPlaceTests {
+    @Test func theAnchorIsTheItemAtTheTopOfTheView() {
+        let tops: [String: Double] = ["a": 0, "b": 120, "c": 400, "d": 900]
+        #expect(ChatWindow.anchor(tops: tops, visibleTop: 0) == "a")
+        #expect(ChatWindow.anchor(tops: tops, visibleTop: 300) == "b")   // b runs from 120 past 300
+        #expect(ChatWindow.anchor(tops: tops, visibleTop: 400) == "c")
+        #expect(ChatWindow.anchor(tops: tops, visibleTop: 5_000) == "d")
+        #expect(ChatWindow.anchor(tops: [:], visibleTop: 10) == nil)
+    }
+
+    @Test func atTheEndWithinASmallMargin() {
+        #expect(ChatWindow.atEnd(contentHeight: 2_000, visibleBottom: 2_000))
+        #expect(ChatWindow.atEnd(contentHeight: 2_000, visibleBottom: 1_980))
+        #expect(!ChatWindow.atEnd(contentHeight: 2_000, visibleBottom: 1_800))
+        // Shorter than the view: everything, the end included, is on screen.
+        #expect(ChatWindow.atEnd(contentHeight: 300, visibleBottom: 900))
+    }
+}

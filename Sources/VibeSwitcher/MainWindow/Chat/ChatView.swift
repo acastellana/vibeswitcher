@@ -77,8 +77,8 @@ struct ChatView: View {
     let choose: (Int, String?) -> Void
     let moveTab: (Int) -> Void
     let resend: (String) -> Void
-    /// Whether the end is on screen. Held, not observed: the stack's own appear/disappear callbacks set it, and if
-    /// that redrew this view the stack would be laid out again and could flip it back, forever.
+    /// Whether the end is on screen. Held, not observed: scrolling changes it, and only the Latest button needs
+    /// redrawing for that.
     @State private var bottom = BottomTracker()
     @State private var viewing: ChatImage?
     @State private var didInitialScroll = false
@@ -92,7 +92,7 @@ struct ChatView: View {
         let window = ChatWindow.shown(items, limit: chat.shownLimit, including: current)
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 16) {
                     switch chat.state {
                     case .loading:
                         ProgressView().frame(maxWidth: .infinity).padding(40)
@@ -108,7 +108,7 @@ struct ChatView: View {
                             Button(chat.loadingEarlier ? "Loading…" : "Load earlier") { chat.loadEarlier() }
                                 .buttonStyle(.borderless).frame(maxWidth: .infinity).disabled(chat.loadingEarlier)
                         }
-                        ForEach(Array(window.items.enumerated()), id: \.element.id) { offset, item in
+                        ForEach(window.items) { item in
                             ChatItemView(item: item, chat: chat, expanded: item.isTools ? chat.expanded : [],
                                          agent: row?.markKind ?? .agent(.claude), rowID: row?.draftKey,
                                          canSend: live, resend: resend) { viewing = $0 }
@@ -117,8 +117,9 @@ struct ChatView: View {
                                 .padding(6)
                                 .background(RoundedRectangle(cornerRadius: 10).fill(
                                     item.id == current ? Color.yellow.opacity(0.18) : matches.contains(item.id) ? Color.yellow.opacity(0.07) : .clear))
-                                .onAppear { chat.visibleItems[item.id] = window.hidden + offset }
-                                .onDisappear { chat.visibleItems[item.id] = nil }
+                                .background(GeometryReader { geometry in
+                                    Color.clear.preference(key: RowTops.self, value: [item.id: geometry.frame(in: .named(RowTops.space)).minY])
+                                })
                         }
                         ForEach(chat.steering) { message in
                             VStack(alignment: .trailing, spacing: 4) {
@@ -180,9 +181,14 @@ struct ChatView: View {
                         }
                     }
                     Color.clear.frame(height: 1).id("bottom")
-                        .onAppear { bottom.set(true); chat.atBottom = true }
-                        .onDisappear { bottom.set(false); chat.atBottom = false }
                 }
+                .coordinateSpace(name: RowTops.space)
+                .onPreferenceChange(RowTops.self) { tops in chat.rowTops = tops.mapValues(Double.init) }
+                .background(ScrollProbe { top, atEnd in
+                    chat.visibleTop = top
+                    chat.atBottom = atEnd
+                    bottom.set(atEnd)
+                })
                 .padding(.horizontal, 22).padding(.vertical, 16)
                 .frame(maxWidth: 900)
                 .frame(maxWidth: .infinity)
@@ -221,6 +227,50 @@ struct ChatView: View {
             }
         }
         .sheet(item: $viewing) { image in ImageViewer(image: image) { viewing = nil } }
+    }
+}
+
+/// Where each shown item starts, from the top of the stack (for where you were reading).
+private struct RowTops: PreferenceKey {
+    static let space = "chat-rows"
+    static let defaultValue: [String: CGFloat] = [:]
+    static func reduce(value: inout [String: CGFloat], nextValue: () -> [String: CGFloat]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
+/// Reports where the scroll view around it is: the top of what's visible (from the top of this view) and whether
+/// the end is on screen. Read from AppKit as you scroll; the stack is eager, so its rows don't appear and disappear.
+private struct ScrollProbe: NSViewRepresentable {
+    let report: (_ top: Double, _ atEnd: Bool) -> Void
+
+    func makeNSView(context: Context) -> ProbeView { ProbeView() }
+    func updateNSView(_ view: ProbeView, context: Context) { view.report = report }
+
+    final class ProbeView: NSView {
+        var report: ((Double, Bool) -> Void)?
+        private weak var clip: NSClipView?
+        override var isFlipped: Bool { true }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            NotificationCenter.default.removeObserver(self)
+            guard window != nil, let scroll = enclosingScrollView else { return }
+            clip = scroll.contentView
+            scroll.contentView.postsBoundsChangedNotifications = true
+            postsFrameChangedNotifications = true
+            NotificationCenter.default.addObserver(self, selector: #selector(changed), name: NSView.boundsDidChangeNotification, object: scroll.contentView)
+            NotificationCenter.default.addObserver(self, selector: #selector(changed), name: NSView.frameDidChangeNotification, object: self)
+            changed()
+        }
+
+        @objc private func changed() {
+            guard let clip else { return }
+            let visible = convert(clip.bounds, from: clip)
+            report?(Double(visible.minY), ChatWindow.atEnd(contentHeight: Double(bounds.height), visibleBottom: Double(visible.maxY)))
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? { nil }
     }
 }
 

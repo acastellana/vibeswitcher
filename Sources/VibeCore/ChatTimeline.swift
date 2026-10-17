@@ -142,8 +142,8 @@ public enum ComposerText {
     }
 }
 
-/// The part of a conversation the chat lays out: the newest items. A long session has thousands, and a lazy stack
-/// still walks them all on every layout pass (the window hung for many seconds on one).
+/// The part of a conversation the chat lays out: the newest items. A long session has thousands, and every one
+/// shown is laid out.
 public enum ChatWindow {
     public static let page = 120
 
@@ -155,5 +155,17 @@ public enum ChatWindow {
             start = max(0, index - 5)
         }
         return (items[start...], start)
+    }
+
+    /// The item at the top of the view: the last one starting at or above `visibleTop` (positions from the top of
+    /// the content).
+    public static func anchor(tops: [String: Double], visibleTop: Double) -> String? {
+        let above = tops.filter { $0.value <= visibleTop + 1 }
+        return (above.isEmpty ? tops.min { $0.value < $1.value } : above.max { $0.value < $1.value })?.key
+    }
+
+    /// Whether the end of the content is on screen (within a few points).
+    public static func atEnd(contentHeight: Double, visibleBottom: Double) -> Bool {
+        visibleBottom >= contentHeight - 24
     }
 }

@@ -125,8 +125,10 @@ final class ChatModel: ObservableObject {
         var anchor: String?
     }
     private var kept: [String: Kept] = [:]
-    /// Items on screen right now (kept current by the view), to know where you were reading.
-    var visibleItems: [String: Int] = [:]
+    /// Where each shown item starts and where the view's top is (kept current by the view), to know where you
+    /// were reading.
+    var rowTops: [String: Double] = [:]
+    var visibleTop: Double = 0
     var atBottom = true
     /// Where to scroll when the conversation opens (set from what was kept).
     private(set) var restoreAnchor: String?
@@ -135,7 +137,7 @@ final class ChatModel: ObservableObject {
     func show(path: String?) {
         guard path != self.path else { return }
         if let old = self.path {
-            let anchor = atBottom ? nil : visibleItems.min { $0.value < $1.value }?.key
+            let anchor = atBottom ? nil : ChatWindow.anchor(tops: rowTops, visibleTop: visibleTop)
             kept[old] = Kept(expanded: expanded, searchActive: searchActive, searchQuery: searchQuery, searchIndex: searchIndex, anchor: anchor)
         }
         generation += 1
@@ -147,7 +149,8 @@ final class ChatModel: ObservableObject {
         searchQuery = restored?.searchQuery ?? ""
         searchIndex = restored?.searchIndex ?? 0
         restoreAnchor = restored?.anchor
-        visibleItems = [:]
+        rowTops = [:]
+        visibleTop = 0
         atBottom = true
         shownLimit = ChatWindow.page
         hasEarlier = false
