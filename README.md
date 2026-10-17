@@ -78,7 +78,10 @@ answer reaches it at its next step), and you can message it any time the same wa
 it tells the lead when a worker waits for input, stops without reporting, or dies. The Team tab in the inspector
 has each task's contract and verdict, your answers, the results, and the lead's files. All of it lives in the
 repository, git-ignored: `.vibeswitcher/board.json` (tasks, questions, updates), `workflow.md` (limits, test and
-setup commands, the verifier's model; edit it), `decisions.md` and `progress.md`. Guard rails, not a sandbox:
+setup commands, the verifier's model, the lead's branch), `decisions.md` and `progress.md`. The lead sets up
+`workflow.md` itself with its `configure` tool, which changes only those settings' lines and keeps your comments
+and notes; when there's no test command, `status` says so and suggests one from the repository (SwiftPM,
+`package.json`, a Makefile, Cargo, Go), and a merge without one says it ran no tests. Guard rails, not a sandbox:
 the lead and verifiers are denied file edits and git writes, workers pushing, merging, rebasing and switching to
 the lead's branch (Claude Code permission rules); that branch only moves through the lead's merge, which fast-forwards to exactly the
 commit the verifier passed and the tests ran on. Their tools come from `vibeswitcher-mcp`, a tool server bundled

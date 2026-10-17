@@ -324,5 +324,113 @@ struct LeadToolsetTests {
         let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: FakeRuntime())
         #expect(lead.base == "release")
     }
+
+    // MARK: The lead's own workflow
+
+    @Test func onlyTheLeadConfiguresTheWorkflow() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        #expect(LeadToolset(role: .lead, root: root, task: nil, runtime: runtime).tools.contains { $0.name == "configure" })
+        for role in [LeadLaunch.Role.worker, .verifier] {
+            let tools = LeadToolset(role: role, root: root, task: "t", runtime: runtime)
+            #expect(!tools.tools.contains { $0.name == "configure" })
+            #expect(call(tools, "configure", ["test_command": "true"]).isError)
+        }
+        #expect(LeadWorkflow.load(from: root + "/.vibeswitcher/workflow.md").testCommand == nil)
+    }
+
+    @Test func statusSaysThereIsNoTestCommandAndSuggestsOne() throws {
+        let root = try repo()
+        try "// swift-tools-version:5.9\n".write(toFile: root + "/Package.swift", atomically: true, encoding: .utf8)
+        let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: FakeRuntime())
+        let status = call(lead, "status").text
+        #expect(status.contains("No test_command"))
+        #expect(status.contains("`swift build && swift test`"))
+        #expect(status.contains("configure"))
+        // Once it's set, status stops saying so.
+        #expect(!call(lead, "configure", ["test_command": "swift build && swift test"]).isError)
+        #expect(!call(lead, "status").text.contains("No test_command"))
+    }
+
+    @Test func statusReportsAWorkflowItCantRead() throws {
+        let root = try repo()
+        let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: FakeRuntime())
+        try "test_command: true\nno front matter here".write(toFile: root + "/.vibeswitcher/workflow.md", atomically: true, encoding: .utf8)
+        let status = call(lead, "status").text
+        #expect(status.contains("front matter"))
+        #expect(status.contains("No test_command"))
+    }
+
+    @Test func configureShowsAndSetsTheSettingsKeepingTheRestOfTheFile() throws {
+        let root = try repo()
+        Git.run(["branch", "dev"], in: root)
+        let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: FakeRuntime())
+        let path = root + "/.vibeswitcher/workflow.md"
+        let original = LeadWorkflow.template.replacingOccurrences(of: "\n", with: "\r\n").replacingOccurrences(of: "worker_agent: claude", with: "worker_agent: claude\r\nteam_size_hint: 7")
+            + "\r\nKeep the API stable.\r\n"
+        try Data(original.utf8).write(to: URL(fileURLWithPath: path))
+
+        let shown = call(lead, "configure")
+        #expect(!shown.isError)
+        #expect(shown.text.contains("test_command: not set"))
+        #expect(shown.text.contains("max_workers: 3"))
+        #expect(shown.text.contains("base_branch: not set: main"))
+
+        let set = call(lead, "configure", ["test_command": "swift build && swift test", "init_command": "make deps", "base_branch": "dev",
+                                           "verifier_model": "opus", "max_workers": 4])
+        #expect(!set.isError, "\(set.text)")
+        #expect(set.text.contains("test_command = `swift build && swift test`"))
+        let workflow = LeadWorkflow.load(from: path)
+        #expect(workflow.testCommand == "swift build && swift test" && workflow.initCommand == "make deps" && workflow.baseBranch == "dev"
+                && workflow.verifierModel == "opus" && workflow.maxWorkers == 4 && workflow.problem == nil)
+        #expect(lead.base == "dev")
+        let text = try String(contentsOfFile: path, encoding: .utf8)
+        // Comments, the unknown key, the notes and the CRLF endings are untouched.
+        #expect(text.contains("# The project's checks."))
+        #expect(text.contains("team_size_hint: 7\r\n"))
+        #expect(text.hasSuffix("Keep the API stable.\r\n"))
+        #expect(!text.replacingOccurrences(of: "\r\n", with: "").contains("\n"))
+        #expect(text.components(separatedBy: "\r\n").count == original.components(separatedBy: "\r\n").count)
+
+        // An empty value clears one.
+        #expect(!call(lead, "configure", ["verifier_model": ""]).isError)
+        #expect(LeadWorkflow.load(from: path).verifierModel == nil)
+    }
+
+    @Test func configureRefusesWhatWouldBreakTheWorkflow() throws {
+        let root = try repo()
+        let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: FakeRuntime())
+        let path = root + "/.vibeswitcher/workflow.md"
+        let before = try String(contentsOfFile: path, encoding: .utf8)
+        for arguments: [String: Any] in [["max_workers": 0], ["max_workers": "many"], ["base_branch": "no-such-branch"],
+                                         ["test_command": "swift test\nrm x"], ["worker_agent": "codex"]] {
+            #expect(call(lead, "configure", arguments).isError, "\(arguments)")
+        }
+        #expect(try String(contentsOfFile: path, encoding: .utf8) == before)
+    }
+
+    @Test func aMergeWithoutATestCommandSaysSo() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: runtime)
+        _ = try audited(lead, runtime, root: root)
+        let merged = call(lead, "merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(merged.text.contains("merged without tests: no test_command"))
+    }
+
+    @Test func aCRLFWorkflowStillTestsTheMerge() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: runtime)
+        // Written on Windows, with a BOM: the test command must still run (and here it fails).
+        try (Data([0xEF, 0xBB, 0xBF]) + Data("---\r\ntest_command: test -f missing.txt\r\n---\r\n".utf8))
+            .write(to: URL(fileURLWithPath: root + "/.vibeswitcher/workflow.md"))
+        _ = try audited(lead, runtime, root: root)
+        let merged = call(lead, "merge", ["task": "add-b"])
+        #expect(merged.isError)
+        #expect(merged.text.contains("test command fails"))
+        #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
+    }
 }
 
