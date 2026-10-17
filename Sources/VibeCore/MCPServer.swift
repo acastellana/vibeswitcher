@@ -51,6 +51,55 @@ public struct MCPToolResult {
     }
 }
 
+/// Whether the binary this server runs from is still the one on disk. An app update replaces it, but a running
+/// server keeps the code it started with (an old lead's tools would still branch from main, say) until its client
+/// reconnects it; killing it isn't enough, Claude Code doesn't start it again by itself. So once the file at `path`
+/// is another binary, every tool result says so, until this process ends.
+public final class BinaryWatch: @unchecked Sendable {
+    public static let notice = "VibeSwitcher was updated; reconnect the vibeswitcher tools: /mcp"
+
+    /// A file as `stat` sees it: an install writes a new file (another inode) or rewrites it (another time or size).
+    public struct Identity: Equatable {
+        public var modified: TimeInterval
+        public var size: Int64
+        public var inode: UInt64
+        public init(modified: TimeInterval, size: Int64, inode: UInt64) {
+            self.modified = modified
+            self.size = size
+            self.inode = inode
+        }
+    }
+
+    private let path: String
+    private let identify: (String) -> Identity?
+    private let started: Identity?
+    private let lock = NSLock()
+    private var replaced = false
+
+    /// Takes the binary's identity now: create it as the server starts.
+    public init(path: String, identify: @escaping (String) -> Identity? = BinaryWatch.identity(of:)) {
+        self.path = path
+        self.identify = identify
+        started = identify(path)
+    }
+
+    /// The notice for a tool result, or nil while the binary is the one this server started from. A missing file
+    /// (mid-install, or moved) is no notice, and neither is a binary that couldn't be read at start: no way to tell.
+    public func notice() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        if !replaced, let started, let now = identify(path), now != started { replaced = true }
+        return replaced ? Self.notice : nil
+    }
+
+    public static func identity(of path: String) -> Identity? {
+        var info = stat()
+        guard stat(path, &info) == 0 else { return nil }
+        let modified = TimeInterval(info.st_mtimespec.tv_sec) + TimeInterval(info.st_mtimespec.tv_nsec) / 1_000_000_000
+        return Identity(modified: modified, size: Int64(info.st_size), inode: UInt64(info.st_ino))
+    }
+}
+
 public protocol MCPToolset: AnyObject {
     var tools: [MCPToolInfo] { get }
     func call(_ name: String, _ arguments: [String: Any]) -> MCPToolResult
@@ -58,19 +107,21 @@ public protocol MCPToolset: AnyObject {
 
 /// MCP over stdio: one JSON-RPC 2.0 message per line in, one reply per line out (none for notifications). Tool
 /// calls run side by side (a 20-minute merge doesn't make `status` or `ping` wait), and a cancelled call's commands
-/// are stopped.
+/// are stopped. With a `watch`, results say when the app was updated under the running server.
 public final class MCPServer: @unchecked Sendable {
     private let name: String
     private let version: String
     private let toolset: MCPToolset
+    private let watch: BinaryWatch?
     private let calls = DispatchQueue(label: "vibeswitcher.mcp-calls", attributes: .concurrent)
     private let lock = NSLock()
     private var running: [String: ShellCancel] = [:]
 
-    public init(name: String, version: String, toolset: MCPToolset) {
+    public init(name: String, version: String, toolset: MCPToolset, watch: BinaryWatch? = nil) {
         self.name = name
         self.version = version
         self.toolset = toolset
+        self.watch = watch
     }
 
     /// Reads requests from stdin until it closes, answering on stdout.
@@ -135,7 +186,9 @@ public final class MCPServer: @unchecked Sendable {
             let tool = params["name"] as? String ?? ""
             let arguments = params["arguments"] as? [String: Any] ?? [:]
             let result = toolset.call(tool, arguments)
-            return reply(id, ["content": [["type": "text", "text": result.text]], "isError": result.isError])
+            var content = [["type": "text", "text": result.text]]
+            if let notice = watch?.notice() { content.append(["type": "text", "text": notice]) }
+            return reply(id, ["content": content, "isError": result.isError])
         default:
             return encode(["jsonrpc": "2.0", "id": id, "error": ["code": -32601, "message": "Method not found: \(method)"]])
         }

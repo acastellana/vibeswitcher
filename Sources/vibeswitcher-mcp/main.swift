@@ -148,6 +148,9 @@ final class HostRuntime: LeadRuntime {
     }
 }
 
+let runtime = HostRuntime()
+// This binary as it is now: an app update replaces it under the running server, which then says so in its results.
+let watch = BinaryWatch(path: runtime.server)
 let toolset = LeadToolset(arguments: Array(CommandLine.arguments.dropFirst()), environment: ProcessInfo.processInfo.environment,
-                          runtime: HostRuntime())
-MCPServer(name: "vibeswitcher", version: "1", toolset: toolset).serve()
+                          runtime: runtime)
+MCPServer(name: "vibeswitcher", version: "1", toolset: toolset, watch: watch).serve()
