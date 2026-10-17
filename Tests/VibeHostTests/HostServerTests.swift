@@ -239,6 +239,64 @@ struct HostCallTests {
         }
     }
 
+    @Test func inputLargerThanTheSocketBufferReachesABusyHost() throws {
+        // E-06: `send` used to close 50 ms after queueing; a host busy for longer than that lost what was still
+        // waiting to go out (over ~8 KB), while the caller reported the message as typed.
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("busy-\(UUID().uuidString.prefix(8)).sock").path
+        let listener = try UnixSocket.listen(path: path)
+        defer {
+            close(listener)
+            unlink(path)
+        }
+        final class Seen: @unchecked Sendable { var bytes = 0 }
+        let seen = Seen()
+        let finished = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            defer { finished.signal() }
+            var fd: Int32 = -1
+            let deadline = Date().addingTimeInterval(5)
+            while fd < 0, Date() < deadline {
+                fd = accept(listener, nil, nil)
+                if fd < 0 { usleep(5_000) }
+            }
+            guard fd >= 0 else { return }
+            defer { close(fd) }
+            _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
+            var decoder = HostFrameDecoder()
+            var buffer = [UInt8](repeating: 0, count: 65_536)
+            var welcomed = false, rested = false
+            func answer(_ seq: Int, _ event: HostEvent) {
+                guard let payload = try? HostCoding.encode(HostEventEnvelope(replyTo: seq, event: event)) else { return }
+                let frame = HostFrame.encode(.control, payload)
+                _ = frame.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
+            }
+            while true {
+                // Busy for a while once it has said hello (another client, a big replay).
+                if welcomed, !rested {
+                    rested = true
+                    usleep(300_000)
+                }
+                let count = read(fd, &buffer, buffer.count)
+                guard count > 0 else { return }
+                decoder.append(Data(buffer[0..<count]))
+                while let frame = try? decoder.next() {
+                    guard let envelope = try? HostCoding.decode(HostRequestEnvelope.self, from: frame.payload) else { continue }
+                    switch envelope.request {
+                    case .hello:
+                        answer(envelope.seq, .welcome(protocolVersion: HostProtocol.version, hostBuild: 0, sessions: []))
+                        welcomed = true
+                    case .input(_, let bytes, _): seen.bytes += bytes.count
+                    case .screen(let id): answer(envelope.seq, .screenText(id: id, text: ""))
+                    default: break
+                    }
+                }
+            }
+        }
+        try HostCall.send(.input(id: UUID(), bytes: Data(repeating: 0x61, count: 64_000), reply: false), socket: path)
+        #expect(finished.wait(timeout: .now() + 5) == .success)
+        #expect(seen.bytes == 64_000)
+    }
+
     @Test func aOneShotSenderDoesntTakeTheSessionFromTheApp() throws {
         let host = try TestHost()
         let app = try TestClient(host)
