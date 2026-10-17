@@ -113,7 +113,6 @@ public final class MCPServer: @unchecked Sendable {
     private let version: String
     private let toolset: MCPToolset
     private let watch: BinaryWatch?
-    private let calls = DispatchQueue(label: "vibeswitcher.mcp-calls", attributes: .concurrent)
     private let lock = NSLock()
     private var running: [String: ShellCancel] = [:]
 
@@ -147,7 +146,9 @@ public final class MCPServer: @unchecked Sendable {
             lock.lock()
             running[key] = token
             lock.unlock()
-            calls.async { [self] in
+            // A thread of its own, not the shared pool: a call blocks for as long as its commands run, and while the
+            // pool is busy (a build, other calls) it wouldn't even start; a cancel would find nothing running.
+            Thread.detachNewThread { [self] in
                 let reply = ShellCancel.with(token) { handle(data) }
                 lock.lock()
                 running[key] = nil
