@@ -294,6 +294,32 @@ final class ChatModel: ObservableObject {
         steering.append(message)
     }
 
+    /// The agent the steered messages wait for is idle: they won't arrive by themselves.
+    @Published private(set) var steeringStranded = false
+
+    /// Follows the selected session's waiting steered messages (from the inbox, so they show after a relaunch too).
+    func watchSteering(tty: String?, agentPid: Int32?, idle: Bool) {
+        guard let tty, let agentPid else {
+            if !steering.isEmpty { steering = [] }
+            steeringTTY = nil
+            if steeringStranded { steeringStranded = false }
+            return
+        }
+        steeringTTY = tty
+        let waiting = SteerInbox.pending(tty: tty).filter { $0.agentPid == agentPid && $0.from == .user }
+        if waiting != steering { steering = waiting }
+        let stranded = idle && !waiting.isEmpty
+        if stranded != steeringStranded { steeringStranded = stranded }
+    }
+
+    /// A waiting steered message, taken back from the inbox (to send it now, or to put it back in the box).
+    func withdrawSteered(_ message: SteerMessage) -> SteerMessage? {
+        guard let tty = steeringTTY, let taken = SteerInbox.withdraw(id: message.id, tty: tty) else { return nil }
+        steering.removeAll { $0.id == message.id }
+        if steering.isEmpty { steeringStranded = false }
+        return taken
+    }
+
     /// Drops steered messages the agent has taken (they show from the transcript then).
     func refreshSteering() {
         guard let tty = steeringTTY, !steering.isEmpty else { return }

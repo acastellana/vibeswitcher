@@ -296,6 +296,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     /// The menu and permission mode on the selected window session's screen, for the answer card and the mode chip.
     private func readScreen() {
+        // Messages steered to this session that are still waiting (also from before a relaunch), and whether its
+        // agent is idle (then they won't be taken by themselves).
+        if let session = model.selectedRow?.session, session.agent == .claude {
+            chat.watchSteering(tty: session.tty, agentPid: session.pid,
+                               idle: LeadDelivery.way(for: HookState.load(from: VibePaths.stateFile(tty: session.tty))) == .type)
+        } else {
+            chat.watchSteering(tty: nil, agentPid: nil, idle: false)
+        }
         guard let row = model.selectedRow, let id = row.hostID, actions.isLive(row) else {
             if chat.menu != nil { chat.menu = nil }
             if chat.mode != nil { chat.mode = nil }
@@ -332,6 +340,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return false
         }
         if session.agent == .codex { return row.hostID != nil ? sendToSelected(text) : false }
+        // Not working after all (its turn ended since the composer last looked): a steer would wait for a next step
+        // that never comes. A window session gets it typed in instead.
+        if LeadDelivery.way(for: HookState.load(from: VibePaths.stateFile(tty: session.tty))) == .type {
+            Breadcrumbs.shared.note("composer: steer to an idle agent on \(session.tty), typed instead")
+            return row.hostID != nil ? sendToSelected(text) : false
+        }
         let message = SteerMessage(text: text, from: .user, agentPid: session.pid)
         do {
             try SteerInbox.post(message, tty: session.tty)

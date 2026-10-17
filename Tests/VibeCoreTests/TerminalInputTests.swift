@@ -20,6 +20,21 @@ struct TerminalInputTests {
       [Fable 5.1] ███░░░░░░░ 30% | lead-demo git:(main)
     """
 
+    @Test func aSuggestionInTheBoxIsNotADraft() {
+        // Claude's dim suggestion fills an empty box; the cursor sits before it. Typed text puts the cursor after.
+        let screen = """
+        ✻ Sautéed for 33s · done 10:34 AM
+        ────────────────────────────────────────────
+        ❯ pushed, check the deploy
+        ────────────────────────────────────────────
+        """
+        #expect(TerminalInput.isEmpty(screen) == false)
+        #expect(TerminalInput.isEmpty(screen, cursor: (row: 2, column: 2)) == true)
+        #expect(TerminalInput.isEmpty(screen, cursor: (row: 2, column: 26)) == false)
+        // A cursor somewhere else (a menu): only the text decides.
+        #expect(TerminalInput.isEmpty(screen, cursor: (row: 0, column: 0)) == false)
+    }
+
     @Test func theInputBoxIsReadFromTheBottom() {
         #expect(TerminalInput.isEmpty(empty) == true)
         #expect(TerminalInput.isEmpty(busy) == false)

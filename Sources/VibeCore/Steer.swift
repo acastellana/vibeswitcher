@@ -70,6 +70,27 @@ public enum SteerInbox {
         return taken
     }
 
+    /// Takes one waiting message back (it's being sent another way, or returned to the composer).
+    @discardableResult
+    public static func withdraw(id: String, tty: String, root: URL = VibePaths.root) -> SteerMessage? {
+        guard let url = try? file(tty, "jsonl", root: root), FileManager.default.fileExists(atPath: url.path) else { return nil }
+        var withdrawn: SteerMessage?
+        try? locked(url) { handle in
+            try handle.seek(toOffset: 0)
+            let messages = decode(try handle.readToEnd() ?? Data())
+            guard let index = messages.firstIndex(where: { $0.id == id }) else { return }
+            withdrawn = messages[index]
+            var rest = Data()
+            for message in messages where message.id != id {
+                rest.append(try JSONEncoder().encode(message))
+                rest.append(0x0A)
+            }
+            try handle.truncate(atOffset: 0)
+            try handle.write(contentsOf: rest)
+        }
+        return withdrawn
+    }
+
     /// Messages waiting for their agent.
     public static func pending(tty: String, root: URL = VibePaths.root) -> [SteerMessage] {
         guard let url = try? file(tty, "jsonl", root: root), let data = try? Data(contentsOf: url) else { return [] }

@@ -13,6 +13,16 @@ struct SteerTests {
         SteerMessage(id: id, text: text, from: from, agentPid: pid, at: 1)
     }
 
+    @Test func oneWaitingMessageCanBeWithdrawn() throws {
+        let root = try root()
+        try SteerInbox.post(message("first", id: "a"), tty: "ttys001", root: root)
+        try SteerInbox.post(message("second", id: "b"), tty: "ttys001", root: root)
+        // Sent another way (typed in) or put back in the box: it must not also arrive as a steer.
+        #expect(SteerInbox.withdraw(id: "a", tty: "ttys001", root: root)?.text == "first")
+        #expect(SteerInbox.withdraw(id: "a", tty: "ttys001", root: root) == nil)
+        #expect(SteerInbox.pending(tty: "ttys001", root: root).map(\.id) == ["b"])
+    }
+
     @Test func postedMessagesAreTakenOnceByTheirAgent() throws {
         let root = try root()
         try SteerInbox.post(message("first", id: "a"), tty: "ttys001", root: root)

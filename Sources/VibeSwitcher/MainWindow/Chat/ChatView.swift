@@ -37,7 +37,8 @@ struct ChatContainer: View {
             if let row = model.selectedRow {
                 if row.hostID != nil, actions.isLive(row) {
                     ComposerView(chat: chat, composer: chat.composer, rowID: row.draftKey, agent: row.session?.agent ?? .claude,
-                                 working: [.working, .background].contains(row.session?.status),
+                                 // Background work (a dev server, a watcher) runs on after the turn: it takes prompts then.
+                                 working: row.session?.status == .working,
                                  actions: ComposerActions(send: { text in
                                      let sent = composer.send(text)
                                      if sent { chat.scrollToBottom() }
@@ -45,8 +46,7 @@ struct ChatContainer: View {
                                  }, steer: composer.steer, stop: composer.stop, cycleMode: composer.cycleMode))
                     // A text box of its own per session: nothing typed for one can end up in another.
                     .id(row.id)
-                } else if let session = row.session, session.inTerminalApp, session.agent == .claude,
-                          [.working, .background].contains(session.status) {
+                } else if let session = row.session, session.inTerminalApp, session.agent == .claude, session.status == .working {
                     // Steering needs no typing, so it reaches a Terminal session too.
                     ComposerView(chat: chat, composer: chat.composer, rowID: row.draftKey, agent: session.agent, working: true, steerOnly: true,
                                  actions: ComposerActions(send: { _ in false }, steer: composer.steer, stop: {}, cycleMode: {}))
@@ -118,15 +118,34 @@ struct ChatView: View {
                                 .onDisappear { chat.visibleItems[item.id] = nil }
                         }
                         ForEach(chat.steering) { message in
-                            Text(message.text).font(.system(size: 13.5)).foregroundStyle(.secondary)
-                                .padding(.horizontal, 13).padding(.vertical, 9)
-                                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.orange.opacity(0.5),
-                                                                                                         style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
-                                .overlay(alignment: .bottomTrailing) {
-                                    Text("steering… arrives at its next step").font(.system(size: 9.5)).foregroundStyle(.tertiary).offset(y: 14)
+                            VStack(alignment: .trailing, spacing: 4) {
+                                Text(String(message.text.prefix(2_000))).font(.system(size: 13.5)).foregroundStyle(.secondary)
+                                    .padding(.horizontal, 13).padding(.vertical, 9)
+                                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.orange.opacity(0.5),
+                                                                                                             style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                                if chat.steeringStranded {
+                                    // Its turn is over: no next step will take it.
+                                    HStack(spacing: 8) {
+                                        Text("Not delivered: \(row?.session?.agent.displayName ?? "the agent") isn't working, so nothing picks it up.")
+                                            .font(.system(size: 10.5)).foregroundStyle(.orange)
+                                        if live, let key = row?.draftKey {
+                                            Button("Send now") { if let taken = chat.withdrawSteered(message) { resend(taken.text) } }.controlSize(.small)
+                                            Button("Put back in the box") {
+                                                if let taken = chat.withdrawSteered(message) {
+                                                    chat.putBack(PendingMessage(text: taken.text, afterPrompts: 0), rowID: key)
+                                                }
+                                            }.controlSize(.small)
+                                        } else {
+                                            Button("Copy") { Pasteboard.copy(message.text) }.controlSize(.small)
+                                            Button("Withdraw") { _ = chat.withdrawSteered(message) }.controlSize(.small)
+                                        }
+                                    }
+                                } else {
+                                    Text("steering… arrives at its next step").font(.system(size: 9.5)).foregroundStyle(.tertiary)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                                .padding(.leading, 60).padding(.bottom, 10)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .padding(.leading, 60).padding(.bottom, 6)
                         }
                         ForEach(chat.pending) { message in
                             let late = chat.late.contains(message.id)
@@ -310,12 +329,18 @@ private struct LiveStateView: View {
         if let session = row.session, !session.isPaused {
             TimelineView(.periodic(from: .now, by: 1)) { context in
                 switch session.status {
-                case .working, .background:
+                case .working:
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
                         Text(workingText(session, now: context.date)).font(.system(size: 12)).foregroundStyle(.secondary)
                     }
                     .padding(.leading, 30)
+                case .background:
+                    // The turn is over; something it started keeps running. It's waiting for you.
+                    Label("Turn done · \(session.detail.map { "still running: \($0)" } ?? "background work still running")",
+                          systemImage: "checkmark.circle")
+                        .font(.system(size: 12)).foregroundStyle(.secondary)
+                        .padding(.leading, 30)
                 case .needsInput:
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(.red).font(.system(size: 16))
