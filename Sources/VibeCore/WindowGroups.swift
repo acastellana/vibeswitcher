@@ -43,12 +43,8 @@ extension WindowRow {
         case .hosted(let info):
             if let exit = info.exit { return RowState(text: "ended · exit \(exit.status)", since: exit.at, group: .idle) }
             if info.agent != nil {
-                // An agent shows up in the scan within seconds. Still missing after a minute, it has quit and
-                // left the shell that a "keep a shell open" preset runs after it.
-                if now.timeIntervalSince(info.startedAt) < WindowGroups.startingFor {
-                    return RowState(text: "starting", since: info.startedAt, group: .working)
-                }
-                return RowState(text: "agent ended · shell", since: nil, group: .idle)
+                if info.agentQuit(now: now) { return RowState(text: "agent ended · shell", since: nil, group: .idle) }
+                return RowState(text: "starting", since: info.startedAt, group: .working)
             }
             return RowState(text: "shell", since: info.startedAt, group: .idle)
         case .agent(let session):
@@ -86,6 +82,14 @@ extension WindowRow {
         var parts = [title, project]
         if case .agent(let session) = content, let task = session.task { parts.append(task) }
         return parts.joined(separator: "\n")
+    }
+}
+
+extension HostSession {
+    /// Started for an agent that the scan doesn't find (so this is asked of a window session without one) a minute
+    /// on: an agent shows up within seconds, so it has quit and left the session's shell running.
+    public func agentQuit(now: Date) -> Bool {
+        isLive && agent != nil && now.timeIntervalSince(startedAt) >= WindowGroups.startingFor
     }
 }
 

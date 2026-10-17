@@ -39,4 +39,90 @@ struct LeadTeamsTests {
         let folded = LeadTeams.arrange([WindowSection(project: "add-login", rows: [worker])], label: { $0.hosted?.label }, expanded: [])
         #expect(folded.sections.flatMap(\.rows).map(\.id) == [worker.id])
     }
+
+    func session(_ label: String, cwd: String, started: Date = Date(), exit: Int32? = nil) -> HostSession {
+        HostSession(id: UUID(), tty: "ttys9", childPID: 1, cwd: cwd, command: nil, label: label, agent: "claude", title: "",
+                    startedAt: started, cols: 80, rows: 24, exit: exit.map { HostSession.Exit(status: $0, at: Date()) })
+    }
+
+    func agentRow(_ cwd: String, status: SessionStatus) -> WindowRow {
+        var session = Session(tty: "ttys\(UUID().uuidString.prefix(4))", agent: .claude, pid: 1, startedAt: Date(), cwd: cwd, project: "p",
+                              task: nil, status: status, statusSince: Date(), detail: nil, hasHooks: true, inTerminalApp: false)
+        session.hostID = UUID()
+        return WindowRow(content: .agent(session), project: "p")
+    }
+
+    func task(_ slug: String, _ status: LeadTask.Status, worktree: String? = "wt") -> LeadTask {
+        var task = LeadTask(slug: slug, title: slug, contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""), status: status)
+        task.worktree = worktree
+        return task
+    }
+
+    @Test func theTaskIsTheWorktreesFolder() {
+        #expect(LeadTeams.task(ofWorktree: "/r/acme/.vibeswitcher/worktrees/add-login") == "add-login")
+        #expect(LeadTeams.task(ofWorktree: "/r/acme/.vibeswitcher/worktrees/add-login/Sources") == "add-login")
+        #expect(LeadTeams.task(ofWorktree: "/r/acme") == nil)
+    }
+
+    @Test func endedSessionsOfFinishedTasksAreForgotten() {
+        var board = LeadBoard()
+        board.tasks = [task("merged", .done, worktree: nil), task("abandoned", .failed, worktree: nil), task("merged-not-cleaned", .done),
+                       task("died", .failed), task("stopped", .blocked), task("running", .running)]
+        let wt = "/r/acme/.vibeswitcher/worktrees/"
+        let gone = [session("Worker: Merged", cwd: wt + "merged", exit: 129), session("Verifier: Merged", cwd: wt + "merged", exit: 129),
+                    session("Worker: Abandoned", cwd: wt + "abandoned", exit: 129), session("Worker: M", cwd: wt + "merged-not-cleaned", exit: 0)]
+        let kept = [session("Worker: Merged", cwd: wt + "merged"),                       // still running
+                    session("Worker: Died", cwd: wt + "died", exit: 1),                  // the lead decides what next
+                    session("Worker: Stopped", cwd: wt + "stopped", exit: 129),
+                    session("Worker: Running", cwd: wt + "running", exit: 129),
+                    session("Worker: Unknown", cwd: wt + "not-on-the-board", exit: 129),
+                    session("Lead · acme", cwd: "/r/acme", exit: 129),
+                    session("Claude", cwd: wt + "merged", exit: 129),                    // not on the team
+                    session("Worker: Merged", cwd: "/r/other/.vibeswitcher/worktrees/merged", exit: 129)] // another repository's
+        let forgotten = LeadTeams.finished(gone + kept, root: "/r/acme/", board: board)
+        #expect(forgotten == gone.map(\.id))
+    }
+
+    @Test func aTeamMembersNormalEndIsntAFailure() {
+        let wt = "/r/acme/.vibeswitcher/worktrees/one"
+        func text(_ exit: Int32) -> String {
+            LeadTeams.state(of: WindowRow(content: .hosted(session("Worker: One", cwd: wt, exit: exit)), project: "one"), now: Date()).text
+        }
+        #expect(text(129) == "ended")
+        #expect(text(143) == "ended")
+        #expect(text(0) == "finished")
+        #expect(text(1) == "ended · exit 1")
+    }
+
+    @Test func theSummaryCountsLiveTasksOnly() {
+        let now = Date()
+        let wt = "/r/acme/.vibeswitcher/worktrees/"
+        var labels: [String: String] = [:]
+        func member(_ label: String, _ row: WindowRow) -> WindowRow {
+            labels[row.id] = label
+            return row
+        }
+        var board = LeadBoard()
+        board.tasks = [task("a", .running), task("b", .running), task("c", .review), task("d", .running), task("e", .done)]
+        var team = [member("Worker: A", agentRow(wt + "a", status: .working)),
+                    member("Worker: B", agentRow(wt + "b", status: .working)),
+                    member("Worker: C", agentRow(wt + "c", status: .done)),
+                    member("Verifier: C", agentRow(wt + "c", status: .working))]
+        // Ended members (and one whose agent quit, leaving its shell) aren't counted.
+        for index in 0..<14 {
+            team.append(member("Worker: Old", WindowRow(content: .hosted(session("Worker: Old", cwd: wt + "old\(index)", exit: 129)), project: "old")))
+        }
+        team.append(member("Worker: D", WindowRow(content: .hosted(session("Worker: D", cwd: wt + "d", started: now - 600)), project: "d")))
+        #expect(LeadTeams.summary(team, label: { labels[$0.id] }, board: board, now: now) == "team: 2 working · 1 in review")
+
+        // Waiting on you comes first; a merged task's live worker is done; a just-started one is working.
+        team.append(member("Worker: E", agentRow(wt + "e", status: .idle)))
+        team.append(member("Worker: F", WindowRow(content: .hosted(session("Worker: F", cwd: wt + "f", started: now - 5)), project: "f")))
+        team[0] = member("Worker: A", agentRow(wt + "a", status: .needsInput))
+        #expect(LeadTeams.summary(team, label: { labels[$0.id] }, board: board, now: now) == "team: 1 needs you · 2 working · 1 in review · 1 done")
+        // Without the board, a live verifier still means the task is in review; an idle worker is idle.
+        let plain = [member("Worker: G", agentRow(wt + "g", status: .idle)), member("Verifier: H", agentRow(wt + "h", status: .idle))]
+        #expect(LeadTeams.summary(plain, label: { labels[$0.id] }, board: nil, now: now) == "team: 1 in review · 1 idle")
+        #expect(LeadTeams.summary(Array(team[4..<18]), label: { labels[$0.id] }, board: board, now: now) == "team: none running")
+    }
 }

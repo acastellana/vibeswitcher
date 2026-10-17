@@ -1,8 +1,8 @@
 import Foundation
 
 /// What VibeSwitcher sees that the lead can't: a worker or verifier that waits for input, stops without
-/// reporting, or ends. Each event is keyed by its session, so it's told once, and a new session on the same
-/// task is watched afresh.
+/// reporting, or ends (its session, or only its agent, leaving the shell open). Each event is keyed by its session,
+/// so it's told once, and a new session on the same task is watched afresh.
 public enum LeadWitness {
     /// A session as VibeSwitcher sees it.
     public struct Seen: Equatable, Sendable {
@@ -11,9 +11,13 @@ public enum LeadWitness {
         public var status: SessionStatus?
         public var since: Date?
         public var detail: String?
+        /// The session lives on as a shell, its agent gone (see `HostSession.agentQuit`).
+        public var agentQuit: Bool
 
-        public init(live: Bool, exit: Int32? = nil, status: SessionStatus? = nil, since: Date? = nil, detail: String? = nil) {
+        public init(live: Bool, exit: Int32? = nil, status: SessionStatus? = nil, since: Date? = nil, detail: String? = nil,
+                    agentQuit: Bool = false) {
             self.live = live
+            self.agentQuit = agentQuit
             self.exit = exit
             self.status = status
             self.since = since
@@ -30,15 +34,17 @@ public enum LeadWitness {
             if let worker = task.worker, let info = seen[worker] {
                 if !info.live, [.running, .failed].contains(task.status) {
                     events.append(("\(worker)|ended", "The worker on \(task.slug) ended (exit \(info.exit ?? 0)) without reporting. Its commits are on agent/\(task.slug); read_session to see why, then start_worker again or re-plan."))
-                } else if info.live, let event = waiting(info, session: worker, now: now,
+                } else if info.live, info.agentQuit, [.running, .failed].contains(task.status) {
+                    events.append(("\(worker)|ended", "The worker on \(task.slug) ended without reporting: its agent quit and left the session's shell open. Its commits are on agent/\(task.slug); read_session to see why, then stop_worker (it closes the shell) and start_worker again, or re-plan."))
+                } else if info.live, !info.agentQuit, let event = waiting(info, session: worker, now: now,
                                                          input: "The worker on \(task.slug) is waiting for input: \(info.detail ?? "a question or a permission"). Answer it with message, or ask the user if it's theirs to decide.",
                                                          stopped: task.status == .running ? "The worker on \(task.slug) stopped without calling report. read_session to see where it is, then message it." : nil) {
                     events.append(event)
                 }
             }
             if task.status == .review, task.evidence == nil, let verifier = task.verifier, let info = seen[verifier] {
-                if !info.live {
-                    events.append(("\(verifier)|ended", "The verifier on \(task.slug) ended without a verdict. read_session(\(task.slug), who: verifier) to see why, then audit again."))
+                if !info.live || info.agentQuit {
+                    events.append(("\(verifier)|ended", "The verifier on \(task.slug) ended without a verdict\(info.live ? " (its agent quit; the session's shell is still open)" : ""). read_session(\(task.slug), who: verifier) to see why, then audit again."))
                 } else if let event = waiting(info, session: verifier, now: now,
                                               input: "The verifier on \(task.slug) is waiting for input: \(info.detail ?? "a question or a permission"). Tell the user if it's theirs, or audit again.",
                                               stopped: "The verifier on \(task.slug) stopped without calling submit_audit. read_session(\(task.slug), who: verifier) to see why, then audit again.") {

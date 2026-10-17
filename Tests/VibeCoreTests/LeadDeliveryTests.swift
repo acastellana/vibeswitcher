@@ -97,5 +97,27 @@ struct LeadWitnessTests {
         // Each event is about one session: a new worker on the same task is watched afresh.
         #expect(events.allSatisfy { key in ["w1", "v1", "w2", "w3"].contains { key.key.contains($0) } })
     }
+
+    @Test func anAgentThatQuitLeavingItsShellHasEnded() {
+        let now = Date()
+        var board = LeadBoard()
+        board.tasks = [task("phone", .running, worker: "w1"), task("judging", .review, worker: "w0", verifier: "v1"),
+                       task("merged", .done, worker: "w2")]
+        // "agent ended · shell": the session lives, its agent doesn't (so no status from its hooks).
+        let seen: [String: LeadWitness.Seen] = [
+            "w1": .init(live: true, agentQuit: true), "v1": .init(live: true, agentQuit: true), "w2": .init(live: true, agentQuit: true),
+            "w0": .init(live: true, status: .idle, since: now - 5),
+        ]
+        let events = LeadWitness.events(board: board, seen: seen, now: now)
+        #expect(events.count == 2, "\(events.map(\.text))")
+        let worker = events.first { $0.key == "w1|ended" }
+        #expect(worker?.text.contains("phone") == true)
+        #expect(worker?.text.contains("without reporting") == true)
+        #expect(worker?.text.contains("shell") == true)
+        #expect(events.contains { $0.key == "v1|ended" && $0.text.contains("without a verdict") })
+        // The same event as the session ending: once the shell exits too, it isn't told again.
+        let closed = LeadWitness.events(board: board, seen: ["w1": .init(live: false, exit: 129)], now: now)
+        #expect(closed.map(\.key) == ["w1|ended"])
+    }
 }
 

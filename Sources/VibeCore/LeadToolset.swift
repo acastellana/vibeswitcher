@@ -47,6 +47,8 @@ public protocol LeadRuntime: AnyObject {
     /// Starts a window session; with `trust`, answers Claude's trust question for `cwd` in it.
     func spawn(cwd: String, command: String, label: String, agent: String, trust: Bool) throws -> String
     func kill(_ session: String)
+    /// Has the host drop an ended session's record (it leaves the session list).
+    func forget(_ session: String)
     /// Delivers a message (see `LeadDelivery`): steered in, typed as its prompt, or queued.
     func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String) throws -> LeadDelivery.Delivered
     func sessions() -> [LeadSessionInfo]
@@ -554,6 +556,12 @@ public final class LeadToolset: MCPToolset {
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].worktree = nil
             if board.tasks[index].status != .done { board.tasks[index].status = .failed }
+        }
+        // Its workers and verifiers, this one and any before it, are history now: off the session list.
+        let folder = (Worktrees.path(root: root, slug: slug) as NSString).standardizingPath
+        for session in runtime.sessions() where !session.live && (session.cwd as NSString).standardizingPath == folder
+            && [.worker, .verifier].contains(LeadTeams.role(label: session.label)) {
+            runtime.forget(session.id)
         }
         return MCPToolResult(text: "Cleaned up \(slug).")
     }

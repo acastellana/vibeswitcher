@@ -288,6 +288,7 @@ final class NoAgent: LeadRuntime {
     func claudeCommand(root: String) -> String { "claude" }
     func spawn(cwd: String, command: String, label: String, agent: String, trust: Bool) throws -> String { "" }
     func kill(_ session: String) {}
+    func forget(_ session: String) {}
     func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String) throws -> LeadDelivery.Delivered { .steered }
     func sessions() -> [LeadSessionInfo] { [] }
     func transcript(of session: String) -> String? { nil }

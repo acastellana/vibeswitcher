@@ -51,6 +51,11 @@ final class HostRuntime: LeadRuntime {
         _ = try? HostCall.request(.kill(id: id), timeout: 3)
     }
 
+    func forget(_ session: String) {
+        guard let id = UUID(uuidString: session) else { return }
+        _ = try? HostCall.request(.remove(id: id), timeout: 3)
+    }
+
     /// Types `text` as the session's prompt; false when the keys didn't all go out.
     func type(_ session: String, text: String) -> Bool {
         guard let id = UUID(uuidString: session) else { return false }

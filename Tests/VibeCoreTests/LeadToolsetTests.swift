@@ -5,6 +5,8 @@ import Testing
 final class FakeRuntime: LeadRuntime {
     var spawned: [(id: String, cwd: String, command: String, label: String, trust: Bool)] = []
     var killed: [String] = []
+    /// Sessions the host was told to drop.
+    var forgotten: [String] = []
     var delivery = LeadDelivery.Delivered.steered
     var steered: [(target: String, sender: SteerMessage.Sender, text: String)] = []
     var transcripts: [String: String] = [:]
@@ -21,6 +23,7 @@ final class FakeRuntime: LeadRuntime {
         return id
     }
     func kill(_ session: String) { killed.append(session) }
+    func forget(_ session: String) { forgotten.append(session) }
     func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String) throws -> LeadDelivery.Delivered {
         let name: String
         switch target {
@@ -31,7 +34,7 @@ final class FakeRuntime: LeadRuntime {
         return delivery
     }
     func sessions() -> [LeadSessionInfo] {
-        spawned.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: "working", tty: nil) }
+        spawned.filter { !forgotten.contains($0.id) }.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: "working", tty: nil) }
     }
     func transcript(of session: String) -> String? { transcripts[session] }
     func currentAgent() -> LeadAgent? { me }
@@ -52,6 +55,7 @@ final class FakeSeat: LeadRuntime {
         try shared.spawn(cwd: cwd, command: command, label: label, agent: agent, trust: trust)
     }
     func kill(_ session: String) { shared.kill(session) }
+    func forget(_ session: String) { shared.forget(session) }
     func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String) throws -> LeadDelivery.Delivered {
         try shared.steer(target, from: sender, text: text)
     }
@@ -184,6 +188,9 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(!call(lead, "cleanup", ["task": "add-b"]).isError)
         #expect(!FileManager.default.fileExists(atPath: worktree))
         #expect(Set(runtime.killed) == Set(runtime.spawned.map(\.id)))
+        // Its worker and verifier leave the session list with it.
+        #expect(Set(runtime.forgotten) == Set(runtime.spawned.map(\.id)))
+        #expect(runtime.sessions().isEmpty)
     }
 
     @Test func workersAreLimitedAndQuestionsDontBlock() throws {
@@ -359,9 +366,28 @@ struct LeadToolsetTests: LeadTeamFixture {
         let cleaned = call(lead, "cleanup", ["task": "one", "force": true])
         #expect(cleaned.isError)
         #expect(FileManager.default.fileExists(atPath: Worktrees.path(root: root, slug: "one")))
+        #expect(runtime.forgotten.isEmpty)
         runtime.stubborn = []
         #expect(!call(lead, "cleanup", ["task": "one", "force": true]).isError)
         #expect(!FileManager.default.fileExists(atPath: Worktrees.path(root: root, slug: "one")))
+        #expect(runtime.forgotten == ["session-1"])
+    }
+
+    @Test func cleanupForgetsEveryEndedSessionOfItsTaskOnly() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        for title in ["One", "Two"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
+        // One's first worker was stopped and another started; two's worker was stopped and waits.
+        _ = call(lead, "start_worker", ["task": "one"])
+        _ = call(lead, "stop_worker", ["task": "one"])
+        _ = call(lead, "start_worker", ["task": "one"])
+        _ = call(lead, "start_worker", ["task": "two"])
+        _ = call(lead, "stop_worker", ["task": "two"])
+        #expect(runtime.spawned.map(\.label) == ["Worker: One", "Worker: One", "Worker: Two"])
+        #expect(!call(lead, "cleanup", ["task": "one", "force": true]).isError)
+        #expect(runtime.forgotten == ["session-1", "session-2"])
+        #expect(runtime.sessions().map(\.id) == ["session-3"])
     }
 
     @Test func theLeadWorksOnTheBranchThatWasCheckedOut() throws {
