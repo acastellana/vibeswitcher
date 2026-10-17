@@ -724,13 +724,8 @@ final class PhoneAccess: ObservableObject {
             // Straight into the session's terminal: no focus changes, no Accessibility, nothing typed elsewhere.
             // The same rules as the Terminal path (the lock included), before each write.
             let check = { [weak self] () -> RemoteInputGate.Verdict in
-                guard let self else { return .notAllowed }
-                return RemoteInputGate.verdict(.init(
-                    screenLocked: self.screenLocked(), accessOn: self.state == .on, inputAllowed: self.inputAllowed,
-                    devicePaired: self.devices.contains { $0.id == device.id },
-                    sameSession: self.store.sessions.first(where: { $0.tty == tty })?.identity == sid
-                        && SessionIdentity.isRunning(pid: session.pid, startedAt: session.startedAt)
-                        && ProcessTable.info(pid: session.pid)?.tty == tty))
+                self?.windowInputVerdict(device: device.id, tty: tty, sid: sid, agent: (session.pid, session.startedAt))
+                    ?? .notAllowed
             }
             switch check() {
             case .allowed: break
@@ -785,6 +780,18 @@ final class PhoneAccess: ObservableObject {
                 respond(.json(["ok": true]))
             }
         }
+    }
+
+    /// Whether a reply from `device` may be written into the window session `sid` on `tty` now: asked before
+    /// every write, the screen lock first.
+    func windowInputVerdict(device: String, tty: String, sid: String, agent: (pid: Int32, startedAt: Date))
+        -> RemoteInputGate.Verdict {
+        RemoteInputGate.verdict(.init(
+            screenLocked: screenLocked(), accessOn: state == .on, inputAllowed: inputAllowed,
+            devicePaired: devices.contains { $0.id == device },
+            sameSession: store.sessions.first(where: { $0.tty == tty })?.identity == sid
+                && SessionIdentity.isRunning(pid: agent.pid, startedAt: agent.startedAt)
+                && ProcessTable.info(pid: agent.pid)?.tty == tty))
     }
 
     /// Pausing only changes what VibeSwitcher shows and announces, so it's allowed even with replies off.
