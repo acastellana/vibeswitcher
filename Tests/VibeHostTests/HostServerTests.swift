@@ -128,15 +128,17 @@ struct HostServerTests {
     @Test func slowClientGetsResyncAndProgramKeepsRunning() throws {
         let host = try TestHost()
         let watcher = try TestClient(host)
-        let session = try watcher.spawn("sleep 0.5; head -c 40000000 /dev/zero | tr '\\0' x; echo; echo all-done; sleep 5")
+        // Half as much again as a client may have queued: a client that never reads must overflow.
+        let session = try watcher.spawn("sleep 0.5; head -c \(ClientConnection.maxQueued * 3 / 2) /dev/zero | tr '\\0' x; echo; echo all-done; sleep 5")
         // A client that attaches and then never reads: the host must not wait for it.
         let fd = try UnixSocket.connect(path: host.socket)
         defer { close(fd) }
         let attach = HostFrame.encode(.control, try HostCoding.encode(HostRequestEnvelope(seq: 1, request:
             .attach(id: session.id, cols: 80, rows: 24))))
         _ = attach.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
-        // The program finishes (its output wasn't blocked), which the host reports on screen.
-        #expect(eventually(timeout: 30) {
+        // The program finishes (its output wasn't blocked), which the host reports on screen. Blocked, it never
+        // would; the time is the host taking in 24 MB, which a busy Mac stretches (10 s alone, 12-16 s in the suite).
+        #expect(eventually(timeout: 90) {
             let seq = watcher.send(.screen(id: session.id))
             Thread.sleep(forTimeInterval: 0.2)
             if case .screenText(_, let text) = watcher.reply(to: seq) { return text.contains("all-done") }
