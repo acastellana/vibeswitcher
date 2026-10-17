@@ -33,18 +33,22 @@ public enum ChatExport {
 /// A message you sent that the transcript doesn't show yet (the agent queues it while it works).
 public struct PendingMessage: Equatable, Sendable, Identifiable {
     public var id = UUID()
+    /// As typed into the terminal (attached images as their quoted paths).
     public var text: String
     /// How many prompts the conversation had when it was sent.
     public var afterPrompts: Int
     /// Typed into an idle agent: it shows in the conversation within seconds (a queued one waits for the turn).
     public var expectsSoon: Bool
     public var sentAt: Date
+    /// The images attached to it (their paths are in `text`; the transcript shows them as image blocks).
+    public var attachments: [String]
 
-    public init(text: String, afterPrompts: Int, expectsSoon: Bool = false, sentAt: Date = Date()) {
+    public init(text: String, afterPrompts: Int, expectsSoon: Bool = false, sentAt: Date = Date(), attachments: [String] = []) {
         self.text = text
         self.afterPrompts = afterPrompts
         self.expectsSoon = expectsSoon
         self.sentAt = sentAt
+        self.attachments = attachments
     }
 
     /// Should be in the conversation by now and isn't: the keys may not have reached the agent.
@@ -53,18 +57,22 @@ public struct PendingMessage: Equatable, Sendable, Identifiable {
     }
 
     /// Those not yet among the prompts that came after them.
-    public static func remaining(_ pending: [PendingMessage], prompts: [String]) -> [PendingMessage] {
+    public static func remaining(_ pending: [PendingMessage], prompts: [SentMatch.Prompt]) -> [PendingMessage] {
         var used = Set<Int>()
         return pending.filter { message in
-            let wanted = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            for index in prompts.indices where index >= message.afterPrompts && !used.contains(index) {
-                if prompts[index].trimmingCharacters(in: .whitespacesAndNewlines) == wanted {
+            for index in prompts.indices where index >= message.afterPrompts && !used.contains(index)
+                && SentMatch.isAfter(prompts[index], message.sentAt) {
+                if SentMatch.matches(message.text, attachments: message.attachments, prompt: prompts[index]) {
                     used.insert(index)
                     return false
                 }
             }
             return true
         }
+    }
+
+    public static func remaining(_ pending: [PendingMessage], prompts: [String]) -> [PendingMessage] {
+        remaining(pending, prompts: prompts.map { SentMatch.Prompt(text: $0) })
     }
 }
 
