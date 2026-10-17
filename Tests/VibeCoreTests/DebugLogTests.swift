@@ -17,6 +17,27 @@ struct StallDetectorTests {
     }
 }
 
+struct StallDetectorSleepTests {
+    @Test func aSuspendedProcessIsNotAHang() {
+        // The Mac slept (or App Nap held the app): the checker didn't run either. Waking up isn't a stall.
+        var detector = StallDetector(threshold: 2)
+        let start = Date(timeIntervalSince1970: 1000)
+        detector.beat(at: start)
+        #expect(detector.check(at: start + 0.25) == nil)
+        #expect(detector.check(at: start + 900) == nil)
+        // A real stall afterwards still counts: the checker keeps running, the main thread doesn't answer.
+        var now = start + 900
+        for _ in 0..<12 {
+            now += 0.25
+            if let event = detector.check(at: now) {
+                #expect(event == .stalled(since: start + 900))
+                return
+            }
+        }
+        Issue.record("the stall wasn't reported")
+    }
+}
+
 struct BreadcrumbsTests {
     @Test func keepsTheLatestLines() throws {
         let crumbs = Breadcrumbs(capacity: 3)

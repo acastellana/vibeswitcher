@@ -13,6 +13,7 @@ public struct StallDetector: Sendable {
     private var lastBeat: Date?
     private var stalledSince: Date?
     private var recovered: TimeInterval?
+    private var lastCheck: Date?
 
     public init(threshold: TimeInterval) { self.threshold = threshold }
 
@@ -28,6 +29,13 @@ public struct StallDetector: Sendable {
         if let length = recovered {
             recovered = nil
             return .recovered(after: length)
+        }
+        defer { lastCheck = now }
+        // The checker didn't run either (the Mac slept, App Nap held the app): the whole process was suspended,
+        // which isn't the main thread being stuck. Start over from now.
+        if stalledSince == nil, let previous = lastCheck, now.timeIntervalSince(previous) > threshold {
+            lastBeat = now
+            return nil
         }
         guard stalledSince == nil, let last = lastBeat, now.timeIntervalSince(last) > threshold else { return nil }
         stalledSince = last
