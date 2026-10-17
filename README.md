@@ -79,7 +79,10 @@ workers and verifiers fold under their lead in the list, and the lead's chat sho
 It only asks you what's really yours to decide; its questions show as cards you answer without stopping it (the
 answer reaches it at its next step), and you can message it any time the same way. VibeSwitcher is its witness:
 it tells the lead when a worker waits for input, stops without reporting, or dies. The Team tab in the inspector
-has each task's contract and verdict, your answers, the results, and the lead's files. All of it lives in the
+shows each task as a pipeline lane, Plan → Work → Review → Merge: where it is now and for how long, the worker's
+latest checkpoint (workers note milestones with a `progress` tool) or what the live stage is doing, and why it failed
+or waits on you; click Work or Review to open the worker or the verifier, or the row for its contract, checkpoints,
+report, audit and merge. It also has your answers, the results, and the lead's files. All of it lives in the
 repository, git-ignored: `.vibeswitcher/board.json` (tasks, questions, updates), `workflow.md` (limits, test and
 setup commands, the verifier's model, the lead's branch), `decisions.md` and `progress.md`. The lead sets up
 `workflow.md` itself with its `configure` tool, which changes only those settings' lines and keeps your comments

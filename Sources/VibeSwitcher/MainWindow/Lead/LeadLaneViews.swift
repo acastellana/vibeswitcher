@@ -138,11 +138,10 @@ struct LaneRow: View {
         VStack(alignment: .leading, spacing: 3) {
             Text(lane.task.title).font(.system(size: 12.5, weight: .medium)).fixedSize(horizontal: false, vertical: true)
             if let checkpoint = lane.checkpoint {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Image(systemName: "flag.fill").font(.system(size: 8)).foregroundStyle(.tertiary)
-                    Text(checkpoint.text).foregroundStyle(.secondary).lineLimit(2)
-                    Text(Durations.compact(now.timeIntervalSince1970 - checkpoint.at)).foregroundStyle(.tertiary).monospacedDigit()
-                }
+                (Text(Image(systemName: "flag.fill")).font(.system(size: 8)).foregroundColor(.secondary) + Text(" ")
+                    + Text(checkpoint.text).foregroundColor(.secondary)
+                    + Text(" · " + Durations.compact(now.timeIntervalSince1970 - checkpoint.at)).foregroundColor(Color.secondary.opacity(0.6)))
+                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
             }
             if let activity = lane.activity {
                 Text(activity).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
@@ -212,14 +211,34 @@ struct LaneDetails: View {
                         .font(.system(size: 11.5)).foregroundStyle(merged.tested ? .green : .orange)
                 }
             }
+            if task.worker.map(canOpen) == true || task.verifier.map(canOpen) == true {
+                HStack(spacing: 8) {
+                    if let worker = task.worker, canOpen(worker) { openButton("Open worker") { open(worker) } }
+                    if let verifier = task.verifier, canOpen(verifier) { openButton("Open verifier") { open(verifier) } }
+                }
+                .fixedSize()
+            }
             HStack(spacing: 8) {
-                if let worker = task.worker, canOpen(worker) { Button("Open worker") { open(worker) }.controlSize(.small) }
-                if let verifier = task.verifier, canOpen(verifier) { Button("Open verifier") { open(verifier) }.controlSize(.small) }
-                if let branch = task.branch { Text(branch).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(.tertiary) }
-                if task.rework > 0 { Text("\(task.rework) rework round\(task.rework == 1 ? "" : "s")").font(.system(size: 10.5)).foregroundStyle(.tertiary) }
+                if let branch = task.branch {
+                    Text(branch).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(.tertiary).lineLimit(1).truncationMode(.middle)
+                }
+                if task.rework > 0 {
+                    Text("\(task.rework) rework round\(task.rework == 1 ? "" : "s")").font(.system(size: 10.5)).foregroundStyle(.tertiary).fixedSize()
+                }
             }
         }
         .padding(.leading, 2)
+    }
+
+    private func openButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: "arrow.up.forward.app").font(.system(size: 11, weight: .medium))
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill(Color.accentColor.opacity(0.14)))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.accentColor)
     }
 
     private func part<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
