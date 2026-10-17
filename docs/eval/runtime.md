@@ -4,7 +4,7 @@
 
 | Metric | Measured | Target for an AAA menu bar app | Verdict |
 |---|---|---|---|
-| Main-thread hangs during this evaluation | **1 live hang, still going at 16:36:41 (≥ 10.5 min) when the report was finalised** (from 16:26:14, 2 s after opening a 62-entry chat). The main thread spins at 55–105 % CPU in a SwiftUI layout transaction | 0 hangs > 250 ms | **FAIL** |
+| Main-thread hangs during this evaluation | **1 live hang of ~13 min that never recovered**: the app process was gone between 16:39:12 and 16:39:27, quit from outside (from 16:26:14, 2 s after opening a 62-entry chat). The main thread spins at 55–105 % CPU in a SwiftUI layout transaction | 0 hangs > 250 ms | **FAIL** |
 | App CPU with the window open on a live session (12.2 min before the hang, 10 s intervals) | mean **14.1 %**, p50 13.3 %, p95 24.1 %, min 8.4 %, max 28.8 % | ≤ 1 % idle, ≤ 5 % while showing a live terminal | **FAIL** |
 | App CPU over the whole 12.9 min window (includes the start of the hang) | mean 18.4 %, max 106.5 % | as above | **FAIL** |
 | Main thread busy outside the hang (`sample`, 10 s) | 12.2 % (1,029 of 8,439 ms): SwiftUI graph updates 434 ms, CA commit and drawing 325 ms (terminal draw 98 ms) | < 2 % | **FAIL** |
@@ -22,7 +22,7 @@
 | Hang watchdog (`VIBESWITCHER_BENCH_STALL=1`) | detects at 2.08 s, writes `hang-*.txt` + `.log`, logs "answered again after 4.0 s" | works | PASS |
 | `osascript` processes spawned by the app | about 15/min for Terminal tabs and up to 10/min for screen text (4 s and 6 s cadence; every 1.5 s while Terminal is frontmost) | event-driven, ~0 when nothing changes | **FAIL** |
 
-Measured on 2026-10-17, 16:13–16:37 CEST, against the installed app (`/Applications/VibeSwitcher.app`, app build
+Measured on 2026-10-17, 16:13–16:40 CEST, against the installed app (`/Applications/VibeSwitcher.app`, app build
 1792239825 = 14:23 today, which includes e992e0a; session host build 1792178869 = 2026-10-16 21:27). Machine: Mac15,7
 (12 cores, 36 GB), macOS 15.7.3. The app (pid 33127) had been running for 1 h 50 min with its window open on a live
 session and the sidebar enabled. 11 Claude sessions ran in `vibeswitcher-host` (pid 4086), three of them evaluation
@@ -36,7 +36,7 @@ core while doing nothing the user can see.
 
 Severity: P0 = crash, data loss or security. P1 = broken behaviour. P2 = slow or wasteful. P3 = polish.
 
-### R1 (P1). Opening a chat hung the main thread for ≥ 10.5 minutes (still hung at report time); CPU 55–105 %, RSS up to 731 MB
+### R1 (P1). Opening a chat hung the main thread for ~13 minutes until the app was quit; CPU 55–105 %, RSS up to 731 MB
 
 **Evidence.** `~/.vibeswitcher/debug/app.log`:
 
@@ -46,7 +46,7 @@ Severity: P0 = crash, data loss or security. P1 = broken behaviour. P2 = slow or
 16:26:16.423 main thread stuck since 2026-10-17 14:26:14 +0000; sampling into hang-20261017-162614.txt
 ```
 
-There was still no "answered again" line at 16:36:41, 10.5 min in, when the report was finalised; the per-15 s trace is in
+It never logged "answered again": the process was gone between 16:39:12 and 16:39:27. It was quit from outside, not by this evaluation, after about 13 minutes stuck; the per-15 s trace is in
 [`runtime-data/hang-watch.txt`](runtime-data/hang-watch.txt). The watchdog's state dump
 ([`hang-20261017-162614.log`](runtime-data/hang-20261017-162614.log)) shows: window key and visible at 1728×1014,
 `showsChat=true terminalHidden=true`, chat `state=ready entries=62 items=30 shownLimit=120 atBottom=false`.
@@ -301,7 +301,7 @@ list varies by more than 2×.
 
 ## Top 10 to fix first
 
-1. **R1 (P1)**: the chat layout loop that hung the app for ≥ 10.5 min (still hung at report time) at 55–105 % CPU and up to 731 MB. Reproduce at
+1. **R1 (P1)**: the chat layout loop that hung the app for ~13 min, until it was quit, at 55–105 % CPU and up to 731 MB. Reproduce at
    the real window geometry with a restored anchor, then break the feedback loop.
 2. **R2 (P1)**: the argv cache poisoned before `exec`, which hides a whole session for its lifetime. A one-line
    cache rule plus a test.
