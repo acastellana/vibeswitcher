@@ -271,8 +271,13 @@ public enum LeadPrompts {
         Start: read the task; \(workflow.initCommand.map { "run `\($0)`; " } ?? "")\
         \(workflow.testCommand.map { "run `\($0)` to see where things stand; " } ?? "")look at the code you'll touch.
         While working: stay inside the boundaries. Commit small, descriptive commits as you go. Don't switch to \(workflow.base), \
-        don't merge, rebase or push, don't delete branches; the lead merges. At each milestone (a part working, checks \
+        don't push, don't delete branches; the lead merges. At each milestone (a part working, checks \
         passing, what's next), call progress with one line: the lead and the user see it on your task's lane.
+        Out of date: when the lead says your branch conflicts with \(workflow.base), bring it up to date here: run \
+        `git rebase \(workflow.base)`, resolve each conflict, `git add` the files and `git rebase --continue` (`git rebase \
+        --abort` starts over; `git merge \(workflow.base)` then `git commit` works too). Then run the checks again, \
+        commit and report. Run git in this worktree as it is, without `git -C`; git log, diff, status and show are \
+        always open to you.
         Done: every acceptance check passes\(workflow.testCommand.map { " and `\($0)` passes" } ?? ""), everything is \
         committed. Then reply with a short report: what changed, how you checked it, anything left or doubtful. A \
         verifier will check your branch independently.

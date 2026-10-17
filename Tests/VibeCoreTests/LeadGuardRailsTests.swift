@@ -278,6 +278,119 @@ struct LeadGuardRailsTests: LeadTeamFixture {
             }
         }
     }
+
+    // MARK: A worker brings its own branch up to date
+
+    /// The permission rules a session was started with (its `--settings` file).
+    func permissions(_ name: String, _ runtime: FakeRuntime) throws -> (allow: [String], deny: [String]) {
+        let spawn = try #require(runtime.spawned.last { $0.command.contains("--name '\(name)'") })
+        let range = try #require(spawn.command.range(of: #"--settings '([^']+)'"#, options: .regularExpression))
+        let path = String(spawn.command[range].dropFirst("--settings '".count).dropLast())
+        let settings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as? [String: Any])
+        let permissions = try #require(settings["permissions"] as? [String: [String]])
+        return (permissions["allow"] ?? [], permissions["deny"] ?? [])
+    }
+
+    /// Whether a `Bash(...)` rule matches a command, as Claude Code's permissions docs say: no `*` matches exactly one
+    /// command; `*` matches any text, spaces included; `:*` at the end is ` *`, and a trailing ` *` that is the rule's
+    /// only wildcard also matches the bare command. Whether a `*` elsewhere matches nothing isn't said, so `emptyStar`
+    /// picks.
+    static func matches(_ rule: String, _ command: String, emptyStar: Bool) -> Bool {
+        guard rule.hasPrefix("Bash("), rule.hasSuffix(")") else { return false }
+        var pattern = String(rule.dropFirst("Bash(".count).dropLast())
+        if pattern.hasSuffix(":*") { pattern = String(pattern.dropLast(2)) + " *" }
+        guard pattern.contains("*") else { return command == pattern }
+        if pattern.hasSuffix(" *"), pattern.filter({ $0 == "*" }).count == 1, command == String(pattern.dropLast(2)) { return true }
+        let regex = "^" + pattern.components(separatedBy: "*").map(NSRegularExpression.escapedPattern(for:))
+            .joined(separator: emptyStar ? ".*" : ".+") + "$"
+        return command.range(of: regex, options: .regularExpression) != nil
+    }
+
+    /// Denied whichever way a `*` reads; allowed (without asking) whichever way it reads.
+    static func denied(_ command: String, by rules: [String]) -> Bool {
+        [true, false].allSatisfy { empty in rules.contains { matches($0, command, emptyStar: empty) } }
+    }
+    static func allowed(_ command: String, by rules: (allow: [String], deny: [String])) -> Bool {
+        [true, false].allSatisfy { empty in
+            !rules.deny.contains { matches($0, command, emptyStar: empty) } && rules.allow.contains { matches($0, command, emptyStar: empty) }
+        }
+    }
+
+    @Test func aWorkerRebasesOrMergesItsOwnBranchOntoTheBaseAndMovesNoOther() throws {
+        let root = try repo()
+        Git.run(["branch", "project-lead"], in: root)
+        try BoardStore(root: root).prepare()
+        let workflowFile = root + "/.vibeswitcher/workflow.md"
+        try "---\nbase_branch: project-lead\n---".write(toFile: workflowFile, atomically: true, encoding: .utf8)
+        let base = LeadWorkflow.load(from: workflowFile).base
+        #expect(base == "project-lead")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let worktree = try reported(lead, runtime, root: root)
+        let rules = try permissions("worker-add-b", runtime)
+
+        let allowed = ["git rebase \(base)", "git rebase --continue", "git rebase --abort", "git rebase --skip",
+                       "git merge \(base)", "git merge --no-edit \(base)", "git merge --continue", "git merge --abort",
+                       "git add b.txt", "git add -A", "git commit -m 'Resolve conflicts with \(base)'"]
+        let reads = ["git log --oneline \(base)..HEAD", "git diff \(base)...HEAD", "git status", "git show HEAD", "git log"]
+        let deniedForms = ["git push", "git push origin agent/add-b", "git push origin \(base)",
+                           "git branch -f \(base) HEAD", "git branch -f agent/other HEAD", "git branch --force main HEAD",
+                           "git update-ref refs/heads/\(base) HEAD", "git update-ref refs/heads/agent/other HEAD",
+                           "git rebase \(base) agent/other", "git rebase main \(base)", "git rebase --onto \(base) HEAD~1 agent/other",
+                           "git rebase --update-refs \(base)", "git -C ../other rebase \(base)",
+                           "git checkout \(base)", "git checkout agent/other", "git checkout -f \(base)", "git checkout -B \(base)",
+                           "git switch \(base)", "git switch agent/other", "git switch -C agent/other",
+                           "git reset --hard \(base)", "git reset --hard \(base)~1", "git reset --hard agent/other", "git reset --hard main",
+                           "git commit --amend", "git worktree remove ../other", "git branch -D agent/other"]
+        for command in allowed + reads { #expect(Self.allowed(command, by: rules), "allowed: \(command)") }
+        for command in deniedForms { #expect(Self.denied(command, by: rules.deny), "denied: \(command)") }
+        // Rules don't remember: after any denial, reading git is still allowed, without asking.
+        for command in deniedForms + reads where !Self.denied(command, by: rules.deny) {
+            #expect(Self.allowed(command, by: rules), "after a denial: \(command)")
+        }
+        // The lead and verifiers read git without asking too; none of them writes with it.
+        for role in [LeadLaunch.Role.lead, .verifier] {
+            let theirs = (LeadLaunch.allow(role, base: base), LeadLaunch.deny(role, base: base))
+            for command in reads { #expect(Self.allowed(command, by: theirs), "\(role): \(command)") }
+            for command in allowed + ["git diff --output=x.txt"] where !reads.contains(command) {
+                #expect(!Self.allowed(command, by: theirs), "\(role): \(command)")
+            }
+        }
+
+        // And the allowed forms do what they say: the base moves on with a conflicting change, the worker rebases onto
+        // it, resolves and continues; its branch is on top of the base, which (like main) didn't move.
+        Git.run(["checkout", "-q", base], in: root)
+        try commit("b.txt", "lead\n", in: root)
+        Git.run(["checkout", "-q", "main"], in: root)
+        let baseHead = head(base, root), mainHead = head("main", root)
+        let rebase = Git.run(["rebase", base], in: worktree)
+        #expect(!rebase.ok)
+        try "bee and lead\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "b.txt"], in: worktree)
+        #expect(Git.run(["-c", "core.editor=true", "rebase", "--continue"], in: worktree).ok)
+        #expect(head(base, root) == baseHead && head("main", root) == mainHead)
+        #expect(Git.run(["merge-base", "--is-ancestor", base, "agent/add-b"], in: root).ok)
+        #expect(try String(contentsOfFile: worktree + "/b.txt", encoding: .utf8) == "bee and lead\n")
+    }
+
+    @Test func aConflictAtMergeAsksForARebaseAndTheBriefSaysHow() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = try reported(lead, runtime, root: root)
+        try passingAudit(lead, runtime)
+        // main gets its own b.txt (as through another task's merge).
+        try commit("b.txt", "main's own\n", in: root)
+        try vault.setHead(head("main", root), root: root, branch: "main")
+        let merged = lead.call("merge", ["task": "add-b"])
+        #expect(merged.isError)
+        #expect(merged.text.contains("conflicts with main") && merged.text.contains("`git rebase main`"))
+        let brief = LeadPrompts.worker(task: try #require(BoardStore(root: root).load().task("add-b")), root: root,
+                                       workflow: LeadWorkflow.parse("---\nbase_branch: main\n---"))
+        for step in ["`git rebase main`", "`git rebase --continue`", "`git merge main`", "without `git -C`"] {
+            #expect(brief.contains(step), "\(step)")
+        }
+    }
 }
 
 /// A tool server that runs under no agent session at all.

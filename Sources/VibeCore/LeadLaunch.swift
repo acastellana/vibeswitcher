@@ -31,7 +31,8 @@ public enum LeadLaunch {
     static let fileWrites = ["Bash(sed -i:*)", "Bash(perl -i:*)", "Bash(perl -pi:*)", "Bash(perl -e:*)", "Bash(tee:*)", "Bash(dd:*)",
                              "Bash(truncate:*)", "Bash(cp:*)", "Bash(mv:*)", "Bash(rm:*)", "Bash(ln:*)", "Bash(touch:*)", "Bash(install:*)",
                              "Bash(rsync:*)", "Bash(patch:*)", "Bash(python -c:*)", "Bash(python3 -c:*)", "Bash(ruby -e:*)",
-                             "Bash(node -e:*)", "Bash(osascript:*)", "Bash(cat >:*)", "Bash(echo >:*)", "Bash(printf >:*)"]
+                             "Bash(node -e:*)", "Bash(osascript:*)", "Bash(cat >:*)", "Bash(echo >:*)", "Bash(printf >:*)",
+                             "Bash(git * --output*)"]
     /// VibeSwitcher's private files (the team's capabilities, the seal on your messages): no role's tools touch them.
     static let privateFiles = ["Read(~/.vibeswitcher/lead/**)", "Edit(~/.vibeswitcher/lead/**)",
                                "Read(~/.vibeswitcher/steer/**)", "Edit(~/.vibeswitcher/steer/**)"]
@@ -42,10 +43,19 @@ public enum LeadLaunch {
         case .lead, .verifier:
             return readOnly + gitWrites + gitAround + fileWrites + privateFiles
         case .worker:
-            // Edits and commits on its own branch; nothing that rewrites history or touches the lead's branch.
+            // Edits and commits on its own branch, and brings it up to date with the lead's (`git rebase <base>`,
+            // `git merge <base>`); nothing that moves the lead's branch or another one. Rebase and merge only move
+            // the branch checked out here, which can't be another: a second branch named after `git rebase` would
+            // be checked out and rebased.
             let protected: [String] = Array(Set(["main", "master"] + (base.map { [$0] } ?? []))).sorted()
-            var rules: [String] = ["Bash(git push:*)", "Bash(git merge:*)", "Bash(git rebase:*)", "Bash(git reset --hard:*)"]
-            rules += protected.flatMap { ["Bash(git checkout \($0):*)", "Bash(git switch \($0):*)"] }
+            var rules: [String] = ["Bash(git push:*)", "Bash(git rebase * *)", "Bash(git rebase --update-refs:*)"]
+            // Onto another branch, or this one reset hard to another (that only moves this branch, but drops its work).
+            for branch in protected + ["agent/"] {
+                let name = branch.hasSuffix("/") ? branch + "*" : branch
+                rules += ["Bash(git checkout \(name))", "Bash(git checkout \(name) *)", "Bash(git checkout * \(name))",
+                          "Bash(git switch \(name))", "Bash(git switch \(name) *)", "Bash(git switch * \(name))",
+                          "Bash(git reset --hard \(branch))", "Bash(git reset --hard \(branch)*)"]
+            }
             // Ways onto a branch checked out elsewhere, or of moving one, that the rules above don't name.
             rules += ["Bash(git checkout -B:*)", "Bash(git checkout --ignore-other-worktrees:*)", "Bash(git switch -C:*)",
                       "Bash(git switch --ignore-other-worktrees:*)", "Bash(git branch -f:*)", "Bash(git branch --force:*)",
@@ -53,6 +63,18 @@ public enum LeadLaunch {
             rules += ["Bash(git branch -D:*)", "Bash(git branch -d:*)", "Bash(git worktree:*)", "Bash(git tag:*)", "Bash(git commit --amend:*)"]
             return rules + gitAround + privateFiles
         }
+    }
+
+    /// What each role may do without asking, the deny rules permitting: reading git at any time (after a denied
+    /// command too), and for a worker, committing and bringing its branch up to date with `base`.
+    public static func allow(_ role: Role, base: String? = nil) -> [String] {
+        let reads = ["Bash(git log:*)", "Bash(git diff:*)", "Bash(git status:*)", "Bash(git show:*)", "Bash(git rev-parse:*)",
+                     "Bash(git merge-base:*)", "Bash(git ls-files:*)", "Bash(git blame:*)", "Bash(git branch --show-current)"]
+        guard role == .worker else { return reads }
+        var rules = reads + ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git rebase --continue)", "Bash(git rebase --abort)",
+                             "Bash(git rebase --skip)", "Bash(git merge --continue)", "Bash(git merge --abort)"]
+        if let base { rules += ["Bash(git rebase \(base))", "Bash(git merge \(base))", "Bash(git merge --no-edit \(base))"] }
+        return rules
     }
 
     /// Writes the role's files (0600) and returns the command line to run. They go in `folder`: the vault's run folder
@@ -75,7 +97,7 @@ public enum LeadLaunch {
         let mcp: [String: Any] = ["mcpServers": ["vibeswitcher": entry]]
         try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: mcp, options: [.prettyPrinted, .sortedKeys]),
                                    to: URL(fileURLWithPath: mcpFile))
-        let settings: [String: Any] = ["permissions": ["deny": deny(role, base: branch)]]
+        let settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch), "deny": deny(role, base: branch)]]
         try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]),
                                    to: URL(fileURLWithPath: settingsFile))
         let quote = RecentProjects.shellQuote

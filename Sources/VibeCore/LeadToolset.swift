@@ -566,7 +566,7 @@ public final class LeadToolset: MCPToolset {
         case .passed(let commit): tested = commit
         case .conflict:
             try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Conflicts with \(base): the branch needs bringing up to date."))
-            throw Problem(text: "\(slug) conflicts with \(base). Message its worker to bring its branch up to date with \(base) and resolve, then audit again.")
+            throw Problem(text: "\(slug) conflicts with \(base). Message its worker to rebase its branch onto \(base) (`git rebase \(base)` in its worktree), resolve the conflicts, run the tests and report again (start_worker again if it has stopped), then audit again.")
         case .failed(let output):
             let last = output.split(whereSeparator: \.isNewline).last.map(String.init) ?? ""
             try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Tests fail rebased onto \(base)" + (last.isEmpty ? "." : ": \(last.prefix(200))")))
