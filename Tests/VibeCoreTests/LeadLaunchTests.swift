@@ -33,12 +33,19 @@ struct LeadLaunchTests {
     @Test func workersMayEditButNotTouchHistoryOrMain() throws {
         let root = try root()
         let launch = try LeadLaunch.prepare(role: .worker, root: root, task: "add-login", base: "claude", prompt: "p", start: "Go.",
-                                            server: "/s", name: "worker-add-login")
+                                            server: "/s", name: "worker-add-login", branch: "project-lead")
         let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
         let deny = (settings?["permissions"] as? [String: Any])?["deny"] as? [String] ?? []
+        let allow = (settings?["permissions"] as? [String: Any])?["allow"] as? [String] ?? []
         #expect(!deny.contains("Edit"))
-        for rule in ["Bash(git push:*)", "Bash(git merge:*)", "Bash(git rebase:*)", "Bash(git reset --hard:*)", "Bash(git switch main:*)", "Bash(git branch -D:*)"] {
+        for rule in ["Bash(git push:*)", "Bash(git rebase * *)", "Bash(git reset --hard project-lead)", "Bash(git reset --hard agent/*)",
+                     "Bash(git switch main *)", "Bash(git checkout project-lead)", "Bash(git checkout agent/*)", "Bash(git branch -D:*)",
+                     "Bash(git branch -f:*)", "Bash(git update-ref:*)"] {
             #expect(deny.contains(rule), "missing \(rule)")
+        }
+        // Its own branch it brings up to date with the lead's (the rest of the rules: LeadGuardRailsTests).
+        for rule in ["Bash(git rebase project-lead)", "Bash(git rebase --continue)", "Bash(git merge project-lead)", "Bash(git log:*)"] {
+            #expect(allow.contains(rule), "missing \(rule)")
         }
         let mcp = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.mcpFile))) as? [String: Any]
         let args = ((mcp?["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any])?["args"] as? [String]

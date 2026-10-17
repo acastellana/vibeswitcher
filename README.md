@@ -111,7 +111,11 @@ under a line naming their sender, so a worker's report can't pass for the user's
 the user. They reach the lead's own conversation, never a subagent it started (a subagent's tool calls fire the same
 hooks; the message waits for the lead's next step), and count as delivered only once they're in it; `status` also
 lists every report that came in since the lead last asked. Claude Code permission rules add a second layer: the lead and verifiers are denied file edits, shell
-file writes and git writes, workers pushing, merging, rebasing, moving refs and switching to the lead's branch.
+file writes and git writes; workers are denied pushing, moving refs, checking out, switching to or resetting hard onto
+the lead's branch or another `agent/` branch, and rebasing any branch but their own. A worker can bring its own branch
+up to date: `git rebase <base>` or `git merge <base>`, resolving and going on with `--continue` (or `--abort`), so when
+`merge` finds a branch conflicting it asks the lead to have that worker rebase. Every session reads git (log, diff,
+status, show) without asking, after a denied command too.
 Their tools come from `vibeswitcher-mcp`, a tool server bundled with the app.
 
 New sessions (⊕, ⌘N) start **in the window** by default: VibeSwitcher runs them itself, in a small background
