@@ -8,6 +8,10 @@ import VibeCore
 final class LeadController: ObservableObject {
     /// Each running lead's board, by repository root.
     @Published private(set) var boards: [String: LeadBoard] = [:]
+    /// Each running lead's decisions (`BoardStore.decisions`), by repository root.
+    @Published private(set) var decisions: [String: [LeadDecision]] = [:]
+    /// The Team view's plain-language lines.
+    let summaries = TeamSummaryModel()
 
     private let host: HostClient
     private let store: SessionStore
@@ -38,6 +42,9 @@ final class LeadController: ObservableObject {
         self.host = host
         self.store = store
         self.claudeCommand = claudeCommand
+        summaries.lookup = { [weak host, weak store] id in
+            (host?.sessions.first { $0.id.uuidString == id }, store?.sessions.first { $0.hostID?.uuidString == id }?.transcriptPath)
+        }
         let timer = Timer(timeInterval: 3, repeats: true) { [weak self] _ in self?.refresh() }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
@@ -224,6 +231,8 @@ final class LeadController: ObservableObject {
         var loaded: [String: LeadBoard] = [:]
         for root in roots { loaded[root] = BoardStore(root: root).load() }
         if loaded != boards { boards = loaded }
+        let read = Dictionary(uniqueKeysWithValues: roots.map { ($0, BoardStore(root: $0).decisions()) })
+        if read != decisions { decisions = read }
         for (root, board) in loaded {
             for question in board.openQuestions where seenQuestions.insert("\(question.id)#\(question.version)").inserted {
                 let project = (root as NSString).lastPathComponent

@@ -183,6 +183,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         preferences.$minimizeOnPause
             .sink { [weak self] enabled in self?.store.minimizeOnPause = enabled }
             .store(in: &cancellables)
+        preferences.$aiSummaries
+            .sink { [weak self] enabled in self?.leadController.summaries.enabled = enabled }
+            .store(in: &cancellables)
         preferences.$sidebarAutoHide
             .receive(on: RunLoop.main)
             .sink { [weak self] autoHide in self?.sidebar.autoHide = autoHide }

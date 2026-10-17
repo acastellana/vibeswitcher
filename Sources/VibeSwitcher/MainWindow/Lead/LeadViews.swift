@@ -311,12 +311,14 @@ private struct ClosedQuestionRow: View {
     }
 }
 
-/// The inspector's Team tab for a lead: each task as a pipeline lane (see `LeadLanes`), questions, results, the files.
+/// The inspector's Team tab for a lead, calm enough to glance at: the lead's questions, its recent decisions (fading
+/// out as they age), then each task in one line (see `TeamRows`) with what its agent is doing in plain words, the
+/// merged ones folded; below, your answers, the results, the files.
 struct LeadTeamView: View {
     let root: String
     let board: LeadBoard
     /// What the team's window sessions are doing, by host id.
-    let seen: [String: LaneSeen]
+    let seen: [String: MemberSeen]
     /// Opens a team member's session (its host id) in the window.
     let open: (String) -> Void
     /// Rows shown opened, and the finished tasks unfolded, to begin with.
@@ -325,66 +327,92 @@ struct LeadTeamView: View {
     /// Answering the lead's questions from here, and what became of answers that didn't land.
     var answer: (LeadQuestion, String) -> Void = { _, _ in }
     var notices: [String: String] = [:]
-    /// When the questions' stack is drawn as of (withdrawn ones fade out of it).
-    var now: Date = Date()
+    /// The lead's decisions (`BoardStore.decisions`), and the ones shown opened, or the earlier ones unfolded, to
+    /// begin with.
+    var decisions: [LeadDecision] = []
+    var openDecisions: Set<String> = []
+    var showEarlier = false
+    /// The plain-language lines written so far (see `TeamSummaryModel`).
+    var summary: (TeamRow) -> String? = { _ in nil }
+    var decisionSummary: (LeadDecision) -> String? = { _ in nil }
+    /// Drawn as of this time instead of the clock's (pictures).
+    var clock: Date?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                let stack = board.questionStack(now: now.timeIntervalSince1970)
-                if !stack.isEmpty {
-                    LeadQuestionStack(questions: stack, notices: notices, answer: answer)
+        let fading = !DecisionFeed.split(decisions, now: (clock ?? Date()).timeIntervalSince1970, reduceMotion: false).recent.isEmpty
+        TimelineView(.periodic(from: .now, by: fading ? 1 : 10)) { context in
+            let now = clock ?? context.date
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    top(now: now)
+                    rest
                 }
-                section("Tasks") {
-                    if board.tasks.isEmpty {
-                        Text("Nothing on the board yet. Tell the lead what to build.").font(.system(size: 12)).foregroundStyle(.secondary)
-                    }
-                    LaneList(board: board, seen: seen, open: open, openRows: openRows, showFinished: showFinished)
+                .padding(14)
+            }
+        }
+    }
+
+    @ViewBuilder private func top(now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            let stack = board.questionStack(now: now.timeIntervalSince1970)
+            if !stack.isEmpty {
+                LeadQuestionStack(questions: stack, notices: notices, answer: answer)
+            }
+            DecisionFeedView(decisions: decisions, now: now, summary: decisionSummary, openDecisions: openDecisions, showEarlier: showEarlier)
+                .padding(.horizontal, -8)
+            section("Tasks") {
+                if board.tasks.isEmpty {
+                    Text("Nothing on the board yet. Tell the lead what to build.").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
-                let closed = board.questions.filter { !$0.isOpen }
-                if !closed.isEmpty {
-                    section("Answered and withdrawn") {
-                        ForEach(closed.suffix(8).reversed()) { question in ClosedQuestionRow(question: question) }
-                    }
-                }
-                if !board.updates.isEmpty {
-                    section("Results") {
-                        ForEach(board.updates.reversed()) { update in
-                            VStack(alignment: .leading, spacing: 6) {
-                                HStack {
-                                    Text(update.title).font(.system(size: 12.5, weight: .semibold))
-                                    Spacer()
-                                    Text(Date(timeIntervalSince1970: update.at).formatted(date: .omitted, time: .shortened))
-                                        .font(.system(size: 10.5)).foregroundStyle(.tertiary)
-                                }
-                                MarkdownView(text: update.body, fontSize: 12)
-                                ForEach(update.images, id: \.self) { path in
-                                    if let image = NSImage(contentsOfFile: path) {
-                                        Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(maxHeight: 160)
-                                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                                            .onTapGesture { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
-                                    }
-                                }
+                TeamTaskList(rows: TeamRows.rows(board, seen: seen), now: now, summary: summary, canOpen: { seen[$0] != nil }, open: open,
+                             openRows: openRows, showFinished: showFinished)
+                    .padding(.horizontal, -8)
+            }
+        }
+    }
+
+    @ViewBuilder private var rest: some View {
+        let closed = board.questions.filter { !$0.isOpen }
+        if !closed.isEmpty {
+            section("Answered and withdrawn") {
+                ForEach(closed.suffix(8).reversed()) { question in ClosedQuestionRow(question: question) }
+            }
+        }
+        if !board.updates.isEmpty {
+            section("Results") {
+                ForEach(board.updates.reversed()) { update in
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack {
+                            Text(update.title).font(.system(size: 12.5, weight: .semibold))
+                            Spacer()
+                            Text(Date(timeIntervalSince1970: update.at).formatted(date: .omitted, time: .shortened))
+                                .font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                        }
+                        MarkdownView(text: update.body, fontSize: 12)
+                        ForEach(update.images, id: \.self) { path in
+                            if let image = NSImage(contentsOfFile: path) {
+                                Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(maxHeight: 160)
+                                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    .onTapGesture { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
                             }
-                            .padding(10).background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))
                         }
                     }
-                }
-                section("Files") {
-                    HStack(spacing: 8) {
-                        ForEach(["workflow.md", "decisions.md", "progress.md"], id: \.self) { name in
-                            Button(name) {
-                                let path = (root as NSString).appendingPathComponent(".vibeswitcher/\(name)")
-                                if FileManager.default.fileExists(atPath: path) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) } else { NSSound.beep() }
-                            }
-                            .controlSize(.small)
-                        }
-                    }
-                    Text("Kept in \(root.replacingOccurrences(of: NSHomeDirectory(), with: "~"))/.vibeswitcher (not committed).")
-                        .font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                    .padding(10).background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))
                 }
             }
-            .padding(14)
+        }
+        section("Files") {
+            HStack(spacing: 8) {
+                ForEach(["workflow.md", "decisions.md", "progress.md"], id: \.self) { name in
+                    Button(name) {
+                        let path = (root as NSString).appendingPathComponent(".vibeswitcher/\(name)")
+                        if FileManager.default.fileExists(atPath: path) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) } else { NSSound.beep() }
+                    }
+                    .controlSize(.small)
+                }
+            }
+            Text("Kept in \(root.replacingOccurrences(of: NSHomeDirectory(), with: "~"))/.vibeswitcher (not committed).")
+                .font(.system(size: 10.5)).foregroundStyle(.tertiary)
         }
     }
 

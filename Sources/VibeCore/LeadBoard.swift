@@ -504,8 +504,18 @@ public final class BoardStore: @unchecked Sendable {
         try append("- \(Self.stamp()) \(line)\n", to: "progress.md", header: "# Progress\n\n")
     }
 
+    /// A decision under a `## <date and time> <decision>` heading (one line), its reason below.
     public func appendDecision(_ decision: String, why: String) throws {
-        try append("## \(Self.stamp()) \(decision)\n\n\(why)\n\n", to: "decisions.md", header: "# Decisions\n\n")
+        let heading = decision.split(whereSeparator: \.isNewline).joined(separator: " ")
+        try append("## \(LeadDecision.stamp(Date())) \(heading)\n\n\(why)\n\n", to: "decisions.md", header: "# Decisions\n\n")
+    }
+
+    /// The lead's decisions, oldest first. Everything that shows them reads them here, so where they're kept can
+    /// change in this one place.
+    public func decisions() -> [LeadDecision] {
+        let path = (folder as NSString).appendingPathComponent("decisions.md")
+        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
+        return LeadDecision.parse(text)
     }
 
     /// Sets a repository up for a lead: the `.vibeswitcher` folder, kept out of git, with the workflow notes (a
@@ -559,6 +569,58 @@ public final class BoardStore: @unchecked Sendable {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
         return formatter.string(from: Date())
+    }
+}
+
+/// A decision the lead recorded (`record_decision`), as `decisions.md` has it.
+public struct LeadDecision: Equatable, Sendable, Identifiable {
+    public var at: Double
+    public var text: String
+    public var why: String
+    public var id: String { "\(at)|\(text)" }
+
+    public init(at: Double, text: String, why: String) {
+        self.at = at
+        self.text = text
+        self.why = why
+    }
+
+    /// "2026-10-17 21:27:05", local time (older entries have no seconds).
+    static func stamp(_ date: Date) -> String { formatter("yyyy-MM-dd HH:mm:ss").string(from: date) }
+
+    private static func formatter(_ format: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = format
+        return formatter
+    }
+
+    /// The decisions in a `decisions.md`: each `## <stamp> <decision>` heading and the text under it.
+    public static func parse(_ markdown: String) -> [LeadDecision] {
+        let seconds = formatter("yyyy-MM-dd HH:mm:ss"), minutes = formatter("yyyy-MM-dd HH:mm")
+        var decisions: [LeadDecision] = []
+        var why: [Substring] = []
+        func close() {
+            guard !decisions.isEmpty else { return }
+            decisions[decisions.count - 1].why = why.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            why = []
+        }
+        for line in markdown.split(separator: "\n", omittingEmptySubsequences: false) {
+            guard line.hasPrefix("## ") else {
+                why.append(line)
+                continue
+            }
+            let words = line.dropFirst(3).split(separator: " ", maxSplits: 2, omittingEmptySubsequences: false)
+            guard words.count >= 2 else { continue }
+            let time = String(words[1])
+            guard let date = seconds.date(from: "\(words[0]) \(time)") ?? minutes.date(from: "\(words[0]) \(time)") else { continue }
+            close()
+            why = []
+            let text = words.count > 2 ? String(words[2]).trimmingCharacters(in: .whitespaces) : ""
+            decisions.append(LeadDecision(at: date.timeIntervalSince1970, text: text, why: ""))
+        }
+        close()
+        return decisions
     }
 }
 

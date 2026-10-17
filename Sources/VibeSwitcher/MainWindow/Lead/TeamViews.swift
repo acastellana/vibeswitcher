@@ -1,0 +1,301 @@
+import SwiftUI
+import VibeCore
+
+extension TeamRow.Mark {
+    var color: Color {
+        switch self {
+        case .needsYou, .failed, .stalled: return .red
+        case .blocked: return .purple
+        case .working, .rework: return .orange
+        case .review: return .blue
+        case .merge, .merged: return .green
+        case .queued, .abandoned: return .secondary
+        }
+    }
+}
+
+/// A task's status mark: its color and its shape.
+struct TeamMark: View {
+    let mark: TeamRow.Mark
+
+    var body: some View {
+        Image(systemName: mark.symbol)
+            .font(.system(size: 9, weight: .bold))
+            .foregroundStyle(mark.color)
+            .frame(width: 12, height: 12)
+            .accessibilityHidden(true)
+    }
+}
+
+/// A task in one line: its mark, its title, its state and time; under it, dim, what its agent is doing (or what it
+/// asks, or why it's red). Clicking it shows its details.
+struct TeamRowView: View {
+    let row: TeamRow
+    let now: Date
+    let summary: String?
+    let isOpen: Bool
+    let canOpen: (String) -> Bool
+    let open: (String) -> Void
+    let toggle: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            header
+            if isOpen {
+                TeamRowDetails(row: row, canOpen: canOpen, open: open).padding(.leading, 18).padding(.bottom, 4)
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 5)
+        .background(RoundedRectangle(cornerRadius: 7).fill(isOpen ? Color.secondary.opacity(0.07) : Color.clear))
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                TeamMark(mark: row.mark).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                Text(row.task.title).font(.system(size: 12.5, weight: .medium)).lineLimit(isOpen ? nil : 1)
+                    .fixedSize(horizontal: false, vertical: isOpen)
+                Spacer(minLength: 8)
+                Text(row.stateText(now: now)).font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .foregroundStyle(row.mark.isRed ? Color.red : Color.secondary).lineLimit(1).fixedSize()
+            }
+            if let line = row.line(summary: summary) {
+                Text(line).font(.system(size: 11)).foregroundStyle(row.mark.isRed ? AnyShapeStyle(Color.red.opacity(0.85)) : AnyShapeStyle(.secondary))
+                    .lineLimit(1).truncationMode(.tail).padding(.leading, 18)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture(perform: toggle)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(row.spoken(now: now, summary: summary))
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(isOpen ? "Hides the task's details" : "Shows the task's details")
+        .accessibilityAction(.default, toggle)
+        .accessibilityActions {
+            if let worker = row.task.worker, canOpen(worker) { Button("Open the worker") { open(worker) } }
+            if let verifier = row.task.verifier, canOpen(verifier) { Button("Open the verifier") { open(verifier) } }
+        }
+    }
+}
+
+/// A row opened: why it last failed, its checkpoints with their times, the worker's report, the audit, and links to
+/// the worker's and the verifier's sessions.
+struct TeamRowDetails: View {
+    let row: TeamRow
+    let canOpen: (String) -> Bool
+    let open: (String) -> Void
+
+    var body: some View {
+        let task = row.task
+        VStack(alignment: .leading, spacing: 9) {
+            if let failure = Self.failure(task) {
+                part("Last failure") { Text(failure).font(.system(size: 11.5)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
+            }
+            if let checkpoints = task.checkpoints, !checkpoints.isEmpty {
+                part("Checkpoints") {
+                    ForEach(Array(checkpoints.suffix(8).enumerated()), id: \.offset) { _, checkpoint in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Text(LeadBoard.clock(checkpoint.at)).font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.tertiary)
+                            Text(checkpoint.text).font(.system(size: 11.5)).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+            if let report = task.report, !report.isEmpty {
+                part("Worker report") { Text(report).font(.system(size: 11.5)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
+            }
+            if let evidence = task.evidence ?? task.setback?.evidence {
+                part(task.evidence == nil ? "Last audit" : "Audit") {
+                    Label(evidence.passes ? "Passed" : "Not passed: \(evidence.completion.rawValue), \(evidence.integrity.rawValue)",
+                          systemImage: evidence.passes ? "checkmark.seal.fill" : "xmark.seal.fill")
+                        .font(.system(size: 11.5, weight: .medium)).foregroundStyle(evidence.passes ? .green : .red)
+                    Text(evidence.summary).font(.system(size: 11.5)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            if let merged = task.merged {
+                Text("Merged \(merged.commit.prefix(8)) at \(LeadBoard.clock(merged.at))" + (merged.tested ? ", tests passed" : ", no tests ran"))
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            if task.worker.map(canOpen) == true || task.verifier.map(canOpen) == true {
+                HStack(spacing: 8) {
+                    if let worker = task.worker, canOpen(worker) { link("Open worker") { open(worker) } }
+                    if let verifier = task.verifier, canOpen(verifier) { link("Open verifier") { open(verifier) } }
+                }
+                .fixedSize()
+            }
+        }
+    }
+
+    /// Why it last failed: the merge or audit that sent it back, a failed verdict, or what blocks it.
+    static func failure(_ task: LeadTask) -> String? {
+        if let setback = task.setback { return setback.reason }
+        if task.status == .failed { return task.evidence?.summary }
+        if task.status == .blocked { return task.blocker }
+        return nil
+    }
+
+    private func link(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: "arrow.up.forward.app").font(.system(size: 11, weight: .medium))
+                .padding(.horizontal, 8).padding(.vertical, 3)
+                .background(Capsule().fill(Color.accentColor.opacity(0.14)))
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(Color.accentColor)
+    }
+
+    private func part<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(title).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.secondary)
+            content()
+        }
+    }
+}
+
+/// The board's tasks, one line each, in their order, with the finished ones folded into "Merged (n)".
+struct TeamTaskList: View {
+    let rows: [TeamRow]
+    let now: Date
+    let summary: (TeamRow) -> String?
+    let canOpen: (String) -> Bool
+    let open: (String) -> Void
+    @State var openRows: Set<String> = []
+    @State var showFinished = false
+
+    var body: some View {
+        let finished = rows.filter { $0.group == .finished }
+        VStack(alignment: .leading, spacing: 1) {
+            ForEach(rows.filter { $0.group != .finished }) { row in line(row) }
+            if !finished.isEmpty {
+                Fold(title: TeamRows.finishedTitle(finished), isOpen: $showFinished, hint: "the finished tasks").padding(.top, 3)
+                if showFinished {
+                    ForEach(finished) { row in line(row) }
+                }
+            }
+        }
+    }
+
+    private func line(_ row: TeamRow) -> some View {
+        TeamRowView(row: row, now: now, summary: summary(row), isOpen: openRows.contains(row.id), canOpen: canOpen, open: open) {
+            if openRows.contains(row.id) { openRows.remove(row.id) } else { openRows.insert(row.id) }
+        }
+    }
+}
+
+/// One dim line that unfolds what's under it.
+struct Fold: View {
+    let title: String
+    @Binding var isOpen: Bool
+    /// What it shows or hides, for VoiceOver ("the finished tasks").
+    let hint: String
+
+    var body: some View {
+        Button { isOpen.toggle() } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "chevron.right").font(.system(size: 8.5, weight: .semibold)).rotationEffect(.degrees(isOpen ? 90 : 0))
+                Text(title).font(.system(size: 11.5, weight: .medium))
+                Spacer()
+            }
+            .foregroundStyle(.secondary).contentShape(Rectangle())
+            .padding(.horizontal, 8).padding(.vertical, 3)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint(isOpen ? "Hides \(hint)" : "Shows \(hint)")
+    }
+}
+
+/// The lead's own decisions: a new one in full view, then fading and blurring out, then folded into
+/// "Earlier decisions (n)" (see `DecisionFeed`). Clicking one shows it in full, with why; an open one stays.
+struct DecisionFeedView: View {
+    let decisions: [LeadDecision]
+    let now: Date
+    let summary: (LeadDecision) -> String?
+    @State var openDecisions: Set<String> = []
+    @State var showEarlier = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        let split = DecisionFeed.split(decisions, now: now.timeIntervalSince1970, reduceMotion: reduceMotion)
+        // One you opened stays in view while it's open.
+        let kept = split.earlier.filter { openDecisions.contains($0.id) && !showEarlier }
+        let recent = (split.recent + kept.map { ($0, DecisionFeed.Phase.fresh) }).sorted { $0.decision.at > $1.decision.at }
+        if !decisions.isEmpty {
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(recent, id: \.decision.id) { item in
+                    let look = DecisionFeed.look(openDecisions.contains(item.decision.id) ? .fresh : item.phase)
+                    row(item.decision, dim: false)
+                        .opacity(look.opacity)
+                        .blur(radius: look.blur)
+                        .animation(reduceMotion ? nil : .linear(duration: 1), value: look.opacity)
+                }
+                let earlier = split.earlier.filter { !kept.contains($0) }
+                if !earlier.isEmpty {
+                    Fold(title: "Earlier decisions (\(earlier.count))", isOpen: $showEarlier, hint: "the lead's earlier decisions")
+                    if showEarlier {
+                        ForEach(earlier) { decision in row(decision, dim: true) }
+                    }
+                }
+            }
+        }
+    }
+
+    private func row(_ decision: LeadDecision, dim: Bool) -> some View {
+        let isOpen = openDecisions.contains(decision.id)
+        let toggle = { if isOpen { openDecisions.remove(decision.id) } else { openDecisions.insert(decision.id) } }
+        return VStack(alignment: .leading, spacing: 5) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "signpost.right.fill").font(.system(size: 9)).foregroundStyle(Color.accentColor.opacity(dim ? 0.5 : 1))
+                    .frame(width: 12)
+                Text(DecisionFeed.line(decision, summary: summary(decision))).font(.system(size: 12, weight: dim ? .regular : .medium))
+                    .foregroundStyle(dim ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary)).lineLimit(1)
+                Spacer(minLength: 8)
+                Text(LeadBoard.clock(decision.at)).font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.tertiary).fixedSize()
+            }
+            .contentShape(Rectangle())
+            .onTapGesture(perform: toggle)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint(isOpen ? "Hides the decision" : "Shows the whole decision and why")
+            if isOpen {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(decision.text).font(.system(size: 11.5, weight: .medium)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    if !decision.why.isEmpty {
+                        Text(decision.why).font(.system(size: 11.5)).foregroundStyle(.secondary).textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.leading, 18).padding(.bottom, 4)
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 7).fill(isOpen ? Color.accentColor.opacity(0.07) : Color.clear))
+    }
+}
+
+/// The Team tab as the window shows it: `LeadTeamView` with the plain-language lines, asked for every few seconds
+/// while it's on screen.
+struct LeadTeamPane: View {
+    let root: String
+    let board: LeadBoard
+    let decisions: [LeadDecision]
+    let seen: [String: MemberSeen]
+    let open: (String) -> Void
+    let answer: (LeadQuestion, String) -> Void
+    let notices: [String: String]
+    @ObservedObject var summaries: TeamSummaryModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    private let timer = Timer.publish(every: 5, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        LeadTeamView(root: root, board: board, seen: seen, open: open, answer: answer, notices: notices, decisions: decisions,
+                     summary: { summaries.line($0) }, decisionSummary: { summaries.line($0) })
+            .onAppear(perform: request)
+            .onReceive(timer) { _ in request() }
+    }
+
+    private func request() {
+        let recent = DecisionFeed.split(decisions, now: Date().timeIntervalSince1970, reduceMotion: reduceMotion).recent.map(\.decision)
+        summaries.request(rows: TeamRows.rows(board, seen: seen), decisions: recent)
+    }
+}

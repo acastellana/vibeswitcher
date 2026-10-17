@@ -103,6 +103,13 @@ struct GeneralSettings: View {
                     .disabled(!preferences.sidebarMode)
                 Toggle("Minimize a session's window when pausing it", isOn: $preferences.minimizeOnPause)
             }
+            Section {
+                Toggle("Summarize what each agent is doing with AI", isOn: $preferences.aiSummaries)
+            } header: {
+                Text("Project lead")
+            } footer: {
+                SettingsFooter("The Team tab says in plain words what each task's agent is doing and what long decisions mean, written by a small Claude model (claude -p with haiku, no tools) from the task's title, checkpoints and last steps: at most every 3 minutes per task, while the tab is open. Off, it shows the latest checkpoint or activity.")
+            }
             Section("Notifications") {
                 LabeledContent("Permission") {
                     HStack {

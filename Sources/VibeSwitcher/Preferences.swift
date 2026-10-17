@@ -41,12 +41,14 @@ final class Preferences: ObservableObject {
     }
     /// Show the window when VibeSwitcher starts.
     @Published var openWindowAtLaunch: Bool { didSet { defaults.set(openWindowAtLaunch, forKey: "openWindowAtLaunch") } }
+    /// The Team view says what each agent is doing in plain words, written by a small model (headless `claude -p`).
+    @Published var aiSummaries: Bool { didSet { defaults.set(aiSummaries, forKey: "aiSummaries") } }
 
     /// `defaults` and `presetsFile` are for tests and offscreen renders; the app uses the standard ones.
     init(defaults: UserDefaults = .standard, presetsFile: URL = VibePaths.presetsFile) {
         self.defaults = defaults
         self.presetsFile = presetsFile
-        defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true, "playSound": true, "notifyReminders": true, "minimizeOnPause": true, "sidebarAutoHide": true,
+        defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true, "playSound": true, "notifyReminders": true, "minimizeOnPause": true, "sidebarAutoHide": true, "aiSummaries": true,
                                      "claudeCommand": "claude", "codexCommand": "codex"])
         notifyNeedsInput = defaults.bool(forKey: "notifyNeedsInput")
         notifyDone = defaults.bool(forKey: "notifyDone")
@@ -67,6 +69,7 @@ final class Preferences: ObservableObject {
         appearance = defaults.data(forKey: "terminalAppearance")
             .flatMap { try? JSONDecoder().decode(TerminalAppearance.self, from: $0) } ?? TerminalAppearance()
         openWindowAtLaunch = defaults.bool(forKey: "openWindowAtLaunch")
+        aiSummaries = defaults.bool(forKey: "aiSummaries")
     }
 
     func command(for agent: Agent) -> String {
