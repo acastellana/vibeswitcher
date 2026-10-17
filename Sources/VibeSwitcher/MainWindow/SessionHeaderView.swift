@@ -72,7 +72,7 @@ struct SessionHeaderView: View {
         if row.hostID != nil {
             if actions.isLive(row) {
                 Button { actions.endSession(row) } label: { Image(systemName: "stop.circle") }
-                    .help("End this session (⌘W)")
+                    .help("End this session… (⇧⌘⌫)")
             } else {
                 if actions.canResume(row) {
                     Button { actions.resume(row) } label: { Image(systemName: "arrow.clockwise") }

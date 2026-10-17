@@ -636,16 +636,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
 
     private func endSession(_ row: WindowRow) {
         guard let id = row.hostID else { return }
-        if let session = row.session, [.working, .needsInput, .background].contains(session.status) {
+        let live = hostClient.sessions.first { $0.id == id }?.isLive ?? (row.session != nil)
+        if let question = Self.endSessionQuestion(row, live: live) {
             let alert = NSAlert()
-            alert.messageText = "End “\(session.displayName)”?"
-            alert.informativeText = "\(session.agent.displayName) is \(session.status.label.lowercased()). Ending the session stops it, like closing its Terminal tab."
-            alert.addButton(withTitle: "End Session")
+            alert.messageText = question.message
+            alert.informativeText = question.detail
+            alert.addButton(withTitle: "End Session").hasDestructiveAction = true
             alert.addButton(withTitle: "Cancel")
             NSApp.activate()
             guard alert.runModal() == .alertFirstButtonReturn else { return }
         }
         hostClient.kill(id)
+    }
+
+    /// What End Session… asks first. Always asked, idle or not, unless the session has ended already (nothing left
+    /// to stop then).
+    static func endSessionQuestion(_ row: WindowRow, live: Bool) -> (message: String, detail: String)? {
+        guard live else { return nil }
+        let state = row.session.map { "\($0.agent.displayName) is \($0.status.label.lowercased()). " } ?? ""
+        return ("End “\(row.session?.displayName ?? row.title)”?",
+                state + "Ending the session stops it and whatever runs in it, like closing its Terminal tab.")
     }
 
     private func resumeCommandLine(for row: WindowRow) -> String? {
