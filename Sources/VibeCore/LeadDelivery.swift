@@ -167,6 +167,12 @@ extension LeadDelivery {
         case .idle, .apiError:
             break
         }
+        // A report for an idle lead isn't typed as it is: the app's wake-up (`LeadWake`) types one short prompt for
+        // all that wait, and the prompt's hook hands them over.
+        if case .system = sender {
+            try post()
+            return .queued
+        }
         guard let screen, let typeInto, let shown = screen() else {
             try post()
             return .queued
@@ -201,5 +207,109 @@ extension HostCall {
             return nil
         default: return nil
         }
+    }
+}
+
+/// Waking an idle lead when reports come in (a worker done or blocked, a verdict, the witness's news). They wait
+/// in its inbox, and its hooks hand them over with its next prompt or step; an idle lead takes no step, so
+/// VibeSwitcher types one short prompt that says what came in and asks it to call status. The reports themselves
+/// still arrive through the prompt's hook (and status), not in the prompt. Reports close together wake it once
+/// (`debounce`), only between turns, only into an empty box (Claude's dim suggestion counts as empty), and no new
+/// wake-up goes in until the lead has taken one of the reports since the last (a turn ran).
+public struct LeadWake: Equatable, Sendable {
+    /// Quiet this long after the last report before waking (more may follow)…
+    public static let debounce: TimeInterval = 5
+    /// …but no longer than this after the first, while they keep coming.
+    public static let longest: TimeInterval = 8
+    /// Reports waiting this long are shown on the lead's strip (it couldn't be woken: your draft, a dialog).
+    public static let shownAfter: TimeInterval = 120
+
+    /// The reports the last wake-up was typed for; while all of them still wait, the lead hasn't taken a turn.
+    public private(set) var typedFor: Set<String> = []
+
+    public init() {}
+
+    public enum Step: Equatable, Sendable {
+        /// Nothing to do: no reports, a wake-up in flight, or the lead gets them otherwise (mid-turn, at a prompt).
+        case none
+        /// More may come: look again then.
+        case later(Double)
+        /// Read the box, and type the wake-up if it's empty (`type`).
+        case ready
+    }
+
+    /// What waits for the lead that a wake-up is for: everything but the user's own words (those are typed as
+    /// they are, see `LeadDelivery.flush`).
+    public static func reports(_ pending: [SteerMessage], agentPid: Int32) -> [SteerMessage] {
+        pending.filter { $0.agentPid == agentPid && $0.from != .user }
+    }
+
+    /// The first half of a try: whether to read the lead's box now.
+    public mutating func step(reports: [SteerMessage], activity: LeadActivity, now: Double) -> Step {
+        let ids = Set(reports.map(\.id))
+        // One of them was taken: its hook ran, so the lead took a turn since the last wake-up.
+        if !typedFor.isEmpty, !typedFor.isSubset(of: ids) { typedFor = [] }
+        guard let first = reports.map(\.at).min(), let last = reports.map(\.at).max(), typedFor.isEmpty,
+              activity.betweenTurns else { return .none }
+        let due = min(last + Self.debounce, first + Self.longest)
+        return now >= due ? .ready : .later(due)
+    }
+
+    /// The second half: types the wake-up for the reports waiting now if the box reads empty. Nothing is marked
+    /// delivered (the prompt's hook hands them over). Returns whether it typed.
+    @discardableResult
+    public mutating func type(reports: [SteerMessage], box: LeadDelivery.Box?, typeInto: (String) -> Bool) -> Bool {
+        guard typedFor.isEmpty, !reports.isEmpty, box == .empty,
+              typeInto(LeadDelivery.typed(Self.prompt(reports), from: .system("reports"))) else { return false }
+        typedFor = Set(reports.map(\.id))
+        return true
+    }
+
+    /// Both halves at once, for a screen read on the spot.
+    @discardableResult
+    public mutating func tick(reports: [SteerMessage], activity: LeadActivity, screen: () -> LeadDelivery.Screen?,
+                              typeInto: (String) -> Bool, now: Double) -> Step {
+        let step = step(reports: reports, activity: activity, now: now)
+        if step == .ready { type(reports: reports, box: screen().map(LeadDelivery.box(in:)), typeInto: typeInto) }
+        return step
+    }
+
+    /// How many reports the strip shows as waiting: those older than `shownAfter`, all of them then.
+    public static func waiting(_ reports: [SteerMessage], now: Double) -> Int {
+        guard let first = reports.map(\.at).min(), now - first >= shownAfter else { return 0 }
+        return reports.count
+    }
+
+    /// "2 new reports (verifier phone-and-remote passed; worker x blocked). Call status."
+    public static func prompt(_ reports: [SteerMessage]) -> String {
+        let named = reports.prefix(3).map(short).joined(separator: "; ")
+        let more = reports.count > 3 ? "; \(reports.count - 3) more" : ""
+        let count = reports.count == 1 ? "1 new report" : "\(reports.count) new reports"
+        return "\(count) (\(named)\(more)). Call status."
+    }
+
+    /// A report in a few words: who, and what became of it.
+    static func short(_ report: SteerMessage) -> String {
+        let text = report.text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        let said: [(String, String)] = [
+            ("says it's done", "done"), ("is blocked", "blocked"), ("asks", "asks"), ("is waiting for input", "waits for input"),
+            ("stopped mid-", "stopped on an API error"), ("stopped without", "stopped"), ("ended", "ended"),
+        ]
+        for role in ["worker", "verifier"] {
+            let opening = "The \(role) on "
+            guard text.hasPrefix(opening) else { continue }
+            let rest = text.dropFirst(opening.count)
+            guard let space = rest.firstIndex(of: " ") else { break }
+            let after = rest[rest.index(after: space)...]
+            if let match = said.first(where: { after.hasPrefix($0.0) }) { return "\(role) \(rest[..<space]) \(match.1)" }
+        }
+        if text.hasPrefix("The audit of "), let space = text.dropFirst(13).firstIndex(of: " ") {
+            let slug = text.dropFirst(13)[..<space]
+            return "verifier \(slug) " + (text[space...].hasPrefix(" passed") ? "passed" : "failed")
+        }
+        let about: String
+        if case .system(let name) = report.from { about = name } else if case .lead(let name) = report.from { about = name } else { about = "" }
+        let clipped = text.count > 60 ? String(text.prefix(60)) + "…" : text
+        return about.isEmpty ? clipped : "\(about): \(clipped)"
     }
 }
