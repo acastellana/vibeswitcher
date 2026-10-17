@@ -301,11 +301,19 @@ final class FakeUpstream: @unchecked Sendable {
 
     func start() async -> UInt16 {
         await withCheckedContinuation { continuation in
-            var resumed = false
+            // Answered once: when it's ready, or (a port it can't have) when it fails, which would otherwise
+            // leave the test waiting forever.
+            let answer = Once()
             listener.stateUpdateHandler = { [listener] state in
-                guard case .ready = state, !resumed else { return }
-                resumed = true
-                continuation.resume(returning: listener.port!.rawValue)
+                switch state {
+                case .ready: answer.run { continuation.resume(returning: listener.port!.rawValue) }
+                case .failed(let error):
+                    answer.run {
+                        Issue.record("The fake dev server couldn't listen: \(error)")
+                        continuation.resume(returning: 0)
+                    }
+                default: break
+                }
             }
             listener.newConnectionHandler = { [weak self] connection in
                 guard let self else { return }
@@ -364,6 +372,30 @@ final class FakeUpstream: @unchecked Sendable {
             if done { connection.cancel() } else { self?.echo(connection) }
         }
     }
+}
+
+/// Runs a body the first time only, from any thread.
+final class Once: @unchecked Sendable {
+    private let lock = NSLock()
+    private var done = false
+
+    func run(_ body: () -> Void) {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !done else { return }
+        done = true
+        body()
+    }
+}
+
+/// Whether `condition` holds within `timeout` seconds, checked every 50 ms.
+func until(timeout: TimeInterval = 10, _ condition: () -> Bool) async -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while Date() < deadline {
+        if condition() { return true }
+        try? await Task.sleep(nanoseconds: 50_000_000)
+    }
+    return condition()
 }
 
 /// Sends `request` to 127.0.0.1:`port`; returns everything received until the server closes.
@@ -512,9 +544,15 @@ struct PreviewProxyTests {
         let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstreamPort)", port: Int(upstreamPort))
         let (proxy, port) = try await startProxy(target: target)
         defer { proxy.stop(); upstream.stop() }
-        _ = await exchange(port: port, "GET /slow HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n", timeout: 1)   // gives up after 1 s
-        try await Task.sleep(nanoseconds: 1_000_000_000)
-        #expect(upstream.closed == 1)
+        // The client gives up once the request has reached the dev server: after a fixed second, on a busy Mac,
+        // it might not have yet, and then there's no connection there to release.
+        let client = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+        client.start(queue: DispatchQueue(label: "abandoning-client"))
+        client.send(content: Data("GET /slow HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n".utf8), completion: .contentProcessed { _ in })
+        #expect(await until { upstream.recorded.count == 1 })
+        client.cancel()
+        // Released long before the dev server would answer (30 s).
+        #expect(await until { upstream.closed == 1 })
     }
 
     @Test func ticketSetsTheSlotCookieAndRedirects() async throws {
