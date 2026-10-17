@@ -50,6 +50,11 @@ It never logged "answered again": the process was gone between 16:39:12 and 16:3
 [`runtime-data/hang-watch.txt`](runtime-data/hang-watch.txt). The watchdog's state dump
 ([`hang-20261017-162614.log`](runtime-data/hang-20261017-162614.log)) shows: window key and visible at 1728×1014,
 `showsChat=true terminalHidden=true`, chat `state=ready entries=62 items=30 shownLimit=120 atBottom=false`.
+**This is a recurrence.** The earlier investigation of today's hang records found exactly one real freeze, at
+10:21 on an older build, and called its cause a "chat layout storm" that is still unexplained. It concluded that
+"since 10:48 the main thread hasn't been stuck for over 2 seconds". That held until 16:26 on the current build
+(1792239825, which includes the e992e0a watchdog fix), so the storm survived the hang fixes. The 10:21 record
+predates the oldest line in today's `app.log` (10:47:58) and was not seen directly by this evaluation.
 CPU went from 13 % to 106 % in the 16:26:30 sample. RSS moved 146 → 275 → 308 MB, then swung between 324 and
 731 MB: something is allocating and freeing furiously in a loop.
 
@@ -211,9 +216,9 @@ MALLOC_LARGE (empty) 26.8 MB swapped. For comparison, the session host is at 42.
 `attached terminals=3`. Check whether hidden terminals (`pane.view.isHidden`) still hold full-size backing
 surfaces. Re-measure with the window closed.
 
-### R9 (P3). Hang history is lost, and the one unexplained hang can't be analysed
+### R9 (P3). Hang records were deleted by hand, so only the app.log lines remain
 
-**Evidence.** `app.log` names six hang reports before this session:
+**Evidence.** `app.log` names seven hang reports before this session:
 
 | when (local) | length | notes |
 |---|---|---|
@@ -222,12 +227,20 @@ surfaces. Re-measure with the window closed.
 | 12:39:06 | 898.3 s | false, as above |
 | 12:54:50 | 898.6 s | false, as above |
 | 13:10:35 | 553.0 s | false, as above (the ~15 min pattern) |
-| 13:24:03 | **5.8 s** | **unexplained, likely real**; no chat or window breadcrumb right before it |
+| 13:24:03 | 5.8 s | ambiguous: the main thread was already idle when sampled, so it can't be told apart from a short nap |
 | 13:59:40 | 899.1 s | false, as above |
 
-None of the `hang-*.txt/.log` files exist any more. `debug/` was recreated at 14:22, apparently while e992e0a was
-being tested, so the only possibly-real hang before today's (13:24:03, 5.8 s) has no stack. Since the fixed build
-launched at 14:23:46 there were no false reports. Other details:
+According to the investigation behind e992e0a, all six non-bench records were false or unprovable. The five
+~15-min ones were only noticed at their end: the 4 Hz checker had been frozen too, so the whole process had been
+suspended. The 13:24 one had an idle main thread by the time it was sampled. All six showed the same state: window
+open but not key, a vibeswitcher terminal selected, chat off, so nothing was being drawn. The six files were then
+deleted on purpose so they wouldn't mislead; only their `app.log` lines remain, and this evaluation could not
+re-check them. Since the fixed build launched at 14:23:46 there were no false reports. The next record, 16:26
+(R1), is real. Other details:
+
+- **The watchdog cannot tell a short nap from a short real stall.** The 13:24 record shows that a 2–6 s stall with
+  an idle main thread at sampling time stays ambiguous, and the e992e0a fix only handles the case where the checker
+  itself was frozen.
 
 - The `.txt`/`.log` hang files are created 0644, while `app.log` is 0600 and the folder is 0700.
 - The "stuck since" time is written in UTC (`14:26:14 +0000`) next to local-time breadcrumbs (`16:26:16.423`).
@@ -314,7 +327,7 @@ list varies by more than 2×.
 7. **R7 (P2)**: the sidebar's 5 Hz poll plus a global mouse monitor. Use tracking areas.
 8. **R8 (P2)**: 296 MB footprint. Release backing surfaces for detached or hidden terminals, and measure with
    the window closed.
-9. **R9 + R12 (P3)**: keep hang evidence in `app.log`, find the 5.8 s 13:24 hang, and make `--chat-bench`
+9. **R9 + R12 (P3)**: keep a stack summary in `app.log` so records survive cleanup, and make `--chat-bench`
    cover the paths that actually hang.
 10. **R10 + R11 (P3)**: make the hook honour `$HOME`, ignore unknown events, and prune lock files.
 
