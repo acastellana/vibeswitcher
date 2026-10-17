@@ -52,6 +52,8 @@ public protocol LeadRuntime: AnyObject {
     func transcript(of session: String) -> String?
     /// The agent this tool server belongs to (its parent process).
     func currentAgent() -> LeadAgent?
+    /// That agent process is still the one running on its terminal.
+    func isRunning(_ agent: LeadAgent) -> Bool
 }
 
 /// The project lead's tools, and the few that workers and verifiers get, over the board and the runtime.
@@ -61,6 +63,8 @@ public final class LeadToolset: MCPToolset {
     let taskID: String?
     let runtime: LeadRuntime
     let store: BoardStore
+    /// How long cleanup waits for a task's sessions to end (the host hangs up, then kills after 5 s).
+    var stopWait: TimeInterval = 8
 
     public init(role: LeadLaunch.Role, root: String, task: String?, runtime: LeadRuntime) {
         self.role = role
@@ -373,7 +377,20 @@ public final class LeadToolset: MCPToolset {
         guard task.status == .done || force else {
             throw Problem(text: "\(slug) isn't merged. Use force: true to abandon its work.")
         }
-        [task.worker, task.verifier].compactMap { $0 }.forEach(runtime.kill)
+        let sessions = [task.worker, task.verifier].compactMap { $0 }
+        sessions.forEach(runtime.kill)
+        // Not under a session that's still writing there (its next write would leave a stray folder behind).
+        let deadline = Date().addingTimeInterval(stopWait)
+        var running = sessions
+        while true {
+            let live = Set(runtime.sessions().filter(\.live).map(\.id))
+            running = sessions.filter(live.contains)
+            guard !running.isEmpty, Date() < deadline else { break }
+            usleep(200_000)
+        }
+        guard running.isEmpty else {
+            throw Problem(text: "\(slug)'s sessions haven't ended yet; cleanup again in a moment.")
+        }
         // Merged work is in main; leftovers in the worktree (build output) can go. Abandoned work goes only on request.
         try Worktrees.remove(root: root, slug: slug, force: true)
         try store.update { board in
@@ -412,11 +429,17 @@ public final class LeadToolset: MCPToolset {
 
     // MARK: Worker and verifier
 
-    private func tellLead(_ text: String, about: String) throws {
+    /// False when no lead is running to tell (it ended; a new one reads the board when it starts).
+    private func tellLead(_ text: String, about: String) throws -> Bool {
         let board = store.load()
-        guard let pid = board.leadPid, let tty = board.leadTTY else { throw Problem(text: "There's no lead to tell.") }
-        _ = try runtime.steer(.agent(LeadAgent(pid: pid, tty: tty, session: board.leadSession)), from: .system(about), text: text)
+        guard let pid = board.leadPid, let tty = board.leadTTY else { return false }
+        let lead = LeadAgent(pid: pid, tty: tty, session: board.leadSession)
+        guard runtime.isRunning(lead) else { return false }
+        _ = try runtime.steer(.agent(lead), from: .system(about), text: text)
+        return true
     }
+
+    private static let noLead = " (There's no lead running right now; it's on the board, and the next lead picks it up.)"
 
     private func report(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
@@ -431,14 +454,17 @@ public final class LeadToolset: MCPToolset {
         let text = done
             ? "The worker on \(slug) says it's done: \(summary)\nRun audit(\(slug)); only the verifier's report counts."
             : "The worker on \(slug) is blocked: \(summary)"
-        try tellLead(text, about: "worker \(slug)")
-        return MCPToolResult(text: done ? "Reported. A verifier will check your branch; stay available for fixes." : "Reported. The lead will get back to you.")
+        let told = try tellLead(text, about: "worker \(slug)")
+        return MCPToolResult(text: (done ? "Reported. A verifier will check your branch; stay available for fixes." : "Reported. The lead will get back to you.")
+                             + (told ? "" : Self.noLead))
     }
 
     private func askLead(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
         guard let question = arguments["question"] as? String, !question.isEmpty else { throw Problem(text: "Ask something.") }
-        try tellLead("The worker on \(slug) asks: \(question)\nAnswer with message(\(slug), …).", about: "worker \(slug)")
+        guard try tellLead("The worker on \(slug) asks: \(question)\nAnswer with message(\(slug), …).", about: "worker \(slug)") else {
+            throw Problem(text: "There's no lead running to ask. Decide what you can within your contract, or report blocked.")
+        }
         return MCPToolResult(text: "Asked the lead. Keep working; the answer arrives as a message.")
     }
 
@@ -460,8 +486,8 @@ public final class LeadToolset: MCPToolset {
         let text = evidence.passes
             ? "The audit of \(slug) passed (complete, clean): \(evidence.summary)\nmerge(\(slug)) when you're ready."
             : "The audit of \(slug) did not pass (\(completion.rawValue), \(integrity.rawValue)): \(evidence.summary)\nSend the worker the findings with message, or re-plan the task."
-        try tellLead(text, about: "verifier \(slug)")
-        return MCPToolResult(text: "Verdict recorded. You're done; the lead takes it from here.")
+        let told = try tellLead(text, about: "verifier \(slug)")
+        return MCPToolResult(text: "Verdict recorded. You're done; the lead takes it from here." + (told ? "" : Self.noLead))
     }
 
     // MARK: Text

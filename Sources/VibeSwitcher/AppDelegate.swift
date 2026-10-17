@@ -587,6 +587,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         let (pid, startedAt) = (session.pid, session.startedAt)
         // The very process the scan saw, not a later one that got its pid.
         guard SessionIdentity.isRunning(pid: pid, startedAt: startedAt) else { return }
+        // And still between turns right now: the scan can be a second or two old, and a prompt you typed in Terminal
+        // meanwhile would have its turn cut off.
+        guard LeadDelivery.way(for: HookState.load(from: VibePaths.stateFile(tty: session.tty))) == .type else {
+            notifier?.postInfo(title: "Not moved", body: "It started working again; move it once it's done.")
+            return
+        }
         kill(pid, SIGTERM)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             // It has to be gone before the conversation is resumed elsewhere.
@@ -670,8 +676,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             window.center()
             phoneAccessWindow = window
         }
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
         phoneAccessWindow?.makeKeyAndOrderFront(nil)
+        phoneAccessWindow?.orderFrontRegardless()
     }
 
     func popoverDidClose(_ notification: Notification) {

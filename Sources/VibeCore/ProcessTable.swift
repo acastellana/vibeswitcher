@@ -35,15 +35,25 @@ public enum ProcessTable {
         return name
     }
 
-    public static func snapshot() -> [Int32: ProcInfo] {
+    public static func snapshot() -> [Int32: ProcInfo] { trySnapshot() ?? [:] }
+
+    /// Every process; nil when the table couldn't be read (not "no processes": callers mustn't act on that as if
+    /// every session had ended).
+    public static func trySnapshot() -> [Int32: ProcInfo]? {
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
-        var size = 0
-        guard sysctl(&mib, 4, nil, &size, nil, 0) == 0 else { return [:] }
         let stride = MemoryLayout<kinfo_proc>.stride
-        // The table can grow between the two calls; leave headroom.
-        var buffer = [kinfo_proc](repeating: kinfo_proc(), count: size / stride + 64)
-        size = buffer.count * stride
-        guard sysctl(&mib, 4, &buffer, &size, nil, 0) == 0 else { return [:] }
+        var buffer: [kinfo_proc] = []
+        var size = 0
+        var read = false
+        // The table can grow between asking its size and reading it (a build forking hard): ask again, with more room.
+        for attempt in 0..<5 where !read {
+            var needed = 0
+            guard sysctl(&mib, 4, nil, &needed, nil, 0) == 0 else { return nil }
+            buffer = [kinfo_proc](repeating: kinfo_proc(), count: needed / stride + 64 << attempt)
+            size = buffer.count * stride
+            if sysctl(&mib, 4, &buffer, &size, nil, 0) == 0 { read = true } else if errno != ENOMEM { return nil }
+        }
+        guard read, size > 0 else { return nil }
         var result: [Int32: ProcInfo] = [:]
         for index in 0..<(size / stride) {
             let info = makeInfo(buffer[index])

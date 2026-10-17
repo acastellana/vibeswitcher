@@ -9,6 +9,9 @@ final class FakeRuntime: LeadRuntime {
     var steered: [(target: String, sender: SteerMessage.Sender, text: String)] = []
     var transcripts: [String: String] = [:]
     var me = LeadAgent(pid: 4242, tty: "ttys040", session: "lead-session")
+    var leadRunning = true
+    /// Sessions that don't end when killed.
+    var stubborn: Set<String> = []
 
     let server = "/App/vibeswitcher-mcp"
     func claudeCommand(root: String) -> String { "claude --dangerously-skip-permissions" }
@@ -28,10 +31,11 @@ final class FakeRuntime: LeadRuntime {
         return delivery
     }
     func sessions() -> [LeadSessionInfo] {
-        spawned.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id), status: "working", tty: nil) }
+        spawned.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: "working", tty: nil) }
     }
     func transcript(of session: String) -> String? { transcripts[session] }
     func currentAgent() -> LeadAgent? { me }
+    func isRunning(_ agent: LeadAgent) -> Bool { leadRunning }
 }
 
 struct LeadToolsetTests {
@@ -255,6 +259,38 @@ struct LeadToolsetTests {
         #expect(merged.text.contains("already"))
         held?.release()
         #expect(!call(lead, "merge", ["task": "add-b"]).isError)
+    }
+
+    @Test func aReportWithNoLeadRunningSaysSo() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: runtime)
+        _ = call(lead, "add_task", ["title": "One", "goal": "g", "acceptance": ["a"]])
+        _ = call(lead, "start_worker", ["task": "one"])
+        runtime.leadRunning = false
+        let reported = call(LeadToolset(role: .worker, root: root, task: "one", runtime: runtime), "report", ["status": "done", "summary": "x"])
+        #expect(!reported.isError)
+        #expect(reported.text.contains("no lead"))
+        #expect(runtime.steered.isEmpty)
+        // It's on the board for the next lead.
+        #expect(BoardStore(root: root).load().task("one")?.status == .review)
+    }
+
+    @Test func cleanupWaitsForItsSessionsToEnd() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: runtime)
+        lead.stopWait = 0.3
+        _ = call(lead, "add_task", ["title": "One", "goal": "g", "acceptance": ["a"]])
+        _ = call(lead, "start_worker", ["task": "one"])
+        runtime.stubborn = ["session-1"]
+        // Its worker is still writing there: the worktree isn't removed under it.
+        let cleaned = call(lead, "cleanup", ["task": "one", "force": true])
+        #expect(cleaned.isError)
+        #expect(FileManager.default.fileExists(atPath: Worktrees.path(root: root, slug: "one")))
+        runtime.stubborn = []
+        #expect(!call(lead, "cleanup", ["task": "one", "force": true]).isError)
+        #expect(!FileManager.default.fileExists(atPath: Worktrees.path(root: root, slug: "one")))
     }
 }
 

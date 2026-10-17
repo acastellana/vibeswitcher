@@ -29,3 +29,15 @@ struct TerminalInputTests {
         #expect(TerminalInput.isEmpty("Enter to select · Esc to cancel") == false)
     }
 }
+
+struct PaletteDecodingTests {
+    @Test func aShortPaletteIsFilledToSixteenColors() throws {
+        let json = "{\"foreground\":\"#FFFFFF\",\"background\":\"#000000\",\"cursor\":\"#FFFFFF\",\"selection\":\"#333333\",\"ansi\":[\"#111111\",\"#222222\"]}"
+        let palette = try JSONDecoder().decode(Palette.self, from: Data(json.utf8))
+        #expect(palette.ansi.count == 16)
+        #expect(Array(palette.ansi.prefix(2)) == ["#111111", "#222222"])
+        let many = Array(repeating: "\"#010101\"", count: 20).joined(separator: ",")
+        let long = "{\"foreground\":\"#FFFFFF\",\"background\":\"#000000\",\"cursor\":\"#FFFFFF\",\"selection\":\"#333333\",\"ansi\":[" + many + "]}"
+        #expect(try JSONDecoder().decode(Palette.self, from: Data(long.utf8)).ansi.count == 16)
+    }
+}

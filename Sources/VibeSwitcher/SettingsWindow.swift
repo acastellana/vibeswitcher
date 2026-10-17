@@ -29,6 +29,8 @@ final class SettingsWindowController: NSWindowController {
         selection.tab = tab
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+        // Up front even when macOS doesn't make the app active (opened from the command line, at login).
+        window?.orderFrontRegardless()
         NSApp.activate()
     }
 }

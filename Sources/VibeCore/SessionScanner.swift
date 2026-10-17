@@ -22,11 +22,16 @@ public final class SessionScanner {
     /// Decoded state files by path, re-read only when their modification date changes.
     private var stateCache: [String: (modified: Date, state: HookState)] = [:]
 
+    /// The last scan, for when the process table can't be read.
+    private var last: [RawSession] = []
+
     public init() {}
 
     /// Finds every `claude`/`codex` process attached to a terminal, one session per TTY.
     public func scan(now: Date = Date()) -> [RawSession] {
-        let procs = ProcessTable.snapshot()
+        // Unreadable this time: keep what was seen (an empty table would look like every session ended, and their
+        // hook state would be deleted).
+        guard let procs = ProcessTable.trySnapshot() else { return last }
         var byTTY: [String: [ProcInfo]] = [:]
         for proc in procs.values where proc.agent != nil {
             guard let tty = proc.tty else { continue }
@@ -53,6 +58,7 @@ public final class SessionScanner {
         }
         cwdCache = cwdCache.filter { procs[$0.key] != nil }
         projectCache = projectCache.filter { procs[$0.key] != nil }
+        last = sessions
         return sessions
     }
 

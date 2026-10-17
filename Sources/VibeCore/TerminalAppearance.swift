@@ -92,6 +92,19 @@ public struct Palette: Codable, Equatable, Sendable {
         self.ansi = ansi
     }
 
+    enum CodingKeys: String, CodingKey { case foreground, background, cursor, selection, ansi }
+
+    /// Always 16 ANSI colors (an edited or older settings file can have fewer, and views index all 16).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        foreground = try c.decode(String.self, forKey: .foreground)
+        background = try c.decode(String.self, forKey: .background)
+        cursor = try c.decode(String.self, forKey: .cursor)
+        selection = try c.decode(String.self, forKey: .selection)
+        let colors = Array(try c.decode([String].self, forKey: .ansi).prefix(16))
+        ansi = colors + Self.standardANSI.dropFirst(colors.count)
+    }
+
     /// Terminal.app's basic colors.
     static let standardANSI = ["#000000", "#C23621", "#25BC24", "#ADAD27", "#492EE1", "#D338D3", "#33BBC8", "#CBCCCD",
                                "#818383", "#FC391F", "#31E722", "#EAEC23", "#5833FF", "#F935F8", "#14F0F0", "#E9EBEB"]
