@@ -79,6 +79,7 @@ enum ChatBench {
             last = now
             if updates, chat.state == .ready { chat.objectWillChange.send() }
             probe.sample()
+            probe.note(position: chat.atBottom ? "end" : ChatWindow.anchor(tops: chat.rowTops, visibleTop: chat.visibleTop) ?? "-")
             Watchdog.beat(layouts: host.layouts)
         }
         RunLoop.main.add(beat, forMode: .common)
@@ -149,8 +150,8 @@ enum ChatBench {
             getrusage(RUSAGE_SELF, &usage)
             let cpu = Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1e6 + Double(usage.ru_stime.tv_sec) + Double(usage.ru_stime.tv_usec) / 1e6
             print("t=\(second)s cpu=\(String(format: "%.1f", cpu))s state=\(chat.state) entries=\(chat.log.entries.count) items=\(chat.items.count) "
-                + "shown=\(min(chat.items.count, chat.shownLimit)) worst stall=\(String(format: "%.2f", worst))s \(probe.summary()) "
-                + "atEnd=\(chat.atBottom) top=\(Int(chat.visibleTop)) rows=\(chat.rowTops.count) anchor=\(ChatWindow.anchor(tops: chat.rowTops, visibleTop: chat.visibleTop) ?? "-")")
+                + "shown=\(min(chat.items.count, chat.shownLimit)) atBottom=\(chat.atBottom) top=\(Int(chat.visibleTop)) rows=\(chat.rowTops.count) "
+                + "anchor=\(ChatWindow.anchor(tops: chat.rowTops, visibleTop: chat.visibleTop) ?? "-") worst stall=\(String(format: "%.2f", worst))s \(probe.summary())")
             fflush(stdout)
             probe.nextSecond()
             worst = 0
@@ -238,6 +239,9 @@ enum ChatBench {
         private var layoutsBefore = 0
         private(set) var heights: [Int] = []
         private var heightsThisSecond: [Int] = []
+        /// Where it showed (the first row on screen, or the end), each time that changed.
+        private var positionsThisSecond: [String] = []
+        private var position = ""
         private var lastChange = Date()
         /// Layout counts at the last few seconds' ends.
         private var layoutsAt: [Int] = []
@@ -265,12 +269,19 @@ enum ChatBench {
             lastChange = Date()
         }
 
+        func note(position: String) {
+            guard position != self.position else { return }
+            self.position = position
+            positionsThisSecond.append(position)
+        }
+
         func summary() -> String {
-            "layouts=\(layouts) heights=\(heightsThisSecond.count) [\(heightsThisSecond.suffix(6).map(String.init).joined(separator: ","))] all=\(heights.count) range=\(range)"
+            "at=[\(positionsThisSecond.suffix(8).joined(separator: ","))] layouts=\(layouts) heights=\(heightsThisSecond.count) [\(heightsThisSecond.suffix(6).map(String.init).joined(separator: ","))] all=\(heights.count) range=\(range)"
         }
 
         func nextSecond() {
             heightsThisSecond = []
+            positionsThisSecond = []
             layoutsAt.append(layouts)
         }
 
