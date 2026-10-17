@@ -77,7 +77,9 @@ struct ChatView: View {
     let choose: (Int, String?) -> Void
     let moveTab: (Int) -> Void
     let resend: (String) -> Void
-    @State private var atBottom = true
+    /// Whether the end is on screen. Held, not observed: the stack's own appear/disappear callbacks set it, and if
+    /// that redrew this view the stack would be laid out again and could flip it back, forever.
+    @State private var bottom = BottomTracker()
     @State private var viewing: ChatImage?
     @State private var didInitialScroll = false
 
@@ -178,20 +180,16 @@ struct ChatView: View {
                         }
                     }
                     Color.clear.frame(height: 1).id("bottom")
-                        .onAppear { atBottom = true; chat.atBottom = true }
-                        .onDisappear { atBottom = false; chat.atBottom = false }
+                        .onAppear { bottom.set(true); chat.atBottom = true }
+                        .onDisappear { bottom.set(false); chat.atBottom = false }
                 }
                 .padding(.horizontal, 22).padding(.vertical, 16)
                 .frame(maxWidth: 900)
                 .frame(maxWidth: .infinity)
             }
             .overlay(alignment: .bottomTrailing) {
-                if !atBottom, chat.state == .ready {
-                    Button { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } } label: {
-                        Label("Latest", systemImage: "arrow.down").font(.system(size: 11.5, weight: .medium))
-                    }
-                    .buttonStyle(.borderedProminent).controlSize(.small).clipShape(Capsule())
-                    .padding(14)
+                if chat.state == .ready {
+                    LatestButton(bottom: bottom) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
                 }
             }
             .onChange(of: chat.state) { _, state in
@@ -209,7 +207,7 @@ struct ChatView: View {
                 }
             }
             .onChange(of: chat.log.entries.count) { _, _ in
-                if atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
+                if bottom.atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
             }
             .onChange(of: chat.scrollToBottomRequests) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
             .onChange(of: current) { _, id in
@@ -223,6 +221,31 @@ struct ChatView: View {
             }
         }
         .sheet(item: $viewing) { image in ImageViewer(image: image) { viewing = nil } }
+    }
+}
+
+/// Whether the chat's end is on screen; only the Latest button watches it.
+final class BottomTracker: ObservableObject {
+    @Published private(set) var atBottom = true
+
+    func set(_ value: Bool) {
+        if atBottom != value { atBottom = value }
+    }
+}
+
+/// Jumps to the end; shown while it's off screen.
+private struct LatestButton: View {
+    @ObservedObject var bottom: BottomTracker
+    let jump: () -> Void
+
+    var body: some View {
+        if !bottom.atBottom {
+            Button(action: jump) {
+                Label("Latest", systemImage: "arrow.down").font(.system(size: 11.5, weight: .medium))
+            }
+            .buttonStyle(.borderedProminent).controlSize(.small).clipShape(Capsule())
+            .padding(14)
+        }
     }
 }
 

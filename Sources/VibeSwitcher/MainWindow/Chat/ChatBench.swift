@@ -37,6 +37,19 @@ enum ChatBench {
             last = now
         }
         RunLoop.main.add(beat, forMode: .common)
+        // VIBESWITCHER_BENCH_SWEEP=N: scrolls N points a frame, end to end and back, like a trackpad.
+        if let step = ProcessInfo.processInfo.environment["VIBESWITCHER_BENCH_SWEEP"].flatMap(Double.init), step > 0 {
+            var direction = -1.0
+            let sweep = Timer(timeInterval: 1.0 / 60, repeats: true) { _ in
+                guard let scroll = Self.scrollView(in: host), let document = scroll.documentView else { return }
+                let height = max(0, document.frame.height - scroll.contentSize.height)
+                var y = scroll.contentView.bounds.origin.y + direction * step
+                if y <= 0 || y >= height { direction = -direction; y = min(max(0, y), height) }
+                scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+                scroll.reflectScrolledClipView(scroll.contentView)
+            }
+            RunLoop.main.add(sweep, forMode: .common)
+        }
         // VIBESWITCHER_BENCH_STALL=1: also checks the hang watchdog (the main thread blocks for 4 s at t=3).
         let stall = ProcessInfo.processInfo.environment["VIBESWITCHER_BENCH_STALL"] == "1"
         if stall {
@@ -49,14 +62,15 @@ enum ChatBench {
             if stall, second == 3 { Breadcrumbs.shared.note("bench: blocking the main thread for 4 s"); sleep(4) }
             chat.poll()
             // A width change (sidebar or inspector toggled, the window dragged): every row is measured again.
-            if second % 2 == 0 {
+            let sweeping = ProcessInfo.processInfo.environment["VIBESWITCHER_BENCH_SWEEP"] != nil
+            if !sweeping, second % 2 == 0 {
                 let started = Date()
                 window.setContentSize(NSSize(width: second % 4 == 0 ? 640 : 1100, height: 900))
                 host.layoutSubtreeIfNeeded()
                 print("  resized to \(Int(window.frame.width)) in \(String(format: "%.2f", Date().timeIntervalSince(started)))s")
             }
             // Scroll like a reader: up to the top, the middle, back to the end.
-            if let scroll = Self.scrollView(in: host), let document = scroll.documentView {
+            if !sweeping, let scroll = Self.scrollView(in: host), let document = scroll.documentView {
                 let height = document.frame.height - scroll.contentSize.height
                 let y = [0, height / 2, height][second % 3]
                 let started = Date()
