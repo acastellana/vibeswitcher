@@ -10,8 +10,20 @@ enum ChatBench {
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
         let chat = ChatModel()
-        let host = NSHostingView(rootView: ChatView(chat: chat, row: nil, live: false, showTerminal: {}, choose: { _, _ in },
-                                                    moveTab: { _ in }, resend: { _ in }))
+        // VIBESWITCHER_BENCH_LIVE=1: as for a session that's working (its live line ticks every second).
+        var row: WindowRow?
+        if ProcessInfo.processInfo.environment["VIBESWITCHER_BENCH_LIVE"] == "1" {
+            var session = Session(tty: "ttys999", agent: .claude, pid: 1, startedAt: Date(), cwd: "/tmp", project: "bench", task: nil,
+                                  status: .working, statusSince: Date().addingTimeInterval(-300), detail: nil, hasHooks: true, inTerminalApp: false)
+            session.activity = "Run tests"
+            session.activitySince = Date().addingTimeInterval(-42)
+            row = WindowRow(content: .agent(session), project: "bench")
+        }
+        let view = ChatView(chat: chat, row: row, live: false, showTerminal: {}, choose: { _, _ in }, moveTab: { _ in }, resend: { _ in })
+        // VIBESWITCHER_BENCH_STACK=1: inside a VStack with a composer-like view below, as the window has it.
+        let host = ProcessInfo.processInfo.environment["VIBESWITCHER_BENCH_STACK"] == "1"
+            ? NSHostingView(rootView: AnyView(VStack(spacing: 0) { view; Text("composer").frame(height: 60) }))
+            : NSHostingView(rootView: AnyView(view))
         let window = NSWindow(contentRect: NSRect(x: -30000, y: -30000, width: 900, height: 900), styleMask: [.borderless],
                               backing: .buffered, defer: false)
         window.contentView = host
@@ -53,7 +65,10 @@ enum ChatBench {
                 host.layoutSubtreeIfNeeded()
                 print("  scrolled to \(Int(y)) of \(Int(height)) in \(String(format: "%.2f", Date().timeIntervalSince(started)))s")
             }
-            print("t=\(second)s state=\(chat.state) items=\(chat.items.count) shown=\(min(chat.items.count, chat.shownLimit)) worst stall=\(String(format: "%.2f", worst))s")
+            var usage = rusage()
+            getrusage(RUSAGE_SELF, &usage)
+            let cpu = Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1e6 + Double(usage.ru_stime.tv_sec) + Double(usage.ru_stime.tv_usec) / 1e6
+            print("t=\(second)s cpu=\(String(format: "%.1f", cpu))s state=\(chat.state) items=\(chat.items.count) shown=\(min(chat.items.count, chat.shownLimit)) worst stall=\(String(format: "%.2f", worst))s")
             fflush(stdout)
             worst = 0
             if second >= seconds { exit(0) }
