@@ -36,6 +36,8 @@ final class SessionStore: ObservableObject {
     // Main-thread only.
     private let launchedAt = Date()
     private var observed: [String: (status: SessionStatus, since: Date)] = [:]
+    /// Hook-less sessions seen mid-turn: only those can be "done" off the title alone.
+    private var turns = TurnWitness()
     private var acknowledged: [String: Date] = [:]
     private var displayed: [String: SessionStatus] = [:]
     /// What each session was asking when last shown, so a new question gets its own banner.
@@ -244,7 +246,9 @@ final class SessionStore: ObservableObject {
             // Claude uses ✳ (idle) and spinners (busy); Codex only shows a braille spinner while busy.
             let activity: TitleActivity = item.agent == .claude ? (parsed?.activity ?? .none)
                 : (parsed?.activity == .busy ? .busy : .none)
-            let resolved = StatusRules.resolve(hook: item.hook, title: activity, now: now.timeIntervalSince1970)
+            let seenBusy = turns.observe(tty: item.tty, pid: item.pid, title: activity)
+            let resolved = StatusRules.resolve(hook: item.hook, title: activity, now: now.timeIntervalSince1970,
+                                               seenBusy: seenBusy)
 
             let since: Date
             if let previous = observed[item.tty], previous.status == resolved {
@@ -341,6 +345,7 @@ final class SessionStore: ObservableObject {
         }
         let live = Set(raw.map(\.tty))
         observed = observed.filter { live.contains($0.key) }
+        turns.prune(liveTTYs: live)
         acknowledged = acknowledged.filter { live.contains($0.key) }
         displayed = displayed.filter { live.contains($0.key) }
         displayedRequest = displayedRequest.filter { live.contains($0.key) }

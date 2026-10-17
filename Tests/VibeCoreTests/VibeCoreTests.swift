@@ -139,7 +139,8 @@ struct StatusRulesTests {
 
     @Test func testNoHookFallsBackToTitle() {
         #expect(StatusRules.resolve(hook: nil, title: .busy, now: 0) == .working)
-        #expect(StatusRules.resolve(hook: nil, title: .idle, now: 0) == .done)
+        #expect(StatusRules.resolve(hook: nil, title: .idle, now: 0, seenBusy: true) == .done)
+        #expect(StatusRules.resolve(hook: nil, title: .idle, now: 0, seenBusy: false) == .idle)
         #expect(StatusRules.resolve(hook: nil, title: .none, now: 0) == .unknown)
     }
 }

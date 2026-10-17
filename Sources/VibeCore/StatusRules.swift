@@ -33,12 +33,16 @@ public enum StatusRules {
     /// Hooks are authoritative, but they miss some transitions: Claude fires no Stop hook when you
     /// press Esc, and resumes on its own after background tasks. The title glyph catches both, but
     /// only once the hook data is a few seconds old, so a fresh hook event always wins.
+    ///
+    /// Without hooks the title is all there is, and ✳ alone can't tell a finished turn from a session that never
+    /// ran one (sitting at the trust prompt or an empty input): `seenBusy` says a spinner was seen first (see
+    /// `TurnWitness`). Only then is it "done"; otherwise it's idle.
     public static func resolve(hook: HookState?, title: TitleActivity, now: Double,
-                               graceSeconds: Double = 4) -> SessionStatus {
+                               graceSeconds: Double = 4, seenBusy: Bool = false) -> SessionStatus {
         guard let hook else {
             switch title {
             case .busy: return .working
-            case .idle: return .done
+            case .idle: return seenBusy ? .done : .idle
             case .none: return .unknown
             }
         }
@@ -61,6 +65,27 @@ public enum StatusRules {
         let isBraille = first.unicodeScalars.first.map { (0x2800...0x28FF).contains($0.value) } ?? false
         if (busyGlyphs.contains(first) || isBraille), trimmed.dropFirst().first == " " { return (.busy, rest) }
         return (.none, trimmed)
+    }
+}
+
+/// Which sessions have been seen mid-turn (a spinner in the title) since this process started on its terminal,
+/// so a title-only ✳ is "done" only after a busy → idle transition was actually observed.
+public struct TurnWitness: Sendable {
+    private var busyPid: [String: Int32] = [:]
+
+    public init() {}
+
+    /// Records what `tty`'s title shows now; returns whether that process has been seen busy.
+    public mutating func observe(tty: String, pid: Int32, title: TitleActivity) -> Bool {
+        // A new process on the terminal starts over.
+        if let seen = busyPid[tty], seen != pid { busyPid[tty] = nil }
+        if title == .busy { busyPid[tty] = pid }
+        return busyPid[tty] == pid
+    }
+
+    /// Forgets terminals that no longer run a session.
+    public mutating func prune(liveTTYs: Set<String>) {
+        busyPid = busyPid.filter { liveTTYs.contains($0.key) }
     }
 }
 
