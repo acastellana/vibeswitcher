@@ -13,8 +13,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     /// Notifications need an app bundle; `swift run` (no bundle) runs without them instead of crashing.
     private lazy var notifier: Notifier? = Bundle.main.bundleIdentifier == nil ? nil : Notifier(preferences: preferences)
     private lazy var phoneAccess = PhoneAccess(store: store)
-    private var phoneAccessWindow: NSWindow?
     private var settingsWindow: SettingsWindowController?
+    /// Hooks, permissions and login item: their live state for the welcome window and Settings.
+    private lazy var setup: SetupModel = {
+        let model = SetupModel(preferences: preferences, system: .live(notifier: notifier))
+        model.onHooksChanged = { [weak self] in self?.store.refreshHookStatus() }
+        return model
+    }()
+    private var welcomeWindow: OnboardingWindowController?
     let windowModel = WindowModel()
     private var mainWindow: MainWindowController?
     private lazy var windowActions = WindowActions(
@@ -92,6 +98,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         terminationSignal = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
         terminationSignal?.setEventHandler { NSApp.terminate(nil) }
         terminationSignal?.resume()
+        // Before the state folder is created below: its absence is part of what makes this a first run.
+        let firstRun = FirstRun.shouldWelcome(
+            defaults: .standard, stateDirExists: FileManager.default.fileExists(atPath: VibePaths.stateDir.path),
+            hooksInstalled: Dictionary(uniqueKeysWithValues: Agent.allCases.map { ($0, HookInstaller.isInstalled(agent: $0)) }))
         HookBinary.sync()
         VibePaths.ensurePrivateDirectories()
         hostClient.connectIfRunning()
@@ -107,8 +117,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 if self?.mainWindow?.window?.isVisible == true { UserDefaults.standard.set(true, forKey: "windowWasOpen") }
             }
         }
-        preferences.setUpLoginItemOnFirstLaunch()
-        notifier?.requestAuthorization()
+        // No permission prompts or login item at launch: the welcome window asks for each, saying why.
+        notifier?.refreshAuthorization()
+        if firstRun { DispatchQueue.main.async { [weak self] in self?.showWelcome(firstRun: true) } }
         notifier?.onOpen = { [weak self] tty in
             guard let self, let session = self.store.sessions.first(where: { $0.tty == tty }) else { return }
             self.open(session, source: "notification")
@@ -139,14 +150,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                                onNewSession: { [weak self] preset, folder in self?.newSession(preset: preset, in: folder) },
                                presetsFor: { [weak self] folder in self?.preferences.presets.presets(for: folder) ?? [] },
                                onEditCommands: { [weak self] in self?.showSettings(tab: .launch) },
-                               onPhoneAccess: { [weak self] in self?.showPhoneAccess() },
                                onPause: { [weak self] in self?.store.pause($0, for: $1) },
                                onResume: { [weak self] in self?.store.resume($0) },
                                onOpenWindow: { [weak self] in
                                    self?.popover.performClose(nil)
                                    self?.showMainWindow()
                                },
-                               onSettings: { [weak self] in self?.showSettings(tab: .general) })
+                               onSettings: { [weak self] in self?.showSettings(tab: .general) },
+                               onAllowNotifications: { [weak self] in self?.setup.allowNotifications() })
         makePopoverContent = { AnyView(view) }
         var sidebarView = view
         sidebarView.isSidebar = true
@@ -156,9 +167,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             onRename: sidebarView.onRename, onResetName: sidebarView.onResetName,
             onNewSession: sidebarView.onNewSession, presetsFor: sidebarView.presetsFor,
             onEditCommands: sidebarView.onEditCommands,
-            onPhoneAccess: sidebarView.onPhoneAccess, onPause: sidebarView.onPause, onResume: sidebarView.onResume,
+            onPause: sidebarView.onPause, onResume: sidebarView.onResume,
             isSidebar: true, onOpenWindow: { [weak self] in self?.showMainWindow() },
-            onSettings: { [weak self] in self?.showSettings(tab: .general) })))
+            onSettings: { [weak self] in self?.showSettings(tab: .general) },
+            onAllowNotifications: sidebarView.onAllowNotifications)))
         // Windows hidden by the earlier sidebar mode (or a crash during it) always come back.
         DispatchQueue.global(qos: .utility).async { SidebarWorkspace.restoreHiddenWindows() }
         // Desktop switched: refresh which session is "here" and show the sidebar for a moment.
@@ -468,12 +480,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     func showSettings(tab: SettingsTab) {
         popover.performClose(nil)
         if settingsWindow == nil {
-            settingsWindow = SettingsWindowController(preferences: preferences) { [weak self] in
-                self?.popoverState.recentProjects.map(\.path) ?? []
-            }
+            settingsWindow = SettingsWindowController(
+                preferences: preferences, setup: setup, phoneAccess: phoneAccess,
+                recentProjects: { [weak self] in self?.popoverState.recentProjects.map(\.path) ?? [] },
+                showWelcome: { [weak self] in self?.showWelcome(firstRun: false) })
         }
         loadRecentProjects()
         settingsWindow?.show(tab: tab)
+    }
+
+    /// The welcome window: on first launch, and from Settings › General.
+    private func showWelcome(firstRun: Bool) {
+        popover.performClose(nil)
+        UserDefaults.standard.set(true, forKey: FirstRun.shownKey)
+        if welcomeWindow == nil { welcomeWindow = OnboardingWindowController(setup: setup, firstRun: firstRun) }
+        welcomeWindow?.show()
     }
 
     /// Debug aid (`VibeSwitcher --capture-window PATH`): each visible window drawn into a PNG (PATH, then
@@ -694,21 +715,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         phoneAccess.shutdown()
     }
 
-    private func showPhoneAccess() {
-        popover.performClose(nil)
-        if phoneAccessWindow == nil {
-            let window = NSWindow(contentRect: .zero, styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            window.title = "Phone Access"
-            window.isReleasedWhenClosed = false
-            window.contentView = NSHostingView(rootView: PhoneAccessView(access: phoneAccess))
-            window.center()
-            phoneAccessWindow = window
-        }
-        NSApp.activate()
-        phoneAccessWindow?.makeKeyAndOrderFront(nil)
-        phoneAccessWindow?.orderFrontRegardless()
-    }
-
     func popoverDidClose(_ notification: Notification) {
         hostingView.rootView = AnyView(EmptyView())
     }
@@ -826,6 +832,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             let problems = HookSetup.installAll()
             DispatchQueue.main.async {
                 self.store.refreshHookStatus()
+                self.setup.refresh()
                 let alert = NSAlert()
                 if problems.isEmpty {
                     alert.messageText = "Hooks installed"

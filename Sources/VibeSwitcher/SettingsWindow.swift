@@ -2,24 +2,32 @@ import AppKit
 import SwiftUI
 import VibeCore
 
-enum SettingsTab: String { case general, launch, terminal }
+/// Raw values are what `--settings TAB` takes.
+enum SettingsTab: String, CaseIterable { case general, agents, phone, launch, terminal }
 
 final class SettingsSelection: ObservableObject {
     @Published var tab: SettingsTab = .general
 }
 
-/// VibeSwitcher › Settings…: General, Launch presets, Terminal.
-final class SettingsWindowController: NSWindowController {
+/// VibeSwitcher › Settings… (⌘,): every preference. The ⚙︎ menu only repeats a few toggles.
+final class SettingsWindowController: NSWindowController, NSWindowDelegate {
+    static let size = CGSize(width: 660, height: 540)
     private let selection = SettingsSelection()
+    private let setup: SetupModel
+    private var watching = false
 
-    init(preferences: Preferences, recentProjects: @escaping () -> [String]) {
-        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 480),
+    init(preferences: Preferences, setup: SetupModel, phoneAccess: PhoneAccess,
+         recentProjects: @escaping () -> [String], showWelcome: @escaping () -> Void) {
+        self.setup = setup
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.size),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Settings"
         window.isReleasedWhenClosed = false
         super.init(window: window)
-        window.contentView = NSHostingView(rootView: SettingsView(preferences: preferences, selection: selection,
-                                                                  recentProjects: recentProjects))
+        window.delegate = self
+        window.contentView = NSHostingView(rootView: SettingsView(preferences: preferences, setup: setup, phoneAccess: phoneAccess,
+                                                                  selection: selection, recentProjects: recentProjects,
+                                                                  showWelcome: showWelcome))
         window.center()
     }
 
@@ -27,45 +35,173 @@ final class SettingsWindowController: NSWindowController {
 
     func show(tab: SettingsTab) {
         selection.tab = tab
+        if !watching { setup.watch(); watching = true }
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         // Up front even when macOS doesn't make the app active (opened from the command line, at login).
         window?.orderFrontRegardless()
         NSApp.activate()
     }
+
+    func windowWillClose(_ notification: Notification) {
+        if watching { setup.unwatch(); watching = false }
+    }
 }
 
 struct SettingsView: View {
     @ObservedObject var preferences: Preferences
+    let setup: SetupModel
+    let phoneAccess: PhoneAccess
     @ObservedObject var selection: SettingsSelection
     let recentProjects: () -> [String]
+    let showWelcome: () -> Void
 
     var body: some View {
         TabView(selection: $selection.tab) {
-            GeneralSettings(preferences: preferences)
+            GeneralSettings(preferences: preferences, setup: setup, showWelcome: showWelcome)
                 .tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsTab.general)
+            AgentsSettings(setup: setup)
+                .tabItem { Label("Agents", systemImage: "waveform.path.ecg") }.tag(SettingsTab.agents)
+            ScrollView { PhoneAccessView(access: phoneAccess).frame(maxWidth: .infinity) }
+                .tabItem { Label("Phone", systemImage: "iphone") }.tag(SettingsTab.phone)
             LaunchSettings(preferences: preferences, recentProjects: recentProjects())
                 .tabItem { Label("Launch", systemImage: "play.rectangle") }.tag(SettingsTab.launch)
             TerminalSettings(preferences: preferences)
                 .tabItem { Label("Terminal", systemImage: "terminal") }.tag(SettingsTab.terminal)
         }
         .padding(20)
-        .frame(width: 640, height: 480)
+        .frame(width: SettingsWindowController.size.width, height: SettingsWindowController.size.height)
     }
 }
 
 struct GeneralSettings: View {
     @ObservedObject var preferences: Preferences
+    @ObservedObject var setup: SetupModel
+    let showWelcome: () -> Void
 
     var body: some View {
         Form {
-            Toggle("Open the window when VibeSwitcher starts", isOn: $preferences.openWindowAtLaunch)
-            Toggle("Launch at login", isOn: Binding(get: { preferences.launchAtLogin },
-                                                    set: { preferences.setLaunchAtLogin($0) }))
-            Text("Window sessions keep running when VibeSwitcher quits or updates. Ended sessions stay listed for a day.")
-                .font(.caption).foregroundStyle(.secondary)
+            Section {
+                Toggle("Open at login", isOn: Binding(get: { preferences.launchAtLogin },
+                                                      set: { preferences.setLaunchAtLogin($0) }))
+                Toggle("Open the window when VibeSwitcher starts", isOn: $preferences.openWindowAtLaunch)
+                LabeledContent("First-run setup") { Button("Show Welcome…", action: showWelcome) }
+            } footer: {
+                Text("Window sessions keep running when VibeSwitcher quits or updates. Ended sessions stay listed for a day.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            Section("Menu bar") {
+                Picker("Order sessions", selection: $preferences.sessionOrder) {
+                    ForEach(SessionOrder.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                Picker("Floating dots panel", selection: $preferences.floatingPanel) {
+                    ForEach(FloatingPanelMode.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+            }
+            Section("Sidebar") {
+                Toggle("Sidebar mode", isOn: $preferences.sidebarMode)
+                Toggle("Auto-hide the sidebar (show it at the right edge)", isOn: $preferences.sidebarAutoHide)
+                    .disabled(!preferences.sidebarMode)
+                Toggle("Minimize a session's window when pausing it", isOn: $preferences.minimizeOnPause)
+            }
+            Section("Notifications") {
+                LabeledContent("Permission") {
+                    HStack {
+                        SetupStatusLabel(status: setup.notificationStatus)
+                        if setup.notifications != .allowed {
+                            Button(setup.notificationButton) { setup.allowNotifications() }.controlSize(.small)
+                        }
+                    }
+                }
+                Toggle("Notify when a session needs input", isOn: $preferences.notifyNeedsInput)
+                Toggle("Notify when a session finishes", isOn: $preferences.notifyDone)
+                Toggle("Play a sound when a session needs input", isOn: $preferences.playSound)
+                Toggle("Remind me about waiting or stuck sessions", isOn: $preferences.notifyReminders)
+            }
         }
         .formStyle(.grouped)
+    }
+}
+
+/// Hooks per agent, Codex's trust of them, and the permissions the Terminal integration needs.
+struct AgentsSettings: View {
+    @ObservedObject var setup: SetupModel
+
+    var body: some View {
+        Form {
+            Section {
+                ForEach(Agent.allCases, id: \.self) { agent in
+                    LabeledContent {
+                        SetupStatusLabel(status: setup.hookStatus(agent))
+                    } label: {
+                        Text(agent.displayName)
+                        Text(Self.tildePath(HookInstaller.configURL(for: agent).path))
+                            .font(.system(.caption, design: .monospaced))
+                    }
+                }
+                HStack {
+                    Button(setup.allHooksInstalled ? "Reinstall Hooks" : "Install Hooks") { setup.installHooks() }
+                    Button("Uninstall") { setup.uninstallHooks() }.disabled(!setup.anyHooksInstalled)
+                    if setup.working == .installing || setup.working == .uninstalling || setup.working == .trusting {
+                        ProgressView().controlSize(.small)
+                    }
+                    Spacer()
+                }
+                .disabled(setup.working != nil)
+                if let outcome = setup.outcome {
+                    Text(outcome.text).font(.caption).foregroundStyle(outcome.failed ? .red : .secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } header: {
+                Text("Hooks")
+            } footer: {
+                Text("Hooks are how sessions report live status. Installing adds VibeSwitcher's entries beside yours; the "
+                     + "first install keeps a copy of each file as …vibeswitcher-backup.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Section {
+                LabeledContent("Trust VibeSwitcher's hooks") {
+                    Button("Trust Now") { setup.trustCodex() }.disabled(setup.working != nil || setup.hooks[.codex] != true)
+                }
+            } header: {
+                Text("Codex")
+            } footer: {
+                Text("Codex skips hooks until they're trusted. Installing trusts them for you (in ~/.codex/config.toml, "
+                     + "like Codex's /hooks screen); do it again here if Codex says they changed.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Section {
+                LabeledContent("Control Terminal") {
+                    HStack {
+                        SetupStatusLabel(status: setup.terminalStatus)
+                        if setup.terminal != .allowed {
+                            Button(setup.terminalButton) { setup.allowTerminal() }.controlSize(.small)
+                                .disabled(setup.working == .askingTerminal)
+                        }
+                    }
+                }
+                LabeledContent("Accessibility") {
+                    HStack {
+                        SetupStatusLabel(status: setup.tabOrderAllowed ? .ok("Allowed") : .pending("Not allowed"))
+                        if !setup.tabOrderAllowed {
+                            Button("Allow…") { setup.allowTabOrder() }.controlSize(.small)
+                        }
+                    }
+                }
+            } header: {
+                Text("Terminal")
+            } footer: {
+                Text("Control Terminal reads tab titles and brings a session's tab to the front. Accessibility lets "
+                     + "the list follow the tab order when sessions share one window.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .formStyle(.grouped)
+    }
+
+    static func tildePath(_ path: String) -> String {
+        let home = NSHomeDirectory()
+        return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
     }
 }
 

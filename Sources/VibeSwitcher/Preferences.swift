@@ -4,9 +4,10 @@ import ServiceManagement
 import UserNotifications
 import VibeCore
 
-/// User-facing toggles, persisted in UserDefaults.
+/// User-facing toggles, persisted in UserDefaults. Every one is in Settings; the ⚙︎ menu repeats a few.
 final class Preferences: ObservableObject {
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
+    private let presetsFile: URL
 
     @Published var notifyNeedsInput: Bool { didSet { defaults.set(notifyNeedsInput, forKey: "notifyNeedsInput") } }
     @Published var notifyDone: Bool { didSet { defaults.set(notifyDone, forKey: "notifyDone") } }
@@ -33,7 +34,7 @@ final class Preferences: ObservableObject {
     }
     /// Launch presets, in ~/.vibeswitcher/presets.json (the first load migrates the two launch commands).
     @Published var presets: LaunchPresets {
-        didSet { try? presets.save(to: VibePaths.presetsFile) }
+        didSet { try? presets.save(to: presetsFile) }
     }
     @Published var appearance: TerminalAppearance {
         didSet { defaults.set(try? JSONEncoder().encode(appearance), forKey: "terminalAppearance") }
@@ -41,7 +42,10 @@ final class Preferences: ObservableObject {
     /// Show the window when VibeSwitcher starts.
     @Published var openWindowAtLaunch: Bool { didSet { defaults.set(openWindowAtLaunch, forKey: "openWindowAtLaunch") } }
 
-    init() {
+    /// `defaults` and `presetsFile` are for tests and offscreen renders; the app uses the standard ones.
+    init(defaults: UserDefaults = .standard, presetsFile: URL = VibePaths.presetsFile) {
+        self.defaults = defaults
+        self.presetsFile = presetsFile
         defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true, "playSound": true, "notifyReminders": true, "minimizeOnPause": true, "sidebarAutoHide": true,
                                      "claudeCommand": "claude", "codexCommand": "codex"])
         notifyNeedsInput = defaults.bool(forKey: "notifyNeedsInput")
@@ -57,7 +61,7 @@ final class Preferences: ObservableObject {
         launchAtLogin = SMAppService.mainApp.status == .enabled
         floatingPanel = FloatingPanelMode(rawValue: defaults.string(forKey: "floatingPanel") ?? "") ?? .automatic
         // Locals, not the @Published properties: those can't be read before init finishes.
-        presets = LaunchPresets.load(from: VibePaths.presetsFile,
+        presets = LaunchPresets.load(from: presetsFile,
                                      claudeCommand: defaults.string(forKey: "claudeCommand") ?? "claude",
                                      codexCommand: defaults.string(forKey: "codexCommand") ?? "codex")
         appearance = defaults.data(forKey: "terminalAppearance")
@@ -68,13 +72,6 @@ final class Preferences: ObservableObject {
     func command(for agent: Agent) -> String {
         let kind: LaunchPreset.Kind = agent == .claude ? .claude : .codex
         return presets.global.first { $0.kind == kind }.flatMap(LaunchPlan.command(for:)) ?? agent.rawValue
-    }
-
-    /// Registers the login item once, on first launch from an app bundle; after that the toggle decides.
-    func setUpLoginItemOnFirstLaunch() {
-        guard Bundle.main.bundlePath.hasSuffix(".app"), !defaults.bool(forKey: "didSetUpLoginItem") else { return }
-        defaults.set(true, forKey: "didSetUpLoginItem")
-        setLaunchAtLogin(true)
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
@@ -139,6 +136,24 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
                 AppStatus.extras["notificationsAllowed"] = allowed
                 if allowed, wasAllowed == false { self.postTest() }
             }
+        }
+    }
+
+    /// The permission as setup shows it: allowed, turned off, or never asked. Doesn't ask.
+    func readAccess(_ done: @escaping (NotificationAccess) -> Void) {
+        center.getNotificationSettings { settings in
+            switch settings.authorizationStatus {
+            case .notDetermined: done(.notAsked)
+            case .authorized, .provisional, .ephemeral: done(settings.alertSetting == .disabled ? .off : .allowed)
+            default: done(.off)
+            }
+        }
+    }
+
+    /// macOS's prompt if it hasn't asked yet (System Settings doesn't list the app before that), else System Settings.
+    func askOrOpenSettings() {
+        readAccess { access in
+            DispatchQueue.main.async { access == .notAsked ? self.requestAuthorization() : Self.openSettings() }
         }
     }
 

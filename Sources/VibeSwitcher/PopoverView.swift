@@ -21,13 +21,14 @@ struct PopoverView: View {
     /// A folder's presets, its default first (nil: other folder).
     var presetsFor: (String?) -> [LaunchPreset] = { _ in LaunchPresets.builtIns().global }
     var onEditCommands: () -> Void = {}
-    var onPhoneAccess: () -> Void = {}
     var onPause: (Session, PauseStore.Duration) -> Void = { _, _ in }
     var onResume: (Session) -> Void = { _ in }
     /// Rendered as the docked sidebar instead of the menu bar popover.
     var isSidebar = false
     var onOpenWindow: () -> Void = {}
     var onSettings: () -> Void = {}
+    /// The "Notifications are off" banner's button: macOS's prompt if it never asked, else System Settings.
+    var onAllowNotifications: () -> Void = { Notifier.openSettings() }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -183,7 +184,7 @@ struct PopoverView: View {
                 Text("Notifications are off, so you won't get a banner when a session needs you.")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button("Turn on…") { Notifier.openSettings() }.controlSize(.small)
+                Button("Turn on…", action: onAllowNotifications).controlSize(.small)
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
         }
@@ -219,28 +220,12 @@ struct PopoverView: View {
             }
             Spacer()
             Menu {
+                // Quick toggles; Settings has these and everything else.
                 Toggle("Notify when a session needs input", isOn: $preferences.notifyNeedsInput)
                 Toggle("Notify when a session finishes", isOn: $preferences.notifyDone)
-                Toggle("Play sound when a session needs input", isOn: $preferences.playSound)
-                Toggle("Remind me about waiting or stuck sessions", isOn: $preferences.notifyReminders)
-                Toggle("Minimize a session's window when pausing it", isOn: $preferences.minimizeOnPause)
                 Toggle("Sidebar mode", isOn: $preferences.sidebarMode)
-                Toggle("Auto-hide sidebar (show at right edge)", isOn: $preferences.sidebarAutoHide)
-                    .disabled(!preferences.sidebarMode)
                 Divider()
-                Picker("Order sessions", selection: $preferences.sessionOrder) {
-                    ForEach(SessionOrder.allCases, id: \.self) { Text($0.label).tag($0) }
-                }
-                Picker("Floating dots panel", selection: $preferences.floatingPanel) {
-                    ForEach(FloatingPanelMode.allCases, id: \.self) { Text($0.label).tag($0) }
-                }
-                Divider()
-                Toggle("Launch at login", isOn: Binding(get: { preferences.launchAtLogin },
-                                                        set: { preferences.setLaunchAtLogin($0) }))
                 Button("Settings…", action: onSettings)
-                Divider()
-                Button("Phone Access…", action: onPhoneAccess)
-                Button("Reinstall hooks", action: onInstallHooks)
                 Button("Quit VibeSwitcher", action: onQuit)
             } label: {
                 Image(systemName: "gearshape")
