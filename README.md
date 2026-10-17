@@ -84,11 +84,20 @@ repository, git-ignored: `.vibeswitcher/board.json` (tasks, questions, updates),
 setup commands, the verifier's model, the lead's branch), `decisions.md` and `progress.md`. The lead sets up
 `workflow.md` itself with its `configure` tool, which changes only those settings' lines and keeps your comments
 and notes; when there's no test command, `status` says so and suggests one from the repository (SwiftPM,
-`package.json`, a Makefile, Cargo, Go), and a merge without one says it ran no tests. Guard rails, not a sandbox:
-the lead and verifiers are denied file edits and git writes, workers pushing, merging, rebasing and switching to
-the lead's branch (Claude Code permission rules); that branch only moves through the lead's merge, which fast-forwards to exactly the
-commit the verifier passed and the tests ran on. Their tools come from `vibeswitcher-mcp`, a tool server bundled
-with the app.
+`package.json`, a Makefile, Cargo, Go), and a merge without one says it ran no tests. Guard rails, not a sandbox
+(the whole team runs as you): each session VibeSwitcher starts for the lead, a worker or a verifier gets a
+capability of its own, bound to that session and kept with the team's records in `~/.vibeswitcher/lead/` (private
+to you, outside the repository), and its tools come from that, so a worker can't run the tool server as the
+verifier or the lead. Only the verifier the lead last started on a task gives its verdict, about the commit it was
+started on. `merge` reads that verdict from there, not from `board.json`; it refuses when the lead's branch was
+moved by anything but its own merges since the lead last left it (starting the lead again takes the branch as it
+is), rebases exactly the audited commit in a worktree no agent works in, runs the test command there and
+fast-forwards to exactly what was tested. Verifiers start without the branch's project settings, hooks and MCP servers, and
+VibeSwitcher doesn't answer Claude's trust question for a branch that changes them. Messages reach the lead quoted
+under a line naming their sender, so a worker's report can't pass for the user's words, and only the app sends as
+the user. Claude Code permission rules add a second layer: the lead and verifiers are denied file edits, shell
+file writes and git writes, workers pushing, merging, rebasing, moving refs and switching to the lead's branch.
+Their tools come from `vibeswitcher-mcp`, a tool server bundled with the app.
 
 New sessions (⊕, ⌘N) start **in the window** by default: VibeSwitcher runs them itself, in a small background
 process (`vibeswitcher-host`) that keeps them going when VibeSwitcher quits, crashes or updates; reopening the

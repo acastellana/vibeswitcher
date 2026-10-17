@@ -137,7 +137,13 @@ public final class LeadToolset: MCPToolset {
         guard let session = member.session else {
             throw Problem(text: "VibeSwitcher is still starting this session; try again in a moment.")
         }
-        guard runtime.currentAgent()?.session == session else {
+        guard let agent = runtime.currentAgent() else {
+            throw Problem(text: "This tool server doesn't run under an agent session VibeSwitcher started. Refused.")
+        }
+        guard let mine = agent.session else {
+            throw Problem(text: "Couldn't tell which session this tool server runs in (the session host didn't say); try again in a moment.")
+        }
+        guard mine == session else {
             throw Problem(text: "This tool server doesn't run in the session VibeSwitcher started for its capability. Refused.")
         }
         return member
