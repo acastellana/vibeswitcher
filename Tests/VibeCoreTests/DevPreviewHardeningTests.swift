@@ -105,7 +105,8 @@ final class ResettingServer: @unchecked Sendable {
     let port: UInt16
     private let socketFD: Int32
 
-    init(reply: Data) throws {
+    /// `gap`: how long after the reply the reset comes.
+    init(reply: Data, gap: TimeInterval = 0.1) throws {
         let fd = socket(AF_INET, SOCK_STREAM, 0)
         var address = sockaddr_in()
         address.sin_family = sa_family_t(AF_INET)
@@ -128,7 +129,7 @@ final class ResettingServer: @unchecked Sendable {
                 received.append(contentsOf: buffer[0..<count])
             }
             _ = reply.withUnsafeBytes { write(client, $0.baseAddress, reply.count) }
-            usleep(100_000)
+            usleep(UInt32(gap * 1_000_000))
             var linger = Darwin.linger(l_onoff: 1, l_linger: 0)
             setsockopt(client, SOL_SOCKET, SO_LINGER, &linger, socklen_t(MemoryLayout<Darwin.linger>.size))
             close(client)
@@ -139,9 +140,12 @@ final class ResettingServer: @unchecked Sendable {
 }
 
 extension PreviewProxyTests {
-    @Test func aDevServerConnectionThatBreaksMidAnswerResetsThePhonesConnection() async throws {
+    /// Reset a moment after the answer, or right after it (then the proxy may see the connection fail before it
+    /// reads the end, as it does on a busy Mac whatever the gap).
+    @Test(arguments: [0.1, 0])
+    func aDevServerConnectionThatBreaksMidAnswerResetsThePhonesConnection(gap: TimeInterval) async throws {
         // No length, not chunked: the end of the connection is the end of the file.
-        let upstream = try ResettingServer(reply: Data("HTTP/1.1 200 OK\r\nContent-Type: text/javascript\r\n\r\nexport const a".utf8))
+        let upstream = try ResettingServer(reply: Data("HTTP/1.1 200 OK\r\nContent-Type: text/javascript\r\n\r\nexport const a".utf8), gap: gap)
         let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstream.port)", port: Int(upstream.port))
         let (proxy, port) = try await startProxy(target: target)
         defer { proxy.stop(); upstream.stop() }

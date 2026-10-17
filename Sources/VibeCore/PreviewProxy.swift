@@ -175,7 +175,10 @@ public final class PreviewProxy: @unchecked Sendable {
         upstreams[ObjectIdentifier(client)] = upstream
         let settled = Flag()
         let fail = { [weak self] in
-            guard !settled.value else { client.cancel(); return }
+            // Once the request is on its way, the answer's side ends the exchange (its pending read fails now):
+            // it resets the phone's connection when the dev server's broke mid-answer, which a clean close here,
+            // when the failed state comes before that read, would hide.
+            guard !settled.value else { upstream.cancel(); return }
             settled.value = true
             upstream.cancel()
             self?.reply(client, Self.page(502, PreviewGate.unreachableMessage(target)))
