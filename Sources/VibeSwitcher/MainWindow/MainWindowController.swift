@@ -159,12 +159,17 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         NSApp.setActivationPolicy(.regular)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
+        // Activation is cooperative (macOS 14+): with no app yielding (at login, after an update, from a hang) the
+        // app isn't made active and its window would open behind the others. Bring the window up regardless; the
+        // first click then activates the app.
+        window?.orderFrontRegardless()
         // Right after becoming a regular app, a polite activate often doesn't take (the app lands last in ⌘-Tab,
         // behind the frontmost one): ask again, firmly, on the next turn of the run loop.
         NSApp.activate()
         DispatchQueue.main.async { [weak self] in
             NSRunningApplication.current.activate(options: [.activateAllWindows])
             self?.window?.makeKeyAndOrderFront(nil)
+            self?.window?.orderFrontRegardless()
         }
         shownID = nil
         showSelection()
