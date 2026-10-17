@@ -33,6 +33,10 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
         panel.backgroundColor = .clear
         panel.hasShadow = true
         panel.delegate = self
+        panel.onClose = { [weak self] in
+            self?.close()
+            window.makeKey()
+        }
         let view = CommandPaletteView(items: items) { [weak self] item in
             self?.close()
             window.makeKey()
@@ -59,7 +63,16 @@ final class CommandPaletteController: NSObject, NSWindowDelegate {
 }
 
 private final class KeyablePanel: NSPanel {
+    /// ⌘W (File › Close Window): borderless, so AppKit would only beep.
+    var onClose: () -> Void = {}
+
     override var canBecomeKey: Bool { true }
+
+    override func performClose(_ sender: Any?) { onClose() }
+
+    override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        menuItem.action == #selector(performClose(_:)) || super.validateMenuItem(menuItem)
+    }
 }
 
 private struct CommandPaletteView: View {

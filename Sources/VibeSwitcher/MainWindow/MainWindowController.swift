@@ -510,6 +510,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             menuItem.state = model.chatShown ? .on : .off
             return model.selectedRow.map { model.chatPath(for: $0) != nil } == true
         case #selector(openInTerminalAction(_:)): return model.selectedRow?.session?.inTerminalApp == true
+        case #selector(findAction(_:)), #selector(findNextAction(_:)), #selector(findPreviousAction(_:)):
+            // Something to search: the conversation, or the terminal's scrollback (not the start page).
+            return model.selectedRow != nil && (model.chatShown || pane.currentView != nil)
+        case #selector(endSessionAction(_:)):
+            return model.selectedRow.map { $0.hostID != nil && actions.isLive($0) } == true
         default: break
         }
         return true

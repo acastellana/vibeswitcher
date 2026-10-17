@@ -243,7 +243,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 self?.windowModel.update(sessions: sessions, hosted: hosted, hostAnswered: state != .connecting)
             }
             .store(in: &cancellables)
-        NSApp.mainMenu = MainMenu.build()
+        MainMenu.install()
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.windowNotification, object: nil,
                                                             queue: .main) { [weak self] note in
             self?.showMainWindow()
