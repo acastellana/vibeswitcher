@@ -47,6 +47,8 @@ struct LeadLaunchTests {
         for rule in ["Bash(git rebase project-lead)", "Bash(git rebase --continue)", "Bash(git merge project-lead)", "Bash(git log:*)"] {
             #expect(allow.contains(rule), "missing \(rule)")
         }
+        // Its git never opens an editor, so `git rebase --continue` needs nothing in front.
+        #expect(settings?["env"] as? [String: String] == ["GIT_EDITOR": "true"])
         let mcp = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.mcpFile))) as? [String: Any]
         let args = ((mcp?["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any])?["args"] as? [String]
         #expect(args == ["--role", "worker", "--root", root, "--task", "add-login"])

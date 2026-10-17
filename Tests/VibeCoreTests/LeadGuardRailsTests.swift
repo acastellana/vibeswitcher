@@ -281,14 +281,26 @@ struct LeadGuardRailsTests: LeadTeamFixture {
 
     // MARK: A worker brings its own branch up to date
 
+    /// A file a session was started with (`--settings`, `--append-system-prompt-file`).
+    func launchFile(_ flag: String, _ name: String, _ runtime: FakeRuntime) throws -> Data {
+        let spawn = try #require(runtime.spawned.last { $0.command.contains("--name '\(name)'") })
+        let range = try #require(spawn.command.range(of: "\(flag) '([^']+)'", options: .regularExpression))
+        return try Data(contentsOf: URL(fileURLWithPath: String(spawn.command[range].dropFirst("\(flag) '".count).dropLast())))
+    }
+
+    func settings(_ name: String, _ runtime: FakeRuntime) throws -> [String: Any] {
+        try #require(try JSONSerialization.jsonObject(with: launchFile("--settings", name, runtime)) as? [String: Any])
+    }
+
     /// The permission rules a session was started with (its `--settings` file).
     func permissions(_ name: String, _ runtime: FakeRuntime) throws -> (allow: [String], deny: [String]) {
-        let spawn = try #require(runtime.spawned.last { $0.command.contains("--name '\(name)'") })
-        let range = try #require(spawn.command.range(of: #"--settings '([^']+)'"#, options: .regularExpression))
-        let path = String(spawn.command[range].dropFirst("--settings '".count).dropLast())
-        let settings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as? [String: Any])
-        let permissions = try #require(settings["permissions"] as? [String: [String]])
+        let permissions = try #require(try settings(name, runtime)["permissions"] as? [String: [String]])
         return (permissions["allow"] ?? [], permissions["deny"] ?? [])
+    }
+
+    /// The environment a session's commands run with (its `--settings` file's `env`).
+    func environment(_ name: String, _ runtime: FakeRuntime) throws -> [String: String] {
+        try settings(name, runtime)["env"] as? [String: String] ?? [:]
     }
 
     /// Whether a `Bash(...)` rule matches a command, as Claude Code's permissions docs say: no `*` matches exactly one
@@ -367,10 +379,42 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         #expect(!rebase.ok)
         try "bee and lead\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
         Git.run(["add", "b.txt"], in: worktree)
-        #expect(Git.run(["-c", "core.editor=true", "rebase", "--continue"], in: worktree).ok)
+        // --continue asks the editor for the message (one that fails stops it); the worker's session has one that
+        // keeps it, so the bare command goes on.
+        #expect(!Shell.run(executable: "/usr/bin/git", args: ["rebase", "--continue"], in: worktree, env: ["GIT_EDITOR": "false"]).ok)
+        let env = try environment("worker-add-b", runtime)
+        #expect(env["GIT_EDITOR"] == "true")
+        #expect(Shell.run(executable: "/usr/bin/git", args: ["rebase", "--continue"], in: worktree, env: env).ok)
         #expect(head(base, root) == baseHead && head("main", root) == mainHead)
         #expect(Git.run(["merge-base", "--is-ancestor", base, "agent/add-b"], in: root).ok)
         #expect(try String(contentsOfFile: worktree + "/b.txt", encoding: .utf8) == "bee and lead\n")
+    }
+
+    @Test func theCommandsTheBriefGivesForARebaseAreTheOnesTheRulesAllow() throws {
+        let root = try repo()
+        Git.run(["branch", "project-lead"], in: root)
+        try BoardStore(root: root).prepare()
+        try "---\nbase_branch: project-lead\n---".write(toFile: root + "/.vibeswitcher/workflow.md", atomically: true, encoding: .utf8)
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]])
+        _ = lead.call("start_worker", ["task": "add-b"])
+        let rules = try permissions("worker-add-b", runtime)
+        // The brief the worker was started with, its "Out of date" part: every command in it, as written.
+        let brief = String(decoding: try launchFile("--append-system-prompt-file", "worker-add-b", runtime), as: UTF8.self)
+        let start = try #require(brief.range(of: "Out of date:")), end = try #require(brief.range(of: "\nDone:"))
+        let part = String(brief[start.lowerBound..<end.lowerBound])
+        let commands = part.matches(of: #/`([^`]+)`/#).map { String($0.1) }
+        let told = commands.filter { !part.contains("without `\($0)`") }
+        #expect(told.contains("git rebase project-lead") && told.contains("git rebase --continue") && told.contains("git merge project-lead"))
+        for command in told {
+            #expect(command.hasPrefix("git "), "said with something in front: \(command)")
+            #expect(Self.allowed(command, by: rules), "the brief says it, the rules refuse it: \(command)")
+        }
+        for command in commands where !told.contains(command) { #expect(Self.denied(command, by: rules.deny), "\(command)") }
+        // A worker that types env in front of one (to keep git's editor away) is refused: the session has no need.
+        #expect(!Self.allowed("GIT_EDITOR=true git rebase --continue", by: rules))
+        #expect(try environment("worker-add-b", runtime) == LeadLaunch.environment(.worker))
     }
 
     @Test func aConflictAtMergeAsksForARebaseAndTheBriefSaysHow() throws {

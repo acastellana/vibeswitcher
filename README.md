@@ -118,7 +118,8 @@ hooks; the message waits for the lead's next step), and count as delivered only 
 lists every report that came in since the lead last asked. Claude Code permission rules add a second layer: the lead and verifiers are denied file edits, shell
 file writes and git writes; workers are denied pushing, moving refs, checking out, switching to or resetting hard onto
 the lead's branch or another `agent/` branch, and rebasing any branch but their own. A worker can bring its own branch
-up to date: `git rebase <base>` or `git merge <base>`, resolving and going on with `--continue` (or `--abort`), so when
+up to date: `git rebase <base>` or `git merge <base>`, resolving and going on with `--continue` (or `--abort`); its
+session runs with `GIT_EDITOR=true`, so those bare commands never wait on an editor and need nothing in front. When
 `merge` finds a branch conflicting it asks the lead to have that worker rebase. Every session reads git (log, diff,
 status, show) without asking, after a denied command too.
 Their tools come from `vibeswitcher-mcp`, a tool server bundled with the app.

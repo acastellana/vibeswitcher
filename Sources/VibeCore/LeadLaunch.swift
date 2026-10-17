@@ -77,6 +77,14 @@ public enum LeadLaunch {
         return rules
     }
 
+    /// The environment a role's session (and every command it runs) starts with. A worker's git never opens an
+    /// editor: `git rebase --continue`, `git merge --continue` and the `git commit` that ends a merge keep their
+    /// message as it is, so the bare commands its rules allow are all it needs (a `GIT_EDITOR=true git ...` prefix
+    /// matches no rule and is refused).
+    public static func environment(_ role: Role) -> [String: String] {
+        role == .worker ? ["GIT_EDITOR": "true"] : [:]
+    }
+
     /// Writes the role's files (0600) and returns the command line to run. They go in `folder`: the vault's run folder
     /// for the role (`LeadVault.runFolder`, out of the team's reach, since the tool server's entry holds the role's
     /// `capability`); `<root>/.vibeswitcher/run/<name>/` when none is given.
@@ -97,7 +105,8 @@ public enum LeadLaunch {
         let mcp: [String: Any] = ["mcpServers": ["vibeswitcher": entry]]
         try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: mcp, options: [.prettyPrinted, .sortedKeys]),
                                    to: URL(fileURLWithPath: mcpFile))
-        let settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch), "deny": deny(role, base: branch)]]
+        var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch), "deny": deny(role, base: branch)]]
+        if !environment(role).isEmpty { settings["env"] = environment(role) }
         try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]),
                                    to: URL(fileURLWithPath: settingsFile))
         let quote = RecentProjects.shellQuote
