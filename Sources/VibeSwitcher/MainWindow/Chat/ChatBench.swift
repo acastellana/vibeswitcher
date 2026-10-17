@@ -4,8 +4,10 @@ import VibeCore
 
 /// Debug aid (`VibeSwitcher --chat-bench TRANSCRIPT`): the chat view in this process (not the running app),
 /// offscreen, on a real transcript, followed like the window does; prints the longest main-thread stall each
-/// second, how often the view was laid out and what heights its content took, then exits (status 2 when the main
-/// thread got stuck for 10 s, 3 when an opened chat's content height never settled).
+/// second, how often the view was laid out and what heights its content took, then exits. By default it resizes
+/// and scrolls like a reader; OPEN, SEEN, AT and SWITCH instead open a conversation the way the window does and
+/// then leave it alone, and it must settle: status 3 when its content height still changed in the last 3 seconds,
+/// 2 when the main thread got stuck for 10 s.
 enum ChatBench {
     private static let env = ProcessInfo.processInfo.environment
 
@@ -34,12 +36,13 @@ enum ChatBench {
             session.activitySince = Date().addingTimeInterval(-42)
             row = WindowRow(content: .agent(session), project: "bench")
         }
-        // A new chat view per conversation, as ChatContainer has it (`.id(chat.path)`).
-        chat.runner.canRun = whole && env["VIBESWITCHER_BENCH_TICKS"] != "1"
-        // VIBESWITCHER_BENCH_TICKS=1: what the window's chat timer does after a conversation is shown: Run is
-        // offered once the session is seen to take input, the composer is focused, the model publishes changes.
+        // VIBESWITCHER_BENCH_TICKS=1: what the window's chat timer does once a second while a conversation is shown:
+        // Run is offered once the session is seen to take input, the composer is focused, the model publishes.
         let ticks = env["VIBESWITCHER_BENCH_TICKS"] == "1"
-        let what = env["VIBESWITCHER_BENCH_WHAT"] ?? "rfp"
+        // VIBESWITCHER_BENCH_UPDATES=1: the model publishes every 20 ms (a busy session: transcript lines, screen
+        // reads, steering), so every layout the chat asks for gets its chance to run.
+        let updates = env["VIBESWITCHER_BENCH_UPDATES"] == "1"
+        chat.runner.canRun = whole && !ticks
         let view = BenchRoot(chat: chat, row: row, whole: whole,
                              board: env["VIBESWITCHER_BENCH_BOARD"].map { BoardStore(root: $0).load() }, folder: env["VIBESWITCHER_BENCH_FOLDER"])
         // VIBESWITCHER_BENCH_STACK=1: inside a VStack with a composer-like view below, as the window has it.
@@ -61,6 +64,11 @@ enum ChatBench {
         let open = env["VIBESWITCHER_BENCH_OPEN"]
         // VIBESWITCHER_BENCH_SEEN=N: you had last seen entry N, so it's opened again at "New since you looked".
         let seen = env["VIBESWITCHER_BENCH_SEEN"].flatMap(Int.init)
+        // VIBESWITCHER_BENCH_AT=top|middle|bottom: once opened again, it's scrolled there (and then left alone).
+        let at = env["VIBESWITCHER_BENCH_AT"]
+        // VIBESWITCHER_BENCH_SWITCH=PATH: at t=2 another session is selected, whose conversation is in PATH (the chat
+        // goes straight from one conversation to the other).
+        let other = env["VIBESWITCHER_BENCH_SWITCH"]
         Self.setSeen(nil, path: path)
         chat.show(path: path)
         var last = Date()
@@ -69,6 +77,7 @@ enum ChatBench {
             let now = Date()
             worst = max(worst, now.timeIntervalSince(last))
             last = now
+            if updates, chat.state == .ready { chat.objectWillChange.send() }
             probe.sample()
             Watchdog.beat(layouts: host.layouts)
         }
@@ -96,15 +105,22 @@ enum ChatBench {
         var reopenedAt: Int?
         let tick = Timer(timeInterval: 1, repeats: true) { _ in
             second += 1
-            if stall, second == 3 { Breadcrumbs.shared.note("bench: blocking the main thread for 4 s") ; sleep(4) }
+            if stall, second == 3 { Breadcrumbs.shared.note("bench: blocking the main thread for 4 s"); sleep(4) }
             chat.poll()
             let sweeping = ProcessInfo.processInfo.environment["VIBESWITCHER_BENCH_SWEEP"] != nil
             if ticks, chat.state == .ready {
-                if what.contains("r") { chat.runner.canRun = whole }
-                if what.contains("f") { chat.focusComposer() }
-                if what.contains("p") { chat.objectWillChange.send() }
+                chat.runner.canRun = whole
+                chat.focusComposer()
+                chat.objectWillChange.send()
             }
-            if open != nil || seen != nil {
+            if let other {
+                if second == 2 {
+                    chat.show(path: other)
+                    probe.reset()
+                    reopenedAt = second
+                    print("  switched to \((other as NSString).lastPathComponent)")
+                }
+            } else if open != nil || seen != nil || at != nil {
                 // t=1: read at that position; t=2: leave it; t=3: come back to it.
                 if second == 1, let open, let scroll = Self.scrollView(in: host) { Self.scroll(scroll, to: open, host: host) }
                 if second == 1, let seen { Self.setSeen(chat.log.entries[min(seen, chat.log.entries.count) - 1].id, path: path) }
@@ -115,6 +131,7 @@ enum ChatBench {
                     reopenedAt = second
                     print("  reopened, anchor \(chat.restoreAnchor ?? "none")")
                 }
+                if second == 4, let at, let scroll = Self.scrollView(in: host) { Self.scroll(scroll, to: at, host: host) }
             } else if !sweeping {
                 // A width change (sidebar or inspector toggled, the window dragged): every row is measured again.
                 if second % 2 == 0 {
@@ -139,9 +156,11 @@ enum ChatBench {
             worst = 0
             if second >= seconds {
                 // Opened and left alone, the content must have settled: no height changes in the last 3 seconds.
-                if let reopenedAt, second - reopenedAt > 4, probe.changedRecently(seconds: 3) {
-                    print("FAIL: the content height still changes \(second - reopenedAt) s after opening")
-                    exit(3)
+                if let reopenedAt {
+                    let verdict = probe.changedRecently(seconds: 3) ? "FAIL: the content height still changes" : "settled"
+                    print("\(verdict) \(second - reopenedAt) s after opening: height=\(probe.heights.last ?? 0) heights=\(probe.heights.count) "
+                        + "range=\(probe.range) layouts=\(probe.layouts) last 3 s: \(probe.layoutsRecently) layouts")
+                    exit(probe.changedRecently(seconds: 3) ? 3 : 0)
                 }
                 exit(0)
             }
@@ -220,6 +239,8 @@ enum ChatBench {
         private(set) var heights: [Int] = []
         private var heightsThisSecond: [Int] = []
         private var lastChange = Date()
+        /// Layout counts at the last few seconds' ends.
+        private var layoutsAt: [Int] = []
 
         init(host: CountingHost) { self.host = host }
 
@@ -228,7 +249,12 @@ enum ChatBench {
             heights = []
             heightsThisSecond = []
             layoutsBefore = host.layouts
+            layoutsAt = []
         }
+
+        var layouts: Int { host.layouts - layoutsBefore }
+        var layoutsRecently: Int { layouts - (layoutsAt.count >= 4 ? layoutsAt[layoutsAt.count - 4] : 0) }
+        var range: String { heights.isEmpty ? "-" : "\(heights.min()!)–\(heights.max()!)" }
 
         /// Notes the content's height when it changed (on every beat: SwiftUI sizes its document view without frame
         /// notifications).
@@ -240,12 +266,12 @@ enum ChatBench {
         }
 
         func summary() -> String {
-            let range = heights.isEmpty ? "-" : "\(heights.min()!)–\(heights.max()!)"
-            return "layouts=\(host.layouts - layoutsBefore) heights=\(heightsThisSecond.count) [\(heightsThisSecond.suffix(6).map(String.init).joined(separator: ","))] all=\(heights.count) range=\(range)"
+            "layouts=\(layouts) heights=\(heightsThisSecond.count) [\(heightsThisSecond.suffix(6).map(String.init).joined(separator: ","))] all=\(heights.count) range=\(range)"
         }
 
         func nextSecond() {
             heightsThisSecond = []
+            layoutsAt.append(layouts)
         }
 
         func changedRecently(seconds: TimeInterval) -> Bool { Date().timeIntervalSince(lastChange) < seconds }
