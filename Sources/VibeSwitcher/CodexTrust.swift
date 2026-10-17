@@ -59,10 +59,11 @@ enum CodexTrust {
         let listing = try call(2, "hooks/list", ["cwds": [NSHomeDirectory()]])
         let entries = (listing["data"] as? [[String: Any]]) ?? []
         var trust: [String: Any] = [:]
+        let ourFile = realPath(HookInstaller.configURL(for: .codex).path)
         for entry in entries {
             for hook in (entry["hooks"] as? [[String: Any]]) ?? [] {
                 guard let key = hook["key"] as? String, let hash = hook["currentHash"] as? String,
-                      key.hasPrefix(HookInstaller.configURL(for: .codex).path),
+                      file(ofKey: key).map(realPath) == ourFile,
                       isOurs(hook),
                       ["untrusted", "modified"].contains(hook["trustStatus"] as? String ?? "") else { continue }
                 trust[key] = ["trusted_hash": hash]
@@ -74,6 +75,20 @@ enum CodexTrust {
             "reloadUserConfig": true,
         ])
         return trust.count
+    }
+
+    /// A hook's key is `<hooks.json path>:<event>:<group>:<handler>`; Codex writes the path resolved
+    /// (`/private/tmp/…` where Foundation says `/tmp/…`), so paths are compared by where they really are.
+    static func file(ofKey key: String) -> String? {
+        let parts = key.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count >= 4 else { return nil }
+        return parts.dropLast(3).joined(separator: ":")
+    }
+
+    private static func realPath(_ path: String) -> String {
+        guard let resolved = realpath(path, nil) else { return path }
+        defer { free(resolved) }
+        return String(cString: resolved)
     }
 
     private static func isOurs(_ hook: [String: Any]) -> Bool {
