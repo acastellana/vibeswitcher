@@ -336,6 +336,28 @@ enum AttachedImages {
         return (images, urls.filter { !extensions.contains($0.pathExtension.lowercased()) })
     }
 
+    /// A prompt's attached images and the rest of its text, worked out once per text (prompts can be tens of
+    /// kilobytes of pasted text, and views ask often).
+    static func prompt(_ text: String) -> (files: [String], text: String) {
+        if let cached = promptCache.object(forKey: text as NSString) { return (cached.files, cached.text) }
+        let files = paths(in: text)
+        let rest = files.reduce(text) { removing($1, from: $0) }.trimmingCharacters(in: .whitespacesAndNewlines)
+        promptCache.setObject(SplitPrompt(files: files, text: rest), forKey: text as NSString)
+        return (files, rest)
+    }
+
+    private final class SplitPrompt {
+        let files: [String]
+        let text: String
+        init(files: [String], text: String) { self.files = files; self.text = text }
+    }
+
+    private static let promptCache: NSCache<NSString, SplitPrompt> = {
+        let cache = NSCache<NSString, SplitPrompt>()
+        cache.countLimit = 500
+        return cache
+    }()
+
     static func removing(_ path: String, from text: String) -> String {
         text.replacingOccurrences(of: RecentProjects.shellQuote(path) + " ", with: "")
             .replacingOccurrences(of: RecentProjects.shellQuote(path), with: "")

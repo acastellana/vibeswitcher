@@ -12,13 +12,19 @@ final class ChatModel: ObservableObject {
         case failed(String)
     }
 
-    @Published private(set) var log = ChatLog()
+    @Published private(set) var log = ChatLog() {
+        didSet { if log != oldValue { updateItems() } }
+    }
+    /// The conversation as the view shows it, worked out once per change (not on every redraw).
+    @Published private(set) var items: [ChatItem] = []
     @Published private(set) var state = State.none
     /// Part of the file before what's loaded.
     @Published private(set) var hasEarlier = false
     @Published private(set) var loadingEarlier = false
     /// The last entry you had seen when this chat opened (the "new since you looked" marker goes after it).
-    @Published private(set) var markerAfter: String?
+    @Published private(set) var markerAfter: String? {
+        didSet { if markerAfter != oldValue { updateItems() } }
+    }
     /// Tool groups and tools you opened (by item / tool id), kept while scrolling.
     @Published var expanded: Set<String> = []
     @Published var searchActive = false
@@ -69,7 +75,10 @@ final class ChatModel: ObservableObject {
     private var reading = false
     private let queue = DispatchQueue(label: "vibeswitcher.chat-reads", qos: .userInitiated)
 
-    var items: [ChatItem] { ChatTimeline.items(log.entries, newAfter: markerAfter) }
+    private func updateItems() {
+        let new = ChatTimeline.items(log.entries, newAfter: markerAfter)
+        if new != items { items = new }
+    }
 
     /// What you left each conversation with (opened tool runs, search, where you were reading), restored when you
     /// come back to it; one conversation's state never shows in another.
@@ -175,7 +184,8 @@ final class ChatModel: ObservableObject {
                 guard generation == self.generation else { return }
                 self.reading = false
                 guard let read, !read.events.isEmpty || read.consumed > 0 else { return }
-                self.log.append(read.events)
+                // Lines that show nothing (progress, metadata) move the cursor without redrawing the chat.
+                if !read.events.isEmpty { self.log.append(read.events) }
                 self.cursor = cursor + read.skipped + read.consumed
                 if !self.pending.isEmpty { self.pending = PendingMessage.remaining(self.pending, prompts: self.log.prompts) }
             }

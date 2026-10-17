@@ -210,6 +210,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
                                  folder: row?.cwd)
             readScreen()
         }
+        // A covered terminal still draws every frame its program sends (a working agent's spinner): hide it. It keeps
+        // reading the session, so the answer card and the mode chip still see the screen.
+        if pane.view.isHidden != shown { pane.view.isHidden = shown }
         if chatHost.isHidden == shown {
             chatHost.isHidden = !shown
             if shown { chat.focusComposer() } else { pane.focus() }

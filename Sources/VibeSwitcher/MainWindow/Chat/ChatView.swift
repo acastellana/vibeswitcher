@@ -101,8 +101,10 @@ struct ChatView: View {
                                 .buttonStyle(.borderless).frame(maxWidth: .infinity).disabled(chat.loadingEarlier)
                         }
                         ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
-                            ChatItemView(item: item, chat: chat, agent: row?.markKind ?? .agent(.claude), rowID: row?.id,
+                            ChatItemView(item: item, chat: chat, expanded: item.isTools ? chat.expanded : [],
+                                         agent: row?.markKind ?? .agent(.claude), rowID: row?.id,
                                          canSend: live, resend: resend) { viewing = $0 }
+                                .equatable()
                                 .id(item.id)
                                 .padding(6)
                                 .background(RoundedRectangle(cornerRadius: 10).fill(
@@ -189,15 +191,24 @@ struct ChatView: View {
     }
 }
 
-private struct ChatItemView: View {
+/// One item of the conversation. It doesn't observe the model: it's drawn again only when its own inputs change
+/// (`.equatable()`), not on every keystroke in the composer or every line the transcript gains.
+private struct ChatItemView: View, Equatable {
     @AppStorage(ChatFont.key) private var chatFontSize = ChatFont.standard
     let item: ChatItem
-    @ObservedObject var chat: ChatModel
+    /// For actions only (toggling, editing a draft).
+    let chat: ChatModel
+    /// The opened tool groups and tools (only passed to tool items).
+    let expanded: Set<String>
     let agent: MarkKind
     let rowID: String?
     let canSend: Bool
     let resend: (String) -> Void
     let openImage: (ChatImage) -> Void
+
+    static func == (a: ChatItemView, b: ChatItemView) -> Bool {
+        a.item == b.item && a.expanded == b.expanded && a.agent == b.agent && a.rowID == b.rowID && a.canSend == b.canSend
+    }
 
     var body: some View {
         switch item {
@@ -216,8 +227,7 @@ private struct ChatItemView: View {
                 .contextMenu { Button("Copy") { Pasteboard.copy(text) } }
             } else if case .prompt(let rawText, let images) = entry.kind {
                 // Images attached from the composer travel as quoted paths: show them as pictures, not as text.
-                let files = AttachedImages.paths(in: rawText)
-                let text = files.reduce(rawText) { AttachedImages.removing($1, from: $0) }.trimmingCharacters(in: .whitespacesAndNewlines)
+                let (files, text) = AttachedImages.prompt(rawText)
                 VStack(alignment: .trailing, spacing: 4) {
                     VStack(alignment: .leading, spacing: 8) {
                         if !images.isEmpty || !files.isEmpty {
@@ -260,7 +270,7 @@ private struct ChatItemView: View {
                 .contextMenu { Button("Copy as Markdown") { Pasteboard.copy(text) } }
             }
         case .tools(let id, let tools):
-            ToolGroupView(id: id, tools: tools, chat: chat, openImage: openImage).padding(.leading, 30)
+            ToolGroupView(id: id, tools: tools, chat: chat, expanded: expanded, openImage: openImage).padding(.leading, 30)
         case .newMarker(let summary):
             HStack(spacing: 10) {
                 Rectangle().fill(Color.accentColor).frame(height: 1)
@@ -561,4 +571,8 @@ private struct FileThumbnail: View {
                 .help(path)
         }
     }
+}
+
+private extension ChatItem {
+    var isTools: Bool { if case .tools = self { return true } else { return false } }
 }

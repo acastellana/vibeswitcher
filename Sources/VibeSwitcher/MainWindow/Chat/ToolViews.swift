@@ -6,11 +6,13 @@ import VibeCore
 struct ToolGroupView: View {
     let id: String
     let tools: [ChatTool]
-    @ObservedObject var chat: ChatModel
+    /// For toggling only: the row doesn't observe the model (see `ChatItemView`).
+    let chat: ChatModel
+    let expanded: Set<String>
     let openImage: (ChatImage) -> Void
 
     var body: some View {
-        let open = chat.expanded.contains(id)
+        let open = expanded.contains(id)
         let images = tools.flatMap { $0.result?.images ?? [] }
         let failed = tools.contains { $0.result?.failed == true }
         let running = tools.contains { $0.result == nil }
@@ -47,7 +49,7 @@ struct ToolGroupView: View {
             }
             if open {
                 VStack(alignment: .leading, spacing: 2) {
-                    ForEach(tools, id: \.id) { ToolRowView(tool: $0, chat: chat) }
+                    ForEach(tools, id: \.id) { ToolRowView(tool: $0, chat: chat, open: expanded.contains($0.id)) }
                 }
                 .padding(.leading, 10)
                 .overlay(alignment: .leading) { Rectangle().fill(Color.secondary.opacity(0.2)).frame(width: 1) }
@@ -83,10 +85,10 @@ enum ToolStyle {
 
 struct ToolRowView: View {
     let tool: ChatTool
-    @ObservedObject var chat: ChatModel
+    let chat: ChatModel
+    let open: Bool
 
     var body: some View {
-        let open = chat.expanded.contains(tool.id)
         VStack(alignment: .leading, spacing: 6) {
             Button { chat.toggle(tool.id) } label: {
                 HStack(spacing: 7) {
