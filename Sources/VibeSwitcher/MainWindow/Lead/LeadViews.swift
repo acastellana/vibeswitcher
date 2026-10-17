@@ -344,7 +344,7 @@ struct LeadTeamView: View {
             let now = clock ?? context.date
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
-                    top(now: now)
+                    glance(now: now)
                     rest
                 }
                 .padding(14)
@@ -352,7 +352,8 @@ struct LeadTeamView: View {
         }
     }
 
-    @ViewBuilder private func top(now: Date) -> some View {
+    /// What's glanced at, top to bottom: the questions, the recent decisions, the tasks (also drawn alone in pictures).
+    @ViewBuilder func glance(now: Date) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             let stack = board.questionStack(now: now.timeIntervalSince1970)
             if !stack.isEmpty {

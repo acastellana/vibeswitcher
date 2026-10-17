@@ -259,7 +259,10 @@ struct DecisionFeedView: View {
             .accessibilityHint(isOpen ? "Hides the decision" : "Shows the whole decision and why")
             if isOpen {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(decision.text).font(.system(size: 11.5, weight: .medium)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    // The line says it all when it's short; a long one is shown whole.
+                    if DecisionFeed.needsSummary(decision) {
+                        Text(decision.text).font(.system(size: 11.5, weight: .medium)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    }
                     if !decision.why.isEmpty {
                         Text(decision.why).font(.system(size: 11.5)).foregroundStyle(.secondary).textSelection(.enabled)
                             .fixedSize(horizontal: false, vertical: true)

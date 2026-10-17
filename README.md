@@ -79,10 +79,20 @@ workers and verifiers fold under their lead in the list, and the lead's chat sho
 It only asks you what's really yours to decide; its questions show as cards you answer without stopping it (the
 answer reaches it at its next step), and you can message it any time the same way. VibeSwitcher is its witness:
 it tells the lead when a worker waits for input, stops without reporting, or dies. The Team tab in the inspector
-shows each task as a pipeline lane, Plan → Work → Review → Merge: where it is now and for how long, the worker's
-latest checkpoint (workers note milestones with a `progress` tool) or what the live stage is doing, and why it failed
-or waits on you; click Work or Review to open the worker or the verifier, or the row for its contract, checkpoints,
-report, audit and merge. It also has your answers, the results, and the lead's files. All of it lives in the
+is meant to be glanced at: the lead's open questions first, then its own recent decisions (`record_decision`), each
+one short line ("Decided: run overlapping tasks in parallel") that stays in full view for two minutes, fades and blurs
+out over the next minute and folds into "Earlier decisions (n)" (with Reduce Motion it just folds); click one for the
+whole decision and why. Then each task in one line, a status mark with its own color and shape, the title and its
+state with how long it's been there ("Working 12m", "Rework 1 · 22m", "In review 3m", "Needs you", "Queued"), counted
+from when that stage began; ordered by what needs you, then work under way, review, the queue in planned order, and
+the merged ones folded into "Merged (n)". Under each task at work, one dim line says in plain words what its agent is
+doing, written by a small model through headless Claude Code (`claude -p` with haiku and no tools) from the task's
+title, its checkpoints (workers note milestones with a `progress` tool) and its agent's last steps, at most every three
+minutes per task and only when its transcript changed, while the tab is open; long decisions get a plain one-line
+summary the same way. Without it (Settings → General → Project lead turns it off, or Claude isn't there or is slow)
+the line is the latest checkpoint or what the agent is doing. Click a task for why it last failed, its checkpoints
+with their times, the worker's report, the audit and links to the worker's and the verifier's sessions. Below are
+your answers, the results, and the lead's files. All of it lives in the
 repository, git-ignored: `.vibeswitcher/board.json` (tasks, questions, updates), `workflow.md` (limits, test and
 setup commands, the verifier's model, the lead's branch), `decisions.md` and `progress.md`. The lead sets up
 `workflow.md` itself with its `configure` tool, which changes only those settings' lines and keeps your comments
