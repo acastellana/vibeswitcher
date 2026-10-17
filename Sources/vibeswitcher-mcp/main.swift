@@ -91,10 +91,7 @@ final class HostRuntime: LeadRuntime {
         }
         let id = session.id
         return try LeadDelivery.deliver(text, from: sender, to: agent, activity: activity(of: session, agent: agent.pid),
-                                        screen: {
-                                            if case .screenText(_, let screen)? = try? HostCall.request(.screen(id: id)) { return screen }
-                                            return nil
-                                        },
+                                        styledScreen: { HostCall.styledScreen(id) },
                                         typeInto: { [weak self] text in self?.type(id.uuidString, text: text) ?? false },
                                         clearDraft: clearDraft,
                                         clear: {

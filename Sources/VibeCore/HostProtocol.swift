@@ -172,6 +172,9 @@ public enum HostRequest: Codable, Equatable, Sendable {
     case input(id: UUID, bytes: Data, reply: Bool)
     case resize(id: UUID, cols: Int, rows: Int)
     case screen(id: UUID)
+    /// The screen's text and how its characters are drawn (see `ScreenRun`). A host older than this answers with
+    /// an error: ask for `screen` then.
+    case styledScreen(id: UUID)
     case history(id: UUID, lines: Int)
     case kill(id: UUID)
     case remove(id: UUID)
@@ -186,6 +189,7 @@ public enum HostEvent: Codable, Equatable, Sendable {
     /// Replay is over; live output follows.
     case attached(id: UUID)
     case screenText(id: UUID, text: String)
+    case styledScreenText(id: UUID, text: String, runs: [ScreenRun])
     case historyText(id: UUID, history: String, screen: String)
     case sessionChanged(HostSession)
     case sessionRemoved(id: UUID)
@@ -194,6 +198,44 @@ public enum HostEvent: Codable, Equatable, Sendable {
     case bell(id: UUID)
     case error(String)
     case ok
+}
+
+/// A run of characters on one screen row drawn alike, when that isn't plain: faint (SGR 2), inverse (SGR 7: an
+/// app's painted caret) or in a colour. `column` counts the row's characters in the screen's text (one per cell).
+public struct ScreenRun: Codable, Equatable, Sendable {
+    public enum Color: Codable, Equatable, Sendable {
+        /// The 256-colour palette (0–15 the ANSI colours).
+        case palette(Int)
+        case rgb(Int, Int, Int)
+    }
+
+    public var row: Int
+    public var column: Int
+    public var length: Int
+    public var faint: Bool
+    public var inverse: Bool
+    /// Nil: the default colour.
+    public var color: Color?
+
+    public init(row: Int, column: Int, length: Int, faint: Bool = false, inverse: Bool = false, color: Color? = nil) {
+        self.row = row
+        self.column = column
+        self.length = length
+        self.faint = faint
+        self.inverse = inverse
+        self.color = color
+    }
+
+    /// Drawn the way terminals show secondary text: faint, or in a mid grey (Claude Code's placeholder and
+    /// suggested prompt are faint; its secondary text is grey).
+    public var isDim: Bool {
+        if faint { return true }
+        switch color {
+        case .palette(let code)?: return code == 8 || (237...250).contains(code)
+        case .rgb(let r, let g, let b)?: return max(r, g, b) - min(r, g, b) <= 16 && (80...190).contains(r)
+        case nil: return false
+        }
+    }
 }
 
 public struct HostRequestEnvelope: Codable, Equatable, Sendable {

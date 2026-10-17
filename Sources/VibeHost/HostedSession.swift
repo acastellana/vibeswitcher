@@ -218,6 +218,40 @@ public final class HostedSession {
             .joined(separator: "\n")
     }
 
+    /// `screenText`, and how its characters are drawn (see `ScreenRun`).
+    public func styledScreen() -> (text: String, runs: [ScreenRun]) { Self.styledScreen(of: terminal) }
+
+    /// The text matches `screenText`'s (one character per cell, trimmed on the right); runs cover what isn't plain.
+    public static func styledScreen(of terminal: Terminal) -> (text: String, runs: [ScreenRun]) {
+        var lines: [String] = []
+        var runs: [ScreenRun] = []
+        for row in 0..<terminal.rows {
+            guard let line = terminal.getLine(row: row) else { continue }
+            let text = line.translateToString(trimRight: true)
+            lines.append(text)
+            for column in 0..<text.count {
+                let attribute = line[column].attribute
+                let style = (faint: attribute.style.contains(.dim), inverse: attribute.style.contains(.inverse), color: color(attribute.fg))
+                guard style.faint || style.inverse || style.color != nil else { continue }
+                if let last = runs.last, last.row == row, last.column + last.length == column,
+                   (last.faint, last.inverse, last.color) == style {
+                    runs[runs.count - 1].length += 1
+                } else {
+                    runs.append(ScreenRun(row: row, column: column, length: 1, faint: style.faint, inverse: style.inverse, color: style.color))
+                }
+            }
+        }
+        return (lines.joined(separator: "\n"), runs)
+    }
+
+    private static func color(_ color: Attribute.Color) -> ScreenRun.Color? {
+        switch color {
+        case .ansi256(let code): return .palette(Int(code))
+        case .trueColor(let red, let green, let blue): return .rgb(Int(red), Int(green), Int(blue))
+        case .defaultColor, .defaultInvertedColor: return nil
+        }
+    }
+
     /// The last `lines` lines above the screen (normal buffer), and the screen itself.
     public func historyText(lines: Int) -> (history: String, screen: String) {
         let all = String(decoding: terminal.getBufferAsData(kind: .normal), as: UTF8.self)

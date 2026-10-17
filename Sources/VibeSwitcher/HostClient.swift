@@ -349,6 +349,17 @@ final class HostClient: ObservableObject {
         }
     }
 
+    /// The screen with how it's drawn; only its text from a host too old to say.
+    func styledScreen(_ id: UUID, completion: @escaping (LeadDelivery.Screen?) -> Void) {
+        request(.styledScreen(id: id)) { [weak self] event in
+            switch event {
+            case .styledScreenText(_, let text, let runs): completion(LeadDelivery.Screen(text: text, runs: runs))
+            case .error: self?.screen(id) { completion($0.map { LeadDelivery.Screen(text: $0) }) } ?? completion(nil)
+            default: completion(nil)
+            }
+        }
+    }
+
     func history(_ id: UUID, lines: Int, completion: @escaping ((history: String, screen: String)?) -> Void) {
         request(.history(id: id, lines: lines)) { event in
             if case .historyText(_, let history, let screen) = event { completion((history, screen)) } else { completion(nil) }

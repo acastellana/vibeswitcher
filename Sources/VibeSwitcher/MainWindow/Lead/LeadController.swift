@@ -190,10 +190,11 @@ final class LeadController: ObservableObject {
               observer.activity(hosted, agentPid: agent.pid).betweenTurns, !flushing.contains(agent.tty),
               Date().timeIntervalSince(typedAt[agent.tty] ?? .distantPast) > 10 else { return }
         flushing.insert(agent.tty)
-        host.screen(id) { [weak self] screen in
+        host.styledScreen(id) { [weak self] screen in
             guard let self else { return }
             self.flushing.remove(agent.tty)
-            guard let screen, TerminalInput.isEmpty(screen) else { return }
+            // Claude's dim suggested prompt isn't a draft: typing replaces it.
+            guard let screen, LeadDelivery.box(in: screen) == .empty else { return }
             LeadDelivery.flush(agent, betweenTurns: true, inputIsEmpty: { true }, typeInto: { text in
                 self.typedAt[agent.tty] = Date()
                 self.type(text, into: id)

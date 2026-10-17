@@ -44,19 +44,52 @@ extension LeadDelivery {
         case dialog(String)
     }
 
-    /// The box between the screen's last two horizontal rules, starting with ❯ (see `TerminalInput`). Claude's dim
-    /// placeholder (`Try "…"`) reads as empty: the screen's text doesn't say it's dim.
-    public static func box(in screen: String) -> Box {
+    /// A screen as the host shows it: its text, and how its characters are drawn (nil: a host too old to say).
+    public struct Screen: Equatable, Sendable {
+        public var text: String
+        public var runs: [ScreenRun]?
+
+        public init(text: String, runs: [ScreenRun]? = nil) {
+            self.text = text
+            self.runs = runs
+        }
+    }
+
+    /// The box between the screen's last two horizontal rules, starting with ❯ (see `TerminalInput`). What Claude
+    /// draws dim in it isn't typed: its placeholder (`Try "…"`) and its suggested next prompt, both faint, the
+    /// first character inverted when it paints its caret there (typing replaces them). Without `runs` only the
+    /// placeholder can be told, by its wording.
+    public static func box(in screen: String, runs: [ScreenRun]? = nil) -> Box {
         let lines = screen.replacingOccurrences(of: "\u{0}", with: " ").components(separatedBy: "\n")
         let rules = lines.indices.filter { lines[$0].filter { $0 == "─" }.count >= 20 }
         let shown = { lines.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.suffix(6).joined(separator: " / ") }
         guard rules.count >= 2 else { return .dialog(shown()) }
         let (top, bottom) = (rules[rules.count - 2], rules[rules.count - 1])
-        let box = lines[(top + 1)..<bottom].map { $0.trimmingCharacters(in: .whitespaces) }
-        guard let first = box.first, first.hasPrefix("❯") else { return .dialog(shown()) }
-        let typed = ([String(first.dropFirst())] + box.dropFirst()).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
-        if typed.isEmpty || typed.range(of: #"^Try "[^"\n]*"$"#, options: .regularExpression) != nil { return .empty }
+        guard top + 1 < bottom, lines[top + 1].trimmingCharacters(in: .whitespaces).hasPrefix("❯"),
+              let marker = lines[top + 1].firstIndex(of: "❯") else { return .dialog(shown()) }
+        let rows = ((top + 1)..<bottom).map { row -> String in
+            let line = Array(lines[row])
+            let from = row == top + 1 ? lines[row].distance(from: lines[row].startIndex, to: marker) + 1 : 0
+            let dim = runs.map { dimColumns(row: row, runs: $0) } ?? []
+            return String(line.indices.filter { $0 >= from && !dim.contains($0) }.map { line[$0] })
+                .trimmingCharacters(in: .whitespaces)
+        }
+        let typed = rows.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+        if typed.isEmpty { return .empty }
+        if runs == nil, typed.range(of: #"^Try "[^"\n]*"$"#, options: .regularExpression) != nil { return .empty }
         return .draft(typed)
+    }
+
+    public static func box(in screen: Screen) -> Box { box(in: screen.text, runs: screen.runs) }
+
+    /// The columns of `row` drawn dim, with a caret cell (inverse, not dim) right before dim text.
+    static func dimColumns(row: Int, runs: [ScreenRun]) -> Set<Int> {
+        let onRow = runs.filter { $0.row == row }
+        var dim = Set(onRow.filter(\.isDim).flatMap { $0.column..<($0.column + $0.length) })
+        for caret in onRow where caret.inverse && !caret.isDim && caret.length == 1 && dim.contains(caret.column + 1) {
+            dim.insert(caret.column)
+        }
+        return dim
     }
 
     /// Steers the message in, or types it when the agent is idle, its input box is empty and `typeInto` reaches its
@@ -114,6 +147,15 @@ extension LeadDelivery {
     public static func deliver(_ text: String, from sender: SteerMessage.Sender, to agent: LeadAgent, activity: LeadActivity,
                                screen: (() -> String?)?, typeInto: ((String) -> Bool)?, clearDraft: Bool = false,
                                clear: (() -> Void)? = nil, root: URL = VibePaths.root) throws -> Delivered {
+        try deliver(text, from: sender, to: agent, activity: activity, styledScreen: screen.map { read in { read().map { Screen(text: $0) } } },
+                    typeInto: typeInto, clearDraft: clearDraft, clear: clear, root: root)
+    }
+
+    /// As above, reading the screen with how it's drawn, which tells Claude's suggested prompt from a draft.
+    @discardableResult
+    public static func deliver(_ text: String, from sender: SteerMessage.Sender, to agent: LeadAgent, activity: LeadActivity,
+                               styledScreen screen: (() -> Screen?)?, typeInto: ((String) -> Bool)?, clearDraft: Bool = false,
+                               clear: (() -> Void)? = nil, root: URL = VibePaths.root) throws -> Delivered {
         let post = { try SteerInbox.post(SteerMessage(text: text, from: sender, agentPid: agent.pid), tty: agent.tty, root: root) }
         switch activity {
         case .working, .unknown:
@@ -146,5 +188,18 @@ extension LeadDelivery {
         }
         try post()
         return .queued
+    }
+}
+
+extension HostCall {
+    /// A session's screen with how it's drawn; only its text from a host too old to say (see `HostRequest.styledScreen`).
+    public static func styledScreen(_ id: UUID, socket: String = VibePaths.hostSocket.path) -> LeadDelivery.Screen? {
+        switch try? request(.styledScreen(id: id), socket: socket) {
+        case .styledScreenText(_, let text, let runs)?: return LeadDelivery.Screen(text: text, runs: runs)
+        case .error?:
+            if case .screenText(_, let text)? = try? request(.screen(id: id), socket: socket) { return LeadDelivery.Screen(text: text) }
+            return nil
+        default: return nil
+        }
     }
 }

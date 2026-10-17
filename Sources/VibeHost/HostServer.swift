@@ -186,6 +186,9 @@ public final class HostServer {
             session.resize(cols: cols, rows: rows)
         case .screen(let id):
             reply(sessions[id].map { .screenText(id: id, text: $0.screenText()) } ?? missing)
+        case .styledScreen(let id):
+            guard let screen = sessions[id]?.styledScreen() else { return reply(missing) }
+            reply(.styledScreenText(id: id, text: screen.text, runs: screen.runs))
         case .history(let id, let lines):
             guard let session = sessions[id] else { return reply(missing) }
             let text = session.historyText(lines: max(1, min(lines, 5_000)))
