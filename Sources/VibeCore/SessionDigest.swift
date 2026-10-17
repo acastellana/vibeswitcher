@@ -33,7 +33,8 @@ public enum SessionDigest {
             }
         }
         flush()
-        var text = lines.joined(separator: "\n")
+        // What the lead reads leaves the session's secrets out (a token pasted into a prompt, printed by a tool).
+        var text = Redaction.secrets(in: lines.joined(separator: "\n"))
         if text.count > limit {
             let marker = "[earlier part left out]\n"
             text = marker + String(text.suffix(limit - marker.count))

@@ -345,7 +345,8 @@ enum SidebarWorkspace {
     }
 
     /// Makes every window recorded as hidden visible again.
-    static func restoreHiddenWindows() {
+    /// `timeout`: short at quit (Terminal busy must not hold the quit up; what's left is restored at the next launch).
+    static func restoreHiddenWindows(timeout: TimeInterval = 4) {
         let hidden = hiddenWindows
         guard !hidden.isEmpty else { return }
         let list = hidden.map(String.init).joined(separator: ", ")
@@ -358,7 +359,8 @@ enum SidebarWorkspace {
             end repeat
         end tell
         """
-        if TerminalBridge.isRunning { _ = TerminalBridge.runAppleScript(script) }
-        hiddenWindows = []
+        guard TerminalBridge.isRunning else { return }
+        // Only forgotten once Terminal has done it; otherwise the next launch tries again.
+        if TerminalBridge.runAppleScript(script, timeout: timeout).status == 0 { hiddenWindows = [] }
     }
 }

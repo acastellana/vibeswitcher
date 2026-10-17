@@ -79,6 +79,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private static let positionKey = "NSStatusItem Preferred Position VibeSwitcher"
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Breadcrumbs.shared.note("app: launched \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") build \(HostBuild.id(ofExecutableAt: Bundle.main.executablePath ?? ""))")
+        HangWatchdog.shared.describeState = { [weak self] in
+            guard let self else { return "" }
+            let host = "host state=\(self.hostClient.state) sessions=\(self.hostClient.sessions.count) live=\(self.hostClient.sessions.filter(\.isLive).count)"
+            return "\(host)\nscanned sessions=\(self.store.sessions.count)\n" + (self.mainWindow?.debugState() ?? "window never opened")
+        }
+        HangWatchdog.shared.start()
         // `kill`/`pkill` (and the build script) send SIGTERM, which skips applicationWillTerminate: route it
         // through a normal quit so hidden windows come back and today's stats are saved.
         signal(SIGTERM, SIG_IGN)
@@ -91,7 +98,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         // Leads' witness and questions work with the window closed too.
         _ = leadController
         if UserDefaults.standard.bool(forKey: "windowWasOpen") {
+            // Cleared until the window has been up a while: if opening it crashes the app, the next launch
+            // doesn't open it again (and crash again).
+            UserDefaults.standard.set(false, forKey: "windowWasOpen")
+            Breadcrumbs.shared.note("app: reopening the window it had open")
             DispatchQueue.main.async { [weak self] in self?.showMainWindow() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10) { [weak self] in
+                if self?.mainWindow?.window?.isVisible == true { UserDefaults.standard.set(true, forKey: "windowWasOpen") }
+            }
         }
         preferences.setUpLoginItemOnFirstLaunch()
         notifier?.requestAuthorization()
@@ -266,8 +280,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         }
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.newSessionNotification, object: nil,
                                                             queue: .main) { [weak self] note in
+            var isFolder: ObjCBool = false
             guard let self, let name = note.userInfo?["preset"] as? String, let folder = note.userInfo?["folder"] as? String,
-                  FileManager.default.fileExists(atPath: folder) else { return }
+                  FileManager.default.fileExists(atPath: folder, isDirectory: &isFolder), isFolder.boolValue else { return }
             let presets = self.preferences.presets.presets(for: folder)
             guard var preset = presets.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame })
                     ?? presets.first(where: { $0.kind.rawValue == name.lowercased() }) else { return }
@@ -593,6 +608,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             notifier?.postInfo(title: "Not moved", body: "It started working again; move it once it's done.")
             return
         }
+        Breadcrumbs.shared.note("move: stopping \(session.agent.displayName) on \(session.tty) (pid \(pid)) to resume in the window")
         kill(pid, SIGTERM)
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             // It has to be gone before the conversation is resumed elsewhere.
@@ -658,10 +674,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        Breadcrumbs.shared.note("app: quitting")
+        Breadcrumbs.shared.flush()
         // Reopened at the next launch (an update relaunches the app: it shouldn't look like the window crashed).
         UserDefaults.standard.set(mainWindow?.window?.isVisible == true, forKey: "windowWasOpen")
         // Never leave session windows hidden behind a closed app.
-        SidebarWorkspace.restoreHiddenWindows()
+        SidebarWorkspace.restoreHiddenWindows(timeout: 1)
         store.saveLedger()
         phoneAccess.shutdown()
     }

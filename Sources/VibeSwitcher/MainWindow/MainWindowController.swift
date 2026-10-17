@@ -183,7 +183,21 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         return container
     }
 
+    /// For the hang watchdog: what the window shows right now.
+    func debugState() -> String {
+        let row = model.selectedRow
+        let frame = window.map { NSStringFromRect($0.frame) } ?? "none"
+        let draft = row.map { chat.composer.drafts[$0.draftKey]?.count ?? 0 } ?? 0
+        return """
+        window visible=\(window?.isVisible == true) key=\(window?.isKeyWindow == true) frame=\(frame) mounted=\(mounted)
+        selected=\(row?.id ?? "none") project=\(row?.project ?? "") showsChat=\(model.showsChat) chatShown=\(!chatHost.isHidden) terminalHidden=\(pane.view.isHidden)
+        chat path=\(chat.path ?? "none") state=\(chat.state) entries=\(chat.log.entries.count) items=\(chat.items.count) shownLimit=\(chat.shownLimit) atBottom=\(chat.atBottom) pending=\(chat.pending.count) menu=\(chat.menu != nil) draft=\(draft) chars
+        attached terminals=\(pane.attachedIDs.count) current=\(pane.current?.uuidString ?? "none")
+        """
+    }
+
     func present() {
+        Breadcrumbs.shared.note("window: present")
         mountViews()
         NSApp.setActivationPolicy(.regular)
         showWindow(nil)
@@ -219,6 +233,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return
         }
         endedBar.isHidden = row.hosted?.exit == nil
+        if shownID != row.id { Breadcrumbs.shared.note("window: select \(row.id) (\(row.project))") }
         if let id = row.hostID {
             if pane.current != id { pane.show(hostID: id, focus: !model.chatShown) }
         } else if let session = row.session {
@@ -247,6 +262,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         // Only read a conversation that's on screen.
         let previous = chat.path
         chat.show(path: shown ? path : nil)
+        if chat.path != previous { Breadcrumbs.shared.note("chat: show \(chat.path.map { ($0 as NSString).lastPathComponent } ?? "none")") }
         if shown, chat.path != previous {
             chat.loadCompletions(agent: row?.session?.agent ?? row?.hosted?.agent.flatMap(Agent.init(rawValue:)) ?? .claude,
                                  folder: row?.cwd)
@@ -298,10 +314,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     /// The composer's message, typed into the selected window session (as a paste when its program asked for that).
     private func sendToSelected(_ text: String) -> Bool {
-        guard let row = model.selectedRow, let id = row.hostID, actions.isLive(row) else {
+        // Not connected to the host (it's reconnecting, or gone): the keys would go nowhere; the text stays in the box.
+        guard let row = model.selectedRow, let id = row.hostID, actions.isLive(row), host.isUsable else {
             NSSound.beep()
             return false
         }
+        Breadcrumbs.shared.note("composer: send \(text.count) chars to \(row.id)")
         write(ComposerText.writes(text, bracketed: pane.bracketedPaste(id)), to: id)
         return true
     }
@@ -380,6 +398,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     func windowDidResignKey(_ notification: Notification) { updateViewing() }
 
     func windowWillClose(_ notification: Notification) {
+        Breadcrumbs.shared.note("window: close")
         store.windowViewingTTY = nil
         palette.close()
         chatTimer?.invalidate()

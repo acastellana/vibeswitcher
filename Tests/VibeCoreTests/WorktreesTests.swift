@@ -121,6 +121,22 @@ struct WorktreesTests {
     }
 }
 
+struct ExcludeTests {
+    @Test func aRepositoryWhoseGitIsAFileIsExcludedToo() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("ex-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let root = url.resolvingSymlinksInPath().path
+        for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"], ["commit", "-q", "--allow-empty", "-m", "first"]] {
+            Git.run(args, in: root)
+        }
+        // A worktree: its .git is a file pointing at the main repository.
+        let other = root + "-wt"
+        Git.run(["worktree", "add", "-q", "-b", "side", other], in: root)
+        try BoardStore(root: other).ensureExcluded()
+        #expect(Git.run(["check-ignore", "-q", ".vibeswitcher/board.json"], in: other).ok)
+    }
+}
+
 struct ShellTests {
     @Test func aTimedOutCommandTakesItsChildrenWithIt() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("shell-\(UUID().uuidString)").path

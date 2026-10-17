@@ -26,9 +26,30 @@ if arguments.contains("--uninstall-hooks") {
     }
     exit(failed ? 1 : 0)
 }
+/// Hands a command to the running app. Not running: the debug aids say so; the others start it (it can't take the
+/// command until it's up, so it's asked again then).
+func postToApp(_ name: Notification.Name, object: String? = nil, userInfo: [AnyHashable: Any]? = nil, startIfNeeded: Bool = true) {
+    let bundleID = "dev.vibeswitcher.VibeSwitcher"
+    let running = NSRunningApplication.runningApplications(withBundleIdentifier: bundleID)
+        .contains { $0.processIdentifier != getpid() && !$0.isTerminated }
+    guard running else {
+        if startIfNeeded, let url = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+            let open = Process()
+            open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            open.arguments = [url.path]
+            try? open.run()
+            open.waitUntilExit()
+            FileHandle.standardError.write(Data("VibeSwitcher wasn't running: started it. Run this again once it's up.\n".utf8))
+        } else {
+            FileHandle.standardError.write(Data("VibeSwitcher isn't running.\n".utf8))
+        }
+        exit(1)
+    }
+    DistributedNotificationCenter.default().postNotificationName(name, object: object, userInfo: userInfo, deliverImmediately: true)
+}
+
 if arguments.contains("--toggle") {
-    DistributedNotificationCenter.default().postNotificationName(AppStatus.toggleNotification, object: nil,
-                                                                 userInfo: nil, deliverImmediately: true)
+    postToApp(AppStatus.toggleNotification)
     exit(0)
 }
 /// A debug aid's output file: absolute, and only in a scratch place (see `DebugOutput`).
@@ -44,23 +65,18 @@ func debugPath(_ argument: String) -> String {
 
 if let index = arguments.firstIndex(of: "--capture-window"), arguments.indices.contains(index + 1) {
     // Debug aid: the running app draws its window into this PNG.
-    DistributedNotificationCenter.default().postNotificationName(AppStatus.captureNotification,
-                                                                 object: debugPath(arguments[index + 1]),
-                                                                 userInfo: nil, deliverImmediately: true)
+    postToApp(AppStatus.captureNotification, object: debugPath(arguments[index + 1]), startIfNeeded: false)
     exit(0)
 }
 if let index = arguments.firstIndex(of: "--settings") {
     // Opens Settings in the running app, optionally on a tab: general, launch or terminal.
     let tab = arguments.indices.contains(index + 1) ? arguments[index + 1] : "general"
-    DistributedNotificationCenter.default().postNotificationName(AppStatus.settingsNotification, object: tab,
-                                                                 userInfo: nil, deliverImmediately: true)
+    postToApp(AppStatus.settingsNotification, object: tab)
     exit(0)
 }
 if let index = arguments.firstIndex(of: "--screen"), arguments.indices.contains(index + 2) {
     // Debug aid: `--screen TEXT PATH` writes the screen of the first window session whose label contains TEXT.
-    DistributedNotificationCenter.default().postNotificationName(AppStatus.screenNotification, object: arguments[index + 1],
-                                                                 userInfo: ["path": debugPath(arguments[index + 2])],
-                                                                 deliverImmediately: true)
+    postToApp(AppStatus.screenNotification, object: arguments[index + 1], userInfo: ["path": debugPath(arguments[index + 2])], startIfNeeded: false)
     exit(0)
 }
 if let index = arguments.firstIndex(of: "--lead"), arguments.indices.contains(index + 1) {
@@ -68,8 +84,7 @@ if let index = arguments.firstIndex(of: "--lead"), arguments.indices.contains(in
     // one the goal), without taking over the window's selection.
     let folder = (arguments[index + 1] as NSString).expandingTildeInPath
     let goal = arguments.firstIndex(of: "--goal").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
-    DistributedNotificationCenter.default().postNotificationName(AppStatus.leadNotification, object: folder,
-                                                                 userInfo: goal.map { ["goal": $0] }, deliverImmediately: true)
+    postToApp(AppStatus.leadNotification, object: folder, userInfo: goal.map { ["goal": $0] })
     print("asked VibeSwitcher to start the project lead for \(folder)")
     exit(0)
 }
@@ -78,14 +93,12 @@ if let index = arguments.firstIndex(of: "--window") {
     // the start page, the first session whose title, project or task contains TEXT, or moving the Terminal session
     // on TTY into the window (between turns only; without asking).
     let extra = arguments.indices.contains(index + 1) ? arguments[index + 1] : nil
-    DistributedNotificationCenter.default().postNotificationName(AppStatus.windowNotification, object: extra,
-                                                                 userInfo: nil, deliverImmediately: true)
+    postToApp(AppStatus.windowNotification, object: extra)
     exit(0)
 }
 if let index = arguments.firstIndex(of: "--open"), arguments.indices.contains(index + 1) {
     // Asks the running app to open a session, exactly like clicking its row.
-    DistributedNotificationCenter.default().postNotificationName(AppStatus.openNotification, object: arguments[index + 1],
-                                                                 userInfo: nil, deliverImmediately: true)
+    postToApp(AppStatus.openNotification, object: arguments[index + 1])
     exit(0)
 }
 if let index = arguments.firstIndex(of: "--new"), arguments.indices.contains(index + 1) {
@@ -97,10 +110,7 @@ if let index = arguments.firstIndex(of: "--new"), arguments.indices.contains(ind
         print("error: no such folder: \(folder)")
         exit(1)
     }
-    DistributedNotificationCenter.default().postNotificationName(
-        AppStatus.newSessionNotification, object: nil,
-        userInfo: ["preset": arguments[index + 1], "folder": folder, "terminal": arguments.contains("--terminal")],
-        deliverImmediately: true)
+    postToApp(AppStatus.newSessionNotification, object: nil, userInfo: ["preset": arguments[index + 1], "folder": folder, "terminal": arguments.contains("--terminal")])
     print("asked VibeSwitcher to start \(arguments[index + 1]) in \(folder)")
     exit(0)
 }

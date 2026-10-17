@@ -41,6 +41,13 @@ public final class HostConnection {
         return seq
     }
 
+    /// A control message as is (tests: what a newer or broken client might send).
+    func sendRaw(_ payload: Data) {
+        guard !closed else { return }
+        outgoing.append(HostFrame.encode(.control, payload))
+        flush()
+    }
+
     public func close() { finish(notify: false) }
 
     private func flush() {

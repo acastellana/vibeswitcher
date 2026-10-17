@@ -63,6 +63,10 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         terminal.isHidden = false
         setMargin(terminal.nativeBackgroundColor)
         current = hostID
+        // Hidden views don't resize their sessions (each would redraw on every step of a window drag): the one on
+        // screen catches up now.
+        let screen = terminal.getTerminal()
+        host.resize(hostID, cols: screen.cols, rows: screen.rows)
         recent.removeAll { $0 == hostID }
         recent.insert(hostID, at: 0)
         for evicted in recent.dropFirst(Self.keepAttached) { forget(evicted) }
@@ -167,7 +171,7 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     }
 
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
-        guard let id = id(of: source) else { return }
+        guard let id = id(of: source), id == current else { return }
         host.resize(id, cols: newCols, rows: newRows)
     }
 

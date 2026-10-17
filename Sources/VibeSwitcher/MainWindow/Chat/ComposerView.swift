@@ -117,7 +117,8 @@ struct ComposerView: View {
         notice = nil
         let accepted = steering ? actions.steer(message) : actions.send(message)
         if accepted {
-            if working && !steering { chat.sent(message) }
+            // Shown until the conversation has it (flagged if it doesn't arrive).
+            if !steering { chat.sent(message, expectsSoon: !working) }
             text.wrappedValue = ""
             composer.attachments[rowID] = []
             suggestions = Suggestions()

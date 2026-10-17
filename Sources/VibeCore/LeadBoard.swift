@@ -216,7 +216,11 @@ public final class BoardStore: @unchecked Sendable {
 
     /// `.vibeswitcher/` in `.git/info/exclude`: ignored without changing the repo's own files.
     public func ensureExcluded() throws {
-        let exclude = (root as NSString).appendingPathComponent(".git/info/exclude")
+        // Where git keeps it: `.git/info/exclude`, or the main repository's when `.git` is a file (a worktree).
+        let asked = Git.run(["rev-parse", "--git-path", "info/exclude"], in: root)
+        let exclude = asked.ok && !asked.output.isEmpty
+            ? (asked.output.hasPrefix("/") ? asked.output : (root as NSString).appendingPathComponent(asked.output))
+            : (root as NSString).appendingPathComponent(".git/info/exclude")
         let current = (try? String(contentsOfFile: exclude, encoding: .utf8)) ?? ""
         guard !current.components(separatedBy: "\n").contains("/.vibeswitcher/") else { return }
         try FileManager.default.createDirectory(atPath: (exclude as NSString).deletingLastPathComponent, withIntermediateDirectories: true)

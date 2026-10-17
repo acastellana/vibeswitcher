@@ -144,6 +144,7 @@ final class HostClient: ObservableObject {
 
     private func connectionLost() {
         let welcomed = state != .connecting
+        Breadcrumbs.shared.note("host: connection lost (welcomed=\(welcomed), replacing=\(replacing), waiting=\(whenReady.count))")
         connection = nil
         let pending = replies
         replies = [:]
@@ -179,6 +180,7 @@ final class HostClient: ObservableObject {
 
     /// The host is gone and took its sessions with it: they stay listed as ended, with their last screen.
     private func hostGone() {
+        Breadcrumbs.shared.note("host: gone; \(sessions.filter(\.isLive).count) sessions marked ended")
         reconnectAttempt = 0
         let now = Date()
         sessions = sessions.map { session in
@@ -195,6 +197,7 @@ final class HostClient: ObservableObject {
         if let seq = envelope.replyTo, let reply = replies.removeValue(forKey: seq) { reply(envelope.event) }
         switch envelope.event {
         case .welcome(let version, let build, let list):
+            Breadcrumbs.shared.note("host: welcome v\(version) build \(build), \(list.count) sessions")
             reconnectAttempt = 0
             restartedForWaiting = false
             sessions = list
@@ -243,6 +246,7 @@ final class HostClient: ObservableObject {
     /// Asks an idle host to quit; `connectionLost` then starts the bundled one.
     private func replaceHost() {
         guard !replacing else { return }
+        Breadcrumbs.shared.note("host: replacing an outdated host")
         replacing = true
         request(.shutdown) { [weak self] event in
             if case .error = event { self?.replacing = false }
@@ -271,6 +275,7 @@ final class HostClient: ObservableObject {
     }
 
     func spawn(_ spawn: SpawnRequest, completion: @escaping (Result<HostSession, HostClientError>) -> Void) {
+        Breadcrumbs.shared.note("host: spawn \(spawn.label) in \((spawn.cwd as NSString).lastPathComponent)")
         ensureHost { error in
             if let error { return completion(.failure(HostClientError(message: error))) }
             self.request(.spawn(spawn)) { event in

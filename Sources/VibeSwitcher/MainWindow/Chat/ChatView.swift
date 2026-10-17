@@ -36,7 +36,7 @@ struct ChatContainer: View {
             Divider()
             if let row = model.selectedRow {
                 if row.hostID != nil, actions.isLive(row) {
-                    ComposerView(chat: chat, composer: chat.composer, rowID: row.id, agent: row.session?.agent ?? .claude,
+                    ComposerView(chat: chat, composer: chat.composer, rowID: row.draftKey, agent: row.session?.agent ?? .claude,
                                  working: [.working, .background].contains(row.session?.status),
                                  actions: ComposerActions(send: { text in
                                      let sent = composer.send(text)
@@ -48,7 +48,7 @@ struct ChatContainer: View {
                 } else if let session = row.session, session.inTerminalApp, session.agent == .claude,
                           [.working, .background].contains(session.status) {
                     // Steering needs no typing, so it reaches a Terminal session too.
-                    ComposerView(chat: chat, composer: chat.composer, rowID: row.id, agent: session.agent, working: true, steerOnly: true,
+                    ComposerView(chat: chat, composer: chat.composer, rowID: row.draftKey, agent: session.agent, working: true, steerOnly: true,
                                  actions: ComposerActions(send: { _ in false }, steer: composer.steer, stop: {}, cycleMode: {}))
                         .id(row.id)
                 } else if let session = row.session, session.inTerminalApp {
@@ -107,7 +107,7 @@ struct ChatView: View {
                         }
                         ForEach(Array(window.items.enumerated()), id: \.element.id) { offset, item in
                             ChatItemView(item: item, chat: chat, expanded: item.isTools ? chat.expanded : [],
-                                         agent: row?.markKind ?? .agent(.claude), rowID: row?.id,
+                                         agent: row?.markKind ?? .agent(.claude), rowID: row?.draftKey,
                                          canSend: live, resend: resend) { viewing = $0 }
                                 .equatable()
                                 .id(item.id)
@@ -129,15 +129,25 @@ struct ChatView: View {
                                 .padding(.leading, 60).padding(.bottom, 10)
                         }
                         ForEach(chat.pending) { message in
-                            Text(message.text).font(.system(size: 13.5)).foregroundStyle(.secondary)
-                                .padding(.horizontal, 13).padding(.vertical, 9)
-                                .background(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.accentColor.opacity(0.4),
-                                                                                                         style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
-                                .overlay(alignment: .bottomTrailing) {
-                                    Text("queued").font(.system(size: 9.5)).foregroundStyle(.tertiary).offset(y: 14)
+                            let late = chat.late.contains(message.id)
+                            VStack(alignment: .trailing, spacing: 4) {
+                                Text(String(message.text.prefix(2_000))).font(.system(size: 13.5)).foregroundStyle(.secondary)
+                                    .padding(.horizontal, 13).padding(.vertical, 9)
+                                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(
+                                        late ? Color.orange.opacity(0.7) : Color.accentColor.opacity(0.4), style: StrokeStyle(lineWidth: 1, dash: [4, 3])))
+                                if late, let rowID = row?.draftKey {
+                                    HStack(spacing: 8) {
+                                        Text("Not in the conversation yet. It may not have reached \(row?.session?.agent.displayName ?? "the agent").")
+                                            .font(.system(size: 10.5)).foregroundStyle(.orange)
+                                        Button("Put back in the box") { chat.putBack(message, rowID: rowID) }.controlSize(.small)
+                                        Button("Dismiss") { chat.dismiss(message) }.controlSize(.small)
+                                    }
+                                } else {
+                                    Text(message.expectsSoon ? "sending…" : "queued").font(.system(size: 9.5)).foregroundStyle(.tertiary)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .trailing)
-                                .padding(.leading, 60).padding(.bottom, 10)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .trailing)
+                            .padding(.leading, 60).padding(.bottom, 6)
                         }
                         LeadQuestionCards(questions: leadQuestions, answer: answerLead)
                         if live, let menu = chat.menu {

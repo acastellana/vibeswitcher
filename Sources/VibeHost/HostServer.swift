@@ -128,8 +128,13 @@ public final class HostServer {
     private var allInfo: [HostSession] { order.compactMap { sessions[$0]?.info } }
 
     private func handle(_ kind: HostFrame.Kind, _ payload: Data, from client: ClientConnection) {
-        guard kind == .control, let envelope = try? HostCoding.decode(HostRequestEnvelope.self, from: payload) else {
-            return client.close()
+        guard kind == .control else { return client.close() }
+        guard let envelope = try? HostCoding.decode(HostRequestEnvelope.self, from: payload) else {
+            // A request this host doesn't know (a newer app): say so, and keep the connection. Only what isn't a
+            // request at all ends it.
+            struct Numbered: Decodable { var seq: Int }
+            guard let numbered = try? HostCoding.decode(Numbered.self, from: payload) else { return client.close() }
+            return client.send(HostEventEnvelope(replyTo: numbered.seq, event: .error("This session host doesn't know that request; it may be older than the app.")))
         }
         let key = ObjectIdentifier(client)
         let reply: (HostEvent) -> Void = { client.send(HostEventEnvelope(replyTo: envelope.seq, event: $0)) }

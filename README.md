@@ -231,6 +231,9 @@ VibeSwitcher --settings launch        # open Settings (general, launch or termin
 VibeSwitcher --lead ~/dev/app --goal "add a login page"  # start (or message) the project lead of that repository
 VibeSwitcher --install-hooks | --uninstall-hooks
 cat ~/.vibeswitcher/app-status.json   # debug aid: what the running app currently sees
+ls ~/.vibeswitcher/debug/             # app.log: what the app did lately; hang-*.txt/.log: a sample of every thread
+                                      # and the app's state whenever its main thread was stuck for over 2 s
+VibeSwitcher --chat-bench TRANSCRIPT  # debug aid: the chat view offscreen on a transcript, timing its layouts
 VibeSwitcher --capture-window /tmp/w.png # debug aid: the running app draws its windows into PNGs (+ view tree .txt; /tmp or ~/.vibeswitcher only)
 ```
 

@@ -181,6 +181,7 @@ final class ChatModel: ObservableObject {
                 self.log = log
                 self.cursor = read.cursor
                 self.earliest = read.start
+                Breadcrumbs.shared.note("chat: loaded \(log.entries.count) entries, \(self.items.count) items from \(url.lastPathComponent)")
                 self.hasEarlier = read.start > 0
                 // Nothing new since you looked: no marker.
                 if self.markerAfter == log.entries.last?.id { self.markerAfter = nil }
@@ -194,6 +195,7 @@ final class ChatModel: ObservableObject {
 
     /// Reads what was added to the file since the last read (call about once a second while shown).
     func poll() {
+        if !pending.isEmpty { updateLate() }
         // Not there yet (a new session writes its transcript with the first message): try again.
         if case .failed = state, let path, !reading {
             self.path = nil
@@ -268,7 +270,10 @@ final class ChatModel: ObservableObject {
 
     func focusComposer() { focusComposerRequests += 1 }
 
-    func showEarlier() { shownLimit += ChatWindow.page }
+    func showEarlier() {
+        shownLimit += ChatWindow.page
+        Breadcrumbs.shared.note("chat: show earlier (\(shownLimit) of \(items.count))")
+    }
 
     private func widen(toInclude id: String?, atMost: Int = .max) {
         guard let id, let index = items.firstIndex(where: { $0.id == id }) else { return }
@@ -299,9 +304,31 @@ final class ChatModel: ObservableObject {
         if left != steering { steering = left }
     }
 
-    /// Records a message sent while the agent works, until the transcript shows it.
-    func sent(_ text: String) {
-        pending.append(PendingMessage(text: text, afterPrompts: log.prompts.count))
+    /// Records a sent message until the transcript shows it: queued for after the turn, or typed into an idle
+    /// agent (`expectsSoon`: flagged if it doesn't show up in seconds).
+    func sent(_ text: String, expectsSoon: Bool = false) {
+        pending.append(PendingMessage(text: text, afterPrompts: log.prompts.count, expectsSoon: expectsSoon))
+    }
+
+    /// Typed messages that should be in the conversation by now and aren't.
+    @Published private(set) var late: Set<UUID> = []
+
+    private func updateLate() {
+        let now = Set(pending.filter { $0.late() }.map(\.id))
+        if now != late { late = now }
+    }
+
+    /// A late message, back in the composer (before what's there), and off the list.
+    func putBack(_ message: PendingMessage, rowID: String) {
+        let draft = composer.drafts[rowID] ?? ""
+        composer.drafts[rowID] = draft.isEmpty ? message.text : message.text + "\n\n" + draft
+        dismiss(message)
+        focusComposer()
+    }
+
+    func dismiss(_ message: PendingMessage) {
+        pending.removeAll { $0.id == message.id }
+        updateLate()
     }
 
     /// Loads what `/` and `@` offer for this folder (off the main thread; files are re-listed when asked again).

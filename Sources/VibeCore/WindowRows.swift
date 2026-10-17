@@ -26,6 +26,15 @@ public struct WindowRow: Identifiable, Equatable, Sendable {
         }
     }
 
+    /// What a composer draft is kept under: the window session (whatever agent runs in it), or for a Terminal
+    /// session its conversation (a new agent on the same tab is someone else).
+    public var draftKey: String {
+        switch content {
+        case .agent(let session) where session.hostID == nil: return "agent:\(session.agentSessionID ?? session.identity)"
+        default: return id
+        }
+    }
+
     public var hostID: UUID? {
         switch content {
         case .agent(let session): return session.hostID

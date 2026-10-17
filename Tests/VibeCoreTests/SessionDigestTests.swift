@@ -33,4 +33,13 @@ struct SessionDigestTests {
         #expect(!text.contains("reply number 1 "))
         #expect(text.hasPrefix("[earlier part left out]"))
     }
+
+    @Test func secretsInTheSessionStayOut() {
+        var log = ChatLog()
+        log.append([.entry(ChatEntry(id: "p", at: nil, kind: .prompt(text: "deploy --api-key=abc123 --env prod", images: [])))])
+        let text = SessionDigest.text(log, limit: 10_000)
+        #expect(!text.contains("abc123"))
+        #expect(text.contains("--api-key=•••"))
+    }
 }
+

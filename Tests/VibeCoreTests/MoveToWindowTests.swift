@@ -50,4 +50,16 @@ struct MoveToWindowTests {
         #expect(plan.env.isEmpty)
         #expect(plan.label == "Codex")
     }
+
+    @Test func draftsBelongToTheConversationNotTheTerminal() {
+        // Two agents, one after the other, on the same Terminal tab: each its own draft.
+        let first = WindowRow(content: .agent(session(status: .idle, id: "conv-1")), project: "p")
+        let second = WindowRow(content: .agent(session(status: .idle, id: "conv-2")), project: "p")
+        #expect(first.id == second.id)
+        #expect(first.draftKey != second.draftKey)
+        // A window session keeps its host id (and with it the draft, across the agents it runs).
+        let host = UUID()
+        #expect(WindowRow(content: .agent(session(status: .idle, id: "conv-1", host: host)), project: "p").draftKey == "host:\(host)")
+    }
 }
+

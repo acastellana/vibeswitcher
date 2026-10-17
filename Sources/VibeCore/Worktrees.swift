@@ -15,6 +15,36 @@ public enum Git {
     }
 }
 
+/// Stops the commands a piece of work runs when it's cancelled (an MCP tool call the user interrupted). Set for
+/// the current thread with `with`; `Shell.run` picks it up.
+public final class ShellCancel: @unchecked Sendable {
+    private let lock = NSLock()
+    private var cancelled = false
+
+    public init() {}
+
+    public var isCancelled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return cancelled
+    }
+
+    public func cancel() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
+    }
+
+    private static let key = "VibeSwitcher.ShellCancel"
+    public static var current: ShellCancel? { Thread.current.threadDictionary[key] as? ShellCancel }
+
+    public static func with<T>(_ token: ShellCancel, _ body: () throws -> T) rethrows -> T {
+        Thread.current.threadDictionary[key] = token
+        defer { Thread.current.threadDictionary[key] = nil }
+        return try body()
+    }
+}
+
 /// Runs a program and captures its output.
 public enum Shell {
     public static func run(executable: String, args: [String], in directory: String, env: [String: String] = [:],
@@ -39,7 +69,8 @@ public enum Shell {
         group.enter()
         Thread.detachNewThread { errors = err.fileHandleForReading.readDataToEndOfFile(); group.leave() }
         let deadline = Date().addingTimeInterval(timeout)
-        while process.isRunning, Date() < deadline { usleep(20_000) }
+        let cancel = ShellCancel.current
+        while process.isRunning, Date() < deadline, cancel?.isCancelled != true { usleep(20_000) }
         if process.isRunning {
             // Out of time: its children (a test runner's workers) go too, or they'd keep running in the worktree.
             // Asked first; whatever is still there after `grace` (it ignores TERM) is killed.

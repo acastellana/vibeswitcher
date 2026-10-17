@@ -36,10 +36,20 @@ public struct PendingMessage: Equatable, Sendable, Identifiable {
     public var text: String
     /// How many prompts the conversation had when it was sent.
     public var afterPrompts: Int
+    /// Typed into an idle agent: it shows in the conversation within seconds (a queued one waits for the turn).
+    public var expectsSoon: Bool
+    public var sentAt: Date
 
-    public init(text: String, afterPrompts: Int) {
+    public init(text: String, afterPrompts: Int, expectsSoon: Bool = false, sentAt: Date = Date()) {
         self.text = text
         self.afterPrompts = afterPrompts
+        self.expectsSoon = expectsSoon
+        self.sentAt = sentAt
+    }
+
+    /// Should be in the conversation by now and isn't: the keys may not have reached the agent.
+    public func late(at now: Date = Date()) -> Bool {
+        expectsSoon && !text.hasPrefix("/") && now.timeIntervalSince(sentAt) > 15
     }
 
     /// Those not yet among the prompts that came after them.

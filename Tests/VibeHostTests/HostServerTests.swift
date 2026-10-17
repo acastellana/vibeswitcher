@@ -250,5 +250,16 @@ struct HostCallTests {
         app.send(.input(id: session.id, bytes: Data("answer\n".utf8), reply: true))
         #expect(eventually { app.text(session.id).contains("answer") })
     }
+
+    @Test func anUnknownRequestIsAnsweredNotFatal() throws {
+        let host = try TestHost()
+        let client = try TestClient(host)
+        // A newer app's request this host doesn't know.
+        client.queue.sync { client.connection.sendRaw(Data(#"{"seq":77,"request":{"teleport":{"to":"mars"}}}"#.utf8)) }
+        #expect(eventually { client.reply(to: 77).map { if case .error = $0 { return true } else { return false } } ?? false })
+        let seq = client.send(.hello(protocolVersion: HostProtocol.version, app: "test"))
+        #expect(eventually { client.reply(to: seq) != nil })
+        #expect(!client.closed)
+    }
 }
 

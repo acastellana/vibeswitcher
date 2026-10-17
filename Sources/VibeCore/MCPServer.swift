@@ -56,11 +56,16 @@ public protocol MCPToolset: AnyObject {
     func call(_ name: String, _ arguments: [String: Any]) -> MCPToolResult
 }
 
-/// MCP over stdio: one JSON-RPC 2.0 message per line in, one reply per line out (none for notifications).
-public final class MCPServer {
+/// MCP over stdio: one JSON-RPC 2.0 message per line in, one reply per line out (none for notifications). Tool
+/// calls run side by side (a 20-minute merge doesn't make `status` or `ping` wait), and a cancelled call's commands
+/// are stopped.
+public final class MCPServer: @unchecked Sendable {
     private let name: String
     private let version: String
     private let toolset: MCPToolset
+    private let calls = DispatchQueue(label: "vibeswitcher.mcp-calls", attributes: .concurrent)
+    private let lock = NSLock()
+    private var running: [String: ShellCancel] = [:]
 
     public init(name: String, version: String, toolset: MCPToolset) {
         self.name = name
@@ -70,10 +75,42 @@ public final class MCPServer {
 
     /// Reads requests from stdin until it closes, answering on stdout.
     public func serve() {
+        let output = NSLock()
         while let line = readLine(strippingNewline: true) {
-            guard !line.trimmingCharacters(in: .whitespaces).isEmpty, let reply = handle(Data(line.utf8)) else { continue }
-            FileHandle.standardOutput.write(reply + Data([0x0A]))
+            guard !line.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+            receive(Data(line.utf8)) { reply in
+                output.lock()
+                FileHandle.standardOutput.write(reply + Data([0x0A]))
+                output.unlock()
+            }
         }
+    }
+
+    /// One incoming message: tool calls are answered when they finish (on another thread), the rest at once.
+    public func receive(_ data: Data, respond: @escaping (Data) -> Void) {
+        let message = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        let method = message?["method"] as? String
+        if method == "tools/call", let id = message?["id"] {
+            let token = ShellCancel()
+            let key = "\(id)"
+            lock.lock()
+            running[key] = token
+            lock.unlock()
+            calls.async { [self] in
+                let reply = ShellCancel.with(token) { handle(data) }
+                lock.lock()
+                running[key] = nil
+                lock.unlock()
+                if let reply { respond(reply) }
+            }
+            return
+        }
+        if method == "notifications/cancelled", let params = message?["params"] as? [String: Any], let request = params["requestId"] {
+            lock.lock()
+            running["\(request)"]?.cancel()
+            lock.unlock()
+        }
+        if let reply = handle(data) { respond(reply) }
     }
 
     public func handle(_ data: Data) -> Data? {

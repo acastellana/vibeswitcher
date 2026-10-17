@@ -23,6 +23,8 @@ final class LeadController: ObservableObject {
     /// working again; until then another flush would type a second prompt).
     private var flushing: Set<String> = []
     private var typedAt: [String: Date] = [:]
+    /// Messages for a lead that isn't running right now (restarting): delivered once a lead runs there again.
+    private var held: [String: [(text: String, sender: SteerMessage.Sender)]] = [:]
 
     init(host: HostClient, store: SessionStore, claudeCommand: @escaping (String) -> String) {
         self.host = host
@@ -80,7 +82,7 @@ final class LeadController: ObservableObject {
 
     private func startLead(root: String, goal: String?, show: Bool) {
         if let running = leadSessions[root] {
-            if let goal { deliver("New goal from the user: \(goal)", from: .user, to: BoardStore(root: root).load()) }
+            if let goal { deliver("New goal from the user: \(goal)", from: .user, to: BoardStore(root: root).load(), root: root) }
             if show { select(running.id) }
             return
         }
@@ -128,14 +130,23 @@ final class LeadController: ObservableObject {
             board.questions[index].answeredAt = Date().timeIntervalSince1970
         }
         let board = store.load()
-        deliver("Answer to your question “\(question.text)”: \(text)", from: .user, to: board)
+        deliver("Answer to your question “\(question.text)”: \(text)", from: .user, to: board, root: root)
         refresh()
     }
 
     /// Steered in while the lead works; while it's idle the message waits in its inbox and `flush` types it as soon
     /// as its input box is empty (never into your draft; a draft you send takes it along).
-    private func deliver(_ text: String, from sender: SteerMessage.Sender, to board: LeadBoard) {
-        guard let pid = board.leadPid, let tty = board.leadTTY else { return }
+    private func deliver(_ text: String, from sender: SteerMessage.Sender, to board: LeadBoard, root: String? = nil) {
+        // The board names the lead that last started; if that one is gone (a restart under way), the message
+        // would be dropped by the next lead's hook: keep it until a lead runs again.
+        guard let pid = board.leadPid, let tty = board.leadTTY,
+              ProcessTable.info(pid: pid).map({ $0.tty == tty && $0.agent != nil }) == true else {
+            if let root {
+                held[root, default: []].append((text, sender))
+                Breadcrumbs.shared.note("lead: holding a message for \((root as NSString).lastPathComponent) (no lead running)")
+            }
+            return
+        }
         let agent = LeadAgent(pid: pid, tty: tty, session: board.leadSession)
         try? LeadDelivery.deliver(text, from: sender, to: agent, inputIsEmpty: nil, typeInto: nil)
         flush(agent)
@@ -211,7 +222,11 @@ final class LeadController: ObservableObject {
             if info.isLive, let session { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
         }
         for event in LeadWitness.events(board: board, seen: seen) where told.insert("\(root)|\(event.key)").inserted {
-            deliver(event.text, from: .system("witness"), to: board)
+            deliver(event.text, from: .system("witness"), to: board, root: root)
+        }
+        // A lead runs again: what was held for it goes now.
+        if let waiting = held.removeValue(forKey: root) {
+            for message in waiting { deliver(message.text, from: message.sender, to: board, root: root) }
         }
         if let pid = board.leadPid, let tty = board.leadTTY { flush(LeadAgent(pid: pid, tty: tty, session: board.leadSession)) }
     }
