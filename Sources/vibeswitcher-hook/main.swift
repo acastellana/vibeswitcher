@@ -38,11 +38,11 @@ case .ignore: break
 }
 if lock >= 0 { flock(lock, LOCK_UN); close(lock) }
 
-// Messages sent to this agent while it works (Claude Code; Codex takes typed input mid-turn itself).
-if agent == .claude, let pid = agentPid, let event = payload["hook_event_name"] as? String, SteerReply.takesMessages(event: event) {
-    let messages = SteerInbox.take(tty: tty, agentPid: pid)
-    if let output = SteerReply.output(event: event, messages: messages) {
-        FileHandle.standardOutput.write(output)
-    }
+// Messages sent to this agent while it works (Claude Code; Codex takes typed input mid-turn itself). Only the main
+// thread's hooks take them (a subagent's would put them in its context instead), and a message is marked delivered
+// only once its reply is written: a closed pipe leaves it waiting rather than lost.
+if agent == .claude, let pid = agentPid {
+    signal(SIGPIPE, SIG_IGN)
+    SteerReply.answer(payload, tty: tty, agentPid: pid) { (try? FileHandle.standardOutput.write(contentsOf: $0)) != nil }
 }
 exit(0)

@@ -67,16 +67,33 @@ public enum SteerInbox {
     /// many as one delivery holds (`SteerReply.contextLimit`), in order; the rest wait for the agent's next step.
     /// A user message without VibeSwitcher's seal comes out as from `.system`, never as the user's.
     public static func take(tty: String, agentPid: Int32, root: URL = VibePaths.root) -> [SteerMessage] {
+        deliver(tty: tty, agentPid: agentPid, root: root) { $0.count }
+    }
+
+    /// Like `take`, but a message counts as delivered only once it's in the agent's context: `hand` puts the
+    /// messages there (prints the hook's reply, types a prompt) and returns how many of them, from the first, went
+    /// in. Only those are recorded as delivered; the rest stay first in line. Runs under the inbox's lock, so
+    /// `hand` must not post to this inbox; killed midway, the inbox is as it was (delivered again, never lost).
+    @discardableResult
+    public static func deliver(tty: String, agentPid: Int32, root: URL = VibePaths.root,
+                               through hand: ([SteerMessage]) -> Int) -> [SteerMessage] {
         guard let url = try? file(tty, "jsonl", root: root), FileManager.default.fileExists(atPath: url.path) else { return [] }
-        var taken: [SteerMessage] = []
+        var delivered: [SteerMessage] = []
         let key = sealKey(root: root, create: false)
         try? locked(url) { handle in
             try handle.seek(toOffset: 0)
             let data = try handle.readToEnd() ?? Data()
             guard !data.isEmpty else { return }
             let mine = decode(data).filter { $0.agentPid == agentPid }.map { verified($0, key: key) }
-            let count = SteerReply.fitting(mine)
-            taken = Array(mine.prefix(count))
+            let batch = Array(mine.prefix(SteerReply.fitting(mine)))
+            let count = batch.isEmpty ? 0 : min(max(hand(batch), 0), batch.count)
+            delivered = Array(batch.prefix(count))
+            if !delivered.isEmpty, let log = try? file(tty, "delivered", root: root) {
+                try? locked(log) { log in
+                    try log.seekToEnd()
+                    try log.write(contentsOf: Data(delivered.map { $0.id + "\n" }.joined().utf8))
+                }
+            }
             var rest = Data()
             for message in mine.dropFirst(count) {
                 rest.append(try JSONEncoder().encode(message))
@@ -85,13 +102,7 @@ public enum SteerInbox {
             try handle.truncate(atOffset: 0)
             try handle.write(contentsOf: rest)
         }
-        if !taken.isEmpty, let log = try? file(tty, "delivered", root: root) {
-            try? locked(log) { handle in
-                try handle.seekToEnd()
-                try handle.write(contentsOf: Data(taken.map { $0.id + "\n" }.joined().utf8))
-            }
-        }
-        return taken
+        return delivered
     }
 
     /// Takes one waiting message back (it's being sent another way, or returned to the composer).
@@ -183,6 +194,34 @@ public enum SteerReply {
     /// The events that deliver messages: after a tool, with a prompt, and at the end of a turn (which then goes on).
     public static func takesMessages(event: String) -> Bool {
         ["PostToolUse", "UserPromptSubmit", "Stop"].contains(event)
+    }
+
+    /// Whether the agent this hook payload comes from takes messages now: the main thread, on one of those events.
+    /// A subagent's tool calls fire the same hooks in the same process and terminal, with its `agent_id` (Claude
+    /// Code sends it only from inside a subagent, never for the main thread): what's handed to one of those lands
+    /// in the subagent's context and never reaches the agent it was sent to. It waits for the main thread's next step.
+    public static func takesMessages(payload: [String: Any]) -> Bool {
+        guard let event = payload["hook_event_name"] as? String, takesMessages(event: event) else { return false }
+        switch payload["agent_id"] {
+        case nil, is NSNull: return true
+        case let id as String: return id.isEmpty
+        default: return false
+        }
+    }
+
+    /// The hook's part: for a payload that takes messages, hands the agent's waiting ones to `write` as the reply to
+    /// its event, and records them delivered only if `write` succeeded. Returns what was written.
+    @discardableResult
+    public static func answer(_ payload: [String: Any], tty: String, agentPid: Int32, root: URL = VibePaths.root,
+                              write: (Data) -> Bool) -> Data? {
+        guard takesMessages(payload: payload), let event = payload["hook_event_name"] as? String else { return nil }
+        var written: Data?
+        SteerInbox.deliver(tty: tty, agentPid: agentPid, root: root) { messages in
+            guard let output = output(event: event, messages: messages), write(output) else { return 0 }
+            written = output
+            return messages.count
+        }
+        return written
     }
 
     public static func output(event: String, messages: [SteerMessage]) -> Data? {
