@@ -222,24 +222,31 @@ public final class HostedSession {
     public func styledScreen() -> (text: String, runs: [ScreenRun]) { Self.styledScreen(of: terminal) }
 
     /// The text matches `screenText`'s (one character per cell, trimmed on the right); runs cover what isn't plain.
+    /// Read cell by cell: a wide character's second cell is an empty character of its own, and a cell that joins
+    /// the character before it (a mark drawn in its own cell) adds to that character, so runs never drift.
     public static func styledScreen(of terminal: Terminal) -> (text: String, runs: [ScreenRun]) {
         var lines: [String] = []
         var runs: [ScreenRun] = []
         for row in 0..<terminal.rows {
             guard let line = terminal.getLine(row: row) else { continue }
-            let text = line.translateToString(trimRight: true)
-            lines.append(text)
-            for column in 0..<text.count {
-                let attribute = line[column].attribute
+            var text = ""
+            var column = -1
+            for cell in 0..<min(line.count, line.getTrimmedLength()) {
+                let character = line[cell].getCharacter()
+                text.append(character)
+                // Else it joined the character before it.
+                if text.last == character { column += 1 }
+                let attribute = line[cell].attribute
                 let style = (faint: attribute.style.contains(.dim), inverse: attribute.style.contains(.inverse), color: color(attribute.fg))
                 guard style.faint || style.inverse || style.color != nil else { continue }
-                if let last = runs.last, last.row == row, last.column + last.length == column,
+                if let last = runs.last, last.row == row, last.column + last.length >= column,
                    (last.faint, last.inverse, last.color) == style {
-                    runs[runs.count - 1].length += 1
+                    runs[runs.count - 1].length = column + 1 - last.column
                 } else {
                     runs.append(ScreenRun(row: row, column: column, length: 1, faint: style.faint, inverse: style.inverse, color: style.color))
                 }
             }
+            lines.append(text)
         }
         return (lines.joined(separator: "\n"), runs)
     }

@@ -201,7 +201,8 @@ public enum HostEvent: Codable, Equatable, Sendable {
 }
 
 /// A run of characters on one screen row drawn alike, when that isn't plain: faint (SGR 2), inverse (SGR 7: an
-/// app's painted caret) or in a colour. `column` counts the row's characters in the screen's text (one per cell).
+/// app's painted caret) or in a colour. `column` counts the row's characters in the screen's text, which has one per
+/// terminal cell: a wide character (CJK, emoji) is followed by an empty one for its second cell.
 public struct ScreenRun: Codable, Equatable, Sendable {
     public enum Color: Codable, Equatable, Sendable {
         /// The 256-colour palette (0–15 the ANSI colours).
