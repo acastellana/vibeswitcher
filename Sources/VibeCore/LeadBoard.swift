@@ -115,6 +115,21 @@ public struct LeadUpdate: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
+/// Something a worker or verifier told the lead (done, blocked, a question, a verdict), kept so the lead's status lists
+/// what came in even if the message itself never reached it.
+public struct LeadReport: Codable, Equatable, Sendable {
+    /// Who it's from ("worker add-b", "verifier add-b").
+    public var about: String
+    public var text: String
+    public var at: Double
+
+    public init(about: String, text: String, at: Double = Date().timeIntervalSince1970) {
+        self.about = about
+        self.text = text
+        self.at = at
+    }
+}
+
 public struct LeadBoard: Codable, Equatable, Sendable {
     /// The lead's session (host id) and agent pid, so answers and events can be steered into it.
     public var leadSession: String?
@@ -125,6 +140,12 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     public var tasks: [LeadTask] = []
     public var questions: [LeadQuestion] = []
     public var updates: [LeadUpdate] = []
+    /// The latest reports for the lead, oldest first, and when its status last listed them. Optional: older boards
+    /// have neither.
+    public var reports: [LeadReport]?
+    public var reportsSeenAt: Double?
+
+    public static let keptReports = 50
 
     public init() {}
 

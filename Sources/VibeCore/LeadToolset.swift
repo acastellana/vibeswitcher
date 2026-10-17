@@ -213,7 +213,7 @@ public final class LeadToolset: MCPToolset {
                                 required: ["completion", "integrity", "summary"])]
         case .lead?:
             return [
-                MCPToolInfo(name: "status", description: "The board at a glance: tasks by state, workers and what they're doing, open questions."),
+                MCPToolInfo(name: "status", description: "The board at a glance: tasks by state, workers and what they're doing, open questions, and every report that came in since you last asked."),
                 MCPToolInfo(name: "board", description: "Everything on the board: tasks with their contracts and evidence, questions and answers, updates."),
                 MCPToolInfo(name: "add_task", description: "Put a task on the board with its contract.",
                             properties: ["title": P(type: "string", description: "Short title"),
@@ -642,6 +642,10 @@ public final class LeadToolset: MCPToolset {
 
     /// False when no lead is running to tell (it ended; a new one reads the board when it starts).
     private func tellLead(_ text: String, about: String) throws -> Bool {
+        // On the board first: the lead's status lists it even if the message never reaches the lead.
+        try store.update { board in
+            board.reports = ((board.reports ?? []) + [LeadReport(about: about, text: text)]).suffix(LeadBoard.keptReports)
+        }
         let board = store.load()
         guard let pid = board.leadPid, let tty = board.leadTTY else { return false }
         let lead = LeadAgent(pid: pid, tty: tty, session: board.leadSession)
@@ -738,12 +742,25 @@ public final class LeadToolset: MCPToolset {
             lines.append("\nWaiting on the user:")
             lines += open.map { "- \($0.text)" }
         }
+        if let reports = try? newReports(), !reports.isEmpty {
+            lines.append("\nReports since your last status:")
+            lines += reports.map { "- \($0.about): " + ($0.text.count > 4_000 ? String($0.text.prefix(4_000)) + "…" : $0.text) }
+        }
         let answered = board.questions.filter { $0.answer != nil }.suffix(5)
         if !answered.isEmpty {
             lines.append("\nRecent answers:")
             lines += answered.map { "- \($0.text) → \($0.answer ?? "")" }
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// The reports that came in since status last listed them, now marked seen.
+    private func newReports() throws -> [LeadReport] {
+        try store.update { board in
+            let new = (board.reports ?? []).filter { $0.at > (board.reportsSeenAt ?? 0) }
+            if let last = new.last { board.reportsSeenAt = last.at }
+            return new
+        }
     }
 
     /// What's missing from the workflow, with what to set (status and configure say it; nothing stays silent).
