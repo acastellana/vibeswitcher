@@ -18,14 +18,17 @@ enum AppStatus {
     static let settingsNotification = Notification.Name("dev.vibeswitcher.settings")
     static let newSessionNotification = Notification.Name("dev.vibeswitcher.new")
 
+    /// Writes go out in order, off the main thread: the tab bars are Accessibility calls into Terminal, which wait
+    /// for it (seconds when it's busy or hung).
+    private static let queue = DispatchQueue(label: "vibeswitcher.app-status", qos: .utility)
+
+    /// Called on the main thread; it only takes a copy of what's shown there.
     static func write(sessions: [Session], terminalAccess: TerminalAccess, extra: [String: Any] = [:]) {
         guard enabled else { return }
         var object: [String: Any] = [
             "updatedAt": ISO8601DateFormatter().string(from: Date()),
             "pid": ProcessInfo.processInfo.processIdentifier,
             "terminalAccess": "\(terminalAccess)",
-            "accessibilityTrusted": TabOrder.isTrusted,
-            "tabBars": TabOrder.tabBars(),
             "sessions": sessions.map { ["tty": $0.tty, "agent": $0.agent.rawValue, "status": $0.status.rawValue,
                                         "title": $0.title, "hooks": $0.hasHooks,
                                         "desktop": $0.screenPosition?.desktop ?? 0, "tab": $0.screenPosition?.tabIndex ?? 0,
@@ -33,9 +36,19 @@ enum AppStatus {
         ]
         object.merge(extras) { $1 }
         object.merge(extra) { $1 }
-        guard JSONSerialization.isValidJSONObject(object),
-              let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) else { return }
-        try? data.write(to: url, options: .atomic)
-        try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        guard JSONSerialization.isValidJSONObject(object) else { return }
+        let snapshot = Snapshot(object: object)
+        let url = self.url
+        queue.async {
+            var object = snapshot.object
+            object["accessibilityTrusted"] = TabOrder.isTrusted
+            object["tabBars"] = TabOrder.tabBars()
+            guard let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) else { return }
+            try? data.write(to: url, options: .atomic)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        }
     }
+
+    /// Plain JSON values only (checked above), so it can cross to the writer's queue.
+    private struct Snapshot: @unchecked Sendable { let object: [String: Any] }
 }

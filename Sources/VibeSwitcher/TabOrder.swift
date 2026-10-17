@@ -18,15 +18,19 @@ enum TabOrder {
         }
     }
 
-    /// For each Terminal window with a tab bar, its tab titles from left to right.
+    /// For each Terminal window with a tab bar, its tab titles from left to right. Off the main thread: each call
+    /// waits on Terminal, up to half a second.
     static func tabBars() -> [[String]] {
         guard isTrusted, let terminal = TerminalBridge.app else { return [] }
         let app = AXUIElementCreateApplication(terminal.processIdentifier)
         AXUIElementSetMessagingTimeout(app, 0.5)
         var bars: [[String]] = []
         for window in children(of: app, attribute: kAXWindowsAttribute) {
+            // The timeout is per element: one set on the app alone leaves its windows at the default (about 6 s).
+            AXUIElementSetMessagingTimeout(window, 0.5)
             guard let tabGroup = children(of: window, attribute: kAXChildrenAttribute)
                 .first(where: { role(of: $0) == kAXTabGroupRole }) else { continue }
+            AXUIElementSetMessagingTimeout(tabGroup, 0.5)
             let titles = children(of: tabGroup, attribute: kAXTabsAttribute).compactMap(title(of:))
             let fallback = children(of: tabGroup, attribute: kAXChildrenAttribute)
                 .filter { role(of: $0) == kAXRadioButtonRole }.compactMap(title(of:))

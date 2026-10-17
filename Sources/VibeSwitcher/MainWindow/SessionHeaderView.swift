@@ -12,7 +12,7 @@ struct SessionHeaderView: View {
         HStack(spacing: 10) {
             if let row = model.selectedRow {
                 AgentMark(kind: row.markKind, status: row.statusColor, hollow: row.statusIsHollow, size: 28)
-                TimelineView(.periodic(from: .now, by: 30)) { context in
+                TimelineView(.ticking(every: 30)) { context in
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 8) {
                             Text(row.title).font(.system(size: 14, weight: .semibold)).lineLimit(1).layoutPriority(1)

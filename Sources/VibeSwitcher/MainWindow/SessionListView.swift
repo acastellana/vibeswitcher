@@ -77,7 +77,7 @@ struct SessionListView: View {
                 .font(.system(size: 12))
                 .padding(.horizontal, 7).padding(.vertical, 4)
                 .background(RoundedRectangle(cornerRadius: 6).fill(.quaternary.opacity(0.6)))
-                TimelineView(.periodic(from: .now, by: 30)) { context in
+                TimelineView(.ticking(every: 30)) { context in
                     let summary = WindowGroups.summary(model.allRows, now: context.date)
                     Text(summary.isEmpty ? countText : summary)
                         .font(.system(size: 11)).foregroundStyle(.secondary)
@@ -114,7 +114,7 @@ struct WindowRowView: View {
     var toggleTeam: () -> Void = {}
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 30)) { context in
+        TimelineView(.ticking(every: 30)) { context in
             // A worker's or verifier's normal end doesn't read as a failure.
             let state = nested ? LeadTeams.state(of: row, now: context.date) : row.state(now: context.date)
             HStack(spacing: 9) {

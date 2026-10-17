@@ -48,7 +48,7 @@ private struct OverviewView: View {
     @State private var branch: String?
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 30)) { context in
+        TimelineView(.ticking(every: 30)) { context in
             Form {
                 Section("Status") {
                     LabeledContent("State") { StatusPill(row: row, now: context.date) }
@@ -119,7 +119,7 @@ struct ActivityView: View {
     let session: Session?
     @State private var entries: [TranscriptEntry] = []
     @State private var message: String?
-    static let tailBytes = 256 * 1024
+    nonisolated static let tailBytes = 256 * 1024
 
     private var key: String { "\(session?.transcriptPath ?? "")|\(session?.eventAt ?? 0)" }
 
@@ -157,7 +157,8 @@ struct ActivityView: View {
         }
     }
 
-    private static func read(_ path: String) -> [TranscriptEntry]? {
+    /// Off the main actor (a View's statics are on it): seeking, reading and parsing the transcript's tail.
+    nonisolated private static func read(_ path: String) -> [TranscriptEntry]? {
         guard let (url, format) = TranscriptReader.checkedURL(path, home: NSHomeDirectory()),
               let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }

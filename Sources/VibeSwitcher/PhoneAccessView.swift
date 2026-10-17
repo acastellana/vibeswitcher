@@ -108,7 +108,7 @@ struct PhoneAccessView: View {
                         .font(.callout).fixedSize(horizontal: false, vertical: true)
                     Text(Self.grouped(pairing.code)).font(.system(size: 26, weight: .bold, design: .monospaced))
                         .textSelection(.enabled)
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                    TimelineView(.ticking(every: 1)) { context in
                         let left = max(0, Int(pairing.expires.timeIntervalSince(context.date)))
                         Text(left > 0 ? "Valid for \(left / 60):\(String(format: "%02d", left % 60)), once"
                                       : "Expired")

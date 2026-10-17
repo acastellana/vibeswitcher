@@ -349,7 +349,7 @@ struct SessionRow: View {
                     HStack(spacing: 4) {
                         if !compact { Text(session.status.label).foregroundStyle(session.isPaused ? Color.secondary : session.status.color) }
                         if session.statusSince > Date.distantPast.addingTimeInterval(1) {
-                            TimelineView(.periodic(from: .now, by: 1)) { context in
+                            TimelineView(.ticking(every: 1)) { context in
                                 Text(Self.elapsed(from: session.statusSince, to: context.date))
                                     .foregroundStyle(.secondary)
                             }
@@ -368,7 +368,7 @@ struct SessionRow: View {
                 }
                 if let activity = session.activity, let since = session.activitySince {
                     // Live: what it's running and for how long; long calls turn orange so a hung one stands out.
-                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                    TimelineView(.ticking(every: 1)) { context in
                         let seconds = context.date.timeIntervalSince(since)
                         HStack(spacing: 4) {
                             Image(systemName: "gearshape.2").imageScale(.small)

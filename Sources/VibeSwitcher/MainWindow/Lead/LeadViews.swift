@@ -170,7 +170,7 @@ private struct LeadQuestionCard: View {
                     .padding(.horizontal, 5).padding(.vertical, 1.5)
                     .foregroundStyle(question.rank == .whenever ? AnyShapeStyle(.secondary) : AnyShapeStyle(.white))
                     .background(Capsule().fill(question.rank == .whenever ? Color.secondary.opacity(0.15) : question.rank.color))
-                TimelineView(.periodic(from: .now, by: 30)) { context in
+                TimelineView(.ticking(every: 30)) { context in
                     Text("asked \(Durations.compact(context.date.timeIntervalSince1970 - question.askedAt)) ago")
                         .font(.system(size: 10.5)).foregroundStyle(.tertiary)
                 }
@@ -340,7 +340,7 @@ struct LeadTeamView: View {
 
     var body: some View {
         let fading = !DecisionFeed.split(decisions, now: (clock ?? Date()).timeIntervalSince1970, reduceMotion: false).recent.isEmpty
-        TimelineView(.periodic(from: .now, by: fading ? 1 : 10)) { context in
+        TimelineView(.ticking(every: fading ? 1 : 10)) { context in
             let now = clock ?? context.date
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {

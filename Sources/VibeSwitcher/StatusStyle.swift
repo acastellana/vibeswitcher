@@ -91,3 +91,12 @@ enum StatusIcon {
         return image
     }
 }
+
+extension TimelineSchedule where Self == PeriodicTimelineSchedule {
+    /// Every `interval` seconds from a fixed start. One from `.now` is a new schedule each time its view is drawn
+    /// again, and SwiftUI then updates the view over and over (the chat laid out about 20 times a second). The same
+    /// start everywhere also puts every clock in the app on the same whole seconds, so they tick together.
+    static func ticking(every interval: TimeInterval) -> PeriodicTimelineSchedule {
+        .periodic(from: Date(timeIntervalSinceReferenceDate: 0), by: interval)
+    }
+}
