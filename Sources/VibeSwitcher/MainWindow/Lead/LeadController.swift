@@ -27,6 +27,8 @@ final class LeadController: ObservableObject {
     private var typedAt: [String: Date] = [:]
     /// Messages for a lead that isn't running right now (restarting): delivered once a lead runs there again.
     private var held: [String: [(text: String, sender: SteerMessage.Sender)]] = [:]
+    /// What the team's agents are doing, from their hooks and transcripts together (see `LeadActivity`).
+    private let observer = LeadObserver()
 
     init(host: HostClient, store: SessionStore, claudeCommand: @escaping (String) -> String) {
         self.host = host
@@ -161,19 +163,20 @@ final class LeadController: ObservableObject {
         flush(agent)
     }
 
-    /// Types what waits for an idle agent in a window session, once its input box is empty.
+    /// Types what waits for an idle agent in a window session, once its input box is empty. Only between turns: a
+    /// missing or stale state file isn't an idle agent (its transcript says whether it's mid-turn).
     private func flush(_ agent: LeadAgent) {
         guard let id = agent.session.flatMap(UUID.init(uuidString:)),
-              SteerInbox.pending(tty: agent.tty).contains(where: { $0.agentPid == agent.pid }) else { return }
-        let state = HookState.load(from: VibePaths.stateFile(tty: agent.tty))
-        guard LeadDelivery.way(for: state) == .type, !flushing.contains(agent.tty),
+              SteerInbox.pending(tty: agent.tty).contains(where: { $0.agentPid == agent.pid }),
+              let hosted = host.sessions.first(where: { $0.id == id }),
+              observer.activity(hosted, agentPid: agent.pid).betweenTurns, !flushing.contains(agent.tty),
               Date().timeIntervalSince(typedAt[agent.tty] ?? .distantPast) > 10 else { return }
         flushing.insert(agent.tty)
         host.screen(id) { [weak self] screen in
             guard let self else { return }
             self.flushing.remove(agent.tty)
             guard let screen, TerminalInput.isEmpty(screen) else { return }
-            LeadDelivery.flush(agent, state: state, inputIsEmpty: { true }, typeInto: { text in
+            LeadDelivery.flush(agent, betweenTurns: true, inputIsEmpty: { true }, typeInto: { text in
                 self.typedAt[agent.tty] = Date()
                 self.type(text, into: id)
                 return true
@@ -239,10 +242,17 @@ final class LeadController: ObservableObject {
         for id in board.tasks.flatMap({ [$0.worker, $0.verifier] }).compactMap({ $0 }) {
             guard let info = hosted[id] else { continue }
             let session = store.sessions.first { $0.hostID?.uuidString == id }
+            // A turn that ended on an API error reads as finished or waiting; its transcript says which it was.
+            var apiError: (text: String, at: Double?)?
+            if info.isLive, let session, session.status != .working {
+                let reading = observer.reading(info, agentPid: session.pid)
+                if case .apiError(let error) = reading.activity { apiError = (error, reading.tail?.at) }
+            }
             // No agent in the scan a minute on: "agent ended · shell", as good as ended.
             seen[id] = LeadWitness.Seen(live: info.isLive, exit: info.exit?.status, status: session?.status,
                                         since: session?.statusSince, detail: session?.detail,
-                                        agentQuit: session == nil && info.agentQuit(now: now))
+                                        agentQuit: session == nil && info.agentQuit(now: now), apiError: apiError?.text,
+                                        apiErrorAt: apiError?.at)
             if info.isLive, let session { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
         }
         for event in LeadWitness.events(board: board, seen: seen, now: now) where told.insert("\(root)|\(event.key)").inserted {

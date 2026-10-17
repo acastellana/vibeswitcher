@@ -409,3 +409,146 @@ public enum TranscriptWindow {
                      truncatedBefore: plan.fresh && plan.start > 0)
     }
 }
+
+/// Where a Claude Code conversation stands, from the end of its transcript: what the hooks say goes stale between
+/// events (a tool that runs for minutes fires nothing), but the agent writes every step here as it takes it.
+public struct TranscriptTail: Equatable, Sendable {
+    public enum State: Equatable, Sendable {
+        /// Mid-turn, waiting on a tool call it made (or on the user, when the hooks say a prompt is on screen).
+        case toolCall
+        /// Mid-turn otherwise: a prompt or a tool's result came in, the model is on it.
+        case thinking
+        /// The turn is over; `apiError` when it ended on one ("API Error: …") rather than on the model's reply.
+        case turnOver(apiError: String?)
+    }
+
+    public var state: State
+    /// When the line that says so was written.
+    public var at: Double?
+
+    public var midTurn: Bool { if case .turnOver = state { return false } else { return true } }
+
+    /// How much of the file's end is read: the last few steps, whatever their size (a tool's result can be big).
+    public static let window = 256 * 1024
+
+    /// The tail of a Claude Code transcript, or nil when it has no main-thread step yet.
+    public static func read(url: URL) -> TranscriptTail? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd() else { return nil }
+        let start = size > UInt64(window) ? size - UInt64(window) : 0
+        guard (try? handle.seek(toOffset: start)) != nil, var data = try? handle.readToEnd() else { return nil }
+        if start > 0 { data = data.subdata(in: (data.startIndex + TranscriptReader.tailStart(data))..<data.endIndex) }
+        return read(data)
+    }
+
+    /// From complete transcript lines (a partial last line is skipped).
+    public static func read(_ data: Data) -> TranscriptTail? {
+        var lines = data.split(separator: 0x0A)
+        if data.last != 0x0A, !lines.isEmpty { lines.removeLast() }
+        var ended: Double?
+        for line in lines.reversed() {
+            guard let object = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
+                  object["isSidechain"] as? Bool != true, object["isMeta"] as? Bool != true else { continue }
+            let at = ChatReader.date(object["timestamp"])?.timeIntervalSince1970
+            switch step(object) {
+            case nil: continue
+            case .over?:
+                // The turn's end is written after its last reply: that reply says whether an API error ended it.
+                if ended == nil { ended = at ?? 0 }
+            case .apiError(let text)?:
+                return TranscriptTail(state: .turnOver(apiError: text), at: ended ?? at)
+            case .reply?:
+                return TranscriptTail(state: .turnOver(apiError: nil), at: ended ?? at)
+            case .state(let state)? where ended == nil:
+                return TranscriptTail(state: state, at: at)
+            case .state?:
+                return TranscriptTail(state: .turnOver(apiError: nil), at: ended)
+            }
+        }
+        return ended.map { TranscriptTail(state: .turnOver(apiError: nil), at: $0) }
+    }
+
+    private enum Step { case over, apiError(String), reply, state(State) }
+
+    private static func step(_ line: [String: Any]) -> Step? {
+        switch line["type"] as? String {
+        case "system":
+            // A turn's end; the rest (away summaries, compaction, notices) aren't steps of the conversation.
+            return ["turn_duration", "stop_hook_summary"].contains(line["subtype"] as? String ?? "") ? .over : nil
+        case "assistant":
+            guard let message = line["message"] as? [String: Any] else { return nil }
+            let blocks = message["content"] as? [[String: Any]] ?? []
+            if line["isApiErrorMessage"] as? Bool == true {
+                let text = blocks.compactMap { $0["text"] as? String }.joined(separator: " ")
+                return .apiError(text.isEmpty ? "API Error" : String(text.prefix(300)))
+            }
+            if blocks.contains(where: { $0["type"] as? String == "tool_use" }) { return .state(.toolCall) }
+            if message["stop_reason"] as? String == "end_turn", blocks.contains(where: { $0["type"] as? String == "text" }) { return .reply }
+            return .state(.thinking)
+        case "user":
+            guard let message = line["message"] as? [String: Any] else { return nil }
+            let texts: [String]
+            if let text = message["content"] as? String {
+                texts = [text]
+            } else {
+                let blocks = message["content"] as? [[String: Any]] ?? []
+                if blocks.contains(where: { $0["type"] as? String == "tool_result" }) { return .state(.thinking) }
+                texts = blocks.compactMap { $0["text"] as? String }
+            }
+            let text = texts.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if text.hasPrefix("[Request interrupted by user") { return .reply }
+            // Local slash commands and their output start no turn.
+            if text.isEmpty || text.hasPrefix("<local-command-") || text.hasPrefix("<command-name>") || text.hasPrefix("<command-message>") { return nil }
+            return .state(.thinking)
+        default:
+            return nil
+        }
+    }
+}
+
+/// Finds a session's Claude Code transcript without its hooks: in Claude's folder for the session's working
+/// directory (`~/.claude/projects/<slug>`). The file is named by Claude's own session id, which is not the window
+/// session's, so it's picked by the name the session was started with (`--name`, written into the transcript) and
+/// by time: written to since the session started.
+public enum TranscriptLocator {
+    public static func claude(cwd: String, name: String?, startedAt: Date, home: String = NSHomeDirectory()) -> String? {
+        let projects = URL(fileURLWithPath: home).appendingPathComponent(".claude/projects")
+        // Claude names the folder after the path it was started in, as it resolves it.
+        let paths = [cwd, (cwd as NSString).standardizingPath, URL(fileURLWithPath: cwd).resolvingSymlinksInPath().path]
+        var seen = Set<String>()
+        var candidates: [(url: URL, modified: Date)] = []
+        for path in paths where seen.insert(RecentProjects.claudeSlug(for: path)).inserted {
+            let folder = projects.appendingPathComponent(RecentProjects.claudeSlug(for: path))
+            let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
+            for file in files where file.pathExtension == "jsonl" {
+                let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?.contentModificationDate ?? .distantPast
+                // A session's transcript is written from its first moments on; older files are earlier sessions'.
+                if modified >= startedAt.addingTimeInterval(-5) { candidates.append((file, modified)) }
+            }
+        }
+        candidates.sort { $0.modified > $1.modified }
+        if let name {
+            let needles = ["\"agentName\":\"\(name)\"", "\"customTitle\":\"\(name)\""].map { Data($0.utf8) }
+            return candidates.first { candidate in
+                guard let ends = edges(of: candidate.url) else { return false }
+                return needles.contains { ends.range(of: $0) != nil }
+            }?.url.path
+        }
+        return candidates.first?.url.path
+    }
+
+    /// The first and last 64 KB of a file, where Claude writes the session's name.
+    private static func edges(of url: URL) -> Data? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        let limit = 64 * 1024
+        guard var data = try? handle.read(upToCount: limit), let size = try? handle.seekToEnd() else { return nil }
+        if size > UInt64(2 * limit), (try? handle.seek(toOffset: size - UInt64(limit))) != nil, let end = try? handle.readToEnd() {
+            data.append(end)
+        } else if size > UInt64(limit), (try? handle.seek(toOffset: UInt64(limit))) != nil, let rest = try? handle.readToEnd() {
+            data.append(rest)
+        }
+        return data
+    }
+}

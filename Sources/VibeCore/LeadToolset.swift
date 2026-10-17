@@ -49,9 +49,12 @@ public protocol LeadRuntime: AnyObject {
     func kill(_ session: String)
     /// Has the host drop an ended session's record (it leaves the session list).
     func forget(_ session: String)
-    /// Delivers a message (see `LeadDelivery`): steered in, typed as its prompt, or queued.
-    func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String) throws -> LeadDelivery.Delivered
+    /// Delivers a message (see `LeadDelivery`): steered in, typed as its prompt, or queued; `clearDraft` clears a
+    /// draft left in an idle agent's input box first.
+    func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String, clearDraft: Bool) throws -> LeadDelivery.Delivered
+    /// Window sessions, each live one with what its agent is doing (see `LeadActivity`).
     func sessions() -> [LeadSessionInfo]
+    /// Its transcript, found with or without its hooks (see `LeadObserver`).
     func transcript(of session: String) -> String?
     /// The agent this tool server belongs to (its parent process).
     func currentAgent() -> LeadAgent?
@@ -232,8 +235,9 @@ public final class LeadToolset: MCPToolset {
                 MCPToolInfo(name: "start_worker", description: "Start a worker on a task: a fresh Claude session in its own worktree on branch agent/<slug>, given the contract.",
                             properties: ["task": task], required: ["task"]),
                 MCPToolInfo(name: "stop_worker", description: "End a task's worker (the worktree stays).", properties: ["task": task], required: ["task"]),
-                MCPToolInfo(name: "message", description: "Tell a task's worker something: while it works it gets it at its next step without stopping; while it's idle it's typed in as its next prompt.",
-                            properties: ["task": task, "text": P(type: "string", description: "The message")],
+                MCPToolInfo(name: "message", description: "Tell a task's worker something: while it works (or waits on a prompt) it gets it at its next step without stopping; between turns it's typed in as its next prompt.",
+                            properties: ["task": task, "text": P(type: "string", description: "The message"),
+                                         "clear_draft": P(type: "boolean", description: "If its input box holds a leftover draft, clear it first (the draft is lost)")],
                             required: ["task", "text"]),
                 MCPToolInfo(name: "read_session", description: "A worker's or verifier's conversation, condensed (prompts, replies, tool runs, failures).",
                             properties: ["task": task, "who": P(type: "string", description: "worker (default) or verifier", options: ["worker", "verifier"])],
@@ -381,6 +385,7 @@ public final class LeadToolset: MCPToolset {
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].status = .running
             board.tasks[index].worker = session
+            board.tasks[index].stopped = nil
             board.tasks[index].branch = Worktrees.branch(slug)
             board.tasks[index].worktree = worktree
             board.tasks[index].evidence = nil
@@ -393,7 +398,9 @@ public final class LeadToolset: MCPToolset {
         guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
         if let worker = task.worker { runtime.kill(worker) }
         try store.update { board in
-            if let index = board.taskIndex(slug), board.tasks[index].status == .running { board.tasks[index].status = .blocked }
+            guard let index = board.taskIndex(slug) else { return }
+            board.tasks[index].stopped = task.worker
+            if board.tasks[index].status == .running { board.tasks[index].status = .blocked }
         }
         return MCPToolResult(text: "Stopped the worker on \(slug). Its worktree and commits stay; start_worker continues there.")
     }
@@ -401,11 +408,17 @@ public final class LeadToolset: MCPToolset {
     private func message(_ slug: String, _ arguments: [String: Any]) throws -> MCPToolResult {
         guard let text = arguments["text"] as? String, !text.isEmpty else { throw Problem(text: "Nothing to send.") }
         guard let worker = store.load().task(slug)?.worker else { throw Problem(text: "\(slug) has no worker.") }
-        switch try runtime.steer(.session(worker), from: .lead("lead of \(project)"), text: text) {
-        case .steered: return MCPToolResult(text: "Sent to \(slug)'s worker; it gets it at its next step.")
-        case .typed: return MCPToolResult(text: "Typed into \(slug)'s idle worker as its next prompt.")
+        let clear = arguments["clear_draft"] as? Bool ?? false
+        switch try runtime.steer(.session(worker), from: .lead("lead of \(project)"), text: text, clearDraft: clear) {
+        case .steered: return MCPToolResult(text: "Sent to \(slug)'s worker while it works; it gets it at its next step.")
+        case .typed: return MCPToolResult(text: "Typed into \(slug)'s worker as its next prompt (it was between turns\(clear ? "; a leftover draft was cleared first" : "")).")
+        case .awaitingAnswer(let asked):
+            return MCPToolResult(text: "\(slug)'s worker is stopped on a prompt\(asked.map { " (\($0))" } ?? ""). The message is in its inbox and goes in at its next step, once that's answered: answer it yourself if it's yours to, or ask the user.")
+        case .behindDraft(let draft):
+            let shown = draft.count > 300 ? String(draft.prefix(300)) + "…" : draft
+            return MCPToolResult(text: "\(slug)'s worker is between turns, but its input box holds a draft: “\(shown)”. The message waits in its inbox (it goes in with the next prompt, or once the box is empty). To clear the draft and send now, message again with clear_draft: true.")
         case .queued:
-            return MCPToolResult(text: "\(slug)'s worker is idle but its input box isn't free (a question, a permission prompt or a draft is on screen), so the message waits; it's typed in as soon as the box is empty. read_session to see what it's waiting on.")
+            return MCPToolResult(text: "\(slug)'s worker is between turns, but its screen couldn't be read, so the message waits in its inbox; it goes in with its next prompt, or as soon as the box reads empty. read_session to see where it is.")
         }
     }
 
@@ -650,7 +663,7 @@ public final class LeadToolset: MCPToolset {
         guard let pid = board.leadPid, let tty = board.leadTTY else { return false }
         let lead = LeadAgent(pid: pid, tty: tty, session: board.leadSession)
         guard runtime.isRunning(lead) else { return false }
-        _ = try runtime.steer(.agent(lead), from: .system(about), text: text)
+        _ = try runtime.steer(.agent(lead), from: .system(about), text: text, clearDraft: false)
         return true
     }
 
@@ -731,7 +744,7 @@ public final class LeadToolset: MCPToolset {
             for task in tasks {
                 var line = "- \(task.slug): \(task.title)"
                 if let worker = task.worker, let info = live[worker] {
-                    line += " — worker \(info.live ? (info.status ?? "running") : "ended")"
+                    line += " — worker \(info.live ? (info.status ?? "running") : task.stopped == worker ? "stopped" : "ended")"
                 }
                 if let evidence = task.evidence { line += " — audit \(evidence.completion.rawValue)/\(evidence.integrity.rawValue)" }
                 lines.append(line)

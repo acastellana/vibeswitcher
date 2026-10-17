@@ -93,4 +93,11 @@ public enum LeadLaunch {
         parts.append("-- \(quote(start))")
         return Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: mcpFile, settingsFile: settingsFile)
     }
+
+    /// The `--name` a command line from `prepare` gives its session (Claude writes it into the transcript).
+    public static func name(inCommand command: String) -> String? {
+        guard let range = command.range(of: #"--name '[^']*'"#, options: .regularExpression) else { return nil }
+        let name = String(command[range].dropFirst("--name '".count).dropLast())
+        return name.isEmpty ? nil : name
+    }
 }

@@ -67,35 +67,69 @@ final class HostRuntime: LeadRuntime {
         return true
     }
 
-    func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String) throws -> LeadDelivery.Delivered {
+    let observer = LeadObserver()
+
+    func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String, clearDraft: Bool) throws -> LeadDelivery.Delivered {
+        let hosted: [HostSession]
         let agent: LeadAgent
         switch target {
-        case .agent(let known): agent = known
+        case .agent(let known):
+            // The lead, told of a report: its inbox takes the message even when the host doesn't answer.
+            hosted = (try? HostCall.sessions()) ?? []
+            agent = known
         case .session(let id):
-            guard let tty = try HostCall.sessions().first(where: { $0.id.uuidString == id && $0.isLive })?.tty,
-                  let pid = Self.agentPid(on: tty) else {
+            hosted = try HostCall.sessions()
+            guard let tty = hosted.first(where: { $0.id.uuidString == id && $0.isLive })?.tty, let pid = Self.agentPid(on: tty) else {
                 throw HostCall.Failure(description: "That session isn't running an agent.")
             }
             agent = LeadAgent(pid: pid, tty: tty, session: id)
         }
-        let session = agent.session ?? ((try? HostCall.sessions()) ?? []).first { $0.tty == agent.tty && $0.isLive }?.id.uuidString
-        return try LeadDelivery.deliver(text, from: sender, to: agent, inputIsEmpty: session.flatMap(UUID.init(uuidString:)).map { id in {
-            if case .screenText(_, let screen)? = try? HostCall.request(.screen(id: id)) { return TerminalInput.isEmpty(screen) }
-            return false
-        } }, typeInto: session.map { id in { [weak self] text in self?.type(id, text: text) ?? false } })
+        let session = hosted.first { hosted in hosted.isLive && (agent.session.map { $0 == hosted.id.uuidString } ?? (hosted.tty == agent.tty)) }
+        // Not a window session: only its hooks can take the message.
+        guard let session else {
+            return try LeadDelivery.deliver(text, from: sender, to: agent, activity: observer.activity(of: agent), screen: nil, typeInto: nil)
+        }
+        let id = session.id
+        return try LeadDelivery.deliver(text, from: sender, to: agent, activity: activity(of: session, agent: agent.pid),
+                                        screen: {
+                                            if case .screenText(_, let screen)? = try? HostCall.request(.screen(id: id)) { return screen }
+                                            return nil
+                                        },
+                                        typeInto: { [weak self] text in self?.type(id.uuidString, text: text) ?? false },
+                                        clearDraft: clearDraft,
+                                        clear: {
+                                            // One ^C empties Claude's box (two in a row would quit it); then a moment to redraw.
+                                            try? HostCall.send(.input(id: id, bytes: Data(HostInput.bytes(forKey: "interrupt") ?? []), reply: false))
+                                            usleep(300_000)
+                                        })
     }
 
     func sessions() -> [LeadSessionInfo] {
         ((try? HostCall.sessions()) ?? []).map { session in
-            let state = HookState.load(from: VibePaths.stateFile(tty: session.tty))
-            return LeadSessionInfo(id: session.id.uuidString, cwd: session.cwd, label: session.label, live: session.isLive,
-                                   status: session.isLive ? state.map(Self.describe) : nil, tty: session.tty)
+            LeadSessionInfo(id: session.id.uuidString, cwd: session.cwd, label: session.label, live: session.isLive,
+                            status: session.isLive ? activity(of: session, agent: Self.agentPid(on: session.tty)).text : nil, tty: session.tty)
         }
     }
 
     func transcript(of session: String) -> String? {
-        guard let tty = ((try? HostCall.sessions()) ?? []).first(where: { $0.id.uuidString == session })?.tty else { return nil }
-        return HookState.load(from: VibePaths.stateFile(tty: tty))?.transcriptPath
+        guard let hosted = ((try? HostCall.sessions()) ?? []).first(where: { $0.id.uuidString == session }) else { return nil }
+        // An ended session's terminal may hold another agent now: only its own hooks' record counts.
+        let pid = hosted.isLive ? Self.agentPid(on: hosted.tty) : nil
+        return observer.transcript(hosted, hook: hosted.isLive ? observer.hook(hosted, agentPid: pid) : nil)
+    }
+
+    /// What the session's agent is doing, with the background shells it still waits on.
+    private func activity(of session: HostSession, agent pid: Int32?) -> LeadActivity {
+        var background: String?
+        if let pid, let processes = ProcessTable.trySnapshot() {
+            let jobs = BackgroundJobs.jobs(forAgent: pid, in: processes, arguments: {
+                ProcessTable.arguments(pid: $0.pid, start: Int($0.startTime.timeIntervalSince1970), comm: $0.comm)
+            })
+            if let first = jobs.first {
+                background = jobs.count == 1 ? "1 shell: \(first.command.prefix(80))" : "\(jobs.count) shells"
+            }
+        }
+        return observer.activity(session, agentPid: pid, background: background)
     }
 
     func currentAgent() -> LeadAgent? {
@@ -111,15 +145,6 @@ final class HostRuntime: LeadRuntime {
     /// The oldest agent process on a terminal (the session's own, not a tool it runs).
     static func agentPid(on tty: String) -> Int32? {
         ProcessTable.snapshot().values.filter { $0.tty == tty && $0.agent != nil }.min { $0.startTime < $1.startTime }?.pid
-    }
-
-    static func describe(_ state: HookState) -> String {
-        switch state.lastEvent {
-        case "Stop", "SessionEnd": return "finished its turn"
-        case "Notification", "PermissionRequest": return "needs input"
-        case "PreToolUse": return state.toolDetail.map { "working: \($0)" } ?? "working"
-        default: return "working"
-        }
     }
 }
 

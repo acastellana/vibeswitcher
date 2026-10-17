@@ -9,6 +9,7 @@ final class FakeRuntime: LeadRuntime {
     var forgotten: [String] = []
     var delivery = LeadDelivery.Delivered.steered
     var steered: [(target: String, sender: SteerMessage.Sender, text: String)] = []
+    var clearedDrafts = 0
     var transcripts: [String: String] = [:]
     var me = LeadAgent(pid: 4242, tty: "ttys040", session: "lead-session")
     var leadRunning = true
@@ -24,7 +25,8 @@ final class FakeRuntime: LeadRuntime {
     }
     func kill(_ session: String) { killed.append(session) }
     func forget(_ session: String) { forgotten.append(session) }
-    func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String) throws -> LeadDelivery.Delivered {
+    func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String, clearDraft: Bool) throws -> LeadDelivery.Delivered {
+        if clearDraft { clearedDrafts += 1 }
         let name: String
         switch target {
         case .session(let id): name = id
@@ -56,8 +58,8 @@ final class FakeSeat: LeadRuntime {
     }
     func kill(_ session: String) { shared.kill(session) }
     func forget(_ session: String) { shared.forget(session) }
-    func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String) throws -> LeadDelivery.Delivered {
-        try shared.steer(target, from: sender, text: text)
+    func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String, clearDraft: Bool) throws -> LeadDelivery.Delivered {
+        try shared.steer(target, from: sender, text: text, clearDraft: clearDraft)
     }
     func sessions() -> [LeadSessionInfo] { shared.sessions() }
     func transcript(of session: String) -> String? { shared.transcript(of: session) }

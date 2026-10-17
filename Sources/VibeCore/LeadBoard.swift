@@ -65,6 +65,8 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// The session host's id of the worker running it.
     public var worker: String?
     public var verifier: String?
+    /// The worker session the lead itself stopped (stop_worker): its end is no news to the lead.
+    public var stopped: String?
     public var branch: String?
     public var worktree: String?
     public var evidence: LeadEvidence?

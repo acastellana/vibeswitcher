@@ -13,11 +13,17 @@ public enum LeadWitness {
         public var detail: String?
         /// The session lives on as a shell, its agent gone (see `HostSession.agentQuit`).
         public var agentQuit: Bool
+        /// Its last turn ended on this API error (see `TranscriptTail`), and it's between turns; `apiErrorAt` is when
+        /// that turn ended (each error is told once).
+        public var apiError: String?
+        public var apiErrorAt: Double?
 
         public init(live: Bool, exit: Int32? = nil, status: SessionStatus? = nil, since: Date? = nil, detail: String? = nil,
-                    agentQuit: Bool = false) {
+                    agentQuit: Bool = false, apiError: String? = nil, apiErrorAt: Double? = nil) {
             self.live = live
             self.agentQuit = agentQuit
+            self.apiError = apiError
+            self.apiErrorAt = apiErrorAt
             self.exit = exit
             self.status = status
             self.since = since
@@ -31,11 +37,14 @@ public enum LeadWitness {
     public static func events(board: LeadBoard, seen: [String: Seen], now: Date = Date()) -> [(key: String, text: String)] {
         var events: [(key: String, text: String)] = []
         for task in board.tasks where task.status != .done {
-            if let worker = task.worker, let info = seen[worker] {
+            // A worker the lead stopped itself ended because it was told to.
+            if let worker = task.worker, worker != task.stopped, let info = seen[worker] {
                 if !info.live, [.running, .failed].contains(task.status) {
                     events.append(("\(worker)|ended", "The worker on \(task.slug) ended (exit \(info.exit ?? 0)) without reporting. Its commits are on agent/\(task.slug); read_session to see why, then start_worker again or re-plan."))
                 } else if info.live, info.agentQuit, [.running, .failed].contains(task.status) {
                     events.append(("\(worker)|ended", "The worker on \(task.slug) ended without reporting: its agent quit and left the session's shell open. Its commits are on agent/\(task.slug); read_session to see why, then stop_worker (it closes the shell) and start_worker again, or re-plan."))
+                } else if info.live, !info.agentQuit, let error = info.apiError, [.running, .failed].contains(task.status) {
+                    events.append(("\(worker)|api-error-\(Int(info.apiErrorAt ?? 0))", "The worker on \(task.slug) stopped mid-task: its turn ended on an API error (\(error)). Tell it to go on with message(\(task.slug), …); it picks up where it was."))
                 } else if info.live, !info.agentQuit, let event = waiting(info, session: worker, now: now,
                                                          input: "The worker on \(task.slug) is waiting for input: \(info.detail ?? "a question or a permission"). Answer it with message, or ask the user if it's theirs to decide.",
                                                          stopped: task.status == .running ? "The worker on \(task.slug) stopped without calling report. read_session to see where it is, then message it." : nil) {
@@ -43,7 +52,9 @@ public enum LeadWitness {
                 }
             }
             if task.status == .review, task.evidence == nil, let verifier = task.verifier, let info = seen[verifier] {
-                if !info.live || info.agentQuit {
+                if info.live, !info.agentQuit, let error = info.apiError {
+                    events.append(("\(verifier)|api-error-\(Int(info.apiErrorAt ?? 0))", "The verifier on \(task.slug) stopped mid-audit: its turn ended on an API error (\(error)). Tell the user, or audit again."))
+                } else if !info.live || info.agentQuit {
                     events.append(("\(verifier)|ended", "The verifier on \(task.slug) ended without a verdict\(info.live ? " (its agent quit; the session's shell is still open)" : ""). read_session(\(task.slug), who: verifier) to see why, then audit again."))
                 } else if let event = waiting(info, session: verifier, now: now,
                                               input: "The verifier on \(task.slug) is waiting for input: \(info.detail ?? "a question or a permission"). Tell the user if it's theirs, or audit again.",
