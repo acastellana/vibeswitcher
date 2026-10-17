@@ -53,7 +53,7 @@ public final class SessionScanner {
                                        cwd: cwd, project: projectRoot.map { SessionNaming.name(forProjectRoot: $0) } ?? "?",
                                        projectRoot: projectRoot, hook: hook,
                                        backgroundJobs: agent == .claude ? BackgroundJobs.jobs(forAgent: root.pid, in: procs) {
-                                           ProcessTable.arguments(pid: $0.pid, start: Int($0.startTime.timeIntervalSince1970))
+                                           ProcessTable.arguments(pid: $0.pid, start: Int($0.startTime.timeIntervalSince1970), comm: $0.comm)
                                        } : []))
         }
         cwdCache = cwdCache.filter { procs[$0.key] != nil }

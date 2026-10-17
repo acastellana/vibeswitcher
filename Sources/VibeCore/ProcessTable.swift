@@ -20,7 +20,7 @@ public enum ProcessTable {
     // never change for a given device / process, so they're cached.
     private static let cacheLock = NSLock()
     private static var ttyNames: [dev_t: String?] = [:]
-    private static var argumentCache: [Int32: (start: Int, arguments: [String])] = [:]
+    static let argumentCache = ArgumentCache(read: readArguments)
 
     static func ttyName(_ device: dev_t) -> String? {
         guard device != -1 else { return nil }
@@ -59,9 +59,7 @@ public enum ProcessTable {
             let info = makeInfo(buffer[index])
             result[info.pid] = info
         }
-        cacheLock.lock()
-        argumentCache = argumentCache.filter { result[$0.key] != nil }
-        cacheLock.unlock()
+        argumentCache.prune { result[$0] != nil }
         return result
     }
 
@@ -103,29 +101,22 @@ public enum ProcessTable {
         let tty = ttyName(kinfo.kp_eproc.e_tdev)
         let start = proc.p_un.__p_starttime
         let startTime = Date(timeIntervalSince1970: Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000)
-        // Only terminal-attached processes can be sessions; skipping the rest keeps snapshots cheap.
-        let agent = tty == nil ? nil
-            : (Agent(comm: comm) ?? arguments(pid: proc.p_pid, start: start.tv_sec).first
-                .map { ($0 as NSString).lastPathComponent }.flatMap(Agent.init(comm:)))
         return ProcInfo(pid: proc.p_pid, ppid: kinfo.kp_eproc.e_ppid, tty: tty, comm: comm, startTime: startTime,
-                        agent: agent)
+                        agent: agent(pid: proc.p_pid, start: start.tv_sec, comm: comm, tty: tty, arguments: argumentCache))
     }
 
-    /// A process's argv, cached per (pid, start time). Claude Code runs as a versioned binary
-    /// (`~/.local/share/claude/versions/2.1.282`), so the kernel's `comm` is "2.1.282", not "claude";
-    /// argv[0] tells them apart.
-    public static func arguments(pid: Int32, start: Int) -> [String] {
-        cacheLock.lock()
-        if let cached = argumentCache[pid], cached.start == start {
-            cacheLock.unlock()
-            return cached.arguments
-        }
-        cacheLock.unlock()
-        let arguments = readArguments(pid: pid)
-        cacheLock.lock()
-        argumentCache[pid] = (start, arguments)
-        cacheLock.unlock()
-        return arguments
+    /// Which agent a process is. Claude Code runs as a versioned binary (`~/.local/share/claude/versions/2.1.282`),
+    /// so the kernel's `comm` is "2.1.282", not "claude"; argv[0] tells them apart.
+    static func agent(pid: Int32, start: Int, comm: String, tty: String?, arguments: ArgumentCache) -> Agent? {
+        // Only terminal-attached processes can be sessions; skipping the rest keeps snapshots cheap.
+        guard tty != nil else { return nil }
+        return Agent(comm: comm) ?? arguments.arguments(pid: pid, start: start, comm: comm).first
+            .map { ($0 as NSString).lastPathComponent }.flatMap(Agent.init(comm:))
+    }
+
+    /// A process's argv (see `ArgumentCache`).
+    public static func arguments(pid: Int32, start: Int, comm: String) -> [String] {
+        argumentCache.arguments(pid: pid, start: start, comm: comm)
     }
 
     static func readArguments(pid: Int32) -> [String] {
@@ -147,5 +138,40 @@ public enum ProcessTable {
             index += 1
         }
         return arguments
+    }
+}
+
+/// argv per process, read once: it needs a sysctl per process, too slow to repeat for every process on every poll.
+///
+/// Keyed on (pid, start time, comm). `exec` keeps the pid and the start time but replaces argv and comm, and window
+/// sessions start as `vibeswitcher-host --pty-exec claude …`: a scan in the moment before that exec reads the
+/// launcher's argv, and keyed on pid and start alone that answer would hide the session for its whole life.
+final class ArgumentCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [Int32: (start: Int, comm: String, arguments: [String])] = [:]
+    private let read: (Int32) -> [String]
+
+    init(read: @escaping (Int32) -> [String]) { self.read = read }
+
+    func arguments(pid: Int32, start: Int, comm: String) -> [String] {
+        lock.lock()
+        if let cached = entries[pid], cached.start == start, cached.comm == comm {
+            lock.unlock()
+            return cached.arguments
+        }
+        lock.unlock()
+        let arguments = read(pid)
+        // Unreadable (the process is still being set up, or just exited): ask again next time.
+        guard !arguments.isEmpty else { return arguments }
+        lock.lock()
+        entries[pid] = (start, comm, arguments)
+        lock.unlock()
+        return arguments
+    }
+
+    /// Forgets processes that are gone.
+    func prune(keeping isLive: (Int32) -> Bool) {
+        lock.lock(); defer { lock.unlock() }
+        entries = entries.filter { isLive($0.key) }
     }
 }
