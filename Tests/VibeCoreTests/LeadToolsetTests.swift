@@ -292,5 +292,37 @@ struct LeadToolsetTests {
         #expect(!call(lead, "cleanup", ["task": "one", "force": true]).isError)
         #expect(!FileManager.default.fileExists(atPath: Worktrees.path(root: root, slug: "one")))
     }
+
+    @Test func theLeadWorksOnTheBranchThatWasCheckedOut() throws {
+        let root = try repo()
+        Git.run(["checkout", "-q", "-b", "feature"], in: root)
+        try "f\n".write(toFile: root + "/f.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "f.txt"], in: root)
+        Git.run(["commit", "-q", "-m", "feature work"], in: root)
+        let runtime = FakeRuntime()
+        let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: runtime)
+        #expect(BoardStore(root: root).load().baseBranch == "feature")
+        let worktree = try audited(lead, runtime, root: root)
+        // The worker started from feature (it has feature's work).
+        #expect(FileManager.default.fileExists(atPath: worktree + "/f.txt"))
+        let merged = call(lead, "merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(merged.text.contains("feature"))
+        #expect(FileManager.default.fileExists(atPath: root + "/b.txt"))
+        #expect(Git.run(["rev-parse", "feature"], in: root).output == Git.run(["rev-parse", "agent/add-b"], in: root).output)
+        // main didn't move.
+        #expect(Git.run(["ls-tree", "--name-only", "main"], in: root).output == "a.txt")
+        // Workers may not switch to it.
+        #expect(runtime.spawned.first.map { _ in try? String(contentsOfFile: root + "/.vibeswitcher/run/worker-add-b/settings.json", encoding: .utf8) }??.contains("git switch feature") == true)
+    }
+
+    @Test func theWorkflowCanNameTheBranch() throws {
+        let root = try repo()
+        Git.run(["branch", "release"], in: root)
+        try BoardStore(root: root).prepare()
+        try "---\nbase_branch: release\n---".write(toFile: root + "/.vibeswitcher/workflow.md", atomically: true, encoding: .utf8)
+        let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: FakeRuntime())
+        #expect(lead.base == "release")
+    }
 }
 

@@ -90,7 +90,8 @@ final class LeadController: ObservableObject {
         let boardStore = BoardStore(root: root)
         do {
             let workflowPath = try boardStore.prepare()
-            let workflow = LeadWorkflow.parse((try? String(contentsOfFile: workflowPath, encoding: .utf8)) ?? "")
+            var workflow = LeadWorkflow.parse((try? String(contentsOfFile: workflowPath, encoding: .utf8)) ?? "")
+            workflow.baseBranch = workflow.baseBranch ?? boardStore.load().baseBranch
             let launch = try LeadLaunch.prepare(
                 role: .lead, root: root, task: nil, base: claudeCommand(root),
                 prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow),

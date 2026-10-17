@@ -10,7 +10,13 @@ public struct LeadWorkflow: Equatable, Sendable {
     public var workerAgent = "claude"
     /// The verifier's model, different from the workers' when possible (a second opinion).
     public var verifierModel: String?
+    /// The branch the lead builds on and merges into (`base_branch:`; otherwise the one checked out when the lead
+    /// first started there, kept on its board).
+    public var baseBranch: String?
     public var notes = ""
+
+    /// The branch, as the prompts name it.
+    var base: String { baseBranch ?? "main" }
 
     public init() {}
 
@@ -31,6 +37,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "init_command": workflow.initCommand = present
                 case "worker_agent": workflow.workerAgent = present ?? "claude"
                 case "verifier_model": workflow.verifierModel = present
+                case "base_branch": workflow.baseBranch = present
                 default: break
                 }
             }
@@ -52,6 +59,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     worker_agent: claude
     # The verifier's model; a different one than the workers' gives a real second opinion (e.g. sonnet, opus).
     verifier_model:
+    # The branch workers start from and verified work is merged into. Empty: the one checked out when the lead first
+    # started here.
+    base_branch:
     ---
     Notes for the lead: conventions, priorities, what not to touch. The lead reads this at the start of every session.
     """
@@ -65,7 +75,7 @@ public enum LeadPrompts {
         """
         You are the project lead for "\(project)" (\(root)). The user talks to you; you get the work done through \
         other sessions. You never write code yourself: no edits, no commits. You plan, delegate, verify, merge and \
-        report.
+        report. Workers start from the branch \(workflow.base), and verified work is merged into it.
 
         Your tools (the vibeswitcher MCP server): \(tools).
 
@@ -104,7 +114,7 @@ public enum LeadPrompts {
 
         Start: read the task; \(workflow.initCommand.map { "run `\($0)`; " } ?? "")\
         \(workflow.testCommand.map { "run `\($0)` to see where things stand; " } ?? "")look at the code you'll touch.
-        While working: stay inside the boundaries. Commit small, descriptive commits as you go. Don't switch to main, \
+        While working: stay inside the boundaries. Commit small, descriptive commits as you go. Don't switch to \(workflow.base), \
         don't merge, rebase or push, don't delete branches; the lead merges.
         Done: every acceptance check passes\(workflow.testCommand.map { " and `\($0)` passes" } ?? ""), everything is \
         committed. Then reply with a short report: what changed, how you checked it, anything left or doubtful. A \
@@ -122,7 +132,7 @@ public enum LeadPrompts {
         what the worker said.
 
         Check: run every acceptance check\(workflow.testCommand.map { " and `\($0)`" } ?? ""); read the whole change \
-        (`git diff main...HEAD`, `git log main..HEAD`); look for edits outside the boundaries, weakened or deleted \
+        (`git diff \(workflow.base)...HEAD`, `git log \(workflow.base)..HEAD`); look for edits outside the boundaries, weakened or deleted \
         tests, hard-coded results, leftovers and anything that only looks done.
         Then call submit_audit with: completion complete / incomplete / blocked; integrity clean, suspect (you're not \
         sure) or violation (edits outside the boundaries, tests weakened, results faked, files you changed); and a \

@@ -120,6 +120,8 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     public var leadSession: String?
     public var leadPid: Int32?
     public var leadTTY: String?
+    /// The branch the lead builds on and merges into: the one checked out when it first started here.
+    public var baseBranch: String?
     public var tasks: [LeadTask] = []
     public var questions: [LeadQuestion] = []
     public var updates: [LeadUpdate] = []
@@ -220,6 +222,12 @@ public final class BoardStore: @unchecked Sendable {
     public func prepare() throws -> String {
         try ensureFolder()
         try ensureExcluded()
+        // The lead's branch: what you're on now, kept for the next leads here (switching branches later doesn't
+        // move it; `base_branch:` in the workflow does).
+        if try read().baseBranch == nil {
+            let branch = Worktrees.currentBranch(root: root) ?? Worktrees.mainBranch(root: root)
+            try update { if $0.baseBranch == nil { $0.baseBranch = branch } }
+        }
         let workflow = (folder as NSString).appendingPathComponent("workflow.md")
         if !FileManager.default.fileExists(atPath: workflow) {
             try LeadWorkflow.template.write(toFile: workflow, atomically: true, encoding: .utf8)

@@ -67,8 +67,10 @@ one Claude session per repository that you talk to about the project, and that r
 tell it what you want; it plans the work into tasks, each with a contract (goal, acceptance checks, boundaries),
 and starts up to three **workers**, each a Claude session in its own git worktree (`.vibeswitcher/worktrees/<task>`
 on `agent/<task>`). When a worker reports, the lead starts a read-only **verifier** that checks the work against
-the contract with real commands (and tries to break it); only work the verifier passes is rebased on main, tested
-(the workflow's `test_command`) and fast-forwarded into main, never with a merge commit or a force. Then the lead
+the contract with real commands (and tries to break it); only work the verifier passes is rebased on the lead's branch,
+tested (the workflow's `test_command`) and fast-forwarded into it, never with a merge commit or a force. The lead's
+branch is the one checked out when it first starts in the repository (`base_branch:` in `workflow.md` changes it);
+workers start from it. Then the lead
 removes the worktree and branch, and tells you what landed in a few lines. The grunt work stays out of your way:
 workers and verifiers fold under their lead in the list, and the lead's chat shows a strip with the team's state.
 It only asks you what's really yours to decide; its questions show as cards you answer without stopping it (the
@@ -78,7 +80,7 @@ has each task's contract and verdict, your answers, the results, and the lead's 
 repository, git-ignored: `.vibeswitcher/board.json` (tasks, questions, updates), `workflow.md` (limits, test and
 setup commands, the verifier's model; edit it), `decisions.md` and `progress.md`. Guard rails, not a sandbox:
 the lead and verifiers are denied file edits and git writes, workers pushing, merging, rebasing and switching to
-main (Claude Code permission rules); main only moves through the lead's merge, which fast-forwards to exactly the
+the lead's branch (Claude Code permission rules); that branch only moves through the lead's merge, which fast-forwards to exactly the
 commit the verifier passed and the tests ran on. Their tools come from `vibeswitcher-mcp`, a tool server bundled
 with the app.
 

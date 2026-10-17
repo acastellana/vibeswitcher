@@ -145,14 +145,20 @@ public enum Worktrees {
         return Git.run(["rev-parse", "--abbrev-ref", "HEAD"], in: root).output
     }
 
-    /// A new worktree on a new branch from main (or on the task's branch, when it's still there).
+    /// The branch checked out at `root`; nil when detached.
+    public static func currentBranch(root: String) -> String? {
+        let head = Git.run(["rev-parse", "--abbrev-ref", "HEAD"], in: root)
+        return head.ok && !head.output.isEmpty && head.output != "HEAD" ? head.output : nil
+    }
+
+    /// A new worktree on a new branch from `base` (main by default), or on the task's branch when it's still there.
     @discardableResult
-    public static func create(root: String, slug: String) throws -> String {
+    public static func create(root: String, slug: String, base: String? = nil) throws -> String {
         // Worktrees live inside the repo: keep them out of its status first.
         try BoardStore(root: root).ensureExcluded()
         let path = path(root: root, slug: slug)
         let exists = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch(slug))"], in: root).ok
-        let result = Git.run(["worktree", "add", "-q"] + (exists ? [path, branch(slug)] : ["-b", branch(slug), path, mainBranch(root: root)]), in: root)
+        let result = Git.run(["worktree", "add", "-q"] + (exists ? [path, branch(slug)] : ["-b", branch(slug), path, base ?? mainBranch(root: root)]), in: root)
         guard result.ok else { throw Failure(description: result.error.isEmpty ? "git worktree add failed" : result.error) }
         return path
     }
@@ -170,7 +176,7 @@ public enum Worktrees {
 
     /// The task's worktree: the existing one, or a new one. An empty leftover folder is replaced; one with files
     /// in it is never touched (they might be someone's).
-    public static func open(root: String, slug: String) throws -> String {
+    public static func open(root: String, slug: String, base: String? = nil) throws -> String {
         if isWorktree(root: root, slug: slug) { return path(root: root, slug: slug) }
         let path = path(root: root, slug: slug)
         if FileManager.default.fileExists(atPath: path) {
@@ -181,17 +187,17 @@ public enum Worktrees {
             try FileManager.default.removeItem(atPath: path)
             Git.run(["worktree", "prune"], in: root)
         }
-        return try create(root: root, slug: slug)
+        return try create(root: root, slug: slug, base: base)
     }
 
     /// Puts the branch on top of main and runs the checks there.
-    public static func rebaseAndTest(root: String, slug: String, test: String?, timeout: TimeInterval = 1200) -> Check {
+    public static func rebaseAndTest(root: String, slug: String, test: String?, base: String? = nil, timeout: TimeInterval = 1200) -> Check {
         let path = path(root: root, slug: slug)
         guard FileManager.default.fileExists(atPath: path) else { return .error("No worktree for \(slug).") }
         guard Git.run(["status", "--porcelain", "--untracked-files=no"], in: path).output.isEmpty else {
             return .error("The worktree of \(slug) has uncommitted changes (its worker may still be working). Have it commit, or stop it, then merge again.")
         }
-        let rebase = Git.run(["rebase", mainBranch(root: root)], in: path)
+        let rebase = Git.run(["rebase", base ?? mainBranch(root: root)], in: path)
         guard rebase.ok else {
             Git.run(["rebase", "--abort"], in: path)
             return .conflict
@@ -208,8 +214,8 @@ public enum Worktrees {
     /// Fast-forwards main to `commit` (the tested one; the branch's head when nil). Never rewrites anything and
     /// never touches uncommitted work: a dirty main checkout, main checked out elsewhere, or a commit not on top
     /// of main is refused with the reason.
-    public static func merge(root: String, slug: String, commit: String? = nil) throws -> Merge {
-        let main = mainBranch(root: root)
+    public static func merge(root: String, slug: String, commit: String? = nil, base: String? = nil) throws -> Merge {
+        let main = base ?? mainBranch(root: root)
         guard !["HEAD", ""].contains(main) else { return .refused("The repository has no main branch checked out.") }
         let branch = commit ?? branch(slug)
         guard Git.run(["merge-base", "--is-ancestor", branch, self.branch(slug)], in: root).ok else {

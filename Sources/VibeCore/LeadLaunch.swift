@@ -18,21 +18,22 @@ public enum LeadLaunch {
                             "Bash(git branch -d:*)", "Bash(git worktree:*)", "Bash(git tag:*)"]
 
     /// What each role may not do.
-    public static func deny(_ role: Role) -> [String] {
+    public static func deny(_ role: Role, base: String? = nil) -> [String] {
         switch role {
         case .lead, .verifier:
             return readOnly + gitWrites
         case .worker:
-            // Edits and commits on its own branch; nothing that rewrites history or touches main.
-            return ["Bash(git push:*)", "Bash(git merge:*)", "Bash(git rebase:*)", "Bash(git reset --hard:*)", "Bash(git checkout main:*)",
-                    "Bash(git switch main:*)", "Bash(git checkout master:*)", "Bash(git switch master:*)", "Bash(git branch -D:*)",
-                    "Bash(git branch -d:*)", "Bash(git worktree:*)", "Bash(git tag:*)", "Bash(git commit --amend:*)"]
+            // Edits and commits on its own branch; nothing that rewrites history or touches the lead's branch.
+            let protected = Array(Set(["main", "master"] + (base.map { [$0] } ?? []))).sorted()
+            return ["Bash(git push:*)", "Bash(git merge:*)", "Bash(git rebase:*)", "Bash(git reset --hard:*)"]
+                + protected.flatMap { ["Bash(git checkout \($0):*)", "Bash(git switch \($0):*)"] }
+                + ["Bash(git branch -D:*)", "Bash(git branch -d:*)", "Bash(git worktree:*)", "Bash(git tag:*)", "Bash(git commit --amend:*)"]
         }
     }
 
     /// Writes the role's files under `<root>/.vibeswitcher/run/<name>/` and returns the command line to run.
     public static func prepare(role: Role, root: String, task: String?, base: String, prompt: String, start: String,
-                               server: String, name: String, model: String? = nil) throws -> Prepared {
+                               server: String, name: String, model: String? = nil, branch: String? = nil) throws -> Prepared {
         let folder = (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
@@ -43,7 +44,7 @@ public enum LeadLaunch {
         if let task { args += ["--task", task] }
         let mcp: [String: Any] = ["mcpServers": ["vibeswitcher": ["command": server, "args": args]]]
         try JSONSerialization.data(withJSONObject: mcp, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: mcpFile))
-        let settings: [String: Any] = ["permissions": ["deny": deny(role)]]
+        let settings: [String: Any] = ["permissions": ["deny": deny(role, base: branch)]]
         try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]).write(to: URL(fileURLWithPath: settingsFile))
         let quote = RecentProjects.shellQuote
         let trimmed = base.trimmingCharacters(in: .whitespaces)

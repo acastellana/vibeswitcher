@@ -75,10 +75,16 @@ public final class LeadToolset: MCPToolset {
         if role == .lead { introduceLead() }
     }
 
+    /// The workflow notes, with the lead's branch resolved.
     var workflow: LeadWorkflow {
         let path = (store.folder as NSString).appendingPathComponent("workflow.md")
-        return LeadWorkflow.parse((try? String(contentsOfFile: path, encoding: .utf8)) ?? "")
+        var workflow = LeadWorkflow.parse((try? String(contentsOfFile: path, encoding: .utf8)) ?? "")
+        workflow.baseBranch = workflow.baseBranch ?? store.load().baseBranch ?? Worktrees.mainBranch(root: root)
+        return workflow
     }
+
+    /// The branch workers start from and verified work is merged into.
+    public var base: String { workflow.base }
 
     var project: String { (root as NSString).lastPathComponent }
 
@@ -144,7 +150,7 @@ public final class LeadToolset: MCPToolset {
                             required: ["task"]),
                 MCPToolInfo(name: "audit", description: "Start the read-only verifier on a task's branch. Its report, not the worker's, decides.",
                             properties: ["task": task], required: ["task"]),
-                MCPToolInfo(name: "merge", description: "Merge a task whose audit passed: rebase onto main, run the test command, fast-forward main.",
+                MCPToolInfo(name: "merge", description: "Merge a task whose audit passed: rebase onto the lead's branch, run the test command, fast-forward that branch.",
                             properties: ["task": task], required: ["task"]),
                 MCPToolInfo(name: "cleanup", description: "End a task's sessions and remove its worktree and branch (after merging, or force to abandon it).",
                             properties: ["task": task, "force": P(type: "boolean", description: "Also discard unmerged work")], required: ["task"]),
@@ -263,11 +269,11 @@ public final class LeadToolset: MCPToolset {
         guard running < limit else {
             throw Problem(text: "\(running) workers already run (max_workers is \(limit) in workflow.md). Wait for one to finish; you'll get a message.")
         }
-        let worktree = try Worktrees.open(root: root, slug: slug)
+        let worktree = try Worktrees.open(root: root, slug: slug, base: base)
         let launch = try LeadLaunch.prepare(role: .worker, root: root, task: slug, base: runtime.claudeCommand(root: root),
                                             prompt: LeadPrompts.worker(task: task, root: root, workflow: workflow),
                                             start: "Start on your task (it's in your instructions). When done, call report.",
-                                            server: runtime.server, name: "worker-\(slug)")
+                                            server: runtime.server, name: "worker-\(slug)", branch: base)
         let session = try runtime.spawn(cwd: worktree, command: launch.command, label: "Worker: \(task.title)", agent: "claude")
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
@@ -346,22 +352,23 @@ public final class LeadToolset: MCPToolset {
         }
         defer { lock.release() }
         let tested: String
-        switch Worktrees.rebaseAndTest(root: root, slug: slug, test: workflow.testCommand) {
+        let base = self.base
+        switch Worktrees.rebaseAndTest(root: root, slug: slug, test: workflow.testCommand, base: base) {
         case .passed(let commit): tested = commit
         case .conflict:
             try setStatus(slug, .failed)
-            throw Problem(text: "\(slug) conflicts with main. Message its worker to rebase onto main and resolve, then audit again.")
+            throw Problem(text: "\(slug) conflicts with \(base). Message its worker to bring its branch up to date with \(base) and resolve, then audit again.")
         case .failed(let output):
             try setStatus(slug, .failed)
-            throw Problem(text: "The test command fails on \(slug) rebased onto main:\n\(output)")
+            throw Problem(text: "The test command fails on \(slug) rebased onto \(base):\n\(output)")
         case .error(let text):
             throw Problem(text: text)
         }
-        switch try Worktrees.merge(root: root, slug: slug, commit: tested) {
+        switch try Worktrees.merge(root: root, slug: slug, commit: tested, base: base) {
         case .merged:
             try setStatus(slug, .done)
             try? store.appendProgress("Merged \(slug): \(task.title)")
-            return MCPToolResult(text: "Merged \(slug) into main. Post an update for the user, then cleanup.")
+            return MCPToolResult(text: "Merged \(slug) into \(base). Post an update for the user, then cleanup.")
         case .refused(let reason):
             throw Problem(text: "Not merged: \(reason)")
         }
@@ -490,7 +497,7 @@ public final class LeadToolset: MCPToolset {
     private func status() -> String {
         let board = store.load()
         let live = Dictionary(uniqueKeysWithValues: runtime.sessions().map { ($0.id, $0) })
-        var lines = ["Project \(project) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once."]
+        var lines = ["Project \(project) on branch \(base) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once."]
         for state in LeadTask.Status.allCases {
             let tasks = board.tasks.filter { $0.status == state }
             guard !tasks.isEmpty else { continue }
