@@ -136,6 +136,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
                 }
             }
             .store(in: &cancellables)
+        leads.$boards.receive(on: RunLoop.main)
+            .sink { [weak self] _ in DispatchQueue.main.async { self?.updateTitleAndBadge() } }
+            .store(in: &cancellables)
         model.$showsChat.removeDuplicates().receive(on: RunLoop.main)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.showSelection() } }
             .store(in: &cancellables)
@@ -401,11 +404,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         }
     }
 
-    /// The window's title names the selected session; the Dock badge counts sessions waiting on you.
+    /// The window's title names the selected session; the Dock badge counts sessions waiting on you, and leads'
+    /// blocking questions (not the ones that can wait).
     private func updateTitleAndBadge() {
         window?.title = model.selectedRow.map { "\($0.title) — \($0.project)" } ?? "VibeSwitcher"
         guard let window, window.isVisible || window.isMiniaturized else { return }
         let waiting = model.allRows.filter { $0.state(now: Date()).group == .needsYou }.count
+            + leads.boards.values.reduce(0) { $0 + $1.blockingQuestions }
         NSApp.dockTile.badgeLabel = waiting > 0 ? "\(waiting)" : nil
     }
 

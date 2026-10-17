@@ -99,6 +99,19 @@ struct LeadQuestionsTests: LeadTeamFixture {
         #expect(board.blockingQuestions == 1)
     }
 
+    @Test func theStackShowsOpenOnesThenLatelyWithdrawnOnes() throws {
+        var board = LeadBoard()
+        let open = board.ask("Open?", options: [], priority: nil, whyNow: nil, at: 0)
+        let lately = board.ask("Lately?", options: [], priority: .blocking, whyNow: nil, at: 0)
+        let long = board.ask("Long ago?", options: [], priority: nil, whyNow: nil, at: 0)
+        let answered = board.ask("Answered?", options: [], priority: nil, whyNow: nil, at: 0)
+        try board.withdraw(lately.id, reason: "r", at: 10_000)
+        try board.withdraw(long.id, reason: "r", at: 100)
+        _ = board.answer(answered.id, with: "a", saw: 1)
+        #expect(board.questionStack(now: 10_060).map(\.id) == [open.id, lately.id])
+        #expect(board.questionStack(now: 10_000 + LeadBoard.withdrawnShown).map(\.id) == [open.id])
+    }
+
     @Test func idsMatchByAUniquePrefix() throws {
         var board = LeadBoard()
         board.questions = [LeadQuestion(id: "2DB85777-AAAA", text: "a", options: []), LeadQuestion(id: "2DB8FFFF-BBBB", text: "b", options: [])]

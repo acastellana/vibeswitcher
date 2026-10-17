@@ -23,9 +23,9 @@ struct InspectorView: View {
             Divider()
             if let row = model.selectedRow {
                 if tab == "team", let lead {
-                    LeadTeamView(root: lead.root, board: lead.board, seen: LeadLanes.seen(model.allRows, now: Date())) { session in
+                    LeadTeamView(root: lead.root, board: lead.board, seen: LeadLanes.seen(model.allRows, now: Date()), open: { session in
                         if let id = UUID(uuidString: session) { model.select(hostID: id) }
-                    }
+                    }, answer: { question, text in leads.answer(question, root: lead.root, with: text) }, notices: leads.answerNotices)
                 } else if tab == "activity" {
                     ActivityView(session: row.session).id(row.id)
                 } else {

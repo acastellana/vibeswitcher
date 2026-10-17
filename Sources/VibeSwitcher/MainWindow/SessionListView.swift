@@ -19,6 +19,7 @@ struct SessionListView: View {
                     ForEach(section.rows.filter { !arranged.nested.contains($0.id) || !LeadLanes.isHistory($0, boards: leads.boards, now: Date()) }) { row in
                         WindowRowView(row: row, showProject: model.grouping == .attention, role: model.role(of: row),
                                       team: arranged.teams[row.id], board: arranged.teams[row.id] == nil ? nil : leads.lead(for: row)?.board,
+                                      questions: model.role(of: row) == .lead ? leads.lead(for: row).map { ($0.board.openQuestions.count, $0.board.blockingQuestions) } : nil,
                                       label: model.label(of:), nested: arranged.nested.contains(row.id),
                                       teamOpen: model.expandedTeams.contains(row.id)) { model.toggleTeam(row.id) }
                             .tag(row.id as String?)
@@ -103,6 +104,8 @@ struct WindowRowView: View {
     var team: [WindowRow]?
     /// The lead's board: what its team's tasks are at.
     var board: LeadBoard?
+    /// A lead's open questions for you, and how many of them block.
+    var questions: (open: Int, blocking: Int)?
     /// Window sessions' labels (who's a verifier).
     var label: (WindowRow) -> String? = { $0.hosted?.label }
     /// A team row shown under its lead.
@@ -139,6 +142,13 @@ struct WindowRowView: View {
                             Text("·").foregroundStyle(.tertiary)
                         }
                         Text(state.text).foregroundStyle(state.group == .needsYou ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                        if let questions, questions.open > 0 {
+                            Text("·").foregroundStyle(.tertiary)
+                            Label("\(questions.open)", systemImage: "questionmark.bubble.fill")
+                                .labelStyle(.titleAndIcon).fontWeight(.medium)
+                                .foregroundStyle(questions.blocking > 0 ? Color.red : Color.orange)
+                                .help(questionCount(questions.open) + (questions.blocking > 0 ? " (\(questions.blocking) blocking)" : ""))
+                        }
                         if let team, !team.isEmpty {
                             Text("·").foregroundStyle(.tertiary)
                             Button(action: toggleTeam) {

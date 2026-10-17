@@ -325,6 +325,16 @@ public struct LeadBoard: Codable, Equatable, Sendable {
         questions.filter(\.isOpen).sorted { ($0.rank, $0.askedAt) < ($1.rank, $1.askedAt) }
     }
 
+    /// How long a withdrawn question stays in the stack, collapsed, so you see it went and why.
+    public static let withdrawnShown: Double = 30 * 60
+
+    /// The "Questions for you" stack: the open questions in order, then the ones withdrawn lately (newest first) as
+    /// collapsed lines.
+    public func questionStack(now: Double = Date().timeIntervalSince1970) -> [LeadQuestion] {
+        let withdrawn = questions.filter { $0.state == .withdrawn && now - ($0.withdrawnAt ?? 0) < Self.withdrawnShown }
+        return openQuestions + withdrawn.sorted { ($0.withdrawnAt ?? 0) > ($1.withdrawnAt ?? 0) }
+    }
+
     /// Open questions that hold up work: what the Dock badge counts.
     public var blockingQuestions: Int { questions.filter { $0.isOpen && $0.rank == .blocking }.count }
 

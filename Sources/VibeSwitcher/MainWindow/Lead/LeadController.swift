@@ -16,7 +16,11 @@ final class LeadController: ObservableObject {
     var notify: (String, String) -> Void = { _, _ in }
     var select: (UUID) -> Void = { _ in }
     private var timer: Timer?
+    /// Questions told about (by id and version: a revision is news too).
     private var seenQuestions: Set<String> = []
+    /// What became of an answer that didn't land as one (the question was withdrawn, or answered already), by
+    /// question id: its card says so.
+    @Published private(set) var answerNotices: [String: String] = [:]
     /// Witness events already told, so each is told once.
     private var told: Set<String> = []
     /// Ended team sessions the host has been asked to drop.
@@ -133,15 +137,22 @@ final class LeadController: ObservableObject {
     // MARK: Questions
 
     /// Your answer: recorded on the board and delivered to the lead (steered in while it works, typed while idle).
+    /// `question` is the card as you saw it: the answer is tied to that version, so if the lead revised it meanwhile
+    /// it's told which wording you answered; if the lead had withdrawn it, the card says so and the lead gets your
+    /// answer as a note.
     func answer(_ question: LeadQuestion, root: String, with text: String) {
         let store = BoardStore(root: root)
-        try? store.update { board in
-            guard let index = board.questions.firstIndex(where: { $0.id == question.id }) else { return }
-            board.questions[index].answer = text
-            board.questions[index].answeredAt = Date().timeIntervalSince1970
+        let outcome = (try? store.update { board in board.answer(question.id, with: text, saw: question.version) }) ?? .missing
+        switch outcome {
+        case .answered: answerNotices[question.id] = nil
+        case .withdrawn(let withdrawn):
+            answerNotices[question.id] = "Withdrawn before your answer: \(withdrawn.withdrawReason ?? "no reason given"). The lead got your answer as a note."
+        case .alreadyAnswered(let answered):
+            answerNotices[question.id] = "Already answered: \(answered.answer ?? ""). Your new answer wasn't sent."
+        case .missing:
+            answerNotices[question.id] = "That question is no longer on the board. Your answer wasn't sent."
         }
-        let board = store.load()
-        deliver("Answer to your question “\(question.text)”: \(text)", from: .user, to: board, root: root)
+        if let message = outcome.message(given: text) { deliver(message, from: .user, to: store.load(), root: root) }
         refresh()
     }
 
@@ -214,9 +225,9 @@ final class LeadController: ObservableObject {
         for root in roots { loaded[root] = BoardStore(root: root).load() }
         if loaded != boards { boards = loaded }
         for (root, board) in loaded {
-            for question in board.questions where question.answer == nil && !seenQuestions.contains(question.id) {
-                seenQuestions.insert(question.id)
-                notify("The lead of \((root as NSString).lastPathComponent) asks", question.text)
+            for question in board.openQuestions where seenQuestions.insert("\(question.id)#\(question.version)").inserted {
+                let project = (root as NSString).lastPathComponent
+                notify(question.version > 1 ? "The lead of \(project) updated a question" : "The lead of \(project) asks", question.text)
             }
             witness(root: root, board: board)
         }
