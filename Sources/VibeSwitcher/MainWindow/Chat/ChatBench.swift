@@ -25,9 +25,16 @@ enum ChatBench {
             last = now
         }
         RunLoop.main.add(beat, forMode: .common)
+        // VIBESWITCHER_BENCH_STALL=1: also checks the hang watchdog (the main thread blocks for 4 s at t=3).
+        let stall = ProcessInfo.processInfo.environment["VIBESWITCHER_BENCH_STALL"] == "1"
+        if stall {
+            HangWatchdog.shared.describeState = { "chat bench, items=\(chat.items.count)" }
+            HangWatchdog.shared.start()
+        }
         var second = 0
         let tick = Timer(timeInterval: 1, repeats: true) { _ in
             second += 1
+            if stall, second == 3 { Breadcrumbs.shared.note("bench: blocking the main thread for 4 s"); sleep(4) }
             chat.poll()
             // A width change (sidebar or inspector toggled, the window dragged): every row is measured again.
             if second % 2 == 0 {
