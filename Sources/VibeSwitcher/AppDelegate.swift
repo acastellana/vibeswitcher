@@ -493,8 +493,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private func showWelcome(firstRun: Bool) {
         popover.performClose(nil)
         UserDefaults.standard.set(true, forKey: FirstRun.shownKey)
-        if welcomeWindow == nil { welcomeWindow = OnboardingWindowController(setup: setup, firstRun: firstRun) }
-        welcomeWindow?.show()
+        if welcomeWindow == nil { welcomeWindow = OnboardingWindowController(setup: setup) }
+        welcomeWindow?.show(firstRun: firstRun)
     }
 
     /// Debug aid (`VibeSwitcher --capture-window PATH`): each visible window drawn into a PNG (PATH, then

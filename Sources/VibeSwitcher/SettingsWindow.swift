@@ -87,8 +87,7 @@ struct GeneralSettings: View {
                 Toggle("Open the window when VibeSwitcher starts", isOn: $preferences.openWindowAtLaunch)
                 LabeledContent("First-run setup") { Button("Show Welcome…", action: showWelcome) }
             } footer: {
-                Text("Window sessions keep running when VibeSwitcher quits or updates. Ended sessions stay listed for a day.")
-                    .font(.caption).foregroundStyle(.secondary)
+                SettingsFooter("Window sessions keep running when VibeSwitcher quits or updates. Ended sessions stay listed for a day.")
             }
             Section("Menu bar") {
                 Picker("Order sessions", selection: $preferences.sessionOrder) {
@@ -155,9 +154,8 @@ struct AgentsSettings: View {
             } header: {
                 Text("Hooks")
             } footer: {
-                Text("Hooks are how sessions report live status. Installing adds VibeSwitcher's entries beside yours; the "
-                     + "first install keeps a copy of each file as …vibeswitcher-backup.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                SettingsFooter("Hooks are how sessions report live status. Installing adds VibeSwitcher's entries beside yours; the "
+                               + "first install keeps a copy of each file as …vibeswitcher-backup.")
             }
             Section {
                 LabeledContent("Trust VibeSwitcher's hooks") {
@@ -166,9 +164,8 @@ struct AgentsSettings: View {
             } header: {
                 Text("Codex")
             } footer: {
-                Text("Codex skips hooks until they're trusted. Installing trusts them for you (in ~/.codex/config.toml, "
-                     + "like Codex's /hooks screen); do it again here if Codex says they changed.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                SettingsFooter("Codex skips hooks until they're trusted. Installing trusts them for you (in ~/.codex/config.toml, "
+                               + "like Codex's /hooks screen); do it again here if Codex says they changed.")
             }
             Section {
                 LabeledContent("Control Terminal") {
@@ -191,9 +188,8 @@ struct AgentsSettings: View {
             } header: {
                 Text("Terminal")
             } footer: {
-                Text("Control Terminal reads tab titles and brings a session's tab to the front. Accessibility lets "
-                     + "the list follow the tab order when sessions share one window.")
-                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                SettingsFooter("Control Terminal reads tab titles and brings a session's tab to the front. Accessibility lets "
+                               + "the list follow the tab order when sessions share one window.")
             }
         }
         .formStyle(.grouped)
@@ -202,6 +198,19 @@ struct AgentsSettings: View {
     static func tildePath(_ path: String) -> String {
         let home = NSHomeDirectory()
         return path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
+    }
+}
+
+/// A section's explanation, under it and aligned with its rows.
+struct SettingsFooter: View {
+    let text: String
+    init(_ text: String) { self.text = text }
+
+    var body: some View {
+        Text(text).font(.caption).foregroundStyle(.secondary)
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 

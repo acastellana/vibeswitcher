@@ -220,7 +220,7 @@ final class SetupModel: ObservableObject {
     var terminalStatus: SetupStatus {
         switch terminal {
         case .allowed?: return .ok("Allowed")
-        case .denied?: return .problem("Not allowed. Turn on Terminal under VibeSwitcher in System Settings › Privacy & Security › Automation.")
+        case .denied?: return .problem("Not allowed (System Settings › Privacy & Security › Automation)")
         case .notAsked?: return .pending("Not asked yet")
         case .appNotRunning?: return .pending("Terminal isn't open. Allow… opens it so macOS can ask.")
         case .unknown(let code)?: return .problem("Couldn't check (error \(code))")
@@ -233,7 +233,7 @@ final class SetupModel: ObservableObject {
     var notificationStatus: SetupStatus {
         switch notifications {
         case .allowed?: return .ok("Allowed")
-        case .off?: return .problem("Off. Turn them on in System Settings › Notifications › VibeSwitcher.")
+        case .off?: return .problem("Off (System Settings › Notifications)")
         case .notAsked?: return .pending("Not asked yet")
         case nil: return .pending("Checking…")
         }
@@ -320,9 +320,9 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
     private let setup: SetupModel
     private var watching = false
 
-    init(setup: SetupModel, firstRun: Bool) {
+    init(setup: SetupModel) {
         self.setup = setup
-        flow = OnboardingFlow(openAtLogin: firstRun || setup.preferences.launchAtLogin)
+        flow = OnboardingFlow(openAtLogin: setup.preferences.launchAtLogin)
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: OnboardingView.size.width, height: OnboardingView.size.height),
                               styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
         window.title = "Welcome to VibeSwitcher"
@@ -337,10 +337,11 @@ final class OnboardingWindowController: NSWindowController, NSWindowDelegate {
 
     required init?(coder: NSCoder) { fatalError("not used") }
 
-    func show() {
+    /// On first run the login switch starts on; opened again later, it shows the login item as it is.
+    func show(firstRun: Bool) {
         flow.step = .welcome
         flow.skipped = []
-        flow.openAtLogin = flow.openAtLogin || setup.preferences.launchAtLogin
+        flow.openAtLogin = firstRun || setup.preferences.launchAtLogin
         if !watching { setup.watch(); watching = true }
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)

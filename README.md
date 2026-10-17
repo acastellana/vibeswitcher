@@ -14,7 +14,7 @@ what each one is doing, and jumps to its Terminal tab in one keystroke.
 
 The menu bar shows one dot per session, in the order of your desktops: sessions on Desktop 1 first, then
 Desktop 2, and so on (as Mission Control and ⌃← / ⌃→ order them); windows sharing a desktop go in reading
-order, tabs in tab order. Each row says which desktop it's on. Prefer oldest-first? Switch it in ⚙︎.
+order, tabs in tab order. Each row says which desktop it's on. Prefer oldest-first? Switch it in Settings › General.
 While a session runs a tool, its row shows what and for how long ("⚙ Run unit tests · 3m", orange after 10 min).
 
 - **Click a dot** to jump straight to that session's Terminal tab. Hover a dot to see which session it is.
@@ -24,7 +24,7 @@ While a session runs a tool, its row shows what and for how long ("⚙ Run unit 
   and press **P**, to park a session you're waiting on or don't want to deal with now. It stays in its place
   but greyed out (dot, row, floating panel, phone), sends no notifications or reminders, and its waiting
   doesn't count in Today. Pausing also minimizes the session's window to the Dock when it's the only tab there
-  (⚙︎ to turn off); Resume brings it back. Pauses survive restarts; timed ones end by themselves (the window
+  (Settings › General to turn off); Resume brings it back. Pauses survive restarts; timed ones end by themselves (the window
   stays in the Dock then, instead of popping up). Resume from the same menu (or P).
 - **Right-click a row › Rename…** to give a session your own name (kept while it runs, and across
   `--resume` when the session id is kept).
@@ -117,14 +117,14 @@ you've set it aside). Waiting only counts while you're at the Mac (screen unlock
 **Crowded menu bar?** On notched MacBooks, macOS silently hides status icons that don't fit right of the
 notch. VibeSwitcher starts next to the clock, where overflow never reaches (⌘-drag it elsewhere if you
 like). If its icon does get hidden, a floating pill with the same numbered dots appears automatically;
-drag it anywhere. Set it to Always / Never in the ⚙︎ menu.
+drag it anywhere. Set it to Always / Never in Settings › General.
 
 ## Phone Access (over Tailscale)
 
 See your sessions on your phone: the list with live status, each session's screen, the Today summary,
 and notifications when a session needs you or finishes. Optionally reply and press keys (Esc, 1–3, ↑↓, ⏎, ⌃C).
 
-1. ⚙︎ › **Phone Access…** › turn it on. It needs Tailscale on this Mac with HTTPS certificates enabled
+1. Settings (⌘,) › **Phone** › turn it on. It needs Tailscale on this Mac with HTTPS certificates enabled
    for your tailnet (admin console › DNS). VibeSwitcher runs `tailscale serve --bg --https=8443` for its
    local server and removes that mapping when you turn Phone Access off or quit.
 2. **Pair a Phone…**: scan the QR code with your phone (Tailscale on), or open the address shown and type
@@ -175,28 +175,35 @@ How it's kept safe:
 
 ```sh
 ./scripts/build-app.sh --install        # builds, copies to /Applications, launches
-/Applications/VibeSwitcher.app/Contents/MacOS/VibeSwitcher --install-hooks
 ```
 
-Or click **Install hooks** in the popover. That installs the hook binary, adds hooks to both agents'
-configs, and marks the Codex hooks as trusted (the same `hooks/list` + `config/batchWrite` calls that
-Codex's own `/hooks` screen makes through `codex app-server`). Then macOS asks twice:
+On first launch a short welcome window sets VibeSwitcher up. Every step says why it's needed, shows its live
+state, and can be skipped; Settings (⌘,) › General › **Show Welcome…** brings the window back.
 
-- **Control Terminal**: allow it. That's how tab titles are read and tabs are selected.
-- **Notifications**: allow it to get a banner when a session needs you (with sound) or finishes. Clicking
-  the banner jumps to that tab. Without permission you still get a sound when a session needs input.
-  The banner says what's being asked: the question, the exact command waiting for approval
-  ("Run: npm publish"), or the plan's title; a finished session shows the start of its last message.
-  One reminder follows if a session has waited on you for 10 minutes (looking at its tab restarts the
-  clock), or if a working session has shown no progress for 15 minutes, which usually means it's stuck.
-  Reminders wait while you're away from the Mac. Turn them off in ⚙︎. Credentials in commands and
-  messages (tokens, passwords, API keys, `Authorization` headers, `user:pass@` URLs) are masked before
-  they are stored or shown.
+1. **Live status**: installs the hooks. That installs the hook binary, adds VibeSwitcher's entries to
+   `~/.claude/settings.json` and `~/.codex/hooks.json` (beside your own hooks), and marks the Codex hooks as
+   trusted (the same `hooks/list` + `config/batchWrite` calls that Codex's own `/hooks` screen makes through
+   `codex app-server`). Later: Settings › **Agents**, the popover's **Install hooks** banner, or
+   `/Applications/VibeSwitcher.app/Contents/MacOS/VibeSwitcher --install-hooks`.
+2. **Terminal**: macOS asks whether VibeSwitcher may control Terminal. Allow it: that's how tab titles are read
+   and tabs are selected. Sessions in VibeSwitcher's own window don't need it.
+3. **Notifications**: allow them to get a banner when a session needs you (with sound) or finishes. Clicking
+   the banner jumps to that tab. Without permission you still get a sound when a session needs input.
+   The banner says what's being asked: the question, the exact command waiting for approval
+   ("Run: npm publish"), or the plan's title; a finished session shows the start of its last message.
+   One reminder follows if a session has waited on you for 10 minutes (looking at its tab restarts the
+   clock), or if a working session has shown no progress for 15 minutes, which usually means it's stuck.
+   Reminders wait while you're away from the Mac. Choose which you get in Settings › General. Credentials in
+   commands and messages (tokens, passwords, API keys, `Authorization` headers, `user:pass@` URLs) are masked
+   before they are stored or shown.
+4. **Open at login**: on unless you switch it off; nothing is registered until you click Done. Change it in
+   Settings › General.
 
 Running Claude Code sessions pick the hooks up immediately; Codex sessions started before the install
-need a restart. VibeSwitcher registers itself as a login item on first launch (toggle it in the ⚙︎ menu).
+need a restart. Every setting lives in Settings (⌘,): General, Agents (hooks, Codex trust, Terminal and
+Accessibility permissions), Phone, Launch and Terminal. The ⚙︎ menu in the list repeats a few toggles.
 
-Uninstall the hooks with `--uninstall-hooks`. The first install keeps copies of your original configs as
+Uninstall the hooks in Settings › Agents or with `--uninstall-hooks`. The first install keeps copies of your original configs as
 `~/.claude/settings.json.vibeswitcher-backup` and `~/.codex/hooks.json.vibeswitcher-backup`. The Codex trust
 entries (`hooks.state` in `~/.codex/config.toml`) stay behind after uninstalling; they are inert without the
 hooks and can be deleted by hand.
@@ -246,7 +253,7 @@ VibeSwitcher --new claude ~/dev/app   # start a preset (name, or claude/codex/sh
 VibeSwitcher --window [palette|home]  # open the window (with the command palette, or on the start page)
 VibeSwitcher --window select:genswap  # … and select the first session matching the text
 VibeSwitcher --window move:ttys012    # move that Terminal session into the window (between turns)
-VibeSwitcher --settings launch        # open Settings (general, launch or terminal)
+VibeSwitcher --settings launch        # open Settings (general, agents, phone, launch or terminal)
 VibeSwitcher --lead ~/dev/app --goal "add a login page"  # start (or message) the project lead of that repository
 VibeSwitcher --install-hooks | --uninstall-hooks
 cat ~/.vibeswitcher/app-status.json   # debug aid: what the running app currently sees
