@@ -36,7 +36,7 @@ struct ChatContainer: View {
             Divider()
             if let row = model.selectedRow {
                 if row.hostID != nil, actions.isLive(row) {
-                    ComposerView(chat: chat, rowID: row.id, agent: row.session?.agent ?? .claude,
+                    ComposerView(chat: chat, composer: chat.composer, rowID: row.id, agent: row.session?.agent ?? .claude,
                                  working: [.working, .background].contains(row.session?.status),
                                  actions: ComposerActions(send: { text in
                                      let sent = composer.send(text)
@@ -48,7 +48,7 @@ struct ChatContainer: View {
                 } else if let session = row.session, session.inTerminalApp, session.agent == .claude,
                           [.working, .background].contains(session.status) {
                     // Steering needs no typing, so it reaches a Terminal session too.
-                    ComposerView(chat: chat, rowID: row.id, agent: session.agent, working: true, steerOnly: true,
+                    ComposerView(chat: chat, composer: chat.composer, rowID: row.id, agent: session.agent, working: true, steerOnly: true,
                                  actions: ComposerActions(send: { _ in false }, steer: composer.steer, stop: {}, cycleMode: {}))
                         .id(row.id)
                 } else if let session = row.session, session.inTerminalApp {
@@ -258,7 +258,7 @@ private struct ChatItemView: View, Equatable {
                     Button("Copy") { Pasteboard.copy(text) }
                     if canSend, let rowID {
                         Button("Edit in Composer") {
-                            chat.drafts[rowID] = text
+                            chat.composer.drafts[rowID] = text
                             chat.focusComposer()
                         }
                         Button("Send Again") { resend(text) }

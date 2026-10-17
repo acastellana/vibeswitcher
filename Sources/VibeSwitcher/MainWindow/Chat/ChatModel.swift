@@ -1,6 +1,39 @@
+import AppKit
 import Combine
 import Foundation
 import VibeCore
+
+/// Unsent text per session (row id), so switching sessions never sends a draft to the wrong one, and images
+/// attached to each draft. Kept on disk (shortly after typing stops), so a restart or an update doesn't lose them.
+final class ComposerDrafts: ObservableObject {
+    @Published var drafts: [String: String] = UserDefaults.standard.dictionary(forKey: "chatDrafts") as? [String: String] ?? [:] {
+        didSet { saveSoon() }
+    }
+    @Published var attachments: [String: [String]] = UserDefaults.standard.dictionary(forKey: "chatAttachments") as? [String: [String]] ?? [:] {
+        didSet { saveSoon() }
+    }
+    private var pendingSave: DispatchWorkItem?
+
+    init() {
+        NotificationCenter.default.addObserver(forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            self?.save()
+        }
+    }
+
+    private func saveSoon() {
+        pendingSave?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.save() }
+        pendingSave = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
+    }
+
+    func save() {
+        pendingSave?.cancel()
+        pendingSave = nil
+        UserDefaults.standard.set(drafts.filter { !$0.value.isEmpty }, forKey: "chatDrafts")
+        UserDefaults.standard.set(attachments.filter { !$0.value.isEmpty }, forKey: "chatAttachments")
+    }
+}
 
 /// The conversation of the session the chat shows: read from its transcript off the main thread, the newest
 /// part first, then followed as the file grows.
@@ -36,15 +69,9 @@ final class ChatModel: ObservableObject {
     @Published private(set) var scrollToBottomRequests = 0
     /// Bumped to put the keyboard focus in the composer.
     @Published private(set) var focusComposerRequests = 0
-    /// Unsent text per session (row id), so switching sessions never sends a draft to the wrong one. Kept on
-    /// disk, so a restart (or an update) doesn't lose what you were typing.
-    @Published var drafts: [String: String] = UserDefaults.standard.dictionary(forKey: "chatDrafts") as? [String: String] ?? [:] {
-        didSet { UserDefaults.standard.set(drafts.filter { !$0.value.isEmpty }, forKey: "chatDrafts") }
-    }
-    /// Images attached to each session's draft (paths), shown as thumbnails and sent with the message.
-    @Published var attachments: [String: [String]] = UserDefaults.standard.dictionary(forKey: "chatAttachments") as? [String: [String]] ?? [:] {
-        didSet { UserDefaults.standard.set(attachments.filter { !$0.value.isEmpty }, forKey: "chatAttachments") }
-    }
+    /// Unsent text and attachments per session. Its own object: typing changes it on every key, and that mustn't
+    /// redraw the conversation.
+    let composer = ComposerDrafts()
 
     /// Messages sent from the composer that the transcript doesn't show yet.
     @Published private(set) var pending: [PendingMessage] = []

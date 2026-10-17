@@ -3,6 +3,10 @@ import VibeCore
 
 // Command-line maintenance modes, e.g. `VibeSwitcher.app/Contents/MacOS/VibeSwitcher --dump`.
 let arguments = CommandLine.arguments
+if let index = arguments.firstIndex(of: "--chat-bench"), arguments.indices.contains(index + 1) {
+    // Debug aid: the chat view offscreen in this process on a transcript, timing its layouts (see `ChatBench`).
+    ChatBench.run(path: arguments[index + 1])
+}
 if arguments.contains("--install-hooks") {
     let problems = HookSetup.installAll()
     problems.forEach { print("problem: \($0)") }

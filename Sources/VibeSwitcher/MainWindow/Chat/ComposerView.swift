@@ -20,6 +20,7 @@ struct ComposerActions {
 /// files inserts their paths. While the agent works, the stop button (or ⌘.) interrupts it.
 struct ComposerView: View {
     @ObservedObject var chat: ChatModel
+    @ObservedObject var composer: ComposerDrafts
     let rowID: String
     let agent: Agent
     let working: Bool
@@ -31,15 +32,15 @@ struct ComposerView: View {
     @State private var notice: String?
 
     private var text: Binding<String> {
-        Binding(get: { chat.drafts[rowID] ?? "" }, set: { chat.drafts[rowID] = $0 })
+        Binding(get: { composer.drafts[rowID] ?? "" }, set: { composer.drafts[rowID] = $0 })
     }
 
-    private var images: [String] { (chat.attachments[rowID] ?? []).filter { FileManager.default.fileExists(atPath: $0) } }
+    private var images: [String] { (composer.attachments[rowID] ?? []).filter { FileManager.default.fileExists(atPath: $0) } }
 
     private func attachImage(_ url: URL) {
-        var list = chat.attachments[rowID] ?? []
+        var list = composer.attachments[rowID] ?? []
         if !list.contains(url.path) { list.append(url.path) }
-        chat.attachments[rowID] = list
+        composer.attachments[rowID] = list
     }
 
     var body: some View {
@@ -50,7 +51,7 @@ struct ComposerView: View {
             if !images.isEmpty {
                 HStack(spacing: 8) {
                     ForEach(images, id: \.self) { path in
-                        AttachedThumbnail(path: path) { chat.attachments[rowID]?.removeAll { $0 == path } }
+                        AttachedThumbnail(path: path) { composer.attachments[rowID]?.removeAll { $0 == path } }
                     }
                 }
             }
@@ -65,7 +66,7 @@ struct ComposerView: View {
                             .font(.system(size: 13)).foregroundStyle(.tertiary).padding(.leading, 5).padding(.top, 1)
                             .allowsHitTesting(false)
                     }
-                    ComposerTextView(text: text, height: $height, suggestions: $suggestions, history: chat.log.prompts,
+                    ComposerTextView(text: text, height: $height, suggestions: $suggestions, history: { [chat] in chat.log.prompts },
                                      focusRequests: chat.focusComposerRequests, complete: complete,
                                      submit: { submit(queue: false) }, queue: { submit(queue: true) }, attachImage: attachImage)
                         .frame(height: min(max(height, 22), 220))
@@ -118,7 +119,7 @@ struct ComposerView: View {
         if accepted {
             if working && !steering { chat.sent(message) }
             text.wrappedValue = ""
-            chat.attachments[rowID] = []
+            composer.attachments[rowID] = []
             suggestions = Suggestions()
         }
     }
@@ -388,7 +389,8 @@ private struct ComposerTextView: NSViewRepresentable {
     @Binding var text: String
     @Binding var height: CGFloat
     @Binding var suggestions: Suggestions
-    let history: [String]
+    /// Earlier prompts, for ↑ (asked for only then: it's every prompt of the conversation).
+    let history: () -> [String]
     let focusRequests: Int
     let complete: (ComposerToken) -> [Suggestion]
     let submit: () -> Void
@@ -542,7 +544,7 @@ private struct ComposerTextView: NSViewRepresentable {
 
         /// ↑ / ↓ go through earlier prompts while the box is empty or showing one of them.
         private func walkHistory(_ textView: NSTextView, by step: Int) -> Bool {
-            let history = parent.history
+            let history = parent.history()
             guard !history.isEmpty, textView.string.isEmpty || historyIndex != nil else { return false }
             let next = (historyIndex ?? history.count) + step
             guard next >= 0 else { return true }
