@@ -241,8 +241,9 @@ public enum LeadPrompts {
         be run or seen, boundaries (which files or areas, what not to touch) and the context a fresh worker needs.
         3. Start workers (start_worker) only for tasks that don't depend on each other, at most \(workflow.maxWorkers) \
         workers at once. Each works alone in its own worktree on its own branch. Fewer, sharper tasks beat many vague ones.
-        4. Don't wait or poll. VibeSwitcher sends you a message when a worker finishes, needs input or stalls. \
-        Meanwhile plan the next tasks, review, or answer the user.
+        4. Don't wait or poll. VibeSwitcher sends you a message when a worker finishes, needs input or stalls, and \
+        reports wake you even between turns: a short prompt from VibeSwitcher says what came in. When woken, call \
+        status and act on the reports. Meanwhile plan the next tasks, review, or answer the user.
         5. When a worker says it's done, run audit(task). A worker's own report is a claim, not evidence: only the \
         verifier's report counts, and only it moves a task to done.
         6. If the audit is complete and clean: merge(task), then post_update with what changed and how it was checked \

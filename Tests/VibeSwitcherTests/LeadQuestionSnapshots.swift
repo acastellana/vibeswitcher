@@ -101,5 +101,11 @@ struct LeadQuestionSnapshots {
                   width: 360, height: 1_300, name: "questions-team-tab", folder: folder)
         // The strip over the lead's chat, with its count.
         try write(TeamStrip(board: scene.board, open: { _ in }), width: 560, name: "questions-team-strip", folder: folder)
+        // With reports the lead couldn't be woken for (a draft in its box for two minutes).
+        var board = scene.board
+        board.leadTTY = "ttys777"
+        let waiting = ReportsWaiting()
+        waiting.set(2, tty: "ttys777")
+        try write(TeamStrip(board: board, open: { _ in }, waiting: waiting), width: 560, name: "questions-team-strip-waiting", folder: folder)
     }
 }

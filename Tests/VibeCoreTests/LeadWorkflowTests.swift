@@ -144,7 +144,7 @@ struct LeadWorkflowTests {
 
     @Test func theLeadsPromptCarriesThePlaybook() {
         let prompt = LeadPrompts.lead(project: "acme", root: "/r", workflow: LeadWorkflow.parse("---\nmax_workers: 2\n---"))
-        for needle in ["acme", "never write code", "at most 2 workers", "audit", "merge", "ask_user", "board", "Don't wait", "configure"] {
+        for needle in ["acme", "never write code", "at most 2 workers", "audit", "merge", "ask_user", "board", "Don't wait", "configure", "reports wake you", "When woken, call status"] {
             #expect(prompt.localizedCaseInsensitiveContains(needle), "missing \(needle)")
         }
     }

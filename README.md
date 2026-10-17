@@ -82,7 +82,12 @@ it tells the lead when a worker waits for input, stops without reporting, or die
 whatever its screen says: it reads as working but its transcript hasn't grown for 15 minutes with no shell of its
 running, it's been between turns for 10 minutes without reporting or asking the lead anything, its transcript ends
 at a context-compaction summary with nothing after it for 5 minutes, or a message has waited in its inbox for 5
-minutes. Each stall is told once, `status` lists stalled workers first, and their rows read "Stalled 2h". The Team
+minutes. Each stall is told once, `status` lists stalled workers first, and their rows read "Stalled 2h". Reports (a
+worker done or blocked, a verdict, the witness's news) wake a lead that's between turns, in any project: a few
+seconds after they come in (several close together count as one), VibeSwitcher types one short prompt into its
+empty box ("2 new reports (verifier x passed; worker y blocked). Call status.") and the reports themselves reach it
+with that prompt. Never into your draft (Claude's dim suggestion isn't one), mid-turn or over a dialog, and no second
+one until the lead has taken a turn; if it can't for two minutes, the lead's strip shows "N reports waiting". The Team
 tab in the inspector
 is meant to be glanced at: the lead's open questions first, then its own recent decisions (`record_decision`), each
 one short line ("Decided: run overlapping tasks in parallel") that stays in full view for two minutes, fades and blurs

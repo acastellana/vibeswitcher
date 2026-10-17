@@ -3,6 +3,22 @@ import Combine
 import Foundation
 import VibeCore
 
+/// How many reports have waited for each lead too long to be woken for (see `LeadWake.waiting`), by the lead's
+/// terminal: its strip shows them.
+final class ReportsWaiting: ObservableObject {
+    static let shared = ReportsWaiting()
+    @Published private(set) var count: [String: Int] = [:]
+
+    func set(_ count: Int, tty: String) {
+        if (self.count[tty] ?? 0) != count { self.count[tty] = count > 0 ? count : nil }
+    }
+
+    /// Only these terminals still have a lead.
+    func keep(_ ttys: Set<String>) {
+        if !Set(count.keys).isSubset(of: ttys) { count = count.filter { ttys.contains($0.key) } }
+    }
+}
+
 /// The app's side of project leads: starting them, keeping their boards loaded, answering their questions, and
 /// being their witness (telling a lead when one of its workers needs input, stops without reporting, or dies).
 final class LeadController: ObservableObject {
@@ -33,6 +49,9 @@ final class LeadController: ObservableObject {
     /// working again; until then another flush would type a second prompt).
     private var flushing: Set<String> = []
     private var typedAt: [String: Date] = [:]
+    /// Each lead's wake-ups (see `LeadWake`), by terminal and agent, and the ones with a look-again scheduled.
+    private var wakes: [String: LeadWake] = [:]
+    private var wakeLater: Set<String> = []
     /// Messages for a lead that isn't running right now (restarting): delivered once a lead runs there again.
     private var held: [String: [(text: String, sender: SteerMessage.Sender)]] = [:]
     /// What the team's agents are doing, from their hooks and transcripts together (see `LeadActivity`).
@@ -195,7 +214,52 @@ final class LeadController: ObservableObject {
         }
         let agent = LeadAgent(pid: pid, tty: tty, session: board.leadSession)
         try? LeadDelivery.deliver(text, from: sender, to: agent, inputIsEmpty: nil, typeInto: nil)
-        flush(agent)
+        wake(agent)
+    }
+
+    /// Wakes an idle lead that reports wait for (see `LeadWake`): one short prompt for all of them, typed into its
+    /// empty box between turns, and none again until it has taken a turn. Your own words waiting for it (an
+    /// answer) are typed as they are instead, and the reports go along with them.
+    private func wake(_ lead: LeadAgent) {
+        let pending = SteerInbox.pending(tty: lead.tty).filter { $0.agentPid == lead.pid }
+        let reports = LeadWake.reports(pending, agentPid: lead.pid)
+        let now = Date().timeIntervalSince1970
+        ReportsWaiting.shared.set(LeadWake.waiting(reports, now: now), tty: lead.tty)
+        if pending.first?.from == .user { return flush(lead) }
+        let key = "\(lead.tty)#\(lead.pid)"
+        guard let id = lead.session.flatMap(UUID.init(uuidString:)), let hosted = host.sessions.first(where: { $0.id == id }) else { return }
+        var state = wakes[key] ?? LeadWake()
+        let step = state.step(reports: reports, activity: observer.activity(hosted, agentPid: lead.pid), now: now)
+        wakes[key] = state
+        switch step {
+        case .none:
+            return
+        case .later(let due):
+            guard wakeLater.insert(key).inserted else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(0, due - now) + 0.2) { [weak self] in
+                self?.wakeLater.remove(key)
+                self?.wake(lead)
+            }
+        case .ready:
+            // A prompt typed a moment ago (its hooks haven't said it's working yet) is one in flight too.
+            guard !flushing.contains(lead.tty), Date().timeIntervalSince(typedAt[lead.tty] ?? .distantPast) > 10 else { return }
+            flushing.insert(lead.tty)
+            host.styledScreen(id) { [weak self] screen in
+                guard let self else { return }
+                self.flushing.remove(lead.tty)
+                // What waits now (its hook may have taken some meanwhile), typed only into an empty box: Claude's
+                // dim suggestion counts as empty, a draft or a dialog waits for the next try.
+                let reports = LeadWake.reports(SteerInbox.pending(tty: lead.tty), agentPid: lead.pid)
+                var state = self.wakes[key] ?? LeadWake()
+                state.type(reports: reports, box: screen.map(LeadDelivery.box(in:))) { text in
+                    self.typedAt[lead.tty] = Date()
+                    self.type(text, into: id)
+                    Breadcrumbs.shared.note("lead: woke the lead on \(lead.tty) for \(reports.count) report(s)")
+                    return true
+                }
+                self.wakes[key] = state
+            }
+        }
     }
 
     /// Types what waits for an idle agent in a window session, once its input box is empty. Only between turns: a
@@ -259,6 +323,10 @@ final class LeadController: ObservableObject {
             witness(root: root, board: board)
         }
         forgetFinished(loaded)
+        // A lead that ended, or another agent on its terminal now: its wake-ups and its waiting count go.
+        let leads = Set(loaded.values.compactMap { board in board.leadTTY.flatMap { tty in board.leadPid.map { "\(tty)#\($0)" } } })
+        wakes = wakes.filter { leads.contains($0.key) }
+        ReportsWaiting.shared.keep(Set(loaded.values.compactMap(\.leadTTY)))
     }
 
     /// A task merged or abandoned: its ended workers and verifiers leave the session list (everywhere it's shown:
@@ -327,7 +395,7 @@ final class LeadController: ObservableObject {
         if let waiting = held.removeValue(forKey: root) {
             for message in waiting { deliver(message.text, from: message.sender, to: board, root: root) }
         }
-        if let pid = board.leadPid, let tty = board.leadTTY { flush(LeadAgent(pid: pid, tty: tty, session: board.leadSession)) }
+        if let pid = board.leadPid, let tty = board.leadTTY { wake(LeadAgent(pid: pid, tty: tty, session: board.leadSession)) }
     }
 
     /// Who a waiting message is from, in words.

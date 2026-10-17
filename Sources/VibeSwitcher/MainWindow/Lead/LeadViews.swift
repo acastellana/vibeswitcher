@@ -30,6 +30,8 @@ extension LeadTask.Status {
 struct TeamStrip: View {
     let board: LeadBoard
     let open: (LeadTask) -> Void
+    /// Reports VibeSwitcher couldn't wake the lead for (see `LeadWake.shownAfter`), by the lead's terminal.
+    @ObservedObject var waiting = ReportsWaiting.shared
 
     var body: some View {
         let order: [LeadTask.Status] = [.running, .review, .blocked, .failed, .planned, .done]
@@ -47,6 +49,11 @@ struct TeamStrip: View {
                 }
                 if board.tasks.isEmpty { Text("No tasks yet").font(.system(size: 11.5)).foregroundStyle(.secondary) }
                 Spacer()
+                if let count = board.leadTTY.flatMap({ waiting.count[$0] }), let text = reportsWaiting(count) {
+                    Label(text, systemImage: "tray.full.fill")
+                        .font(.system(size: 11.5, weight: .medium)).foregroundStyle(.orange)
+                        .help("VibeSwitcher couldn't wake the lead for them: a draft in its box or a dialog on its screen. They go along with its next prompt.")
+                }
                 let open = board.openQuestions.count
                 if open > 0 {
                     Label(questionCount(open), systemImage: "questionmark.circle.fill")
@@ -109,6 +116,9 @@ extension LeadQuestion.Priority {
         }
     }
 }
+
+/// "1 report waiting", "3 reports waiting"; nothing for none.
+func reportsWaiting(_ count: Int) -> String? { count > 0 ? "\(count) report\(count == 1 ? "" : "s") waiting" : nil }
 
 /// "1 question for you", "3 questions for you".
 func questionCount(_ count: Int) -> String { "\(count) question\(count == 1 ? "" : "s") for you" }
