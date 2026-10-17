@@ -77,11 +77,12 @@ public final class LeadToolset: MCPToolset {
 
     /// The workflow notes, with the lead's branch resolved.
     var workflow: LeadWorkflow {
-        let path = (store.folder as NSString).appendingPathComponent("workflow.md")
-        var workflow = LeadWorkflow.parse((try? String(contentsOfFile: path, encoding: .utf8)) ?? "")
+        var workflow = LeadWorkflow.load(from: workflowPath)
         workflow.baseBranch = workflow.baseBranch ?? store.load().baseBranch ?? Worktrees.mainBranch(root: root)
         return workflow
     }
+
+    var workflowPath: String { (store.folder as NSString).appendingPathComponent("workflow.md") }
 
     /// The branch workers start from and verified work is merged into.
     public var base: String { workflow.base }
@@ -166,6 +167,12 @@ public final class LeadToolset: MCPToolset {
                             properties: ["decision": P(type: "string", description: "The decision"), "why": P(type: "string", description: "The reason")],
                             required: ["decision", "why"]),
                 MCPToolInfo(name: "sessions", description: "This project's window sessions, live or ended."),
+                MCPToolInfo(name: "configure", description: "The project's workflow settings (workflow.md's front matter): without arguments, shows them with suggestions from the repository; with some, sets those (an empty string clears one) and keeps the rest of the file as it is.",
+                            properties: ["test_command": P(type: "string", description: "The project's checks; merge runs it on each rebased branch and merges only when it passes"),
+                                         "init_command": P(type: "string", description: "What a fresh worktree needs before work starts (install, build)"),
+                                         "base_branch": P(type: "string", description: "The branch workers start from and verified work is merged into (an existing local branch)"),
+                                         "verifier_model": P(type: "string", description: "The verifier's model (e.g. sonnet, opus); a different one than the workers' gives a second opinion"),
+                                         "max_workers": P(type: "integer", description: "How many workers may run at once (at least 1)")]),
             ]
         }
     }
@@ -189,6 +196,7 @@ public final class LeadToolset: MCPToolset {
             case "post_update": return try postUpdate(arguments)
             case "record_decision": return try recordDecision(arguments)
             case "sessions": return MCPToolResult(text: sessionsText())
+            case "configure": return try configure(arguments)
             case "report": return try report(arguments)
             case "ask_lead": return try askLead(arguments)
             case "submit_audit": return try submitAudit(arguments)
@@ -352,7 +360,8 @@ public final class LeadToolset: MCPToolset {
         }
         defer { lock.release() }
         let tested: String
-        let base = self.base
+        let workflow = self.workflow
+        let base = workflow.base
         switch Worktrees.rebaseAndTest(root: root, slug: slug, test: workflow.testCommand, base: base) {
         case .passed(let commit): tested = commit
         case .conflict:
@@ -367,8 +376,11 @@ public final class LeadToolset: MCPToolset {
         switch try Worktrees.merge(root: root, slug: slug, commit: tested, base: base) {
         case .merged:
             try setStatus(slug, .done)
-            try? store.appendProgress("Merged \(slug): \(task.title)")
-            return MCPToolResult(text: "Merged \(slug) into \(base). Post an update for the user, then cleanup.")
+            // Nothing ran: say so, it isn't a pass.
+            let untested = workflow.testCommand == nil
+                ? " (merged without tests: no test_command\(workflow.problem.map { "; \($0)" } ?? ""). Set one with configure.)" : ""
+            try? store.appendProgress("Merged \(slug): \(task.title)\(untested.isEmpty ? "" : " (without tests: no test_command)")")
+            return MCPToolResult(text: "Merged \(slug) into \(base)\(untested). Post an update for the user, then cleanup.")
         case .refused(let reason):
             throw Problem(text: "Not merged: \(reason)")
         }
@@ -423,6 +435,49 @@ public final class LeadToolset: MCPToolset {
         guard let decision = arguments["decision"] as? String, let why = arguments["why"] as? String else { throw Problem(text: "A decision needs a reason.") }
         try store.appendDecision(decision, why: why)
         return MCPToolResult(text: "Recorded.")
+    }
+
+    private func configure(_ arguments: [String: Any]) throws -> MCPToolResult {
+        let unknown = Set(arguments.keys).subtracting(LeadWorkflow.configurable)
+        guard unknown.isEmpty else {
+            throw Problem(text: "configure sets only \(LeadWorkflow.configurable.joined(separator: ", ")); not \(unknown.sorted().joined(separator: ", ")).")
+        }
+        var changes: [(key: String, value: String)] = []
+        for key in LeadWorkflow.configurable {
+            guard let given = arguments[key], !(given is NSNull) else { continue }
+            var value: String
+            if let text = given as? String { value = text.trimmingCharacters(in: .whitespaces) }
+            else if let number = given as? NSNumber { value = number.stringValue }
+            else { throw Problem(text: "\(key) must be a string.") }
+            guard !value.contains(where: \.isNewline) else { throw Problem(text: "\(key) must be one line.") }
+            switch key {
+            case "max_workers":
+                guard let count = Int(value), count >= 1 else { throw Problem(text: "max_workers must be a whole number, at least 1.") }
+                value = String(count)
+            case "base_branch" where !value.isEmpty:
+                guard Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(value)"], in: root).ok else {
+                    throw Problem(text: "There's no local branch \(value) to work on.")
+                }
+            default: break
+            }
+            changes.append((key, value))
+        }
+        guard !changes.isEmpty else { return MCPToolResult(text: workflowText()) }
+        try store.prepare()
+        let path = workflowPath
+        let current = FileManager.default.contents(atPath: path) ?? Data(LeadWorkflow.template.utf8)
+        try LeadWorkflow.updating(current, with: changes).write(to: URL(fileURLWithPath: path), options: .atomic)
+        // What the next read sees is what counts.
+        let after = LeadWorkflow.load(from: path)
+        let read: [String: String] = ["test_command": after.testCommand ?? "", "init_command": after.initCommand ?? "",
+                                      "base_branch": after.baseBranch ?? "", "verifier_model": after.verifierModel ?? "",
+                                      "max_workers": String(after.maxWorkers)]
+        for change in changes where read[change.key] != change.value {
+            throw Problem(text: "Wrote workflow.md, but \(change.key) reads back as \"\(read[change.key] ?? "")\", not \"\(change.value)\". Check the file.")
+        }
+        let set = changes.map { $0.value.isEmpty ? "cleared \($0.key)" : "\($0.key) = `\($0.value)`" }.joined(separator: ", ")
+        try? store.appendProgress("Workflow: \(set)")
+        return MCPToolResult(text: "Set \(set).\n\n\(workflowText())")
     }
 
     private func setStatus(_ slug: String, _ status: LeadTask.Status) throws {
@@ -497,7 +552,9 @@ public final class LeadToolset: MCPToolset {
     private func status() -> String {
         let board = store.load()
         let live = Dictionary(uniqueKeysWithValues: runtime.sessions().map { ($0.id, $0) })
-        var lines = ["Project \(project) on branch \(base) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once."]
+        let workflow = self.workflow
+        var lines = ["Project \(project) on branch \(workflow.base) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once."]
+        lines += workflowWarnings(workflow)
         for state in LeadTask.Status.allCases {
             let tasks = board.tasks.filter { $0.status == state }
             guard !tasks.isEmpty else { continue }
@@ -521,6 +578,34 @@ public final class LeadToolset: MCPToolset {
             lines.append("\nRecent answers:")
             lines += answered.map { "- \($0.text) → \($0.answer ?? "")" }
         }
+        return lines.joined(separator: "\n")
+    }
+
+    /// What's missing from the workflow, with what to set (status and configure say it; nothing stays silent).
+    private func workflowWarnings(_ workflow: LeadWorkflow) -> [String] {
+        var lines: [String] = []
+        if let problem = workflow.problem { lines.append("workflow.md: \(problem). Fix it with configure.") }
+        if workflow.testCommand == nil {
+            lines.append("No test_command: merges run no tests. " + (LeadWorkflow.detectTestCommand(root: root).map {
+                "Suggested from the repository: `\($0)`; set it with configure (test_command)."
+            } ?? "Set one with configure (test_command)."))
+        }
+        return lines
+    }
+
+    private func workflowText() -> String {
+        let workflow = self.workflow
+        let raw = LeadWorkflow.load(from: workflowPath)
+        let fallback = store.load().baseBranch ?? Worktrees.mainBranch(root: root)
+        let detectedInit = LeadWorkflow.detectInitCommand(root: root)
+        var lines = ["Workflow settings (.vibeswitcher/workflow.md):",
+                     "- test_command: " + (workflow.testCommand.map { "`\($0)`" } ?? "not set: merges run no tests"),
+                     "- init_command: " + (workflow.initCommand.map { "`\($0)`" } ?? "not set" + (detectedInit.map { " (suggested from the repository: `\($0)`)" } ?? "")),
+                     "- base_branch: " + (raw.baseBranch ?? "not set: \(fallback) (the branch the lead first started on)"),
+                     "- verifier_model: " + (workflow.verifierModel ?? "not set: the workers' model"),
+                     "- max_workers: \(workflow.maxWorkers)"]
+        let warnings = workflowWarnings(workflow)
+        if !warnings.isEmpty { lines += [""] + warnings }
         return lines.joined(separator: "\n")
     }
 
