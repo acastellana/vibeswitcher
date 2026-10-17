@@ -19,6 +19,18 @@ enum TerminalAccess: Equatable {
     case unknown, granted, denied, notRunning
 }
 
+extension TerminalRead {
+    /// What the read says about our Automation permission; nil when a failed read says nothing.
+    var access: TerminalAccess? {
+        switch self {
+        case .tabs: return .granted
+        case .denied: return .denied
+        case .notRunning: return .notRunning
+        case .failed: return nil
+        }
+    }
+}
+
 /// Talks to Terminal.app over AppleScript: reads tab titles/TTYs and brings a given tab to the front.
 enum TerminalBridge {
     static let bundleID = "com.apple.Terminal"
@@ -31,9 +43,9 @@ enum TerminalBridge {
         !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
     }
 
-    static func tabs() -> (tabs: [String: TerminalTab], access: TerminalAccess) {
+    static func tabs() -> TerminalRead<TerminalTab> {
         // `tell application "Terminal"` would launch Terminal, so check first.
-        guard isRunning else { return ([:], .notRunning) }
+        guard isRunning else { return .notRunning }
         // Five bulk Apple Events (one per property across all windows/tabs), then local list
         // walking: much cheaper for Terminal than one event per property per tab.
         let script = """
@@ -68,11 +80,9 @@ enum TerminalBridge {
         return out
         """
         let result = runAppleScript(script, sourceForm: true)
-        if result.status != 0 {
-            return ([:], result.error.contains("-1743") ? .denied : .unknown)
-        }
+        if result.status != 0 { return result.error.contains("-1743") ? .denied : .failed }
         guard let fields = AppleScriptStrings.parse(result.output), let records = TerminalTabRecords.parse(fields) else {
-            return ([:], .unknown)
+            return .failed
         }
         var tabs: [String: TerminalTab] = [:]
         var windowNames: [Int: String] = [:]
@@ -113,11 +123,14 @@ enum TerminalBridge {
                                     isSelected: tab.isSelected, windowOrder: tab.windowOrder,
                                     isOnScreenTab: live[tab.windowID] != nil)
         }
-        return (tabs, .granted)
+        return .tabs(tabs)
     }
 
     /// Visible text of the tabs on `ttys` (Claude's footer shows background shells/agents there).
-    static func screens(for ttys: Set<String>) -> [String: String] {
+    static func screens(for ttys: Set<String>) -> [String: String] { readScreens(for: ttys) ?? [:] }
+
+    /// `screens`, but nil when the read failed (rather than "no such tabs").
+    static func readScreens(for ttys: Set<String>) -> [String: String]? {
         let ttys = ttys.filter(isValidTTY)
         guard isRunning, !ttys.isEmpty else { return [:] }
         let list = ttys.map { "\"/dev/\($0)\"" }.joined(separator: ", ")
@@ -143,7 +156,7 @@ enum TerminalBridge {
         """
         // Quoted list of (tty, screen) pairs: screen text can't forge another tab's entry.
         let result = runAppleScript(script, sourceForm: true)
-        guard result.status == 0, let fields = AppleScriptStrings.parse(result.output), fields.count % 2 == 0 else { return [:] }
+        guard result.status == 0, let fields = AppleScriptStrings.parse(result.output), fields.count % 2 == 0 else { return nil }
         var screens: [String: String] = [:]
         for index in stride(from: 0, to: fields.count, by: 2) {
             let tty = fields[index].replacingOccurrences(of: "/dev/", with: "")

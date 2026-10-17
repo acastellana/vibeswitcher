@@ -28,10 +28,8 @@ final class SessionStore: ObservableObject {
     private var forceTerminalRequested = false
 
     // Scan-queue only.
-    private var tabs: [String: TerminalTab] = [:]
-    private var backgroundWork: [String: String] = [:]
-    private var lastTerminalQuery = Date.distantPast
-    private var lastScreenQuery = Date.distantPast
+    private var terminal = TerminalPoll<TerminalTab>()
+    private let bridge = TerminalPoll<TerminalTab>.Bridge(tabs: TerminalBridge.tabs, screens: TerminalBridge.readScreens)
 
     // Main-thread only.
     private let launchedAt = Date()
@@ -172,23 +170,11 @@ final class SessionStore: ObservableObject {
             let now = Date()
             let raw = self.scanner.scan(now: now)
             let transcripts = Self.transcripts(for: raw)
-            var access: TerminalAccess?
-            // AppleScript is the expensive part; query at most every 2s unless forced.
-            if forceTerminal || now.timeIntervalSince(self.lastTerminalQuery) >= terminalInterval - 0.05 {
-                let result = TerminalBridge.tabs()
-                self.tabs = result.tabs
-                access = result.access
-                self.lastTerminalQuery = now
-                // Screen text is only needed for Claude's footer (background agents/tasks that aren't
-                // processes); it's the most expensive query, so read it less often.
-                if forceTerminal || now.timeIntervalSince(self.lastScreenQuery) >= 6 {
-                    self.backgroundWork = TerminalBridge.screens(for: quiet)
-                        .compactMapValues { BackgroundWork.summary(fromScreen: $0) }
-                    self.lastScreenQuery = now
-                }
-            }
-            let tabs = self.tabs
-            var background = self.backgroundWork
+            // AppleScript is the expensive part; query at most every `terminalInterval` unless forced.
+            let access = self.terminal.poll(now: now, interval: terminalInterval, quiet: quiet, force: forceTerminal,
+                                            bridge: self.bridge)?.access
+            let tabs = self.terminal.tabs
+            var background = self.terminal.backgroundWork
             for (tty, screen) in hostScreens where hosted[tty] != nil {
                 background[tty] = BackgroundWork.summary(fromScreen: screen)
             }
@@ -212,12 +198,12 @@ final class SessionStore: ObservableObject {
     /// Synchronous scan on the calling (main) thread, used by `--snapshot`.
     func refreshNow() {
         let now = Date()
-        let result = TerminalBridge.tabs()
-        terminalAccess = result.access
         let raw = scanner.scan(now: now)
         let quiet = Set(raw.filter { $0.agent == .claude }.map(\.tty))
-        let background = TerminalBridge.screens(for: quiet).compactMapValues { BackgroundWork.summary(fromScreen: $0) }
-        apply(raw: raw, tabs: result.tabs, hosted: [:], background: background, transcripts: Self.transcripts(for: raw), now: now)
+        var terminal = TerminalPoll<TerminalTab>()
+        terminalAccess = terminal.poll(now: now, interval: 0, quiet: quiet, force: true, bridge: bridge)?.access ?? .unknown
+        apply(raw: raw, tabs: terminal.tabs, hosted: [:], background: terminal.backgroundWork,
+              transcripts: Self.transcripts(for: raw), now: now)
     }
 
     /// Off the main thread: each session's transcript, if its hook named one inside the agents' folders.

@@ -118,3 +118,67 @@ public final class SessionScanner {
         return states
     }
 }
+
+/// What one read of Terminal.app's tabs gave.
+public enum TerminalRead<Tab> {
+    case tabs([String: Tab])
+    /// Timed out, script error, output that didn't parse: Terminal was busy (it answers Apple Events one at a time),
+    /// its tabs didn't go anywhere.
+    case failed
+    /// The Automation permission was refused.
+    case denied
+    case notRunning
+}
+
+/// When the scan asks Terminal.app for its tabs and screens, and what it keeps when an answer doesn't come.
+///
+/// One failed read must not wipe the tabs for a scan: every session would lose its title and position for a
+/// cycle, the list and ⌃1–9 would reorder, and title-only sessions would flip done → unknown → done and announce
+/// "done" again.
+public struct TerminalPoll<Tab> {
+    public struct Bridge {
+        public var tabs: () -> TerminalRead<Tab>
+        /// Screen text of the tabs on these ttys; nil when the read failed.
+        public var screens: (Set<String>) -> [String: String]?
+        public init(tabs: @escaping () -> TerminalRead<Tab>, screens: @escaping (Set<String>) -> [String: String]?) {
+            self.tabs = tabs
+            self.screens = screens
+        }
+    }
+
+    /// Screen text is only needed for Claude's footer and is the most expensive read, so it's read less often.
+    public static var screensInterval: TimeInterval { 6 }
+
+    /// Terminal's tabs by tty, as last read.
+    public private(set) var tabs: [String: Tab] = [:]
+    /// Background work in Claude's footer by tty (see `BackgroundWork`), as last read.
+    public private(set) var backgroundWork: [String: String] = [:]
+    private var lastTabsRead = Date.distantPast
+    private var lastScreensRead = Date.distantPast
+
+    public init() {}
+
+    /// Reads Terminal if `interval` has passed since the last read (or `force`). `quiet`: Claude sessions whose turn
+    /// looks over, whose footers are read for background work. Returns the read, when one was made.
+    @discardableResult
+    public mutating func poll(now: Date, interval: TimeInterval, quiet: Set<String>, force: Bool,
+                              bridge: Bridge) -> TerminalRead<Tab>? {
+        guard force || now.timeIntervalSince(lastTabsRead) >= interval - 0.05 else { return nil }
+        lastTabsRead = now
+        let read = bridge.tabs()
+        switch read {
+        case .tabs(let fresh): tabs = fresh
+        case .failed: break
+        case .denied, .notRunning: tabs = [:]
+        }
+        if force || now.timeIntervalSince(lastScreensRead) >= Self.screensInterval {
+            if let screens = bridge.screens(quiet) {
+                backgroundWork = screens.compactMapValues { BackgroundWork.summary(fromScreen: $0) }
+            } else {
+                backgroundWork = backgroundWork.filter { quiet.contains($0.key) }
+            }
+            lastScreensRead = now
+        }
+        return read
+    }
+}
