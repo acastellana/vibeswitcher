@@ -15,7 +15,8 @@ struct SessionListView: View {
         List(selection: $model.selectedID) {
             ForEach(sections) { section in
                 Section {
-                    ForEach(section.rows) { row in
+                    // Ended sessions of finished tasks leave with them (WL-1).
+                    ForEach(section.rows.filter { !arranged.nested.contains($0.id) || !LeadLanes.isHistory($0, boards: leads.boards, now: Date()) }) { row in
                         WindowRowView(row: row, showProject: model.grouping == .attention, role: model.role(of: row),
                                       team: arranged.teams[row.id], board: arranged.teams[row.id] == nil ? nil : leads.lead(for: row)?.board,
                                       label: model.label(of:), nested: arranged.nested.contains(row.id),
@@ -142,7 +143,9 @@ struct WindowRowView: View {
                             Text("·").foregroundStyle(.tertiary)
                             Button(action: toggleTeam) {
                                 HStack(spacing: 2) {
-                                    Text(LeadTeams.summary(team, label: label, board: board, now: context.date))
+                                    // From the board's tasks where there's one (a worker that hasn't begun isn't idle).
+                                    Text(board.map { LeadLanes.summary(LeadLanes.lanes($0, seen: LeadLanes.seen(team, now: context.date))) }
+                                        ?? LeadTeams.summary(team, label: label, board: nil, now: context.date))
                                     Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold)).rotationEffect(.degrees(teamOpen ? 90 : 0))
                                 }
                             }

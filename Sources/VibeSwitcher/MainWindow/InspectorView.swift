@@ -23,8 +23,8 @@ struct InspectorView: View {
             Divider()
             if let row = model.selectedRow {
                 if tab == "team", let lead {
-                    LeadTeamView(root: lead.root, board: lead.board) { task in
-                        if let id = task.worker.flatMap(UUID.init(uuidString:)) { model.select(hostID: id) }
+                    LeadTeamView(root: lead.root, board: lead.board, seen: LeadLanes.seen(model.allRows, now: Date())) { session in
+                        if let id = UUID(uuidString: session) { model.select(hostID: id) }
                     }
                 } else if tab == "activity" {
                     ActivityView(session: row.session).id(row.id)

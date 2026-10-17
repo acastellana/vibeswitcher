@@ -147,12 +147,17 @@ private struct LeadQuestionCard: View {
     }
 }
 
-/// The inspector's Team tab for a lead: tasks with contracts and verdicts, questions, results, the files.
+/// The inspector's Team tab for a lead: each task as a pipeline lane (see `LeadLanes`), questions, results, the files.
 struct LeadTeamView: View {
     let root: String
     let board: LeadBoard
-    let openTask: (LeadTask) -> Void
-    @State private var openTasks: Set<String> = []
+    /// What the team's window sessions are doing, by host id.
+    let seen: [String: LaneSeen]
+    /// Opens a team member's session (its host id) in the window.
+    let open: (String) -> Void
+    /// Rows shown opened, and the finished tasks unfolded, to begin with.
+    var openRows: Set<String> = []
+    var showFinished = false
 
     var body: some View {
         ScrollView {
@@ -161,7 +166,7 @@ struct LeadTeamView: View {
                     if board.tasks.isEmpty {
                         Text("Nothing on the board yet. Tell the lead what to build.").font(.system(size: 12)).foregroundStyle(.secondary)
                     }
-                    ForEach(board.tasks.sorted { $0.createdAt > $1.createdAt }) { task in taskRow(task) }
+                    LaneList(board: board, seen: seen, open: open, openRows: openRows, showFinished: showFinished)
                 }
                 let answered = board.questions.filter { $0.answer != nil }
                 if !answered.isEmpty {
@@ -219,47 +224,6 @@ struct LeadTeamView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title.uppercased()).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.secondary)
             content()
-        }
-    }
-
-    private func taskRow(_ task: LeadTask) -> some View {
-        let isOpen = openTasks.contains(task.id)
-        return VStack(alignment: .leading, spacing: 6) {
-            Button {
-                if isOpen { openTasks.remove(task.id) } else { openTasks.insert(task.id) }
-            } label: {
-                HStack(spacing: 8) {
-                    Circle().fill(task.status.color).frame(width: 8, height: 8)
-                    Text(task.title).font(.system(size: 12.5, weight: .medium)).lineLimit(1)
-                    Spacer()
-                    Text(task.status.label).font(.system(size: 10.5)).foregroundStyle(task.status.color)
-                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(isOpen ? 90 : 0))
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            if isOpen {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(task.contract.goal).font(.system(size: 12))
-                    ForEach(task.contract.acceptance, id: \.self) { check in
-                        Label(check, systemImage: "checkmark.circle").font(.system(size: 11.5)).foregroundStyle(.secondary)
-                    }
-                    if !task.contract.boundaries.isEmpty {
-                        Text("Boundaries: " + task.contract.boundaries.joined(separator: "; ")).font(.system(size: 11)).foregroundStyle(.tertiary)
-                    }
-                    if let evidence = task.evidence {
-                        Label("\(evidence.completion.rawValue), \(evidence.integrity.rawValue): \(evidence.summary)",
-                              systemImage: evidence.passes ? "checkmark.seal.fill" : "xmark.seal.fill")
-                            .font(.system(size: 11.5)).foregroundStyle(evidence.passes ? .green : .red)
-                    }
-                    HStack(spacing: 8) {
-                        if task.worker != nil { Button("Open worker") { openTask(task) }.controlSize(.small) }
-                        if let branch = task.branch { Text(branch).font(.system(size: 10.5, design: .monospaced)).foregroundStyle(.tertiary) }
-                    }
-                }
-                .padding(.leading, 16)
-            }
         }
     }
 }
