@@ -11,16 +11,32 @@ let agent = Agent(rawValue: CommandLine.arguments.dropFirst().first ?? "") ?? .c
 let input = FileHandle.standardInput.readDataToEndOfFile()
 guard let payload = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any] else { exit(0) }
 
-// The agent process is our nearest `claude`/`codex` ancestor. If there is a second agent further up
-// (e.g. Claude running `codex exec` as a tool), this is a nested run: it must not overwrite the
-// outer session's state for this terminal.
-let agentAncestors = ProcessTable.ancestors(of: getpid()).filter { $0.agent != nil }
-if agentAncestors.count > 1 { exit(0) }
-let agentPid = agentAncestors.first?.pid
-
-// Agents launch hooks in a fresh session with no controlling terminal, so the TTY that identifies
-// this session comes from the agent process itself.
-guard let tty = agentAncestors.first?.tty ?? ProcessTable.info(pid: getpid())?.tty else { exit(0) }
+// The agent process is our nearest `claude`/`codex` ancestor; its TTY identifies the session (agents launch hooks
+// in a fresh session with no controlling terminal). A second agent further up (e.g. Claude running `codex exec` as a
+// tool) makes this a nested run: it must not overwrite the outer session's state for this terminal. Codex 0.157+ runs
+// hooks from its background daemon instead, with no session above them: the payload names the session's TUI.
+func arguments(_ proc: ProcInfo) -> [String] {
+    ProcessTable.arguments(pid: proc.pid, start: Int(proc.startTime.timeIntervalSince1970), comm: proc.comm)
+}
+func codexOwner() -> (tty: String, pid: Int32)? {
+    guard agent == .codex, let processes = ProcessTable.trySnapshot() else { return nil }
+    let terminals = HookOwner.codexTerminals(processes: processes, cwd: ProcessTable.cwd(pid:), arguments: arguments,
+                                             state: { HookState.load(from: VibePaths.stateFile(tty: $0)) })
+    return HookOwner.codexTerminal(for: payload, among: terminals).map { ($0.tty, $0.pid) }
+}
+let tty: String
+let agentPid: Int32?
+switch HookOwner.lineage(ProcessTable.ancestors(of: getpid()), arguments: arguments) {
+case .agent(let pid, let agentTTY): (tty, agentPid) = (agentTTY, pid)
+case .nested: exit(0)
+case .detached:
+    guard let owner = codexOwner() else { exit(0) }
+    (tty, agentPid) = (owner.tty, owner.pid)
+case .none:
+    if let own = ProcessTable.info(pid: getpid())?.tty { (tty, agentPid) = (own, nil) }
+    else if let owner = codexOwner() { (tty, agentPid) = (owner.tty, owner.pid) }
+    else { exit(0) }
+}
 
 VibePaths.ensurePrivateDirectories()
 let stateURL = VibePaths.stateFile(tty: tty)
