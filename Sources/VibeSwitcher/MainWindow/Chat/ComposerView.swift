@@ -434,6 +434,7 @@ private struct ComposerTextView: NSViewRepresentable {
         (textView as? ComposerNSTextView)?.attachImage = attachImage
         if textView.string != text {
             textView.string = text
+            context.coordinator.undo.removeAllActions()
             textView.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
             context.coordinator.measure(textView)
         }
@@ -457,8 +458,13 @@ private struct ComposerTextView: NSViewRepresentable {
         var lastFocusRequest = 0
         /// Position while walking through history (nil: not walking).
         private var historyIndex: Int?
+        /// The box's own ⌘Z history. Emptied whenever its text is replaced from outside the typing (sent, another
+        /// session's draft, a history step): undoing into text that's gone raises a range exception.
+        let undo = UndoManager()
 
         init(_ parent: ComposerTextView) { self.parent = parent }
+
+        func undoManager(for view: NSTextView) -> UndoManager? { undo }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
@@ -556,6 +562,7 @@ private struct ComposerTextView: NSViewRepresentable {
                 historyIndex = next
                 textView.string = history[next]
             }
+            undo.removeAllActions()
             parent.text = textView.string
             measure(textView)
             return true
