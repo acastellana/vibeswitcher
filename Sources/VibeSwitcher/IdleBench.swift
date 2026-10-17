@@ -149,12 +149,16 @@ enum IdleBench {
             HangWatchdog.shared.start()
             _ = leads
             store.start()
-            spawnShells(4) { [weak self] in self?.phases() }
+            spawnShells(5) { [weak self] in self?.phases() }
         }
 
         private func spawnShells(_ count: Int, then done: @escaping () -> Void) {
             guard count > 0 else { return done() }
-            let command = "/bin/ls -la /usr/bin | /usr/bin/head -60; exec /bin/cat"
+            // The first one stands in for an agent working in another session: its title's spinner turns ten times a
+            // second, as Claude's does; nothing else on its screen changes.
+            let command = shells.isEmpty
+                ? "while :; do for c in ⠋ ⠙ ⠹ ⠸; do printf '\\033]0;%s Working on the bench\\007' $c; sleep 0.1; done; done"
+                : "/bin/ls -la /usr/bin | /usr/bin/head -60; exec /bin/cat"
             host.spawn(SpawnRequest(cwd: NSHomeDirectory(), command: command, env: [:], cols: 120, rows: 40, keepShell: false,
                                     label: "Bench shell \(count)", agent: nil)) { [weak self] result in
                 if case .success(let session) = result { self?.shells.append(session.id) }

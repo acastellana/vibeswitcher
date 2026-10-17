@@ -121,6 +121,17 @@ public struct HostSession: Codable, Equatable, Sendable, Identifiable {
 
     public var isLive: Bool { exit == nil }
 
+    /// The same as `other` but for the spinner frame in its title ("⠋ Fix login" → "⠙ Fix login"): a working agent's
+    /// spinner changes the title many times a second, and that reads the same everywhere the app shows it.
+    public func differsOnlyBySpinner(from other: HostSession) -> Bool {
+        guard title != other.title else { return false }
+        var retitled = other
+        retitled.title = title
+        guard retitled == self else { return false }
+        let (activity, text) = StatusRules.parseTitle(title), (otherActivity, otherText) = StatusRules.parseTitle(other.title)
+        return activity == .busy && otherActivity == .busy && text == otherText
+    }
+
     public init(id: UUID, tty: String, childPID: Int32, cwd: String, command: String?, label: String, agent: String?,
                 title: String, startedAt: Date, cols: Int, rows: Int, exit: Exit?) {
         self.id = id

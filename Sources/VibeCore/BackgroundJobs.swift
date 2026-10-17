@@ -74,10 +74,12 @@ public enum BackgroundJobs {
             .trimmingCharacters(in: .whitespaces)
     }
 
-    /// "npm run prove · 6h" or "5 shells · oldest 7h: until ! ps aux | grep …".
+    /// "npm run prove · 6h" or "5 shells · oldest 7h: until ! ps aux | grep …". The age counts whole minutes
+    /// ("<1m" before the first): it's in the session's detail, and each change republishes the session list.
     public static func summary(_ jobs: [BackgroundJob], now: Date = Date()) -> String? {
         guard let oldest = jobs.first else { return nil }
-        let age = Durations.short(now.timeIntervalSince(oldest.startedAt))
+        let seconds = now.timeIntervalSince(oldest.startedAt)
+        let age = seconds < 60 ? "<1m" : Durations.short(seconds)
         let command = ToolActivity.clip(oldest.command, to: 64)
         if jobs.count == 1 { return "\(command) · \(age)" }
         return "\(jobs.count) shells · oldest \(age): \(command)"

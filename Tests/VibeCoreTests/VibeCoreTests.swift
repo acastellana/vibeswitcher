@@ -459,6 +459,11 @@ struct BackgroundJobsTests {
         let jobs = (0..<5).map { BackgroundJob(pid: Int32($0), command: "until ! pgrep Chrome",
                                                 startedAt: now.addingTimeInterval(-25_200 + Double($0))) }
         #expect(BackgroundJobs.summary(jobs, now: now) == "5 shells · oldest 7h: until ! pgrep Chrome")
+        // Whole minutes only: the summary is in the session's detail, which mustn't change on every scan.
+        let fresh = [BackgroundJob(pid: 1, command: "npm run dev", startedAt: now.addingTimeInterval(-12))]
+        #expect(BackgroundJobs.summary(fresh, now: now) == "npm run dev · <1m")
+        #expect(BackgroundJobs.summary(fresh, now: now.addingTimeInterval(40)) == "npm run dev · <1m")
+        #expect(BackgroundJobs.summary(fresh, now: now.addingTimeInterval(50)) == "npm run dev · 1m")
         #expect(Durations.short(45) == "45s" && Durations.short(3 * 3600 + 300) == "3h 5m" && Durations.short(2 * 86400 + 4 * 3600) == "2d 4h")
     }
 }

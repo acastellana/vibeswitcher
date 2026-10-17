@@ -237,7 +237,13 @@ final class HostClient: ObservableObject {
     }
 
     private func upsert(_ session: HostSession) {
-        if let index = sessions.firstIndex(where: { $0.id == session.id }) { sessions[index] = session } else { sessions.append(session) }
+        if let index = sessions.firstIndex(where: { $0.id == session.id }) {
+            // Every change publishes the list, and everything that shows sessions redraws: not for a spinner frame.
+            guard sessions[index] != session, !session.differsOnlyBySpinner(from: sessions[index]) else { return }
+            sessions[index] = session
+        } else {
+            sessions.append(session)
+        }
         if !session.isLive { screens[session.tty] = nil }
         if case .outdated = state, sessions.isEmpty { replaceHost() }
         else if restartWhenEnded, !sessions.contains(where: \.isLive) { restartWhenEnded = false; replaceHost() }

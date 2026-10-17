@@ -102,3 +102,25 @@ struct HostMessageTests {
         #expect(!session.isLive)
     }
 }
+
+struct HostSessionSpinnerTests {
+    private func session(title: String, cols: Int = 120) -> HostSession {
+        HostSession(id: UUID(uuidString: "6F9619FF-8B86-D011-B42D-00C04FC964FF")!, tty: "ttys012", childPID: 42, cwd: "/tmp",
+                    command: "claude", label: "Claude", agent: "claude", title: title, startedAt: Date(timeIntervalSince1970: 1_000),
+                    cols: cols, rows: 40, exit: nil)
+    }
+
+    /// A working agent's spinner changes the title many times a second: that alone isn't news to the app.
+    @Test func aSpinnerFrameAloneReadsTheSame() {
+        #expect(session(title: "⠙ Fix login").differsOnlyBySpinner(from: session(title: "⠋ Fix login")))
+        #expect(session(title: "✶ Fix login").differsOnlyBySpinner(from: session(title: "✻ Fix login")))
+    }
+
+    @Test func anythingElseIsAChange() {
+        #expect(!session(title: "✳ Fix login").differsOnlyBySpinner(from: session(title: "⠋ Fix login")))   // the turn ended
+        #expect(!session(title: "⠋ Fix signup").differsOnlyBySpinner(from: session(title: "⠋ Fix login")))
+        #expect(!session(title: "⠙ Fix login", cols: 100).differsOnlyBySpinner(from: session(title: "⠋ Fix login")))
+        #expect(!session(title: "~/dev/b").differsOnlyBySpinner(from: session(title: "~/dev/a")))
+        #expect(!session(title: "⠋ Fix login").differsOnlyBySpinner(from: session(title: "⠋ Fix login")))     // nothing changed
+    }
+}
