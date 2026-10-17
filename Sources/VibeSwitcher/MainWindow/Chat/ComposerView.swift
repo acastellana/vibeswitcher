@@ -48,6 +48,12 @@ struct ComposerView: View {
             if !suggestions.items.isEmpty {
                 SuggestionList(suggestions: $suggestions)
             }
+            // Not while the conversation loads: what it shows may answer for some of them.
+            if chat.state != .loading {
+                OutboxStrip(outbox: chat.outbox, rowID: rowID, agent: agent.displayName, send: sendAgain) { entry in
+                    chat.putBack(entry, rowID: rowID)
+                }
+            }
             if !images.isEmpty {
                 HStack(spacing: 8) {
                     ForEach(images, id: \.self) { path in
@@ -115,14 +121,40 @@ struct ComposerView: View {
             return
         }
         notice = nil
+        // On disk before anything goes out, and the box emptied on disk too: whatever happens next (a hang, a
+        // crash, a relaunch), the message is in the outbox, never lost and never in two places.
+        let entry = OutboxEntry(key: rowID, message: message, text: typed, attachments: images, expectsSoon: !working)
+        let draft = text.wrappedValue, attached = composer.attachments[rowID] ?? []
+        chat.outbox.add(entry)
+        text.wrappedValue = ""
+        composer.attachments[rowID] = []
+        composer.save()
         let accepted = steering ? actions.steer(message) : actions.send(message)
-        if accepted {
-            // Shown until the conversation has it (flagged if it doesn't arrive).
-            if !steering { chat.sent(message, expectsSoon: !working) }
-            text.wrappedValue = ""
-            composer.attachments[rowID] = []
-            suggestions = Suggestions()
+        guard accepted else {
+            // Refused (not connected, too long to steer): it stays in the box, as it was.
+            chat.outbox.remove(entry.id)
+            text.wrappedValue = draft
+            composer.attachments[rowID] = attached
+            composer.save()
+            return
         }
+        // Typed in (a steer handed to the agent's inbox left the outbox: the steer strip shows it): shown until
+        // the conversation has it (flagged if it doesn't arrive).
+        if chat.outbox.entry(entry.id) != nil {
+            chat.sent(message, expectsSoon: !working, id: entry.id, attachments: images, sentAt: entry.sentAt)
+        }
+        suggestions = Suggestions()
+    }
+
+    /// Send now, from the outbox strip: typed in again (queued if the agent works), never steered.
+    private func sendAgain(_ entry: OutboxEntry) {
+        guard let again = chat.outbox.resend(entry.id) else { return }
+        guard actions.send(again.message) else {
+            chat.outbox.confirm(key: rowID, message: again.message, ok: false)
+            return
+        }
+        chat.sent(again.message, expectsSoon: !working, id: again.id, attachments: again.attachments, sentAt: again.sentAt)
+        chat.scrollToBottom()
     }
 
     private func attach() {

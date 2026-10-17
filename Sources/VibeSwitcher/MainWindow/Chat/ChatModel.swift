@@ -72,6 +72,10 @@ final class ChatModel: ObservableObject {
     /// Unsent text and attachments per session. Its own object: typing changes it on every key, and that mustn't
     /// redraw the conversation.
     let composer = ComposerDrafts()
+    /// What the composer sent that the conversation doesn't show yet, on disk (survives a crash or relaunch).
+    let outbox = ComposerOutbox()
+    /// The composer (row draft key) whose conversation this is: its outbox is matched against this transcript.
+    private(set) var outboxKey: String?
     /// Run, on code blocks.
     let runner = ChatRunner()
 
@@ -133,8 +137,12 @@ final class ChatModel: ObservableObject {
     /// Where to scroll when the conversation opens (set from what was kept).
     private(set) var restoreAnchor: String?
 
-    /// Shows the conversation in `path` (nil: none). Same path: nothing changes.
-    func show(path: String?) {
+    /// Shows the conversation in `path` (nil: none), the one `key`'s composer sends to. Same path: nothing changes.
+    func show(path: String?, key: String? = nil) {
+        if outboxKey != key {
+            outboxKey = key
+            if path == self.path { syncOutbox() }
+        }
         guard path != self.path else { return }
         if let old = self.path {
             let anchor = atBottom ? nil : ChatWindow.anchor(tops: rowTops, visibleTop: visibleTop)
@@ -167,6 +175,7 @@ final class ChatModel: ObservableObject {
             url = nil
             markerAfter = nil
             state = path == nil ? .none : .failed("No conversation for this session yet.")
+            syncOutbox()
             return
         }
         self.url = url
@@ -194,6 +203,7 @@ final class ChatModel: ObservableObject {
                 self.widen(toInclude: self.restoreAnchor)
                 self.widen(toInclude: "new-marker", atMost: 3 * ChatWindow.page)
                 self.state = .ready
+                self.syncOutbox()
             }
         }
     }
@@ -204,7 +214,7 @@ final class ChatModel: ObservableObject {
         // Not there yet (a new session writes its transcript with the first message): try again.
         if case .failed = state, let path, !reading {
             self.path = nil
-            return show(path: path)
+            return show(path: path, key: outboxKey)
         }
         guard let url, state == .ready, !reading else { return }
         let generation = self.generation, cursor = self.cursor, format = self.format
@@ -218,7 +228,7 @@ final class ChatModel: ObservableObject {
                     self.reading = false
                     let path = self.path
                     self.path = nil
-                    self.show(path: path)
+                    self.show(path: path, key: self.outboxKey)
                 }
                 return
             }
@@ -230,7 +240,7 @@ final class ChatModel: ObservableObject {
                 // Lines that show nothing (progress, metadata) move the cursor without redrawing the chat.
                 if !read.events.isEmpty { self.log.append(read.events) }
                 self.cursor = cursor + read.skipped + read.consumed
-                if !self.pending.isEmpty { self.pending = PendingMessage.remaining(self.pending, prompts: self.log.prompts) }
+                if !read.events.isEmpty { self.syncOutbox() }
             }
         }
     }
@@ -336,9 +346,45 @@ final class ChatModel: ObservableObject {
     }
 
     /// Records a sent message until the transcript shows it: queued for after the turn, or typed into an idle
-    /// agent (`expectsSoon`: flagged if it doesn't show up in seconds).
-    func sent(_ text: String, expectsSoon: Bool = false) {
-        pending.append(PendingMessage(text: text, afterPrompts: log.prompts.count, expectsSoon: expectsSoon))
+    /// agent (`expectsSoon`: flagged if it doesn't show up in seconds). From the composer, `id` is its outbox entry's.
+    func sent(_ text: String, expectsSoon: Bool = false, id: UUID = UUID(), attachments: [String] = [], sentAt: Date = Date()) {
+        var message = PendingMessage(text: text, afterPrompts: log.prompts.count, expectsSoon: expectsSoon, sentAt: sentAt,
+                                     attachments: attachments)
+        message.id = id
+        pending.append(message)
+    }
+
+    /// The session host's answer for a message typed from `key`'s composer. Not taken: off the list of messages on
+    /// their way, and into the composer's outbox strip (to send again or discard).
+    func confirmed(key: String, message: String, ok: Bool) {
+        guard let id = outbox.confirm(key: key, message: message, ok: ok), !ok else { return }
+        pending.removeAll { $0.id == id }
+        updateLate()
+    }
+
+    /// A message from `key`'s composer went to the agent's steer inbox, which shows and keeps it from there.
+    func handedOff(key: String, message: String) {
+        outbox.handedOff(key: key, message: message)
+    }
+
+    /// Lines up the outbox with the conversation: what it shows is delivered (off the outbox and the list); what's
+    /// still on its way from this launch shows as pending again after switching back to this session.
+    private func syncOutbox() {
+        let prompts = SentMatch.prompts(log.entries)
+        if let key = outboxKey, state == .ready { outbox.delivered(key: key, prompts: prompts) }
+        if !pending.isEmpty { pending = PendingMessage.remaining(pending, prompts: prompts) }
+        guard let key = outboxKey else { return }
+        let shown = Set(pending.map(\.id))
+        let missing = outbox.outbox.onTheirWay(key: key).filter { !shown.contains($0.id) }
+        guard !missing.isEmpty else { return }
+        for entry in missing {
+            var message = PendingMessage(text: entry.message, afterPrompts: 0, expectsSoon: entry.expectsSoon, sentAt: entry.sentAt,
+                                         attachments: entry.attachments)
+            message.id = entry.id
+            pending.append(message)
+        }
+        pending.sort { $0.sentAt < $1.sentAt }
+        updateLate()
     }
 
     /// Typed messages that should be in the conversation by now and aren't.
@@ -351,13 +397,33 @@ final class ChatModel: ObservableObject {
 
     /// A late message, back in the composer (before what's there), and off the list.
     func putBack(_ message: PendingMessage, rowID: String) {
-        let draft = composer.drafts[rowID] ?? ""
-        composer.drafts[rowID] = draft.isEmpty ? message.text : message.text + "\n\n" + draft
+        if let entry = outbox.entry(message.id) {
+            putBack(entry, rowID: rowID)
+        } else {
+            let draft = composer.drafts[rowID] ?? ""
+            composer.drafts[rowID] = draft.isEmpty ? message.text : message.text + "\n\n" + draft
+            focusComposer()
+        }
         dismiss(message)
+    }
+
+    /// An outbox message, back in the composer as it was (its text before what's there, its images attached),
+    /// and out of the outbox.
+    func putBack(_ entry: OutboxEntry, rowID: String) {
+        let draft = composer.drafts[rowID] ?? ""
+        composer.drafts[rowID] = entry.text.isEmpty ? draft : draft.isEmpty ? entry.text : entry.text + "\n\n" + draft
+        var images = entry.attachments
+        images += (composer.attachments[rowID] ?? []).filter { !images.contains($0) }
+        composer.attachments[rowID] = images
+        composer.save()
+        outbox.remove(entry.id)
+        pending.removeAll { $0.id == entry.id }
+        updateLate()
         focusComposer()
     }
 
     func dismiss(_ message: PendingMessage) {
+        outbox.remove(message.id)
         pending.removeAll { $0.id == message.id }
         updateLate()
     }

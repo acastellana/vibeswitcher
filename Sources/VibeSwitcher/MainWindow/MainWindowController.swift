@@ -273,7 +273,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         let shown = model.showsChat && path != nil
         // Only read a conversation that's on screen.
         let previous = chat.path
-        chat.show(path: shown ? path : nil)
+        chat.show(path: shown ? path : nil, key: shown ? row?.draftKey : nil)
         if chat.path != previous { Breadcrumbs.shared.note("chat: show \(chat.path.map { ($0 as NSString).lastPathComponent } ?? "none")") }
         if shown, chat.path != previous {
             chat.loadCompletions(agent: row?.session?.agent ?? row?.hosted?.agent.flatMap(Agent.init(rawValue:)) ?? .claude,
@@ -343,7 +343,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return false
         }
         Breadcrumbs.shared.note("composer: send \(text.count) chars to \(row.id)")
-        write(ComposerText.writes(text, bracketed: pane.bracketedPaste(id)), to: id)
+        let key = row.draftKey
+        // The composer's outbox keeps the message until the host confirms it (and the conversation shows it).
+        host.send(id, writes: ComposerText.writes(text, bracketed: pane.bracketedPaste(id))) { [weak self] ok in
+            if !ok { Breadcrumbs.shared.note("composer: the host didn't confirm \(text.count) chars for \(row.id)") }
+            self?.chat.confirmed(key: key, message: text, ok: ok)
+        }
         return true
     }
 
@@ -364,6 +369,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         let message = SteerMessage(text: text, from: .user, agentPid: session.pid)
         do {
             try SteerInbox.post(message, tty: session.tty)
+            chat.handedOff(key: row.draftKey, message: text)
             chat.steered(message, tty: session.tty)
             chat.scrollToBottom()
             return true

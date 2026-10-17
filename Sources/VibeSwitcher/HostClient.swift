@@ -319,6 +319,25 @@ final class HostClient: ObservableObject {
         } while start < bytes.endIndex
     }
 
+    /// Writes these into the session, each after its delay, then tells `confirmed` whether the host took them. The
+    /// host handles a connection's requests in order and doesn't answer input, so the answer to a screen read
+    /// sent after the last write is the receipt; no answer (not connected, gone, too slow) is false.
+    func send(_ id: UUID, writes: [HostInput.Write], confirmed: @escaping (Bool) -> Void) {
+        var at: TimeInterval = 0
+        for write in writes {
+            at += write.delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
+                self?.send(id, bytes: Data(write.bytes), reply: false)
+            }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
+            guard let self else { return confirmed(false) }
+            self.request(.screen(id: id)) { event in
+                if case .screenText = event { confirmed(true) } else { confirmed(false) }
+            }
+        }
+    }
+
     func resize(_ id: UUID, cols: Int, rows: Int) {
         if sinks[id] != nil { sinks[id]?.cols = cols; sinks[id]?.rows = rows }
         request(.resize(id: id, cols: cols, rows: rows))
