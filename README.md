@@ -46,6 +46,9 @@ Open in Terminal (⌘O). The right shows its Overview (status, folder and branch
 Activity: your prompts, the agent's replies and the tools it ran, from its transcript. ⌘K jumps to any session
 or command, or starts a preset in a recent project; ⌘J goes to the next session needing you, ⌘1–9 to a session,
 ⇧⌘H to the start page (recent projects with their presets). The Dock badge counts sessions waiting on you.
+⌘W closes the window (or the ⌘K palette) and never ends a session: they keep running. End Session… (⇧⌘⌫, the
+header's stop button or the row's menu) always asks first, unless the session has ended already. The Edit menu
+is the standard one: Undo, Redo, Cut, Paste and Match Style work in the composer, the filter and Settings.
 
 **Chat** (⌥⌘2; ⌥⌘1 back to the terminal): any Claude or Codex session as a readable conversation, built from
 its transcript. Replies are rendered markdown (tables, lists, code with syntax colors and Copy); the tool calls
