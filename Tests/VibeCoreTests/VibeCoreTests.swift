@@ -483,6 +483,28 @@ struct SidebarHotZoneTests {
         #expect(SidebarHotZone.contains(CGPoint(x: 3647, y: 340), screen: right))
         #expect(!SidebarHotZone.contains(CGPoint(x: 3647, y: -180), screen: right))
     }
+
+    /// The strips that watch for the pointer (tracking areas, no polling): the hot zone, minus where another display
+    /// continues to the right.
+    @Test func stripsCoverTheZoneOnOuterEdgesOnly() {
+        let left = CGRect(x: 0, y: 0, width: 1728, height: 1117)
+        #expect(SidebarHotZone.strips(on: left, screens: [left]) == [CGRect(x: 1724, y: 279.25, width: 4, height: 558.5)])
+        // A display to the right covering the whole band: no strip on the left one's edge.
+        let right = CGRect(x: 1728, y: -200, width: 1920, height: 1600)
+        #expect(SidebarHotZone.strips(on: left, screens: [left, right]).isEmpty)
+        #expect(SidebarHotZone.strips(on: right, screens: [left, right]) == [CGRect(x: 3644, y: 200, width: 4, height: 800)])
+        // One covering only the top of the band: the strip keeps the part below it.
+        let small = CGRect(x: 1728, y: 600, width: 800, height: 600)
+        #expect(SidebarHotZone.strips(on: left, screens: [left, small]) == [CGRect(x: 1724, y: 279.25, width: 4, height: 320.75)])
+        // One in the middle of the band: a strip above it and one below.
+        let middle = CGRect(x: 1728, y: 500, width: 800, height: 100)
+        #expect(SidebarHotZone.strips(on: left, screens: [left, middle])
+                == [CGRect(x: 1724, y: 279.25, width: 4, height: 220.75), CGRect(x: 1724, y: 600, width: 4, height: 237.75)])
+        // Every strip lies in the zone.
+        for strip in SidebarHotZone.strips(on: left, screens: [left, middle]) {
+            #expect(SidebarHotZone.contains(CGPoint(x: strip.midX, y: strip.midY), screen: left))
+        }
+    }
 }
 
 struct TabGroupTests {

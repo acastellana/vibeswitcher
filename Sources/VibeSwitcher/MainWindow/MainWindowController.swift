@@ -67,7 +67,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     /// Follows the transcript while the chat is on screen.
-    private var chatTimer: Timer?
+    private var chatTimer: Heartbeat.Subscription?
 
     let leads: LeadController
 
@@ -300,17 +300,15 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             chat.focusComposer()
         }
         if shown, chatTimer == nil {
-            let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            chatTimer = Heartbeat.shared.every(1) { [weak self] in
                 guard let self, self.window?.isVisible == true, !self.chatHost.isHidden else { return }
                 self.chat.poll()
                 self.chat.refreshSteering()
                 self.readScreen()
                 if self.window?.isKeyWindow == true { self.chat.markSeen() }
             }
-            RunLoop.main.add(timer, forMode: .common)
-            chatTimer = timer
         } else if !shown {
-            chatTimer?.invalidate()
+            chatTimer?.cancel()
             chatTimer = nil
         }
     }
@@ -448,7 +446,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         Breadcrumbs.shared.note("window: close")
         store.windowViewingTTY = nil
         palette.close()
-        chatTimer?.invalidate()
+        chatTimer?.cancel()
         chatTimer = nil
         NSApp.dockTile.badgeLabel = nil
         pane.detachAll()

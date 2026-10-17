@@ -84,6 +84,20 @@ public enum SidebarHotZone {
             && point.y >= screen.minY + margin
             && point.y <= screen.maxY - margin
     }
+
+    /// Where to watch for the pointer on `screen`'s right edge: the zone, less the stretches where another of
+    /// `screens` continues to the right (there the pointer just crosses over), bottom to top.
+    public static func strips(on screen: CGRect, screens: [CGRect]) -> [CGRect] {
+        let margin = screen.height * (1 - band) / 2
+        var free = [(screen.minY + margin, screen.maxY - margin)]
+        for other in screens where other != screen && abs(other.minX - screen.maxX) < 1 {
+            free = free.flatMap { low, high -> [(CGFloat, CGFloat)] in
+                guard other.minY < high, other.maxY > low else { return [(low, high)] }
+                return [(low, min(high, other.minY)), (max(low, other.maxY), high)].filter { $0.1 > $0.0 }
+            }
+        }
+        return free.map { CGRect(x: screen.maxX - edgeWidth, y: $0.0, width: edgeWidth, height: $0.1 - $0.0) }
+    }
 }
 
 /// The sidebar's slide in/out takes ~0.16 s. One that still counts as running a second later never

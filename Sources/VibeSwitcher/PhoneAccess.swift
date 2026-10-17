@@ -129,7 +129,7 @@ final class PhoneAccess: ObservableObject {
     // listener callbacks) see a different generation and stand down instead of touching current state.
 
     private var generation = 0
-    private var healthTimer: Timer?
+    private var healthTimer: Heartbeat.Subscription?
     private var healthCheckRunning = false
     /// Consecutive failed checks; one slow `tailscale status` under load isn't worth a restart.
     private var unhealthyChecks = 0
@@ -239,7 +239,7 @@ final class PhoneAccess: ObservableObject {
 
     private func stop() {
         generation += 1
-        healthTimer?.invalidate()
+        healthTimer?.cancel()
         healthTimer = nil
         server?.stop()
         server = nil
@@ -256,7 +256,7 @@ final class PhoneAccess: ObservableObject {
     /// On quit: nothing may keep pointing the tailnet at a port we no longer own.
     func shutdown() {
         generation += 1
-        healthTimer?.invalidate()
+        healthTimer?.cancel()
         server?.stop()
         // One status read and one bounded wait for every mapping: quitting can't hang on a stuck CLI.
         var mappings: [Int: String] = [:]
@@ -275,8 +275,7 @@ final class PhoneAccess: ObservableObject {
 
     private func scheduleHealthChecks() {
         guard healthTimer == nil else { return }
-        healthTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in self?.checkHealth() }
-        healthTimer?.tolerance = 5
+        healthTimer = Heartbeat.shared.every(30) { [weak self] in self?.checkHealth() }
     }
 
     /// Every 30 s and after wake, repairs what can go missing behind our back: Tailscale not connected

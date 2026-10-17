@@ -19,7 +19,7 @@ final class LeadController: ObservableObject {
     private let claudeCommand: (String) -> String
     var notify: (String, String) -> Void = { _, _ in }
     var select: (UUID) -> Void = { _ in }
-    private var timer: Timer?
+    private var timer: Heartbeat.Subscription?
     /// Questions told about (by id and version: a revision is news too).
     private var seenQuestions: Set<String> = []
     /// What became of an answer that didn't land as one (the question was withdrawn, or answered already), by
@@ -47,9 +47,7 @@ final class LeadController: ObservableObject {
         summaries.lookup = { [weak host, weak store] id in
             (host?.sessions.first { $0.id.uuidString == id }, store?.sessions.first { $0.hostID?.uuidString == id }?.transcriptPath)
         }
-        let timer = Timer(timeInterval: 3, repeats: true) { [weak self] _ in self?.refresh() }
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
+        timer = Heartbeat.shared.every(3) { [weak self] in self?.refresh() }
     }
 
     static var serverPath: String {

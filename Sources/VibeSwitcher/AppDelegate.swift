@@ -75,9 +75,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private var iconSignature = ""
     private var floatingPanel: FloatingPanelController!
     private var sidebar: SidebarController!
-    private var visibilityTimer: Timer?
+    private var visibilityTimer: Heartbeat.Subscription?
     private var hiddenReadings = 0
-    private var notificationTimer: Timer?
+    private var notificationTimer: Heartbeat.Subscription?
     private var terminationSignal: DispatchSourceSignal?
     private static let statusItemName = "VibeSwitcher"
     /// Stored by macOS as the distance from the right screen edge; set once so we start next to the
@@ -217,12 +217,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.updateFloatingPanel() } }
             .store(in: &cancellables)
-        visibilityTimer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in
-            self?.updateFloatingPanel()
-        }
-        notificationTimer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
-            self?.notifier?.refreshAuthorization()
-        }
+        visibilityTimer = Heartbeat.shared.every(2) { [weak self] in self?.updateFloatingPanel() }
+        notificationTimer = Heartbeat.shared.every(15) { [weak self] in self?.notifier?.refreshAuthorization() }
 
         store.$sessions
             .receive(on: RunLoop.main)

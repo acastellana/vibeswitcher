@@ -21,7 +21,7 @@ final class SessionStore: ObservableObject {
 
     private let scanner: SessionScanner
     private let queue = DispatchQueue(label: "vibeswitcher.scan", qos: .utility)
-    private var timer: Timer?
+    private var timer: Heartbeat.Subscription?
     private var watcher: DispatchSourceFileSystemObject?
     private var scanning = false
     private var rescanRequested = false
@@ -83,8 +83,7 @@ final class SessionStore: ObservableObject {
         refresh()
         // Hook updates arrive through the state-directory watcher right away; the timer only has to
         // notice sessions starting/ending, title changes and the viewing ring.
-        timer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in self?.refresh() }
-        timer?.tolerance = 0.5
+        timer = Heartbeat.shared.every(2) { [weak self] in self?.refresh() }
         // Switching apps changes which session you're viewing; don't wait for the next poll.
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
                                                           object: nil, queue: .main) { [weak self] _ in
