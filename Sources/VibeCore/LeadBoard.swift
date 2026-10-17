@@ -41,6 +41,49 @@ public struct LeadEvidence: Codable, Equatable, Sendable {
     public var passes: Bool { completion == .complete && integrity == .clean }
 }
 
+/// A milestone a worker noted with its `progress` tool.
+public struct LeadCheckpoint: Codable, Equatable, Sendable {
+    public var text: String
+    public var at: Double
+
+    public init(text: String, at: Double = Date().timeIntervalSince1970) {
+        self.text = text
+        self.at = at
+    }
+}
+
+/// Why a task last failed: an audit that didn't pass, or a merge that conflicted or failed its tests. Kept when the
+/// task goes back to work, so what's being reworked stays in view.
+public struct LeadSetback: Codable, Equatable, Sendable {
+    public enum Stage: String, Codable, Sendable { case review, merge }
+    public var stage: Stage
+    public var reason: String
+    /// The verdict, when an audit failed it.
+    public var evidence: LeadEvidence?
+    public var at: Double
+
+    public init(stage: Stage, reason: String, evidence: LeadEvidence? = nil, at: Double = Date().timeIntervalSince1970) {
+        self.stage = stage
+        self.reason = reason
+        self.evidence = evidence
+        self.at = at
+    }
+}
+
+/// What a merge put on the lead's branch.
+public struct LeadMergeRecord: Codable, Equatable, Sendable {
+    public var commit: String
+    /// The test command ran on it and passed (false: there was none, so nothing ran).
+    public var tested: Bool
+    public var at: Double
+
+    public init(commit: String, tested: Bool, at: Double = Date().timeIntervalSince1970) {
+        self.commit = commit
+        self.tested = tested
+        self.at = at
+    }
+}
+
 public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public enum Status: String, Codable, Sendable, CaseIterable {
         /// On the board, no worker yet.
@@ -71,6 +114,28 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var worktree: String?
     public var evidence: LeadEvidence?
     public var createdAt: Double
+    // The fields below are optional: older boards have none of them.
+    /// When it took its current status (`BoardStore.update` stamps every change).
+    public var since: Double?
+    /// When its first worker started.
+    public var startedAt: Double?
+    /// Rounds of work: 1 for the first worker, one more each time it goes back to work after failing (the lead
+    /// messages its worker or starts a new one).
+    public var attempts: Int?
+    /// Why it last failed; kept through the rework.
+    public var setback: LeadSetback?
+    /// Why it's blocked (the worker's words, or the lead stopped it); cleared when it works again.
+    public var blocker: String?
+    /// The worker's milestones, oldest first.
+    public var checkpoints: [LeadCheckpoint]?
+    /// The worker's last "done" report.
+    public var report: String?
+    public var merged: LeadMergeRecord?
+
+    public static let keptCheckpoints = 40
+
+    /// Rework rounds so far (0 on the first attempt).
+    public var rework: Int { max(0, (attempts ?? 1) - 1) }
 
     public init(id: String = UUID().uuidString, slug: String, title: String, contract: LeadContract, status: Status = .planned) {
         self.id = id
@@ -224,7 +289,13 @@ public final class BoardStore: @unchecked Sendable {
             close(fd)
         }
         var board = try read()
+        let before = Dictionary(board.tasks.map { ($0.id, $0.status) }, uniquingKeysWith: { first, _ in first })
         let result = try change(&board)
+        // Each status change is stamped, whoever made it: how long a task has been where it is.
+        let now = Date().timeIntervalSince1970
+        for index in board.tasks.indices where before[board.tasks[index].id] != board.tasks[index].status {
+            board.tasks[index].since = before[board.tasks[index].id] == nil ? board.tasks[index].createdAt : now
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(board).write(to: URL(fileURLWithPath: file), options: .atomic)

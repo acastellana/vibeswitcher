@@ -271,7 +271,8 @@ public enum LeadPrompts {
         Start: read the task; \(workflow.initCommand.map { "run `\($0)`; " } ?? "")\
         \(workflow.testCommand.map { "run `\($0)` to see where things stand; " } ?? "")look at the code you'll touch.
         While working: stay inside the boundaries. Commit small, descriptive commits as you go. Don't switch to \(workflow.base), \
-        don't merge, rebase or push, don't delete branches; the lead merges.
+        don't merge, rebase or push, don't delete branches; the lead merges. At each milestone (a part working, checks \
+        passing, what's next), call progress with one line: the lead and the user see it on your task's lane.
         Done: every acceptance check passes\(workflow.testCommand.map { " and `\($0)` passes" } ?? ""), everything is \
         committed. Then reply with a short report: what changed, how you checked it, anything left or doubtful. A \
         verifier will check your branch independently.

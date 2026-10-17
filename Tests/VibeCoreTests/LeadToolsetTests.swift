@@ -134,7 +134,7 @@ struct LeadToolsetTests: LeadTeamFixture {
         let names = { (role: LeadLaunch.Role) in Set(((try? self.issued(role, task: role == .lead ? nil : "t", root: root, runtime))?.tools ?? []).map(\.name)) }
         #expect(names(.lead).isSuperset(of: ["status", "add_task", "start_worker", "audit", "merge", "cleanup", "ask_user", "post_update", "message"]))
         #expect(!names(.lead).contains("submit_audit"))
-        #expect(names(.worker) == ["report", "ask_lead"])
+        #expect(names(.worker) == ["report", "ask_lead", "progress"])
         #expect(names(.verifier) == ["submit_audit"])
     }
 

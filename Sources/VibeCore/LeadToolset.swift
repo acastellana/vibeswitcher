@@ -206,6 +206,8 @@ public final class LeadToolset: MCPToolset {
                             required: ["status", "summary"]),
                 MCPToolInfo(name: "ask_lead", description: "Ask the project lead something without stopping your work; the answer arrives as a message.",
                             properties: ["question": P(type: "string", description: "The question")], required: ["question"]),
+                MCPToolInfo(name: "progress", description: "Note a milestone in one line (a part working, checks passing, what's next). It shows on your task's lane in the lead's Team view; it doesn't message the lead. Call it at each milestone.",
+                            properties: ["text": P(type: "string", description: "One line: what's done or under way")], required: ["text"]),
             ]
         case .verifier?:
             return [MCPToolInfo(name: "submit_audit", description: "Your verdict on the worker's branch, with evidence. Only this moves a task to done.",
@@ -295,6 +297,7 @@ public final class LeadToolset: MCPToolset {
             case "configure": return try configure(arguments)
             case "report": return try report(arguments)
             case "ask_lead": return try askLead(arguments)
+            case "progress": return try progress(arguments)
             case "submit_audit": return try submitAudit(arguments, by: member)
             default: return fail("No tool \(name).")
             }
@@ -380,9 +383,15 @@ public final class LeadToolset: MCPToolset {
         let worktree = try Worktrees.open(root: root, slug: slug, base: base)
         let session = try launch(.worker, task: slug, name: "worker-\(slug)", in: worktree, label: "Worker: \(task.title)", trust: true,
                                  prompt: LeadPrompts.worker(task: task, root: root, workflow: workflow),
-                                 start: "Start on your task (it's in your instructions). When done, call report.", branch: base)
+                                 start: "Start on your task (it's in your instructions). Call progress at each milestone. When done, call report.", branch: base)
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
+            // A failed task started again is a new round of work; its setback stays to say why.
+            let previous = board.tasks[index]
+            let rounds = previous.attempts ?? (previous.worker == nil ? 0 : 1)
+            board.tasks[index].attempts = rounds == 0 || previous.status == .failed ? rounds + 1 : rounds
+            board.tasks[index].startedAt = previous.startedAt ?? Date().timeIntervalSince1970
+            board.tasks[index].blocker = nil
             board.tasks[index].status = .running
             board.tasks[index].worker = session
             board.tasks[index].stopped = nil
@@ -400,7 +409,10 @@ public final class LeadToolset: MCPToolset {
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].stopped = task.worker
-            if board.tasks[index].status == .running { board.tasks[index].status = .blocked }
+            if board.tasks[index].status == .running {
+                board.tasks[index].status = .blocked
+                board.tasks[index].blocker = "The lead stopped its worker."
+            }
         }
         return MCPToolResult(text: "Stopped the worker on \(slug). Its worktree and commits stay; start_worker continues there.")
     }
@@ -409,7 +421,22 @@ public final class LeadToolset: MCPToolset {
         guard let text = arguments["text"] as? String, !text.isEmpty else { throw Problem(text: "Nothing to send.") }
         guard let worker = store.load().task(slug)?.worker else { throw Problem(text: "\(slug) has no worker.") }
         let clear = arguments["clear_draft"] as? Bool ?? false
-        switch try runtime.steer(.session(worker), from: .lead("lead of \(project)"), text: text, clearDraft: clear) {
+        let delivered = try runtime.steer(.session(worker), from: .lead("lead of \(project)"), text: text, clearDraft: clear)
+        // Telling a failed or blocked task's live worker what to do sends it back to work: a failed one starts a
+        // rework round (its setback stays to say why).
+        if runtime.sessions().contains(where: { $0.id == worker && $0.live }) {
+            try store.update { board in
+                guard let index = board.taskIndex(slug), board.tasks[index].worker == worker,
+                      [.failed, .blocked].contains(board.tasks[index].status) else { return }
+                if board.tasks[index].status == .failed {
+                    board.tasks[index].attempts = (board.tasks[index].attempts ?? 1) + 1
+                    board.tasks[index].evidence = nil
+                }
+                board.tasks[index].status = .running
+                board.tasks[index].blocker = nil
+            }
+        }
+        switch delivered {
         case .steered: return MCPToolResult(text: "Sent to \(slug)'s worker while it works; it gets it at its next step.")
         case .typed: return MCPToolResult(text: "Typed into \(slug)'s worker as its next prompt (it was between turns\(clear ? "; a leftover draft was cleared first" : "")).")
         case .awaitingAnswer(let asked):
@@ -521,10 +548,11 @@ public final class LeadToolset: MCPToolset {
                                        scratch: vault.scratch(root: root, "merge-\(slug)")) {
         case .passed(let commit): tested = commit
         case .conflict:
-            try setStatus(slug, .failed)
+            try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Conflicts with \(base): the branch needs bringing up to date."))
             throw Problem(text: "\(slug) conflicts with \(base). Message its worker to bring its branch up to date with \(base) and resolve, then audit again.")
         case .failed(let output):
-            try setStatus(slug, .failed)
+            let last = output.split(whereSeparator: \.isNewline).last.map(String.init) ?? ""
+            try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Tests fail rebased onto \(base)" + (last.isEmpty ? "." : ": \(last.prefix(200))")))
             throw Problem(text: "The test command fails on \(slug) rebased onto \(base):\n\(output)")
         case .error(let text):
             throw Problem(text: text)
@@ -532,7 +560,11 @@ public final class LeadToolset: MCPToolset {
         switch Worktrees.fastForward(root: root, base: base, to: tested, from: current) {
         case .merged:
             try vault.setHead(tested, root: root, branch: base)
-            try setStatus(slug, .done)
+            try store.update { board in
+                guard let index = board.taskIndex(slug) else { return }
+                board.tasks[index].status = .done
+                board.tasks[index].merged = LeadMergeRecord(commit: tested, tested: workflow.testCommand != nil)
+            }
             // Nothing ran: say so, it isn't a pass.
             let untested = workflow.testCommand == nil
                 ? " (merged without tests: no test_command\(workflow.problem.map { "; \($0)" } ?? ""). Set one with configure.)" : ""
@@ -647,8 +679,12 @@ public final class LeadToolset: MCPToolset {
         return MCPToolResult(text: "Set \(set).\n\n\(workflowText())")
     }
 
-    private func setStatus(_ slug: String, _ status: LeadTask.Status) throws {
-        try store.update { board in if let index = board.taskIndex(slug) { board.tasks[index].status = status } }
+    private func setStatus(_ slug: String, _ status: LeadTask.Status, setback: LeadSetback? = nil) throws {
+        try store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            board.tasks[index].status = status
+            if let setback { board.tasks[index].setback = setback }
+        }
     }
 
     // MARK: Worker and verifier
@@ -679,6 +715,8 @@ public final class LeadToolset: MCPToolset {
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].status = done ? .review : .blocked
             board.tasks[index].evidence = nil
+            if done { board.tasks[index].report = summary }
+            board.tasks[index].blocker = done ? nil : (summary.isEmpty ? "The worker is blocked." : summary)
         }
         let text = done
             ? "The worker on \(slug) says it's done: \(summary)\nRun audit(\(slug)); only the verifier's report counts."
@@ -695,6 +733,20 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "There's no lead running to ask. Decide what you can within your contract, or report blocked.")
         }
         return MCPToolResult(text: "Asked the lead. Keep working; the answer arrives as a message.")
+    }
+
+    private func progress(_ arguments: [String: Any]) throws -> MCPToolResult {
+        let slug = try taskSlug(arguments)
+        let text = (arguments["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { throw Problem(text: "Say what's done or under way, in one line.") }
+        // One line, short enough for the lane; the board keeps the latest ones.
+        let line = text.split(whereSeparator: \.isNewline).joined(separator: " ")
+        let checkpoint = LeadCheckpoint(text: line.count > 300 ? String(line.prefix(300)) + "…" : line)
+        try store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            board.tasks[index].checkpoints = ((board.tasks[index].checkpoints ?? []) + [checkpoint]).suffix(LeadTask.keptCheckpoints)
+        }
+        return MCPToolResult(text: "Noted on your task's lane. Keep going.")
     }
 
     private func submitAudit(_ arguments: [String: Any], by member: LeadVault.Member) throws -> MCPToolResult {
@@ -718,6 +770,10 @@ public final class LeadToolset: MCPToolset {
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].evidence = evidence
             board.tasks[index].status = evidence.passes ? .review : .failed
+            if !evidence.passes {
+                board.tasks[index].setback = LeadSetback(stage: .review, reason: summary.isEmpty ? "The audit didn't pass (\(completion.rawValue), \(integrity.rawValue))." : summary,
+                                                         evidence: evidence)
+            }
         }
         try? store.appendProgress("Audit of \(slug): \(completion.rawValue), \(integrity.rawValue)")
         let head = branchHead(Worktrees.branch(slug))
@@ -747,6 +803,8 @@ public final class LeadToolset: MCPToolset {
                     line += " — worker \(info.live ? (info.status ?? "running") : task.stopped == worker ? "stopped" : "ended")"
                 }
                 if let evidence = task.evidence { line += " — audit \(evidence.completion.rawValue)/\(evidence.integrity.rawValue)" }
+                if task.rework > 0 { line += " — rework \(task.rework)" }
+                if let checkpoint = task.checkpoints?.last { line += " — last progress: \(checkpoint.text)" }
                 lines.append(line)
             }
         }
