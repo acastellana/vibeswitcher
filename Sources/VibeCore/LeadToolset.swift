@@ -572,9 +572,11 @@ public final class LeadToolset: MCPToolset {
             try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Conflicts with \(base): the branch needs bringing up to date."))
             throw Problem(text: "\(slug) conflicts with \(base). Message its worker to rebase its branch onto \(base) (`git rebase \(base)` in its worktree), resolve the conflicts, run the tests and report again (start_worker again if it has stopped), then audit again.")
         case .failed(let output):
-            let last = output.split(whereSeparator: \.isNewline).last.map(String.init) ?? ""
+            // The setback names the failing tests; the output's last line only when none is named.
+            let tests = TestFailures(output: output).tests.joined(separator: ", ")
+            let last = tests.isEmpty ? output.split(whereSeparator: \.isNewline).last.map(String.init) ?? "" : tests
             try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Tests fail rebased onto \(base)" + (last.isEmpty ? "." : ": \(last.prefix(200))")))
-            throw Problem(text: "The test command fails on \(slug) rebased onto \(base):\n\(output)")
+            throw Problem(text: testFailure(output, slug: slug, base: base))
         case .error(let text):
             throw Problem(text: text)
         }
@@ -594,6 +596,21 @@ public final class LeadToolset: MCPToolset {
         case .refused(let reason):
             throw Problem(text: "Not merged: \(reason)")
         }
+    }
+
+    /// A failed merge's test run, told by what failed: the failing tests and their lines first (the output's end
+    /// is usually the build's warnings), with all of the output saved where the lead can read it.
+    private func testFailure(_ output: String, slug: String, base: String) -> String {
+        let setup = output.hasPrefix("init_command failed:\n")
+        let output = setup ? String(output.dropFirst("init_command failed:\n".count)) : output
+        let log = vault.scratch(root: root, "\(slug)/merge-test.log")
+        let saved = (try? vault.ensurePrivate(log.deletingLastPathComponent())).flatMap {
+            (try? Data(output.utf8).write(to: log, options: .atomic)).map { log.path }
+        }
+        let found = TestFailures(output: output).summary()
+            ?? "Nothing in the output names a failing test or an error; it ends:\n" + String(output.suffix(1500))
+        return "The \(setup ? "init_command" : "test command") fails on \(slug) rebased onto \(base).\n\(found)\n"
+            + (saved.map { "Full output: \($0)" } ?? "(The full output couldn't be saved.)")
     }
 
     private func cleanup(_ slug: String, force: Bool) throws -> MCPToolResult {

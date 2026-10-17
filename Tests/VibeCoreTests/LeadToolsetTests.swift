@@ -555,5 +555,33 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(merged.text.contains("test command fails"))
         #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
     }
+
+    @Test func aFailedMergeNamesTheFailingTestAndSavesTheOutput() throws {
+        let root = try repo()
+        // The run as a merge saw it: the test results on stdout, then the build's warnings on stderr last.
+        let results = swiftTestingFailure.components(separatedBy: "Build complete! (0.93s)\n")[1]
+        let warnings = swiftTestingFailure.components(separatedBy: "◇ Test run started.")[0]
+        try results.write(toFile: root + "/results.txt", atomically: true, encoding: .utf8)
+        try warnings.write(toFile: root + "/warnings.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "results.txt", "warnings.txt"], in: root)
+        Git.run(["commit", "-q", "-m", "a run"], in: root)
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try "---\ntest_command: cat results.txt; cat warnings.txt >&2; exit 1\n---\n"
+            .write(toFile: root + "/.vibeswitcher/workflow.md", atomically: true, encoding: .utf8)
+        _ = try audited(lead, runtime, root: root)
+        let merged = call(lead, "merge", ["task": "add-b"])
+        #expect(merged.isError)
+        let lines = merged.text.components(separatedBy: "\n")
+        #expect(lines.first == "The test command fails on add-b rebased onto main.")
+        #expect(lines.dropFirst().first == "Failing tests (3): recordsIssue(), param(n:), answerIsRight()")
+        #expect(merged.text.contains("↳ the answer drifted"))
+        #expect(!merged.text.contains("resumed"))
+        let log = vault.scratch(root: root, "add-b/merge-test.log")
+        #expect(lines.last == "Full output: \(log.path)")
+        let saved = try String(contentsOf: log, encoding: .utf8)
+        #expect(saved.contains("Test run with 5 tests failed") && saved.contains("captured var 'resumed'"))
+        #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)
+    }
 }
 

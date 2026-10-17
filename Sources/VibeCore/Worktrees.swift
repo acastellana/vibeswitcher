@@ -47,8 +47,10 @@ public final class ShellCancel: @unchecked Sendable {
 
 /// Runs a program and captures its output.
 public enum Shell {
+    /// With `interleaved`, stderr goes to the same pipe as stdout, so `output` holds both in the order they were
+    /// written (a build's warnings and the test results after them) and `error` is empty.
     public static func run(executable: String, args: [String], in directory: String, env: [String: String] = [:],
-                           timeout: TimeInterval = 120, grace: TimeInterval = 5) -> Git.Result {
+                           timeout: TimeInterval = 120, grace: TimeInterval = 5, interleaved: Bool = false) -> Git.Result {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = args
@@ -56,7 +58,7 @@ public enum Shell {
         process.environment = ProcessInfo.processInfo.environment.merging(env) { $1 }
         let out = Pipe(), err = Pipe()
         process.standardOutput = out
-        process.standardError = err
+        process.standardError = interleaved ? out : err
         process.standardInput = FileHandle.nullDevice
         do { try process.run() } catch { return Git.Result(status: -1, output: "", error: "\(error)") }
         // Read while it runs, so a chatty program can't fill the pipe and stall.
@@ -66,8 +68,11 @@ public enum Shell {
         let group = DispatchGroup()
         group.enter()
         Thread.detachNewThread { output = out.fileHandleForReading.readDataToEndOfFile(); group.leave() }
-        group.enter()
-        Thread.detachNewThread { errors = err.fileHandleForReading.readDataToEndOfFile(); group.leave() }
+        // Unused, its write end is still ours: reading it would never end.
+        if !interleaved {
+            group.enter()
+            Thread.detachNewThread { errors = err.fileHandleForReading.readDataToEndOfFile(); group.leave() }
+        }
         let deadline = Date().addingTimeInterval(timeout)
         let cancel = ShellCancel.current
         while process.isRunning, Date() < deadline, cancel?.isCancelled != true { usleep(20_000) }
@@ -114,6 +119,7 @@ public enum Worktrees {
     public enum Check: Equatable, Sendable {
         /// The checks passed on this commit (the branch rebased onto main).
         case passed(String)
+        /// A command failed; its output (all of it from the commit's rebaseAndTest, the tail from the slug's).
         case failed(String)
         /// Rebasing onto main conflicted; the rebase was undone.
         case conflict
@@ -284,10 +290,10 @@ public enum Worktrees {
         let tested = Git.run(["rev-parse", "HEAD"], in: path).output
         for (name, command) in [("init_command", setup), ("test command", test)] {
             guard let command, !command.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
-            let run = Shell.run(executable: "/bin/zsh", args: ["-lc", command], in: path, timeout: timeout)
+            // All of it, in order: what failed may be anywhere in it, and its tail is often a build's warnings.
+            let run = Shell.run(executable: "/bin/zsh", args: ["-lc", command], in: path, timeout: timeout, interleaved: true)
             guard run.ok else {
-                let output = (run.output + "\n" + run.error).trimmingCharacters(in: .whitespacesAndNewlines)
-                return .failed((name == "init_command" ? "init_command failed:\n" : "") + String(output.suffix(4000)))
+                return .failed((name == "init_command" ? "init_command failed:\n" : "") + run.output)
             }
         }
         return .passed(tested)
@@ -330,5 +336,113 @@ public enum Worktrees {
             if line == "branch refs/heads/\(branch)" { return current }
         }
         return nil
+    }
+}
+
+/// What a failed test run's output says went wrong, so a message can lead with it instead of the output's tail
+/// (often a build's warnings): the tests that failed and their failure lines, else the errors that stopped it.
+public struct TestFailures: Equatable, Sendable {
+    /// The failing tests, in the order they first failed.
+    public var tests: [String] = []
+    /// Their failure lines: Swift Testing's ✘ issue lines with the ↳ details under them, XCTest's error: lines.
+    public var lines: [String] = []
+    /// Swift Testing's closing line ("✘ Test run with 547 tests failed after … with 1 issue.").
+    public var run: String?
+    /// Tests that started and never ended (the test process crashed or was stopped).
+    public var unfinished: [String] = []
+    /// Error lines that name no test: the compiler's, a crash's.
+    public var errors: [String] = []
+
+    public init(output: String) {
+        // Lines since the last issue line, while they may still be part of it.
+        var started: [String] = [], ended: Set<String> = [], inIssue: Int?
+        for raw in output.components(separatedBy: "\n") {
+            let plain = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
+            let line = plain.trimmingCharacters(in: .whitespaces)
+            if let count = inIssue {
+                if line.hasPrefix("↳ ") { lines.append(line); continue }
+                // An expectation's source can span lines ("Expectation failed: eventually(timeout: 30) {" … "}").
+                if count < 20, !line.isEmpty, line.range(of: #"^\S (Test|Suite|Passing) "#, options: .regularExpression) == nil {
+                    lines.append(plain.replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression))
+                    inIssue = count + 1
+                    continue
+                }
+            }
+            inIssue = nil
+            if let name = Self.swiftTesting(line, " recorded an issue") {
+                add(name)
+                lines.append(line)
+                inIssue = 0
+            } else if let name = Self.swiftTesting(line, " failed after") {
+                // A failure with no issue line of its own (a time limit) still shows.
+                if !tests.contains(name) { lines.append(line) }
+                add(name)
+                ended.insert(name)
+            } else if let name = Self.swiftTesting(line, " started.", marks: ["◇"]) {
+                started.append(name)
+            } else if let name = Self.swiftTesting(line, " passed after", marks: ["✔", "􁁛", "➜", "􀟈"]) ?? Self.swiftTesting(line, " skipped") {
+                ended.insert(name)
+            } else if line.range(of: #"^[✘􀢄] Test run with "#, options: .regularExpression) != nil {
+                run = line
+            } else if let match = line.range(of: #": error: -?\[?[^ :\]]+[ .][^ :\]]+\]? : "#, options: .regularExpression) {
+                // XCTest: "File.swift:12: error: -[Module.Suite testName] : XCTAssertEqual failed: …"
+                add(Self.xcTestName(String(line[match]).dropFirst(": error: ".count).dropLast(3)))
+                lines.append(line)
+            } else if let match = line.range(of: #"^Test Case '[^']+' failed"#, options: .regularExpression) {
+                add(Self.xcTestName(line[match].dropFirst("Test Case '".count).prefix { $0 != "'" }))
+            } else if line.range(of: #"(^|:\d+(:\d+)?: )error: |Fatal error: "#, options: .regularExpression) != nil,
+                      !errors.contains(line) {
+                errors.append(line)
+            }
+        }
+        unfinished = started.filter { !ended.contains($0) }
+    }
+
+    private mutating func add(_ name: String) {
+        if !tests.contains(name) { tests.append(name) }
+    }
+
+    /// The name in a Swift Testing event line ("✘ Test answerIsRight() recorded an issue at …"), when it's `event`.
+    private static func swiftTesting(_ line: String, _ event: String, marks: [String] = ["✘", "􀢄"]) -> String? {
+        for mark in marks where line.hasPrefix(mark + " Test ") {
+            let rest = line.dropFirst(mark.count + " Test ".count)
+            guard !rest.hasPrefix("run with "), !rest.hasPrefix("run started"), let end = rest.range(of: event) else { return nil }
+            // A parameterized test's issue says which arguments: "param(n:) recorded an issue with 1 argument n → 2".
+            return String(rest[..<end.lowerBound])
+        }
+        return nil
+    }
+
+    /// "-[Module.Suite testName]" or "Suite.testName" as "Suite.testName".
+    private static func xcTestName<S: StringProtocol>(_ raw: S) -> String {
+        let parts = raw.trimmingCharacters(in: CharacterSet(charactersIn: "-[]")).split(separator: " ")
+        guard parts.count == 2 else { return String(raw) }
+        return "\(parts[0].split(separator: ".").last ?? parts[0]).\(parts[1])"
+    }
+
+    /// For a message: the failing tests and their lines, else what never finished and the errors, at most `limit`
+    /// characters. Nil when the output says neither.
+    public func summary(limit: Int = 4000) -> String? {
+        var head: [String] = [], body: [String] = []
+        if !tests.isEmpty {
+            let more = tests.count > 20 ? ", and \(tests.count - 20) more" : ""
+            head = ["Failing tests (\(tests.count)): \(tests.prefix(20).joined(separator: ", "))\(more)"]
+            body = lines + [run].compactMap { $0 }
+        } else if !unfinished.isEmpty || !errors.isEmpty {
+            if !unfinished.isEmpty { head.append("Started and never finished: \(unfinished.joined(separator: ", "))") }
+            body = errors + [run].compactMap { $0 }
+            if !errors.isEmpty { head.append(unfinished.isEmpty ? "No test failed by name; the errors:" : "The errors:") }
+        } else {
+            return nil
+        }
+        var text = head.joined(separator: "\n")
+        for (index, line) in body.enumerated() {
+            guard text.count + line.count + 1 <= limit else {
+                text += "\n… and \(body.count - index) more lines."
+                break
+            }
+            text += "\n" + line
+        }
+        return text
     }
 }
