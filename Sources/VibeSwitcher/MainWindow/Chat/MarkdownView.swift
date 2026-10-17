@@ -58,16 +58,22 @@ struct MarkdownView: View {
     }
 }
 
-/// Parsed blocks per text, so scrolling and live updates don't re-parse long replies.
+/// Parsed blocks per text, so scrolling and live updates don't re-parse long replies. Bounded by the text it holds
+/// (about the shown page's replies a few times over), not only by memory pressure.
 enum MarkdownCache {
-    private static let cache = NSCache<NSString, Box>()
+    private static let cache: NSCache<NSString, Box> = {
+        let cache = NSCache<NSString, Box>()
+        cache.totalCostLimit = 8 << 20
+        return cache
+    }()
     private final class Box { let blocks: [MDBlock]; init(_ blocks: [MDBlock]) { self.blocks = blocks } }
 
     static func blocks(_ text: String) -> [MDBlock] {
         let key = text as NSString
         if let hit = cache.object(forKey: key) { return hit.blocks }
         let blocks = MarkdownBlocks.parse(text)
-        cache.setObject(Box(blocks), forKey: key)
+        // Its key and its blocks: about twice the text, in UTF-16.
+        cache.setObject(Box(blocks), forKey: key, cost: 4 * key.length)
         return blocks
     }
 }
@@ -89,7 +95,7 @@ func inlineMarkdown(_ text: String, folder: String? = nil, size: CGFloat = 13.5)
             attributed[run.range].link = URL(fileURLWithPath: path)
         }
     }
-    InlineCache.cache.setObject(InlineCache.Box(attributed), forKey: key)
+    InlineCache.cache.setObject(InlineCache.Box(attributed), forKey: key, cost: 4 * key.length)
     return attributed
 }
 
@@ -98,6 +104,7 @@ private enum InlineCache {
     static let cache: NSCache<NSString, Box> = {
         let cache = NSCache<NSString, Box>()
         cache.countLimit = 2000
+        cache.totalCostLimit = 8 << 20
         return cache
     }()
 }

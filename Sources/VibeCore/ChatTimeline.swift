@@ -145,7 +145,7 @@ public enum ComposerText {
 /// The part of a conversation the chat lays out: the newest items. A long session has thousands, and every one
 /// shown is laid out.
 public enum ChatWindow {
-    public static let page = 120
+    public static let page = 60
 
     /// The newest `limit` items, widened to reach `including` (a search match, where you were reading) with a few
     /// items of context before it. `hidden`: how many earlier items aren't shown.
