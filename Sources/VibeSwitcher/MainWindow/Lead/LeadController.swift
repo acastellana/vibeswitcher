@@ -88,30 +88,40 @@ final class LeadController: ObservableObject {
         }
         let project = (root as NSString).lastPathComponent
         let boardStore = BoardStore(root: root)
+        let vault = LeadVault.standard
+        var capability: String?
         do {
             let workflowPath = try boardStore.prepare()
-            var workflow = LeadWorkflow.parse((try? String(contentsOfFile: workflowPath, encoding: .utf8)) ?? "")
+            var workflow = LeadWorkflow.load(from: workflowPath)
             workflow.baseBranch = workflow.baseBranch ?? boardStore.load().baseBranch
+            // Only the app makes a lead: its capability (the lead's tools) and the branch as you start it, which
+            // merges then check nothing else has moved.
+            let token = try vault.startLead(root: root, branch: workflow.baseBranch ?? Worktrees.mainBranch(root: root))
+            capability = token
+            let name = "lead-\(Slug.make(project, taken: []))"
             let launch = try LeadLaunch.prepare(
                 role: .lead, root: root, task: nil, base: claudeCommand(root),
                 prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow),
                 start: goal.map { "You're starting as the project lead. The user's goal: \($0)\nRead status and the workflow notes, plan the goal into tasks with contracts, start the workers, and tell the user your plan in a few lines." }
                     ?? "You're starting as the project lead. Read status and the workflow notes, then greet the user in one short line: what's on the board, and what they'd like to build next.",
-                server: Self.serverPath, name: "lead-\(Slug.make(project, taken: []))")
+                server: Self.serverPath, name: name, capability: token, folder: vault.runFolder(root: root, name: name))
             host.spawn(SpawnRequest(cwd: root, command: launch.command, env: [:], cols: 120, rows: 40, keepShell: false,
                                     label: "Lead · \(project)", agent: "claude")) { [weak self] result in
                 switch result {
                 case .success(let session):
+                    try? vault.bind(token, root: root, session: session.id.uuidString)
                     try? boardStore.update { board in board.leadSession = session.id.uuidString }
                     // You chose to start the lead here: answer Claude's trust question for this folder.
                     self?.answerTrust(session.id, folder: root)
                     if show { self?.select(session.id) }
                     self?.refresh()
                 case .failure(let error):
+                    try? vault.revoke(token, root: root)
                     self?.alert("The lead didn't start.", error.message)
                 }
             }
         } catch {
+            if let capability { try? vault.revoke(capability, root: root) }
             alert("The lead didn't start.", "\(error)")
         }
     }

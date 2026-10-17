@@ -44,7 +44,8 @@ public protocol LeadRuntime: AnyObject {
     var server: String { get }
     /// The project's Claude command (from its launch presets), flags included.
     func claudeCommand(root: String) -> String
-    func spawn(cwd: String, command: String, label: String, agent: String) throws -> String
+    /// Starts a window session; with `trust`, answers Claude's trust question for `cwd` in it.
+    func spawn(cwd: String, command: String, label: String, agent: String, trust: Bool) throws -> String
     func kill(_ session: String)
     /// Delivers a message (see `LeadDelivery`): steered in, typed as its prompt, or queued.
     func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String) throws -> LeadDelivery.Delivered
@@ -57,22 +58,89 @@ public protocol LeadRuntime: AnyObject {
 }
 
 /// The project lead's tools, and the few that workers and verifiers get, over the board and the runtime.
+///
+/// Who may use which tools comes from the session's capability (see `LeadVault`), never from the server's arguments
+/// or the board: the role and task are the capability's, and every call checks that the server runs in the session
+/// VibeSwitcher started for it. A server without a current capability has no tools.
 public final class LeadToolset: MCPToolset {
-    let role: LeadLaunch.Role
+    /// The capability's role; nil when there's none (then nothing is served and `refusal` says why).
+    let role: LeadLaunch.Role?
     let root: String
     let taskID: String?
     let runtime: LeadRuntime
     let store: BoardStore
+    let vault: LeadVault
+    private let capability: String?
+    let refusal: String?
+    private var introduced = false
+    private let introducing = NSLock()
     /// How long cleanup waits for a task's sessions to end (the host hangs up, then kills after 5 s).
     var stopWait: TimeInterval = 8
 
-    public init(role: LeadLaunch.Role, root: String, task: String?, runtime: LeadRuntime) {
-        self.role = role
+    /// The server for the session holding `capability`. `expected` and `expectedTask` are what it was started as
+    /// (`--role`, `--task`): when they don't match the capability, it serves nothing.
+    public init(capability: String?, root: String, runtime: LeadRuntime, vault: LeadVault = .standard,
+                expected: LeadLaunch.Role? = nil, expectedTask: String? = nil) {
         self.root = root
-        self.taskID = task
         self.runtime = runtime
+        self.vault = vault
         store = BoardStore(root: root)
-        if role == .lead { introduceLead() }
+        let member = capability.flatMap { vault.member($0, root: root) }
+        var refusal: String?
+        if capability?.isEmpty ?? true {
+            refusal = "This tool server has no VibeSwitcher capability, so it has no role: only sessions VibeSwitcher starts for a project lead get one (whatever --role says)."
+        } else if member == nil {
+            refusal = "This tool server's capability isn't current in \(root) (VibeSwitcher started another session for its role since, or never issued it). Its tools are off."
+        } else if let expected, expected != member?.role {
+            refusal = "This tool server was started as the \(expected.rawValue), but its capability is the \(member?.role.rawValue ?? "")'s. Refused."
+        } else if let expectedTask, expectedTask != member?.task {
+            refusal = "This tool server was started for task \(expectedTask), but its capability is for \(member?.task ?? "no task"). Refused."
+        }
+        self.refusal = refusal
+        self.capability = refusal == nil ? capability : nil
+        role = refusal == nil ? member?.role : nil
+        taskID = refusal == nil ? member?.task : nil
+        if role == .lead, (try? authenticate()) != nil { introduceLead() }
+    }
+
+    /// The server as `vibeswitcher-mcp` starts it: `--root <repo>` (plus `--role`/`--task` as it was started), its
+    /// capability in the environment.
+    public convenience init(arguments: [String], environment: [String: String], runtime: LeadRuntime, vault: LeadVault = .standard) {
+        var root = FileManager.default.currentDirectoryPath
+        var expected: LeadLaunch.Role?
+        var task: String?
+        var invalid = false
+        var iterator = arguments.makeIterator()
+        while let argument = iterator.next() {
+            switch argument {
+            case "--role":
+                let value = iterator.next() ?? ""
+                expected = LeadLaunch.Role(rawValue: value)
+                invalid = invalid || expected == nil
+            case "--root": root = iterator.next() ?? root
+            case "--task": task = iterator.next()
+            default: break
+            }
+        }
+        self.init(capability: invalid ? nil : environment[LeadVault.environmentKey], root: root, runtime: runtime, vault: vault,
+                  expected: expected, expectedTask: task)
+    }
+
+    /// The caller is the session this capability was issued for: the agent this server runs under (its parent
+    /// process, found from the process table, not from anything the caller says) is that session's.
+    @discardableResult
+    func authenticate() throws -> LeadVault.Member {
+        guard let capability, role != nil else { throw Problem(text: refusal ?? "This tool server has no role.") }
+        guard let member = vault.member(capability, root: root) else {
+            throw Problem(text: "This session's capability was withdrawn (VibeSwitcher started another session for its role). Its tools are off.")
+        }
+        guard let session = member.session else {
+            throw Problem(text: "VibeSwitcher is still starting this session; try again in a moment.")
+        }
+        guard runtime.currentAgent()?.session == session else {
+            throw Problem(text: "This tool server doesn't run in the session VibeSwitcher started for its capability. Refused.")
+        }
+        return member
     }
 
     /// The workflow notes, with the lead's branch resolved.
@@ -89,15 +157,26 @@ public final class LeadToolset: MCPToolset {
 
     var project: String { (root as NSString).lastPathComponent }
 
-    /// The lead records where it runs, so answers and worker events reach it; it also sets up the folder.
+    /// The lead records where it runs, so answers and worker events reach it; it also sets up the folder, and the
+    /// head of its branch when VibeSwitcher has none yet (merges check that nothing else moves it).
     private func introduceLead() {
+        introducing.lock()
+        defer { introducing.unlock() }
+        guard !introduced, let me = runtime.currentAgent() else { return }
+        introduced = true
         try? store.prepare()
-        guard let me = runtime.currentAgent() else { return }
         try? store.update { board in
             board.leadPid = me.pid
             board.leadTTY = me.tty
             board.leadSession = me.session ?? board.leadSession
         }
+        let base = self.base
+        if vault.head(root: root, branch: base) == nil, let head = branchHead(base) { try? vault.setHead(head, root: root, branch: base) }
+    }
+
+    private func branchHead(_ branch: String) -> String? {
+        let head = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"], in: root)
+        return head.ok && !head.output.isEmpty ? head.output : nil
     }
 
     // MARK: Tools
@@ -106,7 +185,9 @@ public final class LeadToolset: MCPToolset {
         typealias P = MCPToolInfo.Property
         let task = P(type: "string", description: "The task's slug (or id) from the board")
         switch role {
-        case .worker:
+        case nil:
+            return []
+        case .worker?:
             return [
                 MCPToolInfo(name: "report", description: "Tell the lead you're done (everything committed, checks passing) or blocked (say what you need). A verifier then checks your branch.",
                             properties: ["status": P(type: "string", description: "done or blocked", options: ["done", "blocked"]),
@@ -115,14 +196,14 @@ public final class LeadToolset: MCPToolset {
                 MCPToolInfo(name: "ask_lead", description: "Ask the project lead something without stopping your work; the answer arrives as a message.",
                             properties: ["question": P(type: "string", description: "The question")], required: ["question"]),
             ]
-        case .verifier:
+        case .verifier?:
             return [MCPToolInfo(name: "submit_audit", description: "Your verdict on the worker's branch, with evidence. Only this moves a task to done.",
                                 properties: ["completion": P(type: "string", description: "Does the branch do what the contract asks?", options: ["complete", "incomplete", "blocked"]),
                                              "integrity": P(type: "string", description: "clean; suspect (not sure); violation (edits outside the boundaries, weakened or deleted tests, faked results)",
                                                             options: ["clean", "suspect", "violation"]),
                                              "summary": P(type: "string", description: "The evidence: what you ran and what you saw")],
                                 required: ["completion", "integrity", "summary"])]
-        case .lead:
+        case .lead?:
             return [
                 MCPToolInfo(name: "status", description: "The board at a glance: tasks by state, workers and what they're doing, open questions."),
                 MCPToolInfo(name: "board", description: "Everything on the board: tasks with their contracts and evidence, questions and answers, updates."),
@@ -178,8 +259,11 @@ public final class LeadToolset: MCPToolset {
     }
 
     public func call(_ name: String, _ arguments: [String: Any]) -> MCPToolResult {
+        guard let role else { return fail(refusal ?? "This tool server has no role.") }
         guard tools.contains(where: { $0.name == name }) else { return fail("No tool \(name) for the \(role.rawValue).") }
         do {
+            let member = try authenticate()
+            if role == .lead { introduceLead() }
             switch name {
             case "status": return MCPToolResult(text: status())
             case "board": return MCPToolResult(text: boardText())
@@ -199,7 +283,7 @@ public final class LeadToolset: MCPToolset {
             case "configure": return try configure(arguments)
             case "report": return try report(arguments)
             case "ask_lead": return try askLead(arguments)
-            case "submit_audit": return try submitAudit(arguments)
+            case "submit_audit": return try submitAudit(arguments, by: member)
             default: return fail("No tool \(name).")
             }
         } catch let error as Problem {
@@ -214,9 +298,13 @@ public final class LeadToolset: MCPToolset {
     private func fail(_ text: String) -> MCPToolResult { MCPToolResult(text: text, isError: true) }
 
     private func taskSlug(_ arguments: [String: Any]) throws -> String {
-        // A worker or verifier acts on its own task only, whatever it passes.
-        let wanted = role == .lead ? arguments["task"] as? String : taskID
-        guard let wanted, let task = try store.read().task(wanted) else {
+        // A worker or verifier acts on its own task only, whatever it passes: its capability's, by slug, not
+        // whatever the board (which anyone can edit) says that slug is.
+        if role != .lead {
+            guard let taskID, try store.read().taskIndex(taskID) != nil else { throw Problem(text: "Your task isn't on the board any more.") }
+            return taskID
+        }
+        guard let wanted = arguments["task"] as? String, let task = try store.read().task(wanted) else {
             throw Problem(text: "No such task on the board. Use status to see the tasks.")
         }
         return task.slug
@@ -278,11 +366,9 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "\(running) workers already run (max_workers is \(limit) in workflow.md). Wait for one to finish; you'll get a message.")
         }
         let worktree = try Worktrees.open(root: root, slug: slug, base: base)
-        let launch = try LeadLaunch.prepare(role: .worker, root: root, task: slug, base: runtime.claudeCommand(root: root),
-                                            prompt: LeadPrompts.worker(task: task, root: root, workflow: workflow),
-                                            start: "Start on your task (it's in your instructions). When done, call report.",
-                                            server: runtime.server, name: "worker-\(slug)", branch: base)
-        let session = try runtime.spawn(cwd: worktree, command: launch.command, label: "Worker: \(task.title)", agent: "claude")
+        let session = try launch(.worker, task: slug, name: "worker-\(slug)", in: worktree, label: "Worker: \(task.title)", trust: true,
+                                 prompt: LeadPrompts.worker(task: task, root: root, workflow: workflow),
+                                 start: "Start on your task (it's in your instructions). When done, call report.", branch: base)
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].status = .running
@@ -329,40 +415,89 @@ public final class LeadToolset: MCPToolset {
         return MCPToolResult(text: SessionDigest.text(log, limit: 12_000))
     }
 
+    /// Starts a worker or a verifier with a new capability (it replaces the role's earlier one), bound to its session
+    /// once that's started; its launch files go in the vault.
+    private func launch(_ role: LeadLaunch.Role, task slug: String, name: String, in folder: String, label: String, trust: Bool,
+                        prompt: String, start: String, model: String? = nil, branch: String? = nil, auditing: String? = nil) throws -> String {
+        let capability = try vault.issue(role: role, root: root, task: slug, auditing: auditing)
+        do {
+            let launch = try LeadLaunch.prepare(role: role, root: root, task: slug, base: runtime.claudeCommand(root: root), prompt: prompt,
+                                                start: start, server: runtime.server, name: name, model: model, branch: branch,
+                                                capability: capability, folder: vault.runFolder(root: root, name: name))
+            let session = try runtime.spawn(cwd: folder, command: launch.command, label: label, agent: "claude", trust: trust)
+            try vault.bind(capability, root: root, session: session)
+            return session
+        } catch {
+            try? vault.revoke(capability, root: root)
+            throw error
+        }
+    }
+
     private func audit(_ slug: String) throws -> MCPToolResult {
-        guard let task = store.load().task(slug), let worktree = task.worktree else { throw Problem(text: "\(slug) has no worktree to check.") }
-        let launch = try LeadLaunch.prepare(role: .verifier, root: root, task: slug, base: runtime.claudeCommand(root: root),
-                                            prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow),
-                                            start: "Verify the task now, then call submit_audit.",
-                                            server: runtime.server, name: "verify-\(slug)", model: workflow.verifierModel)
-        let session = try runtime.spawn(cwd: worktree, command: launch.command, label: "Verifier: \(task.title)", agent: "claude")
+        // The task's own worktree (not whatever folder the board names) on the commit the branch is at now: that
+        // commit is what this verifier's verdict covers.
+        guard let task = store.load().task(slug), Worktrees.isWorktree(root: root, slug: slug), let head = branchHead(Worktrees.branch(slug)) else {
+            throw Problem(text: "\(slug) has no worktree to check.")
+        }
+        let workflow = self.workflow
+        // Settings, hooks or MCP servers the branch brings would run in the verifier: it starts with project settings
+        // off (see LeadLaunch), and VibeSwitcher doesn't say yes to Claude's trust question for that folder.
+        let config = Worktrees.agentConfigChanges(root: root, slug: slug, base: workflow.base)
+        let session = try launch(.verifier, task: slug, name: "verify-\(slug)", in: Worktrees.path(root: root, slug: slug),
+                                 label: "Verifier: \(task.title)", trust: config.isEmpty,
+                                 prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow),
+                                 start: "Verify the task now, then call submit_audit.", model: workflow.verifierModel, auditing: head)
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].verifier = session
             board.tasks[index].status = .review
             board.tasks[index].evidence = nil
         }
-        return MCPToolResult(text: "Verifier started on \(slug). Its verdict arrives as a message.")
+        let flagged = config.isEmpty ? "" : " The branch changes Claude's settings or instructions (\(config.prefix(5).joined(separator: ", "))\(config.count > 5 ? ", …" : "")): the verifier runs with project settings off, and VibeSwitcher didn't answer its trust question; tell the user it waits for them to decide, and have the verifier look hard at those files."
+        return MCPToolResult(text: "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(flagged)")
     }
 
     private func merge(_ slug: String) throws -> MCPToolResult {
         guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
-        guard let evidence = task.evidence, evidence.passes else {
+        // The verdict as the verifier's own tool server recorded it in the vault (the board's copy is for showing):
+        // from the verifier VibeSwitcher started last for this task, on the commit it was started on.
+        guard let verdict = vault.verdict(root: root, task: slug), verdict.passes else {
             throw Problem(text: "\(slug) has no passing audit. Run audit and wait for a complete, clean verdict.")
+        }
+        guard let verifier = vault.current(.verifier, root: root, task: slug), verifier.tokenHash == verdict.verifier,
+              verifier.session == verdict.session, verifier.auditing == verdict.commit else {
+            throw Problem(text: "\(slug)'s verdict isn't from the verifier last started on it. Run audit again.")
         }
         // The verdict covers the commit the verifier saw; anything committed since hasn't been checked.
         let head = Git.run(["rev-parse", Worktrees.branch(slug)], in: root).output
-        guard let audited = evidence.commit, audited == head else {
-            throw Problem(text: "agent/\(slug) has commits the verifier didn't see (audited \(evidence.commit?.prefix(8) ?? "nothing"), now \(head.prefix(8))). Run audit again.")
+        guard verdict.commit == head else {
+            throw Problem(text: "agent/\(slug) has commits the verifier didn't see (audited \(verdict.commit.prefix(8)), now \(head.prefix(8))). Run audit again.")
         }
         guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/merge-\(slug).lock")) else {
             throw Problem(text: "A merge of \(slug) is already running; wait for its result.")
         }
         defer { lock.release() }
-        let tested: String
         let workflow = self.workflow
         let base = workflow.base
-        switch Worktrees.rebaseAndTest(root: root, slug: slug, test: workflow.testCommand, base: base) {
+        // One merge into a branch at a time: each checks the head the other one moves.
+        let baseLock = vault.scratch(root: root, "merge-into-\(LeadVault.hash(base).prefix(16)).lock")
+        try vault.ensurePrivate(baseLock.deletingLastPathComponent())
+        guard let held = FileLock.attempt(baseLock.path) else {
+            throw Problem(text: "Another merge into \(base) is running; merge \(slug) when it's done.")
+        }
+        defer { held.release() }
+        guard let current = branchHead(base) else { throw Problem(text: "There's no branch \(base) to merge into.") }
+        // The branch moves only through these merges: anything else that moved it (a worker's git, a hand-made
+        // commit) is something nobody audited.
+        if let known = vault.head(root: root, branch: base), known != current {
+            throw Problem(text: "Not merged: \(base) moved since the lead last left it (\(known.prefix(8)) → \(current.prefix(8))), and not through merge. Tell the user (`git log \(known.prefix(8))..\(base)` shows what came in). If they moved it themselves, starting the lead again from VibeSwitcher takes \(base) as it is.")
+        } else if vault.head(root: root, branch: base) == nil {
+            try vault.setHead(current, root: root, branch: base)
+        }
+        // Exactly the audited commit, rebased and tested where no agent works.
+        let tested: String
+        switch Worktrees.rebaseAndTest(root: root, commit: verdict.commit, onto: current, setup: workflow.initCommand, test: workflow.testCommand,
+                                       scratch: vault.scratch(root: root, "merge-\(slug)")) {
         case .passed(let commit): tested = commit
         case .conflict:
             try setStatus(slug, .failed)
@@ -373,8 +508,9 @@ public final class LeadToolset: MCPToolset {
         case .error(let text):
             throw Problem(text: text)
         }
-        switch try Worktrees.merge(root: root, slug: slug, commit: tested, base: base) {
+        switch Worktrees.fastForward(root: root, base: base, to: tested, from: current) {
         case .merged:
+            try vault.setHead(tested, root: root, branch: base)
             try setStatus(slug, .done)
             // Nothing ran: say so, it isn't a pass.
             let untested = workflow.testCommand == nil
@@ -407,6 +543,7 @@ public final class LeadToolset: MCPToolset {
         }
         // Merged work is in main; leftovers in the worktree (build output) can go. Abandoned work goes only on request.
         try Worktrees.remove(root: root, slug: slug, force: true)
+        try? vault.retire(root: root, task: slug)
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].worktree = nil
@@ -475,6 +612,9 @@ public final class LeadToolset: MCPToolset {
         for change in changes where read[change.key] != change.value {
             throw Problem(text: "Wrote workflow.md, but \(change.key) reads back as \"\(read[change.key] ?? "")\", not \"\(change.value)\". Check the file.")
         }
+        // A branch the lead hasn't merged into yet: its head now is where merges into it start from.
+        let base = self.base
+        if vault.head(root: root, branch: base) == nil, let head = branchHead(base) { try? vault.setHead(head, root: root, branch: base) }
         let set = changes.map { $0.value.isEmpty ? "cleared \($0.key)" : "\($0.key) = `\($0.value)`" }.joined(separator: ", ")
         try? store.appendProgress("Workflow: \(set)")
         return MCPToolResult(text: "Set \(set).\n\n\(workflowText())")
@@ -503,6 +643,7 @@ public final class LeadToolset: MCPToolset {
         let summary = arguments["summary"] as? String ?? ""
         let done = (arguments["status"] as? String) != "blocked"
         // A new report means new work: an earlier verdict doesn't cover it.
+        try vault.clearVerdict(root: root, task: slug)
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].status = done ? .review : .blocked
@@ -525,23 +666,33 @@ public final class LeadToolset: MCPToolset {
         return MCPToolResult(text: "Asked the lead. Keep working; the answer arrives as a message.")
     }
 
-    private func submitAudit(_ arguments: [String: Any]) throws -> MCPToolResult {
-        let slug = try taskSlug(arguments)
+    private func submitAudit(_ arguments: [String: Any], by member: LeadVault.Member) throws -> MCPToolResult {
+        // Only from the verifier VibeSwitcher started last for its task (checked in `authenticate`), about the commit
+        // it was started on.
+        guard member.role == .verifier, let slug = member.task, let session = member.session, let audited = member.auditing,
+              vault.current(.verifier, root: root, task: slug)?.tokenHash == member.tokenHash else {
+            throw Problem(text: "Only the verifier VibeSwitcher started on a task can give its verdict.")
+        }
+        _ = try taskSlug(arguments)
         guard let completion = (arguments["completion"] as? String).flatMap(LeadEvidence.Completion.init(rawValue:)),
               let integrity = (arguments["integrity"] as? String).flatMap(LeadEvidence.Integrity.init(rawValue:)) else {
             throw Problem(text: "completion must be complete, incomplete or blocked; integrity clean, suspect or violation.")
         }
-        let commit = Git.run(["rev-parse", Worktrees.branch(slug)], in: root)
-        let evidence = LeadEvidence(completion: completion, integrity: integrity, summary: arguments["summary"] as? String ?? "",
-                                    commit: commit.ok ? commit.output : nil)
+        let summary = arguments["summary"] as? String ?? ""
+        let verdict = LeadVault.Verdict(task: slug, completion: completion, integrity: integrity, summary: summary, commit: audited,
+                                        verifier: member.tokenHash, session: session, at: Date().timeIntervalSince1970)
+        try vault.record(verdict, root: root)
+        let evidence = LeadEvidence(completion: completion, integrity: integrity, summary: summary, commit: audited)
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].evidence = evidence
             board.tasks[index].status = evidence.passes ? .review : .failed
         }
         try? store.appendProgress("Audit of \(slug): \(completion.rawValue), \(integrity.rawValue)")
+        let head = branchHead(Worktrees.branch(slug))
+        let moved = head == audited ? "" : "\nagent/\(slug) moved during the audit (now \(head?.prefix(8) ?? "gone")): this verdict covers \(audited.prefix(8)) only, and merge refuses newer commits until they're audited."
         let text = evidence.passes
-            ? "The audit of \(slug) passed (complete, clean): \(evidence.summary)\nmerge(\(slug)) when you're ready."
+            ? "The audit of \(slug) passed (complete, clean): \(evidence.summary)\nmerge(\(slug)) when you're ready.\(moved)"
             : "The audit of \(slug) did not pass (\(completion.rawValue), \(integrity.rawValue)): \(evidence.summary)\nSend the worker the findings with message, or re-plan the task."
         let told = try tellLead(text, about: "verifier \(slug)")
         return MCPToolResult(text: "Verdict recorded. You're done; the lead takes it from here." + (told ? "" : Self.noLead))

@@ -1,6 +1,8 @@
-// The project lead's tool server (MCP over stdio): `vibeswitcher-mcp --role lead|worker|verifier --root <repo>
-// [--task <slug>]`. Claude Code starts it for each role's session (see `LeadLaunch`); the tools live in
-// `LeadToolset`, this file connects them to the session host, the steer inboxes and the hooks' state.
+// The project lead's tool server (MCP over stdio): `vibeswitcher-mcp --root <repo> [--role lead|worker|verifier]
+// [--task <slug>]`. Claude Code starts it for each role's session (see `LeadLaunch`), with the session's capability
+// in `VIBESWITCHER_LEAD_CAPABILITY`: the role and task are the capability's (see `LeadVault`), `--role` and `--task`
+// only say what it was started as. The tools live in `LeadToolset`; this file connects them to the session host,
+// the steer inboxes and the hooks' state.
 import Darwin
 import Foundation
 import VibeCore
@@ -22,12 +24,13 @@ final class HostRuntime: LeadRuntime {
         return preset.flatMap(LaunchPlan.command(for:)) ?? "claude"
     }
 
-    func spawn(cwd: String, command: String, label: String, agent: String) throws -> String {
+    func spawn(cwd: String, command: String, label: String, agent: String, trust: Bool) throws -> String {
         let request = SpawnRequest(cwd: cwd, command: command, env: [:], cols: 120, rows: 40, keepShell: false, label: label, agent: agent)
         switch try HostCall.request(.spawn(request)) {
         case .spawned(let session):
             // A worktree is a new folder to Claude: answer its trust question for that folder (the user started
-            // the lead in this repository).
+            // the lead in this repository), unless the lead says not to (a branch that brings its own settings).
+            guard trust else { return session.id.uuidString }
             TrustPrompt.answer(folder: cwd, readScreen: {
                 if case .screenText(_, let text)? = try? HostCall.request(.screen(id: session.id)) { return text }
                 return nil
@@ -115,18 +118,6 @@ final class HostRuntime: LeadRuntime {
     }
 }
 
-var role = LeadLaunch.Role.lead
-var root = FileManager.default.currentDirectoryPath
-var task: String?
-var arguments = CommandLine.arguments.dropFirst().makeIterator()
-while let argument = arguments.next() {
-    switch argument {
-    case "--role": role = arguments.next().flatMap(LeadLaunch.Role.init(rawValue:)) ?? .lead
-    case "--root": root = arguments.next() ?? root
-    case "--task": task = arguments.next()
-    default: break
-    }
-}
-
-let toolset = LeadToolset(role: role, root: root, task: task, runtime: HostRuntime())
+let toolset = LeadToolset(arguments: Array(CommandLine.arguments.dropFirst()), environment: ProcessInfo.processInfo.environment,
+                          runtime: HostRuntime())
 MCPServer(name: "vibeswitcher", version: "1", toolset: toolset).serve()

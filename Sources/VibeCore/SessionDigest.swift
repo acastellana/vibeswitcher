@@ -69,12 +69,20 @@ public enum HostCall {
         return reply
     }
 
-    /// Sends a request the host doesn't answer (`input`, `resize`): returns once it's written.
+    /// Sends a request the host doesn't answer (`input`, `resize`). Input returns once the host has read it: a
+    /// request it does answer follows on the same connection, and the host reads them in order (closing right after
+    /// writing would lose what's still in the socket's buffer, over ~8 KB).
     public static func send(_ request: HostRequest, socket: String = VibePaths.hostSocket.path, timeout: TimeInterval = 5) throws {
+        if case .input(let id, _, _) = request {
+            guard try exchange(request, then: .screen(id: id), socket: socket, timeout: timeout).reply != nil else {
+                throw Failure(description: "The session host didn't take the input.")
+            }
+            return
+        }
         _ = try exchange(request, socket: socket, timeout: timeout, expectsReply: false)
     }
 
-    private static func exchange(_ request: HostRequest?, socket: String, timeout: TimeInterval,
+    private static func exchange(_ request: HostRequest?, then follow: HostRequest? = nil, socket: String, timeout: TimeInterval,
                                  expectsReply: Bool = true) throws -> (sessions: [HostSession], reply: HostEvent?) {
         let queue = DispatchQueue(label: "vibeswitcher.host-call")
         let connection = try HostConnection(path: socket, queue: queue)
@@ -93,8 +101,10 @@ public enum HostCall {
                 sessions = list
                 if let request {
                     waitingFor = connection.send(request)
+                    // Its answer is the follow-up's: it comes once the host has read both.
+                    if let follow { waitingFor = connection.send(follow) }
                     // Nothing comes back for it: give the write a moment to leave, then we're done.
-                    if !expectsReply { queue.asyncAfter(deadline: .now() + 0.05) { done.signal() } }
+                    else if !expectsReply { queue.asyncAfter(deadline: .now() + 0.05) { done.signal() } }
                 } else {
                     done.signal()
                 }

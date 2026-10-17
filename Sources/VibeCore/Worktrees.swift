@@ -221,7 +221,21 @@ public enum Worktrees {
         guard Git.run(["merge-base", "--is-ancestor", branch, self.branch(slug)], in: root).ok else {
             return .refused("\(branch) isn't on \(self.branch(slug)).")
         }
-        guard Git.run(["merge-base", "--is-ancestor", main, branch], in: root).ok else {
+        // Read once, before the checks: the update below is against this head and no later one.
+        let current = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(main)"], in: root).output
+        return fastForward(root: root, base: main, to: Git.run(["rev-parse", branch], in: root).output, from: current)
+    }
+
+    /// Fast-forwards `base` from `expected` (its head as the caller last saw it) to `commit`. Refused when the
+    /// branch isn't at `expected` any more (something else moved it, or another merge landed first), when `commit`
+    /// isn't on top of it, or when its checkout has uncommitted changes or is another worktree.
+    public static func fastForward(root: String, base main: String, to commit: String, from expected: String) -> Merge {
+        guard !["HEAD", ""].contains(main) else { return .refused("The repository has no main branch checked out.") }
+        let current = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(main)"], in: root).output
+        guard !expected.isEmpty, current == expected else {
+            return .refused("\(main) is at \(current.prefix(8)), not at \(expected.prefix(8)) where it was; it moved meanwhile.")
+        }
+        guard Git.run(["merge-base", "--is-ancestor", expected, commit], in: root).ok else {
             return .refused("The branch isn't on top of \(main); rebase and test it first.")
         }
         let resolvedRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
@@ -230,16 +244,70 @@ public enum Worktrees {
             guard Git.run(["status", "--porcelain", "--untracked-files=no"], in: root).output.isEmpty else {
                 return .refused("The main checkout has uncommitted changes; commit or stash them first.")
             }
-            let merge = Git.run(["merge", "--ff-only", "-q", branch], in: root)
-            return merge.ok ? .merged : .refused(merge.error)
+            let merge = Git.run(["merge", "--ff-only", "-q", commit], in: root)
+            guard merge.ok else { return .refused(merge.error) }
+            let landed = Git.run(["rev-parse", "refs/heads/\(main)"], in: root).output
+            return landed == commit ? .merged : .refused("\(main) ended at \(landed.prefix(8)), not \(commit.prefix(8)); it moved during the merge.")
         case .some(let place):
             return .refused("\(main) is checked out in \(place); merge there.")
         case .none:
-            let target = Git.run(["rev-parse", branch], in: root).output
-            let current = Git.run(["rev-parse", main], in: root).output
-            let update = Git.run(["update-ref", "refs/heads/\(main)", target, current], in: root)
+            // Only from the head that was checked: a merge that landed in between makes this fail, not vanish.
+            let update = Git.run(["update-ref", "refs/heads/\(main)", commit, expected], in: root)
             return update.ok ? .merged : .refused(update.error)
         }
+    }
+
+    /// Rebases `commit` (the audited one) onto `base` and runs the setup and test commands on the result, in a
+    /// worktree of its own at `scratch`, detached, that no agent works in: what's tested is that commit and nothing
+    /// a worker commits or edits meanwhile. The worktree is removed afterwards.
+    public static func rebaseAndTest(root: String, commit: String, onto base: String, setup: String? = nil, test: String?,
+                                     scratch: URL, timeout: TimeInterval = 1200) -> Check {
+        let path = scratch.path
+        if FileManager.default.fileExists(atPath: path) {
+            Git.run(["worktree", "remove", "--force", path], in: root)
+            try? FileManager.default.removeItem(atPath: path)
+            Git.run(["worktree", "prune"], in: root)
+        }
+        try? FileManager.default.createDirectory(at: scratch.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        let added = Git.run(["worktree", "add", "--detach", "-q", path, commit], in: root)
+        guard added.ok else { return .error(added.error.isEmpty ? "Couldn't set up a worktree to test \(commit.prefix(8)) in." : added.error) }
+        defer {
+            Git.run(["worktree", "remove", "--force", path], in: root)
+            try? FileManager.default.removeItem(atPath: path)
+            Git.run(["worktree", "prune"], in: root)
+        }
+        guard Git.run(["rebase", "-q", base], in: path).ok else {
+            Git.run(["rebase", "--abort"], in: path)
+            return .conflict
+        }
+        let tested = Git.run(["rev-parse", "HEAD"], in: path).output
+        for (name, command) in [("init_command", setup), ("test command", test)] {
+            guard let command, !command.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+            let run = Shell.run(executable: "/bin/zsh", args: ["-lc", command], in: path, timeout: timeout)
+            guard run.ok else {
+                let output = (run.output + "\n" + run.error).trimmingCharacters(in: .whitespacesAndNewlines)
+                return .failed((name == "init_command" ? "init_command failed:\n" : "") + String(output.suffix(4000)))
+            }
+        }
+        return .passed(tested)
+    }
+
+    /// Files Claude Code reads as settings or instructions (project settings and hooks under `.claude/`, `.mcp.json`,
+    /// `CLAUDE.md`) that the task's branch changes from `base`, or that sit changed or new in its worktree, ignored
+    /// ones included: a session started there runs what the worker put in them.
+    public static func agentConfigChanges(root: String, slug: String, base: String) -> [String] {
+        let committed = Git.run(["diff", "--name-only", "-z", "\(base)...\(branch(slug))"], in: root).output
+            .split(separator: "\0").map(String.init)
+        // Status lines are "XY path" (a rename's old path follows on its own): both readings are checked.
+        let local = Git.run(["status", "--porcelain", "-z", "--untracked-files=all", "--ignored"], in: path(root: root, slug: slug)).output
+            .split(separator: "\0").flatMap { [String($0), String($0.dropFirst(3))] }
+        return Array(Set((committed + local).filter(isAgentConfig))).sorted()
+    }
+
+    static func isAgentConfig(_ path: String) -> Bool {
+        let parts = path.split(separator: "/").map(String.init)
+        return parts.contains(".claude") || [".mcp.json", "CLAUDE.md", "CLAUDE.local.md"].contains(parts.last ?? "")
     }
 
     /// Removes a worker's worktree and its branch. Without `force` it refuses when either holds work that isn't
