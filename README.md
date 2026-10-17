@@ -76,9 +76,11 @@ answer reaches it at its next step), and you can message it any time the same wa
 it tells the lead when a worker waits for input, stops without reporting, or dies. The Team tab in the inspector
 has each task's contract and verdict, your answers, the results, and the lead's files. All of it lives in the
 repository, git-ignored: `.vibeswitcher/board.json` (tasks, questions, updates), `workflow.md` (limits, test and
-setup commands, the verifier's model; edit it), `decisions.md` and `progress.md`. The lead and verifiers can't
-edit files or write to git; workers can't push, merge, rebase or touch main. Their tools come from
-`vibeswitcher-mcp`, a tool server bundled with the app.
+setup commands, the verifier's model; edit it), `decisions.md` and `progress.md`. Guard rails, not a sandbox:
+the lead and verifiers are denied file edits and git writes, workers pushing, merging, rebasing and switching to
+main (Claude Code permission rules); main only moves through the lead's merge, which fast-forwards to exactly the
+commit the verifier passed and the tests ran on. Their tools come from `vibeswitcher-mcp`, a tool server bundled
+with the app.
 
 New sessions (⊕, ⌘N) start **in the window** by default: VibeSwitcher runs them itself, in a small background
 process (`vibeswitcher-host`) that keeps them going when VibeSwitcher quits, crashes or updates; reopening the

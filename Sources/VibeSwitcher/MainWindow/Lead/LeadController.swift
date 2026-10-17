@@ -19,6 +19,10 @@ final class LeadController: ObservableObject {
     private var seenQuestions: Set<String> = []
     /// Witness events already told, so each is told once.
     private var told: Set<String> = []
+    /// Terminals being flushed, and when a message was last typed into each (its hooks need a moment to say it's
+    /// working again; until then another flush would type a second prompt).
+    private var flushing: Set<String> = []
+    private var typedAt: [String: Date] = [:]
 
     init(host: HostClient, store: SessionStore, claudeCommand: @escaping (String) -> String) {
         self.host = host
@@ -117,20 +121,33 @@ final class LeadController: ObservableObject {
         refresh()
     }
 
+    /// Steered in while the lead works; while it's idle the message waits in its inbox and `flush` types it as soon
+    /// as its input box is empty (never into your draft; a draft you send takes it along).
     private func deliver(_ text: String, from sender: SteerMessage.Sender, to board: LeadBoard) {
         guard let pid = board.leadPid, let tty = board.leadTTY else { return }
-        let session = board.leadSession.flatMap(UUID.init(uuidString:))
-        try? LeadDelivery.deliver(text, from: sender, to: LeadAgent(pid: pid, tty: tty, session: board.leadSession),
-                                  inputIsEmpty: session.map { id in {
-                                      if case .screenText(_, let screen)? = try? HostCall.request(.screen(id: id), timeout: 2) {
-                                          return TerminalInput.isEmpty(screen)
-                                      }
-                                      return false
-                                  } },
-                                  typeInto: session.map { id in { [weak self] typed in
-                                      self?.type(typed, into: id)
-                                      return true
-                                  } })
+        let agent = LeadAgent(pid: pid, tty: tty, session: board.leadSession)
+        try? LeadDelivery.deliver(text, from: sender, to: agent, inputIsEmpty: nil, typeInto: nil)
+        flush(agent)
+    }
+
+    /// Types what waits for an idle agent in a window session, once its input box is empty.
+    private func flush(_ agent: LeadAgent) {
+        guard let id = agent.session.flatMap(UUID.init(uuidString:)),
+              SteerInbox.pending(tty: agent.tty).contains(where: { $0.agentPid == agent.pid }) else { return }
+        let state = HookState.load(from: VibePaths.stateFile(tty: agent.tty))
+        guard LeadDelivery.way(for: state) == .type, !flushing.contains(agent.tty),
+              Date().timeIntervalSince(typedAt[agent.tty] ?? .distantPast) > 10 else { return }
+        flushing.insert(agent.tty)
+        host.screen(id) { [weak self] screen in
+            guard let self else { return }
+            self.flushing.remove(agent.tty)
+            guard let screen, TerminalInput.isEmpty(screen) else { return }
+            LeadDelivery.flush(agent, state: state, inputIsEmpty: { true }, typeInto: { text in
+                self.typedAt[agent.tty] = Date()
+                self.type(text, into: id)
+                return true
+            })
+        }
     }
 
     /// Answers Claude's trust question about `folder` in the new session, carefully (see `TrustPrompt.answer`).
@@ -171,25 +188,21 @@ final class LeadController: ObservableObject {
         }
     }
 
-    /// Tells the lead what its workers can't: that one is waiting for input, stopped without reporting, or died.
+    /// Tells the lead what its team can't (see `LeadWitness`), and types waiting messages into idle team members.
     private func witness(root: String, board: LeadBoard) {
         let hosted = Dictionary(uniqueKeysWithValues: host.sessions.map { ($0.id.uuidString, $0) })
-        for task in board.tasks where task.status == .running {
-            guard let worker = task.worker else { continue }
-            let session = store.sessions.first { $0.hostID?.uuidString == worker }
-            var event: (key: String, text: String)?
-            if let info = hosted[worker], !info.isLive {
-                event = ("ended", "The worker on \(task.slug) ended (exit \(info.exit?.status ?? 0)) without reporting. Its commits are on agent/\(task.slug); read_session to see why, then start_worker again or re-plan.")
-            } else if let session, session.status == .needsInput {
-                event = ("input-\(Int(session.statusSince.timeIntervalSince1970))",
-                         "The worker on \(task.slug) is waiting for input: \(session.detail ?? "a question or a permission"). Answer it with message, or tell the user if it's theirs to decide.")
-            } else if let session, [.done, .idle].contains(session.status), Date().timeIntervalSince(session.statusSince) > 90 {
-                event = ("stopped-\(Int(session.statusSince.timeIntervalSince1970))",
-                         "The worker on \(task.slug) stopped without calling report. read_session to see where it is, then message it.")
-            }
-            guard let event, told.insert("\(root)|\(task.id)|\(event.key)").inserted else { continue }
-            deliver(event.text, from: .system("witness for \(task.slug)"), to: board)
+        var seen: [String: LeadWitness.Seen] = [:]
+        for id in board.tasks.flatMap({ [$0.worker, $0.verifier] }).compactMap({ $0 }) {
+            guard let info = hosted[id] else { continue }
+            let session = store.sessions.first { $0.hostID?.uuidString == id }
+            seen[id] = LeadWitness.Seen(live: info.isLive, exit: info.exit?.status, status: session?.status,
+                                        since: session?.statusSince, detail: session?.detail)
+            if info.isLive, let session { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
         }
+        for event in LeadWitness.events(board: board, seen: seen) where told.insert("\(root)|\(event.key)").inserted {
+            deliver(event.text, from: .system("witness"), to: board)
+        }
+        if let pid = board.leadPid, let tty = board.leadTTY { flush(LeadAgent(pid: pid, tty: tty, session: board.leadSession)) }
     }
 
     private func alert(_ title: String, _ text: String) {

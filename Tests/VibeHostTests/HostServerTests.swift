@@ -238,4 +238,17 @@ struct HostCallTests {
             try HostCall.request(.input(id: session.id, bytes: Data(), reply: false), socket: host.socket, timeout: 0.3)
         }
     }
+
+    @Test func aOneShotSenderDoesntTakeTheSessionFromTheApp() throws {
+        let host = try TestHost()
+        let app = try TestClient(host)
+        let session = try app.spawn("cat")
+        app.attach(session.id)
+        try HostCall.send(.input(id: session.id, bytes: Data("typed\n".utf8), reply: false), socket: host.socket)
+        #expect(eventually { app.text(session.id).contains("typed") })
+        // The app's terminal still answers the program (its replies go through only from the primary client).
+        app.send(.input(id: session.id, bytes: Data("answer\n".utf8), reply: true))
+        #expect(eventually { app.text(session.id).contains("answer") })
+    }
 }
+

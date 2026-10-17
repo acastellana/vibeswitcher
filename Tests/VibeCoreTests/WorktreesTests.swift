@@ -38,8 +38,8 @@ struct WorktreesTests {
         // main moved meanwhile: the branch is rebased onto it first.
         try commit("c.txt", "sea\n", in: root)
         let checked = Worktrees.rebaseAndTest(root: root, slug: "add-b", test: "test -f b.txt && test -f c.txt")
-        #expect(checked == .passed)
-        #expect(try Worktrees.merge(root: root, slug: "add-b") == .merged)
+        guard case .passed(let tested) = checked else { Issue.record("\(checked)"); return }
+        #expect(try Worktrees.merge(root: root, slug: "add-b", commit: tested) == .merged)
         #expect(FileManager.default.fileExists(atPath: root + "/b.txt"))
         try Worktrees.remove(root: root, slug: "add-b")
         #expect(!FileManager.default.fileExists(atPath: worktree))
@@ -72,5 +72,66 @@ struct WorktreesTests {
         try commit("z.txt", "z\n", in: worktree)
         try commit("other.txt", "o\n", in: root)
         if case .refused = try Worktrees.merge(root: root, slug: "z") {} else { Issue.record("merged a branch that isn't on top of main") }
+    }
+
+    @Test func onlyTheTestedCommitReachesMain() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "t")
+        try commit("t.txt", "t\n", in: worktree)
+        guard case .passed(let tested) = Worktrees.rebaseAndTest(root: root, slug: "t", test: "true") else { Issue.record("not passed"); return }
+        // The worker commits again while the tests run: that commit was never tested.
+        try commit("late.txt", "late\n", in: worktree)
+        #expect(try Worktrees.merge(root: root, slug: "t", commit: tested) == .merged)
+        #expect(Git.run(["rev-parse", "main"], in: root).output == tested)
+        #expect(!FileManager.default.fileExists(atPath: root + "/late.txt"))
+    }
+
+    @Test func uncommittedWorkIsNotTakenForAConflict() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "d")
+        try commit("d.txt", "d\n", in: worktree)
+        try "editing\n".write(toFile: worktree + "/d.txt", atomically: true, encoding: .utf8)
+        guard case .error(let text) = Worktrees.rebaseAndTest(root: root, slug: "d", test: "true") else { Issue.record("not an error"); return }
+        #expect(text.contains("uncommitted"))
+        #expect(try String(contentsOfFile: worktree + "/d.txt", encoding: .utf8) == "editing\n")
+    }
+
+    @Test func aStrayFolderIsNotTakenForTheWorktree() throws {
+        let root = try repo()
+        let path = Worktrees.path(root: root, slug: "s")
+        try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: true)
+        #expect(!Worktrees.isWorktree(root: root, slug: "s"))
+        // An empty leftover is replaced by a real worktree; one with files in it is left alone.
+        #expect(try Worktrees.open(root: root, slug: "s") == path)
+        #expect(Worktrees.isWorktree(root: root, slug: "s"))
+        let other = Worktrees.path(root: root, slug: "o")
+        try FileManager.default.createDirectory(atPath: other, withIntermediateDirectories: true)
+        try "mine\n".write(toFile: other + "/notes.txt", atomically: true, encoding: .utf8)
+        #expect(throws: Worktrees.Failure.self) { try Worktrees.open(root: root, slug: "o") }
+        #expect(FileManager.default.fileExists(atPath: other + "/notes.txt"))
+    }
+
+    @Test func aBranchLeftWithoutItsWorktreeIsCheckedOutAgain() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "b")
+        try commit("b.txt", "b\n", in: worktree)
+        _ = Git.run(["worktree", "remove", worktree], in: root)
+        #expect(try Worktrees.open(root: root, slug: "b") == worktree)
+        #expect(FileManager.default.fileExists(atPath: worktree + "/b.txt"))
+    }
+}
+
+struct ShellTests {
+    @Test func aTimedOutCommandTakesItsChildrenWithIt() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("shell-\(UUID().uuidString)").path
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        _ = Shell.run(executable: "/bin/sh", args: ["-c", "sleep 30 & echo $! > child; wait"], in: dir, timeout: 1)
+        let child = Int32((try String(contentsOfFile: dir + "/child", encoding: .utf8)).trimmingCharacters(in: .whitespacesAndNewlines))!
+        var gone = false
+        for _ in 0..<50 where !gone {
+            gone = kill(child, 0) != 0
+            if !gone { usleep(100_000) }
+        }
+        #expect(gone)
     }
 }

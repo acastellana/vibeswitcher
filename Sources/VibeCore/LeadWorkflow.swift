@@ -82,8 +82,8 @@ public enum LeadPrompts {
         5. When a worker says it's done, run audit(task). A worker's own report is a claim, not evidence: only the \
         verifier's report counts, and only it moves a task to done.
         6. If the audit is complete and clean: merge(task), then post_update with what changed and how it was checked \
-        (screenshots when there's UI), then cleanup(task). If not: tell the worker exactly what failed (message with \
-        steer) or start a fresh worker with a sharper contract. After 3 failed attempts on one task, re-plan it or ask \
+        (screenshots when there's UI), then cleanup(task). If not: tell the worker exactly what failed (message) \
+        or start a fresh worker with a sharper contract. After 3 failed attempts on one task, re-plan it or ask \
         the user.
         7. Keep the board, the progress log and decisions (record_decision) current. They are your memory: when your \
         context fills up, a new lead continues from them.

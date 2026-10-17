@@ -170,7 +170,9 @@ public final class HostServer {
             guard let session = sessions[id] else { return }
             if isReply {
                 guard primary[id] == key else { return }
-            } else {
+            } else if client.attached.contains(id) {
+                // Typing makes a watching client the one whose size and replies count; a client that only sends
+                // keys (the lead's tool server, one connection per call) doesn't take the session over.
                 primary[id] = key
             }
             session.write(bytes)

@@ -5,7 +5,7 @@ import Testing
 final class FakeRuntime: LeadRuntime {
     var spawned: [(id: String, cwd: String, command: String, label: String)] = []
     var killed: [String] = []
-    var typed: [(String, String)] = []
+    var delivery = LeadDelivery.Delivered.steered
     var steered: [(target: String, sender: SteerMessage.Sender, text: String)] = []
     var transcripts: [String: String] = [:]
     var me = LeadAgent(pid: 4242, tty: "ttys040", session: "lead-session")
@@ -18,14 +18,14 @@ final class FakeRuntime: LeadRuntime {
         return id
     }
     func kill(_ session: String) { killed.append(session) }
-    func type(_ session: String, text: String) { typed.append((session, text)) }
-    func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String) throws {
+    func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String) throws -> LeadDelivery.Delivered {
         let name: String
         switch target {
         case .session(let id): name = id
         case .agent(let agent): name = "agent:\(agent.pid)"
         }
         steered.append((name, sender, text))
+        return delivery
     }
     func sessions() -> [LeadSessionInfo] {
         spawned.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id), status: "working", tty: nil) }
@@ -155,4 +155,106 @@ struct LeadToolsetTests {
         let status = call(lead, "status").text
         #expect(status.contains("one") && status.contains("running") && status.contains("Which?"))
     }
+
+    /// A task taken to a passing audit, with its worker's worktree.
+    func audited(_ lead: LeadToolset, _ runtime: FakeRuntime, root: String, slug: String = "add-b") throws -> String {
+        _ = call(lead, "add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]])
+        _ = call(lead, "start_worker", ["task": slug])
+        let worktree = Worktrees.path(root: root, slug: slug)
+        try "bee\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "b.txt"], in: worktree)
+        Git.run(["commit", "-q", "-m", "add b"], in: worktree)
+        _ = call(LeadToolset(role: .worker, root: root, task: slug, runtime: runtime), "report", ["status": "done", "summary": "added"])
+        _ = call(lead, "audit", ["task": slug])
+        _ = call(LeadToolset(role: .verifier, root: root, task: slug, runtime: runtime), "submit_audit",
+                 ["completion": "complete", "integrity": "clean", "summary": "checked"])
+        return worktree
+    }
+
+    @Test func commitsTheVerifierDidntSeeAreNotMerged() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: runtime)
+        let worktree = try audited(lead, runtime, root: root)
+        #expect(BoardStore(root: root).load().task("add-b")?.evidence?.commit == Git.run(["rev-parse", "agent/add-b"], in: root).output)
+        // After the audit the worker commits once more.
+        try "unchecked\n".write(toFile: worktree + "/c.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "c.txt"], in: worktree)
+        Git.run(["commit", "-q", "-m", "late"], in: worktree)
+        let merged = call(lead, "merge", ["task": "add-b"])
+        #expect(merged.isError)
+        #expect(merged.text.contains("audit"))
+        #expect(!FileManager.default.fileExists(atPath: root + "/c.txt"))
+        #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
+    }
+
+    @Test func aNewReportNeedsANewAudit() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: runtime)
+        _ = try audited(lead, runtime, root: root)
+        _ = call(LeadToolset(role: .worker, root: root, task: "add-b", runtime: runtime), "report", ["status": "done", "summary": "one more fix"])
+        #expect(BoardStore(root: root).load().task("add-b")?.evidence == nil)
+        #expect(call(lead, "merge", ["task": "add-b"]).isError)
+    }
+
+    @Test func workersAndVerifiersActOnlyOnTheirOwnTask() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: runtime)
+        for title in ["One", "Two"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
+        for slug in ["one", "two"] { _ = call(lead, "start_worker", ["task": slug]) }
+        _ = call(LeadToolset(role: .worker, root: root, task: "one", runtime: runtime), "report", ["task": "two", "status": "blocked", "summary": "x"])
+        _ = call(LeadToolset(role: .verifier, root: root, task: "one", runtime: runtime), "submit_audit",
+                 ["task": "two", "completion": "complete", "integrity": "clean", "summary": "x"])
+        let board = BoardStore(root: root).load()
+        #expect(board.task("two")?.status == .running)
+        #expect(board.task("two")?.evidence == nil)
+        #expect(board.task("one")?.evidence != nil)
+    }
+
+    @Test func aSecondWorkerIsNotStartedOverALiveOne() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: runtime)
+        _ = call(lead, "add_task", ["title": "Fix", "goal": "g", "acceptance": ["a"]])
+        _ = call(lead, "start_worker", ["task": "fix"])
+        _ = call(lead, "update_task", ["task": "fix", "status": "failed"])
+        let again = call(lead, "start_worker", ["task": "fix"])
+        #expect(again.isError)
+        #expect(runtime.spawned.count == 1)
+        _ = call(lead, "stop_worker", ["task": "fix"])
+        #expect(!call(lead, "start_worker", ["task": "fix"]).isError)
+        #expect(BoardStore(root: root).load().task("fix")?.worker == "session-2")
+    }
+
+    @Test func messagesSayHowTheyWereDelivered() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: runtime)
+        _ = call(lead, "add_task", ["title": "One", "goal": "g", "acceptance": ["a"]])
+        _ = call(lead, "start_worker", ["task": "one"])
+        runtime.delivery = .queued
+        let queued = call(lead, "message", ["task": "one", "text": "1. Fix the test"])
+        #expect(!queued.isError)
+        #expect(queued.text.contains("waits"))
+        runtime.delivery = .typed
+        #expect(call(lead, "message", ["task": "one", "text": "go on"]).text.contains("prompt"))
+        #expect(runtime.steered.count == 2)
+    }
+
+    @Test func oneMergeOfATaskAtATime() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = LeadToolset(role: .lead, root: root, task: nil, runtime: runtime)
+        _ = try audited(lead, runtime, root: root)
+        let held = FileLock.attempt(root + "/.vibeswitcher/run/merge-add-b.lock")
+        #expect(held != nil)
+        let merged = call(lead, "merge", ["task": "add-b"])
+        #expect(merged.isError)
+        #expect(merged.text.contains("already"))
+        held?.release()
+        #expect(!call(lead, "merge", ["task": "add-b"]).isError)
+    }
 }
+

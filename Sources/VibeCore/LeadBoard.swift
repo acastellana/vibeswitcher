@@ -27,11 +27,14 @@ public struct LeadEvidence: Codable, Equatable, Sendable {
     public var integrity: Integrity
     public var summary: String
     public var at: Double
+    /// The branch's commit the verifier looked at: only that commit may be merged on this verdict.
+    public var commit: String?
 
-    public init(completion: Completion, integrity: Integrity, summary: String, at: Double = Date().timeIntervalSince1970) {
+    public init(completion: Completion, integrity: Integrity, summary: String, commit: String? = nil, at: Double = Date().timeIntervalSince1970) {
         self.completion = completion
         self.integrity = integrity
         self.summary = summary
+        self.commit = commit
         self.at = at
     }
 
@@ -127,6 +130,38 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     public func taskIndex(_ id: String) -> Int? { tasks.firstIndex { $0.id == id || $0.slug == id } }
 }
 
+public struct BoardError: Error, CustomStringConvertible {
+    public var text: String
+    public var description: String { text }
+}
+
+/// An exclusive lock on a file, across processes, taken only if free.
+public final class FileLock {
+    private var fd: Int32
+
+    private init(fd: Int32) { self.fd = fd }
+
+    public static func attempt(_ path: String) -> FileLock? {
+        try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        let fd = open(path, O_CREAT | O_RDWR, 0o600)
+        guard fd >= 0 else { return nil }
+        guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
+            close(fd)
+            return nil
+        }
+        return FileLock(fd: fd)
+    }
+
+    public func release() {
+        guard fd >= 0 else { return }
+        flock(fd, LOCK_UN)
+        close(fd)
+        fd = -1
+    }
+
+    deinit { release() }
+}
+
 /// The board on disk: `<repo>/.vibeswitcher/board.json`, with the progress log and decisions next to it.
 public final class BoardStore: @unchecked Sendable {
     public let root: String
@@ -136,10 +171,18 @@ public final class BoardStore: @unchecked Sendable {
 
     public init(root: String) { self.root = root }
 
-    public func load() -> LeadBoard {
-        guard let data = FileManager.default.contents(atPath: file),
-              let board = try? JSONDecoder().decode(LeadBoard.self, from: data) else { return LeadBoard() }
-        return board
+    /// The board, or an empty one when there's none or it can't be read (for showing it).
+    public func load() -> LeadBoard { (try? read()) ?? LeadBoard() }
+
+    /// The board; throws when the file is there but doesn't read (a hand edit, a newer version), so nothing
+    /// writes an empty board over it.
+    public func read() throws -> LeadBoard {
+        guard let data = FileManager.default.contents(atPath: file) else { return LeadBoard() }
+        do {
+            return try JSONDecoder().decode(LeadBoard.self, from: data)
+        } catch {
+            throw BoardError(text: "\(file) doesn't read as a board (\(error)); fix or move it, nothing was changed.")
+        }
     }
 
     /// Reads, changes and writes the board under a lock (other processes too), atomically.
@@ -155,7 +198,7 @@ public final class BoardStore: @unchecked Sendable {
             flock(fd, LOCK_UN)
             close(fd)
         }
-        var board = load()
+        var board = try read()
         let result = try change(&board)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]

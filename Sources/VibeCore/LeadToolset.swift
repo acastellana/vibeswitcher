@@ -46,8 +46,8 @@ public protocol LeadRuntime: AnyObject {
     func claudeCommand(root: String) -> String
     func spawn(cwd: String, command: String, label: String, agent: String) throws -> String
     func kill(_ session: String)
-    func type(_ session: String, text: String)
-    func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String) throws
+    /// Delivers a message (see `LeadDelivery`): steered in, typed as its prompt, or queued.
+    func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String) throws -> LeadDelivery.Delivered
     func sessions() -> [LeadSessionInfo]
     func transcript(of session: String) -> String?
     /// The agent this tool server belongs to (its parent process).
@@ -137,9 +137,8 @@ public final class LeadToolset: MCPToolset {
                 MCPToolInfo(name: "start_worker", description: "Start a worker on a task: a fresh Claude session in its own worktree on branch agent/<slug>, given the contract.",
                             properties: ["task": task], required: ["task"]),
                 MCPToolInfo(name: "stop_worker", description: "End a task's worker (the worktree stays).", properties: ["task": task], required: ["task"]),
-                MCPToolInfo(name: "message", description: "Tell a task's worker something. steer (default): it gets it at its next step without stopping.",
-                            properties: ["task": task, "text": P(type: "string", description: "The message"),
-                                         "steer": P(type: "boolean", description: "Deliver at its next step (true) or type it as its next prompt (false)")],
+                MCPToolInfo(name: "message", description: "Tell a task's worker something: while it works it gets it at its next step without stopping; while it's idle it's typed in as its next prompt.",
+                            properties: ["task": task, "text": P(type: "string", description: "The message")],
                             required: ["task", "text"]),
                 MCPToolInfo(name: "read_session", description: "A worker's or verifier's conversation, condensed (prompts, replies, tool runs, failures).",
                             properties: ["task": task, "who": P(type: "string", description: "worker (default) or verifier", options: ["worker", "verifier"])],
@@ -202,10 +201,12 @@ public final class LeadToolset: MCPToolset {
     private func fail(_ text: String) -> MCPToolResult { MCPToolResult(text: text, isError: true) }
 
     private func taskSlug(_ arguments: [String: Any]) throws -> String {
-        guard let task = (arguments["task"] as? String) ?? taskID, store.load().task(task) != nil else {
+        // A worker or verifier acts on its own task only, whatever it passes.
+        let wanted = role == .lead ? arguments["task"] as? String : taskID
+        guard let wanted, let task = try store.read().task(wanted) else {
             throw Problem(text: "No such task on the board. Use status to see the tasks.")
         }
-        return store.load().task(task)!.slug
+        return task.slug
     }
 
     private func strings(_ value: Any?) -> [String] {
@@ -249,30 +250,34 @@ public final class LeadToolset: MCPToolset {
     }
 
     private func startWorker(_ slug: String) throws -> MCPToolResult {
-        let board = store.load()
-        guard var task = board.task(slug) else { throw Problem(text: "No task \(slug).") }
+        let board = try store.read()
+        guard let task = board.task(slug) else { throw Problem(text: "No task \(slug).") }
         guard [.planned, .failed, .blocked].contains(task.status) else {
             throw Problem(text: "\(slug) is \(task.status.rawValue); start a worker only on a planned, failed or blocked task.")
+        }
+        // One worker per worktree: two sessions editing the same files would undo each other.
+        if let worker = task.worker, runtime.sessions().contains(where: { $0.id == worker && $0.live }) {
+            throw Problem(text: "\(slug)'s worker is still running. Send it what to do with message, or stop_worker first.")
         }
         let running = board.tasks.filter { $0.status == .running }.count
         let limit = workflow.maxWorkers
         guard running < limit else {
             throw Problem(text: "\(running) workers already run (max_workers is \(limit) in workflow.md). Wait for one to finish; you'll get a message.")
         }
-        let worktree = FileManager.default.fileExists(atPath: Worktrees.path(root: root, slug: slug))
-            ? Worktrees.path(root: root, slug: slug) : try Worktrees.create(root: root, slug: slug)
+        let worktree = try Worktrees.open(root: root, slug: slug)
         let launch = try LeadLaunch.prepare(role: .worker, root: root, task: slug, base: runtime.claudeCommand(root: root),
                                             prompt: LeadPrompts.worker(task: task, root: root, workflow: workflow),
                                             start: "Start on your task (it's in your instructions). When done, call report.",
                                             server: runtime.server, name: "worker-\(slug)")
         let session = try runtime.spawn(cwd: worktree, command: launch.command, label: "Worker: \(task.title)", agent: "claude")
-        task.status = .running
-        task.worker = session
-        task.branch = Worktrees.branch(slug)
-        task.worktree = worktree
-        task.evidence = nil
-        let updated = task
-        try store.update { board in if let index = board.taskIndex(slug) { board.tasks[index] = updated } }
+        try store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            board.tasks[index].status = .running
+            board.tasks[index].worker = session
+            board.tasks[index].branch = Worktrees.branch(slug)
+            board.tasks[index].worktree = worktree
+            board.tasks[index].evidence = nil
+        }
         try? store.appendProgress("Started a worker on \(slug)")
         return MCPToolResult(text: "Worker started on \(slug) in \(worktree) (branch agent/\(slug)). You'll get a message when it reports, needs input or stalls.")
     }
@@ -289,12 +294,12 @@ public final class LeadToolset: MCPToolset {
     private func message(_ slug: String, _ arguments: [String: Any]) throws -> MCPToolResult {
         guard let text = arguments["text"] as? String, !text.isEmpty else { throw Problem(text: "Nothing to send.") }
         guard let worker = store.load().task(slug)?.worker else { throw Problem(text: "\(slug) has no worker.") }
-        if arguments["steer"] as? Bool ?? true {
-            try runtime.steer(.session(worker), from: .lead("lead of \(project)"), text: text)
-            return MCPToolResult(text: "Sent to \(slug)'s worker; it gets it at its next step.")
+        switch try runtime.steer(.session(worker), from: .lead("lead of \(project)"), text: text) {
+        case .steered: return MCPToolResult(text: "Sent to \(slug)'s worker; it gets it at its next step.")
+        case .typed: return MCPToolResult(text: "Typed into \(slug)'s idle worker as its next prompt.")
+        case .queued:
+            return MCPToolResult(text: "\(slug)'s worker is idle but its input box isn't free (a question, a permission prompt or a draft is on screen), so the message waits; it's typed in as soon as the box is empty. read_session to see what it's waiting on.")
         }
-        runtime.type(worker, text: text)
-        return MCPToolResult(text: "Typed into \(slug)'s worker as its next prompt.")
     }
 
     private func readSession(_ slug: String, who: String) throws -> MCPToolResult {
@@ -329,11 +334,21 @@ public final class LeadToolset: MCPToolset {
 
     private func merge(_ slug: String) throws -> MCPToolResult {
         guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
-        guard task.evidence?.passes == true else {
+        guard let evidence = task.evidence, evidence.passes else {
             throw Problem(text: "\(slug) has no passing audit. Run audit and wait for a complete, clean verdict.")
         }
+        // The verdict covers the commit the verifier saw; anything committed since hasn't been checked.
+        let head = Git.run(["rev-parse", Worktrees.branch(slug)], in: root).output
+        guard let audited = evidence.commit, audited == head else {
+            throw Problem(text: "agent/\(slug) has commits the verifier didn't see (audited \(evidence.commit?.prefix(8) ?? "nothing"), now \(head.prefix(8))). Run audit again.")
+        }
+        guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/merge-\(slug).lock")) else {
+            throw Problem(text: "A merge of \(slug) is already running; wait for its result.")
+        }
+        defer { lock.release() }
+        let tested: String
         switch Worktrees.rebaseAndTest(root: root, slug: slug, test: workflow.testCommand) {
-        case .passed: break
+        case .passed(let commit): tested = commit
         case .conflict:
             try setStatus(slug, .failed)
             throw Problem(text: "\(slug) conflicts with main. Message its worker to rebase onto main and resolve, then audit again.")
@@ -343,7 +358,7 @@ public final class LeadToolset: MCPToolset {
         case .error(let text):
             throw Problem(text: text)
         }
-        switch try Worktrees.merge(root: root, slug: slug) {
+        switch try Worktrees.merge(root: root, slug: slug, commit: tested) {
         case .merged:
             try setStatus(slug, .done)
             try? store.appendProgress("Merged \(slug): \(task.title)")
@@ -400,14 +415,19 @@ public final class LeadToolset: MCPToolset {
     private func tellLead(_ text: String, about: String) throws {
         let board = store.load()
         guard let pid = board.leadPid, let tty = board.leadTTY else { throw Problem(text: "There's no lead to tell.") }
-        try runtime.steer(.agent(LeadAgent(pid: pid, tty: tty, session: board.leadSession)), from: .system(about), text: text)
+        _ = try runtime.steer(.agent(LeadAgent(pid: pid, tty: tty, session: board.leadSession)), from: .system(about), text: text)
     }
 
     private func report(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
         let summary = arguments["summary"] as? String ?? ""
         let done = (arguments["status"] as? String) != "blocked"
-        try setStatus(slug, done ? .review : .blocked)
+        // A new report means new work: an earlier verdict doesn't cover it.
+        try store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            board.tasks[index].status = done ? .review : .blocked
+            board.tasks[index].evidence = nil
+        }
         let text = done
             ? "The worker on \(slug) says it's done: \(summary)\nRun audit(\(slug)); only the verifier's report counts."
             : "The worker on \(slug) is blocked: \(summary)"
@@ -428,7 +448,9 @@ public final class LeadToolset: MCPToolset {
               let integrity = (arguments["integrity"] as? String).flatMap(LeadEvidence.Integrity.init(rawValue:)) else {
             throw Problem(text: "completion must be complete, incomplete or blocked; integrity clean, suspect or violation.")
         }
-        let evidence = LeadEvidence(completion: completion, integrity: integrity, summary: arguments["summary"] as? String ?? "")
+        let commit = Git.run(["rev-parse", Worktrees.branch(slug)], in: root)
+        let evidence = LeadEvidence(completion: completion, integrity: integrity, summary: arguments["summary"] as? String ?? "",
+                                    commit: commit.ok ? commit.output : nil)
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].evidence = evidence

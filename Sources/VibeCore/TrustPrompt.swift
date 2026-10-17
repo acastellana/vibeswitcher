@@ -32,26 +32,35 @@ extension TrustPrompt {
 
     /// Watches a new session's screen; when it asks about `folder`, moves to "Yes" and presses Enter only once the
     /// screen shows the cursor there (keys sent before the menu takes input are lost, and Enter on the default
-    /// "No, exit" would end the session). Never presses Enter otherwise. Returns whether it answered.
+    /// "No, exit" would end the session). Never presses Enter otherwise. After each key it decides nothing until
+    /// the screen has changed (a read can lag behind the keys); a screen unchanged for `settle` seconds means the key
+    /// was lost. Returns whether it answered.
     @discardableResult
-    public static func answer(folder: String, timeout: TimeInterval = 15, pause: TimeInterval = 0.5,
+    public static func answer(folder: String, timeout: TimeInterval = 15, pause: TimeInterval = 0.5, settle: TimeInterval = 2,
                               readScreen: () -> String?, send: ([HostInput.Write]) -> Void) -> Bool {
         let down = HostInput.Write(bytes: [27, 91, 66], delay: 0)
         let start = Date()
         var asked = false
+        var lastKey: (screen: String, at: Date)?
+        func press(_ screen: String) {
+            send([down])
+            lastKey = (screen, Date())
+        }
         while Date().timeIntervalSince(start) < timeout {
             if let screen = readScreen() {
-                if asked || isAsking(screen, about: folder) {
+                if let key = lastKey, screen == key.screen, Date().timeIntervalSince(key.at) < settle {
+                    // The last key hasn't shown yet.
+                } else if asked || isAsking(screen, about: folder) {
                     if !asked {
                         asked = true
                         // Let the menu start taking keys.
                         if pause > 0 { usleep(useconds_t(pause * 1_000_000)) }
-                        send([down])
+                        press(screen)
                     } else if cursorOnYes(screen) {
                         send([HostInput.Write(bytes: [13], delay: 0)])
                         return true
                     } else if isAsking(screen, about: folder) {
-                        send([down])
+                        press(screen)
                     } else {
                         return false
                     }

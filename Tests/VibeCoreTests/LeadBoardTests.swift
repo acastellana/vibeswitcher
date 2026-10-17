@@ -62,3 +62,26 @@ struct LeadBoardTests {
         #expect(decisions.contains("Use SQLite") && decisions.contains("no server to run"))
     }
 }
+
+struct BoardSafetyTests {
+    @Test func anUnreadableBoardIsNeverOverwritten() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("board-\(UUID().uuidString)").path
+        let store = BoardStore(root: root)
+        try store.update { $0.tasks.append(LeadTask(slug: "one", title: "One", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))) }
+        let file = root + "/.vibeswitcher/board.json"
+        let edited = try String(contentsOfFile: file, encoding: .utf8).replacingOccurrences(of: "\"planned\"", with: "\"someday\"")
+        try edited.write(toFile: file, atomically: true, encoding: .utf8)
+        #expect(throws: (any Error).self) { try store.update { $0.updates = [] } }
+        #expect(try String(contentsOfFile: file, encoding: .utf8) == edited)
+    }
+
+    @Test func aHeldLockIsReported() throws {
+        let path = FileManager.default.temporaryDirectory.appendingPathComponent("lock-\(UUID().uuidString)").path
+        let held = FileLock.attempt(path)
+        #expect(held != nil)
+        #expect(FileLock.attempt(path) == nil)
+        held?.release()
+        #expect(FileLock.attempt(path) != nil)
+    }
+}
+

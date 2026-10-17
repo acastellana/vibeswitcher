@@ -30,15 +30,28 @@ public enum Shell {
         process.standardInput = FileHandle.nullDevice
         do { try process.run() } catch { return Git.Result(status: -1, output: "", error: "\(error)") }
         // Read while it runs, so a chatty program can't fill the pipe and stall.
+        // Their own threads, not the shared pool: callers block too, and many at once (parallel tests, several tool
+        // calls) could leave the readers no thread to run on.
         var output = Data(), errors = Data()
         let group = DispatchGroup()
         group.enter()
-        DispatchQueue.global().async { output = out.fileHandleForReading.readDataToEndOfFile(); group.leave() }
+        Thread.detachNewThread { output = out.fileHandleForReading.readDataToEndOfFile(); group.leave() }
         group.enter()
-        DispatchQueue.global().async { errors = err.fileHandleForReading.readDataToEndOfFile(); group.leave() }
+        Thread.detachNewThread { errors = err.fileHandleForReading.readDataToEndOfFile(); group.leave() }
         let deadline = Date().addingTimeInterval(timeout)
         while process.isRunning, Date() < deadline { usleep(20_000) }
-        if process.isRunning { process.terminate() }
+        if process.isRunning {
+            // Out of time: its children (a test runner's workers) go too, or they'd keep running in the worktree.
+            let table = ProcessTable.snapshot()
+            var family = [process.processIdentifier]
+            var index = 0
+            while index < family.count {
+                let parent = family[index]
+                family += table.values.filter { $0.ppid == parent }.map(\.pid)
+                index += 1
+            }
+            for pid in family.reversed() { kill(pid, SIGTERM) }
+        }
         process.waitUntilExit()
         group.wait()
         return Git.Result(status: process.terminationStatus,
@@ -50,7 +63,8 @@ public enum Shell {
 /// Workers' worktrees (`<repo>/.vibeswitcher/worktrees/<slug>` on `agent/<slug>`) and the merge queue's git steps.
 public enum Worktrees {
     public enum Check: Equatable, Sendable {
-        case passed
+        /// The checks passed on this commit (the branch rebased onto main).
+        case passed(String)
         case failed(String)
         /// Rebasing onto main conflicted; the rebase was undone.
         case conflict
@@ -82,38 +96,76 @@ public enum Worktrees {
         return Git.run(["rev-parse", "--abbrev-ref", "HEAD"], in: root).output
     }
 
-    /// A new worktree on a new branch from main.
+    /// A new worktree on a new branch from main (or on the task's branch, when it's still there).
     @discardableResult
     public static func create(root: String, slug: String) throws -> String {
         // Worktrees live inside the repo: keep them out of its status first.
         try BoardStore(root: root).ensureExcluded()
         let path = path(root: root, slug: slug)
-        let result = Git.run(["worktree", "add", "-q", "-b", branch(slug), path, mainBranch(root: root)], in: root)
+        let exists = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch(slug))"], in: root).ok
+        let result = Git.run(["worktree", "add", "-q"] + (exists ? [path, branch(slug)] : ["-b", branch(slug), path, mainBranch(root: root)]), in: root)
         guard result.ok else { throw Failure(description: result.error.isEmpty ? "git worktree add failed" : result.error) }
         return path
+    }
+
+    /// The folder is a worktree of this repository on the task's branch (not a leftover folder, where git would
+    /// find the main checkout instead and the worker's commits would land there).
+    public static func isWorktree(root: String, slug: String) -> Bool {
+        let path = path(root: root, slug: slug)
+        guard FileManager.default.fileExists(atPath: path + "/.git") else { return false }
+        let top = Git.run(["rev-parse", "--show-toplevel"], in: path)
+        let resolved = { (p: String) in URL(fileURLWithPath: p).resolvingSymlinksInPath().path }
+        return top.ok && resolved(top.output) == resolved(path)
+            && Git.run(["rev-parse", "--abbrev-ref", "HEAD"], in: path).output == branch(slug)
+    }
+
+    /// The task's worktree: the existing one, or a new one. An empty leftover folder is replaced; one with files
+    /// in it is never touched (they might be someone's).
+    public static func open(root: String, slug: String) throws -> String {
+        if isWorktree(root: root, slug: slug) { return path(root: root, slug: slug) }
+        let path = path(root: root, slug: slug)
+        if FileManager.default.fileExists(atPath: path) {
+            let contents = (try? FileManager.default.contentsOfDirectory(atPath: path)) ?? []
+            guard contents.isEmpty else {
+                throw Failure(description: "\(path) is there but isn't the worktree of \(branch(slug)); move it away, then start the worker again.")
+            }
+            try FileManager.default.removeItem(atPath: path)
+            Git.run(["worktree", "prune"], in: root)
+        }
+        return try create(root: root, slug: slug)
     }
 
     /// Puts the branch on top of main and runs the checks there.
     public static func rebaseAndTest(root: String, slug: String, test: String?, timeout: TimeInterval = 1200) -> Check {
         let path = path(root: root, slug: slug)
         guard FileManager.default.fileExists(atPath: path) else { return .error("No worktree for \(slug).") }
+        guard Git.run(["status", "--porcelain", "--untracked-files=no"], in: path).output.isEmpty else {
+            return .error("The worktree of \(slug) has uncommitted changes (its worker may still be working). Have it commit, or stop it, then merge again.")
+        }
         let rebase = Git.run(["rebase", mainBranch(root: root)], in: path)
         guard rebase.ok else {
             Git.run(["rebase", "--abort"], in: path)
             return .conflict
         }
-        guard let test, !test.trimmingCharacters(in: .whitespaces).isEmpty else { return .passed }
+        // What's tested is what may be merged: the commit now, not whatever the branch holds later.
+        let tested = Git.run(["rev-parse", "HEAD"], in: path).output
+        guard let test, !test.trimmingCharacters(in: .whitespaces).isEmpty else { return .passed(tested) }
         let run = Shell.run(executable: "/bin/zsh", args: ["-lc", test], in: path, timeout: timeout)
-        if run.ok { return .passed }
+        if run.ok { return .passed(tested) }
         let output = (run.output + "\n" + run.error).trimmingCharacters(in: .whitespacesAndNewlines)
         return .failed(String(output.suffix(4000)))
     }
 
-    /// Fast-forwards main to the branch. Never rewrites anything and never touches uncommitted work: a dirty main
-    /// checkout, main checked out elsewhere, or a branch not on top of main is refused with the reason.
-    public static func merge(root: String, slug: String) throws -> Merge {
+    /// Fast-forwards main to `commit` (the tested one; the branch's head when nil). Never rewrites anything and
+    /// never touches uncommitted work: a dirty main checkout, main checked out elsewhere, or a commit not on top
+    /// of main is refused with the reason.
+    public static func merge(root: String, slug: String, commit: String? = nil) throws -> Merge {
         let main = mainBranch(root: root)
-        let branch = branch(slug)
+        guard !["HEAD", ""].contains(main) else { return .refused("The repository has no main branch checked out.") }
+        let branch = commit ?? branch(slug)
+        guard Git.run(["merge-base", "--is-ancestor", branch, self.branch(slug)], in: root).ok else {
+            return .refused("\(branch) isn't on \(self.branch(slug)).")
+        }
         guard Git.run(["merge-base", "--is-ancestor", main, branch], in: root).ok else {
             return .refused("The branch isn't on top of \(main); rebase and test it first.")
         }

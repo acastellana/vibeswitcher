@@ -37,7 +37,8 @@ struct TrustCursorTests {
                        "/tmp/x\n ❯ No, exit\n   Yes, I trust this folder",      // the first down was lost
                        "/tmp/x\n   No, exit\n ❯ Yes, I trust this folder"]      // second down took
         var sent: [[UInt8]] = []
-        let answered = TrustPrompt.answer(folder: "/tmp/x", timeout: 5, pause: 0,
+        // No settling time: an unchanged screen means the key was lost.
+        let answered = TrustPrompt.answer(folder: "/tmp/x", timeout: 5, pause: 0, settle: 0,
                                           readScreen: { screens.count > 1 ? screens.removeFirst() : screens.first },
                                           send: { sent += $0.map(\.bytes) })
         #expect(answered)
@@ -51,4 +52,17 @@ struct TrustCursorTests {
         #expect(!answered)
         #expect(!sent.contains([13]))
     }
+
+    @Test func noSecondKeyBeforeTheFirstShows() {
+        // The screen lags: three reads still show the old cursor after the down was sent.
+        let no = "/tmp/x\n ❯ No, exit\n   Yes, I trust this folder"
+        var screens = [no, no, no, no, "/tmp/x\n   No, exit\n ❯ Yes, I trust this folder"]
+        var sent: [[UInt8]] = []
+        let answered = TrustPrompt.answer(folder: "/tmp/x", timeout: 5, pause: 0, settle: 30,
+                                          readScreen: { screens.count > 1 ? screens.removeFirst() : screens[0] },
+                                          send: { sent += $0.map(\.bytes) })
+        #expect(answered)
+        #expect(sent == [[27, 91, 66], [13]])
+    }
 }
+
