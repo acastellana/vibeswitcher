@@ -12,11 +12,13 @@ final class TestHost {
     let startedAt = Date()
     private(set) var readyAt = Date.distantFuture
 
-    init(build: Int = 42, log: String? = nil) throws {
+    init(build: Int = 42, vault: LeadVault.Book? = nil, appExecutable: String? = nil, log: String? = nil) throws {
         lock = socket + ".lock"
         var config = HostServer.Config(socketPath: socket, lockPath: lock, shell: "/bin/sh",
                                        launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: build)
         config.idleExit = nil
+        config.vault = vault
+        config.appExecutable = appExecutable
         config.ringCapacity = 1 << 20
         config.logPath = log
         server = HostServer(config: config)

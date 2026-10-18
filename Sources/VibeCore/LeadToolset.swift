@@ -64,18 +64,19 @@ public protocol LeadRuntime: AnyObject {
 
 /// The project lead's tools, and the few that workers and verifiers get, over the board and the runtime.
 ///
-/// Who may use which tools comes from the session's capability (see `LeadVault`), never from the server's arguments
-/// or the board: the role and task are the capability's, and every call checks that the server runs in the session
-/// VibeSwitcher started for it. A server without a current capability has no tools.
+/// Who may use which tools comes from the session host (see `LeadVault`), never from the server's arguments or the
+/// board: the host tells which session this server's process runs in, and which role and task that session holds.
+/// Every call asks again. A server in no such session has no tools.
 public final class LeadToolset: MCPToolset {
-    /// The capability's role; nil when there's none (then nothing is served and `refusal` says why).
+    /// The session's role; nil when it holds none (then nothing is served and `refusal` says why).
     let role: LeadLaunch.Role?
     let root: String
     let taskID: String?
     let runtime: LeadRuntime
     let store: BoardStore
     let vault: LeadVault
-    private let capability: String?
+    /// The grant the session held when the server started: a newer session for the role withdraws it.
+    private let grant: String?
     let refusal: String?
     private var introduced = false
     private let introducing = NSLock()
@@ -86,74 +87,77 @@ public final class LeadToolset: MCPToolset {
     var freeSpace: (String) -> Int64? = DiskSpace.free(at:)
     var scratchRoot = ClaudeScratch.root
 
-    /// The server for the session holding `capability`. `expected` and `expectedTask` are what it was started as
-    /// (`--role`, `--task`): when they don't match the capability, it serves nothing.
-    public init(capability: String?, root: String, runtime: LeadRuntime, vault: LeadVault = .standard,
-                expected: LeadLaunch.Role? = nil, expectedTask: String? = nil) {
+    /// The server for the session it runs in. `expected` and `expectedTask` are what it was started as (`--role`,
+    /// `--task`): when they don't match the session's role, it serves nothing. `wait`: how long to wait for the
+    /// session's role while VibeSwitcher is still binding it (the session can start first).
+    public init(root: String, runtime: LeadRuntime, vault: LeadVault = .standard,
+                expected: LeadLaunch.Role? = nil, expectedTask: String? = nil, unknownRole: String? = nil, wait: TimeInterval = 0) {
         self.root = root
         self.runtime = runtime
         self.vault = vault
         store = BoardStore(root: root)
-        let member = capability.flatMap { vault.member($0, root: root) }
+        var member: LeadVault.Member?
+        var problem: String?
+        let deadline = Date().addingTimeInterval(wait)
+        repeat {
+            do {
+                member = try vault.whoami(root: root)
+                problem = nil
+            } catch {
+                problem = "\(error)"
+            }
+            if member != nil || Date() >= deadline { break }
+            Thread.sleep(forTimeInterval: 0.1)
+        } while true
         var refusal: String?
-        if capability?.isEmpty ?? true {
-            refusal = "This tool server has no VibeSwitcher capability, so it has no role: only sessions VibeSwitcher starts for a project lead get one (whatever --role says)."
+        if let unknownRole {
+            refusal = "There's no role \"\(unknownRole)\": the roles are lead, worker and verifier. Refused."
+        } else if let problem, member == nil {
+            refusal = "This tool server couldn't ask the session host which role its session holds: \(problem) Its tools are off."
         } else if member == nil {
-            refusal = "This tool server's capability isn't current in \(root) (VibeSwitcher started another session for its role since, or never issued it). Its tools are off."
+            refusal = "This tool server doesn't run in a session VibeSwitcher started for a project lead's team (or its role went to a newer session), so it has no role, whatever --role says. Its tools are off."
         } else if let expected, expected != member?.role {
-            refusal = "This tool server was started as the \(expected.rawValue), but its capability is the \(member?.role.rawValue ?? "")'s. Refused."
+            refusal = "This tool server was started as the \(expected.rawValue), but its session is the \(member?.role.rawValue ?? "")'s. Refused."
         } else if let expectedTask, expectedTask != member?.task {
-            refusal = "This tool server was started for task \(expectedTask), but its capability is for \(member?.task ?? "no task"). Refused."
+            refusal = "This tool server was started for task \(expectedTask), but its session is for \(member?.task ?? "no task"). Refused."
         }
         self.refusal = refusal
-        self.capability = refusal == nil ? capability : nil
+        grant = refusal == nil ? member?.id : nil
         role = refusal == nil ? member?.role : nil
         taskID = refusal == nil ? member?.task : nil
         if role == .lead, (try? authenticate()) != nil { introduceLead() }
     }
 
-    /// The server as `vibeswitcher-mcp` starts it: `--root <repo>` (plus `--role`/`--task` as it was started), its
-    /// capability in the environment.
-    public convenience init(arguments: [String], environment: [String: String], runtime: LeadRuntime, vault: LeadVault = .standard) {
+    /// The server as `vibeswitcher-mcp` starts it: `--root <repo>` (plus `--role`/`--task` as it was started).
+    public convenience init(arguments: [String], runtime: LeadRuntime, vault: LeadVault = .standard, wait: TimeInterval = 0) {
         var root = FileManager.default.currentDirectoryPath
         var expected: LeadLaunch.Role?
         var task: String?
-        var invalid = false
+        var unknown: String?
         var iterator = arguments.makeIterator()
         while let argument = iterator.next() {
             switch argument {
             case "--role":
                 let value = iterator.next() ?? ""
                 expected = LeadLaunch.Role(rawValue: value)
-                invalid = invalid || expected == nil
+                if expected == nil { unknown = value }
             case "--root": root = iterator.next() ?? root
             case "--task": task = iterator.next()
             default: break
             }
         }
-        self.init(capability: invalid ? nil : environment[LeadVault.environmentKey], root: root, runtime: runtime, vault: vault,
-                  expected: expected, expectedTask: task)
+        self.init(root: root, runtime: runtime, vault: vault, expected: expected, expectedTask: task, unknownRole: unknown, wait: wait)
     }
 
-    /// The caller is the session this capability was issued for: the agent this server runs under (its parent
-    /// process, found from the process table, not from anything the caller says) is that session's.
+    /// The caller is still the session holding the role it started with: the session host tells (from this server's
+    /// process, not from anything it says).
     @discardableResult
     func authenticate() throws -> LeadVault.Member {
-        guard let capability, role != nil else { throw Problem(text: refusal ?? "This tool server has no role.") }
-        guard let member = vault.member(capability, root: root) else {
-            throw Problem(text: "This session's capability was withdrawn (VibeSwitcher started another session for its role). Its tools are off.")
-        }
-        guard let session = member.session else {
-            throw Problem(text: "VibeSwitcher is still starting this session; try again in a moment.")
-        }
-        guard let agent = runtime.currentAgent() else {
-            throw Problem(text: "This tool server doesn't run under an agent session VibeSwitcher started. Refused.")
-        }
-        guard let mine = agent.session else {
-            throw Problem(text: "Couldn't tell which session this tool server runs in (the session host didn't say); try again in a moment.")
-        }
-        guard mine == session else {
-            throw Problem(text: "This tool server doesn't run in the session VibeSwitcher started for its capability. Refused.")
+        guard let grant, role != nil else { throw Problem(text: refusal ?? "This tool server has no role.") }
+        let member: LeadVault.Member?
+        do { member = try vault.whoami(root: root) } catch { throw Problem(text: "\(error)") }
+        guard let member, member.id == grant else {
+            throw Problem(text: "This session's role was withdrawn (VibeSwitcher started another session for it). Its tools are off.")
         }
         return member
     }
@@ -336,7 +340,7 @@ public final class LeadToolset: MCPToolset {
     private func fail(_ text: String) -> MCPToolResult { MCPToolResult(text: text, isError: true) }
 
     private func taskSlug(_ arguments: [String: Any]) throws -> String {
-        // A worker or verifier acts on its own task only, whatever it passes: its capability's, by slug, not
+        // A worker or verifier acts on its own task only, whatever it passes: its session's, by slug, not
         // whatever the board (which anyone can edit) says that slug is.
         if role != .lead {
             guard let taskID, try store.read().taskIndex(taskID) != nil else { throw Problem(text: "Your task isn't on the board any more.") }
@@ -496,20 +500,21 @@ public final class LeadToolset: MCPToolset {
         return MCPToolResult(text: SessionDigest.text(log, limit: 12_000))
     }
 
-    /// Starts a worker or a verifier with a new capability (it replaces the role's earlier one), bound to its session
-    /// once that's started; its launch files go in the vault.
+    /// Starts a worker or a verifier with a new grant (it replaces the role's earlier one), bound to its session once
+    /// that's started; its launch files go in the vault's folder.
     private func launch(_ role: LeadLaunch.Role, task slug: String, name: String, in folder: String, label: String, trust: Bool,
                         prompt: String, start: String, model: String? = nil, branch: String? = nil, auditing: String? = nil) throws -> String {
-        let capability = try vault.issue(role: role, root: root, task: slug, auditing: auditing)
+        let grant: String
+        do { grant = try vault.issue(role: role, root: root, task: slug, auditing: auditing) } catch { throw Problem(text: "\(error)") }
         do {
             let launch = try LeadLaunch.prepare(role: role, root: root, task: slug, base: runtime.claudeCommand(root: root), prompt: prompt,
                                                 start: start, server: runtime.server, name: name, model: model, branch: branch,
-                                                capability: capability, folder: vault.runFolder(root: root, name: name))
+                                                folder: vault.runFolder(root: root, name: name))
             let session = try runtime.spawn(cwd: folder, command: launch.command, label: label, agent: "claude", trust: trust)
-            try vault.bind(capability, root: root, session: session)
+            try vault.bind(grant, root: root, session: session)
             return session
         } catch {
-            try? vault.revoke(capability, root: root)
+            try? vault.revoke(grant, root: root)
             throw error
         }
     }
@@ -545,7 +550,7 @@ public final class LeadToolset: MCPToolset {
         guard let verdict = vault.verdict(root: root, task: slug), verdict.passes else {
             throw Problem(text: "\(slug) has no passing audit. Run audit and wait for a complete, clean verdict.")
         }
-        guard let verifier = vault.current(.verifier, root: root, task: slug), verifier.tokenHash == verdict.verifier,
+        guard let verifier = vault.current(.verifier, root: root, task: slug), verifier.id == verdict.verifier,
               verifier.session == verdict.session, verifier.auditing == verdict.commit else {
             throw Problem(text: "\(slug)'s verdict isn't from the verifier last started on it. Run audit again.")
         }
@@ -884,10 +889,9 @@ public final class LeadToolset: MCPToolset {
     }
 
     private func submitAudit(_ arguments: [String: Any], by member: LeadVault.Member) throws -> MCPToolResult {
-        // Only from the verifier VibeSwitcher started last for its task (checked in `authenticate`), about the commit
-        // it was started on.
-        guard member.role == .verifier, let slug = member.task, let session = member.session, let audited = member.auditing,
-              vault.current(.verifier, root: root, task: slug)?.tokenHash == member.tokenHash else {
+        // Only from the verifier VibeSwitcher's lead started last for its task, about the commit it was started on:
+        // the session host records it from this server's session, whatever it says.
+        guard member.role == .verifier, let slug = member.task else {
             throw Problem(text: "Only the verifier VibeSwitcher started on a task can give its verdict.")
         }
         _ = try taskSlug(arguments)
@@ -896,9 +900,11 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "completion must be complete, incomplete or blocked; integrity clean, suspect or violation.")
         }
         let summary = arguments["summary"] as? String ?? ""
-        let verdict = LeadVault.Verdict(task: slug, completion: completion, integrity: integrity, summary: summary, commit: audited,
-                                        verifier: member.tokenHash, session: session, at: Date().timeIntervalSince1970)
-        try vault.record(verdict, root: root)
+        let verdict: LeadVault.Verdict
+        do { verdict = try vault.submitVerdict(root: root, completion: completion, integrity: integrity, summary: summary) } catch {
+            throw Problem(text: "\(error)")
+        }
+        let audited = verdict.commit
         let evidence = LeadEvidence(completion: completion, integrity: integrity, summary: summary, commit: audited)
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }

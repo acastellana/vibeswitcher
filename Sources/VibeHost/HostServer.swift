@@ -18,6 +18,12 @@ public final class HostServer {
         /// Ended sessions are forgotten after this long.
         public var keepEnded: TimeInterval = 24 * 3600
         public var housekeepingInterval: TimeInterval = 30
+        /// The project lead's vault (see `LeadVault`): the teams' roles, verdicts and the user's sealing key, kept in
+        /// this process. Nil: this host keeps none (it refuses vault requests).
+        public var vault: LeadVault.Book?
+        /// The app's executable: a process running its code (by cdhash, see `AppCode`), outside every session, is the
+        /// app to the vault.
+        public var appExecutable: String?
         /// The session log (see `HostLog`); nil: none (a scratch host).
         public var logPath: String?
         /// What this host was started with after its executable (socket, lock, idle exit): a build it hands over to is
@@ -167,7 +173,13 @@ public final class HostServer {
             }
             UnixSocket.configure(fd)
             let client = ClientConnection(fd: fd, queue: queue)
+            client.peer = UnixSocket.peerToken(fd)
+            client.caller = identify(client.peer)
             let key = ObjectIdentifier(client)
+            client.onRead = { [weak self, weak client] in
+                guard let self, let client else { return }
+                self.checkPeer(client)
+            }
             client.onFrame = { [weak self, weak client] kind, payload in
                 guard let self, let client else { return }
                 self.handle(kind, payload, from: client)
@@ -233,6 +245,11 @@ public final class HostServer {
             reply(.ok)
         case .input(let id, let bytes, let isReply):
             guard let session = sessions[id] else { return }
+            // A session in a lead's team takes keys only from the app, itself or its lead: a worker's Bash can't
+            // type into the lead (as you).
+            if let vault = config.vault, !vault.mayType(into: id.uuidString, from: caller(of: client)) {
+                return log("refused input to \(id.uuidString.prefix(8)) from pid \(client.peer?.pid ?? 0)")
+            }
             if isReply {
                 guard primary[id] == key else { return }
             } else if client.attached.contains(id) {
@@ -267,6 +284,9 @@ public final class HostServer {
             guard !session.info.isLive else { return reply(.error("The session is still running.")) }
             forget(id)
             reply(.ok)
+        case .vault(let request):
+            guard let vault = config.vault else { return reply(.vault(.refused("This session host keeps no lead vault."))) }
+            reply(.vault(vault.answer(request, from: caller(of: client))))
         case .handover(let executable):
             handOver(to: executable, reply: reply)
         case .shutdown:
@@ -283,6 +303,41 @@ public final class HostServer {
                 self?.onExit?()
             }
         }
+    }
+
+    /// Who the process on `client` is to the lead's vault (see `identify`).
+    func caller(of client: ClientConnection) -> LeadVault.Caller { client.caller }
+
+    /// The kernel names whichever process last used the client's socket, not the one that connected: after a
+    /// connector forks a child to write and execs the app's binary (or anything else), the token names the child,
+    /// or the new image. Anything but the process accepted makes the connection nobody's.
+    private func checkPeer(_ client: ClientConnection) {
+        guard client.caller != .unknown else { return }
+        if let accepted = client.peer, let now = UnixSocket.peerToken(client.fd), now.sameImage(as: accepted) { return }
+        log("pid \(client.peer?.pid ?? 0) is no longer the one sending on its connection: it's no one to the vault now")
+        client.caller = .unknown
+    }
+
+    /// Who the process `token` names is: a process in one of the live sessions (its program or anything under it,
+    /// by parent processes, or with the session's terminal), else the app (its code, outside every session), else
+    /// unknown. Told once, when the connection is accepted: a process can leave its session's tree, never join
+    /// another's.
+    func identify(_ token: audit_token_t?) -> LeadVault.Caller {
+        guard let token, token.pid > 1, let ancestry = ProcessTable.ancestry(of: token.pid) else { return .unknown }
+        let live = sessions.values.filter { $0.info.isLive }
+        let chain = Set([token.pid] + ancestry.map(\.pid))
+        if let session = live.first(where: { chain.contains($0.info.childPID) }) { return .session(session.id.uuidString) }
+        if let tty = ProcessTable.info(pid: token.pid)?.tty, let session = live.first(where: { $0.info.tty == tty }) {
+            return .session(session.id.uuidString)
+        }
+        if let app = config.appExecutable, AppCode.runs(token, executable: app) { return .app }
+        return .unknown
+    }
+
+    static func executable(of pid: pid_t) -> String? {
+        var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+        guard proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 else { return nil }
+        return String(cString: buffer)
     }
 
     /// Re-executes as `executable`, keeping every session (see `HostHandover`). The new build is probed first (off the

@@ -237,6 +237,9 @@ public enum HostRequest: Codable, Equatable, Sendable {
     case remove(id: UUID)
     /// Honoured only when no session is live.
     case shutdown
+    /// The project lead's vault (see `LeadVault`), answered for the process on this connection. A host older than
+    /// this answers with an error.
+    case vault(LeadVault.Request)
     /// Re-execute as the host binary at `executable`, keeping every session (see `HostProtocol.Capability.handover`). Answered
     /// with `ok` just before, then the connection closes; connect again for the new build's welcome. An error: the
     /// running host carries on as it was.
@@ -261,6 +264,7 @@ public enum HostEvent: Codable, Equatable, Sendable {
     case bell(id: UUID)
     case error(String)
     case ok
+    case vault(LeadVault.Reply)
 }
 
 /// A run of characters on one screen row drawn alike, when that isn't plain: faint (SGR 2), inverse (SGR 7: an

@@ -108,11 +108,27 @@ setup commands, the verifier's model, the lead's branch), `decisions.md` and `pr
 `workflow.md` itself with its `configure` tool, which changes only those settings' lines and keeps your comments
 and notes; when there's no test command, `status` says so and suggests one from the repository (SwiftPM,
 `package.json`, a Makefile, Cargo, Go), and a merge without one says it ran no tests. Guard rails, not a sandbox
-(the whole team runs as you): each session VibeSwitcher starts for the lead, a worker or a verifier gets a
-capability of its own, bound to that session and kept with the team's records in `~/.vibeswitcher/lead/` (private
-to you, outside the repository), and its tools come from that, so a worker can't run the tool server as the
-verifier or the lead. Only the verifier the lead last started on a task gives its verdict, about the commit it was
-started on. `merge` reads that verdict from there, not from `board.json`; it refuses when the lead's branch was
+(the whole team runs as you, so a file one of them can read, all of them can): the team's records (who holds which
+role, verdicts, where the lead left its branch) and the key that seals your messages are held by the session host
+(`vibeswitcher-host`) in its memory, and kept on disk only sealed with a key in your login Keychain that the host
+reads without asking you (other programs make macOS ask). The host tells who asks by the process on the other end
+of its socket, never by what it says: by its audit token as the host accepted the connection, then the session whose
+process tree it's in, or for the app, the code it runs (its cdhash, the one of the app beside the host, not its
+path); a connection that anything else then sends on (a child it forked, or the same pid after an exec) counts as
+no one. So a worker's Bash,
+whether it runs the tool server as the verifier or the lead or writes to the socket itself, is the worker (or,
+once it leaves its session's process tree, no one, even when it execs the app's binary), and it
+can't give a verdict, take the lead's tools, record the lead's branch, seal a message as yours or type into the
+lead's terminal (a session in a team takes keys only from the app, itself or its lead). Only the verifier the
+lead last started on a task gives its verdict, from its own session, about the commit it was started on. Not
+protected: anything that runs code as the app or the host (a debugger, a library injected into the app's binary,
+which isn't built with the hardened runtime, or the app's files rewritten: they're yours to write), or
+that changes what the sessions run (the hook binary in `~/.vibeswitcher/bin`, Claude settings, `CLAUDE.md`);
+the app's window itself when a worker drives it through Accessibility; ordinary (non-team) sessions, which still
+take keys from anyone running as you; and messages labelled as the lead's or VibeSwitcher's, which aren't sealed.
+A goal sent with `vibeswitcher --lead` (any process can send one) reaches the lead as not vouched for. With an
+ad-hoc signed build (no `scripts/setup-signing.sh`) the rebuilt host can't read its Keychain key, so the vault
+starts empty after a host restart. `merge` reads that verdict from there, not from `board.json`; it refuses when the lead's branch was
 moved by anything but its own merges since the lead last left it (starting the lead again takes the branch as it
 is), rebases exactly the audited commit in a worktree no agent works in (squashing it into one commit when the
 worker merged the base in, so the lead's history stays a line), runs the test command there and

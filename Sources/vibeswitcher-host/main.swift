@@ -96,6 +96,13 @@ if let handoverPath {
     }
 }
 
+// The app sits beside this binary in the bundle (and in a build folder).
+config.appExecutable = URL(fileURLWithPath: executable).deletingLastPathComponent().appendingPathComponent("VibeSwitcher").path
+// The lead's vault: the user's host keeps it sealed under ~/.vibeswitcher/lead with its Keychain key; a scratch host
+// (on its own lock) keeps one in memory only, never touching the user's.
+let vaultFile = VibePaths.root.appendingPathComponent("lead/vault.sealed")
+config.vault = ownsLaunchers ? VaultStorage(file: vaultFile, key: VaultStorage.keychainKey()).book() : LeadVault.Book()
+
 let server = HostServer(config: config)
 server.onExit = { exit(0) }
 // A test of the secret channel: these bytes are handed over, and the next build says whether it got them.
@@ -155,6 +162,11 @@ if let handoverPath, let state = restoring {
 // its own lock, which runs beside the real one).
 for name in (try? FileManager.default.contentsOfDirectory(atPath: launchers.path)) ?? [] where ownsLaunchers && name != "launcher-\(build)" {
     try? FileManager.default.removeItem(at: launchers.appendingPathComponent(name))
+}
+// Earlier versions kept the user's sealing key and the teams in files any of the team could read: gone.
+if ownsLaunchers {
+    try? FileManager.default.removeItem(at: VibePaths.root.appendingPathComponent("steer/sender.key"))
+    try? FileManager.default.removeItem(at: VibePaths.root.appendingPathComponent("lead/teams"))
 }
 FileHandle.standardError.write(Data("vibeswitcher-host: started \(Date())\n".utf8))
 dispatchMain()

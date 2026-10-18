@@ -1,7 +1,7 @@
 // The project lead's tool server (MCP over stdio): `vibeswitcher-mcp --root <repo> [--role lead|worker|verifier]
-// [--task <slug>]`. Claude Code starts it for each role's session (see `LeadLaunch`), with the session's capability
-// in `VIBESWITCHER_LEAD_CAPABILITY`: the role and task are the capability's (see `LeadVault`), `--role` and `--task`
-// only say what it was started as. The tools live in `LeadToolset`; this file connects them to the session host,
+// [--task <slug>]`. Claude Code starts it for each role's session (see `LeadLaunch`): the role and task are what
+// the session host says this process's session holds (see `LeadVault`), `--role` and `--task` only say what it was
+// started as. The tools live in `LeadToolset`; this file connects them to the session host,
 // the steer inboxes and the hooks' state.
 import Darwin
 import Foundation
@@ -148,6 +148,6 @@ final class HostRuntime: LeadRuntime {
 let runtime = HostRuntime()
 // This binary as it is now: an app update replaces it under the running server, which then says so in its results.
 let watch = BinaryWatch(path: runtime.server)
-let toolset = LeadToolset(arguments: Array(CommandLine.arguments.dropFirst()), environment: ProcessInfo.processInfo.environment,
-                          runtime: runtime)
+// The session can start before VibeSwitcher has bound its role to it: give that a moment.
+let toolset = LeadToolset(arguments: Array(CommandLine.arguments.dropFirst()), runtime: runtime, wait: 3)
 MCPServer(name: "vibeswitcher", version: "1", toolset: toolset, watch: watch).serve()

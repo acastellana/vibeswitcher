@@ -67,48 +67,82 @@ final class FakeSeat: LeadRuntime {
     func isRunning(_ agent: LeadAgent) -> Bool { shared.isRunning(agent) }
 }
 
-/// The team as VibeSwitcher starts it, with a private vault of its own.
+/// The team as VibeSwitcher starts it, with a vault of its own: the book a session host would hold, asked in
+/// process. Where the host tells a caller from its process, here each tool server is the session its runtime's agent
+/// runs in (`vault(for:)`); `vault` is the app.
 protocol LeadTeamFixture {
     var vault: LeadVault { get }
 }
 
+private let booksLock = NSLock()
+nonisolated(unsafe) private var books: [String: LeadVault.Book] = [:]
+
 extension LeadTeamFixture {
     static func newVault() -> LeadVault {
-        LeadVault(folder: FileManager.default.temporaryDirectory.appendingPathComponent("vault-\(UUID().uuidString)"))
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("vault-\(UUID().uuidString)")
+        let book = LeadVault.Book()
+        booksLock.lock()
+        books[folder.path] = book
+        booksLock.unlock()
+        return book.vault(folder: folder, as: { .app })
     }
 
-    /// The lead, as the app starts it: a capability bound to the lead's session.
+    /// The vault's book, as the session host holds it.
+    var book: LeadVault.Book {
+        booksLock.lock()
+        defer { booksLock.unlock() }
+        return books[vault.folder.path]!
+    }
+
+    /// The vault as the session host answers a process running under `runtime`'s agent: its session, or unknown.
+    func vault(for runtime: LeadRuntime) -> LeadVault {
+        nonisolated(unsafe) let runtime = runtime
+        return book.vault(folder: vault.folder, as: { runtime.currentAgent()?.session.map { .session($0) } ?? .unknown })
+    }
+
+    /// The lead, as the app starts it: a grant bound to the lead's session.
     func lead(_ root: String, _ runtime: FakeRuntime) throws -> LeadToolset {
-        let capability = try vault.startLead(root: root, branch: Worktrees.currentBranch(root: root) ?? "main")
-        try vault.bind(capability, root: root, session: try #require(runtime.me.session))
-        return LeadToolset(capability: capability, root: root, runtime: runtime, vault: vault)
+        let grant = try vault.startLead(root: root, branch: Worktrees.currentBranch(root: root) ?? "main")
+        try vault.bind(grant, root: root, session: try #require(runtime.me.session))
+        return LeadToolset(root: root, runtime: runtime, vault: vault(for: runtime))
     }
 
-    /// What the lead last started as `name` (worker-<slug>, verify-<slug>): its launch files.
-    func launched(_ name: String, _ runtime: FakeRuntime) throws -> (session: String, capability: String, args: [String]) {
+    /// What the lead last started as `name` (worker-<slug>, verify-<slug>): its session and its tool server's arguments.
+    func launched(_ name: String, _ runtime: FakeRuntime) throws -> (session: String, args: [String]) {
         let spawn = try #require(runtime.spawned.last { $0.command.contains("--name '\(name)'") })
         let range = try #require(spawn.command.range(of: #"--mcp-config '([^']+)'"#, options: .regularExpression))
         let path = String(spawn.command[range].dropFirst("--mcp-config '".count).dropLast())
         let mcp = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as? [String: Any])
         let entry = try #require((mcp["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any])
-        let capability = try #require((entry["env"] as? [String: String])?[LeadVault.environmentKey])
-        return (spawn.id, capability, try #require(entry["args"] as? [String]))
+        return (spawn.id, try #require(entry["args"] as? [String]))
     }
 
     /// That session's own tool server, started the way Claude Code starts it, running under that session.
     func seat(_ name: String, _ runtime: FakeRuntime) throws -> LeadToolset {
         let launch = try launched(name, runtime)
         let agent = LeadAgent(pid: 5000 + Int32(runtime.spawned.count), tty: "ttys09\(runtime.spawned.count % 10)", session: launch.session)
-        return LeadToolset(arguments: launch.args, environment: [LeadVault.environmentKey: launch.capability],
-                           runtime: FakeSeat(runtime, agent: agent), vault: vault)
+        let seat = FakeSeat(runtime, agent: agent)
+        return LeadToolset(arguments: launch.args, runtime: seat, vault: vault(for: seat))
     }
 
-    /// A role's tool server with a capability of its own (no lead started it), in a session of its own.
-    func issued(_ role: LeadLaunch.Role, task: String?, root: String, _ runtime: FakeRuntime, session: String = "own-session") throws -> LeadToolset {
-        let capability = try vault.issue(role: role, root: root, task: task)
-        try vault.bind(capability, root: root, session: session)
-        return LeadToolset(capability: capability, root: root, runtime: FakeSeat(runtime, agent: LeadAgent(pid: 6000, tty: "ttys080", session: session)),
-                           vault: vault)
+    /// A role's tool server in a session of its own, which the app (a lead) or the repository's lead (a worker or
+    /// verifier; a stand-in lead when none runs) granted the role to.
+    func issued(_ role: LeadLaunch.Role, task: String?, root: String, _ runtime: FakeRuntime, session: String? = nil) throws -> LeadToolset {
+        // A session holds one role in a repository.
+        let session = session ?? "own-\(role.rawValue)-session"
+        var issuer = vault
+        if role != .lead {
+            let lead = try vault.current(.lead, root: root, task: nil)?.session ?? {
+                let grant = try vault.issue(role: .lead, root: root, task: nil)
+                try vault.bind(grant, root: root, session: "stand-in-lead")
+                return "stand-in-lead"
+            }()
+            issuer = book.vault(folder: vault.folder, as: { .session(lead) })
+        }
+        let grant = try issuer.issue(role: role, root: root, task: task)
+        try issuer.bind(grant, root: root, session: session)
+        let seat = FakeSeat(runtime, agent: LeadAgent(pid: 6000, tty: "ttys080", session: session))
+        return LeadToolset(root: root, runtime: seat, vault: vault(for: seat))
     }
 }
 

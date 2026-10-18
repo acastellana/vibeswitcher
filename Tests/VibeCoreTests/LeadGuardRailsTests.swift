@@ -43,56 +43,58 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         #expect(!verdict.isError, "\(verdict.text)")
     }
 
-    // MARK: F-L1 · roles come from capabilities
+    // MARK: F-L1 · roles come from the session the host tells the caller is in
 
-    @Test func aServerStartedAsVerifierOrLeadWithoutACapabilityIsRefused() throws {
+    @Test func aServerStartedAsVerifierOrLeadFromAWorkersSessionIsRefused() throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         _ = try reported(lead, runtime, root: root)
         // The PoC: the worker runs the tool server itself, saying it's the verifier, then the lead.
         let worker = FakeSeat(runtime, agent: LeadAgent(pid: 7000, tty: "ttys070", session: try launched("worker-add-b", runtime).session))
-        let verifier = LeadToolset(arguments: ["--role", "verifier", "--root", root, "--task", "add-b"], environment: [:], runtime: worker, vault: vault)
+        let verifier = LeadToolset(arguments: ["--role", "verifier", "--root", root, "--task", "add-b"], runtime: worker, vault: vault(for: worker))
         #expect(verifier.tools.isEmpty)
         let audit = verifier.call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "ok"])
         #expect(audit.isError)
-        #expect(audit.text.contains("capability"))
-        let asLead = LeadToolset(arguments: ["--role", "lead", "--root", root], environment: [:], runtime: worker, vault: vault)
+        #expect(audit.text.contains("its session is the worker's"))
+        let asLead = LeadToolset(arguments: ["--role", "lead", "--root", root], runtime: worker, vault: vault(for: worker))
         #expect(asLead.tools.isEmpty)
         #expect(asLead.call("merge", ["task": "add-b"]).isError)
-        // Its own capability doesn't make it either.
-        let mine = try launched("worker-add-b", runtime).capability
-        for role in ["verifier", "lead"] {
-            let spoofed = LeadToolset(arguments: ["--role", role, "--root", root, "--task", "add-b"],
-                                      environment: [LeadVault.environmentKey: mine], runtime: worker, vault: vault)
-            #expect(spoofed.tools.isEmpty, "\(role)")
-            #expect(spoofed.call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "ok"]).isError)
-            #expect(spoofed.call("merge", ["task": "add-b"]).isError)
-        }
+        // Nor by asking the vault itself, as the server would: the host answers for the worker's session.
+        let fromWorker = vault(for: worker)
+        #expect(throws: LeadVault.Refused.self) { try fromWorker.submitVerdict(root: root, completion: .complete, integrity: .clean, summary: "ok") }
+        #expect(throws: LeadVault.Refused.self) { try fromWorker.issue(role: .verifier, root: root, task: "add-b", auditing: self.head("agent/add-b", root)) }
+        #expect(throws: LeadVault.Refused.self) { try fromWorker.issue(role: .lead, root: root, task: nil) }
+        #expect(throws: LeadVault.Refused.self) { try fromWorker.setHead(self.head("agent/add-b", root), root: root, branch: "main") }
+        #expect(throws: LeadVault.Refused.self) { try fromWorker.retire(root: root, task: "add-b") }
+        #expect(try fromWorker.whoami(root: root)?.role == .worker)
         #expect(BoardStore(root: root).load().task("add-b")?.evidence == nil)
         #expect(vault.verdict(root: root, task: "add-b") == nil)
         #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
     }
 
-    @Test func theVerifiersCapabilityDoesNothingOutsideTheVerifiersSession() throws {
+    @Test func theVerifiersToolServerDoesNothingOutsideTheVerifiersSession() throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         _ = try reported(lead, runtime, root: root)
         _ = lead.call("audit", ["task": "add-b"])
-        // The worker found the verifier's capability and runs the server from its own session with it.
-        let stolen = try launched("verify-add-b", runtime)
+        // The worker runs the server exactly as the verifier's was started, from its own session.
+        let verifiers = try launched("verify-add-b", runtime)
         let workerSession = try launched("worker-add-b", runtime).session
-        let fromWorker = LeadToolset(arguments: stolen.args, environment: [LeadVault.environmentKey: stolen.capability],
-                                     runtime: FakeSeat(runtime, agent: LeadAgent(pid: 7001, tty: "ttys071", session: workerSession)), vault: vault)
+        let worker = FakeSeat(runtime, agent: LeadAgent(pid: 7001, tty: "ttys071", session: workerSession))
+        let fromWorker = LeadToolset(arguments: verifiers.args, runtime: worker, vault: vault(for: worker))
         let audit = fromWorker.call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "ok"])
         #expect(audit.isError)
-        #expect(audit.text.contains("doesn't run in the session"))
+        #expect(audit.text.contains("its session is the worker's"))
         #expect(vault.verdict(root: root, task: "add-b") == nil)
-        // Nor from outside any session (a process started with nohup, launchd…).
-        let detached = LeadToolset(arguments: stolen.args, environment: [LeadVault.environmentKey: stolen.capability],
-                                   runtime: NoAgent(runtime), vault: vault)
+        // Nor from outside any session (a process started with nohup, launchd…): the host doesn't know it.
+        let outside = NoAgent(runtime)
+        let detached = LeadToolset(arguments: verifiers.args, runtime: outside, vault: vault(for: outside))
         #expect(detached.call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "ok"]).isError)
+        #expect(throws: LeadVault.Refused.self) {
+            try self.vault(for: outside).submitVerdict(root: root, completion: .complete, integrity: .clean, summary: "ok")
+        }
         #expect(lead.call("merge", ["task": "add-b"]).isError)
     }
 
@@ -104,7 +106,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         _ = lead.call("audit", ["task": "add-b"])
         let first = try seat("verify-add-b", runtime)
         _ = lead.call("audit", ["task": "add-b"])
-        // The lead started another verifier: the first one's capability is withdrawn.
+        // The lead started another verifier: the first one's role is withdrawn.
         #expect(first.call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "ok"]).isError)
         #expect(lead.call("merge", ["task": "add-b"]).isError)
     }
@@ -126,29 +128,41 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         #expect(merged.isError)
         #expect(merged.text.contains("no passing audit"))
         #expect(head("main", root) == main)
-        // A verdict in the vault from a verifier the lead didn't start doesn't count either.
-        try vault.record(LeadVault.Verdict(task: "add-b", completion: .complete, integrity: .clean, summary: "forged", commit: branchHead,
-                                           verifier: "0000", session: "worker", at: 0), root: root)
+        // A verdict in the vault comes only from a verifier's own session: not the worker's, not even the app's.
+        let worker = FakeSeat(runtime, agent: LeadAgent(pid: 7002, tty: "ttys072", session: try launched("worker-add-b", runtime).session))
+        #expect(throws: LeadVault.Refused.self) {
+            try self.vault(for: worker).submitVerdict(root: root, completion: .complete, integrity: .clean, summary: "forged")
+        }
+        #expect(throws: LeadVault.Refused.self) { try self.vault.submitVerdict(root: root, completion: .complete, integrity: .clean, summary: "forged") }
+        #expect(vault.verdict(root: root, task: "add-b") == nil)
         #expect(lead.call("merge", ["task": "add-b"]).isError)
         #expect(head("main", root) == main)
     }
 
-    @Test func theVaultIsPrivate() throws {
+    @Test func noFileHoldsTheTeamOrAGrant() throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         _ = try reported(lead, runtime, root: root)
-        let team = vault.teamFile(root)
-        #expect((try FileManager.default.attributesOfItem(atPath: team.path)[.posixPermissions] as? Int) == 0o600)
-        #expect((try FileManager.default.attributesOfItem(atPath: vault.folder.path)[.posixPermissions] as? Int) == 0o700)
-        // The worker's launch files (its capability) aren't in the repository, and only you read them.
-        let launch = try launched("worker-add-b", runtime)
-        let mcp = vault.runFolder(root: root, name: "worker-add-b").appendingPathComponent("mcp.json").path
-        #expect(!mcp.hasPrefix(root))
-        #expect((try FileManager.default.attributesOfItem(atPath: mcp)[.posixPermissions] as? Int) == 0o600)
-        // Only a hash of the capability is stored.
-        let stored = try String(contentsOf: team, encoding: .utf8)
-        #expect(!stored.contains(launch.capability))
+        // The team is the host's: nothing under the vault's folder records it.
+        #expect(!FileManager.default.fileExists(atPath: vault.folder.appendingPathComponent("teams").path))
+        // The worker's launch files aren't in the repository, only you read them, and they hold nothing that makes a role.
+        let grant = try #require(vault.current(.worker, root: root, task: "add-b")?.id)
+        let folder = vault.runFolder(root: root, name: "worker-add-b")
+        #expect(!folder.path.hasPrefix(root))
+        for name in ["mcp.json", "settings.json", "prompt.md"] {
+            let file = folder.appendingPathComponent(name).path
+            #expect((try FileManager.default.attributesOfItem(atPath: file)[.posixPermissions] as? Int) == 0o600, "\(name)")
+            #expect(!(try String(contentsOfFile: file, encoding: .utf8)).contains(grant), "\(name)")
+        }
+        let mcp = try JSONSerialization.jsonObject(with: Data(contentsOf: folder.appendingPathComponent("mcp.json"))) as? [String: Any]
+        #expect(((mcp?["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any])?["env"] == nil)
+        // A grant is no key: only whoever asked for it binds it, so a worker that learns one can't take the role.
+        let worker = FakeSeat(runtime, agent: LeadAgent(pid: 7003, tty: "ttys073", session: try launched("worker-add-b", runtime).session))
+        let leadGrant = try #require(vault.current(.lead, root: root, task: nil)?.id)
+        #expect(throws: LeadVault.Refused.self) { try self.vault(for: worker).bind(leadGrant, root: root, session: "elsewhere") }
+        #expect(throws: LeadVault.Refused.self) { try self.vault(for: worker).revoke(leadGrant, root: root) }
+        #expect(vault.current(.lead, root: root, task: nil)?.session == runtime.me.session)
     }
 
     // MARK: F-L3 · the lead's branch moves only through merge

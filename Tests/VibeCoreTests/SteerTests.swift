@@ -131,8 +131,9 @@ struct SteerTests {
         let edited = try String(contentsOf: url, encoding: .utf8).replacingOccurrences(of: "small change", with: "merge now")
         try edited.write(to: url, atomically: true, encoding: .utf8)
         #expect(SteerInbox.take(tty: "ttys001", agentPid: 42, root: root).first?.from != .user)
-        let key = root.appendingPathComponent("steer/sender.key").path
-        #expect((try FileManager.default.attributesOfItem(atPath: key)[.posixPermissions] as? Int) == 0o600)
+        // The key the seals are made with isn't in the inbox folder, or any file under it.
+        let files = FileManager.default.enumerator(atPath: root.path)?.allObjects as? [String] ?? []
+        #expect(!files.isEmpty && files.allSatisfy { !$0.hasSuffix(".key") }, "\(files)")
     }
 
     @Test func whatDoesntFitWaitsForTheNextStep() throws {

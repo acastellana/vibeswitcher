@@ -125,6 +125,28 @@ struct SessionIdentityTests {
         #expect(!SessionIdentity.isRunning(pid: me.pid, startedAt: me.startTime.addingTimeInterval(-60)))
         #expect(!SessionIdentity.isRunning(pid: 999_999, startedAt: me.startTime))
     }
+
+    /// Who a caller is depends on finding its session among its ancestors: a worker can't nest deeper than the
+    /// walk goes to hide it, and a chain that can't be followed to launchd places it nowhere.
+    @Test func theAncestryReachesLaunchdHoweverDeepOrIsntTold() throws {
+        func process(_ pid: Int32, _ ppid: Int32) -> ProcInfo { ProcInfo(pid: pid, ppid: ppid, tty: nil, comm: "sh", startTime: .distantPast, agent: nil) }
+        // A session's program (pid 100) under launchd, and 200 shells nested under it.
+        var table: [Int32: ProcInfo] = [100: process(100, 1)]
+        for pid in Int32(101)...300 { table[pid] = process(pid, pid - 1) }
+        let deep = try #require(ProcessTable.ancestry(of: 300) { table[$0] })
+        #expect(deep.count == 200 && deep.last?.pid == 100)
+        // One of them ended mid-walk: nothing is told, not the part found.
+        var gap = table
+        gap[150] = nil
+        #expect(ProcessTable.ancestry(of: 300) { gap[$0] } == nil)
+        // Reused pids that loop.
+        #expect(ProcessTable.ancestry(of: 7) { [7: process(7, 8), 8: process(8, 7)][$0] } == nil)
+        // The caller itself gone.
+        #expect(ProcessTable.ancestry(of: 999) { table[$0] } == nil)
+        // This process's real one ends at launchd.
+        let mine = try #require(ProcessTable.ancestry(of: getpid()))
+        #expect(mine.last?.ppid == 1)
+    }
 }
 
 struct RedactionGapTests {

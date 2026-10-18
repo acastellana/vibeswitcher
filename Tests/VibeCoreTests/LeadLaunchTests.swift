@@ -55,17 +55,17 @@ struct LeadLaunchTests {
         #expect(launch.promptFile.contains("/.vibeswitcher/run/worker-add-login/"))
     }
 
-    @Test func theCapabilityGoesToTheToolServerOnlyInPrivateFiles() throws {
+    @Test func theLaunchFilesArePrivateAndHoldNoRole() throws {
         let root = try root()
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("run-\(UUID().uuidString)/verify-x")
         let launch = try LeadLaunch.prepare(role: .verifier, root: root, task: "x", base: "claude", prompt: "p", start: "Check.",
-                                            server: "/s", name: "verify-x", capability: "secret", folder: folder)
+                                            server: "/s", name: "verify-x", folder: folder)
         #expect(launch.mcpFile.hasPrefix(folder.path))
         let mcp = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.mcpFile))) as? [String: Any]
         let entry = (mcp?["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any]
-        #expect((entry?["env"] as? [String: String])?[LeadVault.environmentKey] == "secret")
-        // Never on the command line (other processes see that).
-        #expect(!launch.command.contains("secret"))
+        // The session host knows which session holds the role: the tool server gets nothing that would make one.
+        #expect(entry?["env"] == nil)
+        #expect(Set(entry?.keys.map { $0 } ?? []) == ["command", "args"])
         for file in [launch.mcpFile, launch.promptFile, launch.settingsFile] {
             #expect((try FileManager.default.attributesOfItem(atPath: file)[.posixPermissions] as? Int) == 0o600, "\(file)")
         }

@@ -69,6 +69,16 @@ public enum HostCall {
         return reply
     }
 
+    /// Asks the host's lead vault. Throws only when the host can't be asked; one that doesn't know the request (older
+    /// than the app) refuses it.
+    public static func vault(_ request: LeadVault.Request, socket: String = VibePaths.hostSocket.path, timeout: TimeInterval = 5) throws -> LeadVault.Reply {
+        switch try self.request(.vault(request), socket: socket, timeout: timeout) {
+        case .vault(let reply): return reply
+        case .error(let message): return .refused(message)
+        default: return .refused("The session host answered something else.")
+        }
+    }
+
     /// Sends a request the host doesn't answer (`input`, `resize`). Input returns once the host has read it: a
     /// request it does answer follows on the same connection, and the host reads them in order (closing right after
     /// writing would lose what's still in the socket's buffer, over ~8 KB).

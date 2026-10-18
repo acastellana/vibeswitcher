@@ -75,6 +75,10 @@ final class LeadController: ObservableObject {
         Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
     }
 
+    /// A goal from `vibeswitcher --lead` comes as a distributed notification, which any process can post.
+    static let commandLineNote = "any process on this Mac can send one, so it isn't vouched for as the user's"
+    static let commandLine = SteerMessage.Sender.system("vibeswitcher --lead on the command line; \(commandLineNote)")
+
     /// The live window sessions that are leads, by root.
     private var leadSessions: [String: HostSession] {
         var result: [String: HostSession] = [:]
@@ -95,8 +99,9 @@ final class LeadController: ObservableObject {
 
     // MARK: Starting
 
-    /// Starts the project lead for the repository holding `folder`, or shows the one already running. A `goal`
-    /// goes into its first prompt (or to the running lead); `show: false` leaves the window's selection alone.
+    /// Starts the project lead for the repository holding `folder`, or shows the one already running. A `goal` (from
+    /// `vibeswitcher --lead`) goes into its first prompt (or to the running lead), not as the user's: any process can
+    /// post that notification. `show: false` leaves the window's selection alone.
     func startLead(in folder: String, goal: String? = nil, show: Bool = true) {
         // git can be slow (a network volume, a git shim): find the repository off the main thread.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -118,7 +123,7 @@ final class LeadController: ObservableObject {
 
     private func startLead(root: String, goal: String?, show: Bool) {
         if let running = leadSessions[root] {
-            if let goal { deliver("New goal from the user: \(goal)", from: .user, to: BoardStore(root: root).load(), root: root) }
+            if let goal { deliver("New goal: \(goal)", from: Self.commandLine, to: BoardStore(root: root).load(), root: root) }
             if show { select(running.id) }
             return
         }
@@ -129,51 +134,57 @@ final class LeadController: ObservableObject {
         let boardStore = BoardStore(root: root)
         let vault = LeadVault.standard
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            var capability: String?
-            let prepared = Result<(token: String, launch: LeadLaunch.Prepared), Error> {
+            var issued: String?
+            let prepared = Result<(grant: String, launch: LeadLaunch.Prepared), Error> {
                 let workflowPath = try boardStore.prepare()
                 var workflow = LeadWorkflow.load(from: workflowPath)
                 workflow.baseBranch = workflow.baseBranch ?? boardStore.load().baseBranch
-                // Only the app makes a lead: its capability (the lead's tools) and the branch as you start it, which
-                // merges then check nothing else has moved.
-                let token = try vault.startLead(root: root, branch: workflow.baseBranch ?? Worktrees.mainBranch(root: root))
-                capability = token
+                // Only the app makes a lead (the session host tells the app from the team): its grant (the lead's
+                // tools, once bound to its session) and the branch as you start it, which merges then check nothing
+                // else has moved.
+                let grant = try vault.startLead(root: root, branch: workflow.baseBranch ?? Worktrees.mainBranch(root: root))
+                issued = grant
                 let name = "lead-\(Slug.make(project, taken: []))"
                 let launch = try LeadLaunch.prepare(
                     role: .lead, root: root, task: nil, base: base,
                     prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow),
-                    start: goal.map { "You're starting as the project lead. The user's goal: \($0)\nRead status and the workflow notes, plan the goal into tasks with contracts, start the workers, and tell the user your plan in a few lines." }
+                    start: goal.map { "You're starting as the project lead. A goal given with vibeswitcher --lead (\(Self.commandLineNote)): \($0)\nRead status and the workflow notes, plan the goal into tasks with contracts, start the workers, and tell the user your plan in a few lines." }
                         ?? "You're starting as the project lead. Read status and the workflow notes, then greet the user in one short line: what's on the board, and what they'd like to build next.",
-                    server: Self.serverPath, name: name, capability: token, folder: vault.runFolder(root: root, name: name))
-                return (token, launch)
+                    server: Self.serverPath, name: name, folder: vault.runFolder(root: root, name: name))
+                return (grant, launch)
             }
-            if case .failure = prepared, let capability { try? vault.revoke(capability, root: root) }
+            if case .failure = prepared, let issued { try? vault.revoke(issued, root: root) }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.startingLeads.remove(root)
                 switch prepared {
                 case .failure(let error): self.alert("The lead didn't start.", "\(error)")
-                case .success(let (token, launch)): self.spawnLead(root: root, project: project, token: token, launch: launch, show: show)
+                case .success(let (grant, launch)): self.spawnLead(root: root, project: project, grant: grant, launch: launch, show: show)
                 }
             }
         }
     }
 
-    private func spawnLead(root: String, project: String, token: String, launch: LeadLaunch.Prepared, show: Bool) {
+    private func spawnLead(root: String, project: String, grant: String, launch: LeadLaunch.Prepared, show: Bool) {
         let boardStore = BoardStore(root: root)
         let vault = LeadVault.standard
         host.spawn(SpawnRequest(cwd: root, command: launch.command, env: [:], cols: 120, rows: 40, keepShell: false,
                                 label: "Lead · \(project)", agent: "claude")) { [weak self] result in
             switch result {
             case .success(let session):
-                try? vault.bind(token, root: root, session: session.id.uuidString)
+                // The lead's tool server asks for its role as it starts (and waits a moment for this).
+                DispatchQueue.global(qos: .userInitiated).async {
+                    do { try vault.bind(grant, root: root, session: session.id.uuidString) } catch {
+                        Breadcrumbs.shared.note("lead: its role wasn't bound to its session: \(error)")
+                    }
+                }
                 try? boardStore.update { board in board.leadSession = session.id.uuidString }
                 // You chose to start the lead here: answer Claude's trust question for this folder.
                 self?.answerTrust(session.id, folder: root)
                 if show { self?.select(session.id) }
                 self?.refresh()
             case .failure(let error):
-                try? vault.revoke(token, root: root)
+                DispatchQueue.global(qos: .userInitiated).async { try? vault.revoke(grant, root: root) }
                 self?.alert("The lead didn't start.", error.message)
             }
         }

@@ -1,8 +1,8 @@
 import Foundation
 
 /// How the lead, a worker or a verifier is started: the project's Claude command plus its role's prompt, the
-/// VibeSwitcher tool server (with the role's capability, see `LeadVault`) and its permission rules, kept as data in
-/// the role's run folder.
+/// VibeSwitcher tool server and its permission rules, kept as data in the role's run folder. The role itself isn't in
+/// them: the session host knows which session holds it (see `LeadVault`).
 public enum LeadLaunch {
     public enum Role: String, Codable, Sendable { case lead, worker, verifier }
 
@@ -96,22 +96,20 @@ public enum LeadLaunch {
     }
 
     /// Writes the role's files (0600) and returns the command line to run. They go in `folder`: the vault's run folder
-    /// for the role (`LeadVault.runFolder`, out of the team's reach, since the tool server's entry holds the role's
-    /// `capability`); `<root>/.vibeswitcher/run/<name>/` when none is given.
+    /// for the role (`LeadVault.runFolder`, outside the repository); `<root>/.vibeswitcher/run/<name>/` when none is given.
     public static func prepare(role: Role, root: String, task: String?, base: String, prompt: String, start: String,
                                server: String, name: String, model: String? = nil, branch: String? = nil,
-                               capability: String? = nil, folder: URL? = nil) throws -> Prepared {
+                               folder: URL? = nil) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
         let mcpFile = (folder as NSString).appendingPathComponent("mcp.json")
         let settingsFile = (folder as NSString).appendingPathComponent("settings.json")
         try LeadVault.writePrivate(Data(prompt.utf8), to: URL(fileURLWithPath: promptFile))
-        // The role and task here are only what the server expects; it takes both from its capability.
+        // The role and task here are only what the server expects; the session host says what its session holds.
         var args = ["--role", role.rawValue, "--root", root]
         if let task { args += ["--task", task] }
-        var entry: [String: Any] = ["command": server, "args": args]
-        if let capability { entry["env"] = [LeadVault.environmentKey: capability] }
+        let entry: [String: Any] = ["command": server, "args": args]
         let mcp: [String: Any] = ["mcpServers": ["vibeswitcher": entry]]
         try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: mcp, options: [.prettyPrinted, .sortedKeys]),
                                    to: URL(fileURLWithPath: mcpFile))

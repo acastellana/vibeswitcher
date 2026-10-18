@@ -102,6 +102,21 @@ public enum ProcessTable {
         return chain
     }
 
+    /// Every ancestor of `pid` up to launchd, nearest first, however deep; nil when the chain can't be followed
+    /// there (a process in it ended, or it loops while pids are reused). For deciding who a caller is: a chain cut
+    /// short could hide the session it runs in.
+    public static func ancestry(of pid: Int32, info: (Int32) -> ProcInfo? = { info(pid: $0) }) -> [ProcInfo]? {
+        var chain: [ProcInfo] = []
+        var seen: Set<Int32> = [pid]
+        guard var current = info(pid)?.ppid else { return nil }
+        while current > 1 {
+            guard seen.insert(current).inserted, let proc = info(current) else { return nil }
+            chain.append(proc)
+            current = proc.ppid
+        }
+        return current == 1 ? chain : nil
+    }
+
     static func makeInfo(_ kinfo: kinfo_proc) -> ProcInfo {
         var proc = kinfo.kp_proc
         let comm = withUnsafePointer(to: &proc.p_comm) {

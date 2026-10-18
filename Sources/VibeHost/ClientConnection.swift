@@ -10,10 +10,17 @@ final class ClientConnection {
     static let tooLarge = HostEvent.error("The reply was too large to send.")
 
     let fd: Int32
+    /// The process that connected, as it ran when the host accepted it (see `HostServer.identify`).
+    var peer: audit_token_t?
+    /// Who that process is to the lead's vault, told when the host accepted it; `.unknown` for good once anything
+    /// else sends on the connection.
+    var caller: LeadVault.Caller = .unknown
     /// The app (or tool server) on the other end, as it was when it connected.
     let peerPID: pid_t?
     var attached: Set<UUID> = []
     var onFrame: ((HostFrame.Kind, Data) -> Void)?
+    /// After bytes arrive, before any of their frames is handled.
+    var onRead: (() -> Void)?
     var onClose: (() -> Void)?
 
     private let queue: DispatchQueue
@@ -125,9 +132,11 @@ final class ClientConnection {
 
     private func readAvailable() {
         var buffer = [UInt8](repeating: 0, count: 65_536)
+        var arrived = false
         while !closed {
             let count = Darwin.read(fd, &buffer, buffer.count)
             if count > 0 {
+                arrived = true
                 decoder.append(Data(buffer[0..<count]))
             } else if count < 0, errno == EAGAIN || errno == EINTR {
                 break
@@ -135,6 +144,7 @@ final class ClientConnection {
                 return close()
             }
         }
+        if arrived { onRead?() }
         do {
             while !closed, let frame = try decoder.next() { onFrame?(frame.kind, frame.payload) }
         } catch {

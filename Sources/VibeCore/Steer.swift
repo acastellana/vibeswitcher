@@ -43,18 +43,20 @@ public enum SteerInbox {
         return folder(root).appendingPathComponent("\(tty).\(suffix)")
     }
 
-    /// Posts a message. Only VibeSwitcher posts as the user (the app's composer and the lead's question cards); the
-    /// project lead's tool server sends as `.lead` or `.system`. A user message is sealed with a key kept in the
-    /// inbox folder, so a line someone appended by hand isn't taken for the user's.
+    /// Posts a message. Only VibeSwitcher posts as the user (the app's composer and the lead's question cards): a
+    /// user message is sealed by whoever holds the key (`SteerSeal`: the session host, which seals for the app
+    /// only), so a line someone appended by hand, or sealed themselves, isn't taken for the user's. The project
+    /// lead's tool server sends as `.lead` or `.system`.
     public static func post(_ message: SteerMessage, tty: String, root: URL = VibePaths.root) throws {
+        try post(message, tty: tty, root: root, sealer: .for(root))
+    }
+
+    public static func post(_ message: SteerMessage, tty: String, root: URL, sealer: SteerSeal) throws {
         let url = try file(tty, "jsonl", root: root)
         try FileManager.default.createDirectory(at: folder(root), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         var message = message
         message.seal = nil
-        if message.from == .user {
-            guard let key = sealKey(root: root, create: true) else { throw CocoaError(.fileWriteNoPermission) }
-            message.seal = try seal(message, key: key)
-        }
+        if message.from == .user { message.seal = try sealer.seal(message) }
         try locked(url) { handle in
             var line = try JSONEncoder().encode(message)
             line.append(0x0A)
@@ -76,6 +78,7 @@ public enum SteerInbox {
     /// messages there (prints the hook's reply, types a prompt) and returns how many of them, from the first, went
     /// in. Only those are recorded as delivered; the rest stay first in line. Runs under the inbox's lock, so
     /// `hand` must not post to this inbox; killed midway, the inbox is as it was (delivered again, never lost).
+    /// A user message whose seal can't be checked now (the session host doesn't answer) waits, with what follows it.
     ///
     /// Recording them takes a write. When the disk is full that write fails, and messages handed over would be handed
     /// again at every step (a Stop hook's would keep the agent going round). So before handing anything it checks
@@ -88,20 +91,22 @@ public enum SteerInbox {
         deliver(tty: tty, agentPid: agentPid, root: root, check: { writeCheck($0, ids: $1) }, through: hand)
     }
 
-    /// As above, with how the write is checked (faked in tests: a full disk).
+    /// As above, with who checks seals (nil: the folder's own, see `SteerSeal.for`) and how the write is checked
+    /// (faked in tests: a full disk).
     @discardableResult
-    static func deliver(tty: String, agentPid: Int32, root: URL, check: (URL, [String]) -> Bool,
+    static func deliver(tty: String, agentPid: Int32, root: URL, sealer: SteerSeal? = nil, check: (URL, [String]) -> Bool,
                         through hand: ([SteerMessage]) -> Int) -> [SteerMessage] {
         guard let url = try? file(tty, "jsonl", root: root), FileManager.default.fileExists(atPath: url.path),
               let probe = try? file(tty, "check", root: root) else { return [] }
+        let sealer = sealer ?? .for(root)
         var delivered: [SteerMessage] = []
-        let key = sealKey(root: root, create: false)
         try? locked(url) { handle in
             try handle.seek(toOffset: 0)
             let data = try handle.readToEnd() ?? Data()
             guard !data.isEmpty else { return }
-            let mine = decode(data).filter { $0.agentPid == agentPid }.map { verified($0, key: key) }
-            let batch = Array(mine.prefix(SteerReply.fitting(mine)))
+            let mine = decode(data).filter { $0.agentPid == agentPid }
+            let ready = verified(mine, sealer: sealer)
+            let batch = Array(ready.prefix(SteerReply.fitting(ready)))
             guard !batch.isEmpty else { return }
             let armed = FileManager.default.fileExists(atPath: probe.path)
             guard check(probe, batch.map(\.id)) else {
@@ -181,37 +186,30 @@ public enum SteerInbox {
         return Set(text.split(separator: "\n").map(String.init))
     }
 
-    /// The message as it may be delivered: a user message keeps its sender only with a valid seal.
-    static func verified(_ message: SteerMessage, key: SymmetricKey?) -> SteerMessage {
-        guard message.from == .user else { return message }
-        if let key, let seal = message.seal, let expected = try? self.seal(message, key: key), seal == expected { return message }
-        var demoted = message
-        demoted.from = .system("a message marked as the user's that VibeSwitcher didn't send")
-        demoted.seal = nil
-        return demoted
-    }
-
-    static func seal(_ message: SteerMessage, key: SymmetricKey) throws -> String {
-        let fields = [message.id, String(message.agentPid), String(message.at), message.text]
-        let body = try JSONEncoder().encode(fields)
-        return Data(HMAC<SHA256>.authenticationCode(for: body, using: key)).base64EncodedString()
-    }
-
-    /// The key user messages are sealed with: 32 random bytes in the inbox folder, readable only by you.
-    static func sealKey(root: URL, create: Bool) -> SymmetricKey? {
-        let url = folder(root).appendingPathComponent("sender.key")
-        if let data = FileManager.default.contents(atPath: url.path), data.count == 32 { return SymmetricKey(data: data) }
-        guard create else { return nil }
-        let key = SymmetricKey(size: .bits256)
-        let data = key.withUnsafeBytes { Data($0) }
-        // Two posters at once: the first one's key wins, the other reads it.
-        let fd = open(url.path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
-        if fd >= 0 {
-            defer { close(fd) }
-            guard data.withUnsafeBytes({ write(fd, $0.baseAddress, $0.count) }) == data.count else { return nil }
-            return key
+    /// The messages as they may be delivered, in order: a user message keeps its sender only with a valid seal.
+    /// When the seals can't be checked now, only those before the first user message.
+    static func verified(_ messages: [SteerMessage], sealer: SteerSeal) -> [SteerMessage] {
+        let users = messages.filter { $0.from == .user }
+        guard !users.isEmpty else { return messages }
+        guard let valid = sealer.verify(users), valid.count == users.count else {
+            return Array(messages.prefix { $0.from != .user })
         }
-        return FileManager.default.contents(atPath: url.path).flatMap { $0.count == 32 ? SymmetricKey(data: $0) : nil }
+        var verdicts = valid.makeIterator()
+        return messages.map { message in
+            guard message.from == .user else { return message }
+            if verdicts.next() == true { return message }
+            var demoted = message
+            demoted.from = .system("a message marked as the user's that VibeSwitcher didn't send")
+            demoted.seal = nil
+            return demoted
+        }
+    }
+
+    /// The seal: an HMAC of the message's id, agent, time and text.
+    static func seal(_ message: SteerMessage, key: SymmetricKey) -> String {
+        let fields = [message.id, String(message.agentPid), String(message.at), message.text]
+        let body = (try? JSONEncoder().encode(fields)) ?? Data()
+        return Data(HMAC<SHA256>.authenticationCode(for: body, using: key)).base64EncodedString()
     }
 
     private static func decode(_ data: Data) -> [SteerMessage] {
@@ -226,6 +224,51 @@ public enum SteerInbox {
         flock(fd, LOCK_EX)
         defer { flock(fd, LOCK_UN) }
         try body(handle)
+    }
+}
+
+/// Who seals the user's messages and checks seals. For VibeSwitcher's own inbox folder that's the session host,
+/// which keeps the key in its memory and seals for the app only (see `LeadVault`): no file holds it. A scratch inbox
+/// folder (tests) uses a key this process keeps for it.
+public struct SteerSeal: Sendable {
+    public let seal: @Sendable (SteerMessage) throws -> String
+    /// Whether each carries a valid seal; nil when that can't be told now (the host doesn't answer).
+    public let verify: @Sendable ([SteerMessage]) -> [Bool]?
+
+    public init(seal: @escaping @Sendable (SteerMessage) throws -> String, verify: @escaping @Sendable ([SteerMessage]) -> [Bool]?) {
+        self.seal = seal
+        self.verify = verify
+    }
+
+    public static func `for`(_ root: URL) -> SteerSeal {
+        root.standardizedFileURL.path == VibePaths.root.standardizedFileURL.path ? .host : .scratch(root)
+    }
+
+    /// The session host's key. A host that answers but doesn't vouch for them (one older than the app) counts as no seal.
+    public static let host = SteerSeal(seal: { try LeadVault.standard.seal($0) }, verify: { messages in
+        guard let reply = try? LeadVault.standard.ask(.verify(messages)) else { return nil }
+        if case .verified(let valid) = reply, valid.count == messages.count { return valid }
+        return messages.map { _ in false }
+    })
+
+    /// A key kept in this process for one scratch folder.
+    static func scratch(_ root: URL) -> SteerSeal {
+        let key = scratchKey(root)
+        return SteerSeal(seal: { SteerInbox.seal($0, key: key) },
+                         verify: { $0.map { message in message.seal == SteerInbox.seal(message, key: key) } })
+    }
+
+    private static let scratchLock = NSLock()
+    nonisolated(unsafe) private static var scratchKeys: [String: SymmetricKey] = [:]
+
+    private static func scratchKey(_ root: URL) -> SymmetricKey {
+        scratchLock.lock()
+        defer { scratchLock.unlock() }
+        let path = root.standardizedFileURL.path
+        if let key = scratchKeys[path] { return key }
+        let key = SymmetricKey(size: .bits256)
+        scratchKeys[path] = key
+        return key
     }
 }
 
