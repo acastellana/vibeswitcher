@@ -82,6 +82,12 @@ public struct LeadVault: Sendable {
         case verify([SteerMessage])
         /// When the vault began empty in place of one that couldn't be read (`Reply.startedOver`).
         case startedOver
+        /// A git command the caller's session is about to run, or just ran, in the repository (its hooks; see
+        /// `GitMoves`): recorded under the session the host tells the caller is in.
+        case ranGit(root: String, step: GitStep)
+        /// Take the branch as it is now if the move since the lead last left it is the user's own (see `judge`).
+        /// The app, or the repository's lead.
+        case acceptMove(root: String, branch: String)
     }
 
     public enum Reply: Codable, Equatable, Sendable {
@@ -94,6 +100,7 @@ public struct LeadVault: Sendable {
         case verified([Bool])
         case refused(String)
         case startedOver(Double?)
+        case move(BaseMove)
     }
 
     /// The host said no, or couldn't be asked.
@@ -291,6 +298,8 @@ extension LeadVault {
             var verdicts: [String: Verdict] = [:]
             /// Each branch's head as the lead last left it (after its own merges, or when it started).
             var heads: [String: String] = [:]
+            /// The git commands sessions ran here that can move a branch, newest last (optional: older vaults have none).
+            var runs: [GitRun]?
         }
 
         struct State: Codable {
@@ -371,18 +380,60 @@ extension LeadVault {
             }
         }
 
-        /// A client asking this book directly, as `caller` (tests, and the host's own checks).
-        public func vault(folder: URL, as caller: @escaping @Sendable () -> Caller) -> LeadVault {
-            LeadVault(folder: folder) { [self] request in answer(request, from: caller()) }
+        /// A client asking this book directly, as `caller` (tests, and the host's own checks); `userOpened` as `answer`.
+        public func vault(folder: URL, as caller: @escaping @Sendable () -> Caller, userOpened: Bool = false) -> LeadVault {
+            LeadVault(folder: folder) { [self] request in answer(request, from: caller(), userOpened: userOpened) }
         }
 
-        public func answer(_ request: Request, from caller: Caller) -> Reply {
+        /// `userOpened`: the caller's session is one the app opened (the host knows; no session started it), so the
+        /// git commands it records are the user's while it holds no role in the team.
+        public func answer(_ request: Request, from caller: Caller, userOpened: Bool = false) -> Reply {
+            // It reads git: outside the lock.
+            if case .acceptMove(let root, let branch) = request { return acceptMove(root: root, branch: branch, from: caller) }
             lock.lock()
             defer { lock.unlock() }
             var changed = false
-            let reply = answer(request, from: caller, changed: &changed)
+            let reply = answer(request, from: caller, userOpened: userOpened, changed: &changed)
             if changed, let onChange, let data = try? JSONEncoder().encode(state) { onChange(data) }
             return reply
+        }
+
+        /// The base moved since the lead last left it: the head moves on to where it is when the move is the user's
+        /// own (`LeadVault.judge`), from what git says now and the commands recorded here.
+        private func acceptMove(root: String, branch: String, from caller: Caller) -> Reply {
+            lock.lock()
+            let allowed = caller == .app || isLead(caller, root)
+            let recorded = team(root)?.heads[branch]
+            let members = Set(team(root)?.members.compactMap(\.session) ?? [])
+            // A session that holds a role now is no user's, whatever it held when it ran the command.
+            let runs = (team(root)?.runs ?? []).map { run in
+                var run = run
+                run.user = run.user && !members.contains(run.session)
+                return run
+            }
+            lock.unlock()
+            guard allowed else { return .refused("Only VibeSwitcher or the lead asks to take a move of the lead's branch.") }
+            guard let recorded else { return .refused("No head is recorded for \(branch) here: the lead takes it as it is when it starts.") }
+            guard let history = BaseHistory.read(root: root, branch: branch, since: recorded) else {
+                return .refused("Couldn't read \(branch) in \(root).")
+            }
+            guard history.head != recorded else {
+                return .move(BaseMove(branch: branch, from: recorded, to: recorded, accepted: true, commits: [], sessions: []))
+            }
+            var move = LeadVault.judge(from: recorded, history: history, branch: branch, runs: runs)
+            guard move.accepted else { return .move(move) }
+            lock.lock()
+            var changed = false
+            if team(root)?.heads[branch] == recorded {
+                change(root, &changed) { $0.heads[branch] = move.to }
+            } else {
+                move.accepted = false
+                move.reason = "The lead's merges moved \(branch) meanwhile: ask again."
+            }
+            let data = changed ? try? JSONEncoder().encode(state) : nil
+            lock.unlock()
+            if let data { onChange?(data) }
+            return .move(move)
         }
 
         /// Whether `caller` may type into `session`: one that holds a role in a team takes keys only from the app,
@@ -407,7 +458,7 @@ extension LeadVault {
 
         // MARK: Rules
 
-        private func answer(_ request: Request, from caller: Caller, changed: inout Bool) -> Reply {
+        private func answer(_ request: Request, from caller: Caller, userOpened: Bool, changed: inout Bool) -> Reply {
             switch request {
             case .issue(let role, let root, let task, let auditing):
                 if role == .lead {
@@ -489,6 +540,35 @@ extension LeadVault {
                 return .verified(messages.map { message in message.seal.map { $0 == SteerInbox.seal(message, key: key) } ?? false })
             case .startedOver:
                 return .startedOver(state.startedOver)
+            case .ranGit(let root, let step):
+                guard case .session(let session) = caller else { return .refused("Only a session's own hooks say what it ran.") }
+                // Kept only where a lead works: nothing reads them anywhere else.
+                guard let team = team(root) else { return .ok }
+                let user = userOpened && !team.members.contains { $0.session == session }
+                let now = Date().timeIntervalSince1970
+                switch step.phase {
+                case .before:
+                    let run = GitRun(session: session, user: user, call: step.call, verb: step.verb, branch: step.branch,
+                                     before: step.head, started: now)
+                    change(root, &changed) { team in
+                        team.runs = Array((team.runs ?? []).filter { now - $0.started < 7 * 86_400 }.suffix(199)) + [run]
+                    }
+                case .after:
+                    guard let index = team.runs?.lastIndex(where: { run in
+                        run.session == session && run.ended == nil && run.verb == step.verb && (step.call == nil || run.call == step.call)
+                    }) else { return .ok }
+                    change(root, &changed) { team in
+                        guard var run = team.runs?[index] else { return }
+                        run.ended = now
+                        run.user = run.user && user
+                        // On another branch now (it checked one out): where it left the first one isn't known.
+                        if run.branch == step.branch { run.after = step.head }
+                        team.runs?[index] = run
+                    }
+                }
+                return .ok
+            case .acceptMove:
+                return .refused("Asked outside the lock.")
             }
         }
 

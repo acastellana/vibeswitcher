@@ -31,6 +31,8 @@ public enum HostHandover {
         public var ended: Ended?
         /// The session whose process asked for this one (see `HostServer`'s kill rule); nil: the app or no session.
         public var startedBy: UUID?
+        /// The app asked for it: one of the user's (see `HostServer`'s `openedByApp`). Nil from builds before that.
+        public var openedByApp: Bool?
 
         public struct Ended: Codable, Equatable {
             public var screen: String

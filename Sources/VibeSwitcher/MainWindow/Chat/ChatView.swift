@@ -24,6 +24,7 @@ struct ChatContainer: View {
                 TeamStrip(board: lead.board) { task in
                     if let id = task.worker.flatMap(UUID.init(uuidString:)) { model.select(hostID: id) }
                 }
+                BaseMovePrompt(moves: leads.baseMoves, root: lead.root)
             } else if let todos = chat.log.todos, todos.contains(where: { $0.status != .done }) {
                 TodoPanel(todos: todos)
             }

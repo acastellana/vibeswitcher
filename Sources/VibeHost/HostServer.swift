@@ -73,6 +73,12 @@ public final class HostServer {
     private var clients: [ObjectIdentifier: ClientConnection] = [:]
     /// Per session, the session whose process asked for it (see `mayKill`).
     private var startedBy: [UUID: UUID] = [:]
+    /// The sessions the app asked for: the user's own (the lead's among them, which its team tells apart). The git
+    /// commands their hooks record count as the user's (see `LeadVault.judge`); a session's own sessions' don't.
+    private var openedByApp: Set<UUID> = []
+    /// Sessions something other than the app or the session itself typed into: what their agents run may be someone
+    /// else's say (a worker's Bash can type into any session outside a team), so it doesn't count as the user's.
+    private var typedByOthers: Set<UUID> = []
     /// Per session, the client whose terminal answers queries and sets the size: the last to attach or type.
     private var primary: [UUID: ObjectIdentifier] = [:]
     private var lockFD: Int32 = -1
@@ -124,6 +130,7 @@ public final class HostServer {
                 register(HostedSession.restore(saved, launcher: config.launcher, parser: config.parser, ringCapacity: config.ringCapacity,
                                                queue: queue))
                 startedBy[saved.info.id] = saved.startedBy
+                if saved.openedByApp == true { openedByApp.insert(saved.info.id) }
             }
         }
         serve()
@@ -291,7 +298,11 @@ public final class HostServer {
                 let session = try HostedSession.spawn(request, shell: config.shell, launcher: config.launcher, baseEnvironment: config.baseEnvironment,
                                                       ringCapacity: config.ringCapacity, queue: queue, parser: config.parser)
                 register(session)
-                if case .session(let from) = caller(of: client) { startedBy[session.id] = UUID(uuidString: from) }
+                switch caller(of: client) {
+                case .session(let from): startedBy[session.id] = UUID(uuidString: from)
+                case .app: openedByApp.insert(session.id)
+                case .unknown: break
+                }
                 let info = session.info
                 log.note("spawn \(Self.short(info.id)) pid \(info.childPID) label '\(info.label)' cwd '\(info.cwd)'\(info.agent.map { " agent \($0)" } ?? ""), \(HostLog.peer(client.peerPID))")
                 reply(.spawned(session.info))
@@ -326,6 +337,10 @@ public final class HostServer {
             // type into the lead (as you).
             if let vault = config.vault, !vault.mayType(into: id.uuidString, from: caller(of: client)) {
                 return log("refused input to \(id.uuidString.prefix(8)) from pid \(client.peer?.pid ?? 0)")
+            }
+            let from = caller(of: client)
+            if from != .app, from != .session(id.uuidString), typedByOthers.insert(id).inserted, openedByApp.contains(id) {
+                log.note("input to \(Self.short(id)) not from the app: its git commands no longer count as the user's, \(HostLog.peer(client.peerPID))")
             }
             if isReply {
                 guard primary[id] == key else { return }
@@ -370,7 +385,19 @@ public final class HostServer {
             reply(.ok)
         case .vault(let request):
             guard let vault = config.vault else { return reply(.vault(.refused("This session host keeps no lead vault."))) }
-            reply(.vault(vault.answer(request, from: caller(of: client))))
+            let from = caller(of: client)
+            let opened: Bool = {
+                guard case .session(let id) = from, let id = UUID(uuidString: id) else { return false }
+                return openedByApp.contains(id) && startedBy[id] == nil && !typedByOthers.contains(id)
+            }()
+            var answer = vault.answer(request, from: from, userOpened: opened)
+            if case .move(var move) = answer, move.from != move.to {
+                move.labels = move.sessions.map { id in UUID(uuidString: id).flatMap { sessions[$0]?.info.label } ?? String(id.prefix(8)) }
+                log.note(move.accepted ? "vault: \(move.acceptedLine) (\(move.from.prefix(8)) → \(move.to.prefix(8))), \(HostLog.peer(client.peerPID))"
+                    : "vault: didn't take \(move.branch) at \(move.to.prefix(8)) (left at \(move.from.prefix(8))): \(move.reason ?? "")\(move.waiting == true ? " (a command is still running)" : ""), \(HostLog.peer(client.peerPID))")
+                answer = .move(move)
+            }
+            reply(.vault(answer))
         case .handover(let executable):
             // The new build inherits every session's terminal and the socket: only the app picks it.
             guard caller(of: client) == .app else {
@@ -503,6 +530,7 @@ public final class HostServer {
                                sessions[id].map { session in
                                    var saved = session.saved()
                                    saved.startedBy = startedBy[id]
+                                   saved.openedByApp = openedByApp.contains(id) && !typedByOthers.contains(id)
                                    return saved
                                }
                            })
@@ -577,6 +605,8 @@ public final class HostServer {
     private func forget(_ id: UUID) {
         sessions.removeValue(forKey: id)?.close()
         startedBy[id] = nil
+        openedByApp.remove(id)
+        typedByOthers.remove(id)
         order.removeAll { $0 == id }
         primary[id] = nil
         for client in clients.values { client.attached.remove(id) }

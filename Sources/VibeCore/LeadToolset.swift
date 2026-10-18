@@ -681,8 +681,19 @@ public final class LeadToolset: MCPToolset {
         guard let current = branchHead(base) else { throw Problem(text: "There's no branch \(base) to merge into.") }
         // The branch moves only through these merges: anything else that moved it (a worker's git, a hand-made
         // commit) is something nobody audited.
+        // Except the user's own commits, which the vault takes when their sessions' hooks account for every one.
         if let known = vault.head(root: root, branch: base), known != current {
-            throw Problem(text: "Not merged: \(base) moved since the lead last left it (\(known.prefix(8)) → \(current.prefix(8))), and not through merge. Tell the user (`git log \(known.prefix(8))..\(base)` shows what came in). If they moved it themselves, starting the lead again from VibeSwitcher takes \(base) as it is.")
+            let move = Result { try vault.acceptMove(root: root, branch: base) }
+            guard case .success(let taken) = move, taken.accepted, taken.to == current else {
+                let why: String
+                switch move {
+                case .success(let taken): why = (taken.reason.map { " \($0)" } ?? "") + (taken.waiting == true ? " A command of the user's is still running there: merge again in a moment." : "")
+                case .failure(let error): why = " (\(error))"
+                }
+                throw Problem(text: "Not merged: \(base) moved since the lead last left it (\(known.prefix(8)) → \(current.prefix(8))), and not through merge.\(why) VibeSwitcher shows the user the commits that came in to accept (`git log \(known.prefix(8))..\(base)` shows them too); merge again once they have. Tell the user if it's not theirs.")
+            }
+            try? store.update { $0.updates.append(LeadUpdate(title: "Took \(taken.count) on \(base)", body: taken.acceptedLine)) }
+            try? store.appendProgress(taken.acceptedLine)
         } else if vault.head(root: root, branch: base) == nil {
             try vault.setHead(current, root: root, branch: base)
         }

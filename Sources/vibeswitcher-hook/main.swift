@@ -58,6 +58,10 @@ case .ignore: break
 }
 if lock >= 0 { flock(lock, LOCK_UN); close(lock) }
 
+// A git command that can move a branch, before and after it runs: the session host records it under the session it
+// tells this process is in (nothing said here names one), so a commit of yours on a lead's base is taken as yours.
+for (root, step) in GitMoves.steps(for: payload) { try? LeadVault.standard.record(step, root: root) }
+
 // Messages sent to this agent while it works (Claude Code; Codex takes typed input mid-turn itself). Only the main
 // thread's hooks take them (a subagent's would put them in its context instead), and a message is marked delivered
 // only once its reply is written: a closed pipe leaves it waiting rather than lost.

@@ -583,3 +583,66 @@ struct ResultsList: View {
         .padding(10).background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))
     }
 }
+
+/// The lead's base moved, and not in a way the vault could take as yours (see `BaseMoves`): what came in, and
+/// whether to take it. Asked once per move; the lead's merges stay refused until you answer.
+struct BaseMovePrompt: View {
+    @ObservedObject var moves: BaseMoves
+    let root: String
+
+    var body: some View {
+        if let move = moves.asking[root] {
+            BaseMoveCard(move: move, failure: moves.failures[root], accept: { moves.accept(root) }, keep: { moves.keepRefused(root) })
+                .padding(.horizontal, 12).padding(.vertical, 8)
+        }
+    }
+}
+
+struct BaseMoveCard: View {
+    let move: LeadVault.BaseMove
+    var failure: String?
+    let accept: () -> Void
+    let keep: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: "arrow.triangle.branch").foregroundStyle(.orange)
+                Text("\(move.branch) moved outside the lead's merges").font(.system(size: 12, weight: .semibold))
+                Spacer()
+                Text("\(move.from.prefix(8)) → \(move.to.prefix(8))").font(.system(size: 10.5).monospaced()).foregroundStyle(.tertiary)
+            }
+            if let reason = move.reason {
+                Text(reason).font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            if !move.commits.isEmpty {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(move.commits.prefix(6), id: \.sha) { commit in
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Text(commit.sha.prefix(7)).font(.system(size: 11).monospaced()).foregroundStyle(.secondary)
+                            Text(commit.subject).font(.system(size: 11.5)).lineLimit(1).truncationMode(.tail)
+                        }
+                    }
+                    if move.commits.count > 6 {
+                        Text("and \(move.commits.count - 6) more").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                    }
+                }
+                .textSelection(.enabled)
+            }
+            Text(move.commits.isEmpty
+                 ? "It isn't a fast-forward of where the lead left it. Accept takes it as it is anyway: merges start from there."
+                 : "Accept if these are yours: the lead's merges start from here, with the lead and its team running on. Keep Refused leaves its merges refused.")
+                .font(.system(size: 11)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if let failure {
+                Text(failure).font(.system(size: 11)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                Button(move.commits.count == 1 ? "Accept This Commit" : "Accept These Commits", action: accept).buttonStyle(.borderedProminent).controlSize(.small)
+                Button("Keep Refused", action: keep).controlSize(.small)
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(Color.orange.opacity(0.08)))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Color.orange.opacity(0.35)))
+    }
+}

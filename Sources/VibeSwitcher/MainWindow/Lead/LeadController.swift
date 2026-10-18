@@ -83,6 +83,8 @@ final class LeadController: ObservableObject {
     @Published private(set) var decisions: [String: [LeadDecision]] = [:]
     /// The Team view's plain-language lines.
     let summaries = TeamSummaryModel()
+    /// The leads' bases, when they moved other than through merges (see `BaseMoves`).
+    let baseMoves = BaseMoves()
 
     private let host: HostClient
     private let store: SessionStore
@@ -126,6 +128,14 @@ final class LeadController: ObservableObject {
             (host?.sessions.first { $0.id.uuidString == id }, store?.sessions.first { $0.hostID?.uuidString == id }?.transcriptPath)
         }
         timer = Heartbeat.shared.every(3) { [weak self] in self?.refresh() }
+        baseMoves.onAsk = { [weak self] root, move in
+            self?.notify("\(move.branch) moved outside the lead's merges", "\(move.count) in \((root as NSString).lastPathComponent): accept them in the lead's chat, or keep its merges refused.")
+        }
+        baseMoves.onTaken = { [weak self] root, move, byYou in
+            guard byYou, let self else { return }
+            self.deliver("The user accepted the \(move.count) on \(move.branch) (\(move.from.prefix(8)) → \(move.to.prefix(8))) in VibeSwitcher: merges start from there now.",
+                         from: .system("the user, in the window"), root: root)
+        }
     }
 
     static var serverPath: String {
@@ -442,6 +452,7 @@ final class LeadController: ObservableObject {
         let read = Dictionary(uniqueKeysWithValues: roots.map { ($0, reads.decisions($0)) })
         if read != decisions { decisions = read }
         reads.keep(roots)
+        baseMoves.look(roots)
         for (root, board) in loaded {
             for question in board.openQuestions where seenQuestions.insert("\(question.id)#\(question.version)").inserted {
                 let project = (root as NSString).lastPathComponent
