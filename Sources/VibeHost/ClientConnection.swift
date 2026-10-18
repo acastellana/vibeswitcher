@@ -10,6 +10,8 @@ final class ClientConnection {
     static let tooLarge = HostEvent.error("The reply was too large to send.")
 
     let fd: Int32
+    /// The app (or tool server) on the other end, as it was when it connected.
+    let peerPID: pid_t?
     var attached: Set<UUID> = []
     var onFrame: ((HostFrame.Kind, Data) -> Void)?
     var onClose: (() -> Void)?
@@ -31,6 +33,7 @@ final class ClientConnection {
 
     init(fd: Int32, queue: DispatchQueue) {
         self.fd = fd
+        peerPID = UnixSocket.peerPID(fd)
         self.queue = queue
     }
 

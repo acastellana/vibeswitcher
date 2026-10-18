@@ -296,6 +296,8 @@ public enum LeadPrompts {
         passing, what's next), call progress with one line: the lead and the user see it on your task's lane. \
         Keep your temporary folder small: build or download into the worktree, not your scratchpad, and delete big \
         scratch files once you're done with them (a full disk stops every session).
+        Processes: stop one you started by its pid (`kill <pid>`; `$!` or `pgrep -f <your worktree path>` finds it). \
+        pkill and killall are refused: their patterns match the other sessions on this Mac too.
         Out of date: when the lead says your branch conflicts with \(workflow.base), bring it up to date here by \
         merging: run `git merge \(workflow.base)`, resolve each conflict, `git add` the files, then `git commit` \
         (`git merge --abort` starts over). Then run the checks again, commit and report. The lead's merge puts your \

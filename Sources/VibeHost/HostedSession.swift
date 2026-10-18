@@ -18,6 +18,8 @@ public final class HostedSession {
     /// Title, size or exit changed.
     public var onChange: ((HostSession) -> Void)?
     public var onBell: (() -> Void)?
+    /// It ended: its raw wait status (before `onChange` says so).
+    public var onEnd: ((Int32) -> Void)?
     /// While a view is attached it answers terminal queries; the headless terminal's answers are dropped.
     public var clientsAttached = false
 
@@ -37,6 +39,8 @@ public final class HostedSession {
     /// asynchronously, and a process that already exited can't be watched).
     private var exitPoll: DispatchSourceTimer?
     private var pendingInput = Data()
+    /// The client that asked to end it (see `terminate`): its process id and name.
+    private var killer: (pid: pid_t, name: String?)?
     /// Input was refused for lack of room: more is refused until what waits went in, so none lands out of order.
     private var refusingInput = false
     private var closed = false
@@ -224,12 +228,14 @@ public final class HostedSession {
         exitSource = nil
         exitPoll?.cancel()
         exitPoll = nil
-        info.exit = .init(status: code, at: Date())
+        info.exit = .init(status: code, at: Date(), signal: signal == 0 ? nil : signal, core: signal == 0 ? nil : status & 0x80 != 0,
+                          killedBy: killer?.pid, killedByName: killer?.name)
         // A program that died without `state=clear` isn't still working.
         info.programStatus = nil
         // What it printed last is still in the PTY.
         if readSource != nil { drain(reads: 256) }
         release()
+        onEnd?(status)
         onChange?(info)
     }
 
@@ -421,8 +427,10 @@ public final class HostedSession {
     /// Like closing a Terminal tab: SIGHUP to the shell's process group and to the job in the foreground
     /// (the agent runs in its own group). Then SIGKILL after 5 s to whichever of those groups still exists:
     /// a program that ignores SIGHUP would otherwise outlive the session, detached, once the shell exits.
-    public func terminate() {
+    /// `by`: the client that asked (its process id), which its exit names.
+    public func terminate(by client: pid_t? = nil) {
         guard info.isLive || readSource != nil else { return }
+        if let client, info.isLive, killer == nil { killer = (client, ProcessTable.info(pid: client)?.comm) }
         let groups = Set([info.childPID, tcgetpgrp(masterFD)].filter { $0 > 0 })
         groups.forEach { Darwin.kill(-$0, SIGHUP) }
         queue.asyncAfter(deadline: .now() + 5) {

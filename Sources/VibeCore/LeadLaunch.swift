@@ -37,11 +37,16 @@ public enum LeadLaunch {
     static let privateFiles = ["Read(~/.vibeswitcher/lead/**)", "Edit(~/.vibeswitcher/lead/**)",
                                "Read(~/.vibeswitcher/steer/**)", "Edit(~/.vibeswitcher/steer/**)"]
 
+    /// Killing by name. Its pattern matches every command line it's in, other sessions' too: on 2026-10-17 a worker's
+    /// `pkill -f "cat" -n` (BSD pkill takes the `-n` as a second pattern) ended three workers, two verifiers (each
+    /// role's `--name`), every tool server and the app ("cat" is in /Applications). `kill <pid>` stays open.
+    static let killsByName = ["Bash(pkill:*)", "Bash(killall:*)", "Bash(/usr/bin/pkill:*)", "Bash(/usr/bin/killall:*)"]
+
     /// What each role may not do.
     public static func deny(_ role: Role, base: String? = nil) -> [String] {
         switch role {
         case .lead, .verifier:
-            return readOnly + gitWrites + gitAround + fileWrites + privateFiles
+            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + killsByName
         case .worker:
             // Edits and commits on its own branch, and brings it up to date with the lead's (`git merge <base>`, what
             // the brief gives, or `git rebase <base>`); nothing that moves the lead's branch or another one. Rebase and merge only move
@@ -61,7 +66,7 @@ public enum LeadLaunch {
                       "Bash(git switch --ignore-other-worktrees:*)", "Bash(git branch -f:*)", "Bash(git branch --force:*)",
                       "Bash(git branch -m:*)", "Bash(git branch -M:*)", "Bash(git commit-tree:*)"]
             rules += ["Bash(git branch -D:*)", "Bash(git branch -d:*)", "Bash(git worktree:*)", "Bash(git tag:*)", "Bash(git commit --amend:*)"]
-            return rules + gitAround + privateFiles
+            return rules + gitAround + privateFiles + killsByName
         }
     }
 

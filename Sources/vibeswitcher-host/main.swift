@@ -27,6 +27,9 @@ let inherited = ["HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "PATH", "LANG", "
 let shell = environment["SHELL"].flatMap { $0.isEmpty ? nil : $0 } ?? "/bin/zsh"
 let executable = Bundle.main.executablePath ?? arguments[0]
 let build = HostBuild.id(ofExecutableAt: executable)
+let lockPath = value(after: "--lock") ?? VibePaths.hostLock.path
+// The user's host, not a scratch host on its own lock (which runs beside it, and leaves its files alone).
+let ownsLaunchers = lockPath == VibePaths.hostLock.path
 // Sessions are started through a launcher (see `PTYSpawn`). Not the app's copy: an update replaces that file while
 // this host keeps running, and this host must keep starting its own build. A private copy, named by build.
 let launchers = VibePaths.root.appendingPathComponent("host", isDirectory: true)
@@ -43,12 +46,14 @@ func ensureLauncher() -> String {
 }
 var config = HostServer.Config(
     socketPath: value(after: "--socket") ?? VibePaths.hostSocket.path,
-    lockPath: value(after: "--lock") ?? VibePaths.hostLock.path,
+    lockPath: lockPath,
     shell: shell,
     launcher: ensureLauncher(),
     baseEnvironment: environment.filter { inherited.contains($0.key) },
     hostBuild: build)
 config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600
+// The user's host logs its sessions (see `HostLog`); a scratch host only where it's told to.
+config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.appendingPathComponent("debug/host.log").path : nil)
 // What a build this one hands over to is started with: the same, without this start's handover.
 let handoverFlags: [String: Bool] = ["--handover": true, "--handover-fallback": true, "--handover-fail-restore": false]
 config.arguments = arguments.dropFirst().enumerated().reduce(into: (kept: [String](), skip: false)) { result, item in
@@ -96,6 +101,36 @@ server.onExit = { exit(0) }
 // A test of the secret channel: these bytes are handed over, and the next build says whether it got them.
 let testSecret = value(after: "--handover-test-secret").map { Data($0.utf8) }
 if let testSecret { server.secretsForHandover = { testSecret } }
+// Ended by a signal: said in the log first (with who sent it), then ended by it as before. Installed before
+// `start()` (or `start(restoring:)`), which logs "host: started": a signal from then on is always logged. Sessions
+// outlive the host either way; they lose their terminal. The handler only writes the signal and its sender to a
+// pipe. A handover's exec puts the signals back to their defaults: the new build installs its own here.
+var signalPipe: [Int32] = [-1, -1]
+pipe(&signalPipe)
+signalPipe.forEach { _ = fcntl($0, F_SETFD, FD_CLOEXEC) }
+nonisolated(unsafe) var signalPipeWriter = signalPipe[1]
+for number in [SIGTERM, SIGINT] {
+    var action = sigaction()
+    action.__sigaction_u.__sa_sigaction = { number, info, _ in
+        var said: (Int32, Int32) = (number, info?.pointee.si_pid ?? 0)
+        _ = withUnsafeBytes(of: &said) { write(signalPipeWriter, $0.baseAddress, $0.count) }
+    }
+    action.sa_flags = SA_SIGINFO
+    sigaction(number, &action, nil)
+}
+let signals = DispatchSource.makeReadSource(fileDescriptor: signalPipe[0], queue: server.queue)
+signals.setEventHandler {
+    var said: (Int32, Int32) = (0, 0)
+    guard withUnsafeMutableBytes(of: &said, { read(signalPipe[0], $0.baseAddress, $0.count) }) == MemoryLayout.size(ofValue: said) else { return }
+    let (number, sender) = said
+    let who = sender > 0 ? "pid \(sender)" + (ProcessTable.info(pid: sender).map { " (\($0.comm))" } ?? "") : "an unknown process"
+    server.note("host: got \(HostSession.Exit.signalName(number)) from \(who), exiting")
+    signal(number, SIG_DFL)
+    // To the process (this queue's thread blocks it); exiting outright if it still isn't delivered.
+    kill(getpid(), number)
+    server.queue.asyncAfter(deadline: .now() + 1) { _exit(128 + number) }
+}
+signals.resume()
 if let handoverPath, let state = restoring {
     do {
         _ = try server.start(restoring: state)
@@ -109,6 +144,7 @@ if let handoverPath, let state = restoring {
     do {
         try server.start()
     } catch HostServer.Failure.alreadyRunning {
+        server.note("host: another host holds the lock; this one (build \(build)) exits")
         exit(0)
     } catch {
         log("\(error)")
@@ -117,7 +153,6 @@ if let handoverPath, let state = restoring {
 }
 // Holding the user's lock now: no other host runs, so other builds' launchers can go (not for a scratch host on
 // its own lock, which runs beside the real one).
-let ownsLaunchers = config.lockPath == VibePaths.hostLock.path
 for name in (try? FileManager.default.contentsOfDirectory(atPath: launchers.path)) ?? [] where ownsLaunchers && name != "launcher-\(build)" {
     try? FileManager.default.removeItem(at: launchers.appendingPathComponent(name))
 }

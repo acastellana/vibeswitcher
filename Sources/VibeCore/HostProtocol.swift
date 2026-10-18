@@ -108,9 +108,37 @@ public struct HostSession: Codable, Equatable, Sendable, Identifiable {
         /// The exit code, or 128 + signal number when it was killed.
         public var status: Int32
         public var at: Date
-        public init(status: Int32, at: Date) {
+        /// The signal that killed it; nil when it exited (or an older host said nothing): a SIGTERM death and a
+        /// program that exited 143 have the same `status`. The fields below are nil from an older host too.
+        public var signal: Int32?
+        /// It dumped core.
+        public var core: Bool?
+        /// The client that asked this host to end it (a `kill`), when one did: its process id and name.
+        public var killedBy: Int32?
+        public var killedByName: String?
+
+        public init(status: Int32, at: Date, signal: Int32? = nil, core: Bool? = nil, killedBy: Int32? = nil,
+                    killedByName: String? = nil) {
             self.status = status
             self.at = at
+            self.signal = signal
+            self.core = core
+            self.killedBy = killedBy
+            self.killedByName = killedByName
+        }
+
+        /// How it ended, in words: "killed by SIGTERM", "killed by SIGHUP from pid 4242 (vibeswitcher-mcp)", "exited 143".
+        public var cause: String {
+            guard status >= 0 || signal != nil else { return "lost with the session host" }
+            let client = killedBy.map { pid in "pid \(pid)" + (killedByName.map { " (\($0))" } ?? "") }
+            guard let signal else { return "exited \(status)" + (client.map { " after \($0) closed it" } ?? "") }
+            return "killed by \(Self.signalName(signal))" + (client.map { " from \($0)" } ?? "") + (core == true ? " (core dumped)" : "")
+        }
+
+        public static func signalName(_ signal: Int32) -> String {
+            let names: [Int32: String] = [1: "HUP", 2: "INT", 3: "QUIT", 4: "ILL", 5: "TRAP", 6: "ABRT", 8: "FPE", 9: "KILL",
+                                          10: "BUS", 11: "SEGV", 13: "PIPE", 14: "ALRM", 15: "TERM", 24: "XCPU", 25: "XFSZ"]
+            return names[signal].map { "SIG" + $0 } ?? "signal \(signal)"
         }
     }
 

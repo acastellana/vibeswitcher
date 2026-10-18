@@ -98,6 +98,35 @@ struct HostMessageTests {
         }
     }
 
+    /// The Exit an app before `signal` knew: status and time only.
+    private struct OlderExit: Codable, Equatable {
+        var status: Int32
+        var at: Date
+    }
+
+    @Test func anExitSaysWhetherASignalEndedItAndOlderAppsStillReadIt() throws {
+        let at = Date(timeIntervalSince1970: 2_000)
+        let killed = HostSession.Exit(status: 143, at: at, signal: 15, core: false)
+        let exited = HostSession.Exit(status: 143, at: at)
+        #expect(killed.cause == "killed by SIGTERM")
+        #expect(exited.cause == "exited 143")
+        #expect(HostSession.Exit(status: 129, at: at, signal: 1, killedBy: 4242, killedByName: "vibeswitcher-mcp").cause
+                == "killed by SIGHUP from pid 4242 (vibeswitcher-mcp)")
+        #expect(HostSession.Exit(status: 139, at: at, signal: 11, core: true).cause == "killed by SIGSEGV (core dumped)")
+        #expect(HostSession.Exit(status: 158, at: at, signal: 30).cause == "killed by signal 30")
+        #expect(HostSession.Exit(status: -1, at: at).cause == "lost with the session host")
+        // Through the protocol both ways: the new fields survive, an older app reads what it knows, and an older
+        // host's Exit has no signal.
+        let session = HostSession(id: UUID(), tty: "ttys001", childPID: 1, cwd: "/", command: nil, label: "Shell",
+                                  agent: nil, title: "", startedAt: at, cols: 80, rows: 24, exit: killed)
+        let data = try HostCoding.encode(HostEventEnvelope(replyTo: nil, event: .sessionChanged(session)))
+        #expect(try HostCoding.decode(HostEventEnvelope.self, from: data) == HostEventEnvelope(replyTo: nil, event: .sessionChanged(session)))
+        let older = try HostCoding.decode(OlderExit.self, from: try HostCoding.encode(killed))
+        #expect(older == OlderExit(status: 143, at: at))
+        let fromOlderHost = try HostCoding.decode(HostSession.Exit.self, from: try HostCoding.encode(older))
+        #expect(fromOlderHost == exited && fromOlderHost.signal == nil)
+    }
+
     /// The welcome's capabilities, pid and start time are additions: an older app reads a newer host's welcome, and
     /// this app reads an older host's.
     @Test func welcomeAdditionsKeepTheOldShapeReadable() throws {

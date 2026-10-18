@@ -378,7 +378,7 @@ final class LeadController: ObservableObject {
                 }
             }
             // No agent in the scan a minute on: "agent ended · shell", as good as ended.
-            seen[id] = LeadWitness.Seen(live: info.isLive, exit: info.exit?.status, status: session?.status,
+            seen[id] = LeadWitness.Seen(live: info.isLive, exit: info.exit?.status, cause: info.exit?.cause, status: session?.status,
                                         since: session?.statusSince, detail: session?.detail,
                                         agentQuit: session == nil && info.agentQuit(now: now), apiError: apiError?.text,
                                         apiErrorAt: apiError?.at, activity: watched?.activity,
@@ -386,8 +386,10 @@ final class LeadController: ObservableObject {
                                         shellRunning: shellRunning, heldSince: held?.at, heldFrom: held.map { Self.sender($0.from) })
             if info.isLive, let session { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
         }
-        for event in LeadWitness.events(board: board, seen: seen, now: now) where told.insert("\(root)|\(event.key)").inserted {
-            deliver(event.text, from: .system("witness"), to: board, root: root)
+        // Sessions that ended together (a stray kill, the app relaunched over them) are told in one message.
+        for message in LeadWitness.messages(board: board, seen: seen, now: now, told: { told.contains("\(root)|\($0)") }) {
+            message.keys.forEach { told.insert("\(root)|\($0)") }
+            deliver(message.text, from: .system("witness"), to: board, root: root)
         }
         // Low disk space, once per episode; what takes it is sized off the main thread.
         var disk = disks[root] ?? LeadWitness.Disk()

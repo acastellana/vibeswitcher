@@ -312,6 +312,24 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(BoardStore(root: root).load().task("fix")?.worker == "session-2")
     }
 
+    /// 2026-10-17: workers killed from outside left their tasks running, and start_worker refused each until the
+    /// lead set it to blocked. A running task whose worker is gone starts again straight away, at the worker limit too.
+    @Test func aRunningTaskWhoseWorkerEndedStartsAgain() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        for title in ["One", "Two", "Three"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
+        for slug in ["one", "two", "three"] { #expect(!call(lead, "start_worker", ["task": slug]).isError) }
+        let live = call(lead, "start_worker", ["task": "one"])
+        #expect(live.isError && live.text.contains("still running"))
+        runtime.kill("session-1")   // ended without reporting; the lead didn't stop it
+        let again = call(lead, "start_worker", ["task": "one"])
+        #expect(!again.isError, "\(again.text)")
+        let task = BoardStore(root: root).load().task("one")
+        #expect(task?.status == .running && task?.worker == "session-4" && task?.attempts == 1)
+        #expect(runtime.spawned.count == 4)
+    }
+
     @Test func messagesSayHowTheyWereDelivered() throws {
         let root = try repo()
         let runtime = FakeRuntime()

@@ -78,4 +78,11 @@ public enum UnixSocket {
         var gid: gid_t = 0
         return getpeereid(fd, &uid, &gid) == 0 ? uid : nil
     }
+
+    /// The process on the other end of a connected socket, as it was when it connected.
+    public static func peerPID(_ fd: Int32) -> pid_t? {
+        var pid: pid_t = 0
+        var size = socklen_t(MemoryLayout<pid_t>.size)
+        return getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &pid, &size) == 0 && pid > 0 ? pid : nil
+    }
 }

@@ -360,6 +360,47 @@ struct LeadWitnessStopsAndErrorsTests {
         #expect(LeadWitness.events(board: board, seen: ["w3": .init(live: false, exit: 1)]).map(\.key).contains("w3|ended"))
     }
 
+    /// 2026-10-17: a stray pkill ended 3 workers and 2 verifiers at once, and the lead got 5 messages that each said
+    /// "exit 143". Now: one message naming every ended task and how it ended, and how to start each again.
+    @Test func sessionsThatEndTogetherAreToldInOneMessage() {
+        var board = LeadBoard()
+        let a = task("a", .running, worker: "w-a"), b = task("b", .running, worker: "w-b"), c = task("c", .failed, worker: "w-c")
+        var d = task("d", .review, worker: "w-d"), e = task("e", .review, worker: "w-e")
+        d.verifier = "v-d"
+        e.verifier = "v-e"
+        board.tasks = [a, b, c, d, e]
+        let at = Date()
+        let seen: [String: LeadWitness.Seen] = [
+            "w-a": .init(live: false, exit: 143, cause: HostSession.Exit(status: 143, at: at, signal: 15).cause),
+            "w-b": .init(live: false, exit: 143, cause: HostSession.Exit(status: 143, at: at).cause),
+            "w-c": .init(live: true, agentQuit: true),
+            "v-d": .init(live: false, exit: 143, cause: HostSession.Exit(status: 143, at: at, signal: 15).cause),
+            "v-e": .init(live: false, exit: 129, cause: HostSession.Exit(status: 129, at: at, signal: 1, killedBy: 77, killedByName: "zsh").cause),
+            "w-d": .init(live: false, exit: 0), "w-e": .init(live: false, exit: 0),   // reported: their tasks are in review
+        ]
+        var told: Set<String> = []
+        let messages = LeadWitness.messages(board: board, seen: seen, told: { told.contains($0) })
+        #expect(messages.count == 1)
+        let message = messages[0]
+        #expect(Set(message.keys) == ["w-a|ended", "w-b|ended", "w-c|ended", "v-d|ended", "v-e|ended"])
+        for line in ["worker on a: killed by SIGTERM", "worker on b: exited 143", "worker on c: its agent quit",
+                     "verifier on d: killed by SIGTERM", "verifier on e: killed by SIGHUP from pid 77 (zsh)"] {
+            #expect(message.text.contains(line), "\(line)")
+        }
+        #expect(message.text.hasPrefix("5 sessions ended without reporting"))
+        #expect(message.text.contains("start_worker") && message.text.contains("audit"))
+        // Told: not again; one more ending later is told on its own, the way one always was.
+        told.formUnion(message.keys)
+        #expect(LeadWitness.messages(board: board, seen: seen, told: { told.contains($0) }).isEmpty)
+        board.tasks.append(task("f", .running, worker: "w-f"))
+        var later = seen
+        later["w-f"] = .init(live: false, exit: 143, cause: HostSession.Exit(status: 143, at: at, signal: 15).cause)
+        let alone = LeadWitness.messages(board: board, seen: later, told: { told.contains($0) })
+        #expect(alone.map(\.keys) == [["w-f|ended"]])
+        #expect(alone.first?.text.hasPrefix("The worker on f ended (killed by SIGTERM) without reporting.") == true)
+        #expect(alone.first?.text.contains("start_worker") == true)
+    }
+
     /// (i) A turn that ended on an API error reaches the lead as that, with what to do.
     @Test func anAPIErrorIsToldAsOne() {
         let now = Date()

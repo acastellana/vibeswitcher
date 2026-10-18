@@ -391,14 +391,15 @@ public final class LeadToolset: MCPToolset {
     private func startWorker(_ slug: String) throws -> MCPToolResult {
         let board = try store.read()
         guard let task = board.task(slug) else { throw Problem(text: "No task \(slug).") }
-        guard [.planned, .failed, .blocked].contains(task.status) else {
-            throw Problem(text: "\(slug) is \(task.status.rawValue); start a worker only on a planned, failed or blocked task.")
-        }
         // One worker per worktree: two sessions editing the same files would undo each other.
         if let worker = task.worker, runtime.sessions().contains(where: { $0.id == worker && $0.live }) {
             throw Problem(text: "\(slug)'s worker is still running. Send it what to do with message, or stop_worker first.")
         }
-        let running = board.tasks.filter { $0.status == .running }.count
+        // A running task whose worker ended without reporting (killed, crashed) starts again as it is.
+        guard [.planned, .failed, .blocked, .running].contains(task.status) else {
+            throw Problem(text: "\(slug) is \(task.status.rawValue); start a worker only on a planned, failed or blocked task, or a running one whose worker ended.")
+        }
+        let running = board.tasks.filter { $0.status == .running && $0.id != task.id }.count
         let limit = workflow.maxWorkers
         guard running < limit else {
             throw Problem(text: "\(running) workers already run (max_workers is \(limit) in workflow.md). Wait for one to finish; you'll get a message.")

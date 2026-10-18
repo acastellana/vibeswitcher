@@ -12,12 +12,13 @@ final class TestHost {
     let startedAt = Date()
     private(set) var readyAt = Date.distantFuture
 
-    init(build: Int = 42) throws {
+    init(build: Int = 42, log: String? = nil) throws {
         lock = socket + ".lock"
         var config = HostServer.Config(socketPath: socket, lockPath: lock, shell: "/bin/sh",
                                        launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: build)
         config.idleExit = nil
         config.ringCapacity = 1 << 20
+        config.logPath = log
         server = HostServer(config: config)
         try server.start()
         readyAt = Date()
@@ -63,6 +64,14 @@ final class TestClient {
         return events.contains { match($0.event) }
     }
     func close() { queue.sync { connection.close() } }
+    /// The latest the host said about a session.
+    func latest(_ id: UUID) -> HostSession? {
+        lock.lock(); defer { lock.unlock() }
+        for envelope in events.reversed() {
+            if case .sessionChanged(let session) = envelope.event, session.id == id { return session }
+        }
+        return nil
+    }
 
     /// Spawns a scratch program and waits for the reply.
     func spawn(_ command: String?, cwd: String = "/tmp") throws -> HostSession {

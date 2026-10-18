@@ -17,6 +17,8 @@ final class ScratchHostProcess {
     let newBinary: String
     let oldBuild: Int
     let newBuild: Int
+    /// The session log (see `HostLog`), the same file through every build.
+    let sessionLog: String
     let process = Process()
 
     init(arguments extra: [String] = []) throws {
@@ -27,6 +29,7 @@ final class ScratchHostProcess {
         lock = dir + "/h.lock"
         oldBinary = dir + "/old/vibeswitcher-host"
         newBinary = dir + "/new/vibeswitcher-host"
+        sessionLog = dir + "/session.log"
         let files = FileManager.default
         for folder in [home, dir + "/old", dir + "/new"] { try files.createDirectory(atPath: folder, withIntermediateDirectories: true) }
         // APFS clones: no extra disk for the copies.
@@ -39,7 +42,7 @@ final class ScratchHostProcess {
         newBuild = HostBuild.id(ofExecutableAt: newBinary)
 
         process.executableURL = URL(fileURLWithPath: oldBinary)
-        process.arguments = ["--socket", socket, "--lock", lock, "--idle-exit", "600"] + extra
+        process.arguments = ["--socket", socket, "--lock", lock, "--idle-exit", "600", "--log", sessionLog] + extra
         process.environment = ["HOME": home, "CFFIXED_USER_HOME": home, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin",
                                "TMPDIR": dir + "/"]
         files.createFile(atPath: dir + "/host.log", contents: nil)
@@ -229,6 +232,37 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         #expect(scene.host.pid == pid)
         #expect(scene.host.runningExecutable == URL(fileURLWithPath: scene.host.newBinary).resolvingSymlinksInPath().path)
         #expect(scene.host.log.contains("took over 5 sessions"))
+    }
+
+    /// A session carried over by a handover still ends in the session log, and with its signal, as one started by
+    /// the new build would; a kill names who asked.
+    @Test func aRestoredSessionsEndIsLoggedWithItsSignal() throws {
+        let scene = try scene()
+        defer { end(scene) }
+        let signalled = try scene.client.spawn("exec sleep 600"), killed = try scene.client.spawn("sleep 600")
+        #expect(eventually { (ProcessTable.info(pid: signalled.childPID)?.comm ?? "") == "sleep" })
+        let seq = scene.client.send(.handover(executable: scene.host.newBinary))
+        #expect(eventually(timeout: 20) { scene.client.reply(to: seq) != nil })
+        #expect(scene.client.reply(to: seq) == .ok, "\(scene.host.log)")
+        #expect(eventually(timeout: 20) { scene.host.log.contains("took over") })
+
+        let (client, _, build, _, _, _, _) = try TestClient.welcomed(scene.host.socket)
+        #expect(build == scene.host.newBuild)
+        kill(signalled.childPID, SIGTERM)
+        client.send(.kill(id: killed.id))
+        #expect(eventually(timeout: 10) { client.latest(signalled.id)?.exit != nil && client.latest(killed.id)?.exit != nil })
+        let death = try #require(client.latest(signalled.id)?.exit), kill = try #require(client.latest(killed.id)?.exit)
+        #expect(death.status == 143 && death.signal == SIGTERM && death.cause == "killed by SIGTERM")
+        #expect(kill.signal == SIGHUP && kill.killedBy == getpid())
+        let lines = { (try? String(contentsOfFile: scene.host.sessionLog, encoding: .utf8)) ?? "" }
+        #expect(eventually { lines().components(separatedBy: "\n").filter { $0.contains("exit ") }.count >= 3 })
+        let all = lines().components(separatedBy: "\n")
+        // Started before the handover, ended after it: both in the one log.
+        #expect(all.contains { $0.contains("spawn") && $0.contains("pid \(signalled.childPID)") })
+        #expect(all.filter { $0.contains("host: started") }.count == 2)
+        #expect(all.contains { $0.contains("exit ") && $0.contains("pid \(signalled.childPID)") && $0.contains("signal 15 (SIGTERM)") })
+        #expect(all.contains { $0.contains("kill ") && $0.contains("pid \(killed.childPID)") && $0.contains("peer pid \(getpid())") })
+        #expect(all.contains { $0.contains("exit ") && $0.contains("pid \(killed.childPID)") && $0.contains("after a kill from peer pid \(getpid())") })
     }
 
     @Test func aBuildThatCantStartLeavesTheHostAsItWas() throws {

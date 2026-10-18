@@ -18,6 +18,8 @@ public final class HostServer {
         /// Ended sessions are forgotten after this long.
         public var keepEnded: TimeInterval = 24 * 3600
         public var housekeepingInterval: TimeInterval = 30
+        /// The session log (see `HostLog`); nil: none (a scratch host).
+        public var logPath: String?
         /// What this host was started with after its executable (socket, lock, idle exit): a build it hands over to is
         /// started with the same.
         public var arguments: [String] = []
@@ -54,6 +56,7 @@ public final class HostServer {
     public var secretsForHandover: (() -> Data)?
 
     private let config: Config
+    private let log: HostLog
     private var sessions: [UUID: HostedSession] = [:]
     private var order: [UUID] = []
     private var clients: [ObjectIdentifier: ClientConnection] = [:]
@@ -74,6 +77,7 @@ public final class HostServer {
 
     public init(config: Config) {
         self.config = config
+        log = HostLog(path: config.logPath)
     }
 
     public func start() throws {
@@ -122,13 +126,18 @@ public final class HostServer {
         timer.setEventHandler { [weak self] in self?.tidy() }
         timer.resume()
         housekeeping = timer
+        log.note("host: started, build \(config.hostBuild), socket \(config.socketPath)")
     }
+
+    /// A line in the session log (see `HostLog`).
+    public func note(_ text: String) { log.note(text) }
 
     /// Closes everything. `terminateSessions`: also end the programs (tests); otherwise they lose their terminal anyway.
     public func stop(terminateSessions: Bool) {
         let work = {
             guard !self.stopped else { return }
             self.stopped = true
+            self.log.note("host: stopping, \(self.sessions.values.filter { $0.info.isLive }.count) sessions live\(terminateSessions ? ", ending them" : "")")
             self.acceptSource?.cancel()
             self.housekeeping?.cancel()
             self.clients.values.forEach { $0.close() }
@@ -194,11 +203,15 @@ public final class HostServer {
                 let session = try HostedSession.spawn(request, shell: config.shell, launcher: config.launcher, baseEnvironment: config.baseEnvironment,
                                                       ringCapacity: config.ringCapacity, queue: queue)
                 register(session)
+                let info = session.info
+                log.note("spawn \(Self.short(info.id)) pid \(info.childPID) label '\(info.label)' cwd '\(info.cwd)'\(info.agent.map { " agent \($0)" } ?? ""), \(HostLog.peer(client.peerPID))")
                 reply(.spawned(session.info))
                 broadcast(.sessionChanged(session.info), except: key)
             } catch HostedSession.Failure.noSuchFolder(let path) {
+                log.note("spawn failed: no such folder '\(path)', \(HostLog.peer(client.peerPID))")
                 reply(.error("No such folder: \(path)"))
             } catch {
+                log.note("spawn failed: \(error) in '\(request.cwd)', \(HostLog.peer(client.peerPID))")
                 reply(.error("Couldn't start the session."))
             }
         case .attach(let id, let cols, let rows):
@@ -242,7 +255,12 @@ public final class HostServer {
             let text = session.historyText(lines: max(1, min(lines, 5_000)))
             reply(.historyText(id: id, history: Self.fitting(text.history, besides: text.screen), screen: text.screen))
         case .kill(let id):
-            sessions[id]?.terminate()
+            if let session = sessions[id] {
+                log.note("kill \(Self.short(id)) pid \(session.info.childPID) label '\(session.info.label)'\(session.info.isLive ? "" : " (already ended)"), \(HostLog.peer(client.peerPID))")
+            } else {
+                log.note("kill \(Self.short(id)): no such session, \(HostLog.peer(client.peerPID))")
+            }
+            sessions[id]?.terminate(by: client.peerPID)
             reply(.ok)
         case .remove(let id):
             guard let session = sessions[id] else { return reply(.ok) }
@@ -252,7 +270,12 @@ public final class HostServer {
         case .handover(let executable):
             handOver(to: executable, reply: reply)
         case .shutdown:
-            guard !sessions.values.contains(where: { $0.info.isLive }) else { return reply(.error("Sessions are running.")) }
+            let live = sessions.values.filter { $0.info.isLive }.count
+            guard live == 0 else {
+                log.note("shutdown refused: \(live) sessions live, \(HostLog.peer(client.peerPID))")
+                return reply(.error("Sessions are running."))
+            }
+            log.note("shutdown accepted, \(HostLog.peer(client.peerPID))")
             shuttingDown = true
             reply(.ok)
             queue.asyncAfter(deadline: .now() + 0.1) { [weak self] in
@@ -345,7 +368,15 @@ public final class HostServer {
         session.onOutput = { [weak self] data in self?.deliver(data, of: id) }
         session.onChange = { [weak self] info in self?.broadcast(.sessionChanged(info)) }
         session.onBell = { [weak self] in self?.broadcast(.bell(id: id)) }
+        session.onEnd = { [weak self, weak session] status in
+            guard let self, let info = session?.info else { return }
+            let asked = info.exit?.killedBy.map { ", after a kill from peer pid \($0)" } ?? ""
+            self.log.note("exit \(Self.short(id)) pid \(info.childPID) label '\(info.label)': \(HostLog.waitStatus(status))\(asked)")
+        }
     }
+
+    /// A session's id in the log: its first 8 characters.
+    static func short(_ id: UUID) -> String { String(id.uuidString.prefix(8)) }
 
     private func deliver(_ data: Data, of id: UUID) {
         let frames = HostFrame.output(session: id, bytes: data)
@@ -390,6 +421,7 @@ public final class HostServer {
         if !clients.isEmpty || sessions.values.contains(where: { $0.info.isLive }) {
             lastBusy = now
         } else if let idle = config.idleExit, now.timeIntervalSince(lastBusy) >= idle {
+            log.note("host: idle \(Int(idle)) s with no session and no app, exiting")
             stop(terminateSessions: false)
             onExit?()
         }

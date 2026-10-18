@@ -279,6 +279,41 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         }
     }
 
+    // MARK: A stray pkill doesn't end the team (2026-10-17)
+
+    /// A genswap worker's `pkill -f "cat" -n` SIGTERMed 3 workers, 2 verifiers, every tool server and the app: BSD
+    /// pkill takes the `-n` after a pattern as a second pattern, which every role's `--name` matches (and "cat" is in
+    /// /Applications). Shown on a scratch process shaped like a role's session, with pgrep (which only lists).
+    @Test func aStrayPkillIsRefusedToEveryRole() throws {
+        let token = "vsguard-\(UUID().uuidString.prefix(8))"
+        let scratch = Process()
+        scratch.executableURL = URL(fileURLWithPath: "/bin/sh")
+        // `; :` keeps sh from exec'ing sleep, so its arguments stay as they are.
+        scratch.arguments = ["-c", "sleep 30; :", token, "--name", "worker-\(token)"]
+        try scratch.run()
+        defer { scratch.terminate() }
+        let pgrep = Process()
+        pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
+        // A pattern that matches nothing, then "-n": what that worker typed.
+        pgrep.arguments = ["-f", "zz-\(UUID().uuidString)", "-n"]
+        let out = Pipe()
+        pgrep.standardOutput = out
+        try pgrep.run()
+        pgrep.waitUntilExit()
+        let matched = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).split(separator: "\n")
+        #expect(matched.contains("\(scratch.processIdentifier)"), "-n read as a pattern matches a role's --name")
+
+        for role in [LeadLaunch.Role.lead, .worker, .verifier] {
+            let rules = LeadLaunch.deny(role, base: "main")
+            for rule in ["Bash(pkill:*)", "Bash(killall:*)", "Bash(/usr/bin/pkill:*)", "Bash(/usr/bin/killall:*)"] {
+                #expect(rules.contains(rule), "\(role): \(rule)")
+            }
+        }
+        let brief = LeadPrompts.worker(task: LeadTask(slug: "t", title: "T", contract: LeadContract(goal: "g", acceptance: [], boundaries: [], context: "")),
+                                       root: "/r", workflow: LeadWorkflow())
+        #expect(brief.contains("pkill"))
+    }
+
     // MARK: A worker brings its own branch up to date
 
     /// A file a session was started with (`--settings`, `--append-system-prompt-file`).
