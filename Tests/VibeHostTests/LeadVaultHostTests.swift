@@ -221,7 +221,7 @@ struct LeadVaultHostTests {
             // "late": the host accepts only after the exec, when LOCAL_PEERTOKEN already names nc.
             if name == "late" { host.server.queue.async { Thread.sleep(forTimeInterval: 1) } }
             FileManager.default.createFile(atPath: file + ".go", contents: nil)
-            #expect(eventually(timeout: 15) { FileManager.default.fileExists(atPath: file + ".answers") }, "\(name)")
+            #expect(eventually { FileManager.default.fileExists(atPath: file + ".answers") }, "\(name)")
             let got = try replies(Data(contentsOf: URL(fileURLWithPath: file + ".answers")))
             for seq in 2...4 { #expect(refused(got[seq]), "\(name), request \(seq): \(String(describing: got[seq]))") }
         }

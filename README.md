@@ -117,7 +117,8 @@ process tree it's in, or for the app, the code it runs (its cdhash, the one of t
 path); a connection that anything else then sends on (a child it forked, or the same pid after an exec) counts as
 no one. So a worker's Bash,
 whether it runs the tool server as the verifier or the lead or writes to the socket itself, is the worker (or,
-once it leaves its session's process tree, no one, even when it execs the app's binary), and it
+once it leaves its session's process tree, no one, even when it execs the app's binary after the host accepted
+it), and it
 can't give a verdict, take the lead's tools, record the lead's branch, seal a message as yours or type into the
 lead's terminal (a session in a team takes keys only from the app, itself or its lead). Only the verifier the
 lead last started on a task gives its verdict, from its own session, about the commit it was started on. Not
@@ -125,7 +126,10 @@ protected: anything that runs code as the app or the host (a debugger, a library
 which isn't built with the hardened runtime, or the app's files rewritten: they're yours to write), or
 that changes what the sessions run (the hook binary in `~/.vibeswitcher/bin`, Claude settings, `CLAUDE.md`);
 the app's window itself when a worker drives it through Accessibility; ordinary (non-team) sessions, which still
-take keys from anyone running as you; and messages labelled as the lead's or VibeSwitcher's, which aren't sealed.
+take keys from anyone running as you; messages labelled as the lead's or VibeSwitcher's, which aren't sealed; and
+two known gaps, both closed once the app answers a challenge on each connection (planned): a process that writes
+its requests, then execs the app's binary before the host accepts its connection, can pass as the app (by then the
+kernel names the connection's process by the app's code), and any connection can ask the host for a handover.
 A goal sent with `vibeswitcher --lead` (any process can send one) reaches the lead as not vouched for. With an
 ad-hoc signed build (no `scripts/setup-signing.sh`) the rebuilt host can't read its Keychain key, so the vault
 starts empty after a host restart. `merge` reads that verdict from there, not from `board.json`; it refuses when the lead's branch was
