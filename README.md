@@ -89,9 +89,10 @@ later reaches it as a note). There's never a timer on a blocking question, a mer
 discarding work, or anything outward-facing; those wait for you. VibeSwitcher is its witness:
 it tells the lead when a worker waits for input, stops without reporting, or dies, and when one has stalled
 whatever its screen says: it reads as working but its transcript hasn't grown for 15 minutes with no shell of its
-running, it's been between turns for 10 minutes without reporting or asking the lead anything, its transcript ends
-at a context-compaction summary with nothing after it for 5 minutes, or a message has waited in its inbox for 5
-minutes. Each stall is told once, `status` lists stalled workers first, and their rows read "Stalled 2h". Reports (a
+running, it's been between turns for 10 minutes without reporting or asking the lead anything (45 minutes while it
+waits on a background task of its own, such as a long test run, which its status then names), its transcript ends at
+a context-compaction summary made mid-turn with nothing after it for 5 minutes, or a message has waited in its inbox
+for 5 minutes. A compaction Claude makes while a worker is idle is neither work nor a stall of its own. Each stall is told once, `status` lists stalled workers first, and their rows read "Stalled 2h". Reports (a
 worker done or blocked, a verdict, the witness's news) wake a lead that's between turns, in any project: a few
 seconds after they come in (several close together count as one), VibeSwitcher types one short prompt into its
 empty box ("2 new reports (verifier x passed; worker y blocked). Call status.") and the reports themselves reach it
