@@ -300,6 +300,7 @@ public final class LeadToolset: MCPToolset {
                                          "max_workers": P(type: "integer", description: "How many workers may run at once (at least 1)"),
                                          "disk_warning_gb": P(type: "number", description: "Free space (GB) on the worktrees' volume below which you're told, once, what takes the space (default 10)"),
                                          "disk_floor_gb": P(type: "number", description: "Free space (GB) below which start_worker refuses (default 3)"),
+                                         "test_timeout_min": P(type: "number", description: "Minutes merge lets init_command and test_command run before it takes them as hung and stops them (default 45)"),
                                          "merge_policy": P(type: "string", description: "How merges are handled, as the owner chose once: auto (audited work merges, the user gets an update afterwards), ask_sensitive (a commit touching sensitive_paths waits for the user's approval of that exact commit), ask_all (every merge waits)",
                                                            options: LeadWorkflow.MergePolicy.allCases.map(\.rawValue)),
                                          "sensitive_paths": P(type: "string", description: "The globs ask_sensitive holds back, comma-separated, as in .gitignore (empty: Claude's settings and instructions, .github, .env files, entitlements, keys)")]),
@@ -458,7 +459,29 @@ public final class LeadToolset: MCPToolset {
         return MCPToolResult(text: changed.isEmpty ? "Nothing to change on \(slug)." : "Updated \(slug): \(changed.joined(separator: ", ")).")
     }
 
+    /// One start at a time, in this server and any other: each counts the workers running and starts its own before
+    /// the next counts, so calls at once can't go past max_workers (or start two workers on one task).
     private func startWorker(_ slug: String, recover: Bool = false) throws -> MCPToolResult {
+        try exclusively("start-worker") { try startWorkerAlone(slug, recover: recover) }
+    }
+
+    /// Runs `body` holding the lock `run/<name>.lock` in the project's folder, waiting for it while another thread or
+    /// process holds it.
+    private func exclusively<T>(_ name: String, _ body: () throws -> T) throws -> T {
+        let path = (store.folder as NSString).appendingPathComponent("run/\(name).lock")
+        try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        // Its own open file: flock locks are per open file, so another thread's open of it waits too.
+        let fd = open(path, O_CREAT | O_RDWR, 0o600)
+        guard fd >= 0 else { throw Problem(text: "Couldn't open \(path) to take its lock: \(String(cString: strerror(errno))).") }
+        defer { close(fd) }
+        while flock(fd, LOCK_EX) != 0 {
+            guard errno == EINTR else { throw Problem(text: "Couldn't take the lock \(path): \(String(cString: strerror(errno))).") }
+        }
+        defer { flock(fd, LOCK_UN) }
+        return try body()
+    }
+
+    private func startWorkerAlone(_ slug: String, recover: Bool) throws -> MCPToolResult {
         let board = try store.read()
         guard let task = board.task(slug) else { throw Problem(text: "No task \(slug).") }
         // One worker per worktree: two sessions editing the same files would undo each other.
@@ -700,8 +723,18 @@ public final class LeadToolset: MCPToolset {
         // Exactly the audited commit, rebased and tested where no agent works.
         let tested: String
         switch Worktrees.rebaseAndTest(root: root, commit: verdict.commit, onto: current, setup: workflow.initCommand, test: workflow.testCommand,
-                                       scratch: vault.scratch(root: root, "merge-\(slug)")) {
+                                       scratch: vault.scratch(root: root, "merge-\(slug)"), timeout: workflow.testTimeout) {
         case .passed(let commit): tested = commit
+        case .cancelled:
+            // Stopped by the caller: nothing is known about the work, and the task stays as it was.
+            throw Problem(text: "The merge of \(slug) was cancelled; nothing was merged, and \(slug) stays as it was.")
+        case .hung(let command, let after, let output):
+            // Not a failure of the work as far as anyone knows: the task stays as it was, and the lead decides.
+            let (what, they) = command == "init_command" ? ("init_command", "it was") : ("tests", "they were")
+            let saved = saveMergeLog(output, slug: slug)
+            throw Problem(text: "Not merged: the \(what) hung after \(Worktrees.duration(after)) on \(slug) rebased onto \(base); \(they) stopped, with everything started under them. \(slug) stays as it was. "
+                          + (saved.map { "The output so far: \($0). " } ?? "(The output couldn't be saved.) ")
+                          + "If they only need longer, raise test_timeout_min (\(Self.gb(workflow.testTimeoutMinutes)) in workflow.md) with configure; else have the worker find what hangs.")
         case .conflict:
             try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Conflicts with \(base): the branch needs bringing up to date."))
             throw Problem(text: "\(slug) conflicts with \(base). Message its worker to bring its branch up to date by merging, in its worktree: `git merge \(base)`, resolve the conflicts, `git add` the files, then `git commit`, each command on its own (no pipes, && or 2>&1); then run the tests and report again (start_worker again if it has stopped). Then audit again; merge puts the work on top of \(base) itself.")
@@ -712,9 +745,13 @@ public final class LeadToolset: MCPToolset {
             try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Tests fail rebased onto \(base)" + (last.isEmpty ? "." : ": \(last.prefix(200))")))
             throw Problem(text: testFailure(output, slug: slug, base: base))
         case .error(let text):
-            throw Problem(text: text)
+            throw Problem(text: "Not merged: \(text)")
         }
-        switch Worktrees.fastForward(root: root, base: base, to: tested, from: current) {
+        // Cancelled after its checks passed: it doesn't land. Past here, it lands whole or not at all.
+        if ShellCancel.current?.isCancelled == true {
+            throw Problem(text: "The merge of \(slug) was cancelled after its checks passed; nothing was merged, and \(slug) stays as it was.")
+        }
+        switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: tested, from: current) }) {
         case .merged:
             try vault.setHead(tested, root: root, branch: base)
             try store.update { board in
@@ -755,14 +792,19 @@ public final class LeadToolset: MCPToolset {
     private func testFailure(_ output: String, slug: String, base: String) -> String {
         let setup = output.hasPrefix("init_command failed:\n")
         let output = setup ? String(output.dropFirst("init_command failed:\n".count)) : output
-        let log = vault.scratch(root: root, "\(slug)/merge-test.log")
-        let saved = (try? vault.ensurePrivate(log.deletingLastPathComponent())).flatMap {
-            (try? Data(output.utf8).write(to: log, options: .atomic)).map { log.path }
-        }
+        let saved = saveMergeLog(output, slug: slug)
         let found = TestFailures(output: output).summary()
             ?? "Nothing in the output names a failing test or an error; it ends:\n" + String(output.suffix(1500))
         return "The \(setup ? "init_command" : "test command") fails on \(slug) rebased onto \(base).\n\(found)\n"
             + (saved.map { "Full output: \($0)" } ?? "(The full output couldn't be saved.)")
+    }
+
+    /// Saves a merge's test output where the lead can read it; its path, or nil when it couldn't be saved.
+    private func saveMergeLog(_ output: String, slug: String) -> String? {
+        let log = vault.scratch(root: root, "\(slug)/merge-test.log")
+        return (try? vault.ensurePrivate(log.deletingLastPathComponent())).flatMap {
+            (try? Data(output.utf8).write(to: log, options: .atomic)).map { log.path }
+        }
     }
 
     private func cleanup(_ slug: String, force: Bool) throws -> MCPToolResult {
@@ -972,6 +1014,10 @@ public final class LeadToolset: MCPToolset {
                 guard !value.isEmpty else { break }
                 guard let size = LeadWorkflow.gigabytes(value) else { throw Problem(text: "\(key) must be a number of GB, 0 or more.") }
                 value = Self.gb(size)
+            case "test_timeout_min":
+                guard !value.isEmpty else { break }
+                guard let minutes = LeadWorkflow.minutes(value) else { throw Problem(text: "test_timeout_min must be a number of minutes, more than 0.") }
+                value = Self.gb(minutes)
             case "merge_policy" where !value.isEmpty:
                 guard let policy = LeadWorkflow.MergePolicy(text: value) else {
                     throw Problem(text: "merge_policy is one of \(LeadWorkflow.MergePolicy.allCases.map(\.rawValue).joined(separator: ", ")).")
@@ -998,9 +1044,11 @@ public final class LeadToolset: MCPToolset {
                                       "base_branch": after.baseBranch ?? "", "verifier_model": after.verifierModel ?? "",
                                       "max_workers": String(after.maxWorkers),
                                       "disk_warning_gb": Self.gb(after.diskWarningGB), "disk_floor_gb": Self.gb(after.diskFloorGB),
+                                      "test_timeout_min": Self.gb(after.testTimeoutMinutes),
                                       "merge_policy": after.mergePolicy?.rawValue ?? "", "sensitive_paths": after.sensitivePaths?.joined(separator: ", ") ?? ""]
-        // A disk limit cleared reads back as its default.
-        let defaults = ["disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB)]
+        // A limit cleared reads back as its default.
+        let defaults = ["disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB),
+                        "test_timeout_min": Self.gb(LeadWorkflow().testTimeoutMinutes)]
         for change in changes where read[change.key] != (change.value.isEmpty ? defaults[change.key] ?? "" : change.value) {
             throw Problem(text: "Wrote workflow.md, but \(change.key) reads back as \"\(read[change.key] ?? "")\", not \"\(change.value)\". Check the file.")
         }
@@ -1353,7 +1401,8 @@ public final class LeadToolset: MCPToolset {
                      "- verifier_model: " + (workflow.verifierModel ?? "not set: the workers' model"),
                      "- max_workers: \(workflow.maxWorkers)",
                      "- disk_warning_gb: \(Self.gb(workflow.diskWarningGB)) (the lead is told below this much free space)",
-                     "- disk_floor_gb: \(Self.gb(workflow.diskFloorGB)) (start_worker refuses below it)"]
+                     "- disk_floor_gb: \(Self.gb(workflow.diskFloorGB)) (start_worker refuses below it)",
+                     "- test_timeout_min: \(Self.gb(workflow.testTimeoutMinutes)) (merge stops init_command and test_command past it, as hung)"]
         let policy = workflow.mergePolicy.map { "\($0.rawValue) (\($0.meaning))" } ?? "not set: ask the owner once; until then merges are handled as ask_sensitive"
         lines.append("- merge_policy: \(policy)")
         lines.append("- sensitive_paths: \(workflow.sensitiveGlobs.joined(separator: ", "))\(workflow.sensitivePaths == nil ? " (the defaults)" : "")")

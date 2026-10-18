@@ -32,17 +32,35 @@ struct WorktreesTests {
         #expect(Worktrees.mainBranch(root: root) == "main")
     }
 
+    func scratch() -> URL { temp.url("wt-scratch").appendingPathComponent("merge") }
+
+    /// The heads of `main` and of `slug`'s branch.
+    func heads(_ root: String, _ slug: String) -> (main: String, tip: String) {
+        (Git.run(["rev-parse", "main"], in: root).output, Git.run(["rev-parse", Worktrees.branch(slug)], in: root).output)
+    }
+
+    /// The worktrees git lists for `root`, its own checkout included.
+    func listed(_ root: String) -> [String] {
+        Git.run(["worktree", "list", "--porcelain"], in: root).output.components(separatedBy: "\n")
+            .filter { $0.hasPrefix("worktree ") }.map { String($0.dropFirst("worktree ".count)) }
+    }
+
     @Test func aPassingBranchFastForwardsMainAndIsCleanedUp() throws {
         let root = try repo()
         let worktree = try Worktrees.create(root: root, slug: "add-b")
         try commit("b.txt", "bee\n", in: worktree)
         // main moved meanwhile: the branch is rebased onto it first.
         try commit("c.txt", "sea\n", in: root)
-        let checked = Worktrees.rebaseAndTest(root: root, slug: "add-b", test: "test -f b.txt && test -f c.txt")
+        let (main, tip) = heads(root, "add-b")
+        let scratch = scratch()
+        let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test -f b.txt && test -f c.txt", scratch: scratch)
         guard case .passed(let tested) = checked else { Issue.record("\(checked)"); return }
-        #expect(try Worktrees.merge(root: root, slug: "add-b", commit: tested) == .merged)
+        #expect(Worktrees.fastForward(root: root, base: "main", to: tested, from: main) == .merged)
         #expect(FileManager.default.fileExists(atPath: root + "/b.txt"))
-        try Worktrees.remove(root: root, slug: "add-b")
+        // The scratch worktree the checks ran in is gone, from the disk and from git's list.
+        #expect(!FileManager.default.fileExists(atPath: scratch.path))
+        #expect(listed(root).count == 2)
+        try Worktrees.remove(root: root, slug: "add-b", force: true)
         #expect(!FileManager.default.fileExists(atPath: worktree))
         #expect(Git.run(["branch", "--list", "agent/add-b"], in: root).output.isEmpty)
     }
@@ -51,14 +69,15 @@ struct WorktreesTests {
         let root = try repo()
         let worktree = try Worktrees.create(root: root, slug: "x")
         try commit("a.txt", "worker\n", in: worktree)
-        #expect(Worktrees.rebaseAndTest(root: root, slug: "x", test: "false").isFailure)
+        var (main, tip) = heads(root, "x")
+        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "false", scratch: scratch()).isFailure)
         try commit("a.txt", "main\n", in: root)
-        #expect(Worktrees.rebaseAndTest(root: root, slug: "x", test: "true") == .conflict)
-        // The aborted rebase leaves the branch as it was.
+        (main, tip) = heads(root, "x")
+        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch()) == .conflict)
+        // The branch and its worktree are left as they were.
         #expect(try String(contentsOfFile: worktree + "/a.txt", encoding: .utf8) == "worker\n")
+        #expect(heads(root, "x").tip == tip)
     }
-
-    func scratch() -> URL { temp.url("wt-scratch").appendingPathComponent("merge") }
 
     @Test func anAuditedCommitWithoutMergesIsRebasedCommitByCommit() throws {
         let root = try repo()
@@ -123,10 +142,12 @@ struct WorktreesTests {
         let root = try repo()
         let worktree = try Worktrees.create(root: root, slug: "t")
         try commit("t.txt", "t\n", in: worktree)
-        guard case .passed(let tested) = Worktrees.rebaseAndTest(root: root, slug: "t", test: "true") else { Issue.record("not passed"); return }
+        let (main, tip) = heads(root, "t")
+        guard case .passed(let tested) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch())
+        else { Issue.record("not passed"); return }
         // The worker commits again while the tests run: that commit was never tested.
         try commit("late.txt", "late\n", in: worktree)
-        #expect(try Worktrees.merge(root: root, slug: "t", commit: tested) == .merged)
+        #expect(Worktrees.fastForward(root: root, base: "main", to: tested, from: main) == .merged)
         #expect(Git.run(["rev-parse", "main"], in: root).output == tested)
         #expect(!FileManager.default.fileExists(atPath: root + "/late.txt"))
     }
@@ -136,8 +157,10 @@ struct WorktreesTests {
         let worktree = try Worktrees.create(root: root, slug: "d")
         try commit("d.txt", "d\n", in: worktree)
         try "editing\n".write(toFile: worktree + "/d.txt", atomically: true, encoding: .utf8)
-        guard case .error(let text) = Worktrees.rebaseAndTest(root: root, slug: "d", test: "true") else { Issue.record("not an error"); return }
-        #expect(text.contains("uncommitted"))
+        // The commit is tested where no one works: the worker's edit is neither a conflict nor tested, and stays.
+        let (main, tip) = heads(root, "d")
+        let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test \"$(cat d.txt)\" = d", scratch: scratch())
+        guard case .passed = checked else { Issue.record("\(checked)"); return }
         #expect(try String(contentsOfFile: worktree + "/d.txt", encoding: .utf8) == "editing\n")
     }
 
@@ -275,6 +298,121 @@ struct WorktreesTests {
         #expect(FileManager.default.fileExists(atPath: Git.run(["rev-parse", "--path-format=absolute", "--git-path", "rebase-merge"], in: worktree).output))
     }
 
+    /// A hook in the repository that fails, saying `text`.
+    func failingHook(_ name: String, saying text: String, in root: String) throws {
+        let hooks = Git.run(["rev-parse", "--path-format=absolute", "--git-path", "hooks"], in: root).output
+        try FileManager.default.createDirectory(atPath: hooks, withIntermediateDirectories: true)
+        try "#!/bin/sh\necho '\(text)' >&2\nexit 1\n".write(toFile: hooks + "/" + name, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hooks + "/" + name)
+    }
+
+    /// E-15: a rebase stopped by something else than a conflict says what stopped it.
+    @Test func aRebaseThatFailsWithoutAConflictSaysWhatFailed() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "h")
+        try commit("h.txt", "h\n", in: worktree)
+        try commit("c.txt", "c\n", in: root)
+        let (main, tip) = heads(root, "h")
+        // A base that isn't there.
+        guard case .error(let missing) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: "no-such-branch", test: "true", scratch: scratch())
+        else { Issue.record("not an error"); return }
+        #expect(missing.contains("not on a conflict") && missing.contains("no-such-branch"), "\(missing)")
+        // A hook that refuses the rebase.
+        try failingHook("pre-rebase", saying: "pre-rebase hook says no", in: root)
+        let scratch = scratch()
+        guard case .error(let hooked) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch)
+        else { Issue.record("not an error"); return }
+        #expect(hooked.contains("pre-rebase hook says no") && !hooked.lowercased().contains("conflicts"), "\(hooked)")
+        #expect(!FileManager.default.fileExists(atPath: scratch.path))
+        #expect(listed(root).count == 2)
+    }
+
+    /// E-15: a branch that merged the base in is squashed; a hook that refuses that commit is said, not a conflict.
+    @Test func aSquashThatFailsWithoutAConflictSaysWhatFailed() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "q")
+        try commit("s.txt", "s\n", in: worktree)
+        try commit("c.txt", "c\n", in: root)
+        #expect(Git.run(["merge", "-q", "--no-edit", "main"], in: worktree).ok)
+        try commit("d.txt", "d\n", in: root)
+        try failingHook("pre-commit", saying: "pre-commit hook says no", in: root)
+        let (main, tip) = heads(root, "q")
+        let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch())
+        guard case .error(let text) = checked else { Issue.record("\(checked)"); return }
+        #expect(text.contains("pre-commit hook says no"), "\(text)")
+    }
+
+    /// E-17: a test command that never ends is stopped at the time limit with what it started (also a child its shell
+    /// left behind, outside its family but in its process group), and the scratch worktree goes.
+    @Test func aTestCommandThatNeverEndsIsStoppedAsHung() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "n")
+        try commit("n.txt", "n\n", in: worktree)
+        let (main, tip) = heads(root, "n")
+        let marks = temp.url("hung").path
+        try FileManager.default.createDirectory(atPath: marks, withIntermediateDirectories: true)
+        // The subshell exits at once: its sleep is launchd's child by the time the time limit comes.
+        let test = "(sleep \(ShellTests.childRuns) & echo $! > \(marks)/child); echo started; sleep \(ShellTests.childRuns)"
+        var timeout: TimeInterval = 2
+        var child: Int32?, checked = Worktrees.Check.cancelled, took: TimeInterval = 0
+        let scratch = scratch()
+        // On a busy Mac the shell may not have started the child in time: given twice as long, until it has.
+        while child == nil, timeout < hangGuard {
+            let started = Date()
+            checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: test, scratch: scratch, timeout: timeout)
+            took = Date().timeIntervalSince(started)
+            child = (try? String(contentsOfFile: marks + "/child", encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            if child == nil { timeout *= 2 }
+        }
+        guard case .hung(let command, let after, let output) = checked else { Issue.record("\(checked)"); return }
+        #expect(command == "test command" && after == timeout && output.contains("started"))
+        #expect(took < hangGuard)
+        let left = try #require(child)
+        #expect(eventually { kill(left, 0) != 0 })
+        #expect(!FileManager.default.fileExists(atPath: scratch.path))
+        #expect(listed(root).count == 2)
+    }
+
+    /// E-12: a cancelled run stops its test command, removes its scratch worktree (git's list included) and says
+    /// cancelled, not failed.
+    @Test func aCancelledRunIsCancelledAndCleanedUp() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "k")
+        try commit("k.txt", "k\n", in: worktree)
+        let (main, tip) = heads(root, "k")
+        let marks = temp.url("cancel").path
+        try FileManager.default.createDirectory(atPath: marks, withIntermediateDirectories: true)
+        let token = ShellCancel()
+        let scratch = scratch()
+        let result = Locked<Worktrees.Check?>(nil)
+        Thread.detachNewThread {
+            let checked = ShellCancel.with(token) {
+                Worktrees.rebaseAndTest(root: root, commit: tip, onto: main,
+                                        test: "sleep \(ShellTests.childRuns) & echo $! > \(marks)/child; wait", scratch: scratch)
+            }
+            result.set(checked)
+        }
+        #expect(eventually { FileManager.default.fileExists(atPath: marks + "/child") })
+        token.cancel()
+        #expect(eventually { result.get() != nil })
+        #expect(result.get() == .cancelled)
+        let child = try #require(Int32(try String(contentsOfFile: marks + "/child", encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+        #expect(eventually { kill(child, 0) != 0 })
+        #expect(!FileManager.default.fileExists(atPath: scratch.path))
+        #expect(listed(root).count == 2)
+        // Cancelled before it began, nothing is set up.
+        let early = ShellCancel()
+        early.cancel()
+        #expect(ShellCancel.with(early) { Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch) } == .cancelled)
+        #expect(listed(root).count == 2)
+    }
+
+    @Test func timeLimitsReadInMinutes() {
+        #expect(Worktrees.duration(45 * 60) == "45 min")
+        #expect(Worktrees.duration(2) == "2 s")
+        #expect(Worktrees.testTimeout == 45 * 60)
+    }
+
     @Test func aBranchLeftWithoutItsWorktreeIsCheckedOutAgain() throws {
         let root = try repo()
         let worktree = try Worktrees.create(root: root, slug: "b")
@@ -352,6 +490,50 @@ struct ShellTests {
         #expect(run.took < hangGuard)
         let child = try #require(run.child)
         #expect(eventually { kill(child, 0) != 0 })
+    }
+
+    /// E-17: a command that ends but leaves something holding its output open (a background job) isn't waited for
+    /// without end: what it wrote is returned, and what it left is stopped with its process group.
+    @Test func aBackgroundJobHoldingTheOutputIsNotWaitedFor() throws {
+        let dir = temp.url("shell").path
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        let started = Date()
+        let run = Shell.run(executable: "/bin/sh", args: ["-c", "(sleep \(Self.childRuns) & echo $! > child); echo done"], in: dir, grace: 1)
+        #expect(Date().timeIntervalSince(started) < hangGuard)
+        #expect(run.ok && !run.timedOut && run.output == "done")
+        let child = try #require(Int32(try String(contentsOfFile: dir + "/child", encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
+        #expect(eventually { kill(child, 0) != 0 })
+    }
+
+    @Test func aTimedOutRunSaysSoAndIsntOk() {
+        let run = Shell.run(executable: "/bin/sleep", args: ["\(Self.childRuns)"], in: "/", timeout: 0.5, grace: 1)
+        #expect(run.timedOut && !run.cancelled && !run.ok)
+    }
+}
+
+/// A value shared between threads.
+final class Locked<Value>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value: Value
+
+    init(_ value: Value) { self.value = value }
+
+    func get() -> Value {
+        lock.lock()
+        defer { lock.unlock() }
+        return value
+    }
+
+    func set(_ new: Value) {
+        lock.lock()
+        value = new
+        lock.unlock()
+    }
+
+    func change<T>(_ body: (inout Value) -> T) -> T {
+        lock.lock()
+        defer { lock.unlock() }
+        return body(&value)
     }
 }
 

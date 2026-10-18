@@ -6,7 +6,11 @@ public enum Git {
         public var status: Int32
         public var output: String
         public var error: String
-        public var ok: Bool { status == 0 }
+        /// It ran past its time limit and was stopped.
+        public var timedOut = false
+        /// The work it ran for was cancelled (see `ShellCancel`), and it was stopped.
+        public var cancelled = false
+        public var ok: Bool { status == 0 && !timedOut && !cancelled }
     }
 
     @discardableResult
@@ -38,10 +42,34 @@ public final class ShellCancel: @unchecked Sendable {
     private static let key = "VibeSwitcher.ShellCancel"
     public static var current: ShellCancel? { Thread.current.threadDictionary[key] as? ShellCancel }
 
-    public static func with<T>(_ token: ShellCancel, _ body: () throws -> T) rethrows -> T {
+    /// With nil, what `body` runs isn't stopped by a cancel (cleanup that must finish: removing a scratch worktree).
+    /// The token that was set before is set again afterwards.
+    public static func with<T>(_ token: ShellCancel?, _ body: () throws -> T) rethrows -> T {
+        let outer = Thread.current.threadDictionary[key]
         Thread.current.threadDictionary[key] = token
-        defer { Thread.current.threadDictionary[key] = nil }
+        defer { Thread.current.threadDictionary[key] = outer }
         return try body()
+    }
+}
+
+/// What a running program wrote to one of its pipes, read as it comes, so what came before is there even when the
+/// pipe never closes (something it started still holds it).
+private final class PipeText: @unchecked Sendable {
+    private let lock = NSLock()
+    private var data = Data()
+
+    func drain(_ handle: FileHandle) {
+        while case let chunk = handle.availableData, !chunk.isEmpty {
+            lock.lock()
+            data.append(chunk)
+            lock.unlock()
+        }
+    }
+
+    var text: String {
+        lock.lock()
+        defer { lock.unlock() }
+        return String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }
 
@@ -61,34 +89,62 @@ public enum Shell {
         process.standardError = interleaved ? out : err
         process.standardInput = FileHandle.nullDevice
         do { try process.run() } catch { return Git.Result(status: -1, output: "", error: "\(error)") }
+        let pid = process.processIdentifier
+        // Process starts it as the leader of a process group of its own, whose id is its pid: what it starts is in it
+        // too, also what has left its family since (a background job whose shell exited). Taken from the pid, not
+        // looked up: a command that ends at once is gone before getpgid could ask, and its group with it. A group
+        // with that id can only be the one it made (its pid isn't given out again while the group has members).
+        // Never ours, whatever happens.
+        let group = pid > 0 && pid != getpgrp() ? pid : nil
         // Read while it runs, so a chatty program can't fill the pipe and stall.
         // Their own threads, not the shared pool: callers block too, and many at once (parallel tests, several tool
         // calls) could leave the readers no thread to run on.
-        var output = Data(), errors = Data()
-        let group = DispatchGroup()
-        group.enter()
-        Thread.detachNewThread { output = out.fileHandleForReading.readDataToEndOfFile(); group.leave() }
+        let output = PipeText(), errors = PipeText()
+        let readers = DispatchGroup()
+        readers.enter()
+        Thread.detachNewThread { output.drain(out.fileHandleForReading); readers.leave() }
         // Unused, its write end is still ours: reading it would never end.
         if !interleaved {
-            group.enter()
-            Thread.detachNewThread { errors = err.fileHandleForReading.readDataToEndOfFile(); group.leave() }
+            readers.enter()
+            Thread.detachNewThread { errors.drain(err.fileHandleForReading); readers.leave() }
         }
         let deadline = Date().addingTimeInterval(timeout)
         let cancel = ShellCancel.current
         while process.isRunning, Date() < deadline, cancel?.isCancelled != true { usleep(20_000) }
+        var timedOut = false, cancelled = false
         if process.isRunning {
+            cancelled = cancel?.isCancelled == true
+            timedOut = !cancelled
             // Out of time: its children (a test runner's workers) go too, or they'd keep running in the worktree.
             // Asked first; whatever is still there after `grace` (it ignores TERM) is killed.
-            let asked = signalFamily(of: process.processIdentifier, SIGTERM)
-            let end = Date().addingTimeInterval(grace)
-            while process.isRunning, Date() < end { usleep(50_000) }
-            signalFamily(of: process.processIdentifier, SIGKILL, also: asked)
+            stop(process, group: group, grace: grace)
         }
         process.waitUntilExit()
-        group.wait()
-        return Git.Result(status: process.terminationStatus,
-                          output: String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines),
-                          error: String(decoding: errors, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines))
+        // Its output ends when everything holding the pipe has: something it started may still (a server left in the
+        // background). Given `grace`, then its group is stopped; then the output is taken as it is, never waited for
+        // without end. (Its group only: its own pid may be another program's by now. The group's id isn't given to a
+        // new process while the group has members.)
+        if readers.wait(timeout: .now() + grace) == .timedOut {
+            if let group, kill(-group, SIGTERM) == 0 {
+                let end = Date().addingTimeInterval(grace)
+                while kill(-group, 0) == 0, Date() < end { usleep(50_000) }
+                kill(-group, SIGKILL)
+            }
+            _ = readers.wait(timeout: .now() + grace)
+        }
+        return Git.Result(status: process.terminationStatus, output: output.text, error: errors.text, timedOut: timedOut, cancelled: cancelled)
+    }
+
+    /// Stops a program and everything it started: its family and its process group, asked with TERM, then, once it's
+    /// gone or `grace` is over (it ignores TERM), killed.
+    private static func stop(_ process: Process, group: Int32?, grace: TimeInterval) {
+        let pid = process.processIdentifier
+        let asked = signalFamily(of: pid, SIGTERM)
+        if let group { kill(-group, SIGTERM) }
+        let end = Date().addingTimeInterval(grace)
+        while process.isRunning, Date() < end { usleep(50_000) }
+        signalFamily(of: pid, SIGKILL, also: asked)
+        if let group { kill(-group, SIGKILL) }
     }
 }
 
@@ -119,13 +175,23 @@ public enum Worktrees {
     public enum Check: Equatable, Sendable {
         /// The checks passed on this commit (the branch rebased onto main).
         case passed(String)
-        /// A command failed; its output (all of it from the commit's rebaseAndTest, the tail from the slug's).
+        /// A command failed; all of its output.
         case failed(String)
         /// Rebasing onto main conflicted; the rebase was undone.
         case conflict
+        /// A command (`init_command` or `test command`) ran past `after` seconds and was stopped, with everything it
+        /// started; what it wrote until then. Not a failure: nothing says the work is wrong.
+        case hung(command: String, after: TimeInterval, output: String)
+        /// The run was cancelled (the tool call was), and stopped.
+        case cancelled
         case error(String)
 
         public var isFailure: Bool { if case .failed = self { return true } else { return false } }
+    }
+
+    /// "45 min", "90 s": how long a time limit is, as a message says it.
+    public static func duration(_ seconds: TimeInterval) -> String {
+        seconds >= 60 ? "\(Int((seconds / 60).rounded())) min" : "\(Int(seconds.rounded())) s"
     }
 
     public enum Merge: Equatable, Sendable {
@@ -329,27 +395,6 @@ public enum Worktrees {
         return try create(root: root, slug: slug, base: base)
     }
 
-    /// Puts the branch on top of main and runs the checks there.
-    public static func rebaseAndTest(root: String, slug: String, test: String?, base: String? = nil, timeout: TimeInterval = 1200) -> Check {
-        let path = path(root: root, slug: slug)
-        guard FileManager.default.fileExists(atPath: path) else { return .error("No worktree for \(slug).") }
-        guard Git.run(["status", "--porcelain", "--untracked-files=no"], in: path).output.isEmpty else {
-            return .error("The worktree of \(slug) has uncommitted changes (its worker may still be working). Have it commit, or stop it, then merge again.")
-        }
-        let rebase = Git.run(["rebase", base ?? mainBranch(root: root)], in: path)
-        guard rebase.ok else {
-            Git.run(["rebase", "--abort"], in: path)
-            return .conflict
-        }
-        // What's tested is what may be merged: the commit now, not whatever the branch holds later.
-        let tested = Git.run(["rev-parse", "HEAD"], in: path).output
-        guard let test, !test.trimmingCharacters(in: .whitespaces).isEmpty else { return .passed(tested) }
-        let run = Shell.run(executable: "/bin/zsh", args: ["-lc", test], in: path, timeout: timeout)
-        if run.ok { return .passed(tested) }
-        let output = (run.output + "\n" + run.error).trimmingCharacters(in: .whitespacesAndNewlines)
-        return .failed(String(output.suffix(4000)))
-    }
-
     /// Fast-forwards main to `commit` (the tested one; the branch's head when nil). Never rewrites anything and
     /// never touches uncommitted work: a dirty main checkout, main checked out elsewhere, or a commit not on top
     /// of main is refused with the reason.
@@ -398,40 +443,53 @@ public enum Worktrees {
 
     /// Rebases `commit` (the audited one) onto `base` and runs the setup and test commands on the result, in a
     /// worktree of its own at `scratch`, detached, that no agent works in: what's tested is that commit and nothing
-    /// a worker commits or edits meanwhile. The worktree is removed afterwards.
+    /// a worker commits or edits meanwhile. The worktree is removed afterwards, also when the run is cancelled.
+    /// A command that runs past `timeout` is stopped with everything it started (`hung`); a cancel stops it the same
+    /// way (`cancelled`); a rebase that fails on something else than a conflict says what failed (`error`).
     public static func rebaseAndTest(root: String, commit: String, onto base: String, setup: String? = nil, test: String?,
-                                     scratch: URL, timeout: TimeInterval = 1200) -> Check {
+                                     scratch: URL, timeout: TimeInterval = testTimeout) -> Check {
         let path = scratch.path
-        if FileManager.default.fileExists(atPath: path) {
-            Git.run(["worktree", "remove", "--force", path], in: root)
-            try? FileManager.default.removeItem(atPath: path)
-            Git.run(["worktree", "prune"], in: root)
+        let cancel = ShellCancel.current
+        // Not stopped by the cancel: a worktree left half removed stays in git's list.
+        let remove = {
+            ShellCancel.with(nil) {
+                Git.run(["worktree", "remove", "--force", path], in: root)
+                try? FileManager.default.removeItem(atPath: path)
+                Git.run(["worktree", "prune"], in: root)
+            }
         }
+        if FileManager.default.fileExists(atPath: path) { remove() }
+        guard cancel?.isCancelled != true else { return .cancelled }
         try? FileManager.default.createDirectory(at: scratch.deletingLastPathComponent(), withIntermediateDirectories: true,
                                                  attributes: [.posixPermissions: 0o700])
+        defer { remove() }
         let added = Git.run(["worktree", "add", "--detach", "-q", path, commit], in: root)
-        guard added.ok else { return .error(added.error.isEmpty ? "Couldn't set up a worktree to test \(commit.prefix(8)) in." : added.error) }
-        defer {
-            Git.run(["worktree", "remove", "--force", path], in: root)
-            try? FileManager.default.removeItem(atPath: path)
-            Git.run(["worktree", "prune"], in: root)
+        guard added.ok else {
+            if cancel?.isCancelled == true { return .cancelled }
+            return .error(added.error.isEmpty ? "Couldn't set up a worktree to test \(commit.prefix(8)) in." : added.error)
         }
         // A worker brings its branch up to date by merging the base in. Rebasing would drop that merge and replay
         // the commits before it, conflicts and all, so such a branch lands as one commit on top of the base; either
         // way the base's history stays a line.
         if Git.run(["rev-list", "--merges", "--max-count=1", "\(base)..HEAD"], in: path).output.isEmpty {
-            guard Git.run(["rebase", "-q", base], in: path).ok else {
+            let rebase = Git.run(["rebase", "-q", base], in: path)
+            if !rebase.ok {
+                let conflict = unmerged(in: path)
                 Git.run(["rebase", "--abort"], in: path)
-                return .conflict
+                if cancel?.isCancelled == true { return .cancelled }
+                return conflict ? .conflict : .error("Rebasing \(commit.prefix(8)) onto \(base.prefix(8)) failed, and not on a conflict: \(said(rebase))")
             }
-        } else if !squash(onto: base, in: path) {
-            return .conflict
+        } else if let stopped = squash(onto: base, in: path) {
+            return cancel?.isCancelled == true ? .cancelled : stopped
         }
+        guard cancel?.isCancelled != true else { return .cancelled }
         let tested = Git.run(["rev-parse", "HEAD"], in: path).output
         for (name, command) in [("init_command", setup), ("test command", test)] {
             guard let command, !command.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
             // All of it, in order: what failed may be anywhere in it, and its tail is often a build's warnings.
             let run = Shell.run(executable: "/bin/zsh", args: ["-lc", command], in: path, timeout: timeout, interleaved: true)
+            if run.cancelled || cancel?.isCancelled == true { return .cancelled }
+            if run.timedOut { return .hung(command: name, after: timeout, output: run.output) }
             guard run.ok else {
                 return .failed((name == "init_command" ? "init_command failed:\n" : "") + run.output)
             }
@@ -439,23 +497,43 @@ public enum Worktrees {
         return .passed(tested)
     }
 
+    /// How long the merge queue's commands may run before they're taken as hung: generous, a full build and test run
+    /// on a slow Mac takes a fraction of it.
+    public static let testTimeout: TimeInterval = 45 * 60
+
+    /// A rebase or merge at `path` stopped on a conflict: it left files unmerged.
+    static func unmerged(in path: String) -> Bool {
+        !Git.run(["diff", "--name-only", "--diff-filter=U"], in: path).output.isEmpty
+    }
+
+    /// What git said when a command failed.
+    static func said(_ result: Git.Result) -> String {
+        let text = [result.error, result.output].first { !$0.isEmpty } ?? ""
+        return text.isEmpty ? "git exited with status \(result.status)." : String(text.suffix(1500))
+    }
+
     /// Replaces the detached HEAD at `path` with one commit on `base` holding the branch's changes, titled after the
-    /// branch's own commits (merges left out) and authored by the last of them. False when they conflict with `base`.
-    static func squash(onto base: String, in path: String) -> Bool {
+    /// branch's own commits (merges left out) and authored by the last of them. Nil when that's done; `conflict` when
+    /// they conflict with `base`; `error`, saying what failed, when something else stops it (a hook, a missing commit).
+    static func squash(onto base: String, in path: String) -> Check? {
         let tip = Git.run(["rev-parse", "HEAD"], in: path).output
         let subjects = Git.run(["log", "--reverse", "--no-merges", "--format=%s", "\(base)..\(tip)"], in: path).output
             .split(whereSeparator: \.isNewline).map(String.init)
         let author = Git.run(["log", "-1", "--no-merges", "--format=%an <%ae>", "\(base)..\(tip)"], in: path).output
-        guard Git.run(["checkout", "-q", "--detach", base], in: path).ok else { return false }
-        guard Git.run(["merge", "--squash", "-q", tip], in: path).ok else {
+        let checkout = Git.run(["checkout", "-q", "--detach", base], in: path)
+        guard checkout.ok else { return .error("Checking out \(base.prefix(8)) to put the branch on failed: \(said(checkout))") }
+        let merge = Git.run(["merge", "--squash", "-q", tip], in: path)
+        guard merge.ok else {
+            let conflict = unmerged(in: path)
             Git.run(["reset", "-q", "--hard"], in: path)
-            return false
+            return conflict ? .conflict : .error("Squashing \(tip.prefix(8)) onto \(base.prefix(8)) failed, and not on a conflict: \(said(merge))")
         }
         // Nothing of its own beyond what it merged: the base is the result, as a rebase would leave it.
-        if Git.run(["diff", "--cached", "--quiet"], in: path).ok { return true }
+        if Git.run(["diff", "--cached", "--quiet"], in: path).ok { return nil }
         let message = (subjects.first.map { [$0] } ?? ["Changes from \(tip.prefix(8))"])
             + (subjects.count > 1 ? [""] + subjects.dropFirst().map { "- \($0)" } : [])
-        return Git.run(["commit", "-q", "-m", message.joined(separator: "\n")] + (author.isEmpty ? [] : ["--author", author]), in: path).ok
+        let committed = Git.run(["commit", "-q", "-m", message.joined(separator: "\n")] + (author.isEmpty ? [] : ["--author", author]), in: path)
+        return committed.ok ? nil : .error("Committing the branch squashed onto \(base.prefix(8)) failed: \(said(committed))")
     }
 
     /// Files Claude Code reads as settings or instructions (project settings and hooks under `.claude/`, `.mcp.json`,

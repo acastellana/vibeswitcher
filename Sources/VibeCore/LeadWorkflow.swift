@@ -18,6 +18,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// every session.
     public var diskWarningGB: Double = 10
     public var diskFloorGB: Double = 3
+    /// How many minutes merge lets init_command and test_command run before they're taken as hung and stopped
+    /// (`test_timeout_min:`).
+    public var testTimeoutMinutes: Double = Worktrees.testTimeout / 60
     /// What the owner chose once for merges (`merge_policy:`); nil until they did (then the lead asks them, and merge
     /// treats it as ask_sensitive).
     public var mergePolicy: MergePolicy?
@@ -49,6 +52,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "base_branch": workflow.baseBranch = present
                 case "disk_warning_gb": workflow.diskWarningGB = gigabytes(value) ?? 10
                 case "disk_floor_gb": workflow.diskFloorGB = gigabytes(value) ?? 3
+                case "test_timeout_min": workflow.testTimeoutMinutes = minutes(value) ?? Worktrees.testTimeout / 60
                 // One it can't read asks for everything rather than merging what the owner meant to see.
                 case "merge_policy": workflow.mergePolicy = present.map { MergePolicy(text: $0) ?? .askAll }
                 case "sensitive_paths": workflow.sensitivePaths = globs(value)
@@ -161,6 +165,13 @@ public struct LeadWorkflow: Equatable, Sendable {
     var diskWarning: Int64 { DiskSpace.bytes(diskWarningGB) }
     var diskFloor: Int64 { DiskSpace.bytes(diskFloorGB) }
 
+    /// A time in minutes (more than 0); nil when it isn't one.
+    static func minutes(_ value: String) -> Double? {
+        Double(value).flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+    }
+
+    var testTimeout: TimeInterval { testTimeoutMinutes * 60 }
+
     /// Reads `workflow.md` whatever its line endings, BOM or stray bytes; `problem` says when it couldn't be used.
     public static func load(from path: String) -> LeadWorkflow {
         guard FileManager.default.fileExists(atPath: path) else {
@@ -215,7 +226,7 @@ public struct LeadWorkflow: Equatable, Sendable {
 
     /// The settings the lead may change with `configure`.
     public static let configurable = ["test_command", "init_command", "base_branch", "verifier_model", "max_workers",
-                                      "disk_warning_gb", "disk_floor_gb", "merge_policy", "sensitive_paths"]
+                                      "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "merge_policy", "sensitive_paths"]
 
     /// `data` with each setting's line changed (an empty value clears it), added when missing; every other line, the
     /// comments, unknown keys, the notes, the line endings and a BOM stay as they were.
