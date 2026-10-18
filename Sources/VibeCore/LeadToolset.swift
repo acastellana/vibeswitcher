@@ -81,6 +81,10 @@ public final class LeadToolset: MCPToolset {
     private let introducing = NSLock()
     /// How long cleanup waits for a task's sessions to end (the host hangs up, then kills after 5 s).
     var stopWait: TimeInterval = 8
+    /// The bytes free on the volume holding a path (see `DiskSpace.free`), and where Claude Code keeps its sessions'
+    /// temporary folders (see `ClaudeScratch`). Faked in tests.
+    var freeSpace: (String) -> Int64? = DiskSpace.free(at:)
+    var scratchRoot = ClaudeScratch.root
 
     /// The server for the session holding `capability`. `expected` and `expectedTask` are what it was started as
     /// (`--role`, `--task`): when they don't match the capability, it serves nothing.
@@ -281,7 +285,9 @@ public final class LeadToolset: MCPToolset {
                                          "init_command": P(type: "string", description: "What a fresh worktree needs before work starts (install, build)"),
                                          "base_branch": P(type: "string", description: "The branch workers start from and verified work is merged into (an existing local branch)"),
                                          "verifier_model": P(type: "string", description: "The verifier's model (e.g. sonnet, opus); a different one than the workers' gives a second opinion"),
-                                         "max_workers": P(type: "integer", description: "How many workers may run at once (at least 1)")]),
+                                         "max_workers": P(type: "integer", description: "How many workers may run at once (at least 1)"),
+                                         "disk_warning_gb": P(type: "number", description: "Free space (GB) on the worktrees' volume below which you're told, once, what takes the space (default 10)"),
+                                         "disk_floor_gb": P(type: "number", description: "Free space (GB) below which start_worker refuses (default 3)")]),
             ]
         }
     }
@@ -396,6 +402,11 @@ public final class LeadToolset: MCPToolset {
         let limit = workflow.maxWorkers
         guard running < limit else {
             throw Problem(text: "\(running) workers already run (max_workers is \(limit) in workflow.md). Wait for one to finish; you'll get a message.")
+        }
+        // A worker on a full disk fails, and takes every other session with it (none can write its output).
+        let workflow = self.workflow
+        if let free = freeSpace(worktreesFolder), free < workflow.diskFloor {
+            throw Problem(text: "Not started: only \(DiskSpace.text(free)) free on the volume holding the worktrees, under disk_floor_gb (\(Self.gb(workflow.diskFloorGB)) GB in workflow.md). A worker started now would fail once the disk fills. Free space first: cleanup finished tasks (status lists the biggest task folders), or tell the user.")
         }
         let worktree = try Worktrees.open(root: root, slug: slug, base: base)
         let session = try launch(.worker, task: slug, name: "worker-\(slug)", in: worktree, label: "Worker: \(task.title)", trust: true,
@@ -614,7 +625,8 @@ public final class LeadToolset: MCPToolset {
     }
 
     private func cleanup(_ slug: String, force: Bool) throws -> MCPToolResult {
-        guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
+        let board = store.load()
+        guard let task = board.task(slug) else { throw Problem(text: "No task \(slug).") }
         guard task.status == .done || force else {
             throw Problem(text: "\(slug) isn't merged. Use force: true to abandon its work.")
         }
@@ -632,8 +644,17 @@ public final class LeadToolset: MCPToolset {
         guard running.isEmpty else {
             throw Problem(text: "\(slug)'s sessions haven't ended yet; cleanup again in a moment.")
         }
+        // Its sessions' temporary folders, found by the worktree's path while it's still there to resolve.
+        let worktree = Worktrees.path(root: root, slug: slug)
+        let temporary = ClaudeScratch.folders(for: worktree, in: scratchRoot)
         // Merged work is in main; leftovers in the worktree (build output) can go. Abandoned work goes only on request.
-        try Worktrees.remove(root: root, slug: slug, force: true)
+        // The build folder goes first and whatever git makes of the rest: it's most of the space.
+        var freed = removeFolder((worktree as NSString).appendingPathComponent(".build"))
+        if FileManager.default.fileExists(atPath: worktree) || branchHead(Worktrees.branch(slug)) != nil {
+            try Worktrees.remove(root: root, slug: slug, force: true)
+        }
+        freed += temporary.reduce(0) { $0 + removeFolder($1.path) }
+        freed += sweepFinished(board, except: slug)
         try? vault.retire(root: root, task: slug)
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
@@ -646,7 +667,39 @@ public final class LeadToolset: MCPToolset {
             && [.worker, .verifier].contains(LeadTeams.role(label: session.label)) {
             runtime.forget(session.id)
         }
-        return MCPToolResult(text: "Cleaned up \(slug).")
+        return MCPToolResult(text: "Cleaned up \(slug)" + (freed > 0 ? " (freed \(DiskSpace.text(freed)) of build output and temporary folders)." : "."))
+    }
+
+    /// Removes a folder, if it's there; returns what it took.
+    private func removeFolder(_ path: String) -> Int64 {
+        guard FileManager.default.fileExists(atPath: path) else { return 0 }
+        let bytes = DiskSpace.size(of: path)
+        return (try? FileManager.default.removeItem(atPath: path)) == nil ? 0 : bytes
+    }
+
+    /// The temporary folders other finished tasks left behind (cleaned up before cleanup removed them): only a task
+    /// merged or abandoned whose worktree is gone, with no session running there.
+    private func sweepFinished(_ board: LeadBoard, except slug: String) -> Int64 {
+        let live = Set(runtime.sessions().filter(\.live).map { ($0.cwd as NSString).standardizingPath })
+        var freed: Int64 = 0
+        for task in board.tasks where task.slug != slug && task.worktree == nil && [.done, .failed].contains(task.status) {
+            let worktree = Worktrees.path(root: root, slug: task.slug)
+            guard !FileManager.default.fileExists(atPath: worktree), !live.contains((worktree as NSString).standardizingPath) else { continue }
+            freed += ClaudeScratch.folders(for: worktree, in: scratchRoot).reduce(0) { $0 + removeFolder($1.path) }
+        }
+        return freed
+    }
+
+    /// Where the worktrees go (the volume they fill).
+    var worktreesFolder: String { (root as NSString).appendingPathComponent(".vibeswitcher/worktrees") }
+
+    /// 10 → "10", 2.5 → "2.5".
+    static func gb(_ value: Double) -> String { String(format: "%g", value) }
+
+    /// Low disk space, with what takes it (status says it while it lasts; the witness tells it once).
+    func diskWarning(_ workflow: LeadWorkflow, board: LeadBoard) -> [String] {
+        guard let free = freeSpace(worktreesFolder), free < workflow.diskWarning else { return [] }
+        return [LeadWitness.diskText(free: free, workflow: workflow, folders: TaskFolder.all(root: root, board: board, scratch: scratchRoot))]
     }
 
     private func askUser(_ arguments: [String: Any]) throws -> MCPToolResult {
@@ -718,6 +771,10 @@ public final class LeadToolset: MCPToolset {
             case "max_workers":
                 guard let count = Int(value), count >= 1 else { throw Problem(text: "max_workers must be a whole number, at least 1.") }
                 value = String(count)
+            case "disk_warning_gb", "disk_floor_gb":
+                guard !value.isEmpty else { break }
+                guard let size = LeadWorkflow.gigabytes(value) else { throw Problem(text: "\(key) must be a number of GB, 0 or more.") }
+                value = Self.gb(size)
             case "base_branch" where !value.isEmpty:
                 guard Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(value)"], in: root).ok else {
                     throw Problem(text: "There's no local branch \(value) to work on.")
@@ -735,8 +792,11 @@ public final class LeadToolset: MCPToolset {
         let after = LeadWorkflow.load(from: path)
         let read: [String: String] = ["test_command": after.testCommand ?? "", "init_command": after.initCommand ?? "",
                                       "base_branch": after.baseBranch ?? "", "verifier_model": after.verifierModel ?? "",
-                                      "max_workers": String(after.maxWorkers)]
-        for change in changes where read[change.key] != change.value {
+                                      "max_workers": String(after.maxWorkers),
+                                      "disk_warning_gb": Self.gb(after.diskWarningGB), "disk_floor_gb": Self.gb(after.diskFloorGB)]
+        // A disk limit cleared reads back as its default.
+        let defaults = ["disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB)]
+        for change in changes where read[change.key] != (change.value.isEmpty ? defaults[change.key] ?? "" : change.value) {
             throw Problem(text: "Wrote workflow.md, but \(change.key) reads back as \"\(read[change.key] ?? "")\", not \"\(change.value)\". Check the file.")
         }
         // A branch the lead hasn't merged into yet: its head now is where merges into it start from.
@@ -866,6 +926,7 @@ public final class LeadToolset: MCPToolset {
         let workflow = self.workflow
         var lines = ["Project \(project) on branch \(workflow.base) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once."]
         lines += workflowWarnings(workflow)
+        lines += diskWarning(workflow, board: board)
         // Stalled workers first: VibeSwitcher's witness noticed them stop making progress, whatever their screens say.
         let stalled = board.stalled
         if !stalled.isEmpty {
@@ -993,7 +1054,9 @@ public final class LeadToolset: MCPToolset {
                      "- init_command: " + (workflow.initCommand.map { "`\($0)`" } ?? "not set" + (detectedInit.map { " (suggested from the repository: `\($0)`)" } ?? "")),
                      "- base_branch: " + (raw.baseBranch ?? "not set: \(fallback) (the branch the lead first started on)"),
                      "- verifier_model: " + (workflow.verifierModel ?? "not set: the workers' model"),
-                     "- max_workers: \(workflow.maxWorkers)"]
+                     "- max_workers: \(workflow.maxWorkers)",
+                     "- disk_warning_gb: \(Self.gb(workflow.diskWarningGB)) (the lead is told below this much free space)",
+                     "- disk_floor_gb: \(Self.gb(workflow.diskFloorGB)) (start_worker refuses below it)"]
         let warnings = workflowWarnings(workflow)
         if !warnings.isEmpty { lines += [""] + warnings }
         return lines.joined(separator: "\n")
