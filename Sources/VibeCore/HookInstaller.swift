@@ -86,15 +86,16 @@ public enum HookInstaller {
     }
 
     /// Installs (or reinstalls) our hooks. The previous file is kept once as `<name>.vibeswitcher-backup`.
-    public static func install(agent: Agent) throws {
-        let url = configURL(for: agent)
+    /// `url` and `hookBinary` are for tests.
+    public static func install(agent: Agent, at url: URL? = nil, hookBinary: String = VibePaths.hookBinary.path) throws {
+        let url = url ?? configURL(for: agent)
         let current = try readConfigThrowing(url)
         try backupOnce(url)
-        try writeConfig(addingOurs(to: current, agent: agent), to: url)
+        try writeConfig(addingOurs(to: current, agent: agent, hookBinary: hookBinary), to: url)
     }
 
-    public static func uninstall(agent: Agent) throws {
-        let url = configURL(for: agent)
+    public static func uninstall(agent: Agent, at url: URL? = nil) throws {
+        let url = url ?? configURL(for: agent)
         guard FileManager.default.fileExists(atPath: url.path) else { return }
         let current = try readConfigThrowing(url)
         try writeConfig(removingOurs(from: current), to: url)
@@ -112,18 +113,36 @@ public enum HookInstaller {
         return object
     }
 
+    /// A copy of the file's contents (the file a symlink points at, not the link: that would follow our edits).
     static func backupOnce(_ url: URL) throws {
         let backup = url.appendingPathExtension("vibeswitcher-backup")
         let fm = FileManager.default
         if fm.fileExists(atPath: url.path), !fm.fileExists(atPath: backup.path) {
-            try fm.copyItem(at: url, to: backup)
+            try fm.copyItem(at: try fileBehindLinks(url), to: backup)
         }
     }
 
+    /// Written to the file a symlinked settings file points at (dotfiles), so the link stays a link; the file keeps
+    /// its permissions.
     static func writeConfig(_ config: [String: Any], to url: URL) throws {
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let target = try fileBehindLinks(url)
+        let fm = FileManager.default
+        try fm.createDirectory(at: target.deletingLastPathComponent(), withIntermediateDirectories: true)
         let data = try JSONSerialization.data(withJSONObject: config,
                                               options: [.prettyPrinted, .sortedKeys, .withoutEscapingSlashes])
-        try (data + Data("\n".utf8)).write(to: url, options: .atomic)
+        let mode = (try? fm.attributesOfItem(atPath: target.path))?[.posixPermissions]
+        try (data + Data("\n".utf8)).write(to: target, options: .atomic)
+        if let mode { try fm.setAttributes([.posixPermissions: mode], ofItemAtPath: target.path) }
+    }
+
+    /// `url`, or what its chain of symlinks ends at (the end may not exist yet). A loop is an error.
+    static func fileBehindLinks(_ url: URL) throws -> URL {
+        var file = url
+        for _ in 0..<32 {
+            guard let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: file.path) else { return file }
+            file = destination.hasPrefix("/") ? URL(fileURLWithPath: destination)
+                : file.deletingLastPathComponent().appendingPathComponent(destination)
+        }
+        throw POSIXError(.ELOOP)
     }
 }

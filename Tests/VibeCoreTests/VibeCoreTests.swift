@@ -176,6 +176,58 @@ struct HookInstallerTests {
             #expect(handler["command"] as? String == "/h/vibeswitcher-hook codex")
         }
     }
+
+    /// E-13: a dotfiles user's `settings.json` is a symlink; installing used to replace the link with a plain file.
+    @Test func installAndUninstallEditThroughASymlinkedSettingsFile() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? fm.removeItem(at: home) }
+        let dotfiles = home.appendingPathComponent("dotfiles/claude")
+        try fm.createDirectory(at: dotfiles, withIntermediateDirectories: true)
+        try fm.createDirectory(at: home.appendingPathComponent(".claude"), withIntermediateDirectories: true)
+        let real = dotfiles.appendingPathComponent("settings.json")
+        try Data(#"{"model": "opus"}"#.utf8).write(to: real)
+        try fm.setAttributes([.posixPermissions: 0o640], ofItemAtPath: real.path)
+        // Two hops, the first relative: ~/.claude/settings.json → ../dotfiles/settings.json → dotfiles/claude/settings.json
+        try fm.createSymbolicLink(atPath: home.appendingPathComponent("dotfiles/settings.json").path,
+                                  withDestinationPath: real.path)
+        let link = home.appendingPathComponent(".claude/settings.json")
+        try fm.createSymbolicLink(atPath: link.path, withDestinationPath: "../dotfiles/settings.json")
+
+        try HookInstaller.install(agent: .claude, at: link, hookBinary: "/h/vibeswitcher-hook")
+        #expect(try fm.destinationOfSymbolicLink(atPath: link.path) == "../dotfiles/settings.json")
+        let installed = try HookInstaller.readConfigThrowing(real)
+        #expect(installed["model"] as? String == "opus" && HookInstaller.isComplete(in: installed, agent: .claude))
+        #expect(try fm.attributesOfItem(atPath: real.path)[.posixPermissions] as? Int == 0o640)
+        // The backup is a copy of what the file held, not another link to it.
+        let backup = link.appendingPathExtension("vibeswitcher-backup")
+        #expect(try fm.attributesOfItem(atPath: backup.path)[.type] as? FileAttributeType == .typeRegular)
+        #expect(try Data(contentsOf: backup) == Data(#"{"model": "opus"}"#.utf8))
+
+        try HookInstaller.uninstall(agent: .claude, at: link)
+        #expect(try fm.destinationOfSymbolicLink(atPath: link.path) == "../dotfiles/settings.json")
+        let removed = try HookInstaller.readConfigThrowing(real)
+        #expect(removed["model"] as? String == "opus" && !HookInstaller.isInstalled(in: removed))
+    }
+
+    @Test func aLinkToAFileNotThereYetIsCreatedThereAndALoopIsAnError() throws {
+        let fm = FileManager.default
+        let home = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try fm.createDirectory(at: home, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: home) }
+        let link = home.appendingPathComponent("hooks.json")
+        let target = home.appendingPathComponent("dotfiles/codex/hooks.json")
+        try fm.createSymbolicLink(atPath: link.path, withDestinationPath: target.path)
+        try HookInstaller.install(agent: .codex, at: link, hookBinary: "/h/vibeswitcher-hook")
+        #expect(try fm.destinationOfSymbolicLink(atPath: link.path) == target.path)
+        #expect(HookInstaller.isComplete(in: try HookInstaller.readConfigThrowing(target), agent: .codex))
+
+        let a = home.appendingPathComponent("a.json"), b = home.appendingPathComponent("b.json")
+        try fm.createSymbolicLink(atPath: a.path, withDestinationPath: b.path)
+        try fm.createSymbolicLink(atPath: b.path, withDestinationPath: a.path)
+        #expect(throws: (any Error).self) { try HookInstaller.install(agent: .codex, at: a, hookBinary: "/h/vibeswitcher-hook") }
+        #expect(try fm.destinationOfSymbolicLink(atPath: a.path) == b.path)
+    }
 }
 
 
