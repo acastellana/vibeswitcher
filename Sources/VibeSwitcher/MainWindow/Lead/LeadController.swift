@@ -153,8 +153,7 @@ final class LeadController: ObservableObject {
                 let launch = try LeadLaunch.prepare(
                     role: .lead, root: root, task: nil, base: base,
                     prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow),
-                    start: goal.map { "You're starting as the project lead. A goal given with vibeswitcher --lead (\(Self.commandLineNote)): \($0)\nRead status and the workflow notes, plan the goal into tasks with contracts, start the workers, and tell the user your plan in a few lines." }
-                        ?? "You're starting as the project lead. Read status and the workflow notes, then greet the user in one short line: what's on the board, and what they'd like to build next.",
+                    start: LeadPrompts.leadStart(root: root, goal: goal, note: Self.commandLineNote),
                     server: Self.serverPath, name: name, folder: vault.runFolder(root: root, name: name))
                 return (grant, launch)
             }

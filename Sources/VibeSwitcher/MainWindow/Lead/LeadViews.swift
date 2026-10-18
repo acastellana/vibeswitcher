@@ -11,6 +11,7 @@ extension LeadTask.Status {
         case .done: return .green
         case .failed: return .red
         case .blocked: return .purple
+        case .kept: return .teal
         }
     }
 
@@ -22,6 +23,7 @@ extension LeadTask.Status {
         case .done: return "Done"
         case .failed: return "Failed"
         case .blocked: return "Blocked"
+        case .kept: return "Kept"
         }
     }
 }

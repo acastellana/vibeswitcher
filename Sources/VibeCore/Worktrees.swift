@@ -331,15 +331,32 @@ public enum Worktrees {
     public static func agentConfigChanges(root: String, slug: String, base: String) -> [String] {
         let committed = Git.run(["diff", "--name-only", "-z", "\(base)...\(branch(slug))"], in: root).output
             .split(separator: "\0").map(String.init)
-        // Status lines are "XY path" (a rename's old path follows on its own): both readings are checked.
+        // Status lines are "XY path" (a rename's old path follows on its own): both readings are checked. Ignored
+        // ones ("!! path") count only when Claude reads them as settings or instructions, not its own lock and state
+        // files.
         let local = Git.run(["status", "--porcelain", "-z", "--untracked-files=all", "--ignored"], in: path(root: root, slug: slug)).output
-            .split(separator: "\0").flatMap { [String($0), String($0.dropFirst(3))] }
-        return Array(Set((committed + local).filter(isAgentConfig))).sorted()
+            .split(separator: "\0").flatMap { entry in
+                [String(entry), String(entry.dropFirst(3))].filter { isAgentConfig($0, ignored: entry.hasPrefix("!! ")) }
+            }
+        return Array(Set(committed.filter { isAgentConfig($0) } + local)).sorted()
     }
 
-    static func isAgentConfig(_ path: String) -> Bool {
+    /// Under `.claude/`, what Claude Code reads as settings or instructions (the rest there is its own state: locks,
+    /// scheduled-task bookkeeping).
+    static let agentConfigFolders: Set<String> = ["commands", "agents", "skills", "hooks", "output-styles", "rules"]
+
+    /// A file Claude Code reads as settings or instructions. A git-ignored one counts only when it's one Claude
+    /// reads (`settings*.json`, `.mcp.json`, `CLAUDE*.md`, what's under `agentConfigFolders`), not one it writes
+    /// for itself (`.claude/scheduled_tasks.lock`).
+    static func isAgentConfig(_ path: String, ignored: Bool = false) -> Bool {
         let parts = path.split(separator: "/").map(String.init)
-        return parts.contains(".claude") || [".mcp.json", "CLAUDE.md", "CLAUDE.local.md"].contains(parts.last ?? "")
+        let name = parts.last ?? ""
+        if [".mcp.json", "CLAUDE.md", "CLAUDE.local.md"].contains(name) { return true }
+        guard let claude = parts.firstIndex(of: ".claude") else { return false }
+        guard ignored else { return true }
+        let inside = parts[(claude + 1)...]
+        if inside.count == 1 { return name.hasPrefix("settings") && name.hasSuffix(".json") || name == "CLAUDE.md" }
+        return inside.first.map(agentConfigFolders.contains) ?? false
     }
 
     /// Removes a worker's worktree and its branch. Without `force` it refuses when either holds work that isn't

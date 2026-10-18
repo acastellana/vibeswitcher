@@ -98,6 +98,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
         case failed
         /// Waiting on something (an answer, another task).
         case blocked
+        /// Deliberately not merged (a decision, a note or the user holds it back, e.g. a prototype the user hasn't
+        /// looked at): its work stays, merge refuses it, and nothing counts it as failed.
+        case kept
     }
 
     public var id: String
@@ -135,6 +138,8 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var leadQuestionAt: Double?
     /// The witness's latest word that its worker stopped making progress (see `LeadStall`); cleared once it moves.
     public var stall: LeadStall?
+    /// Why the lead keeps it unmerged (status kept).
+    public var keptBecause: String?
 
     public static let keptCheckpoints = 40
 
@@ -294,6 +299,13 @@ public struct LeadReport: Codable, Equatable, Sendable {
         self.about = about
         self.text = text
         self.at = at
+    }
+
+    /// The task it's about: the slug after "worker " or "verifier ".
+    public var task: String? {
+        let parts = about.split(separator: " ", maxSplits: 1)
+        guard parts.count == 2, ["worker", "verifier"].contains(parts[0]) else { return nil }
+        return String(parts[1])
     }
 }
 

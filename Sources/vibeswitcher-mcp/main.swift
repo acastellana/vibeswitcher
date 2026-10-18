@@ -96,20 +96,23 @@ final class HostRuntime: LeadRuntime {
                                         clearDraft: clearDraft,
                                         clear: {
                                             // One ^C empties Claude's box (two in a row would quit it); then a moment to redraw.
-                                            try? HostCall.send(.input(id: id, bytes: Data(HostInput.bytes(forKey: "interrupt") ?? []), reply: false))
+                                            let sent = (try? HostCall.send(.input(id: id, bytes: Data(HostInput.bytes(forKey: "interrupt") ?? []), reply: false))) != nil
                                             usleep(300_000)
+                                            return sent
                                         })
     }
 
-    func sessions() -> [LeadSessionInfo] {
-        ((try? HostCall.sessions()) ?? []).map { session in
+    /// A host that can't be read is an error, never "no sessions": the tools that act on that answer (start a second
+    /// worker in a live worktree, remove one) refuse with it.
+    func sessions() throws -> [LeadSessionInfo] {
+        try HostCall.sessions().map { session in
             LeadSessionInfo(id: session.id.uuidString, cwd: session.cwd, label: session.label, live: session.isLive,
                             status: session.isLive ? activity(of: session, agent: Self.agentPid(on: session.tty)).text : nil, tty: session.tty)
         }
     }
 
-    func transcript(of session: String) -> String? {
-        guard let hosted = ((try? HostCall.sessions()) ?? []).first(where: { $0.id.uuidString == session }) else { return nil }
+    func transcript(of session: String) throws -> String? {
+        guard let hosted = try HostCall.sessions().first(where: { $0.id.uuidString == session }) else { return nil }
         // An ended session's terminal may hold another agent now: only its own hooks' record counts.
         let pid = hosted.isLive ? Self.agentPid(on: hosted.tty) : nil
         return observer.transcript(hosted, hook: hosted.isLive ? observer.hook(hosted, agentPid: pid) : nil)

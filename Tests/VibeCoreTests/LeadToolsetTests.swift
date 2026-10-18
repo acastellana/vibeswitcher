@@ -406,15 +406,15 @@ struct LeadToolsetTests: LeadTeamFixture {
         _ = call(lead, "audit", ["task": "one"])
         _ = call(try seat("verify-one", runtime), "submit_audit", ["completion": "complete", "integrity": "clean", "summary": "checked it"])
         let status = call(lead, "status").text
-        let listed = try #require(status.components(separatedBy: "Reports since your last status:").last)
-        #expect(listed.contains("- worker one: The worker on one says it's done: added b.txt"))
-        #expect(listed.contains("- verifier one: The audit of one passed (complete, clean): checked it"))
+        let listed = try #require(status.components(separatedBy: "Reports since your last status").last)
+        #expect(listed.contains(" worker one: The worker on one says it's done: added b.txt"))
+        #expect(listed.contains(" verifier one: The audit of one passed (complete, clean): checked it"))
         // Listed once: the next status has nothing new, until another report comes in.
         #expect(!call(lead, "status").text.contains("Reports since"))
         runtime.leadRunning = false
         _ = call(try seat("worker-one", runtime), "report", ["status": "blocked", "summary": "need a key"])
         let later = call(lead, "status").text
-        #expect(later.contains("- worker one: The worker on one is blocked: need a key") && !later.contains("added b.txt"))
+        #expect(later.contains(" worker one: The worker on one is blocked: need a key") && !later.contains("added b.txt"))
     }
 
     @Test func aReportWithNoLeadRunningSaysSo() throws {

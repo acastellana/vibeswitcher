@@ -4,11 +4,12 @@ import VibeCore
 extension TeamRow.Mark {
     var color: Color {
         switch self {
-        case .needsYou, .failed, .stalled: return .red
+        case .needsYou, .failed, .stalled, .ended: return .red
         case .blocked: return .purple
         case .working, .rework: return .orange
         case .review: return .blue
         case .merge, .merged: return .green
+        case .kept: return .teal
         case .queued, .abandoned: return .secondary
         }
     }

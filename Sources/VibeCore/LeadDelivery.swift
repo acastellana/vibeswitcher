@@ -34,6 +34,9 @@ extension LeadDelivery {
         case awaitingAnswer(String?)
         /// Idle, but its input box holds this draft: the message waits (as `queued`) unless the draft is cleared.
         case behindDraft(String)
+        /// Asked to clear the draft, it couldn't: what the box held before, and what it showed after the ^C (nil:
+        /// the keys didn't go out, or the screen couldn't be read). The message waits (as `queued`).
+        case draftStayed(before: String, after: String?)
     }
 
     /// What Claude Code's input box shows: nothing typed, a draft, or no box at all (a dialog is on screen: a
@@ -142,11 +145,12 @@ extension LeadDelivery {
     /// Delivers by what the agent is doing (see `LeadActivity`), never typing into one that isn't between turns:
     /// working, or with nothing known about it, the message is steered in (it gets it at its next step); on a
     /// prompt, steered too (it gets it once that's answered); between turns, typed as its next prompt when its box is
-    /// empty, or, with `clearDraft`, once `clear` has emptied a draft. Otherwise it waits in the inbox.
+    /// empty, or, with `clearDraft`, once `clear` (true when its keys went out) has emptied a draft. Otherwise it
+    /// waits in the inbox.
     @discardableResult
     public static func deliver(_ text: String, from sender: SteerMessage.Sender, to agent: LeadAgent, activity: LeadActivity,
                                screen: (() -> String?)?, typeInto: ((String) -> Bool)?, clearDraft: Bool = false,
-                               clear: (() -> Void)? = nil, root: URL = VibePaths.root) throws -> Delivered {
+                               clear: (() -> Bool)? = nil, root: URL = VibePaths.root) throws -> Delivered {
         try deliver(text, from: sender, to: agent, activity: activity, styledScreen: screen.map { read in { read().map { Screen(text: $0) } } },
                     typeInto: typeInto, clearDraft: clearDraft, clear: clear, root: root)
     }
@@ -155,7 +159,7 @@ extension LeadDelivery {
     @discardableResult
     public static func deliver(_ text: String, from sender: SteerMessage.Sender, to agent: LeadAgent, activity: LeadActivity,
                                styledScreen screen: (() -> Screen?)?, typeInto: ((String) -> Bool)?, clearDraft: Bool = false,
-                               clear: (() -> Void)? = nil, root: URL = VibePaths.root) throws -> Delivered {
+                               clear: (() -> Bool)? = nil, root: URL = VibePaths.root) throws -> Delivered {
         let post = { try SteerInbox.post(SteerMessage(text: text, from: sender, agentPid: agent.pid), tty: agent.tty, root: root) }
         switch activity {
         case .working, .unknown:
@@ -185,12 +189,27 @@ extension LeadDelivery {
             return .awaitingAnswer(lines)
         case .draft(let draft):
             // Cleared only when asked, and typed only if the box then reads empty (a draft that didn't go stays).
-            if clearDraft, let clear {
-                clear()
-                if let after = screen(), box(in: after) == .empty, typeInto(typed(text, from: sender)) { return .typed }
+            guard clearDraft, let clear else {
+                try post()
+                return .behindDraft(draft)
+            }
+            var seen: String?
+            if clear(), let after = screen() {
+                switch box(in: after) {
+                case .empty:
+                    if typeInto(typed(text, from: sender)) { return .typed }
+                    seen = ""
+                case .draft(let again) where again == draft && after.runs == nil:
+                    // The same text drawn again right after the ^C emptied the box: Claude's suggested prompt, which a
+                    // host too old to say what's dim shows as text. Typing replaces it.
+                    if typeInto(typed(text, from: sender)) { return .typed }
+                    seen = again
+                case .draft(let again), .dialog(let again):
+                    seen = again
+                }
             }
             try post()
-            return .behindDraft(draft)
+            return .draftStayed(before: draft, after: seen)
         }
         try post()
         return .queued

@@ -217,7 +217,7 @@ struct StyledScreenTests {
         var cleared = 0
         #expect(try LeadDelivery.deliver("b", from: .lead("lead"), to: agent, activity: .idle(background: nil),
                                          styledScreen: { ClaudeScreens.shown(shown) }, typeInto: type, clearDraft: true,
-                                         clear: { cleared += 1; shown = ClaudeScreens.incident }, root: root) == .typed)
+                                         clear: { cleared += 1; shown = ClaudeScreens.incident; return true }, root: root) == .typed)
         #expect(cleared == 1 && typed.count == 1 && typed[0].hasSuffix("b"))
         #expect(SteerInbox.pending(tty: agent.tty, root: root).map(\.text) == ["a"])
     }

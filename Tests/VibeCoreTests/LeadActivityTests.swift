@@ -282,11 +282,11 @@ struct LeadDeliveryByActivityTests {
         var shown = draft
         var cleared = 0
         #expect(try LeadDelivery.deliver("b", from: .lead("lead"), to: agent, activity: .idle(background: nil), screen: { shown },
-                                         typeInto: type, clearDraft: true, clear: { cleared += 1; shown = self.empty }, root: root) == .typed)
+                                         typeInto: type, clearDraft: true, clear: { cleared += 1; shown = self.empty; return true }, root: root) == .typed)
         #expect(cleared == 1 && typed.count == 1 && typed[0].hasSuffix("b"))
         // A draft that doesn't clear stays, and the message waits behind it.
         #expect(try LeadDelivery.deliver("c", from: .lead("lead"), to: agent, activity: .idle(background: nil), screen: { draft },
-                                         typeInto: type, clearDraft: true, clear: {}, root: root) == .behindDraft("half-written note"))
+                                         typeInto: type, clearDraft: true, clear: { false }, root: root) == .draftStayed(before: "half-written note", after: nil))
         let dialog = """
          Bash command
            rm -rf build

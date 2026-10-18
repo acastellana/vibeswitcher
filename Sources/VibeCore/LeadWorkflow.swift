@@ -242,6 +242,20 @@ public struct LeadWorkflow: Equatable, Sendable {
 public enum LeadPrompts {
     public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, record_decision, merge, cleanup, configure"
 
+    /// What a new lead is told to do first: the board, and the memory earlier leads left (their decisions hold
+    /// back merges and deletions a fresh lead can't otherwise know about). `goal`: one given with `vibeswitcher --lead`.
+    public static func leadStart(root: String, goal: String?, note: String) -> String {
+        let folder = (root as NSString).appendingPathComponent(".vibeswitcher")
+        let memory = "Read status, the workflow notes, \(folder)/decisions.md (every decision: one may hold a task back from "
+            + "merging or its branch from deletion) and the end of \(folder)/progress.md"
+        if let goal {
+            return "You're starting as the project lead. A goal given with vibeswitcher --lead (\(note)): \(goal)\n"
+                + "\(memory); then plan the goal into tasks with contracts, start the workers, and tell the user your plan in a few lines."
+        }
+        return "You're starting as the project lead. \(memory); then greet the user in one short line: what's on the board, and "
+            + "what they'd like to build next. Merge or clean up nothing a decision or the user holds back."
+    }
+
     public static func lead(project: String, root: String, workflow: LeadWorkflow) -> String {
         """
         You are the project lead for "\(project)" (\(root)). The user talks to you; you get the work done through \
@@ -266,10 +280,13 @@ public enum LeadPrompts {
         status and act on the reports. Meanwhile plan the next tasks, review, or answer the user.
         5. When a worker says it's done, run audit(task). A worker's own report is a claim, not evidence: only the \
         verifier's report counts, and only it moves a task to done.
-        6. If the audit is complete and clean: merge(task), then post_update with what changed and how it was checked \
-        (screenshots when there's UI), then cleanup(task). If not: tell the worker exactly what failed (message) \
-        or start a fresh worker with a sharper contract. After 3 failed attempts on one task, re-plan it or ask \
-        the user.
+        6. If the audit is complete and clean, check first that nothing holds the task back: a recorded decision \
+        (decisions.md), the task's own contract or notes, or something the user said (e.g. "prototype: never merge \
+        until the user has looked"). If something does, don't merge and don't cleanup: update_task(task, status: \
+        kept, reason: what holds it) keeps its branch and worktree, and merge refuses it until you set it back. \
+        Otherwise merge(task), then post_update with what changed and how it was checked (screenshots when there's \
+        UI), then cleanup(task). If the audit didn't pass: tell the worker exactly what failed (message) or start a \
+        fresh worker with a sharper contract. After 3 failed attempts on one task, re-plan it or ask the user.
         7. Keep the board, the progress log and decisions (record_decision) current. They are your memory: when your \
         context fills up, a new lead continues from them.
         8. When the same mistake happens twice, add a task that turns it into a check (a test, a lint rule), not a note.

@@ -31,7 +31,7 @@ struct TeamRow: Identifiable, Equatable {
 
     /// The status mark: each has its own color and its own shape, so it reads without color too.
     enum Mark: CaseIterable {
-        case needsYou, failed, blocked, stalled, working, rework, review, merge, queued, merged, abandoned
+        case needsYou, failed, blocked, stalled, ended, working, rework, review, merge, queued, merged, kept, abandoned
 
         var symbol: String {
             switch self {
@@ -39,17 +39,19 @@ struct TeamRow: Identifiable, Equatable {
             case .failed: return "xmark.octagon.fill"
             case .blocked: return "nosign"
             case .stalled: return "pause.circle.fill"
+            case .ended: return "stop.circle.fill"
             case .working: return "circle.fill"
             case .rework: return "arrow.triangle.2.circlepath"
             case .review: return "diamond.fill"
             case .merge: return "checkmark.diamond.fill"
             case .queued: return "circle"
             case .merged: return "checkmark.circle.fill"
+            case .kept: return "archivebox.fill"
             case .abandoned: return "minus.circle"
             }
         }
 
-        var isRed: Bool { [.needsYou, .failed, .stalled].contains(self) }
+        var isRed: Bool { [.needsYou, .failed, .stalled, .ended].contains(self) }
     }
 
     var task: LeadTask
@@ -83,7 +85,7 @@ struct TeamRow: Identifiable, Equatable {
     /// The dim line under the title: for a task at work, what its agent is doing (the plain-language summary, else
     /// the latest checkpoint, else the live activity); for a red one, what it asks or why.
     func line(summary: String?) -> String? {
-        if mark.isRed || mark == .blocked { return problem }
+        if mark.isRed || mark == .blocked || mark == .kept { return problem }
         guard isLive else { return nil }
         return summary ?? checkpoint?.text ?? activity
     }
@@ -131,9 +133,11 @@ enum TeamRows {
 
     /// The board's tasks as rows, in the order shown: needing you (what asks you first), at work, in review, queued
     /// (in the board's planned order), finished (latest first).
+    /// The host's sessions are known once any is seen (the lead's own, at least): a worker or verifier missing from
+    /// them then is gone (a replaced host takes its sessions with it).
     static func rows(_ board: LeadBoard, seen: [String: MemberSeen]) -> [TeamRow] {
         let position = Dictionary(board.tasks.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
-        return board.tasks.map { row($0, seen: seen) }.sorted { a, b in
+        return board.tasks.map { row($0, seen: seen, listed: !seen.isEmpty) }.sorted { a, b in
             if a.group != b.group { return a.group < b.group }
             switch a.group {
             case .needsYou:
@@ -157,10 +161,13 @@ enum TeamRows {
         return session?.startedAt
     }
 
-    /// One task's row.
-    static func row(_ task: LeadTask, seen: [String: MemberSeen]) -> TeamRow {
+    /// One task's row. `listed`: `seen` holds every session the host has, so a worker or verifier missing from it is
+    /// gone (false: nothing is known of the missing ones).
+    static func row(_ task: LeadTask, seen: [String: MemberSeen], listed: Bool = false) -> TeamRow {
         let worker = task.worker.flatMap { seen[$0] }
         let verifier = task.verifier.flatMap { seen[$0] }
+        let workerGone = listed && task.worker != nil && worker == nil
+        let verifierGone = listed && task.verifier != nil && verifier == nil
         var row = TeamRow(task: task, group: .queued, mark: .queued, state: "Queued", since: nil,
                           checkpoint: task.checkpoints?.last, activity: nil, problem: nil, agent: nil)
 
@@ -205,7 +212,11 @@ enum TeamRows {
             break
         case .running:
             if let worker, !worker.live {
-                red(.stalled, "Stalled", "The worker ended without reporting.", since: nil)
+                red(.ended, "Worker ended", "The worker ended without reporting.", since: nil)
+                return row
+            }
+            if workerGone {
+                red(.ended, "Worker ended", "Its session is gone (the session host was replaced); the lead can start it again in its worktree.", since: nil)
                 return row
             }
             // The witness saw it stop making progress, whatever its screen says: "Stalled 2h", since it last did something.
@@ -229,7 +240,9 @@ enum TeamRows {
                 row.mark = .merge
                 row.state = "Ready to merge"
             } else if let verifier, !verifier.live, task.evidence == nil {
-                red(.stalled, "Stalled", "The verifier ended without a verdict.", since: nil)
+                red(.ended, "Verifier ended", "The verifier ended without a verdict.", since: nil)
+            } else if verifierGone, task.evidence == nil {
+                red(.ended, "Verifier ended", "Its session is gone with no verdict (the session host was replaced); the lead audits again.", since: nil)
             } else {
                 row.mark = .review
                 row.state = "In review"
@@ -242,6 +255,12 @@ enum TeamRows {
                 since: task.since.map(Date.init(timeIntervalSince1970:)))
         case .blocked:
             red(.blocked, "Blocked", task.blocker ?? "Waiting on something.", since: task.since.map(Date.init(timeIntervalSince1970:)))
+        case .kept:
+            // Held back on purpose: finished for now, not failed.
+            row.group = .finished
+            row.mark = .kept
+            row.state = "Kept"
+            row.problem = task.keptBecause
         }
         return row
     }
@@ -267,11 +286,12 @@ enum TeamRows {
         return parts.isEmpty ? "team: none running" : "team: " + parts.joined(separator: " · ")
     }
 
-    /// "Merged (4)", "Merged (4) · Abandoned (1)".
+    /// "Merged (4)", "Merged (4) · Kept (1) · Abandoned (1)".
     static func finishedTitle(_ finished: [TeamRow]) -> String {
         let merged = finished.filter { $0.mark == .merged }.count
-        let abandoned = finished.count - merged
-        return "Merged (\(merged))" + (abandoned > 0 ? " · Abandoned (\(abandoned))" : "")
+        let kept = finished.filter { $0.mark == .kept }.count
+        let abandoned = finished.count - merged - kept
+        return "Merged (\(merged))" + (kept > 0 ? " · Kept (\(kept))" : "") + (abandoned > 0 ? " · Abandoned (\(abandoned))" : "")
     }
 }
 

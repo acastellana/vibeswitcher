@@ -52,10 +52,11 @@ public protocol LeadRuntime: AnyObject {
     /// Delivers a message (see `LeadDelivery`): steered in, typed as its prompt, or queued; `clearDraft` clears a
     /// draft left in an idle agent's input box first.
     func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String, clearDraft: Bool) throws -> LeadDelivery.Delivered
-    /// Window sessions, each live one with what its agent is doing (see `LeadActivity`).
-    func sessions() -> [LeadSessionInfo]
-    /// Its transcript, found with or without its hooks (see `LeadObserver`).
-    func transcript(of session: String) -> String?
+    /// Window sessions, each live one with what its agent is doing (see `LeadActivity`); throws when the session
+    /// host can't be read (never "no sessions" then).
+    func sessions() throws -> [LeadSessionInfo]
+    /// Its transcript, found with or without its hooks (see `LeadObserver`); throws when the host can't be read.
+    func transcript(of session: String) throws -> String?
     /// The agent this tool server belongs to (its parent process).
     func currentAgent() -> LeadAgent?
     /// That agent process is still the one running on its terminal.
@@ -226,8 +227,9 @@ public final class LeadToolset: MCPToolset {
                                 required: ["completion", "integrity", "summary"])]
         case .lead?:
             return [
-                MCPToolInfo(name: "status", description: "The board at a glance: tasks by state, workers and what they're doing, open questions, and every report that came in since you last asked."),
-                MCPToolInfo(name: "board", description: "Everything on the board: tasks with their contracts and evidence, questions and answers, updates."),
+                MCPToolInfo(name: "status", description: "The board at a glance: tasks by state, workers and what they're doing, open questions, and each report that came in since you last asked, in one line (board(task) or read_session has the full text)."),
+                MCPToolInfo(name: "board", description: "The board in one line per task, with the open questions and the latest updates; with task, that task in full: its contract, evidence, setback, reports, checkpoints and merge.",
+                            properties: ["task": P(type: "string", description: "A task's slug (or id): that task in full")]),
                 MCPToolInfo(name: "add_task", description: "Put a task on the board with its contract.",
                             properties: ["title": P(type: "string", description: "Short title"),
                                          "goal": P(type: "string", description: "What must be true when it's done"),
@@ -235,12 +237,14 @@ public final class LeadToolset: MCPToolset {
                                          "boundaries": P(type: "array", description: "Files or areas it may touch; what it must not do", items: "string"),
                                          "context": P(type: "string", description: "What a fresh worker needs to know")],
                             required: ["title", "goal", "acceptance"]),
-                MCPToolInfo(name: "update_task", description: "Change a task: its contract, or its state (planned, blocked, failed).",
+                MCPToolInfo(name: "update_task", description: "Change a task: its contract, or its state (planned, blocked, failed, or kept: deliberately not merged, which merge then refuses).",
                             properties: ["task": task, "title": P(type: "string", description: "New title"), "goal": P(type: "string", description: "New goal"),
-                                         "acceptance": P(type: "array", description: "New checks", items: "string"),
-                                         "boundaries": P(type: "array", description: "New boundaries", items: "string"),
-                                         "context": P(type: "string", description: "New context"),
-                                         "status": P(type: "string", description: "New state", options: ["planned", "blocked", "failed"])],
+                                         "acceptance": P(type: "array", description: "New checks (replaces them all)", items: "string"),
+                                         "boundaries": P(type: "array", description: "New boundaries (replaces them all)", items: "string"),
+                                         "context": P(type: "string", description: "Replaces the whole context; to add to it, use append_context"),
+                                         "append_context": P(type: "string", description: "Added at the end of the context, which keeps what it had"),
+                                         "status": P(type: "string", description: "New state", options: Self.settableStates.map(\.rawValue)),
+                                         "reason": P(type: "string", description: "With status kept: what holds it back (a decision, the user's word); merge names it when it refuses")],
                             required: ["task"]),
                 MCPToolInfo(name: "start_worker", description: "Start a worker on a task: a fresh Claude session in its own worktree on branch agent/<slug>, given the contract.",
                             properties: ["task": task], required: ["task"]),
@@ -304,7 +308,7 @@ public final class LeadToolset: MCPToolset {
             if role == .lead { introduceLead() }
             switch name {
             case "status": return MCPToolResult(text: status())
-            case "board": return MCPToolResult(text: boardText())
+            case "board": return try MCPToolResult(text: boardText(task: arguments["task"] as? String))
             case "add_task": return try addTask(arguments)
             case "update_task": return try updateTask(arguments)
             case "start_worker": return try startWorker(try taskSlug(arguments))
@@ -358,6 +362,24 @@ public final class LeadToolset: MCPToolset {
         return []
     }
 
+    /// The names callers often give a tool's text under instead of the one it asks for (workers sent progress and
+    /// report as `message` and lost it).
+    static let textAliases = ["text", "message", "summary", "content", "note"]
+
+    /// The text a tool takes as `key`, else under one of `textAliases`; a list is joined into lines. Without any,
+    /// the refusal names `key` and what was passed instead.
+    private func text(_ arguments: [String: Any], _ key: String, missing: String) throws -> String {
+        for name in [key] + Self.textAliases where arguments[name] != nil {
+            let value = strings(arguments[name]).joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !value.isEmpty { return value }
+        }
+        let others = arguments.keys.filter { !["task", "status", "clear_draft"].contains($0) }.sorted()
+        throw Problem(text: "\(missing) Pass it as `\(key)`" + (others.isEmpty ? "." : " (this call had \(others.joined(separator: ", ")) and no \(key))."))
+    }
+
+    /// The states update_task sets (the rest come from the tools that do the work: start_worker, audit, merge).
+    static let settableStates: [LeadTask.Status] = [.planned, .blocked, .failed, .kept]
+
     // MARK: Lead
 
     private func addTask(_ arguments: [String: Any]) throws -> MCPToolResult {
@@ -376,27 +398,65 @@ public final class LeadToolset: MCPToolset {
         return MCPToolResult(text: "Added task \(task.slug) (\(title)). Start it with start_worker when it doesn't depend on unfinished work.")
     }
 
+    static let updateKeys: Set<String> = ["task", "title", "goal", "acceptance", "boundaries", "context", "append_context", "status", "reason"]
+
     private func updateTask(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
-        try store.update { board in
+        // Nothing passed is dropped unsaid: a name it doesn't take, or a state it doesn't set, is refused whole.
+        let unknown = Set(arguments.keys).subtracting(Self.updateKeys)
+        guard unknown.isEmpty else {
+            throw Problem(text: "update_task doesn't take \(unknown.sorted().joined(separator: ", ")); it takes \(Self.updateKeys.sorted().joined(separator: ", ")). Nothing was changed.")
+        }
+        var status: LeadTask.Status?
+        if let given = arguments["status"] as? String, !given.isEmpty {
+            guard let wanted = LeadTask.Status(rawValue: given.lowercased()), Self.settableStates.contains(wanted) else {
+                throw Problem(text: "update_task sets the state to \(Self.settableStates.map(\.rawValue).joined(separator: ", ")), not \(given). Nothing was changed.")
+            }
+            status = wanted
+        }
+        let reason = (arguments["reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if status == .kept, reason.isEmpty {
+            throw Problem(text: "Say what keeps it from merging (reason): a decision, the user's word. merge names it when it refuses. Nothing was changed.")
+        }
+        let appended = (arguments["append_context"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        var changed: [String] = []
+        try boardChange { board in
             guard let index = board.taskIndex(slug) else { return }
-            if let title = arguments["title"] as? String { board.tasks[index].title = title }
-            if let goal = arguments["goal"] as? String { board.tasks[index].contract.goal = goal }
-            if arguments["acceptance"] != nil { board.tasks[index].contract.acceptance = strings(arguments["acceptance"]) }
-            if arguments["boundaries"] != nil { board.tasks[index].contract.boundaries = strings(arguments["boundaries"]) }
-            if let context = arguments["context"] as? String { board.tasks[index].contract.context = context }
-            if let status = (arguments["status"] as? String).flatMap(LeadTask.Status.init(rawValue:)), [.planned, .blocked, .failed].contains(status) {
+            if let status, board.tasks[index].status == .done {
+                throw BoardError(text: "\(slug) is merged already\(board.tasks[index].merged.map { " (at \($0.commit.prefix(8)))" } ?? ""); it stays done, not \(status.rawValue). Nothing was changed.")
+            }
+            if !reason.isEmpty, (status ?? board.tasks[index].status) != .kept {
+                throw BoardError(text: "reason goes with status kept (what holds the task back); \(slug) isn't being kept. Nothing was changed.")
+            }
+            if let title = arguments["title"] as? String { board.tasks[index].title = title; changed.append("title") }
+            if let goal = arguments["goal"] as? String { board.tasks[index].contract.goal = goal; changed.append("goal") }
+            if arguments["acceptance"] != nil { board.tasks[index].contract.acceptance = strings(arguments["acceptance"]); changed.append("acceptance") }
+            if arguments["boundaries"] != nil { board.tasks[index].contract.boundaries = strings(arguments["boundaries"]); changed.append("boundaries") }
+            if let context = arguments["context"] as? String { board.tasks[index].contract.context = context; changed.append("context (replaced)") }
+            if !appended.isEmpty {
+                let context = board.tasks[index].contract.context.trimmingCharacters(in: .whitespacesAndNewlines)
+                board.tasks[index].contract.context = context.isEmpty ? appended : context + "\n\n" + appended
+                changed.append("context (added to)")
+            }
+            if let status {
                 board.tasks[index].status = status
+                board.tasks[index].keptBecause = status == .kept ? reason : nil
+                changed.append("state \(status.rawValue)")
+            } else if !reason.isEmpty {
+                board.tasks[index].keptBecause = reason
+                changed.append("why it's kept")
             }
         }
-        return MCPToolResult(text: "Updated \(slug).")
+        if status == .kept { try? store.appendProgress("Kept \(slug) unmerged: \(reason)") }
+        return MCPToolResult(text: changed.isEmpty ? "Nothing to change on \(slug)." : "Updated \(slug): \(changed.joined(separator: ", ")).")
     }
 
     private func startWorker(_ slug: String) throws -> MCPToolResult {
         let board = try store.read()
         guard let task = board.task(slug) else { throw Problem(text: "No task \(slug).") }
         // One worker per worktree: two sessions editing the same files would undo each other.
-        if let worker = task.worker, runtime.sessions().contains(where: { $0.id == worker && $0.live }) {
+        let sessions = try hostSessions("whether \(slug)'s worker still runs isn't known; no worker was started")
+        if let worker = task.worker, sessions.contains(where: { $0.id == worker && $0.live }) {
             throw Problem(text: "\(slug)'s worker is still running. Send it what to do with message, or stop_worker first.")
         }
         // A running task whose worker ended without reporting (killed, crashed) starts again as it is.
@@ -438,7 +498,10 @@ public final class LeadToolset: MCPToolset {
 
     private func stopWorker(_ slug: String) throws -> MCPToolResult {
         guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
-        if let worker = task.worker { runtime.kill(worker) }
+        let sessions = try hostSessions("\(slug)'s worker wasn't stopped")
+        // A session that's gone (ended, or lost with a replaced host) has nothing left to kill.
+        let running = task.worker.map { worker in sessions.contains { $0.id == worker && $0.live } } ?? false
+        if running, let worker = task.worker { runtime.kill(worker) }
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].stopped = task.worker
@@ -447,11 +510,12 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].blocker = "The lead stopped its worker."
             }
         }
-        return MCPToolResult(text: "Stopped the worker on \(slug). Its worktree and commits stay; start_worker continues there.")
+        return MCPToolResult(text: (running ? "Stopped the worker on \(slug)." : "\(slug)'s worker had already ended.")
+                             + " Its worktree and commits stay; start_worker continues there.")
     }
 
     private func message(_ slug: String, _ arguments: [String: Any]) throws -> MCPToolResult {
-        guard let text = arguments["text"] as? String, !text.isEmpty else { throw Problem(text: "Nothing to send.") }
+        let text = try self.text(arguments, "text", missing: "Nothing to send.")
         guard let worker = store.load().task(slug)?.worker else { throw Problem(text: "\(slug) has no worker.") }
         let clear = arguments["clear_draft"] as? Bool ?? false
         let delivered = try runtime.steer(.session(worker), from: .lead("lead of \(project)"), text: text, clearDraft: clear)
@@ -461,7 +525,8 @@ public final class LeadToolset: MCPToolset {
         }
         // Telling a failed or blocked task's live worker what to do sends it back to work: a failed one starts a
         // rework round (its setback stays to say why).
-        if runtime.sessions().contains(where: { $0.id == worker && $0.live }) {
+        // (Delivered already: a host that can't be read now only leaves the board's state as it was.)
+        if (try? runtime.sessions())?.contains(where: { $0.id == worker && $0.live }) == true {
             try store.update { board in
                 guard let index = board.taskIndex(slug), board.tasks[index].worker == worker,
                       [.failed, .blocked].contains(board.tasks[index].status) else { return }
@@ -479,8 +544,12 @@ public final class LeadToolset: MCPToolset {
         case .awaitingAnswer(let asked):
             return MCPToolResult(text: "\(slug)'s worker is stopped on a prompt\(asked.map { " (\($0))" } ?? ""). The message is in its inbox and goes in at its next step, once that's answered: answer it yourself if it's yours to, or ask the user.")
         case .behindDraft(let draft):
-            let shown = draft.count > 300 ? String(draft.prefix(300)) + "…" : draft
-            return MCPToolResult(text: "\(slug)'s worker is between turns, but its input box holds a draft: “\(shown)”. The message waits in its inbox (it goes in with the next prompt, or once the box is empty). To clear the draft and send now, message again with clear_draft: true.")
+            return MCPToolResult(text: "\(slug)'s worker is between turns, but its input box holds a draft: “\(Self.clip(draft))”. The message waits in its inbox (it goes in with the next prompt, or once the box is empty). To clear the draft and send now, message again with clear_draft: true.")
+        case .draftStayed(let before, let after):
+            // clear_draft was on already: asking for it again would do the same.
+            let saw = after.map { $0.isEmpty ? "then read empty, but typing didn't go out" : "still showed “\(Self.clip($0))”" }
+                ?? "couldn't be cleared (the ^C didn't go out, or its screen couldn't be read)"
+            return MCPToolResult(text: "\(slug)'s worker is between turns with “\(Self.clip(before))” in its input box. clear_draft sent one ^C, and the box \(saw). The message waits in its inbox and goes in with its next prompt or once the box reads empty. Don't send it again; read_session to see where it is, or tell the user what's in its box.")
         case .queued:
             return MCPToolResult(text: "\(slug)'s worker is between turns, but its screen couldn't be read, so the message waits in its inbox; it goes in with its next prompt, or as soon as the box reads empty. read_session to see where it is.")
         }
@@ -490,7 +559,11 @@ public final class LeadToolset: MCPToolset {
         guard let task = store.load().task(slug), let session = who == "verifier" ? task.verifier : task.worker else {
             throw Problem(text: "\(slug) has no \(who).")
         }
-        guard let path = runtime.transcript(of: session), let (url, format) = TranscriptReader.checkedURL(path, home: NSHomeDirectory()),
+        let found: String?
+        do { found = try runtime.transcript(of: session) } catch {
+            throw Problem(text: "The session host can't be read (\(error)), so \(slug)'s \(who) can't be found. Try again in a moment.")
+        }
+        guard let path = found, let (url, format) = TranscriptReader.checkedURL(path, home: NSHomeDirectory()),
               let data = try? Data(contentsOf: url) else {
             return MCPToolResult(text: "No conversation yet for \(slug)'s \(who).")
         }
@@ -536,7 +609,8 @@ public final class LeadToolset: MCPToolset {
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].verifier = session
-            board.tasks[index].status = .review
+            // A kept task stays kept through a new audit: what holds it back hasn't changed.
+            if board.tasks[index].status != .kept { board.tasks[index].status = .review }
             board.tasks[index].evidence = nil
         }
         let flagged = config.isEmpty ? "" : " The branch changes Claude's settings or instructions (\(config.prefix(5).joined(separator: ", "))\(config.count > 5 ? ", …" : "")): the verifier runs with project settings off, and VibeSwitcher didn't answer its trust question; tell the user it waits for them to decide, and have the verifier look hard at those files."
@@ -545,6 +619,14 @@ public final class LeadToolset: MCPToolset {
 
     private func merge(_ slug: String) throws -> MCPToolResult {
         guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
+        if task.status == .done {
+            throw Problem(text: "\(slug) is already merged" + (task.merged.map { " at \($0.commit.prefix(8)) (\(LeadBoard.clock($0.at)))" } ?? "")
+                          + ". Nothing to do but cleanup, if it isn't done yet.")
+        }
+        // Held back on purpose (a decision, the user's word): only the lead setting it back lets it merge.
+        if task.status == .kept {
+            throw Problem(text: "Not merged: \(slug) is kept unmerged (\(task.keptBecause ?? "no reason recorded")). If that no longer holds (the user said so, a newer decision), update_task(\(slug), status: planned) first, and say why with record_decision.")
+        }
         // The verdict as the verifier's own tool server recorded it in the vault (the board's copy is for showing):
         // from the verifier VibeSwitcher started last for this task, on the commit it was started on.
         guard let verdict = vault.verdict(root: root, task: slug), verdict.passes else {
@@ -636,13 +718,16 @@ public final class LeadToolset: MCPToolset {
         guard task.status == .done || force else {
             throw Problem(text: "\(slug) isn't merged. Use force: true to abandon its work.")
         }
-        let sessions = [task.worker, task.verifier].compactMap { $0 }
+        // Only the ones still running are ended: a session that's gone (lost with a replaced host) has nothing to kill.
+        let refused = "\(slug)'s sessions can't be checked; nothing was cleaned up"
+        let live = Set(try hostSessions(refused).filter(\.live).map(\.id))
+        let sessions = [task.worker, task.verifier].compactMap { $0 }.filter(live.contains)
         sessions.forEach(runtime.kill)
         // Not under a session that's still writing there (its next write would leave a stray folder behind).
         let deadline = Date().addingTimeInterval(stopWait)
         var running = sessions
-        while true {
-            let live = Set(runtime.sessions().filter(\.live).map(\.id))
+        while !running.isEmpty {
+            let live = Set(try hostSessions(refused).filter(\.live).map(\.id))
             running = sessions.filter(live.contains)
             guard !running.isEmpty, Date() < deadline else { break }
             usleep(200_000)
@@ -669,7 +754,7 @@ public final class LeadToolset: MCPToolset {
         }
         // Its workers and verifiers, this one and any before it, are history now: off the session list.
         let folder = (Worktrees.path(root: root, slug: slug) as NSString).standardizingPath
-        for session in runtime.sessions() where !session.live && (session.cwd as NSString).standardizingPath == folder
+        for session in (try? runtime.sessions()) ?? [] where !session.live && (session.cwd as NSString).standardizingPath == folder
             && [.worker, .verifier].contains(LeadTeams.role(label: session.label)) {
             runtime.forget(session.id)
         }
@@ -686,7 +771,9 @@ public final class LeadToolset: MCPToolset {
     /// The temporary folders other finished tasks left behind (cleaned up before cleanup removed them): only a task
     /// merged or abandoned whose worktree is gone, with no session running there.
     private func sweepFinished(_ board: LeadBoard, except slug: String) -> Int64 {
-        let live = Set(runtime.sessions().filter(\.live).map { ($0.cwd as NSString).standardizingPath })
+        // Which folders sessions still run in isn't known: nothing goes.
+        guard let sessions = try? runtime.sessions() else { return 0 }
+        let live = Set(sessions.filter(\.live).map { ($0.cwd as NSString).standardizingPath })
         var freed: Int64 = 0
         for task in board.tasks where task.slug != slug && task.worktree == nil && [.done, .failed].contains(task.status) {
             let worktree = Worktrees.path(root: root, slug: task.slug)
@@ -744,6 +831,14 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// A board change whose refusal (`BoardError`) is the lead's to read, not a failure.
+    /// The host's sessions. One that can't be read is a refusal saying what didn't happen (`refused`), never "no
+    /// sessions": a second worker started in a live worktree would undo the first's work.
+    private func hostSessions(_ refused: String) throws -> [LeadSessionInfo] {
+        do { return try runtime.sessions() } catch {
+            throw Problem(text: "The session host can't be read (\(error)), so \(refused). Try again in a moment; if it keeps failing, tell the user (VibeSwitcher may be restarting its session host).")
+        }
+    }
+
     private func boardChange<T>(_ change: (inout LeadBoard) throws -> T) throws -> T {
         do { return try store.update(change) } catch let error as BoardError { throw Problem(text: error.text) }
     }
@@ -841,13 +936,13 @@ public final class LeadToolset: MCPToolset {
 
     private func report(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
-        let summary = arguments["summary"] as? String ?? ""
+        let summary = try text(arguments, "summary", missing: "Say what changed and how you checked it, or what blocks you.")
         let done = (arguments["status"] as? String) != "blocked"
         // A new report means new work: an earlier verdict doesn't cover it.
         try vault.clearVerdict(root: root, task: slug)
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
-            board.tasks[index].status = done ? .review : .blocked
+            if board.tasks[index].status != .kept { board.tasks[index].status = done ? .review : .blocked }
             board.tasks[index].evidence = nil
             if done { board.tasks[index].report = summary }
             board.tasks[index].blocker = done ? nil : (summary.isEmpty ? "The worker is blocked." : summary)
@@ -862,7 +957,7 @@ public final class LeadToolset: MCPToolset {
 
     private func askLead(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
-        guard let question = arguments["question"] as? String, !question.isEmpty else { throw Problem(text: "Ask something.") }
+        let question = try text(arguments, "question", missing: "Ask something.")
         guard try tellLead("The worker on \(slug) asks: \(question)\nAnswer with message(\(slug), …).", about: "worker \(slug)") else {
             throw Problem(text: "There's no lead running to ask. Decide what you can within your contract, or report blocked.")
         }
@@ -876,9 +971,8 @@ public final class LeadToolset: MCPToolset {
 
     private func progress(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
-        let text = (arguments["text"] as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { throw Problem(text: "Say what's done or under way, in one line.") }
-        // One line, short enough for the lane; the board keeps the latest ones.
+        let text = try self.text(arguments, "text", missing: "Say what's done or under way.")
+        // One line (several are joined), short enough for the lane; the board keeps the latest ones.
         let line = text.split(whereSeparator: \.isNewline).joined(separator: " ")
         let checkpoint = LeadCheckpoint(text: line.count > 300 ? String(line.prefix(300)) + "…" : line)
         try store.update { board in
@@ -909,7 +1003,7 @@ public final class LeadToolset: MCPToolset {
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].evidence = evidence
-            board.tasks[index].status = evidence.passes ? .review : .failed
+            if board.tasks[index].status != .kept { board.tasks[index].status = evidence.passes ? .review : .failed }
             if !evidence.passes {
                 board.tasks[index].setback = LeadSetback(stage: .review, reason: summary.isEmpty ? "The audit didn't pass (\(completion.rawValue), \(integrity.rawValue))." : summary,
                                                          evidence: evidence)
@@ -927,35 +1021,60 @@ public final class LeadToolset: MCPToolset {
 
     // MARK: Text
 
+    /// How many tasks of one state status lists one per line (the rest by slug), and how many new reports.
+    static let statusTasks = 12
+    static let statusReports = 12
+
     private func status() -> String {
         let board = store.load()
-        let live = Dictionary(uniqueKeysWithValues: runtime.sessions().map { ($0.id, $0) })
+        // nil: the host can't be read (what workers do isn't known), never "none running".
+        let sessions = (try? runtime.sessions()).map { Dictionary($0.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) }
         let workflow = self.workflow
         var lines = ["Project \(project) on branch \(workflow.base) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once."]
         lines += workflowWarnings(workflow)
         lines += diskWarning(workflow, board: board)
+        if sessions == nil {
+            lines.append("The session host can't be read right now: what the workers are doing isn't known; the states below are the board's.")
+        }
         // Stalled workers first: VibeSwitcher's witness noticed them stop making progress, whatever their screens say.
         let stalled = board.stalled
         if !stalled.isEmpty {
             let now = Date()
             lines.append("\nStalled (\(stalled.count)):")
-            lines += stalled.map { task in
-                "- \(task.slug): \(task.stall!.text(now: now)). \(task.stall!.advice(slug: task.slug))"
+            lines += stalled.prefix(Self.statusTasks).map { task in
+                Self.clip("- \(task.slug): \(task.stall!.text(now: now)). \(task.stall!.advice(slug: task.slug))", 300)
             }
         }
+        // A task whose worker or verifier ended without a word, or whose session went with a replaced host, isn't
+        // running: it's said apart, with what to do.
+        let ended = sessions.map { sessions in board.tasks.compactMap { task in Self.endedMember(task, sessions).map { (task, $0) } } } ?? []
+        let endedIDs = Set(ended.map(\.0.id))
         for state in LeadTask.Status.allCases {
-            let tasks = board.tasks.filter { $0.status == state }
+            var tasks = board.tasks.filter { $0.status == state && !endedIDs.contains($0.id) }
             guard !tasks.isEmpty else { continue }
-            lines.append("\n\(state.rawValue):")
-            for task in tasks {
-                var line = "- \(task.slug): \(task.title)"
-                if let worker = task.worker, let info = live[worker] {
-                    line += " — worker \(info.live ? (info.status ?? "running") : task.stopped == worker ? "stopped" : "ended")"
+            switch state {
+            case .done:
+                lines.append("\ndone (\(tasks.count)): " + Self.clip(tasks.map(\.slug).joined(separator: ", "), 600))
+                continue
+            case .failed:
+                let abandoned = tasks.filter { $0.worktree == nil && $0.worker != nil }
+                if !abandoned.isEmpty {
+                    lines.append("\nabandoned (\(abandoned.count)): " + Self.clip(abandoned.map(\.slug).joined(separator: ", "), 600))
                 }
-                if let evidence = task.evidence { line += " — audit \(evidence.completion.rawValue)/\(evidence.integrity.rawValue)" }
-                if task.rework > 0 { line += " — rework \(task.rework)" }
-                if let checkpoint = task.checkpoints?.last { line += " — last progress: \(checkpoint.text)" }
-                lines.append(line)
+                tasks.removeAll { abandoned.contains($0) }
+                guard !tasks.isEmpty else { continue }
+            default: break
+            }
+            lines.append("\n\(state.rawValue):")
+            lines += tasks.prefix(Self.statusTasks).map { taskLine($0, sessions) }
+            if tasks.count > Self.statusTasks {
+                lines.append(Self.clip("- … and \(tasks.count - Self.statusTasks) more: " + tasks.dropFirst(Self.statusTasks).map(\.slug).joined(separator: ", "), 600))
+            }
+        }
+        if !ended.isEmpty {
+            lines.append("\nworker ended (\(ended.count)), not running:")
+            lines += ended.prefix(Self.statusTasks).map { task, who in
+                Self.clip("- \(task.slug): \(task.title) — \(who)", 300)
             }
         }
         let open = board.openQuestions
@@ -973,8 +1092,13 @@ public final class LeadToolset: MCPToolset {
             }
         }
         if let reports = try? newReports(), !reports.isEmpty {
-            lines.append("\nReports since your last status:")
-            lines += reports.map { "- \($0.about): " + ($0.text.count > 4_000 ? String($0.text.prefix(4_000)) + "…" : $0.text) }
+            // One line each: the full text is on the board (board(task)), and reports about finished work are a count.
+            let finished = reports.filter { report in report.task.flatMap(board.task).map(LeadTeams.isFinished) ?? false }
+            let current = reports.filter { !finished.contains($0) }
+            lines.append("\nReports since your last status (\(reports.count)), each cut to its start (board(task) has a task's reports in full, read_session its conversation):")
+            if current.count > Self.statusReports { lines.append("- \(current.count - Self.statusReports) earlier ones: board(task) has them.") }
+            lines += current.suffix(Self.statusReports).map { "- \(LeadBoard.clock($0.at)) \($0.about): " + Self.clip($0.text, 200) }
+            if !finished.isEmpty { lines.append("- \(finished.count) about tasks already merged or abandoned.") }
         }
         let answered = board.questions.filter { $0.state == .answered }.suffix(5)
         if !answered.isEmpty {
@@ -986,6 +1110,46 @@ public final class LeadToolset: MCPToolset {
             }
         }
         return lines.joined(separator: "\n")
+    }
+
+    /// A task in one line (bounded): its title, what its worker does, its audit, rework, why it's kept, its last
+    /// progress. `sessions` nil: the host can't be read.
+    private func taskLine(_ task: LeadTask, _ sessions: [String: LeadSessionInfo]?) -> String {
+        var line = "- \(task.slug): \(Self.clip(task.title, 100))"
+        if let worker = task.worker, let info = sessions?[worker] {
+            line += " — worker \(info.live ? (info.status ?? "running") : task.stopped == worker ? "stopped" : "ended")"
+        }
+        if let evidence = task.evidence { line += " — audit \(evidence.completion.rawValue)/\(evidence.integrity.rawValue)" }
+        if task.rework > 0 { line += " — rework \(task.rework)" }
+        if task.status == .kept { line += " — kept: \(Self.clip(task.keptBecause ?? "no reason recorded", 120))" }
+        if let checkpoint = task.checkpoints?.last { line += " — last progress: \(Self.clip(checkpoint.text, 100))" }
+        return Self.clip(line, 320)
+    }
+
+    /// Who of a running or reviewed task's team ended without a word, and what to do: its worker gone from the host
+    /// (a replaced host takes every session with it) or ended without reporting, or its verifier ended without a
+    /// verdict. nil when nothing ended (or the lead stopped it).
+    static func endedMember(_ task: LeadTask, _ sessions: [String: LeadSessionInfo]) -> String? {
+        switch task.status {
+        case .running:
+            guard let worker = task.worker, task.stopped != worker else { return nil }
+            guard let info = sessions[worker] else {
+                return "worker ended: its session is gone (the session host was replaced, or it was removed). start_worker continues in its worktree."
+            }
+            return info.live ? nil : "worker ended without reporting. read_session to see where it stopped; start_worker continues in its worktree."
+        case .review where task.evidence == nil:
+            guard let verifier = task.verifier else { return nil }
+            guard let info = sessions[verifier] else { return "verifier ended: its session is gone, with no verdict. audit again." }
+            return info.live ? nil : "verifier ended without a verdict. audit again."
+        default:
+            return nil
+        }
+    }
+
+    /// At most `limit` characters, "…" when cut, on one line.
+    static func clip(_ text: String, _ limit: Int = 300) -> String {
+        let line = text.split(whereSeparator: \.isNewline).joined(separator: " ")
+        return line.count > limit ? String(line.prefix(limit)) + "…" : line
     }
 
     /// "4 min", "2 h 5 min", "3 d".
@@ -1069,14 +1233,51 @@ public final class LeadToolset: MCPToolset {
         return lines.joined(separator: "\n")
     }
 
-    private func boardText() -> String {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return (try? encoder.encode(store.load())).map { String(decoding: $0, as: UTF8.self) } ?? "{}"
+    /// How many of the latest updates the board lists.
+    static let boardUpdates = 5
+
+    /// The board in one bounded line per task, with the open questions and the latest updates; with `task`, that task
+    /// in full, with the reports about it.
+    private func boardText(task wanted: String?) throws -> String {
+        let board = store.load()
+        let sessions = (try? runtime.sessions()).map { Dictionary($0.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) }
+        if let wanted, !wanted.isEmpty {
+            guard let task = board.task(wanted) else { throw Problem(text: "No task \(wanted) on the board. board without task lists them.") }
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            var lines = [String(decoding: try encoder.encode(task), as: UTF8.self)]
+            if let sessions, let ended = Self.endedMember(task, sessions) { lines.append("\nNow: \(ended)") }
+            let reports = (board.reports ?? []).filter { $0.task == task.slug }
+            lines.append(reports.isEmpty ? "\nNo reports about it on the board." : "\nReports about it (oldest first):")
+            lines += reports.map { "- \(LeadBoard.clock($0.at)) \($0.about): \($0.text)" }
+            return lines.joined(separator: "\n")
+        }
+        var counts: [LeadTask.Status: Int] = [:]
+        for task in board.tasks { counts[task.status, default: 0] += 1 }
+        let tally = LeadTask.Status.allCases.compactMap { state in counts[state].map { "\($0) \(state.rawValue)" } }.joined(separator: ", ")
+        var lines = ["Board of \(project) (base \(workflow.base)): \(board.tasks.count) task(s)\(tally.isEmpty ? "" : ": \(tally)"). board(task) shows one in full."]
+        lines += board.tasks.map { task in
+            let ended = sessions.flatMap { Self.endedMember(task, $0) }
+            // A running task whose worker ended reads so, not running.
+            let state = ended.map { $0.hasPrefix("worker") ? "worker ended" : "verifier ended" } ?? task.status.rawValue
+            return Self.clip("- \(task.slug) [\(state)] " + String(taskLine(task, sessions).dropFirst(task.slug.count + 4)), 200)
+        }
+        let open = board.openQuestions
+        if !open.isEmpty {
+            lines.append("\nOpen questions (\(open.count); questions has them in full):")
+            lines += open.map { Self.clip("- \($0.short) [\($0.rank.rawValue)] \($0.text)", 200) }
+        }
+        if !board.updates.isEmpty {
+            lines.append("\nLatest updates (\(board.updates.count) in all):")
+            lines += board.updates.suffix(Self.boardUpdates).map { Self.clip("- \(LeadBoard.clock($0.at)) \($0.title)", 160) }
+        }
+        return lines.joined(separator: "\n")
     }
 
     private func sessionsText() -> String {
-        let mine = runtime.sessions().filter { $0.cwd == root || $0.cwd.hasPrefix(root + "/") }
+        let all: [LeadSessionInfo]
+        do { all = try runtime.sessions() } catch { return "The session host can't be read: \(error)" }
+        let mine = all.filter { $0.cwd == root || $0.cwd.hasPrefix(root + "/") }
         guard !mine.isEmpty else { return "No window sessions in this project." }
         return mine.map { "- \($0.id): \($0.label) — \($0.live ? ($0.status ?? "running") : "ended") — \($0.cwd)" }.joined(separator: "\n")
     }

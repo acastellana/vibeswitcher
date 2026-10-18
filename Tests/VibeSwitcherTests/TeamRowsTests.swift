@@ -109,7 +109,7 @@ struct TeamRowsTests {
         blocked.blocker = "Need the API key"
         #expect(row(blocked, ["w-b": Self.idle]).mark == .blocked)
         #expect(row(blocked, ["w-b": Self.idle]).line(summary: nil) == "Need the API key")
-        #expect(row(Self.task("s", .running), ["w-s": Self.ended]).mark == .stalled)
+        #expect(row(Self.task("s", .running), ["w-s": Self.ended]).mark == .ended)
         var passed = Self.task("p", .review, since: 60)
         passed.evidence = LeadEvidence(completion: .complete, integrity: .clean, summary: "ok")
         #expect(row(passed).state == "Ready to merge")
