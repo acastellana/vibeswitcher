@@ -285,6 +285,11 @@ final class FakeUpstream: @unchecked Sendable {
     var echoAfterReply = false
     /// More of the response, each sent after its delay (a streamed or chunked answer).
     var stages: [(TimeInterval, Data)] = []
+    /// When set, each stage waits for it to be signalled instead of for its delay (the test lets the rest of the
+    /// answer go once it has seen the first part arrive); after the hang guard it goes anyway, noted in `gateTimedOut`.
+    var stagesGate: DispatchSemaphore?
+    private var gateGaveUp = false
+    var gateTimedOut: Bool { queue.sync { gateGaveUp } }
     private var bodies: [Data] = []
     /// Each request's body (read up to its Content-Length).
     var recordedBodies: [Data] { queue.sync { bodies } }
@@ -359,10 +364,18 @@ final class FakeUpstream: @unchecked Sendable {
 
     private func sendStages(_ stages: [(TimeInterval, Data)], on connection: NWConnection) {
         guard let (delay, data) = stages.first else { return connection.cancel() }
-        queue.asyncAfter(deadline: .now() + delay) {
+        let send = {
             connection.send(content: data, completion: .contentProcessed { _ in
                 self.sendStages(Array(stages.dropFirst()), on: connection)
             })
+        }
+        guard let gate = stagesGate else { return queue.asyncAfter(deadline: .now() + delay, execute: send) }
+        DispatchQueue.global().async {
+            let opened = gate.wait(timeout: .now() + hangGuard) == .success
+            self.queue.async {
+                if !opened { self.gateGaveUp = true }
+                send()
+            }
         }
     }
 
@@ -388,8 +401,8 @@ final class Once: @unchecked Sendable {
     }
 }
 
-/// Whether `condition` holds within `timeout` seconds, checked every 50 ms.
-func until(timeout: TimeInterval = 10, _ condition: () -> Bool) async -> Bool {
+/// Whether `condition` holds within `timeout` seconds (a hang guard), checked every 50 ms.
+func until(timeout: TimeInterval = hangGuard, _ condition: () -> Bool) async -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
     while Date() < deadline {
         if condition() { return true }
@@ -398,8 +411,9 @@ func until(timeout: TimeInterval = 10, _ condition: () -> Bool) async -> Bool {
     return condition()
 }
 
-/// Sends `request` to 127.0.0.1:`port`; returns everything received until the server closes.
-func exchange(port: UInt16, _ request: String, timeout: TimeInterval = 5) async -> Data {
+/// Sends `request` to 127.0.0.1:`port`; returns everything received until the server closes (or the hang guard
+/// passes).
+func exchange(port: UInt16, _ request: String, timeout: TimeInterval = hangGuard) async -> Data {
     await withCheckedContinuation { continuation in
         let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
         let queue = DispatchQueue(label: "test-client")
@@ -424,8 +438,9 @@ func exchange(port: UInt16, _ request: String, timeout: TimeInterval = 5) async 
 }
 
 /// Like `exchange`, but also reports whether the connection ended in an error (a reset) rather than a
-/// clean close, and when each piece of the response arrived (seconds after sending).
-func exchangeDetailed(port: UInt16, _ request: String, timeout: TimeInterval = 5) async
+/// clean close, and when each piece of the response arrived (seconds after sending). `onData` sees all that has
+/// arrived so far, each time more does.
+func exchangeDetailed(port: UInt16, _ request: String, timeout: TimeInterval = hangGuard, onData: ((Data) -> Void)? = nil) async
     -> (data: Data, endedWithError: Bool, arrivals: [(TimeInterval, Data)]) {
     await withCheckedContinuation { continuation in
         let connection = NWConnection(host: "127.0.0.1", port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
@@ -445,6 +460,7 @@ func exchangeDetailed(port: UInt16, _ request: String, timeout: TimeInterval = 5
                 if let data, !data.isEmpty {
                     received.append(data)
                     arrivals.append((Date().timeIntervalSince(started), data))
+                    onData?(received)
                 }
                 if error != nil { finish(error: true) } else if done { finish(error: false) } else { read() }
             }
@@ -483,8 +499,23 @@ func upgradeExchange(port: UInt16, _ request: String, payload: Data) async -> (h
         }
         connection.start(queue: queue)
         connection.send(content: Data(request.utf8), completion: .contentProcessed { _ in read() })
-        queue.asyncAfter(deadline: .now() + 5) { finish() }
+        queue.asyncAfter(deadline: .now() + hangGuard) { finish() }
     }
+}
+
+/// Whether nothing listens on 127.0.0.1:`port` any more (a connection is refused).
+func refusesConnections(port: UInt16) -> Bool {
+    let fd = socket(AF_INET, SOCK_STREAM, 0)
+    guard fd >= 0 else { return false }
+    defer { close(fd) }
+    var address = sockaddr_in()
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_addr.s_addr = inet_addr("127.0.0.1")
+    address.sin_port = port.bigEndian
+    let connected = withUnsafePointer(to: &address) {
+        $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size)) }
+    }
+    return connected != 0 && errno == ECONNREFUSED
 }
 
 struct ProxyStartFailure: Error { let message: String }
@@ -530,7 +561,7 @@ struct PreviewProxyTests {
         // A cold Vite load: tailscale serve opens one backend connection per in-flight module request.
         let ok = await withTaskGroup(of: Bool.self) { group in
             for i in 0..<100 {
-                group.addTask { self.text(await exchange(port: port, "GET /m\(i).js HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n", timeout: 10)).hasSuffix("ok") }
+                group.addTask { self.text(await exchange(port: port, "GET /m\(i).js HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n")).hasSuffix("ok") }
             }
             return await group.reduce(0) { $0 + ($1 ? 1 : 0) }
         }
@@ -539,7 +570,7 @@ struct PreviewProxyTests {
 
     @Test func aRequestTheClientAbandonsReleasesTheDevServerConnection() async throws {
         let upstream = try FakeUpstream()
-        upstream.delay = 30   // a hung dev server
+        upstream.delay = 3_600   // a hung dev server (longer than the test waits)
         let upstreamPort = await upstream.start()
         let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstreamPort)", port: Int(upstreamPort))
         let (proxy, port) = try await startProxy(target: target)
@@ -551,7 +582,7 @@ struct PreviewProxyTests {
         client.send(content: Data("GET /slow HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n".utf8), completion: .contentProcessed { _ in })
         #expect(await until { upstream.recorded.count == 1 })
         client.cancel()
-        // Released long before the dev server would answer (30 s).
+        // Released long before the dev server would answer.
         #expect(await until { upstream.closed == 1 })
     }
 
@@ -620,7 +651,7 @@ struct PreviewProxyTests {
         let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstreamPort)", port: Int(upstreamPort))
         let (proxy, port) = try await startProxy(target: target)
         defer { proxy.stop(); upstream.stop() }
-        let response = await exchange(port: port, "GET /big.js HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n", timeout: 15)
+        let response = await exchange(port: port, "GET /big.js HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n")
         let split = try #require(response.range(of: Data("\r\n\r\n".utf8)))
         #expect(Data(response[split.upperBound...]) == body)
     }
@@ -640,11 +671,11 @@ struct PreviewProxyTests {
         let probe = try FakeUpstream()
         let deadPort = await probe.start()
         probe.stop()
-        try await Task.sleep(nanoseconds: 200_000_000)
+        #expect(await until { refusesConnections(port: deadPort) })
         let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(deadPort)", port: Int(deadPort))
         let (proxy, port) = try await startProxy(target: target)
         defer { proxy.stop() }
-        let response = text(await exchange(port: port, "GET / HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n", timeout: 10))
+        let response = text(await exchange(port: port, "GET / HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n"))
         #expect(response.hasPrefix("HTTP/1.1 502"))
         #expect(response.contains("isn't answering"))
     }

@@ -37,8 +37,8 @@ struct TrustCursorTests {
                        "/tmp/x\n ❯ No, exit\n   Yes, I trust this folder",      // the first down was lost
                        "/tmp/x\n   No, exit\n ❯ Yes, I trust this folder"]      // second down took
         var sent: [[UInt8]] = []
-        // No settling time: an unchanged screen means the key was lost.
-        let answered = TrustPrompt.answer(folder: "/tmp/x", timeout: 5, pause: 0, settle: 0,
+        // No settling time: an unchanged screen means the key was lost. It ends on the screens; the timeout is a hang guard.
+        let answered = TrustPrompt.answer(folder: "/tmp/x", timeout: hangGuard, pause: 0, settle: 0,
                                           readScreen: { screens.count > 1 ? screens.removeFirst() : screens.first },
                                           send: { sent += $0.map(\.bytes) })
         #expect(answered)
@@ -47,6 +47,7 @@ struct TrustCursorTests {
 
     @Test func neverEnterOnNo() {
         let stuck = "/tmp/x\n ❯ No, exit\n   Yes, I trust this folder"
+        // How long it keeps trying is the case: a busy Mac only gives it fewer tries, never an Enter.
         var sent: [[UInt8]] = []
         let answered = TrustPrompt.answer(folder: "/tmp/x", timeout: 1, pause: 0, readScreen: { stuck }, send: { sent += $0.map(\.bytes) })
         #expect(!answered)
@@ -54,11 +55,12 @@ struct TrustCursorTests {
     }
 
     @Test func noSecondKeyBeforeTheFirstShows() {
-        // The screen lags: three reads still show the old cursor after the down was sent.
+        // The screen lags: three reads still show the old cursor after the down was sent. However long those reads
+        // take (settle, and the timeout, are hang guards), it must not press again.
         let no = "/tmp/x\n ❯ No, exit\n   Yes, I trust this folder"
         var screens = [no, no, no, no, "/tmp/x\n   No, exit\n ❯ Yes, I trust this folder"]
         var sent: [[UInt8]] = []
-        let answered = TrustPrompt.answer(folder: "/tmp/x", timeout: 5, pause: 0, settle: 30,
+        let answered = TrustPrompt.answer(folder: "/tmp/x", timeout: hangGuard, pause: 0, settle: hangGuard,
                                           readScreen: { screens.count > 1 ? screens.removeFirst() : screens[0] },
                                           send: { sent += $0.map(\.bytes) })
         #expect(answered)

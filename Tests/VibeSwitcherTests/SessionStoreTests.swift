@@ -37,9 +37,14 @@ struct SessionStoreTests {
             arguments: { $0.pid == 972 ? ["/bin/zsh", "-c", "source /h/.claude/shell-snapshots/a.sh && eval 'npm run dev' < /dev/null"] : [] }))
     }
 
-    private func settle() async throws {
-        // A scan runs on the store's queue and lands back on the main thread.
-        try await Task.sleep(for: .milliseconds(400))
+    /// Refreshes, and waits for that scan to land: it runs on the store's queue and lands back on the main thread.
+    /// The next one starts no sooner than 400 ms after this one, so the clock moves on between scans.
+    private func refreshAndSettle(_ store: SessionStore) async throws {
+        let before = store.scansApplied
+        let earliestNext = ContinuousClock.now + .milliseconds(400)
+        store.refresh()
+        #expect(await until { store.scansApplied > before })
+        try await Task.sleep(until: earliestNext)
     }
 
     @Test func scansThatFindNothingNewDontRepublish() async throws {
@@ -49,15 +54,13 @@ struct SessionStoreTests {
         var publishes = 0
         let watching = store.$sessions.dropFirst().sink { _ in publishes += 1 }
         defer { watching.cancel() }
-        store.refresh()
-        try await settle()
+        try await refreshAndSettle(store)
         #expect(store.sessions.map(\.status) == [.working, .background] || store.sessions.map(\.status) == [.background, .working])
         #expect(store.sessions.first { $0.tty == "ttys971" }?.detail == "Waiting on npm run dev · <1m")
         #expect(publishes == 1)
         // Seconds later: the background shell is older, the working agent's tool has run longer; nothing shown changed.
         for _ in 0..<3 {
-            store.refresh()
-            try await settle()
+            try await refreshAndSettle(store)
         }
         #expect(publishes == 1)
     }

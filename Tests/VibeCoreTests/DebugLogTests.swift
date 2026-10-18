@@ -78,12 +78,14 @@ final class SlowTools: MCPToolset, @unchecked Sendable {
     /// Calls that have started.
     var started: Int { lock.lock(); defer { lock.unlock() }; return calls }
     var tools: [MCPToolInfo] { [MCPToolInfo(name: "slow", description: "runs a long command")] }
+    /// How long its command runs, in seconds: twice the hang guard, so an answer within the guard means it was stopped.
+    static let runs = Int(2 * hangGuard)
     func call(_ name: String, _ arguments: [String: Any]) -> MCPToolResult {
         lock.lock()
         calls += 1
         lock.unlock()
         let started = Date()
-        _ = Shell.run(executable: "/bin/sleep", args: ["30"], in: "/tmp", timeout: 60)
+        _ = Shell.run(executable: "/bin/sleep", args: ["\(Self.runs)"], in: "/tmp", timeout: TimeInterval(Self.runs * 2))
         return MCPToolResult(text: "took \(Int(Date().timeIntervalSince(started)))")
     }
 }
@@ -103,19 +105,14 @@ struct MCPConcurrencyTests {
         let started = Date()
         server.receive(Data(#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"slow","arguments":{}}}"#.utf8), respond: respond)
         // It's running (not just queued) when the ping and the cancel come.
-        var waited = 0
-        while tools.started == 0, waited < 50 { usleep(100_000); waited += 1 }
-        #expect(tools.started == 1)
+        #expect(eventually { tools.started == 1 })
         server.receive(Data(#"{"jsonrpc":"2.0","id":2,"method":"ping"}"#.utf8), respond: respond)
         func reply(_ id: String) -> (Date, String)? { lock.lock(); defer { lock.unlock() }; return replies[id] }
-        waited = 0
-        while reply("2") == nil, waited < 50 { usleep(100_000); waited += 1 }
-        #expect(reply("2") != nil)
+        #expect(eventually { reply("2") != nil })
         #expect(reply("1") == nil)
         server.receive(Data(#"{"jsonrpc":"2.0","method":"notifications/cancelled","params":{"requestId":1}}"#.utf8), respond: respond)
-        waited = 0
-        while reply("1") == nil, waited < 100 { usleep(100_000); waited += 1 }
-        #expect(reply("1") != nil)
-        #expect(Date().timeIntervalSince(started) < 15)
+        #expect(eventually { reply("1") != nil })
+        // Stopped: answered in well under the time its command takes.
+        #expect(Date().timeIntervalSince(started) < TimeInterval(SlowTools.runs) / 2)
     }
 }

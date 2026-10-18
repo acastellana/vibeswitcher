@@ -182,14 +182,20 @@ extension PreviewProxyTests {
     @Test func streamsServerSentEventsAsTheyCome() async throws {
         let upstream = try FakeUpstream()
         upstream.reply = Data("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n\r\n6\r\ndata:1\r\n".utf8)
-        upstream.stages = [(1.2, Data("6\r\ndata:2\r\n0\r\n\r\n".utf8))]
+        // The rest is sent only once the first event has reached the phone: held back until the stream ends, it
+        // never would, and the dev server would give up waiting (gateTimedOut).
+        upstream.stages = [(0, Data("6\r\ndata:2\r\n0\r\n\r\n".utf8))]
+        let firstSeen = DispatchSemaphore(value: 0)
+        upstream.stagesGate = firstSeen
         let upstreamPort = await upstream.start()
         let target = PreviewTarget(connectHost: "127.0.0.1", hostHeader: "localhost:\(upstreamPort)", port: Int(upstreamPort))
         let (proxy, port) = try await startProxy(target: target)
         defer { proxy.stop(); upstream.stop() }
-        let result = await exchangeDetailed(port: port, "GET /events HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n")
-        let first = try #require(result.arrivals.first { String(decoding: $0.1, as: UTF8.self).contains("data:1") })
-        #expect(first.0 < 0.8)   // not held back until the stream ends
+        let saw = Once()
+        let result = await exchangeDetailed(port: port, "GET /events HTTP/1.1\r\n\(Self.me)\(Self.ours)\r\n") { received in
+            if String(decoding: received, as: UTF8.self).contains("data:1") { saw.run { firstSeen.signal() } }
+        }
+        #expect(!upstream.gateTimedOut)   // not held back until the stream ends
         #expect(text(result.data).hasSuffix("6\r\ndata:2\r\n0\r\n\r\n"))
         #expect(!result.endedWithError)
     }

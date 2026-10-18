@@ -130,12 +130,14 @@ struct TeamSummariesTests {
     }
 
     @Test func aSlowOrFailingRunGivesNothingInTime() {
+        // Late: it would answer after twice the hang guard. Given up on, it returns long before that.
         let start = Date()
-        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "sleep 20; echo late"], timeout: 0.5) == nil)
-        #expect(Date().timeIntervalSince(start) < 5)
-        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "echo nope; exit 1"], timeout: 5) == nil)
-        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "echo Fixing the parser"], timeout: 5) == "Fixing the parser")
-        #expect(ClaudeHeadless.run(executable: "/nonexistent/claude", args: [], timeout: 5) == nil)
+        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "sleep \(Int(2 * hangGuard)); echo late"], timeout: 0.5) == nil)
+        #expect(Date().timeIntervalSince(start) < hangGuard)
+        // These end by themselves: the timeout is only a hang guard.
+        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "echo nope; exit 1"], timeout: hangGuard) == nil)
+        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "echo Fixing the parser"], timeout: hangGuard) == "Fixing the parser")
+        #expect(ClaudeHeadless.run(executable: "/nonexistent/claude", args: [], timeout: hangGuard) == nil)
     }
 
     /// One real `claude -p` call on made-up text, only with `TEAM_SUMMARY_LIVE=1 swift test --filter TeamSummariesTests`.

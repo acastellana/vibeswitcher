@@ -138,32 +138,43 @@ struct ExcludeTests {
 }
 
 struct ShellTests {
+    /// How long the children below run, in seconds: twice the hang guard, so a run that returns within the guard
+    /// and a child gone within the guard after that mean the child was killed, not waited for or left to end.
+    static let childRuns = Int(2 * hangGuard)
+
+    /// Runs `script`, which starts a child and writes its pid to `child`, until `timeout` ends it. On a busy Mac the
+    /// shell may not have got that far in the first second: then it's run again with twice the time, until it has.
+    /// The child, and how long the run that started it took.
+    func runUntilTimedOut(_ script: String, in dir: String, grace: TimeInterval = 5) -> (child: Int32?, took: TimeInterval) {
+        var timeout: TimeInterval = 1
+        while true {
+            let started = Date()
+            _ = Shell.run(executable: "/bin/sh", args: ["-c", script], in: dir, timeout: timeout, grace: grace)
+            let took = Date().timeIntervalSince(started)
+            let written = try? String(contentsOfFile: dir + "/child", encoding: .utf8)
+            if let child = written.flatMap({ Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }) { return (child, took) }
+            guard timeout < hangGuard else { return (nil, took) }
+            timeout *= 2
+        }
+    }
+
     @Test func aTimedOutCommandTakesItsChildrenWithIt() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("shell-\(UUID().uuidString)").path
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        _ = Shell.run(executable: "/bin/sh", args: ["-c", "sleep 30 & echo $! > child; wait"], in: dir, timeout: 1)
-        let child = Int32((try String(contentsOfFile: dir + "/child", encoding: .utf8)).trimmingCharacters(in: .whitespacesAndNewlines))!
-        var gone = false
-        for _ in 0..<50 where !gone {
-            gone = kill(child, 0) != 0
-            if !gone { usleep(100_000) }
-        }
-        #expect(gone)
+        let run = runUntilTimedOut("sleep \(Self.childRuns) & echo $! > child; wait", in: dir)
+        #expect(run.took < hangGuard)
+        let child = try #require(run.child)
+        #expect(eventually { kill(child, 0) != 0 })
     }
 
     @Test func aCommandThatIgnoresTermIsKilled() throws {
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("shell-\(UUID().uuidString)").path
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        let started = Date()
-        _ = Shell.run(executable: "/bin/sh", args: ["-c", "trap '' TERM; sleep 60 & echo $! > child; wait"], in: dir, timeout: 1, grace: 1)
-        #expect(Date().timeIntervalSince(started) < 10)
-        let child = Int32((try String(contentsOfFile: dir + "/child", encoding: .utf8)).trimmingCharacters(in: .whitespacesAndNewlines))!
-        var gone = false
-        for _ in 0..<50 where !gone {
-            gone = kill(child, 0) != 0
-            if !gone { usleep(100_000) }
-        }
-        #expect(gone)
+        let run = runUntilTimedOut("trap '' TERM; sleep \(Self.childRuns) & echo $! > child; wait", in: dir, grace: 1)
+        // It returned long before its child would have ended: the child was killed, not waited for.
+        #expect(run.took < hangGuard)
+        let child = try #require(run.child)
+        #expect(eventually { kill(child, 0) != 0 })
     }
 
     @Test func aChildLeftBehindByItsParentIsKilledToo() throws {
@@ -171,16 +182,10 @@ struct ShellTests {
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         // The shell dies on TERM; the child it started ignores TERM and is left to launchd (still holding the output
         // pipe, so the call would wait for it).
-        let started = Date()
-        _ = Shell.run(executable: "/bin/sh", args: ["-c", "(trap '' TERM; exec sleep 60) & echo $! > child; wait"], in: dir, timeout: 1, grace: 1)
-        #expect(Date().timeIntervalSince(started) < 10)
-        let child = Int32((try String(contentsOfFile: dir + "/child", encoding: .utf8)).trimmingCharacters(in: .whitespacesAndNewlines))!
-        var gone = false
-        for _ in 0..<50 where !gone {
-            gone = kill(child, 0) != 0
-            if !gone { usleep(100_000) }
-        }
-        #expect(gone)
+        let run = runUntilTimedOut("(trap '' TERM; exec sleep \(Self.childRuns)) & echo $! > child; wait", in: dir, grace: 1)
+        #expect(run.took < hangGuard)
+        let child = try #require(run.child)
+        #expect(eventually { kill(child, 0) != 0 })
     }
 }
 

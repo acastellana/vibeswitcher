@@ -119,9 +119,7 @@ struct SetupTests {
         let model = SetupModel(preferences: preferences,
                                system: .fixed(hooks: [.claude: true, .codex: false], terminal: .denied, notifications: .notAsked))
         model.refresh()
-        for _ in 0..<100 where model.notifications == nil || model.terminal == nil || model.hooks.isEmpty {
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
+        #expect(await until { model.notifications != nil && model.terminal != nil && !model.hooks.isEmpty })
         #expect(model.hookStatus(.claude) == .ok("Installed"))
         #expect(model.hookStatus(.codex) == .pending("Not installed"))
         #expect(model.anyHooksInstalled && !model.allHooksInstalled)

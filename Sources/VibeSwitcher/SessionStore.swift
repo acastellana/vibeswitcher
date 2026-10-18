@@ -24,6 +24,8 @@ final class SessionStore: ObservableObject {
     private var timer: Heartbeat.Subscription?
     private var watcher: DispatchSourceFileSystemObject?
     private var scanning = false
+    /// Scans that have landed on the main thread, for tests to wait on one (`refresh` returns before its scan runs).
+    private(set) var scansApplied = 0
     private var rescanRequested = false
     private var forceTerminalRequested = false
 
@@ -189,6 +191,7 @@ final class SessionStore: ObservableObject {
                     AppStatus.write(sessions: self.sessions, terminalAccess: access)
                 }
                 self.apply(raw: raw, tabs: tabs, hosted: hosted, background: background, transcripts: transcripts, now: now)
+                self.scansApplied += 1
                 self.scanning = false
                 if self.rescanRequested {
                     let force = self.forceTerminalRequested
