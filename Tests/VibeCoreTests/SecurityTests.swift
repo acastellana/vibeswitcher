@@ -228,9 +228,10 @@ struct RedactionReviewTests {
 
     @Test func longHyphenatedTextIsMaskedQuickly() {
         let blob = String(repeating: "a-", count: 20_000) + " token=abc"
-        let start = Date()
-        let masked = Redaction.secrets(in: blob)
-        #expect(Date().timeIntervalSince(start) < 1)
-        #expect(masked.hasSuffix("token=•••"))
+        // Against the same size of ordinary output in the same run, so a busy machine slows both alike.
+        let benign = RedactionSpeedTests.best(String(RedactionSpeedTests.benign.prefix(blob.count)))
+        let hostile = RedactionSpeedTests.best(blob)
+        #expect(hostile <= benign * 10, "\(Int(hostile * 1000)) ms, benign \(Int(benign * 1000)) ms")
+        #expect(Redaction.secrets(in: blob).hasSuffix("token=•••"))
     }
 }

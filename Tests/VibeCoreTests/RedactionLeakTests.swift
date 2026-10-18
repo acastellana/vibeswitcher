@@ -119,8 +119,9 @@ struct RedactionLeakTests {
 }
 
 /// 200 KB of input built to make the rules work hardest (long runs, repeated prefixes, unterminated quotes and
-/// keys, floods of each rule's trigger, a letter and every word starting with it) is masked well inside 50 ms
-/// each (about 12 ms at worst unoptimised, on its own).
+/// keys, floods of each rule's trigger, a letter and every word starting with it) is masked in at most 10 times what
+/// the same size of ordinary output takes in the same run (about 1.2 times at worst, and about 12 ms, unoptimised).
+/// A rule gone quadratic on 200 KB takes thousands of times as long.
 @Suite(.serialized) struct RedactionSpeedTests {
     static let size = 200_000
 
@@ -160,17 +161,28 @@ struct RedactionLeakTests {
         + "sshpass SG. token cookie: credential key-data mysql mariadb -u --user :// -----BEGIN -----END bearer ghp_ "
         + "github_pat_ glpat- hf_ hooks.slack.com/ xoxb- npm_ eyJ discord.com/api/webhooks/ "
 
-    @Test(arguments: inputs.indices) func hostileInputIsMaskedQuickly(_ index: Int) {
-        let input = Self.inputs[index]
-        // The best of three: a busy machine can stall any single run.
+    /// The same size of ordinary terminal output (a listing, a build, prose): what masking costs when nothing in it
+    /// needs it, measured beside each hostile input so a busy machine slows both alike.
+    static let benign = flood("drwxr-xr-x  12 me  staff   384 Oct 17 21:27 Sources\nCompiling VibeCore Redaction.swift\n"
+        + "Build complete! The quick brown fox jumps over the lazy dog.\n")
+
+    /// The best of three runs: a busy machine can stall any single one.
+    static func best(_ input: String) -> TimeInterval {
         var best = TimeInterval.infinity
         for _ in 0..<3 {
             let start = Date()
             _ = Redaction.secrets(in: input)
             best = min(best, Date().timeIntervalSince(start))
         }
+        return best
+    }
+
+    @Test(arguments: inputs.indices) func hostileInputIsMaskedQuickly(_ index: Int) {
+        let input = Self.inputs[index]
+        let benign = Self.best(Self.benign), hostile = Self.best(input)
         // One line per case, to compare runs.
-        print("RedactionSpeed #\(index) \(input.prefix(24).debugDescription) \(String(format: "%.1f", best * 1000)) ms")
-        #expect(best < 0.05, "\(input.prefix(24).debugDescription): \(Int(best * 1000)) ms")
+        print("RedactionSpeed #\(index) \(input.prefix(24).debugDescription) \(String(format: "%.1f", hostile * 1000)) ms, "
+            + "benign \(String(format: "%.1f", benign * 1000)) ms, \(String(format: "%.1f", hostile / benign))x")
+        #expect(hostile <= benign * 10, "\(input.prefix(24).debugDescription): \(Int(hostile * 1000)) ms, benign \(Int(benign * 1000)) ms")
     }
 }
