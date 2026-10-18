@@ -292,7 +292,7 @@ public struct LeadWake: Equatable, Sendable {
     static func short(_ report: SteerMessage) -> String {
         let text = report.text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
         let said: [(String, String)] = [
-            ("says it's done", "done"), ("is blocked", "blocked"), ("asks", "asks"), ("is waiting for input", "waits for input"),
+            ("says it's done", "done"), ("is blocked", "blocked"), ("is stalled", "stalled"), ("asks", "asks"), ("is waiting for input", "waits for input"),
             ("stopped mid-", "stopped on an API error"), ("stopped without", "stopped"), ("ended", "ended"),
         ]
         for role in ["worker", "verifier"] {

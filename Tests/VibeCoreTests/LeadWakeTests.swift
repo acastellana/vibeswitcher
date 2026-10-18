@@ -181,6 +181,7 @@ struct LeadWakeTests {
         func message(_ text: String, _ about: String = "witness") -> SteerMessage { SteerMessage(text: text, from: .system(about), agentPid: 1) }
         #expect(LeadWake.short(message("The worker on a says it's done: x")) == "worker a done")
         #expect(LeadWake.short(message("The worker on a asks: which db?\nAnswer with message(a, …).")) == "worker a asks")
+        #expect(LeadWake.short(message("The worker on a is stalled: idle for 10 min without reporting, last activity 12 min ago. Message it.")) == "worker a stalled")
         #expect(LeadWake.short(message("The worker on a ended (exit 1) without reporting. Its commits…")) == "worker a ended")
         #expect(LeadWake.short(message("The worker on a stopped without calling report. read_session…")) == "worker a stopped")
         #expect(LeadWake.short(message("The worker on a stopped mid-task: its turn ended on an API error (x).")) == "worker a stopped on an API error")
