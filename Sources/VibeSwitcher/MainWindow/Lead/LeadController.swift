@@ -19,6 +19,61 @@ final class ReportsWaiting: ObservableObject {
     }
 }
 
+/// Each lead's board and decisions as last read, kept while their files are unchanged. The lead controller looks
+/// every 3 s on the main thread, and a day's board is most of a MB of JSON (its decisions, dates to parse).
+struct LeadFiles {
+    /// A file's identity, size and modification time: while they're the same, so is what it says. A board is
+    /// written whole and renamed into place, so a new one is a new file.
+    struct Stamp: Equatable {
+        let inode: UInt64
+        let size: Int64
+        let modified: timespec
+
+        init?(_ path: String) {
+            var info = stat()
+            guard stat(path, &info) == 0 else { return nil }
+            inode = info.st_ino
+            size = info.st_size
+            modified = info.st_mtimespec
+        }
+
+        static func == (a: Stamp, b: Stamp) -> Bool {
+            a.inode == b.inode && a.size == b.size && a.modified.tv_sec == b.modified.tv_sec && a.modified.tv_nsec == b.modified.tv_nsec
+        }
+    }
+
+    private var boards: [String: (stamp: Stamp, board: LeadBoard)] = [:]
+    private var decisionLists: [String: (stamp: Stamp, decisions: [LeadDecision])] = [:]
+    /// How many times a file was read (for tests).
+    private(set) var fileReads = 0
+
+    mutating func board(_ root: String) -> LeadBoard {
+        let store = BoardStore(root: root)
+        let stamp = Stamp((store.folder as NSString).appendingPathComponent("board.json"))
+        if let stamp, let kept = boards[root], kept.stamp == stamp { return kept.board }
+        fileReads += 1
+        let board = store.load()
+        boards[root] = stamp.map { ($0, board) }
+        return board
+    }
+
+    mutating func decisions(_ root: String) -> [LeadDecision] {
+        let store = BoardStore(root: root)
+        let stamp = Stamp((store.folder as NSString).appendingPathComponent("decisions.md"))
+        if let stamp, let kept = decisionLists[root], kept.stamp == stamp { return kept.decisions }
+        fileReads += 1
+        let decisions = store.decisions()
+        decisionLists[root] = stamp.map { ($0, decisions) }
+        return decisions
+    }
+
+    /// Only these roots still have a lead.
+    mutating func keep(_ roots: Set<String>) {
+        boards = boards.filter { roots.contains($0.key) }
+        decisionLists = decisionLists.filter { roots.contains($0.key) }
+    }
+}
+
 /// The app's side of project leads: starting them, keeping their boards loaded, answering their questions, and
 /// being their witness (telling a lead when one of its workers needs input, stops without reporting, or dies).
 final class LeadController: ObservableObject {
@@ -60,6 +115,8 @@ final class LeadController: ObservableObject {
     private let observer = LeadObserver()
     /// Roots whose lead is being prepared (off the main thread) right now.
     private var startingLeads: Set<String> = []
+    /// The boards and decisions as last read: the refresh reads them again only when their files changed.
+    private var reads = LeadFiles()
 
     init(host: HostClient, store: SessionStore, claudeCommand: @escaping (String) -> String) {
         self.host = host
@@ -369,10 +426,11 @@ final class LeadController: ObservableObject {
         let roots = Set(leadSessions.keys)
         runTimers(roots)
         var loaded: [String: LeadBoard] = [:]
-        for root in roots { loaded[root] = BoardStore(root: root).load() }
+        for root in roots { loaded[root] = reads.board(root) }
         if loaded != boards { boards = loaded }
-        let read = Dictionary(uniqueKeysWithValues: roots.map { ($0, BoardStore(root: $0).decisions()) })
+        let read = Dictionary(uniqueKeysWithValues: roots.map { ($0, reads.decisions($0)) })
         if read != decisions { decisions = read }
+        reads.keep(roots)
         for (root, board) in loaded {
             for question in board.openQuestions where seenQuestions.insert("\(question.id)#\(question.version)").inserted {
                 let project = (root as NSString).lastPathComponent
