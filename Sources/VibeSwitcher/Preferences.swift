@@ -34,8 +34,12 @@ final class Preferences: ObservableObject {
     }
     /// Launch presets, in ~/.vibeswitcher/presets.json (the first load migrates the two launch commands).
     @Published var presets: LaunchPresets {
-        didSet { try? presets.save(to: presetsFile) }
+        didSet { if presetsCanSave { try? presets.save(to: presetsFile) } }
     }
+    /// What couldn't be read from presets.json at launch, for the one notice that says so (nil: it read fine).
+    let presetsNotice: String?
+    /// False when presets.json couldn't be read and couldn't be copied aside: saving would lose it.
+    private let presetsCanSave: Bool
     @Published var appearance: TerminalAppearance {
         didSet { defaults.set(try? JSONEncoder().encode(appearance), forKey: "terminalAppearance") }
     }
@@ -63,9 +67,12 @@ final class Preferences: ObservableObject {
         launchAtLogin = SMAppService.mainApp.status == .enabled
         floatingPanel = FloatingPanelMode(rawValue: defaults.string(forKey: "floatingPanel") ?? "") ?? .automatic
         // Locals, not the @Published properties: those can't be read before init finishes.
-        presets = LaunchPresets.load(from: presetsFile,
-                                     claudeCommand: defaults.string(forKey: "claudeCommand") ?? "claude",
-                                     codexCommand: defaults.string(forKey: "codexCommand") ?? "codex")
+        let loaded = LaunchPresets.loadChecked(from: presetsFile,
+                                               claudeCommand: defaults.string(forKey: "claudeCommand") ?? "claude",
+                                               codexCommand: defaults.string(forKey: "codexCommand") ?? "codex")
+        presets = loaded.presets
+        presetsNotice = loaded.notice
+        presetsCanSave = loaded.canSave
         appearance = defaults.data(forKey: "terminalAppearance")
             .flatMap { try? JSONDecoder().decode(TerminalAppearance.self, from: $0) } ?? TerminalAppearance()
         openWindowAtLaunch = defaults.bool(forKey: "openWindowAtLaunch")

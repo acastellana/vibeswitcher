@@ -74,6 +74,24 @@ struct SetupTests {
         }
     }
 
+    /// E-01: an edit after a partly unreadable presets.json saves what was read, and the original stays aside.
+    @Test func editingAfterAnUnreadablePresetKeepsTheOriginal() throws {
+        try withSuite { defaults, presets in
+            let text = #"{"global": [{"name": "Opus", "kind": "claude", "command": "claude --model opus"}, {"name": "New", "kind": "robot"}]}"#
+            try Data(text.utf8).write(to: presets)
+            let preferences = Preferences(defaults: defaults, presetsFile: presets)
+            let notice = try #require(preferences.presetsNotice)
+            #expect(notice.contains("preset 2"))
+            #expect(preferences.presets.global.map(\.name) == ["Opus"])
+            preferences.presets.global.append(LaunchPreset(name: "Shell", kind: .shell, command: ""))
+            #expect(LaunchPresets.load(from: presets, claudeCommand: "", codexCommand: "").global.map(\.name) == ["Opus", "Shell"])
+            let backup = presets.appendingPathExtension("corrupt")
+            #expect(try Data(contentsOf: backup) == Data(text.utf8))
+            // The next launch reads the saved file cleanly: nothing more to say.
+            #expect(Preferences(defaults: defaults, presetsFile: presets).presetsNotice == nil)
+        }
+    }
+
     @Test func freshPreferencesUseTheDefaults() throws {
         try withSuite { defaults, presets in
             let preferences = Preferences(defaults: defaults, presetsFile: presets)

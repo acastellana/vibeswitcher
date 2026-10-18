@@ -69,4 +69,72 @@ struct LaunchPresetsTests {
         let mode = try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? Int
         #expect(mode == 0o600)
     }
+
+    /// E-01: one bad field used to drop the whole file for the built-ins, and the next edit saved them over it.
+    @Test func aBadFieldKeepsTheRestAndTheFileIsCopiedAsideFirst() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("presets.json")
+        let opus = UUID()
+        let text = """
+        {"global": [
+           {"id": "\(opus.uuidString)", "name": "Opus", "kind": "claude", "command": "claude --model opus"},
+           {"name": "Phone", "kind": "codex", "command": "codex", "env": {}, "keepShell": false, "place": "phone"},
+           {"name": "Broken", "kind": "robot", "command": "x"},
+           {"kind": "shell"}
+         ],
+         "byProject": {"/p": [{"name": "Mine", "kind": "shell", "keepShell": "yes"}], "/q": 7},
+         "defaults": {"/p": "\(opus.uuidString)", "/q": "not a uuid"}}
+        """
+        try Data(text.utf8).write(to: file)
+
+        let loaded = LaunchPresets.loadChecked(from: file, claudeCommand: "claude", codexCommand: "codex")
+        // A hand-added preset without env/keepShell/place reads with the defaults; a newer app's place resets.
+        #expect(loaded.presets.global.map(\.name) == ["Opus", "Phone"])
+        #expect(loaded.presets.global[0].id == opus && loaded.presets.global[0].command == "claude --model opus")
+        #expect(loaded.presets.global[1].place == .window)
+        #expect(loaded.presets.byProject["/p"]?.map(\.name) == ["Mine"])
+        #expect(loaded.presets.byProject["/p"]?.first?.keepShell == false)
+        #expect(loaded.presets.byProject["/q"] == nil)
+        #expect(loaded.presets.defaults == ["/p": opus])
+        #expect(loaded.problems == [
+            "“Phone”: its place couldn't be read, so it's back to the default",
+            "Global presets, preset 3: its kind couldn't be read; left out",
+            "Global presets, preset 4: it has no name; left out",
+            "“Mine”: its keepShell couldn't be read, so it's back to the default",
+            "The presets for /q couldn't be read; left out",
+            "The default preset for /q couldn't be read; left out",
+        ])
+        // The file as it was is kept before anything can be saved over it, and the notice says where.
+        #expect(loaded.canSave)
+        let backup = try #require(loaded.backup)
+        #expect(backup.lastPathComponent == "presets.json.corrupt")
+        #expect(try Data(contentsOf: backup) == Data(text.utf8))
+        #expect(try FileManager.default.attributesOfItem(atPath: backup.path)[.posixPermissions] as? Int == 0o600)
+        let notice = try #require(loaded.notice)
+        #expect(notice.contains("• Global presets, preset 3") && notice.contains(backup.path))
+
+        // Loading again (no edit in between) keeps the one copy; a different bad file gets its own.
+        #expect(LaunchPresets.loadChecked(from: file, claudeCommand: "", codexCommand: "").backup == backup)
+        try Data("not json".utf8).write(to: file)
+        let other = LaunchPresets.loadChecked(from: file, claudeCommand: "claude", codexCommand: "codex")
+        #expect(other.presets == LaunchPresets.builtIns())
+        #expect(other.problems == ["presets.json isn't readable JSON, so the built-in presets are used"])
+        #expect(try other.backup.map { try Data(contentsOf: $0) } == Data("not json".utf8))
+        #expect(other.backup != backup)
+        #expect(try Data(contentsOf: backup) == Data(text.utf8))
+    }
+
+    @Test func aCleanFileHasNothingToSay() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let file = dir.appendingPathComponent("presets.json")
+        #expect(LaunchPresets.loadChecked(from: file, claudeCommand: "", codexCommand: "").notice == nil)
+        try LaunchPresets.builtIns().save(to: file)
+        let loaded = LaunchPresets.loadChecked(from: file, claudeCommand: "", codexCommand: "")
+        #expect(loaded.notice == nil && loaded.backup == nil && loaded.canSave)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: dir.path) == ["presets.json"])
+    }
 }

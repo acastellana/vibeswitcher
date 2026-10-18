@@ -120,6 +120,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         // No permission prompts or login item at launch: the welcome window asks for each, saying why.
         notifier?.refreshAuthorization()
         if firstRun { DispatchQueue.main.async { [weak self] in self?.showWelcome(firstRun: true) } }
+        if let notice = preferences.presetsNotice {
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "Some launch presets couldn't be read"
+                alert.informativeText = notice
+                NSApp.activate()
+                alert.runModal()
+            }
+        }
         notifier?.onOpen = { [weak self] tty in
             guard let self, let session = self.store.sessions.first(where: { $0.tty == tty }) else { return }
             self.open(session, source: "notification")
