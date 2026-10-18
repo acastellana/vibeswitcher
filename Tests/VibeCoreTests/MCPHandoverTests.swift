@@ -22,7 +22,8 @@ final class ScratchToolServer {
     private var replies: [Int: [String: Any]] = [:]
     private var notified: [String] = []
 
-    init(_ scratch: Scratch) throws {
+    /// `extra`: more of the server's environment.
+    init(_ scratch: Scratch, environment extra: [String: String] = [:]) throws {
         dir = scratch.url("mcp-handover")
         let home = dir.appendingPathComponent("home")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
@@ -32,7 +33,7 @@ final class ScratchToolServer {
         process.executableURL = URL(fileURLWithPath: installed)
         process.arguments = ["--root", dir.path]
         process.environment = ["HOME": home.path, "CFFIXED_USER_HOME": home.path, "PATH": "/usr/bin:/bin",
-                               "TMPDIR": dir.path + "/", "VIBESWITCHER_MCP_TEST_BINARY": installed]
+                               "TMPDIR": dir.path + "/", "VIBESWITCHER_MCP_TEST_BINARY": installed].merging(extra) { $1 }
         let log = dir.appendingPathComponent("server.log")
         FileManager.default.createFile(atPath: log.path, contents: nil)
         process.standardError = try FileHandle(forWritingTo: log)
@@ -211,6 +212,171 @@ struct MCPHandoverTests {
         try server.install(build: "B")
         try server.send([server.call(6, "build")])
         #expect(try server.texts(6) == ["B \(pid)"])
+    }
+}
+
+/// The session host restarts after an install (it hands over to its new build) just as the tool servers switch to
+/// theirs: a server that can't ask it which role its session holds asks again until it answers.
+struct MCPHostRestartTests {
+    let scratch = Scratch()
+
+    func server(_ environment: [String: String] = [:]) throws -> ScratchToolServer {
+        try ScratchToolServer(scratch, environment: environment)
+    }
+
+    /// The session host as the test builds play it (see main.swift): a file there while it answers, holding the role.
+    func hostEnvironment(_ path: String, hold: Bool = false, patience: TimeInterval? = nil) -> [String: String] {
+        var environment = ["VIBESWITCHER_MCP_TEST_HOST": path]
+        if hold { environment["VIBESWITCHER_MCP_TEST_HOLD"] = "1" }
+        if let patience { environment["VIBESWITCHER_MCP_TEST_PATIENCE"] = "\(patience)" }
+        return environment
+    }
+
+    /// The host plays: `role` while it answers ("" for a session with none), nil while it can't be asked.
+    func host(_ path: String, _ role: String?) throws {
+        if let role { try Data(role.utf8).write(to: URL(fileURLWithPath: path)) } else { try? FileManager.default.removeItem(atPath: path) }
+    }
+
+    @Test func aSwitchWhileTheHostIsDownGetsTheRoleOnceItsBack() throws {
+        let path = scratch.url("host").path
+        try host(path, "worker")
+        let server = try server(hostEnvironment(path))
+        defer { server.stop() }
+        try server.send(ScratchToolServer.initialize + [server.call(2, "build")])
+        let pid = server.process.processIdentifier
+        #expect(try server.texts(2) == ["A worker \(pid)"])
+
+        try host(path, nil)
+        try server.install(build: "B")
+        try server.send([server.call(3, "build")])
+        // Not a refusal: the new build waits for the host's answer.
+        #expect(try server.texts(3) == [MCPHostedToolset.waiting])
+        #expect(server.log.contains("switched in place to the new build"))
+        #expect(server.log.contains("the session host can't be asked yet"))
+
+        try host(path, "worker")
+        #expect(eventually { server.notifications == ["notifications/tools/list_changed"] })
+        try server.send([server.call(4, "build"), ["jsonrpc": "2.0", "id": 5, "method": "tools/list"]])
+        #expect(try server.texts(4) == ["B worker \(pid)"])
+        #expect(try server.tools(5) == ["build", "slow", "only-B"])
+    }
+
+    /// Optionally better still: no switch until the host answers, so the new build gets its role at once.
+    @Test func aSwitchWaitsForTheHost() throws {
+        let path = scratch.url("host").path
+        try host(path, "lead")
+        let server = try server(hostEnvironment(path, hold: true))
+        defer { server.stop() }
+        try server.send(ScratchToolServer.initialize)
+        _ = try server.reply(1)
+        let pid = server.process.processIdentifier
+
+        try host(path, nil)
+        try server.install(build: "B")
+        try server.send([server.call(2, "build")])
+        #expect(try server.texts(2) == ["A lead \(pid)"])
+        try host(path, "lead")
+        try server.send([server.call(3, "build")])
+        #expect(try server.texts(3) == ["B lead \(pid)"])
+    }
+
+    /// A fresh start with the host down: no tools for a moment, then the role's, and the client is told.
+    @Test func aFreshStartWithTheHostDownGetsItsRoleWhenItsBack() throws {
+        let path = scratch.url("host").path
+        let server = try server(hostEnvironment(path))
+        defer { server.stop() }
+        try server.send(ScratchToolServer.initialize + [server.call(2, "build")])
+        #expect(try server.tools(1) == [])
+        #expect(try server.texts(2) == [MCPHostedToolset.waiting])
+        try host(path, "verifier")
+        #expect(eventually { server.notifications == ["notifications/tools/list_changed"] })
+        try server.send([["jsonrpc": "2.0", "id": 3, "method": "tools/list"], server.call(4, "build")])
+        #expect(try server.tools(3) == ["build", "slow", "only-A"])
+        #expect(try server.texts(4) == ["A verifier \(server.process.processIdentifier)"])
+    }
+
+    /// The host's answer is final: a session with no role stays without, whatever happens after.
+    @Test func noRoleFromTheHostIsFinal() throws {
+        let path = scratch.url("host").path
+        try host(path, "")
+        let server = try server(hostEnvironment(path))
+        defer { server.stop() }
+        try server.send(ScratchToolServer.initialize + [server.call(2, "build")])
+        #expect(try server.tools(1) == [])
+        #expect(try server.texts(2) == ["A has no role"])
+        try host(path, "lead")
+        try server.send([server.call(3, "build")])
+        #expect(try server.texts(3) == ["A has no role"])
+        #expect(!server.log.contains("can't be asked"))
+    }
+
+    @Test func aHostThatNeverAnswersIsGivenUpOn() throws {
+        let server = try server(hostEnvironment(scratch.url("host").path, patience: 1))
+        defer { server.stop() }
+        try server.send(ScratchToolServer.initialize)
+        _ = try server.reply(1)
+        var id = 2
+        #expect(eventually {
+            defer { id += 1 }
+            try? server.send([server.call(id, "build")])
+            return (try? server.texts(id)) == ["A has no role"]
+        })
+        #expect(server.log.contains("the session host didn't answer for 1 s; giving up"))
+    }
+}
+
+struct MCPHostedToolsetTests {
+    final class Count: @unchecked Sendable {
+        var attempts = 0
+        var settled = 0
+    }
+
+    @Test func aHostThatAnswersAtOnceMakesTheToolsetAtOnce() {
+        let count = Count()
+        let toolset = MCPHostedToolset(attempt: { count.attempts += 1; return MCPServerTests.Echo() }, giveUp: { MCPServerTests.Echo() })
+        toolset.start { count.settled += 1 }
+        #expect(toolset.settled)
+        #expect(toolset.call("echo", ["text": "hi"]).text == "echo: hi")
+        #expect(count.attempts == 1)
+        #expect(count.settled == 0)
+    }
+
+    @Test func aHostThatCantBeAskedIsAskedAgainUntilItAnswers() {
+        let lock = NSLock()
+        let count = Count()
+        let toolset = MCPHostedToolset(firstDelay: 0.01, longestDelay: 0.02, attempt: {
+            lock.lock()
+            defer { lock.unlock() }
+            count.attempts += 1
+            return count.attempts < 4 ? nil : MCPServerTests.Echo()
+        }, giveUp: { MCPServerTests.Echo() })
+        toolset.start {
+            lock.lock()
+            count.settled += 1
+            lock.unlock()
+        }
+        // Meanwhile: no tools, and calls are told to come back.
+        if !toolset.settled {
+            #expect(toolset.tools.isEmpty)
+            let waiting = toolset.call("echo", ["text": "hi"])
+            #expect(waiting.text == MCPHostedToolset.waiting && waiting.isError)
+        }
+        #expect(eventually { lock.lock(); defer { lock.unlock() }; return count.settled == 1 })
+        #expect(toolset.settled)
+        #expect(toolset.call("echo", ["text": "hi"]).text == "echo: hi")
+        #expect(count.attempts == 4)
+    }
+
+    @Test func patienceRunsOut() {
+        final class Refuses: MCPToolset {
+            var tools: [MCPToolInfo] { [] }
+            func call(_ name: String, _ arguments: [String: Any]) -> MCPToolResult { MCPToolResult(text: "no host", isError: true) }
+        }
+        let toolset = MCPHostedToolset(patience: 0.1, firstDelay: 0.01, longestDelay: 0.02, attempt: { nil }, giveUp: { Refuses() })
+        let settled = DispatchSemaphore(value: 0)
+        toolset.start { settled.signal() }
+        #expect(settled.wait(timeout: .now() + hangGuard) == .success)
+        #expect(toolset.call("echo", [:]).text == "no host")
     }
 }
 

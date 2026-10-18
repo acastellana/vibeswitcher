@@ -344,6 +344,85 @@ public enum MCPHandover {
 public protocol MCPToolset: AnyObject {
     var tools: [MCPToolInfo] { get }
     func call(_ name: String, _ arguments: [String: Any]) -> MCPToolResult
+    /// False while the toolset can't tell its tools yet (see `MCPHostedToolset`): nothing is announced until it can.
+    var settled: Bool { get }
+}
+
+extension MCPToolset {
+    public var settled: Bool { true }
+}
+
+/// A toolset that the session host's answer makes (it tells which role the session holds), when the host can't be
+/// asked yet. After an install it restarts, handing over to its new build, at the very moment the tool servers switch
+/// to theirs: rather than serve nothing for good, this asks again, less often each time, for up to `patience`, and
+/// answers calls meanwhile with `waiting`. Whatever the host answers is final (the toolset made from it decides).
+public final class MCPHostedToolset: MCPToolset, @unchecked Sendable {
+    public static let waiting = "The session host is restarting; try again in a few seconds."
+
+    private let attempt: () -> MCPToolset?
+    private let giveUp: () -> MCPToolset
+    private let patience: TimeInterval
+    private let firstDelay: TimeInterval
+    private let longestDelay: TimeInterval
+    private let lock = NSLock()
+    private var made: MCPToolset?
+
+    /// `attempt`: the toolset from the host's answer, or nil when the host couldn't be asked. `giveUp`: the toolset
+    /// once `patience` has run out (one that says why it has no tools).
+    public init(patience: TimeInterval = 120, firstDelay: TimeInterval = 0.25, longestDelay: TimeInterval = 5,
+                attempt: @escaping () -> MCPToolset?, giveUp: @escaping () -> MCPToolset) {
+        self.attempt = attempt
+        self.giveUp = giveUp
+        self.patience = patience
+        self.firstDelay = firstDelay
+        self.longestDelay = longestDelay
+    }
+
+    /// Asks once now, waiting for the answer as a fresh start does (so the client's first `tools/list` is the role's),
+    /// then, while the host can't be asked, again on a thread of its own. `settled` is called when the toolset is made
+    /// after that.
+    public func start(settled: @escaping () -> Void) {
+        if let toolset = attempt() {
+            settle(toolset)
+            return
+        }
+        FileHandle.standardError.write(Data("vibeswitcher-mcp: the session host can't be asked yet; asking again\n".utf8))
+        Thread.detachNewThread { [self] in
+            let deadline = Date().addingTimeInterval(patience)
+            var delay = firstDelay
+            var toolset: MCPToolset?
+            while toolset == nil, Date() < deadline {
+                Thread.sleep(forTimeInterval: min(delay, max(0, deadline.timeIntervalSinceNow)))
+                delay = min(delay * 2, longestDelay)
+                toolset = attempt()
+            }
+            if toolset == nil {
+                FileHandle.standardError.write(Data("vibeswitcher-mcp: the session host didn't answer for \(Int(patience)) s; giving up\n".utf8))
+            }
+            settle(toolset ?? giveUp())
+            settled()
+        }
+    }
+
+    private func settle(_ toolset: MCPToolset) {
+        lock.lock()
+        made = toolset
+        lock.unlock()
+    }
+
+    private var current: MCPToolset? {
+        lock.lock()
+        defer { lock.unlock() }
+        return made
+    }
+
+    public var settled: Bool { current != nil }
+
+    public var tools: [MCPToolInfo] { current?.tools ?? [] }
+
+    public func call(_ name: String, _ arguments: [String: Any]) -> MCPToolResult {
+        current?.call(name, arguments) ?? MCPToolResult(text: Self.waiting, isError: true)
+    }
 }
 
 /// MCP over stdio: one JSON-RPC 2.0 message per line in, one reply per line out (none for notifications). Tool
@@ -362,6 +441,11 @@ public final class MCPServer: @unchecked Sendable {
     private var carried: Data
     /// Written to when a tool call ends: the reader looks again whether it can switch builds.
     private var wake: Int32 = -1
+    /// How `serve` writes to the client, for announcements from other threads.
+    private var announce: ((Data) -> Void)?
+    /// Whether to switch to a new build now; asked once one is due (`vibeswitcher-mcp` waits for the session host to
+    /// answer, as it restarts after an install too). Nil: always.
+    public var switchWhen: (() -> Bool)?
 
     /// The MCP revisions this server speaks, newest first: tools only, text results, no JSON-RPC batches (2025-03-26
     /// has them), which reads the same in each. Not 2026-07-28, which has no initialize (a `server/discover`, a `_meta`
@@ -411,12 +495,14 @@ public final class MCPServer: @unchecked Sendable {
         }
         lock.lock()
         wake = wakeup[1]
+        announce = respond
         var pending = carried
         carried = Data()
         lock.unlock()
         defer {
             lock.lock()
             wake = -1
+            announce = nil
             lock.unlock()
             for fd in wakeup where fd >= 0 { Darwin.close(fd) }
         }
@@ -464,7 +550,7 @@ public final class MCPServer: @unchecked Sendable {
         let idle = running.isEmpty
         let state = MCPHandover.State(session: session, input: pending, binary: nil)
         lock.unlock()
-        guard idle, let build = watch.update() else { return }
+        guard idle, let build = watch.update(), switchWhen?() ?? true else { return }
         var handover = state
         handover.binary = build
         let why = MCPHandover.replace(with: watch.path, arguments: Array(CommandLine.arguments.dropFirst()), state: handover)
@@ -472,11 +558,23 @@ public final class MCPServer: @unchecked Sendable {
         FileHandle.standardError.write(Data("vibeswitcher-mcp: couldn't switch to the new build at \(watch.path): \(why); this build serves on\n".utf8))
     }
 
-    /// The notification that the tools changed, for a client that got another build's list and was told they may.
+    /// The toolset can tell its tools now (see `MCPToolset.settled`): the client hears if they aren't the ones it got.
+    public func toolsSettled() {
+        lock.lock()
+        let announce = self.announce
+        lock.unlock()
+        if let announce, let changed = toolsChanged() { announce(changed) }
+    }
+
+    /// The notification that the tools changed, for a client that got other tools (another build's, or none while
+    /// the role was still being asked) and was told they may. Once: the client asks again.
     private func toolsChanged() -> Data? {
+        guard toolset.settled else { return nil }
+        let digest = Self.digest(toolset.tools)
         lock.lock()
         defer { lock.unlock() }
-        guard session.initialized, session.announcesToolChanges, let told = session.tools, told != Self.digest(toolset.tools) else { return nil }
+        guard session.initialized, session.announcesToolChanges, let told = session.tools, told != digest else { return nil }
+        session.tools = digest
         return encode(["jsonrpc": "2.0", "method": "notifications/tools/list_changed"])
     }
 

@@ -25,27 +25,47 @@ if handover != nil { FileHandle.standardError.write(Data("vibeswitcher-mcp: swit
 
 /// For MCPHandoverTests: a server with no host behind it whose tools say which build answers.
 /// `VIBESWITCHER_MCP_TEST_BUILD` names the build (a script standing in for one sets it), `VIBESWITCHER_MCP_TEST_BINARY`
-/// is where it's installed.
+/// is where it's installed. `VIBESWITCHER_MCP_TEST_HOST` plays the session host: a file that's there while the host
+/// answers, holding the session's role ("" for none); `VIBESWITCHER_MCP_TEST_HOLD=1` holds a switch until it answers.
 final class TestBuild: MCPToolset {
     let build: String
-    init(_ build: String) { self.build = build }
+    /// Nil: no host played.
+    let role: String?
+    init(_ build: String, role: String?) {
+        self.build = build
+        self.role = role
+    }
 
     var tools: [MCPToolInfo] {
-        [MCPToolInfo(name: "build", description: "Which build answers, and its process"),
-         MCPToolInfo(name: "slow", description: "Answers after a while", properties: ["seconds": .init(type: "number", description: "How long")]),
-         MCPToolInfo(name: "only-\(build)", description: "A tool only this build has")]
+        guard role != "" else { return [] }
+        return [MCPToolInfo(name: "build", description: "Which build answers, and its process"),
+                MCPToolInfo(name: "slow", description: "Answers after a while", properties: ["seconds": .init(type: "number", description: "How long")]),
+                MCPToolInfo(name: "only-\(build)", description: "A tool only this build has")]
     }
 
     func call(_ name: String, _ arguments: [String: Any]) -> MCPToolResult {
-        if name == "slow" { Thread.sleep(forTimeInterval: arguments["seconds"] as? Double ?? 1) }
-        return MCPToolResult(text: "\(build) \(getpid())")
+        guard let role else {
+            if name == "slow" { Thread.sleep(forTimeInterval: arguments["seconds"] as? Double ?? 1) }
+            return MCPToolResult(text: "\(build) \(getpid())")
+        }
+        guard !role.isEmpty else { return MCPToolResult(text: "\(build) has no role", isError: true) }
+        return MCPToolResult(text: "\(build) \(role) \(getpid())")
     }
 }
 
 let environment = ProcessInfo.processInfo.environment
 if let build = environment["VIBESWITCHER_MCP_TEST_BUILD"], let installed = environment["VIBESWITCHER_MCP_TEST_BINARY"] {
-    MCPServer(name: "vibeswitcher", version: "1", toolset: TestBuild(build),
-              watch: BinaryWatch(path: installed, running: handover?.binary), resuming: handover).serve()
+    let host = environment["VIBESWITCHER_MCP_TEST_HOST"]
+    let toolset = MCPHostedToolset(patience: environment["VIBESWITCHER_MCP_TEST_PATIENCE"].flatMap(Double.init) ?? 120,
+                                   firstDelay: 0.05, longestDelay: 0.2, attempt: {
+        guard let host else { return TestBuild(build, role: nil) }
+        return (try? String(contentsOfFile: host, encoding: .utf8)).map { TestBuild(build, role: $0) }
+    }, giveUp: { TestBuild(build, role: "") })
+    let server = MCPServer(name: "vibeswitcher", version: "1", toolset: toolset,
+                           watch: BinaryWatch(path: installed, running: handover?.binary), resuming: handover)
+    if let host, environment["VIBESWITCHER_MCP_TEST_HOLD"] == "1" { server.switchWhen = { FileManager.default.fileExists(atPath: host) } }
+    toolset.start { server.toolsSettled() }
+    server.serve()
     exit(0)
 }
 
@@ -191,9 +211,43 @@ final class HostRuntime: LeadRuntime {
 }
 
 let runtime = HostRuntime()
-// This binary as it is now: when an app update replaces it, the server switches to the new one between requests.
+let arguments = Array(CommandLine.arguments.dropFirst())
+// The repository, as `LeadToolset` reads it from the arguments.
+var root = FileManager.default.currentDirectoryPath
+var words = arguments.makeIterator()
+while let word = words.next() {
+    switch word {
+    case "--root": root = words.next() ?? root
+    case "--role", "--task": _ = words.next()
+    default: break
+    }
+}
+
+/// Whether the session host answers `vault`'s whoami, whatever it says (a role or none): it throws only when the host
+/// can't be asked (not running, or restarting after an install as it hands over to its new build).
+func hostAnswers(_ vault: LeadVault) -> Bool {
+    do {
+        _ = try vault.whoami(root: root)
+        return true
+    } catch {
+        return false
+    }
+}
+
+// The role comes from the session host, at a fresh start as after a switch of builds (never from the build before).
+// The session can start before VibeSwitcher has bound its role to it: give that a moment. A host that can't be asked
+// yet is asked again, for up to two minutes; one that answers decides.
+let toolset = MCPHostedToolset(attempt: {
+    guard hostAnswers(.standard) else { return nil }
+    let toolset = LeadToolset(arguments: arguments, runtime: runtime, wait: 3)
+    // No tools: that's the host's answer, unless it couldn't be asked by then either.
+    return toolset.tools.isEmpty && !hostAnswers(.standard) ? nil : toolset
+}, giveUp: { LeadToolset(arguments: arguments, runtime: runtime) })
+// This binary as it is now: when an app update replaces it, the server switches to the new one between requests,
+// once the session host answers (the new build asks it first thing).
 let watch = BinaryWatch(path: runtime.server, running: handover?.binary)
-// The session can start before VibeSwitcher has bound its role to it: give that a moment. After a switch of builds
-// too: the role comes from the session host, never from the build before.
-let toolset = LeadToolset(arguments: Array(CommandLine.arguments.dropFirst()), runtime: runtime, wait: 3)
-MCPServer(name: "vibeswitcher", version: "1", toolset: toolset, watch: watch, resuming: handover).serve()
+let server = MCPServer(name: "vibeswitcher", version: "1", toolset: toolset, watch: watch, resuming: handover)
+let quickVault = LeadVault(folder: LeadVault.standard.folder) { try HostCall.vault($0, timeout: 1) }
+server.switchWhen = { hostAnswers(quickVault) }
+toolset.start { server.toolsSettled() }
+server.serve()
