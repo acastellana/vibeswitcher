@@ -45,6 +45,16 @@ final class ComposerOutbox: ObservableObject {
         return entry
     }
 
+    /// Drops what was sent to sessions the host no longer has (`known`: all it lists), and says so once: they're gone
+    /// from the file with it.
+    func forgetGone(known: Set<UUID>) {
+        var dropped: [OutboxEntry] = []
+        change { dropped = $0.dropGone(known: known) }
+        guard !dropped.isEmpty else { return }
+        let keys = Set(dropped.map(\.key)).sorted().joined(separator: ", ")
+        Breadcrumbs.shared.note("composer: dropped \(dropped.count) unsent message(s) to session(s) the host no longer has (\(keys))")
+    }
+
     func delivered(key: String, prompts: [SentMatch.Prompt]) {
         // Most polls find nothing to drop: don't rewrite the file for those.
         var copy = outbox

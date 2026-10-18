@@ -151,4 +151,18 @@ struct ComposerOutboxTests {
         defer { try? FileManager.default.removeItem(at: url) }
         #expect(OutboxStore.load(url).isEmpty)
     }
+
+    /// ~/.vibeswitcher/outbox.json kept restoring "go on" for a lead lost with a replaced host, on every launch.
+    @Test func messagesToASessionTheHostNoLongerHasAreDropped() {
+        let gone = UUID(), here = UUID()
+        var outbox = Outbox(restoring: [OutboxEntry(key: "host:\(gone)", message: "go on", text: "go on", state: .typed),
+                                        OutboxEntry(key: "host:\(here)", message: "hi", text: "hi"),
+                                        OutboxEntry(key: "agent:abc", message: "terminal", text: "terminal")])
+        let dropped = outbox.dropGone(known: [here])
+        #expect(dropped.map(\.message) == ["go on"])
+        #expect(outbox.entries.map(\.message) == ["hi", "terminal"])
+        #expect(!outbox.restored.contains(dropped[0].id))
+        // Once only: nothing left to drop.
+        #expect(outbox.dropGone(known: [here]).isEmpty)
+    }
 }

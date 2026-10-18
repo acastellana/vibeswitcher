@@ -223,6 +223,89 @@ struct StyledScreenTests {
     }
 }
 
+/// clear_draft against Claude's grey suggestion (genswap, 10-18: 8 refusals, 4 with clear_draft on, every one a
+/// suggestion read through a session host too old to say what's dim).
+struct ClearDraftTests {
+    func scratch() -> URL {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("clear-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        return root
+    }
+
+    /// The captured screen as an older host gives it: text only.
+    func plain(_ screen: LeadDelivery.Screen) -> LeadDelivery.Screen { LeadDelivery.Screen(text: screen.text) }
+
+    @Test func theCapturedSuggestionIsTypedOverOnAnOlderHost() throws {
+        let root = scratch()
+        let agent = LeadAgent(pid: 7, tty: "ttys908", session: "s")
+        let shown = ClaudeScreens.suggested.at("suggestion")
+        // The newer host says it's dim: the box is empty, nothing to clear.
+        var typed: [String] = []
+        #expect(try LeadDelivery.deliver("a", from: .lead("lead"), to: agent, activity: .idle(background: nil), styledScreen: { shown },
+                                         typeInto: { typed.append($0); return true }, root: root) == .typed)
+        // An older host shows it as text, and Claude draws it again after the ^C: typed over, once.
+        #expect(LeadDelivery.box(in: plain(shown)) == .draft("Reply with only the word cherry."))
+        var clears = 0
+        #expect(try LeadDelivery.deliver("b", from: .lead("lead"), to: agent, activity: .idle(background: nil), styledScreen: { plain(shown) },
+                                         typeInto: { typed.append($0); return true }, clearDraft: true,
+                                         clear: { clears += 1; return true }, root: root) == .typed)
+        #expect(clears == 1 && typed.count == 2 && typed[1].hasSuffix("] b"))
+        // Without clear_draft it still waits, saying what it saw.
+        #expect(try LeadDelivery.deliver("c", from: .lead("lead"), to: agent, activity: .idle(background: nil), styledScreen: { plain(shown) },
+                                         typeInto: { typed.append($0); return true }, root: root) == .behindDraft("Reply with only the word cherry."))
+    }
+
+    /// A scratch program in a real host session draws Claude's box with a dim suggestion and draws it again on ^C;
+    /// what's typed into it is written to a file.
+    @Test func aScratchSessionsSuggestionIsClearedAndTypedOver() throws {
+        let root = scratch()
+        let typedFile = root.appendingPathComponent("typed").path
+        let rule = String(repeating: "─", count: 40)
+        let script = root.appendingPathComponent("box.sh").path
+        try """
+        draw() { printf '\\033[2J\\033[H* done\\r\\n%s\\r\\n\\342\\235\\257 \\033[2mopen rotate.html so I can try it\\033[22m\\r\\n%s\\r\\n' '\(rule)' '\(rule)'; }
+        stty raw -echo
+        draw
+        while :; do
+          c=$(dd bs=1 count=1 2>/dev/null | od -An -tx1 | tr -d ' ')
+          if [ "$c" = "03" ]; then draw; echo cleared >> '\(typedFile).log'; else printf "\\x$c" >> '\(typedFile)'; fi
+        done
+        """.write(toFile: script, atomically: true, encoding: .utf8)
+        let host = try TestHost()
+        let client = try TestClient(host)
+        let session = try client.spawn("/bin/sh \(script)")
+        let id = session.id
+        let older = { () -> LeadDelivery.Screen? in
+            if case .screenText(_, let text)? = try? HostCall.request(.screen(id: id), socket: host.socket) { return LeadDelivery.Screen(text: text) }
+            return nil
+        }
+        #expect(eventually { older()?.text.contains("open rotate.html") == true })
+        #expect(older().map(LeadDelivery.box(in:)) == .draft("open rotate.html so I can try it"))
+        let typeInto = { (text: String) -> Bool in
+            for write in ComposerText.writes(text, bracketed: true) {
+                if write.delay > 0 { usleep(useconds_t(write.delay * 1_000_000)) }
+                guard (try? HostCall.send(.input(id: id, bytes: Data(write.bytes), reply: false), socket: host.socket)) != nil else { return false }
+            }
+            return true
+        }
+        let agent = LeadAgent(pid: 7, tty: "ttys909", session: id.uuidString)
+        let delivered = try LeadDelivery.deliver("go on with the tests", from: .lead("lead"), to: agent, activity: .idle(background: nil),
+                                                 styledScreen: older, typeInto: typeInto, clearDraft: true, clear: {
+            let sent = (try? HostCall.send(.input(id: id, bytes: Data(HostInput.bytes(forKey: "interrupt") ?? []), reply: false), socket: host.socket)) != nil
+            usleep(300_000)
+            return sent
+        }, root: root)
+        #expect(delivered == .typed)
+        #expect(eventually { (try? String(contentsOfFile: typedFile, encoding: .utf8))?.contains("go on with the tests") == true })
+        #expect((try? String(contentsOfFile: typedFile + ".log", encoding: .utf8)) == "cleared\n")
+        // The host that says what's dim: the suggestion is an empty box, typed into without a ^C.
+        let styled = try LeadDelivery.deliver("and then report", from: .lead("lead"), to: agent, activity: .idle(background: nil),
+                                              styledScreen: { HostCall.styledScreen(id, socket: host.socket) }, typeInto: typeInto, root: root)
+        #expect(styled == .typed)
+        #expect(eventually { (try? String(contentsOfFile: typedFile, encoding: .utf8))?.contains("and then report") == true })
+    }
+}
+
 /// Scratch programs only (`/bin/sh -c …`).
 struct StyledScreenHostTests {
     @Test func theHostAnswersWithHowTheScreenIsDrawn() throws {

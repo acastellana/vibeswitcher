@@ -1021,9 +1021,11 @@ public final class LeadToolset: MCPToolset {
 
     // MARK: Text
 
-    /// How many tasks of one state status lists one per line (the rest by slug), and how many new reports.
-    static let statusTasks = 12
-    static let statusReports = 12
+    /// How many tasks status lists one per line in all (the rest by slug), and how many new reports.
+    static let statusTasks = 24
+    static let statusReports = 10
+    /// The order status lists the states in: what needs the lead first.
+    static let statusOrder: [LeadTask.Status] = [.running, .review, .blocked, .failed, .kept, .planned, .done]
 
     private func status() -> String {
         let board = store.load()
@@ -1049,7 +1051,8 @@ public final class LeadToolset: MCPToolset {
         // running: it's said apart, with what to do.
         let ended = sessions.map { sessions in board.tasks.compactMap { task in Self.endedMember(task, sessions).map { (task, $0) } } } ?? []
         let endedIDs = Set(ended.map(\.0.id))
-        for state in LeadTask.Status.allCases {
+        var budget = Self.statusTasks
+        for state in Self.statusOrder {
             var tasks = board.tasks.filter { $0.status == state && !endedIDs.contains($0.id) }
             guard !tasks.isEmpty else { continue }
             switch state {
@@ -1066,15 +1069,17 @@ public final class LeadToolset: MCPToolset {
             default: break
             }
             lines.append("\n\(state.rawValue):")
-            lines += tasks.prefix(Self.statusTasks).map { taskLine($0, sessions) }
-            if tasks.count > Self.statusTasks {
-                lines.append(Self.clip("- … and \(tasks.count - Self.statusTasks) more: " + tasks.dropFirst(Self.statusTasks).map(\.slug).joined(separator: ", "), 600))
+            let shown = tasks.prefix(budget)
+            budget -= shown.count
+            lines += shown.map { taskLine($0, sessions) }
+            if tasks.count > shown.count {
+                lines.append(Self.clip("- … and \(tasks.count - shown.count) more: " + tasks.dropFirst(shown.count).map(\.slug).joined(separator: ", "), 600))
             }
         }
         if !ended.isEmpty {
             lines.append("\nworker ended (\(ended.count)), not running:")
             lines += ended.prefix(Self.statusTasks).map { task, who in
-                Self.clip("- \(task.slug): \(task.title) — \(who)", 300)
+                Self.clip("- \(task.slug): \(Self.clip(task.title, 60)) — \(who)", 240)
             }
         }
         let open = board.openQuestions
@@ -1115,15 +1120,15 @@ public final class LeadToolset: MCPToolset {
     /// A task in one line (bounded): its title, what its worker does, its audit, rework, why it's kept, its last
     /// progress. `sessions` nil: the host can't be read.
     private func taskLine(_ task: LeadTask, _ sessions: [String: LeadSessionInfo]?) -> String {
-        var line = "- \(task.slug): \(Self.clip(task.title, 100))"
+        var line = "- \(task.slug): \(Self.clip(task.title, 60))"
+        if task.status == .kept { line += " — kept: \(Self.clip(task.keptBecause ?? "no reason recorded", 80))" }
         if let worker = task.worker, let info = sessions?[worker] {
             line += " — worker \(info.live ? (info.status ?? "running") : task.stopped == worker ? "stopped" : "ended")"
         }
         if let evidence = task.evidence { line += " — audit \(evidence.completion.rawValue)/\(evidence.integrity.rawValue)" }
         if task.rework > 0 { line += " — rework \(task.rework)" }
-        if task.status == .kept { line += " — kept: \(Self.clip(task.keptBecause ?? "no reason recorded", 120))" }
-        if let checkpoint = task.checkpoints?.last { line += " — last progress: \(Self.clip(checkpoint.text, 100))" }
-        return Self.clip(line, 320)
+        if let checkpoint = task.checkpoints?.last { line += " — last progress: \(Self.clip(checkpoint.text, 70))" }
+        return Self.clip(line, 200)
     }
 
     /// Who of a running or reviewed task's team ended without a word, and what to do: its worker gone from the host

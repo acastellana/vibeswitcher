@@ -15,6 +15,8 @@ final class FakeRuntime: LeadRuntime {
     var leadRunning = true
     /// Sessions that don't end when killed.
     var stubborn: Set<String> = []
+    /// Set: the session host can't be read (the error it gives).
+    var hostDown: String?
 
     let server = "/App/vibeswitcher-mcp"
     func claudeCommand(root: String) -> String { "claude --dangerously-skip-permissions" }
@@ -35,10 +37,14 @@ final class FakeRuntime: LeadRuntime {
         steered.append((name, sender, text))
         return delivery
     }
-    func sessions() -> [LeadSessionInfo] {
-        spawned.filter { !forgotten.contains($0.id) }.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: "working", tty: nil) }
+    func sessions() throws -> [LeadSessionInfo] {
+        if let hostDown { throw BoardError(text: hostDown) }
+        return spawned.filter { !forgotten.contains($0.id) }.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: "working", tty: nil) }
     }
-    func transcript(of session: String) -> String? { transcripts[session] }
+    func transcript(of session: String) throws -> String? {
+        if let hostDown { throw BoardError(text: hostDown) }
+        return transcripts[session]
+    }
     func currentAgent() -> LeadAgent? { me }
     func isRunning(_ agent: LeadAgent) -> Bool { leadRunning }
 }
@@ -61,8 +67,8 @@ final class FakeSeat: LeadRuntime {
     func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String, clearDraft: Bool) throws -> LeadDelivery.Delivered {
         try shared.steer(target, from: sender, text: text, clearDraft: clearDraft)
     }
-    func sessions() -> [LeadSessionInfo] { shared.sessions() }
-    func transcript(of session: String) -> String? { shared.transcript(of: session) }
+    func sessions() throws -> [LeadSessionInfo] { try shared.sessions() }
+    func transcript(of session: String) throws -> String? { try shared.transcript(of: session) }
     func currentAgent() -> LeadAgent? { agent }
     func isRunning(_ agent: LeadAgent) -> Bool { shared.isRunning(agent) }
 }
@@ -226,7 +232,7 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(Set(runtime.killed) == Set(runtime.spawned.map(\.id)))
         // Its worker and verifier leave the session list with it.
         #expect(Set(runtime.forgotten) == Set(runtime.spawned.map(\.id)))
-        #expect(runtime.sessions().isEmpty)
+        #expect(try runtime.sessions().isEmpty)
     }
 
     @Test func workersAreLimitedAndQuestionsDontBlock() throws {
@@ -465,7 +471,7 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(runtime.spawned.map(\.label) == ["Worker: One", "Worker: One", "Worker: Two"])
         #expect(!call(lead, "cleanup", ["task": "one", "force": true]).isError)
         #expect(runtime.forgotten == ["session-1", "session-2"])
-        #expect(runtime.sessions().map(\.id) == ["session-3"])
+        #expect(try runtime.sessions().map(\.id) == ["session-3"])
     }
 
     @Test func theLeadWorksOnTheBranchThatWasCheckedOut() throws {

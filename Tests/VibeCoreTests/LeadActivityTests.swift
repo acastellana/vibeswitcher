@@ -287,6 +287,20 @@ struct LeadDeliveryByActivityTests {
         // A draft that doesn't clear stays, and the message waits behind it.
         #expect(try LeadDelivery.deliver("c", from: .lead("lead"), to: agent, activity: .idle(background: nil), screen: { draft },
                                          typeInto: type, clearDraft: true, clear: { false }, root: root) == .draftStayed(before: "half-written note", after: nil))
+        // genswap, 10-18: a host too old to say what's dim showed Claude's suggestion as text; ^C emptied the box and
+        // Claude drew the same suggestion again. The same text back after the ^C is that suggestion: typed over.
+        let suggestion = screen("open rotate.html so I can try it")
+        var clears = 0
+        #expect(try LeadDelivery.deliver("c1", from: .lead("lead"), to: agent, activity: .idle(background: nil), screen: { suggestion },
+                                         typeInto: type, clearDraft: true, clear: { clears += 1; return true }, root: root) == .typed)
+        #expect(clears == 1 && typed.count == 2 && typed[1].hasSuffix("c1"))
+        typed.removeLast()
+        // Something else in the box after the ^C: said, not typed over.
+        shown = draft
+        #expect(try LeadDelivery.deliver("c2", from: .lead("lead"), to: agent, activity: .idle(background: nil), screen: { shown },
+                                         typeInto: type, clearDraft: true, clear: { shown = self.screen("another note"); return true }, root: root)
+                == .draftStayed(before: "half-written note", after: "another note"))
+        #expect(typed.count == 1)
         let dialog = """
          Bash command
            rm -rf build
@@ -303,7 +317,7 @@ struct LeadDeliveryByActivityTests {
         #expect(try LeadDelivery.deliver("e", from: .lead("lead"), to: agent, activity: .needsInput("Run: rm -rf build"), screen: { dialog },
                                          typeInto: type, root: root) == .awaitingAnswer("Run: rm -rf build"))
         #expect(typed.count == 1)
-        #expect(SteerInbox.pending(tty: agent.tty, root: root).map(\.text) == ["a", "c", "d", "e"])
+        #expect(SteerInbox.pending(tty: agent.tty, root: root).map(\.text) == ["a", "c", "c2", "d", "e"])
     }
 
     @Test func theBoxIsRead() {

@@ -149,6 +149,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
                 self.pane.attachedIDs.filter { !known.contains($0) }.forEach(self.pane.forget)
             }
             .store(in: &cancellables)
+        // Once the host has listed its sessions, unsent messages to ones it doesn't have (lost with a replaced host)
+        // go: they'd be restored on every launch with nowhere to go.
+        host.$sessions.combineLatest(host.$state).receive(on: RunLoop.main)
+            .sink { [weak self] sessions, state in
+                switch state {
+                case .connected, .outdated(_, true): self?.chat.outbox.forgetGone(known: Set(sessions.map(\.id)))
+                default: break
+                }
+            }
+            .store(in: &cancellables)
     }
 
     required init?(coder: NSCoder) { fatalError("not used") }

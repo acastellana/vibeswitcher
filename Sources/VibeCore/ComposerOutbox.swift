@@ -181,6 +181,19 @@ public struct Outbox: Equatable, Sendable {
         return entries[index]
     }
 
+    /// Drops the entries sent to window sessions the session host no longer has (`known`: every session it lists,
+    /// live or ended): a session lost with a replaced host can't take them, and they'd be restored on every launch.
+    /// Returns what it dropped.
+    @discardableResult
+    public mutating func dropGone(known: Set<UUID>) -> [OutboxEntry] {
+        let gone = entries.filter { entry in
+            guard entry.key.hasPrefix("host:"), let id = UUID(uuidString: String(entry.key.dropFirst(5))) else { return false }
+            return !known.contains(id)
+        }
+        gone.forEach { remove($0.id) }
+        return gone
+    }
+
     /// Drops `key`'s entries the conversation has (`prompts`, oldest first), whatever their state: a message
     /// that arrived is never offered again. One prompt answers one entry. Returns the ids dropped.
     @discardableResult

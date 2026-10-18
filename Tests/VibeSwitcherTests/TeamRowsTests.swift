@@ -141,6 +141,37 @@ struct TeamRowsTests {
         #expect(row(Self.task("q", .planned)).line(summary: "x") == nil)
     }
 
+    // MARK: Kept, and ended with a replaced host
+
+    @Test func aKeptTaskIsKeptNotFailed() {
+        var kept = Self.task("proto", .kept)
+        kept.keptBecause = "Prototype: never merge until the user has looked"
+        let row = row(kept)
+        #expect(row.group == .finished && row.mark == .kept && row.state == "Kept")
+        #expect(!row.mark.isRed)
+        #expect(row.line(summary: nil) == "Prototype: never merge until the user has looked")
+        var merged = Self.task("m", .done)
+        merged.merged = LeadMergeRecord(commit: "abc", tested: true)
+        #expect(TeamRows.finishedTitle([self.row(merged), row]) == "Merged (1) · Kept (1)")
+    }
+
+    @Test func aWorkerWhoseSessionIsGoneReadsEnded() {
+        // The host was replaced: the lead's new session is listed, the worker's and verifier's aren't.
+        var board = LeadBoard()
+        board.tasks = [Self.task("fix", .running), Self.task("rev", .review)]
+        board.tasks[1].verifier = "v-rev"
+        let rows = TeamRows.rows(board, seen: ["lead": Self.working])
+        let fix = rows.first { $0.id == "fix" }!
+        #expect(fix.state == "Worker ended" && fix.mark == .ended && fix.group == .needsYou)
+        #expect(fix.stateText(now: Self.now) == "Worker ended")
+        let rev = rows.first { $0.id == "rev" }!
+        #expect(rev.state == "Verifier ended")
+        // Nothing listed yet (the host hasn't answered): nothing is said of them.
+        #expect(TeamRows.rows(board, seen: [:]).first { $0.id == "fix" }?.state == "Working")
+        // A worker that ended on the host reads the same.
+        #expect(row(Self.task("s", .running), ["w-s": Self.ended]).state == "Worker ended")
+    }
+
     // MARK: Order
 
     @Test func rowsAreOrderedNeedsYouWorkingReviewQueuedFinished() {
