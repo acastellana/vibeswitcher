@@ -61,6 +61,8 @@ public enum SteerInbox {
             try handle.seekToEnd()
             try handle.write(contentsOf: line)
         }
+        // Armed, so a full disk is told once (see `deliver`).
+        if let check = try? file(tty, "check", root: root), !FileManager.default.fileExists(atPath: check.path) { _ = writeCheck(check, ids: []) }
     }
 
     /// Takes the messages for `agentPid` (dropping any left for an earlier agent) and records them as delivered: as
@@ -74,10 +76,24 @@ public enum SteerInbox {
     /// messages there (prints the hook's reply, types a prompt) and returns how many of them, from the first, went
     /// in. Only those are recorded as delivered; the rest stay first in line. Runs under the inbox's lock, so
     /// `hand` must not post to this inbox; killed midway, the inbox is as it was (delivered again, never lost).
+    ///
+    /// Recording them takes a write. When the disk is full that write fails, and messages handed over would be handed
+    /// again at every step (a Stop hook's would keep the agent going round). So before handing anything it checks
+    /// that it can write (`check`, the `.check` file); when it can't, the agent is handed one notice instead (its
+    /// messages wait, none lost) and then nothing until a write succeeds. That notice was given once the `.check`
+    /// file is gone: removing a file still works on a full disk, where writing a record of it wouldn't.
     @discardableResult
     public static func deliver(tty: String, agentPid: Int32, root: URL = VibePaths.root,
                                through hand: ([SteerMessage]) -> Int) -> [SteerMessage] {
-        guard let url = try? file(tty, "jsonl", root: root), FileManager.default.fileExists(atPath: url.path) else { return [] }
+        deliver(tty: tty, agentPid: agentPid, root: root, check: { writeCheck($0, ids: $1) }, through: hand)
+    }
+
+    /// As above, with how the write is checked (faked in tests: a full disk).
+    @discardableResult
+    static func deliver(tty: String, agentPid: Int32, root: URL, check: (URL, [String]) -> Bool,
+                        through hand: ([SteerMessage]) -> Int) -> [SteerMessage] {
+        guard let url = try? file(tty, "jsonl", root: root), FileManager.default.fileExists(atPath: url.path),
+              let probe = try? file(tty, "check", root: root) else { return [] }
         var delivered: [SteerMessage] = []
         let key = sealKey(root: root, create: false)
         try? locked(url) { handle in
@@ -86,7 +102,16 @@ public enum SteerInbox {
             guard !data.isEmpty else { return }
             let mine = decode(data).filter { $0.agentPid == agentPid }.map { verified($0, key: key) }
             let batch = Array(mine.prefix(SteerReply.fitting(mine)))
-            let count = batch.isEmpty ? 0 : min(max(hand(batch), 0), batch.count)
+            guard !batch.isEmpty else { return }
+            let armed = FileManager.default.fileExists(atPath: probe.path)
+            guard check(probe, batch.map(\.id)) else {
+                try? FileManager.default.removeItem(at: probe)
+                if armed, !FileManager.default.fileExists(atPath: probe.path) {
+                    _ = hand([diskFull(waiting: mine.count, agentPid: agentPid, folder: folder(root))])
+                }
+                return
+            }
+            let count = min(max(hand(batch), 0), batch.count)
             delivered = Array(batch.prefix(count))
             if !delivered.isEmpty, let log = try? file(tty, "delivered", root: root) {
                 try? locked(log) { log in
@@ -103,6 +128,24 @@ public enum SteerInbox {
             try handle.write(contentsOf: rest)
         }
         return delivered
+    }
+
+    /// Writes the `.check` file (the ids about to be handed): whether the disk takes a write now.
+    static func writeCheck(_ url: URL, ids: [String]) -> Bool {
+        let fd = open(url.path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0o600)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        let data = Data((ids.joined(separator: "\n") + "\n").utf8)
+        let wrote = data.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+        return wrote == data.count && fsync(fd) == 0
+    }
+
+    /// The one notice an agent gets while deliveries can't be recorded.
+    static func diskFull(waiting: Int, agentPid: Int32, folder: URL) -> SteerMessage {
+        SteerMessage(id: "disk-full", text: "VibeSwitcher can't write to \(folder.path): the disk is probably full. "
+                     + "\(waiting == 1 ? "A message waits" : "\(waiting) messages wait") for you; you'll get \(waiting == 1 ? "it" : "them") once a write succeeds there, "
+                     + "and nothing more comes until then. Until there's space, sessions can't save their output: free some (cleanup finished tasks, delete build output) "
+                     + "or tell the user.", from: .system("disk full"), agentPid: agentPid)
     }
 
     /// Takes one waiting message back (it's being sent another way, or returned to the composer).
@@ -214,9 +257,16 @@ public enum SteerReply {
     @discardableResult
     public static func answer(_ payload: [String: Any], tty: String, agentPid: Int32, root: URL = VibePaths.root,
                               write: (Data) -> Bool) -> Data? {
+        answer(payload, tty: tty, agentPid: agentPid, root: root, check: { SteerInbox.writeCheck($0, ids: $1) }, write: write)
+    }
+
+    /// As above, with how the disk's checked (see `SteerInbox.deliver`).
+    @discardableResult
+    static func answer(_ payload: [String: Any], tty: String, agentPid: Int32, root: URL, check: (URL, [String]) -> Bool,
+                       write: (Data) -> Bool) -> Data? {
         guard takesMessages(payload: payload), let event = payload["hook_event_name"] as? String else { return nil }
         var written: Data?
-        SteerInbox.deliver(tty: tty, agentPid: agentPid, root: root) { messages in
+        SteerInbox.deliver(tty: tty, agentPid: agentPid, root: root, check: check) { messages in
             guard let output = output(event: event, messages: messages), write(output) else { return 0 }
             written = output
             return messages.count
