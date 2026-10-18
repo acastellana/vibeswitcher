@@ -180,9 +180,140 @@ public enum Worktrees {
             && Git.run(["rev-parse", "--abbrev-ref", "HEAD"], in: path).output == branch(slug)
     }
 
+    /// A rebase or merge of the task's branch that its worktree stopped partway through (a refused `--continue`, a
+    /// session that ended in the middle).
+    public struct Interrupted: Error, Equatable, Sendable, CustomStringConvertible {
+        public enum Kind: String, Sendable { case rebase, merge }
+        public var kind: Kind
+        public var path: String
+        public var branch: String
+        /// The branch's commit now: where the abort must leave it.
+        public var head: String
+        /// What it rebases onto, or what it merges in ("1a2b3c4d (main)").
+        public var onto: String
+        /// The rebase's pick it stopped at, and how many there are.
+        public var step: Int?
+        public var steps: Int?
+        /// The commit being applied (REBASE_HEAD) or merged (MERGE_HEAD), with its subject.
+        public var stoppedAt: String?
+        /// A merge that was started with HEAD detached at the branch's commit.
+        public var detached = false
+        public var staged: [String] = []
+        public var conflicted: [String] = []
+        /// Why aborting would lose commits (the branch moved since the rebase began, and the abort would put it
+        /// back); nil when it's safe.
+        public var unsafe: String?
+
+        public var description: String {
+            var text: String
+            switch kind {
+            case .rebase:
+                text = "\(path) stopped partway through rebasing \(branch) onto \(onto)"
+                if let step, let steps { text += ", at pick \(step) of \(steps) (\(max(step - 1, 0)) done)" }
+            case .merge:
+                text = "\(path) stopped partway through merging \(onto) into \(branch)" + (detached ? " (HEAD detached)" : "")
+            }
+            if let stoppedAt { text += "; stopped on \(stoppedAt)" }
+            text += ". Staged: " + (staged.isEmpty ? "nothing" : staged.joined(separator: ", "))
+            if !conflicted.isEmpty { text += "; unresolved: " + conflicted.joined(separator: ", ") }
+            return text + ". \(branch) is at \(head.prefix(8))."
+        }
+    }
+
+    /// The rebase or merge the task's worktree is in the middle of, when it's this repository's worktree and the
+    /// operation is on the task's branch (rebasing it, or merging into it); nil otherwise, also for a folder that
+    /// belongs to something else.
+    public static func interrupted(root: String, slug: String) -> Interrupted? {
+        let path = path(root: root, slug: slug), branch = branch(slug)
+        guard FileManager.default.fileExists(atPath: path + "/.git") else { return nil }
+        let resolved = { (p: String) in URL(fileURLWithPath: p).resolvingSymlinksInPath().path }
+        let top = Git.run(["rev-parse", "--show-toplevel"], in: path)
+        guard top.ok, resolved(top.output) == resolved(path) else { return nil }
+        // A worktree of this repository, not a repository of its own checked out there.
+        let common = { (dir: String) -> String? in
+            let found = Git.run(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: dir)
+            return found.ok ? resolved(found.output) : nil
+        }
+        guard let mine = common(path), mine == common(root) else { return nil }
+        let head = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"], in: root).output
+        guard !head.isEmpty else { return nil }
+        let gitPath = { (name: String) in Git.run(["rev-parse", "--path-format=absolute", "--git-path", name], in: path).output }
+        let read = { (file: String) in (try? String(contentsOfFile: file, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) }
+        let exists = { (file: String) in FileManager.default.fileExists(atPath: file) }
+        // "1a2b3c4d (main)": the commit and the other branches at it.
+        let name = { (commit: String) -> String in
+            let short = Git.run(["rev-parse", "--short=8", commit], in: path).output
+            let at = Git.run(["for-each-ref", "--points-at", commit, "--format=%(refname:short)", "refs/heads"], in: path).output
+                .split(whereSeparator: \.isNewline).map(String.init).filter { $0 != branch }
+            return at.isEmpty ? short : "\(short) (\(at.joined(separator: ", ")))"
+        }
+        let subject = { (ref: String) -> String? in
+            let shown = Git.run(["log", "-1", "--format=%h %s", ref], in: path)
+            return shown.ok && !shown.output.isEmpty ? shown.output : nil
+        }
+        let conflicted = Git.run(["diff", "--name-only", "--diff-filter=U"], in: path).output
+            .split(whereSeparator: \.isNewline).map(String.init)
+        let staged = Git.run(["diff", "--cached", "--name-only"], in: path).output
+            .split(whereSeparator: \.isNewline).map(String.init).filter { !conflicted.contains($0) }
+        // rebase-merge for `rebase` and `rebase -i`; rebase-apply for the old apply backend.
+        for (folder, current, last) in [("rebase-merge", "msgnum", "end"), ("rebase-apply", "next", "last")] {
+            let dir = gitPath(folder)
+            guard exists(dir) else { continue }
+            // Another branch's rebase (or `git am`, which names none) isn't this task's to undo.
+            guard read(dir + "/head-name") == "refs/heads/\(branch)" else { return nil }
+            var stuck = Interrupted(kind: .rebase, path: path, branch: branch, head: head, onto: read(dir + "/onto").map(name) ?? "?",
+                                    step: read(dir + "/" + current).flatMap { Int($0) }, steps: read(dir + "/" + last).flatMap { Int($0) },
+                                    stoppedAt: exists(gitPath("REBASE_HEAD")) ? subject("REBASE_HEAD") : nil,
+                                    staged: staged, conflicted: conflicted)
+            // The abort puts the branch back where the rebase began: anything committed to it since would go.
+            if let began = read(dir + "/orig-head"), began != head {
+                stuck.unsafe = "\(branch) is at \(head.prefix(8)), not at \(began.prefix(8)) where the rebase began; aborting would move it back and lose what's in between"
+            }
+            return stuck
+        }
+        guard exists(gitPath("MERGE_HEAD")), let merging = read(gitPath("MERGE_HEAD"))?.split(whereSeparator: \.isNewline).first else { return nil }
+        let on = Git.run(["symbolic-ref", "-q", "HEAD"], in: path).output
+        let detached = on.isEmpty
+        // Into the branch, or into a detached HEAD at its commit; a merge on anything else isn't this task's.
+        guard on == "refs/heads/\(branch)" || detached && Git.run(["rev-parse", "HEAD"], in: path).output == head else { return nil }
+        return Interrupted(kind: .merge, path: path, branch: branch, head: head, onto: name(String(merging)),
+                           stoppedAt: subject("MERGE_HEAD"), detached: detached, staged: staged, conflicted: conflicted)
+    }
+
+    /// Aborts the rebase or merge the task's worktree stopped in, back on its branch at the same commit (what's
+    /// staged in the middle of it goes; the branch's commits stay). Refused when aborting would move the branch.
+    @discardableResult
+    public static func recover(root: String, slug: String) throws -> String {
+        guard let stuck = interrupted(root: root, slug: slug) else {
+            throw Failure(description: "\(path(root: root, slug: slug)) isn't in the middle of a rebase or merge of \(branch(slug)).")
+        }
+        if let unsafe = stuck.unsafe { throw Failure(description: "Not recovered: \(unsafe).") }
+        let abort = Git.run([stuck.kind.rawValue, "--abort"], in: stuck.path)
+        let after = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(stuck.branch)"], in: root).output
+        if after != stuck.head {
+            // Never expected (checked above), and never left so: the branch goes back to its commits.
+            Git.run(["update-ref", "refs/heads/\(stuck.branch)", stuck.head] + (after.isEmpty ? [] : [after]), in: root)
+            throw Failure(description: "git \(stuck.kind.rawValue) --abort moved \(stuck.branch) to \(after.prefix(8)); it was put back at \(stuck.head.prefix(8)).")
+        }
+        guard abort.ok else {
+            throw Failure(description: "git \(stuck.kind.rawValue) --abort failed in \(stuck.path): \(abort.error.isEmpty ? abort.output : abort.error)")
+        }
+        if stuck.detached { Git.run(["checkout", "-q", stuck.branch], in: stuck.path) }
+        let head = Git.run(["rev-parse", "HEAD"], in: stuck.path).output
+        guard isWorktree(root: root, slug: slug), head == stuck.head, interrupted(root: root, slug: slug) == nil else {
+            throw Failure(description: "After git \(stuck.kind.rawValue) --abort, \(stuck.path) isn't back on \(stuck.branch) at \(stuck.head.prefix(8)) (HEAD is at \(head.prefix(8))).")
+        }
+        return stuck.path
+    }
+
     /// The task's worktree: the existing one, or a new one. An empty leftover folder is replaced; one with files
-    /// in it is never touched (they might be someone's).
-    public static func open(root: String, slug: String, base: String? = nil) throws -> String {
+    /// in it is never touched (they might be someone's). One stopped partway through a rebase or merge of the
+    /// task's branch is thrown as `Interrupted`, or, with `recover`, aborted back to the branch first.
+    public static func open(root: String, slug: String, base: String? = nil, recover: Bool = false) throws -> String {
+        if let stuck = interrupted(root: root, slug: slug) {
+            guard recover else { throw stuck }
+            return try self.recover(root: root, slug: slug)
+        }
         if isWorktree(root: root, slug: slug) { return path(root: root, slug: slug) }
         let path = path(root: root, slug: slug)
         if FileManager.default.fileExists(atPath: path) {
