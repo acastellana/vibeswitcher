@@ -20,7 +20,8 @@ final class ReportsWaiting: ObservableObject {
 }
 
 /// Each lead's board and decisions as last read, kept while their files are unchanged. The lead controller looks
-/// every 3 s on the main thread, and a day's board is most of a MB of JSON (its decisions, dates to parse).
+/// every 3 s (off the main thread, see `LeadReads`), and a day's board is most of a MB of JSON (its decisions, dates
+/// to parse).
 struct LeadFiles {
     /// A file's identity, size and modification time: while they're the same, so is what it says. A board is
     /// written whole and renamed into place, so a new one is a new file.
@@ -74,6 +75,43 @@ struct LeadFiles {
     }
 }
 
+/// Where the lead controller reads and writes the boards: a queue of its own, never the main thread (decoding a day's
+/// board there, most of a MB of JSON, froze the window for a second at a time). One at a time, in the order asked, so
+/// a read after a write sees it; what's read is handed to the main thread.
+final class LeadReads: @unchecked Sendable {
+    private let queue = DispatchQueue(label: "VibeSwitcher.lead-boards", qos: .userInitiated)
+    /// The boards and decisions as last read (only on `queue`): read again only when their files changed.
+    private var files = LeadFiles()
+
+    /// Runs `work` on the queue with the files read so far, then `then` with its result on the main thread.
+    func async<T>(_ work: @escaping (inout LeadFiles) -> T, then: @escaping (T) -> Void = { _ in }) {
+        queue.async {
+            let result = work(&self.files)
+            DispatchQueue.main.async { then(result) }
+        }
+    }
+}
+
+/// The lead each board names (its pid, terminal and session), for what must know it now on the main thread: whom a
+/// message goes to, whether a wake-up or a flush still goes to the same lead, which session is the live lead. Only
+/// those fields are decoded (`BoardStore.loadLead`, under a millisecond for a MB of board), and only when the board's
+/// file changed; the rest of the board is read off the main thread (`LeadReads`).
+struct LeadNames {
+    private var kept: [String: (stamp: LeadFiles.Stamp, board: LeadBoard)] = [:]
+    /// How many times a board's file was read (for tests).
+    private(set) var fileReads = 0
+
+    mutating func board(_ root: String) -> LeadBoard {
+        let store = BoardStore(root: root)
+        let stamp = LeadFiles.Stamp((store.folder as NSString).appendingPathComponent("board.json"))
+        if let stamp, let hit = kept[root], hit.stamp == stamp { return hit.board }
+        fileReads += 1
+        let board = store.loadLead()
+        kept[root] = stamp.map { ($0, board) }
+        return board
+    }
+}
+
 /// The app's side of project leads: starting them, keeping their boards loaded, answering their questions, and
 /// being their witness (telling a lead when one of its workers needs input, stops without reporting, or dies).
 final class LeadController: ObservableObject {
@@ -124,8 +162,13 @@ final class LeadController: ObservableObject {
     @Published private(set) var keptLeads: [String: UUID] = [:]
     private var adopting: Set<UUID> = []
     private var hostWelcome: AnyCancellable?
-    /// The boards and decisions as last read: the refresh reads them again only when their files changed.
-    private var reads = LeadFiles()
+    /// The boards and decisions, read off the main thread (and written there too, to keep the order).
+    private let reads = LeadReads()
+    /// The lead each board names, for the checks that must know it now on the main thread (only those fields read).
+    private var names = LeadNames()
+    /// A refresh is reading the boards; one asked for meanwhile runs once it's done.
+    private var refreshing = false
+    private var refreshAgain = false
     private let vault: LeadVault
     /// Leads whose role another session of their project holds now (VibeSwitcher started a new lead), by window
     /// session: the window says so, and what's typed into them goes to the live lead (see `ReplacedLead`).
@@ -189,7 +232,7 @@ final class LeadController: ObservableObject {
         for session in host.sessions where session.isLive && LeadTeams.role(label: session.label) == .lead {
             let root = (session.cwd as NSString).standardizingPath
             if let other = result[root] {
-                let named = reads.board(root).leadSession
+                let named = names.board(root).leadSession
                 if other.id.uuidString == named || (session.id.uuidString != named && session.startedAt < other.startedAt) { continue }
             }
             result[root] = session
@@ -414,7 +457,7 @@ final class LeadController: ObservableObject {
                         Breadcrumbs.shared.note("lead: its role wasn't bound to its session: \(error)")
                     }
                 }
-                try? boardStore.update { board in LeadHandover.started(session.id.uuidString, on: &board) }
+                self?.reads.async { _ in try? boardStore.update { board in LeadHandover.started(session.id.uuidString, on: &board) } }
                 // You chose to start the lead here: answer Claude's trust question for this folder.
                 if self?.answersTrust == true { self?.answerTrust(session.id, folder: root) }
                 if show { self?.select(session.id) }
@@ -435,20 +478,22 @@ final class LeadController: ObservableObject {
     /// answer as a note.
     func answer(_ question: LeadQuestion, root: String, with text: String) {
         let store = BoardStore(root: root)
-        let outcome = (try? store.update { board in board.answer(question.id, with: text, saw: question.version) }) ?? .missing
-        switch outcome {
-        case .answered: answerNotices[question.id] = nil
-        case .withdrawn(let withdrawn):
-            answerNotices[question.id] = "Withdrawn before your answer: \(withdrawn.withdrawReason ?? "no reason given"). The lead got your answer as a note."
-        case .afterAutoDecision(let decided):
-            answerNotices[question.id] = "The timer had run out: the lead went ahead with ‘\(decided.proposal ?? "")’. Your answer reached it as a note."
-        case .alreadyAnswered(let answered):
-            answerNotices[question.id] = "Already answered: \(answered.answer ?? answered.proposal ?? ""). Your new answer wasn't sent."
-        case .missing:
-            answerNotices[question.id] = "That question is no longer on the board. Your answer wasn't sent."
+        reads.async({ _ in (try? store.update { board in board.answer(question.id, with: text, saw: question.version) }) ?? .missing }) { [weak self] outcome in
+            guard let self else { return }
+            switch outcome {
+            case .answered: self.answerNotices[question.id] = nil
+            case .withdrawn(let withdrawn):
+                self.answerNotices[question.id] = "Withdrawn before your answer: \(withdrawn.withdrawReason ?? "no reason given"). The lead got your answer as a note."
+            case .afterAutoDecision(let decided):
+                self.answerNotices[question.id] = "The timer had run out: the lead went ahead with ‘\(decided.proposal ?? "")’. Your answer reached it as a note."
+            case .alreadyAnswered(let answered):
+                self.answerNotices[question.id] = "Already answered: \(answered.answer ?? answered.proposal ?? ""). Your new answer wasn't sent."
+            case .missing:
+                self.answerNotices[question.id] = "That question is no longer on the board. Your answer wasn't sent."
+            }
+            if let message = outcome.message(given: text) { self.deliver(message, from: .user, root: root) }
+            self.refresh()
         }
-        if let message = outcome.message(given: text) { deliver(message, from: .user, root: root) }
-        refresh()
     }
 
     /// You hold a question with a timer: the timer stops, it waits for your answer like any other, and the lead is
@@ -456,25 +501,34 @@ final class LeadController: ObservableObject {
     func hold(_ question: LeadQuestion) {
         guard let root = boards.first(where: { $0.value.questions.contains { $0.id == question.id } })?.key else { return }
         let store = BoardStore(root: root)
-        do {
-            let held = try store.update { board in try board.hold(question.id) }
-            answerNotices[question.id] = nil
-            deliver("The user is holding your question \(held.short) “\(held.text)”: its timer is off, so don't go ahead with ‘\(held.proposal ?? "")’; "
-                    + "wait for their answer.", from: .user, root: root)
-        } catch {
-            answerNotices[question.id] = "\(error)"
+        reads.async({ _ in Result { try store.update { board in try board.hold(question.id) } } }) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let held):
+                self.answerNotices[question.id] = nil
+                self.deliver("The user is holding your question \(held.short) “\(held.text)”: its timer is off, so don't go ahead with ‘\(held.proposal ?? "")’; "
+                             + "wait for their answer.", from: .user, root: root)
+            case .failure(let error):
+                self.answerNotices[question.id] = "\(error)"
+            }
+            self.refresh()
         }
-        refresh()
     }
 
-    /// Runs out the timers of the leads' questions (see `BoardStore.runTimers`): the lead is told to go ahead with
-    /// each proposal no one answered, once.
-    private func runTimers(_ roots: Set<String>) {
+    /// Runs out the timers of the leads' questions (see `BoardStore.runTimers`; on the boards' queue, it reads the
+    /// board): the lead is told to go ahead with each proposal no one answered, once.
+    private static func runTimers(_ roots: Set<String>) -> [String: [(question: LeadQuestion, message: String)]] {
+        var fired: [String: [(question: LeadQuestion, message: String)]] = [:]
         for root in roots {
-            let store = BoardStore(root: root)
-            guard let fired = try? store.runTimers(), !fired.isEmpty else { continue }
+            if let expired = try? BoardStore(root: root).runTimers(), !expired.isEmpty { fired[root] = expired }
+        }
+        return fired
+    }
+
+    private func tell(timers fired: [String: [(question: LeadQuestion, message: String)]]) {
+        for (root, expired) in fired {
             let project = (root as NSString).lastPathComponent
-            for (question, message) in fired {
+            for (question, message) in expired {
                 deliver(message, from: .system("timer"), root: root)
                 notify("The lead of \(project) went ahead with ‘\(question.proposal ?? "")’", question.text)
             }
@@ -488,8 +542,8 @@ final class LeadController: ObservableObject {
     private func deliver(_ text: String, from sender: SteerMessage.Sender, root: String) -> Bool {
         // The board as it is now names the lead that holds the role (none while a new one starts, see
         // `LeadHandover`); if that one is gone (a restart under way), the message would be dropped by the next lead's
-        // hook: keep it until a lead runs again.
-        guard let agent = LeadHandover.named(reads.board(root)), leadRuns(agent),
+        // hook: keep it until a lead runs again. Only the lead's fields are read here (see `LeadNames`).
+        guard let agent = LeadHandover.named(names.board(root)), leadRuns(agent),
               (try? LeadDelivery.deliver(text, from: sender, to: agent, state: HookState.load(from: VibePaths.stateFile(tty: agent.tty)),
                                          inputIsEmpty: nil, typeInto: nil, root: inbox)) != nil else {
             held[root, default: []].append((text, sender))
@@ -538,7 +592,7 @@ final class LeadController: ObservableObject {
         replacing = replacing.filter { roots[$0.key] != nil }
         var holders: [String: UUID] = [:]
         for root in Set(roots.values) {
-            if let id = reads.board(root).leadSession.flatMap(UUID.init(uuidString:)) { holders[root] = id }
+            if let id = names.board(root).leadSession.flatMap(UUID.init(uuidString:)) { holders[root] = id }
         }
         let replacedBy = StatusRules.replacedLeads(roots.map { (id: $0.key, root: $0.value) }, holders: holders)
         var marked: [UUID: ReplacedLead] = [:]
@@ -559,7 +613,7 @@ final class LeadController: ObservableObject {
     /// answer) are typed as they are instead, and the reports go along with them. Always the lead the board names
     /// at that moment, looked up again before anything is typed: a lead replaced meanwhile gets nothing.
     private func wake(root: String) {
-        guard let lead = LeadHandover.named(reads.board(root)) else { return }
+        guard let lead = LeadHandover.named(names.board(root)) else { return }
         let pending = SteerInbox.pending(tty: lead.tty).filter { $0.agentPid == lead.pid }
         let reports = LeadWake.reports(pending, agentPid: lead.pid)
         let now = Date().timeIntervalSince1970
@@ -586,7 +640,7 @@ final class LeadController: ObservableObject {
             host.styledScreen(id) { [weak self] screen in
                 guard let self else { return }
                 self.flushing.remove(lead.tty)
-                guard LeadHandover.named(self.reads.board(root)) == lead else { return }
+                guard LeadHandover.named(self.names.board(root)) == lead else { return }
                 // What waits now (its hook may have taken some meanwhile), typed only into an empty box: Claude's
                 // dim suggestion counts as empty, a draft or a dialog waits for the next try.
                 let reports = LeadWake.reports(SteerInbox.pending(tty: lead.tty), agentPid: lead.pid)
@@ -615,7 +669,7 @@ final class LeadController: ObservableObject {
         host.styledScreen(id) { [weak self] screen in
             guard let self else { return }
             self.flushing.remove(agent.tty)
-            if let root, LeadHandover.named(self.reads.board(root)) != agent { return }
+            if let root, LeadHandover.named(self.names.board(root)) != agent { return }
             // Claude's dim suggested prompt isn't a draft: typing replaces it.
             guard let screen, LeadDelivery.box(in: screen) == .empty else { return }
             LeadDelivery.flush(agent, betweenTurns: true, inputIsEmpty: { true }, typeInto: { text in
@@ -650,18 +704,44 @@ final class LeadController: ObservableObject {
 
     // MARK: Refresh and witness
 
-    private func refresh() {
+    /// Every 3 s (and after your answers): starts that waited and running leads go on, replaced leads are marked;
+    /// then the boards and decisions are read off the main thread, shown, and the lead told what it needs to know, on
+    /// the main thread.
+    func refresh() {
         startPending()
         keepRunningLeads()
         markReplaced()
+        guard !refreshing else {
+            refreshAgain = true
+            return
+        }
+        refreshing = true
         let roots = Set(leadSessions.keys)
-        runTimers(roots)
-        var loaded: [String: LeadBoard] = [:]
-        for root in roots { loaded[root] = reads.board(root) }
+        reads.async({ files in
+            let fired = Self.runTimers(roots)
+            var loaded: [String: LeadBoard] = [:]
+            for root in roots { loaded[root] = files.board(root) }
+            let decisions = Dictionary(uniqueKeysWithValues: roots.map { ($0, files.decisions($0)) })
+            files.keep(roots)
+            return (fired, loaded, decisions)
+        }) { [weak self] fired, loaded, decisions in
+            guard let self else { return }
+            self.refreshed(roots: roots, fired: fired, loaded: loaded, decisions: decisions)
+            self.refreshing = false
+            if self.refreshAgain {
+                self.refreshAgain = false
+                self.refresh()
+            }
+        }
+    }
+
+    /// What a refresh read, on the main thread.
+    private func refreshed(roots: Set<String>, fired: [String: [(question: LeadQuestion, message: String)]], loaded: [String: LeadBoard],
+                           decisions read: [String: [LeadDecision]]) {
+        dispatchPrecondition(condition: .onQueue(.main))
+        tell(timers: fired)
         if loaded != boards { boards = loaded }
-        let read = Dictionary(uniqueKeysWithValues: roots.map { ($0, reads.decisions($0)) })
         if read != decisions { decisions = read }
-        reads.keep(roots)
         baseMoves.look(roots)
         for (root, board) in loaded {
             for question in board.openQuestions where seenQuestions.insert("\(question.id)#\(question.version)").inserted {
@@ -749,7 +829,7 @@ final class LeadController: ObservableObject {
         // On the board too, for status and the Team view, until the worker moves again.
         let stalls = LeadWitness.stalls(board: board, seen: seen, now: now)
         var noted = board
-        if noted.noteStalls(stalls) { try? BoardStore(root: root).update { $0.noteStalls(stalls) } }
+        if noted.noteStalls(stalls) { reads.async { _ in try? BoardStore(root: root).update { $0.noteStalls(stalls) } } }
         // A lead runs again: what was held for it goes now.
         if let waiting = held.removeValue(forKey: root) {
             for message in waiting { deliver(message.text, from: message.sender, root: root) }

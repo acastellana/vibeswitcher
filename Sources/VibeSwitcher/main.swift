@@ -17,6 +17,11 @@ if let index = arguments.firstIndex(of: "--ui-bench") {
     // idle, checking SwiftUI's faults, main-thread stalls, CPU and memory (see `UIBench`). Needs CFFIXED_USER_HOME.
     UIBench.run(arguments: Array(arguments[(index + 1)...]))
 }
+if let index = arguments.firstIndex(of: "--board-bench") {
+    // Debug aid and test: a big board refreshed by the lead controller and its views, timing the main thread's longest
+    // block (see `BoardBench`). Needs CFFIXED_USER_HOME.
+    BoardBench.run(arguments: Array(arguments[(index + 1)...]))
+}
 if let index = arguments.firstIndex(of: "--ui-bench-write") {
     UIBench.write(arguments: Array(arguments[(index + 1)...]))
 }

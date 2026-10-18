@@ -596,10 +596,15 @@ public struct LeadBoard: Codable, Equatable, Sendable {
 
     /// "17:42": the local time of day.
     public static func clock(_ at: Double) -> String {
+        clockFormatter.string(from: Date(timeIntervalSince1970: at))
+    }
+
+    /// Made once: the Team view draws a time on every row it shows, and making a formatter costs more than using one.
+    private static let clockFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm"
-        return formatter.string(from: Date(timeIntervalSince1970: at))
-    }
+        return formatter
+    }()
 }
 
 public struct BoardError: Error, CustomStringConvertible {
@@ -646,15 +651,52 @@ public final class BoardStore: @unchecked Sendable {
     /// The board, or an empty one when there's none or it can't be read (for showing it).
     public func load() -> LeadBoard { (try? read()) ?? LeadBoard() }
 
+    /// Only the lead the board names (`leadPid`, `leadTTY`, `leadSession`), the rest left out: what the app checks on
+    /// the main thread (whom to deliver to) decodes three fields, not most of a MB of tasks and reports. A board that
+    /// can't be read names none, as `load()` gives.
+    public func loadLead() -> LeadBoard {
+        var board = LeadBoard()
+        guard let data = FileManager.default.contents(atPath: file),
+              let named = try? JSONDecoder().decode(NamedLead.self, from: data) else { return board }
+        board.leadPid = named.leadPid
+        board.leadTTY = named.leadTTY
+        board.leadSession = named.leadSession
+        return board
+    }
+
+    private struct NamedLead: Decodable {
+        var leadPid: Int32?
+        var leadTTY: String?
+        var leadSession: String?
+    }
+
     /// The board; throws when the file is there but doesn't read (a hand edit, a newer version), so nothing
     /// writes an empty board over it.
     public func read() throws -> LeadBoard {
+        if Thread.isMainThread { Self.noteReadOnMainThread() }
         guard let data = FileManager.default.contents(atPath: file) else { return LeadBoard() }
         do {
             return try JSONDecoder().decode(LeadBoard.self, from: data)
         } catch {
             throw BoardError(text: "\(file) doesn't read as a board (\(error)); fix or move it, nothing was changed.")
         }
+    }
+
+    /// How many times a board was read on the main thread, in this process. The app reads none there: a day's board
+    /// is most of a MB of JSON, and decoding it there froze the window (`--board-bench` checks).
+    public static var readsOnMainThread: Int {
+        counter.lock()
+        defer { counter.unlock() }
+        return mainThreadReads
+    }
+
+    private static let counter = NSLock()
+    nonisolated(unsafe) private static var mainThreadReads = 0
+
+    private static func noteReadOnMainThread() {
+        counter.lock()
+        mainThreadReads += 1
+        counter.unlock()
     }
 
     /// Reads, changes and writes the board under a lock (other processes too), atomically.

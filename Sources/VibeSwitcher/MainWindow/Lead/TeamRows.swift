@@ -102,11 +102,19 @@ struct TeamRow: Identifiable, Equatable {
     }
 
     static func spokenDuration(_ seconds: TimeInterval) -> String {
+        (seconds < 60 ? secondsFormatter : longerFormatter).string(from: max(0, seconds)) ?? ""
+    }
+
+    /// Made once: every row of the Team view says its time on each draw.
+    private static let secondsFormatter = durationFormatter([.second])
+    private static let longerFormatter = durationFormatter([.day, .hour, .minute])
+
+    private static func durationFormatter(_ units: NSCalendar.Unit) -> DateComponentsFormatter {
         let formatter = DateComponentsFormatter()
         formatter.unitsStyle = .full
         formatter.maximumUnitCount = 1
-        formatter.allowedUnits = seconds < 60 ? [.second] : [.day, .hour, .minute]
-        return formatter.string(from: max(0, seconds)) ?? ""
+        formatter.allowedUnits = units
+        return formatter
     }
 }
 
