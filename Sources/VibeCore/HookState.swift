@@ -73,6 +73,16 @@ extension HookState {
         let subagent = !((payload["agent_id"] as? String) ?? "").isEmpty
         if subagent, ["SessionStart", "SessionEnd", "UserPromptSubmit", "Stop"].contains(event) { return .ignore }
         if event == "SessionEnd" { return .delete }
+        if let current, current.agent == agent {
+            // Claude's own compaction between turns (idle compaction, 2.1.299+: a long conversation left idle about 54
+            // minutes is compacted before its prompt cache expires; trigger "auto") isn't work: the session stays done,
+            // idle or waiting on you, since when it was.
+            if event == "PreCompact" || event == "PostCompact", payload["trigger"] as? String != "manual",
+               current.lastEvent != "PreCompact", [.done, .idle, .needsInput].contains(StatusRules.status(for: current)) { return .ignore }
+            // Claude restarts its hooks' session after every compaction (SessionStart, source "compact"): the turn goes
+            // on, or the session stays where it was.
+            if event == "SessionStart", payload["source"] as? String == "compact" { return .ignore }
+        }
         // A subagent that finishes after the turn did doesn't make it work again.
         if event == "SubagentStop", let current, ["Stop", "Interrupt"].contains(current.lastEvent) { return .ignore }
 
