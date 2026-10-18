@@ -18,6 +18,8 @@ import Testing
         host.executableURL = URL(fileURLWithPath: hostLauncher)
         host.arguments = ["--socket", socket, "--lock", socket + ".lock", "--idle-exit", String(idleExit)] + (log.map { ["--log", $0] } ?? [])
         host.environment = ["CFFIXED_USER_HOME": home.path, "HOME": home.path, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin"]
+        // Not the runner's: a host left running would hold its output open, and `swift test` would wait on it.
+        host.standardOutput = FileHandle.nullDevice
         host.standardError = FileHandle.nullDevice
         return (host, socket, home)
     }
@@ -36,12 +38,17 @@ import Testing
         var pid: pid_t = 0, dir = "", session: pid_t = 0
         withKnownIssue("the body fails on purpose, its host still running") {
             let host = try ScratchHostProcess()
-            pid = host.pid
-            dir = host.dir
-            let (client, _, _, _, _, _, _) = try TestClient.welcomed(host.socket, appKey: host.appKey)
-            session = try client.spawn(keepRunning).childPID
-            #expect(exists(pid) && TestHosts.running.contains(pid))
-            throw Failure()
+            // Kept until the body throws (Swift may otherwise let it go after its last use).
+            try withExtendedLifetime(host) {
+                pid = host.pid
+                dir = host.dir
+                let (client, _, _, _, _, _, _) = try TestClient.welcomed(host.socket, appKey: host.appKey)
+                session = try client.spawn(keepRunning).childPID
+                // Running on its terminal (a session the host leaves before it has one never sees it hang up).
+                #expect(eventually { (ProcessTable.info(pid: session)?.comm ?? "") == "sleep" })
+                #expect(exists(pid) && TestHosts.running.contains(pid))
+                throw Failure()
+            }
         }
         #expect(pid > 0)
         #expect(!exists(pid) && !TestHosts.running.contains(pid))
@@ -55,9 +62,12 @@ import Testing
         var pid: pid_t = 0
         withKnownIssue("the body fails on purpose") {
             let scene = try HostHandoverTests().scene()
-            pid = scene.host.pid
-            if scene.background > 0 { kill(scene.background, SIGKILL) }
-            throw Failure()
+            try withExtendedLifetime(scene.host) {
+                pid = scene.host.pid
+                if scene.background > 0 { kill(scene.background, SIGKILL) }
+                #expect(scene.host.process.isRunning)
+                throw Failure()
+            }
         }
         #expect(pid > 0 && !exists(pid))
     }
@@ -83,7 +93,7 @@ import Testing
         #expect(host.isRunning)
         kill(runner.processIdentifier, SIGKILL)
         runner.waitUntilExit()
-        #expect(eventually(timeout: 10) { !host.isRunning })
+        try #require(eventually(timeout: 10) { !host.isRunning })
         #expect(host.terminationReason == .uncaughtSignal && host.terminationStatus == SIGKILL)
         #expect(eventually(timeout: 30) { !exists(session.childPID) })
     }
@@ -109,7 +119,7 @@ import Testing
         #expect(host.isRunning)
         client.close()
         let gone = Date()
-        #expect(eventually(timeout: 10) { !host.isRunning })
+        try #require(eventually(timeout: 10) { !host.isRunning })
         #expect(Date().timeIntervalSince(gone) < 6)
         #expect(host.terminationReason == .exit && host.terminationStatus == 0)
         let lines = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""
