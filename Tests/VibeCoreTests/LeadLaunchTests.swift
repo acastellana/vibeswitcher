@@ -48,8 +48,9 @@ struct LeadLaunchTests {
         for rule in ["Bash(git rebase project-lead)", "Bash(git rebase --continue)", "Bash(git merge project-lead)", "Bash(git log:*)"] {
             #expect(allow.contains(rule), "missing \(rule)")
         }
-        // Its git never opens an editor, so the `git commit` that ends a merge needs nothing in front.
-        #expect(settings?["env"] as? [String: String] == ["GIT_EDITOR": "true"])
+        // Its git never opens an editor, so the `git commit` that ends a merge needs nothing in front; its `git status`
+        // (its status line's too) never takes index.lock (IndexLockTests).
+        #expect(settings?["env"] as? [String: String] == ["GIT_EDITOR": "true", "GIT_OPTIONAL_LOCKS": "0"])
         let mcp = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.mcpFile))) as? [String: Any]
         let args = ((mcp?["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any])?["args"] as? [String]
         #expect(args == ["--role", "worker", "--root", root, "--task", "add-login"])
@@ -67,6 +68,9 @@ struct LeadLaunchTests {
         // The session host knows which session holds the role: the tool server gets nothing that would make one.
         #expect(entry?["env"] == nil)
         #expect(Set(entry?.keys.map { $0 } ?? []) == ["command", "args"])
+        // Its session's git takes no optional index.lock either.
+        let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
+        #expect(settings?["env"] as? [String: String] == ["GIT_OPTIONAL_LOCKS": "0"])
         for file in [launch.mcpFile, launch.promptFile, launch.settingsFile] {
             #expect((try FileManager.default.attributesOfItem(atPath: file)[.posixPermissions] as? Int) == 0o600, "\(file)")
         }

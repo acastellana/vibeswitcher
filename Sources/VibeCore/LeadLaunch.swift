@@ -91,8 +91,11 @@ public enum LeadLaunch {
     /// editor: `git rebase --continue`, `git merge --continue` and the `git commit` that ends a merge keep their
     /// message as it is, so the bare commands its rules allow are all it needs (a `GIT_EDITOR=true git ...` prefix
     /// matches no rule and is refused).
+    /// No role's `git status` takes index.lock (`GIT_OPTIONAL_LOCKS`), its status line's included: Claude Code stops
+    /// a status line it gives up on with TERM, then SIGKILL about 2 s later, and on a busy Mac a `git status` killed
+    /// so leaves a 0-byte lock that blocks every commit and merge in that checkout (2026-10-18).
     public static func environment(_ role: Role) -> [String: String] {
-        role == .worker ? ["GIT_EDITOR": "true"] : [:]
+        ["GIT_OPTIONAL_LOCKS": "0"].merging(role == .worker ? ["GIT_EDITOR": "true"] : [:]) { $1 }
     }
 
     /// Writes the role's files (0600) and returns the command line to run. They go in `folder`: the vault's run folder

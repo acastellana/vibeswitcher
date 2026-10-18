@@ -516,7 +516,21 @@ public final class LeadToolset: MCPToolset {
         }
         // A merge into the branch that its last worker left unfinished: the new one finishes its resolution.
         let merging = recover ? nil : stuck.flatMap { $0.kind == .merge && !$0.detached ? $0 : nil }
-        let finish = merging.map { " Your worktree is in the middle of a merge: \($0) Finish it first: resolve what's unresolved, `git add` the files, then `git commit`, each command on its own; `git merge --abort` starts the merge over." } ?? ""
+        var finish = merging.map { " Your worktree is in the middle of a merge: \($0) Finish it first: resolve what's unresolved, `git add` the files, then `git commit`, each command on its own; `git merge --abort` starts the merge over." } ?? ""
+        // A lock left in its worktree would stop the worker's first commit. A stale one goes (the folder is the
+        // team's own); one a process holds stays, and is said.
+        var locked = ""
+        if let lock = IndexLock.find(in: worktree) {
+            if lock.removeIfStale() {
+                locked = "Removed a stale index.lock from its worktree (\(lock.size) bytes, last written \(Self.age(lock.age())) ago; no process held it). "
+            } else {
+                let wait = lock.holder != nil ? " git commands that change the index there wait until it's done."
+                    : lock.stale ? " It's under a minute old, so it was left; if git still refuses because of it, remove it (`rm '\(lock.path)'`)."
+                    : " It was left; remove it only once you've seen nothing runs git in this worktree (`lsof '\(lock.path)'`)."
+                locked = "In its worktree, \(lock).\(wait) "
+                finish += " In your worktree, \(lock).\(wait)"
+            }
+        }
         let session = try launch(.worker, task: slug, name: "worker-\(slug)", in: worktree, label: "Worker: \(task.title)", trust: true,
                                  prompt: LeadPrompts.worker(task: task, root: root, workflow: workflow),
                                  start: "Start on your task (it's in your instructions)." + finish + " Call progress at each milestone. When done, call report.", branch: base)
@@ -538,7 +552,7 @@ public final class LeadToolset: MCPToolset {
         try? store.appendProgress("Started a worker on \(slug)")
         let recovered = merging.map { "Its worktree is in the middle of a merge, which the worker was told to finish (start_worker with recover: true aborts it instead): \($0) " }
             ?? stuck.map { "Aborted the \($0.kind.rawValue) its worktree was stuck in; it's back on \($0.branch) at \($0.head.prefix(8)). " } ?? ""
-        return MCPToolResult(text: recovered + "Worker started on \(slug) in \(worktree) (branch agent/\(slug)). You'll get a message when it reports, needs input or stalls.")
+        return MCPToolResult(text: recovered + locked + "Worker started on \(slug) in \(worktree) (branch agent/\(slug)). You'll get a message when it reports, needs input or stalls.")
     }
 
     private func stopWorker(_ slug: String) throws -> MCPToolResult {
@@ -719,6 +733,10 @@ public final class LeadToolset: MCPToolset {
             try? store.appendProgress(taken.acceptedLine)
         } else if vault.head(root: root, branch: base) == nil {
             try vault.setHead(current, root: root, branch: base)
+        }
+        // A lock in the main checkout stops the fast-forward at the end: said now, before the tests run.
+        if let lock = Worktrees.indexLock(blocking: base, root: root) {
+            throw Problem(text: "Not merged (nothing was tested): \(Worktrees.refusal(lock))")
         }
         // Exactly the audited commit, rebased and tested where no agent works.
         let tested: String

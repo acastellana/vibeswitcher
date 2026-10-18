@@ -13,9 +13,14 @@ public enum Git {
         public var ok: Bool { status == 0 && !timedOut && !cancelled }
     }
 
+    /// What git runs with here: never prompting for credentials, and without the optional locks: `git status` and the
+    /// like don't take index.lock to save what they refreshed. Killed while they held it (SIGKILL; they remove it on
+    /// TERM) they would leave it, and every git that changes that index refuses until someone removes it.
+    public static let environment = ["GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"]
+
     @discardableResult
     public static func run(_ args: [String], in directory: String) -> Result {
-        Shell.run(executable: "/usr/bin/git", args: args, in: directory, env: ["GIT_TERMINAL_PROMPT": "0"])
+        Shell.run(executable: "/usr/bin/git", args: args, in: directory, env: environment)
     }
 }
 
@@ -425,11 +430,16 @@ public enum Worktrees {
         let resolvedRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
         switch checkout(of: main, root: root) {
         case .some(let place) where URL(fileURLWithPath: place).resolvingSymlinksInPath().path == resolvedRoot:
+            if let lock = IndexLock.find(in: root) { return .refused(refusal(lock)) }
             guard Git.run(["status", "--porcelain", "--untracked-files=no"], in: root).output.isEmpty else {
                 return .refused("The main checkout has uncommitted changes; commit or stash them first.")
             }
             let merge = Git.run(["merge", "--ff-only", "-q", commit], in: root)
-            guard merge.ok else { return .refused(merge.error) }
+            guard merge.ok else {
+                // One that came meanwhile: said whose it is, not as git's "Another git process seems to be running".
+                if let lock = IndexLock.find(in: root) { return .refused(refusal(lock)) }
+                return .refused(merge.error)
+            }
             let landed = Git.run(["rev-parse", "refs/heads/\(main)"], in: root).output
             return landed == commit ? .merged : .refused("\(main) ended at \(landed.prefix(8)), not \(commit.prefix(8)); it moved during the merge.")
         case .some(let place):
@@ -590,6 +600,195 @@ public enum Worktrees {
             if line == "branch refs/heads/\(branch)" { return current }
         }
         return nil
+    }
+
+    /// Why a merge into the main checkout can't go on while `lock` is there, and what to do. A stale one is left: the
+    /// main checkout is the user's too, and their own sessions run git there.
+    public static func refusal(_ lock: IndexLock) -> String {
+        if !lock.checked {
+            return "\(lock). It's left there; merge again in a while, and if it's still there, tell the user (`lsof '\(lock.path)'` shows who has it open) before anyone removes it."
+        }
+        return lock.stale
+            ? "\(lock). VibeSwitcher leaves it: the main checkout is shared with the user's own sessions. Once nothing of theirs runs git there, it can be removed (`rm '\(lock.path)'`); then merge again."
+            : "\(lock). git can't move the branch in that checkout until it's done; merge again then."
+    }
+
+    /// The main checkout's index.lock when `base` is checked out there: what a merge into it would fail on.
+    public static func indexLock(blocking base: String, root: String) -> IndexLock? {
+        let resolved = { (p: String) in URL(fileURLWithPath: p).resolvingSymlinksInPath().path }
+        guard let place = checkout(of: base, root: root), resolved(place) == resolved(root) else { return nil }
+        return IndexLock.find(in: root)
+    }
+}
+
+/// A checkout's index.lock. git makes it to change the index (or to save one it refreshed) and removes it when it's
+/// done, also when it's stopped with TERM, HUP or INT; only a git killed outright (SIGKILL) leaves it, and then every
+/// git that changes that index refuses until it's removed.
+public struct IndexLock: Equatable, Sendable, CustomStringConvertible {
+    public struct Holder: Equatable, Sendable {
+        public var pid: Int32
+        /// Its command line ("git commit -m …").
+        public var command: String
+    }
+
+    public var path: String
+    /// The checkout whose index it locks.
+    public var checkout: String
+    public var size: Int
+    /// When it was last written (made, for one git never wrote into).
+    public var modified: Date
+    /// The live process that holds it: one with it open, else a git running in its checkout (a `git commit` waiting
+    /// for its editor keeps it closed). Nil when there's none, or when that wasn't found out (`checked`).
+    public var holder: Holder?
+    /// Whether the search for its holder finished in its time. It reads the whole process table, which on a loaded
+    /// Mac can take minutes.
+    public var checked = true
+    var inode: UInt64
+
+    /// Nobody holds it, as far as a search that finished could tell.
+    public var stale: Bool { checked && holder == nil }
+
+    /// Who holds a lock, as far as a search could tell before its deadline.
+    public enum Holding: Equatable, Sendable {
+        case held(Holder)
+        case none
+        /// The deadline came first.
+        case unknown
+    }
+
+    /// Looks for the holder of the lock at `path` in `checkout`, giving up (`unknown`) at the deadline.
+    public typealias Search = @Sendable (_ path: String, _ checkout: String, _ deadline: Date) -> Holding
+
+    public func age(now: Date = Date()) -> TimeInterval { max(0, now.timeIntervalSince(modified)) }
+
+    public var description: String {
+        if let holder { return "\(path) is held by pid \(holder.pid) (\(holder.command)), at work in \(checkout)" }
+        let written = "It's \(size) bytes, last written \(LeadToolset.age(age())) ago (\(LeadBoard.clock(modified.timeIntervalSince1970)))"
+        guard checked else { return "\(path) is there, and VibeSwitcher couldn't check who holds it in time. \(written)" }
+        return "\(path) is stale: no process has it open and no git runs in \(checkout). \(written), left by a git that was killed outright"
+    }
+
+    /// The index.lock of the checkout at `checkout` (the main one or a worktree), with its holder; nil when there's none.
+    /// Its holder is looked for for at most `timeLimit`, and never on the main thread (the search reads the whole
+    /// process table: on a loaded Mac that froze the window for minutes): then it's not `checked`.
+    public static func find(in checkout: String, timeLimit: TimeInterval = 10, search: @escaping Search = holder) -> IndexLock? {
+        let asked = Git.run(["rev-parse", "--path-format=absolute", "--git-path", "index.lock"], in: checkout)
+        guard asked.ok, !asked.output.isEmpty else { return nil }
+        return at(asked.output, checkout: checkout, timeLimit: timeLimit, search: search)
+    }
+
+    static func at(_ path: String, checkout: String, timeLimit: TimeInterval, search: @escaping Search) -> IndexLock? {
+        // Looked at again after the search for its holder: one that went meanwhile was a git at work, now done; one
+        // made again meanwhile is looked at anew.
+        for _ in 0..<3 {
+            guard let before = file(path) else { return nil }
+            let holding = Thread.isMainThread ? .unknown : look(path, checkout: checkout, timeLimit: timeLimit, search: search)
+            guard let after = file(path) else { return nil }
+            guard after.inode == before.inode else { continue }
+            var lock = IndexLock(path: path, checkout: checkout, size: after.size, modified: after.modified, inode: after.inode)
+            switch holding {
+            case .held(let holder): lock.holder = holder
+            case .none: break
+            case .unknown: lock.checked = false
+            }
+            return lock
+        }
+        return nil
+    }
+
+    /// The search on a thread of its own, waited for until `timeLimit`: the process table can't be read in pieces,
+    /// and a read that takes minutes mustn't hold up a merge. One still running then ends on its own (it stops at the
+    /// deadline wherever it can); its answer is dropped.
+    private static func look(_ path: String, checkout: String, timeLimit: TimeInterval, search: @escaping Search) -> Holding {
+        final class Answer: @unchecked Sendable {
+            let lock = NSLock()
+            var holding = Holding.unknown
+        }
+        let answer = Answer(), done = DispatchSemaphore(value: 0)
+        let deadline = Date().addingTimeInterval(timeLimit)
+        Thread.detachNewThread {
+            let holding = search(path, checkout, deadline)
+            answer.lock.lock()
+            answer.holding = holding
+            answer.lock.unlock()
+            done.signal()
+        }
+        guard done.wait(timeout: .now() + timeLimit) == .success else { return .unknown }
+        answer.lock.lock()
+        defer { answer.lock.unlock() }
+        return answer.holding
+    }
+
+    private static func file(_ path: String) -> (inode: UInt64, size: Int, modified: Date)? {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: path),
+              let inode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value else { return nil }
+        return (inode, (attributes[.size] as? NSNumber)?.intValue ?? 0, attributes[.modificationDate] as? Date ?? Date())
+    }
+
+    /// Removes it if it's still this file, stale and at least `minimumAge` old (a git that has only just made it may
+    /// not have been seen yet), as a search for its holder made now says. Never one a process holds, nor one whose
+    /// holder couldn't be checked. Whether it was removed.
+    public func removeIfStale(minimumAge: TimeInterval = 60, timeLimit: TimeInterval = 10, search: @escaping Search = Self.holder) -> Bool {
+        guard stale, let now = Self.at(path, checkout: checkout, timeLimit: timeLimit, search: search),
+              now.inode == inode, now.stale, now.age() >= minimumAge else { return false }
+        return unlink(path) == 0
+    }
+
+    /// The path as the kernel names an open file and a working directory (`/private/var/…`, which Foundation's
+    /// resolvingSymlinksInPath turns back into `/var/…`).
+    static func real(_ path: String) -> String {
+        guard let resolved = realpath(path, nil) else { return path }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
+
+    /// The search `find` makes by default: processes with the file open, then gits running in the checkout.
+    public static let holder: Search = { path, checkout, deadline in holder(of: path, checkout: checkout, deadline: deadline) }
+
+    private static func holder(of path: String, checkout: String, deadline: Date) -> Holding {
+        let resolved = real
+        let target = resolved(path)
+        // A table that couldn't be read says nothing: not that nobody holds it.
+        guard let table = ProcessTable.trySnapshot() else { return .unknown }
+        let me = getpid()
+        let command = { (info: ProcInfo) -> Holding in
+            let words = ProcessTable.arguments(pid: info.pid, start: Int(info.startTime.timeIntervalSince1970), comm: info.comm)
+            let line = words.isEmpty ? info.comm : words.joined(separator: " ")
+            return .held(Holder(pid: info.pid, command: line.count > 120 ? line.prefix(119) + "…" : line))
+        }
+        for info in table.values.sorted(by: { $0.pid < $1.pid }) where info.pid > 0 && info.pid != me {
+            guard Date() < deadline else { return .unknown }
+            if opens(info.pid, target) { return command(info) }
+        }
+        let place = resolved(checkout)
+        for info in table.values.sorted(by: { $0.pid < $1.pid }) where info.comm == "git" || info.comm.hasPrefix("git-") {
+            guard Date() < deadline else { return .unknown }
+            guard let cwd = ProcessTable.cwd(pid: info.pid).map(resolved), cwd == place || cwd.hasPrefix(place + "/") else { continue }
+            // The main checkout holds the worktrees' folders too: only a git working on this index.
+            let its = Git.run(["rev-parse", "--path-format=absolute", "--git-path", "index.lock"], in: cwd)
+            if its.ok, resolved(its.output) == target { return command(info) }
+        }
+        return Date() < deadline ? .none : .unknown
+    }
+
+    /// Whether the process has the file at `path` open.
+    private static func opens(_ pid: Int32, _ path: String) -> Bool {
+        let stride = MemoryLayout<proc_fdinfo>.stride
+        let needed = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
+        guard needed > 0 else { return false }
+        var fds = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(needed) / stride + 8)
+        let got = fds.withUnsafeMutableBytes { proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count)) }
+        guard got > 0 else { return false }
+        for fd in fds.prefix(Int(got) / stride) where fd.proc_fdtype == UInt32(PROX_FDTYPE_VNODE) {
+            var info = vnode_fdinfowithpath()
+            let size = Int32(MemoryLayout<vnode_fdinfowithpath>.size)
+            guard proc_pidfdinfo(pid, fd.proc_fd, PROC_PIDFDVNODEPATHINFO, &info, size) == size else { continue }
+            let open = withUnsafePointer(to: &info.pvip.vip_path) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
+            }
+            if open == path { return true }
+        }
+        return false
     }
 }
 
