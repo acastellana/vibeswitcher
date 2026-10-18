@@ -334,19 +334,23 @@ tab titles. The Today totals are kept per day in `~/.vibeswitcher/stats/` (proje
 
 ## How status is detected
 
-Three sources, most precise first:
+Four sources, most precise first:
 
 1. **Hooks.** Claude Code (`~/.claude/settings.json`) and Codex (`~/.codex/hooks.json`) run
    `~/.vibeswitcher/bin/vibeswitcher-hook` on `SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`,
    `PermissionRequest`, `Notification`, `Stop`, `Interrupt` (Codex), `PreCompact` and `SessionEnd`. The hook
    writes that terminal's latest facts to `~/.vibeswitcher/state/<tty>.json`. It prints nothing and always
    exits 0, so it can never block an agent.
-2. **Terminal tab titles.** Claude Code titles its tab `✳ <task>` when idle and uses a spinner glyph while
+2. **The program's own status (OSC 7501).** In a window session the host answers the Program Status Protocol's
+   query, and a program that speaks it (Claude Code 2.1.295+) reports working, blocked (with what it waits
+   on), done, error or idle. A session without hooks shows that, in its row, dot and header; a session with
+   hooks reads as its hooks say (hooks win when both exist). An ended session shows no program status.
+3. **Terminal tab titles.** Claude Code titles its tab `✳ <task>` when idle and uses a spinner glyph while
    working. That covers sessions without hooks, plus the transitions hooks miss (Esc interrupts fire no
    `Stop`). For finished Claude sessions, background work is found in the process tree: shells Claude
    started that are still running (with their real command and age), plus Claude's footer for
    background agents/tasks that aren't processes (🔵).
-3. **The process table** (`sysctl`, no `ps`). Finds every `claude` / `codex` process attached to a TTY, so
+4. **The process table** (`sysctl`, no `ps`). Finds every `claude` / `codex` process attached to a TTY, so
    every session is listed even before it sends a hook event.
 
 Desktop numbers come from macOS's private SkyLight window-server calls (the same ones yabai and Hammerspoon
