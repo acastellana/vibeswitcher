@@ -101,6 +101,11 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
         /// Deliberately not merged (a decision, a note or the user holds it back, e.g. a prototype the user hasn't
         /// looked at): its work stays, merge refuses it, and nothing counts it as failed.
         case kept
+
+        /// The order the board lists the states in: what needs the lead first. Holds every case (a test checks).
+        public static let attentionOrder: [Status] = [.running, .review, .blocked, .failed, .kept, .planned, .done]
+        /// Where the state sits in `attentionOrder`.
+        public var attentionRank: Int { Self.attentionOrder.firstIndex(of: self) ?? Self.attentionOrder.count }
     }
 
     public var id: String

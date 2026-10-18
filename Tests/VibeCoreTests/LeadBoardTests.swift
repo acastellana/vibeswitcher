@@ -32,6 +32,12 @@ struct LeadBoardTests {
         #expect(store.load().updates.count == 20)
     }
 
+    @Test func theAttentionOrderHoldsEveryState() {
+        let order = LeadTask.Status.attentionOrder
+        #expect(order.count == LeadTask.Status.allCases.count)
+        #expect(Set(order) == Set(LeadTask.Status.allCases))
+    }
+
     @Test func slugsAreSafeAndUnique() {
         #expect(Slug.make("Add login page!", taken: []) == "add-login-page")
         #expect(Slug.make("Add login page", taken: ["add-login-page"]) == "add-login-page-2")

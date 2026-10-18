@@ -1083,8 +1083,6 @@ public final class LeadToolset: MCPToolset {
     /// How many tasks status lists one per line in all (the rest by slug), and how many new reports.
     static let statusTasks = 24
     static let statusReports = 10
-    /// The order status lists the states in: what needs the lead first.
-    static let statusOrder: [LeadTask.Status] = [.running, .review, .blocked, .failed, .kept, .planned, .done]
 
     private func status() -> String {
         let board = store.load()
@@ -1111,7 +1109,7 @@ public final class LeadToolset: MCPToolset {
         let ended = sessions.map { sessions in board.tasks.compactMap { task in Self.endedMember(task, sessions).map { (task, $0) } } } ?? []
         let endedIDs = Set(ended.map(\.0.id))
         var budget = Self.statusTasks
-        for state in Self.statusOrder {
+        for state in LeadTask.Status.attentionOrder {
             var tasks = board.tasks.filter { $0.status == state && !endedIDs.contains($0.id) }
             guard !tasks.isEmpty else { continue }
             switch state {

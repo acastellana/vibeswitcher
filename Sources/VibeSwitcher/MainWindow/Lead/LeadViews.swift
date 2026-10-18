@@ -36,7 +36,7 @@ struct TeamStrip: View {
     @ObservedObject var waiting = ReportsWaiting.shared
 
     var body: some View {
-        let order: [LeadTask.Status] = [.running, .review, .blocked, .failed, .planned, .done]
+        let order = LeadTask.Status.attentionOrder
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 Image(systemName: "person.3.fill").foregroundStyle(Color.accentColor)
@@ -65,7 +65,7 @@ struct TeamStrip: View {
             if !board.tasks.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
-                        ForEach(board.tasks.sorted { order.firstIndex(of: $0.status)! < order.firstIndex(of: $1.status)! }) { task in
+                        ForEach(board.tasks.sorted { $0.status.attentionRank < $1.status.attentionRank }) { task in
                             Button { open(task) } label: {
                                 HStack(spacing: 5) {
                                     Circle().fill(task.status.color).frame(width: 7, height: 7)
