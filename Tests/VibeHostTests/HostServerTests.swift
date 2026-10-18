@@ -111,6 +111,7 @@ struct HostServerTests {
         #expect(sessions.map(\.id) == [session.id])
         #expect(capabilities?.contains(HostProtocol.Capability.styledScreen) == true)
         #expect(capabilities?.contains(HostProtocol.Capability.inputRefusals) == true)
+        #expect(capabilities?.contains(HostProtocol.Capability.leadVault) == true)
         #expect(pid == getpid())
         // Stamped while the test host was being made (a millisecond's slack for the encoding).
         #expect(startedAt.map { $0.timeIntervalSince(host.startedAt) > -0.001 && host.readyAt.timeIntervalSince($0) > -0.001 } == true)

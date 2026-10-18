@@ -14,6 +14,8 @@ public enum HostProtocol {
         public static let inputRefusals = "inputRefusals"
         /// Takes `HostRequest.handover`: it's updated without ending its sessions.
         public static let handover = "handover"
+        /// Answers `HostRequest.vault`: the lead's vault and the user's sealing key live in the host.
+        public static let leadVault = "leadVault"
     }
 
     /// The error a spawn gets once the host agreed to shut down.

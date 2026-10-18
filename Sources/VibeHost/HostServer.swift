@@ -78,7 +78,8 @@ public final class HostServer {
     private var shuttingDown = false
     /// When this host started: a build it hands over to is the same host, started then.
     private var startedAt = Date()
-    static let capabilities = [HostProtocol.Capability.styledScreen, HostProtocol.Capability.inputRefusals, HostProtocol.Capability.handover]
+    static let capabilities = [HostProtocol.Capability.styledScreen, HostProtocol.Capability.inputRefusals, HostProtocol.Capability.handover,
+                               HostProtocol.Capability.leadVault]
     private var handingOver = false
 
     public init(config: Config) {

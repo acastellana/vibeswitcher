@@ -127,6 +127,11 @@ final class LeadController: ObservableObject {
             if show { select(running.id) }
             return
         }
+        // The lead's vault lives in the session host: an older one still serving its sessions can't hold it (and
+        // one too old to hand over stays until restarted).
+        if case .outdated = host.state, !host.hostCapabilities.contains(HostProtocol.Capability.leadVault) {
+            return offerHostRestart()
+        }
         // Preparing runs git (the board's folder, the base branch): off the main thread, one start per root at a time.
         guard startingLeads.insert(root).inserted else { return }
         let project = (root as NSString).lastPathComponent
@@ -431,6 +436,20 @@ final class LeadController: ObservableObject {
         case .lead(let name): return name
         case .system(let about): return "VibeSwitcher (\(about))"
         }
+    }
+
+    private func offerHostRestart() {
+        let live = host.sessions.filter(\.isLive).count
+        let alert = NSAlert()
+        alert.messageText = "The session host is older than the lead."
+        alert.informativeText = host.canHandOver
+            ? "The lead's vault lives in the session host. Restart it to this app's version; its sessions keep running."
+            : "The lead's vault lives in the session host, and the one running predates it (and can't update in place). "
+                + "Restarting it ends its \(live == 1 ? "live session" : "\(live) live sessions"); hosts from now on update without ending any."
+        alert.addButton(withTitle: host.canHandOver ? "Restart Session Host" : "Restart Session Host (ends \(live))")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate()
+        if alert.runModal() == .alertFirstButtonReturn { host.restartHost() }
     }
 
     private func alert(_ title: String, _ text: String) {
