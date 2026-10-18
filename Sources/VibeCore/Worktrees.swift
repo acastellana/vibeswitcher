@@ -401,8 +401,8 @@ public enum Worktrees {
     }
 
     /// Fast-forwards main to `commit` (the tested one; the branch's head when nil). Never rewrites anything and
-    /// never touches uncommitted work: a dirty main checkout, main checked out elsewhere, or a commit not on top
-    /// of main is refused with the reason.
+    /// never touches uncommitted work: uncommitted changes in the main checkout to files the merge changes, main
+    /// checked out elsewhere, or a commit not on top of main is refused with the reason.
     public static func merge(root: String, slug: String, commit: String? = nil, base: String? = nil) throws -> Merge {
         let main = base ?? mainBranch(root: root)
         guard !["HEAD", ""].contains(main) else { return .refused("The repository has no main branch checked out.") }
@@ -417,7 +417,8 @@ public enum Worktrees {
 
     /// Fast-forwards `base` from `expected` (its head as the caller last saw it) to `commit`. Refused when the
     /// branch isn't at `expected` any more (something else moved it, or another merge landed first), when `commit`
-    /// isn't on top of it, or when its checkout has uncommitted changes or is another worktree.
+    /// isn't on top of it, when its checkout has uncommitted changes to files the merge changes (named), or when it's
+    /// checked out in another worktree.
     public static func fastForward(root: String, base main: String, to commit: String, from expected: String) -> Merge {
         guard !["HEAD", ""].contains(main) else { return .refused("The repository has no main branch checked out.") }
         let current = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(main)"], in: root).output
@@ -431,8 +432,12 @@ public enum Worktrees {
         switch checkout(of: main, root: root) {
         case .some(let place) where URL(fileURLWithPath: place).resolvingSymlinksInPath().path == resolvedRoot:
             if let lock = IndexLock.find(in: root) { return .refused(refusal(lock)) }
-            guard Git.run(["status", "--porcelain", "--untracked-files=no"], in: root).output.isEmpty else {
-                return .refused("The main checkout has uncommitted changes; commit or stash them first.")
+            // Only the uncommitted files the merge changes stop it, as they would stop git: the rest is the user's
+            // work in progress, and stays as it is. git's own check still holds: --ff-only overwrites nothing.
+            switch uncommitted(in: root, changedFrom: expected, to: commit) {
+            case .failure(let error): return .refused(error.description)
+            case .success(let overlap) where !overlap.isEmpty: return .refused(refusal(overlap))
+            case .success: break
             }
             let merge = Git.run(["merge", "--ff-only", "-q", commit], in: root)
             guard merge.ok else {
@@ -600,6 +605,59 @@ public enum Worktrees {
             if line == "branch refs/heads/\(branch)" { return current }
         }
         return nil
+    }
+
+    /// An uncommitted file in a checkout, and how: "modified", "staged", "staged and modified", "untracked" or
+    /// "unmerged". A rename counts by both its names.
+    public struct Uncommitted: Equatable, Sendable {
+        public var path: String
+        public var state: String
+    }
+
+    /// The uncommitted files in `checkout` (staged, unstaged and untracked; ignored ones aren't) at paths that change
+    /// from `from` to `to`, files added or removed included.
+    public static func uncommitted(in checkout: String, changedFrom from: String, to: String) -> Swift.Result<[Uncommitted], Failure> {
+        let diff = Git.run(["diff", "--name-only", "-z", "--no-renames", from, to], in: checkout)
+        guard diff.ok else { return .failure(Failure(description: "Can't tell which files the merge changes: \(diff.error)")) }
+        let changed = Set(diff.output.split(separator: "\0").map(String.init))
+        guard !changed.isEmpty else { return .success([]) }
+        let status = Git.run(["status", "--porcelain=v2", "-z", "--untracked-files=all"], in: checkout)
+        guard status.ok else { return .failure(Failure(description: "Can't read the main checkout's uncommitted changes: \(status.error)")) }
+        return .success(uncommitted(porcelain: status.output).filter { changed.contains($0.path) })
+    }
+
+    /// The files in `git status --porcelain=v2 -z` output.
+    static func uncommitted(porcelain: String) -> [Uncommitted] {
+        var found: [Uncommitted] = []
+        var entries = porcelain.split(separator: "\0", omittingEmptySubsequences: true).makeIterator()
+        while let entry = entries.next() {
+            // "1 XY sub mH mI mW hH hI path", "2 XY … score path" then the old path, "u XY … path", "? path".
+            let fields = { (count: Int) in entry.split(separator: " ", maxSplits: count, omittingEmptySubsequences: false).map(String.init) }
+            switch entry.first {
+            case "?":
+                found.append(Uncommitted(path: String(entry.dropFirst(2)), state: "untracked"))
+            case "1", "2":
+                let parts = fields(entry.first == "1" ? 8 : 9)
+                guard let path = parts.last, parts.count >= 2 else { continue }
+                let xy = Array(parts[1])
+                let staged = xy.first != ".", modified = xy.last != "."
+                let state = staged && modified ? "staged and modified" : staged ? "staged" : "modified"
+                found.append(Uncommitted(path: path, state: state))
+                if entry.first == "2", let old = entries.next() { found.append(Uncommitted(path: String(old), state: state)) }
+            case "u":
+                if let path = fields(10).last { found.append(Uncommitted(path: path, state: "unmerged")) }
+            default:
+                continue
+            }
+        }
+        return found
+    }
+
+    /// Why a merge into the main checkout can't go on over `files`, its uncommitted changes the merge would change.
+    public static func refusal(_ files: [Uncommitted]) -> String {
+        let named = files.map { "\($0.path) (\($0.state))" }.joined(separator: ", ")
+        let (which, them) = files.count == 1 ? ("a file", "it") : ("files", "them")
+        return "The main checkout has uncommitted changes to \(which) this merge changes: \(named). Commit or stash \(them) first; the checkout's other uncommitted changes can stay."
     }
 
     /// Why a merge into the main checkout can't go on while `lock` is there, and what to do. A stale one is left: the

@@ -121,13 +121,115 @@ struct WorktreesTests {
         #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: moved, test: "true", scratch: scratch()) == .conflict)
     }
 
-    @Test func mergingRefusesADirtyMainCheckout() throws {
+    /// The user's own work in progress in the main checkout, on files the merge doesn't change, doesn't stop it,
+    /// and is there afterwards as it was: modified, not staged.
+    @Test func uncommittedChangesTheMergeDoesntTouchStay() throws {
         let root = try repo()
         let worktree = try Worktrees.create(root: root, slug: "y")
         try commit("y.txt", "y\n", in: worktree)
         try "local edit\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
-        #expect(try Worktrees.merge(root: root, slug: "y") == .refused("The main checkout has uncommitted changes; commit or stash them first."))
+        try "mine\n".write(toFile: root + "/notes.txt", atomically: true, encoding: .utf8)
+        #expect(try Worktrees.merge(root: root, slug: "y") == .merged)
+        #expect(Git.run(["rev-parse", "main"], in: root).output == heads(root, "y").tip)
+        #expect(try String(contentsOfFile: root + "/y.txt", encoding: .utf8) == "y\n")
         #expect(try String(contentsOfFile: root + "/a.txt", encoding: .utf8) == "local edit\n")
+        #expect(Git.run(["status", "--porcelain", "--", "a.txt", "notes.txt"], in: root).output == "M a.txt\n?? notes.txt")
+        #expect(Git.run(["diff", "--cached", "--name-only"], in: root).output.isEmpty)
+    }
+
+    @Test func anUnstagedChangeToAFileTheMergeChangesIsRefusedByName() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "y")
+        try commit("a.txt", "worker\n", in: worktree)
+        let before = Git.run(["rev-parse", "main"], in: root).output
+        try "local edit\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
+        #expect(try Worktrees.merge(root: root, slug: "y") == .refused(
+            "The main checkout has uncommitted changes to a file this merge changes: a.txt (modified). Commit or stash it first; the checkout's other uncommitted changes can stay."))
+        #expect(Git.run(["rev-parse", "main"], in: root).output == before)
+        #expect(try String(contentsOfFile: root + "/a.txt", encoding: .utf8) == "local edit\n")
+    }
+
+    @Test func aStagedChangeToAFileTheMergeChangesIsRefused() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "y")
+        try commit("a.txt", "worker\n", in: worktree)
+        try "staged edit\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "a.txt"], in: root)
+        guard case .refused(let reason) = try Worktrees.merge(root: root, slug: "y") else { Issue.record("merged over a staged change"); return }
+        #expect(reason.contains(": a.txt (staged)."), "\(reason)")
+        // Staged and then edited again: both.
+        try "edited again\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
+        guard case .refused(let both) = try Worktrees.merge(root: root, slug: "y") else { Issue.record("merged over a staged change"); return }
+        #expect(both.contains(": a.txt (staged and modified)."), "\(both)")
+        #expect(try String(contentsOfFile: root + "/a.txt", encoding: .utf8) == "edited again\n")
+    }
+
+    @Test func anUntrackedFileWhereTheMergeAddsOneIsRefusedByName() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "y")
+        try FileManager.default.createDirectory(atPath: worktree + "/new", withIntermediateDirectories: true)
+        try commit("new/y.txt", "y\n", in: worktree)
+        try FileManager.default.createDirectory(atPath: root + "/new", withIntermediateDirectories: true)
+        try "mine\n".write(toFile: root + "/new/y.txt", atomically: true, encoding: .utf8)
+        #expect(try Worktrees.merge(root: root, slug: "y") == .refused(
+            "The main checkout has uncommitted changes to a file this merge changes: new/y.txt (untracked). Commit or stash it first; the checkout's other uncommitted changes can stay."))
+        #expect(try String(contentsOfFile: root + "/new/y.txt", encoding: .utf8) == "mine\n")
+    }
+
+    /// Of several uncommitted files, only the one the merge changes is named.
+    @Test func onlyTheOverlappingFilesAreNamed() throws {
+        let root = try repo()
+        try commit("c.txt", "c\n", in: root)
+        let worktree = try Worktrees.create(root: root, slug: "y")
+        try commit("c.txt", "worker's c\n", in: worktree)
+        try commit("y.txt", "y\n", in: worktree)
+        try "local edit\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
+        try "mine\n".write(toFile: root + "/notes.txt", atomically: true, encoding: .utf8)
+        try "staged\n".write(toFile: root + "/d.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "d.txt"], in: root)
+        try "my c\n".write(toFile: root + "/c.txt", atomically: true, encoding: .utf8)
+        guard case .refused(let reason) = try Worktrees.merge(root: root, slug: "y") else { Issue.record("merged over c.txt"); return }
+        #expect(reason == "The main checkout has uncommitted changes to a file this merge changes: c.txt (modified). Commit or stash it first; the checkout's other uncommitted changes can stay.")
+        // Two of them: both named, in order.
+        try "my y\n".write(toFile: root + "/y.txt", atomically: true, encoding: .utf8)
+        guard case .refused(let two) = try Worktrees.merge(root: root, slug: "y") else { Issue.record("merged over c.txt"); return }
+        #expect(two == "The main checkout has uncommitted changes to files this merge changes: c.txt (modified), y.txt (untracked). Commit or stash them first; the checkout's other uncommitted changes can stay.")
+    }
+
+    /// What the overlap doesn't see, git still does: --ff-only moves the branch, and overwrites nothing.
+    @Test func gitStillRefusesWhatTheOverlapMisses() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "y")
+        try FileManager.default.createDirectory(atPath: worktree + "/new", withIntermediateDirectories: true)
+        try commit("new/y.txt", "y\n", in: worktree)
+        let before = Git.run(["rev-parse", "main"], in: root).output
+        // An untracked file where the merge needs a folder: not a path the merge changes, but in its way.
+        try "mine\n".write(toFile: root + "/new", atomically: true, encoding: .utf8)
+        guard case .refused(let reason) = try Worktrees.merge(root: root, slug: "y") else { Issue.record("merged over new"); return }
+        #expect(!reason.isEmpty)
+        #expect(Git.run(["rev-parse", "main"], in: root).output == before)
+        #expect(try String(contentsOfFile: root + "/new", encoding: .utf8) == "mine\n")
+    }
+
+    /// A rename in the main checkout counts by both names; one the merge makes changes both its paths.
+    @Test func renamesOverlapByBothNames() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "y")
+        try commit("a.txt", "worker\n", in: worktree)
+        Git.run(["mv", "a.txt", "r.txt"], in: root)
+        guard case .refused(let old) = try Worktrees.merge(root: root, slug: "y") else { Issue.record("merged over a rename"); return }
+        #expect(old.contains(": a.txt (staged)."), "\(old)")
+        Git.run(["mv", "r.txt", "a.txt"], in: root)
+        let other = try Worktrees.create(root: root, slug: "m")
+        Git.run(["mv", "a.txt", "moved.txt"], in: other)
+        Git.run(["commit", "-q", "-m", "move a"], in: other)
+        try "mine\n".write(toFile: root + "/moved.txt", atomically: true, encoding: .utf8)
+        guard case .refused(let new) = try Worktrees.merge(root: root, slug: "m") else { Issue.record("merged over moved.txt"); return }
+        #expect(new.contains(": moved.txt (untracked)."), "\(new)")
+        try FileManager.default.removeItem(atPath: root + "/moved.txt")
+        try "local edit\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
+        guard case .refused(let gone) = try Worktrees.merge(root: root, slug: "m") else { Issue.record("merged over a.txt"); return }
+        #expect(gone.contains(": a.txt (modified)."), "\(gone)")
     }
 
     @Test func aBranchBehindMainIsNotMergedBlindly() throws {
@@ -537,3 +639,24 @@ final class Locked<Value>: @unchecked Sendable {
     }
 }
 
+
+extension LeadToolsetTests {
+    /// merge says the fast-forward's refusal as it is: the files in the main checkout it would change, and only those.
+    @Test func mergeNamesTheUncommittedFilesItWouldChange() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = try audited(lead, runtime, root: root)
+        try "local edit\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
+        try "mine\n".write(toFile: root + "/b.txt", atomically: true, encoding: .utf8)
+        let refused = call(lead, "merge", ["task": "add-b"])
+        #expect(refused.isError)
+        #expect(refused.text == "Not merged: The main checkout has uncommitted changes to a file this merge changes: b.txt (untracked). Commit or stash it first; the checkout's other uncommitted changes can stay.", "\(refused.text)")
+        #expect(try String(contentsOfFile: root + "/b.txt", encoding: .utf8) == "mine\n")
+        try FileManager.default.removeItem(atPath: root + "/b.txt")
+        let merged = call(lead, "merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(try String(contentsOfFile: root + "/b.txt", encoding: .utf8) == "bee\n")
+        #expect(try String(contentsOfFile: root + "/a.txt", encoding: .utf8) == "local edit\n")
+    }
+}
