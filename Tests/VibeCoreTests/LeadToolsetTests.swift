@@ -15,6 +15,10 @@ final class FakeRuntime: LeadRuntime {
     var leadRunning = true
     /// Sessions that don't end when killed.
     var stubborn: Set<String> = []
+    /// Sessions whose kill the host refuses, with what it answers.
+    var refusals: [String: String] = [:]
+    /// Each session's process; this test's own (it runs) unless set.
+    var pids: [String: Int32] = [:]
     /// Set: the session host can't be read (the error it gives).
     var hostDown: String?
 
@@ -25,7 +29,10 @@ final class FakeRuntime: LeadRuntime {
         spawned.append((id, cwd, command, label, trust))
         return id
     }
-    func kill(_ session: String) { killed.append(session) }
+    func kill(_ session: String) throws {
+        if let refusal = refusals[session] { throw BoardError(text: refusal) }
+        killed.append(session)
+    }
     func forget(_ session: String) { forgotten.append(session) }
     func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String, clearDraft: Bool) throws -> LeadDelivery.Delivered {
         if clearDraft { clearedDrafts += 1 }
@@ -39,7 +46,7 @@ final class FakeRuntime: LeadRuntime {
     }
     func sessions() throws -> [LeadSessionInfo] {
         if let hostDown { throw BoardError(text: hostDown) }
-        return spawned.filter { !forgotten.contains($0.id) }.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: "working", tty: nil) }
+        return spawned.filter { !forgotten.contains($0.id) }.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: "working", tty: nil, pid: pids[$0.id] ?? getpid()) }
     }
     func transcript(of session: String) throws -> String? {
         if let hostDown { throw BoardError(text: hostDown) }
@@ -62,7 +69,7 @@ final class FakeSeat: LeadRuntime {
     func spawn(cwd: String, command: String, label: String, agent: String, trust: Bool) throws -> String {
         try shared.spawn(cwd: cwd, command: command, label: label, agent: agent, trust: trust)
     }
-    func kill(_ session: String) { shared.kill(session) }
+    func kill(_ session: String) throws { try shared.kill(session) }
     func forget(_ session: String) { shared.forget(session) }
     func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String, clearDraft: Bool) throws -> LeadDelivery.Delivered {
         try shared.steer(target, from: sender, text: text, clearDraft: clearDraft)
@@ -462,7 +469,7 @@ struct LeadToolsetTests: LeadTeamFixture {
         for slug in ["one", "two", "three"] { #expect(!call(lead, "start_worker", ["task": slug]).isError) }
         let live = call(lead, "start_worker", ["task": "one"])
         #expect(live.isError && live.text.contains("still running"))
-        runtime.kill("session-1")   // ended without reporting; the lead didn't stop it
+        try runtime.kill("session-1")   // ended without reporting; the lead didn't stop it
         let again = call(lead, "start_worker", ["task": "one"])
         #expect(!again.isError, "\(again.text)")
         let task = BoardStore(root: root).load().task("one")

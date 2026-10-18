@@ -27,14 +27,17 @@ public struct LeadSessionInfo: Equatable, Sendable {
     /// What its hooks say ("working", "needs input", "done"…), when known.
     public var status: String?
     public var tty: String?
+    /// Its program's process (the agent), when the host says.
+    public var pid: Int32?
 
-    public init(id: String, cwd: String, label: String, live: Bool, status: String?, tty: String?) {
+    public init(id: String, cwd: String, label: String, live: Bool, status: String?, tty: String?, pid: Int32? = nil) {
         self.id = id
         self.cwd = cwd
         self.label = label
         self.live = live
         self.status = status
         self.tty = tty
+        self.pid = pid
     }
 }
 
@@ -46,7 +49,8 @@ public protocol LeadRuntime: AnyObject {
     func claudeCommand(root: String) -> String
     /// Starts a window session; with `trust`, answers Claude's trust question for `cwd` in it.
     func spawn(cwd: String, command: String, label: String, agent: String, trust: Bool) throws -> String
-    func kill(_ session: String)
+    /// Asks the host to end a session; throws what the host answered when it refused (or couldn't be asked).
+    func kill(_ session: String) throws
     /// Has the host drop an ended session's record (it leaves the session list).
     func forget(_ session: String)
     /// Delivers a message (see `LeadDelivery`): steered in, typed as its prompt, or queued; `clearDraft` clears a
@@ -581,7 +585,7 @@ public final class LeadToolset: MCPToolset {
         let sessions = try hostSessions("\(slug)'s worker wasn't stopped")
         // A session that's gone (ended, or lost with a replaced host) has nothing left to kill.
         let running = task.worker.map { worker in sessions.contains { $0.id == worker && $0.live } } ?? false
-        if running, let worker = task.worker { runtime.kill(worker) }
+        if running, let worker = task.worker { try? runtime.kill(worker) }
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].stopped = task.worker
@@ -856,7 +860,7 @@ public final class LeadToolset: MCPToolset {
         let refused = "\(slug)'s sessions can't be checked; nothing was cleaned up"
         let live = Set(try hostSessions(refused).filter(\.live).map(\.id))
         let sessions = [task.worker, task.verifier].compactMap { $0 }.filter(live.contains)
-        sessions.forEach(runtime.kill)
+        sessions.forEach { try? runtime.kill($0) }
         // Not under a session that's still writing there (its next write would leave a stray folder behind).
         let deadline = Date().addingTimeInterval(stopWait)
         var running = sessions
