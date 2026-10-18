@@ -109,42 +109,76 @@ struct StaleServerTests {
         BinaryWatch(path: "/Applications/VibeSwitcher.app/Contents/MacOS/vibeswitcher-mcp", identify: { _ in disk.binary })
     }
 
-    @Test func theSameBinaryHasNoNotice() {
+    @Test func theSameBinaryIsNoUpdate() {
         let disk = Disk()
         let watch = watch(disk)
-        #expect(watch.notice() == nil)
+        #expect(watch.update() == nil)
         #expect(watch.notice() == nil)
     }
 
-    @Test func aReplacedBinaryIsNoticedUntilRestart() {
+    @Test func aReplacedBinaryIsAnUpdateWithNoAdviceToReconnect() {
         let disk = Disk()
         let watch = watch(disk)
-        disk.binary = BinaryWatch.Identity(modified: 200, size: 5_000, inode: 7)
-        #expect(watch.notice() == "VibeSwitcher was updated; reconnect the vibeswitcher tools: /mcp")
-        // Put back or not, this process still runs the code it started with.
-        disk.binary = BinaryWatch.Identity(modified: 100, size: 5_000, inode: 7)
-        #expect(watch.notice() == BinaryWatch.notice)
-        // A copy that kept the time but not the file is another binary too.
+        let newer = BinaryWatch.Identity(modified: 200, size: 5_000, inode: 7)
+        disk.binary = newer
+        #expect(watch.update() == newer)
+        // The server switches to it by itself: nothing for the agent to do, so nothing said.
+        #expect(watch.notice() == nil)
+        // A copy that kept the time but not the file is another build too.
         let copied = Disk()
         let other = self.watch(copied)
         copied.binary = BinaryWatch.Identity(modified: 100, size: 5_000, inode: 8)
-        #expect(other.notice() == BinaryWatch.notice)
+        #expect(other.update() == copied.binary)
+        // Put back: nothing to switch to.
+        disk.binary = BinaryWatch.Identity(modified: 100, size: 5_000, inode: 7)
+        #expect(watch.update() == nil)
     }
 
-    @Test func aMissingBinaryIsNoCrashAndNoNotice() {
+    @Test func aBuildThatCouldntTakeOverIsTriedAgainLaterAndSaidSo() {
+        let disk = Disk()
+        let watch = watch(disk)
+        let broken = BinaryWatch.Identity(modified: 200, size: 5_000, inode: 7)
+        disk.binary = broken
+        let now = Date()
+        watch.failed(broken, because: "its probe exited with status 3", at: now)
+        #expect(watch.update(now: now.addingTimeInterval(30)) == nil)
+        #expect(watch.update(now: now.addingTimeInterval(61)) == broken)
+        let notice = watch.notice() ?? ""
+        #expect(notice.contains("couldn't switch to the new build (its probe exited with status 3)"))
+        #expect(!notice.contains("/mcp"))
+        // Another build replacing it is tried at once.
+        let fixed = BinaryWatch.Identity(modified: 300, size: 5_100, inode: 9)
+        disk.binary = fixed
+        #expect(watch.update(now: now.addingTimeInterval(1)) == fixed)
+        // The old build back in place: nothing to switch to, nothing to say.
+        disk.binary = BinaryWatch.Identity(modified: 100, size: 5_000, inode: 7)
+        #expect(watch.update() == nil)
+        #expect(watch.notice() == nil)
+    }
+
+    @Test func aMissingBinaryIsNoCrashAndNoUpdate() {
         let disk = Disk()
         let watch = watch(disk)
         // Mid-install, or the app moved: nothing to compare with yet.
         disk.binary = nil
-        #expect(watch.notice() == nil)
+        #expect(watch.update() == nil)
         disk.binary = BinaryWatch.Identity(modified: 300, size: 6_000, inode: 9)
-        #expect(watch.notice() == BinaryWatch.notice)
-        // Never seen at start: no notice ever, it can't tell old from new.
+        #expect(watch.update() == disk.binary)
+        // Never seen at start: never an update, it can't tell old from new.
         disk.binary = nil
         let blind = self.watch(disk)
         disk.binary = BinaryWatch.Identity(modified: 400, size: 6_000, inode: 9)
-        #expect(blind.notice() == nil)
-        #expect(BinaryWatch(path: "/nonexistent/vibeswitcher-mcp").notice() == nil)
+        #expect(blind.update() == nil)
+        #expect(BinaryWatch(path: "/nonexistent/vibeswitcher-mcp").update() == nil)
+    }
+
+    /// After a switch, the build the process runs is the one the build before checked, not the file as it is by then.
+    @Test func theBuildHandedOverIsTheOneRunning() {
+        let disk = Disk()
+        disk.binary = BinaryWatch.Identity(modified: 300, size: 6_000, inode: 9)
+        let handed = BinaryWatch.Identity(modified: 200, size: 5_000, inode: 8)
+        let watch = BinaryWatch(path: "/x/vibeswitcher-mcp", running: handed, identify: { _ in disk.binary })
+        #expect(watch.update() == disk.binary)
     }
 
     @Test func aRealFileIsIdentifiedAndItsReplacementNoticed() throws {
@@ -155,24 +189,27 @@ struct StaleServerTests {
         try Data("old".utf8).write(to: binary)
         let watch = BinaryWatch(path: binary.path)
         #expect(BinaryWatch.identity(of: binary.path) != nil)
-        #expect(watch.notice() == nil)
+        #expect(watch.update() == nil)
         // An install writes a new file in its place.
         try FileManager.default.removeItem(at: binary)
         try Data("newer".utf8).write(to: binary)
-        #expect(watch.notice() == BinaryWatch.notice)
+        #expect(watch.update() == BinaryWatch.identity(of: binary.path))
     }
 
-    @Test func toolResultsCarryTheNoticeAfterAnUpdate() throws {
+    @Test func toolResultsCarryANoticeOnlyWhenSwitchingFailed() throws {
         let disk = Disk()
-        let server = MCPServer(name: "vibeswitcher", version: "1", toolset: MCPServerTests.Echo(), watch: watch(disk))
-        func call() throws -> [[String: Any]] {
+        let watch = watch(disk)
+        let server = MCPServer(name: "vibeswitcher", version: "1", toolset: MCPServerTests.Echo(), watch: watch)
+        func call() throws -> [String?] {
             let request = try JSONSerialization.data(withJSONObject: ["jsonrpc": "2.0", "id": 1, "method": "tools/call",
                                                                       "params": ["name": "echo", "arguments": ["text": "hi"]]])
             let reply = try #require(server.handle(request).flatMap { try JSONSerialization.jsonObject(with: $0) as? [String: Any] })
-            return try #require((reply["result"] as? [String: Any])?["content"] as? [[String: Any]])
+            return try #require((reply["result"] as? [String: Any])?["content"] as? [[String: Any]]).map { $0["text"] as? String }
         }
-        #expect(try call().map { $0["text"] as? String } == ["echo: hi"])
+        #expect(try call() == ["echo: hi"])
         disk.binary = BinaryWatch.Identity(modified: 200, size: 5_000, inode: 7)
-        #expect(try call().map { $0["text"] as? String } == ["echo: hi", BinaryWatch.notice])
+        #expect(try call() == ["echo: hi"])
+        watch.failed(try #require(disk.binary), because: "it couldn't start")
+        #expect(try call() == ["echo: hi", watch.notice()])
     }
 }
