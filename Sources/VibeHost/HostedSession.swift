@@ -150,7 +150,7 @@ public final class HostedSession {
         }
         headless.onBell = { [weak self] in self?.onBell?() }
         headless.onProgramStatus = { [weak self] report in self?.programStatus(report) }
-        headless.listen(to: terminal)
+        if let terminal { headless.listen(to: terminal) }
 
         let read = DispatchSource.makeReadSource(fileDescriptor: masterFD, queue: queue)
         read.setEventHandler { [weak self] in self?.drain() }
@@ -225,6 +225,8 @@ public final class HostedSession {
         exitPoll?.cancel()
         exitPoll = nil
         info.exit = .init(status: code, at: Date())
+        // A program that died without `state=clear` isn't still working.
+        info.programStatus = nil
         // What it printed last is still in the PTY.
         if readSource != nil { drain(reads: 256) }
         release()

@@ -190,6 +190,14 @@ struct HostedSessionTests {
         probe.queue.sync { session.terminate(); session.close() }
     }
 
+    @Test func aProgramThatEndsWithoutClearingItsStatusHasNone() throws {
+        let probe = SessionProbe()
+        let session = try start("printf '\\033]7501;state=working:app=claude-code\\007'; sleep 0.5; exit 1", probe: probe)
+        #expect(eventually { probe.lastChange?.exit != nil }, "\(probe.diagnosis(session))")
+        #expect(probe.lastChange?.programStatus == nil)
+        probe.queue.sync { session.close() }
+    }
+
     @Test func replayHoldsEarlierOutput() throws {
         let probe = SessionProbe()
         let session = try start("echo first; sleep 5", probe: probe)
