@@ -11,10 +11,13 @@ import Testing
 /// `git status`, which holds index.lock while it collects; on a Mac too busy to run it in those 2 s (load 140-200 that
 /// evening) it's killed holding it. These tests do the same to a `git status` in a scratch repository: stopped first,
 /// standing in for a git the busy Mac doesn't get to, then TERM and KILL to its group.
+///
+/// Each step waits for what it says happened (git holding its lock, git stopped, git gone), never for a time: a loaded
+/// Mac runs git and the test late, in any order (a TERM sent before the stop took effect is handled first, and git then
+/// removes its lock).
 struct IndexLockTests {
     let temp = Scratch()
 
-    /// A repository whose `git status` takes a moment: enough untracked files that it's caught holding its lock.
     func repo() throws -> String {
         let url = temp.url("index-lock")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -23,57 +26,68 @@ struct IndexLockTests {
         try "one\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
         Git.run(["add", "a.txt"], in: root)
         Git.run(["commit", "-q", "-m", "first"], in: root)
-        let folder = root + "/untracked"
-        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
-        for index in 0..<3000 { FileManager.default.createFile(atPath: "\(folder)/\(index).txt", contents: Data("\(index)\n".utf8)) }
         return root
     }
 
-    /// Runs `git status` with `environment` (on top of this process's, without any GIT_OPTIONAL_LOCKS of its own) and,
-    /// if it's ever caught holding index.lock, kills it as Claude Code does a status line on a busy Mac: stopped there
-    /// (the Mac doesn't get to it), TERM to its group, then KILL. Whether it was caught, and whether the lock was left.
-    func killStatus(in root: String, environment: [String: String]) -> (caught: Bool, left: Bool) {
+    /// A repository whose `git status` waits where it holds index.lock (if it takes it) until it's stopped: it has a
+    /// submodule, and git collects the status of a submodule by running `git status` there, which calls the
+    /// submodule's fsmonitor hook. The hook touches `$INDEX_LOCK_TESTS_WAITING` and sleeps.
+    func waitingRepo() throws -> String {
+        let root = try repo()
+        let sub = root + "/sub"
+        try FileManager.default.createDirectory(atPath: sub, withIntermediateDirectories: true)
+        for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"],
+                     ["commit", "-q", "--allow-empty", "-m", "sub"]] { Git.run(args, in: sub) }
+        Git.run(["add", "sub"], in: root)
+        Git.run(["commit", "-q", "-m", "sub"], in: root)
+        // Only now: the commit above collects the submodule's status too.
+        let hook = temp.url("fsmonitor-hook").path
+        try "#!/bin/sh\ntouch \"$INDEX_LOCK_TESTS_WAITING\"\nexec sleep 300\n".write(toFile: hook, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook)
+        Git.run(["config", "core.fsmonitor", hook], in: sub)
+        return root
+    }
+
+    /// Runs `git status` in a `waitingRepo` with `environment` (on top of this process's, without any
+    /// GIT_OPTIONAL_LOCKS of its own) and, once it's at work where it holds index.lock if it takes it, kills it as
+    /// Claude Code does a status line on a busy Mac: stopped there (the Mac doesn't get to it), TERM to its group, then
+    /// KILL. Whether it held the lock there, and whether the lock was left once git is gone.
+    func killStatus(in root: String, environment: [String: String]) throws -> (held: Bool, left: Bool) {
         let lock = root + "/.git/index.lock"
+        let waiting = temp.url("waiting").path
         var base = ProcessInfo.processInfo.environment
         base["GIT_OPTIONAL_LOCKS"] = nil
-        // The lock is there for a few milliseconds of each run: tried until one is caught.
-        for _ in 0..<40 {
-            let git = Process()
-            git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-            git.arguments = ["status", "--porcelain"]
-            git.currentDirectoryURL = URL(fileURLWithPath: root)
-            git.environment = base.merging(environment) { $1 }
-            git.standardOutput = FileHandle.nullDevice
-            git.standardError = FileHandle.nullDevice
-            git.standardInput = FileHandle.nullDevice
-            guard (try? git.run()) != nil else { return (false, false) }
-            // Process makes it the leader of a process group of its own, as Claude Code starts a status line.
-            let group = git.processIdentifier
-            var caught = false
-            while git.isRunning, !caught {
-                caught = FileManager.default.fileExists(atPath: lock)
-                if !caught { usleep(100) }
-            }
-            if caught {
-                kill(group, SIGSTOP)
-                kill(-group, SIGTERM)
-                usleep(100_000)
-                kill(-group, SIGKILL)
-            }
+        let git = Process()
+        git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        git.arguments = ["status", "--porcelain"]
+        git.currentDirectoryURL = URL(fileURLWithPath: root)
+        git.environment = base.merging(environment) { $1 }.merging(["INDEX_LOCK_TESTS_WAITING": waiting]) { $1 }
+        git.standardOutput = FileHandle.nullDevice
+        git.standardError = FileHandle.nullDevice
+        git.standardInput = FileHandle.nullDevice
+        try git.run()
+        // Process makes it the leader of a process group of its own, as Claude Code starts a status line; the
+        // submodule's git and its hook are in it too.
+        let group = git.processIdentifier
+        defer {
+            if git.isRunning { kill(-group, SIGKILL) }
             git.waitUntilExit()
-            let left = FileManager.default.fileExists(atPath: lock)
-            // Scratch: the next try starts clean.
-            if left { try? FileManager.default.removeItem(atPath: lock) }
-            if caught { return (true, left) }
         }
-        return (false, false)
+        #expect(eventually { FileManager.default.fileExists(atPath: waiting) }, "git status never got to its submodule")
+        kill(group, SIGSTOP)
+        // A TERM that git gets before the stop takes effect is handled first: it would remove its lock.
+        #expect(eventually { stopped(group) }, "git status never stopped")
+        let held = FileManager.default.fileExists(atPath: lock)
+        kill(-group, SIGTERM)
+        kill(-group, SIGKILL)
+        #expect(eventually { !git.isRunning }, "git status outlived SIGKILL")
+        return (held, FileManager.default.fileExists(atPath: lock))
     }
 
     /// The incidents, reproduced: a `git status` killed outright while it holds index.lock leaves it, 0 bytes.
     @Test func aGitKilledOutrightLeavesItsLock() throws {
-        let root = try repo()
-        let killed = killStatus(in: root, environment: ["GIT_OPTIONAL_LOCKS": "1"])
-        #expect(killed.caught, "git status was never caught holding index.lock")
+        let killed = try killStatus(in: try waitingRepo(), environment: ["GIT_OPTIONAL_LOCKS": "1"])
+        #expect(killed.held, "git status didn't hold index.lock while it collected")
         #expect(killed.left)
     }
 
@@ -96,29 +110,45 @@ struct IndexLockTests {
         // Waiting for its editor: the git holding the lock is past setting up.
         #expect(eventually { FileManager.default.fileExists(atPath: editing) })
         #expect(FileManager.default.fileExists(atPath: lock))
+        defer {
+            if git.isRunning { kill(-git.processIdentifier, SIGKILL) }
+            git.waitUntilExit()
+        }
         kill(-git.processIdentifier, SIGTERM)
-        git.waitUntilExit()
+        #expect(eventually { !git.isRunning }, "git commit outlived SIGTERM")
         #expect(!FileManager.default.fileExists(atPath: lock))
     }
 
     /// The git VibeSwitcher runs (a merge's `git status` in the main checkout, among others) leaves no lock however
     /// it's stopped.
     @Test func vibeSwitchersGitLeavesNoLockWhenKilled() throws {
-        let root = try repo()
-        #expect(!killStatus(in: root, environment: Git.environment).left)
-        // It still answers.
+        let root = try waitingRepo()
+        let killed = try killStatus(in: root, environment: Git.environment)
+        #expect(!killed.held, "it took index.lock")
+        #expect(!killed.left)
+        // It still answers (past the submodule, whose hook waits).
         try "two\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
-        #expect(Git.run(["status", "--porcelain", "--untracked-files=no"], in: root).output == "M a.txt")
+        #expect(Git.run(["status", "--porcelain", "--untracked-files=no", "--ignore-submodules"], in: root).output == "M a.txt")
     }
 
     /// Nor does the git that the lead's, a worker's or a verifier's session runs, its status line's included: they
     /// start with the role's environment.
     @Test func theTeamsSessionsLeaveNoLockWhenTheirGitIsKilled() throws {
-        let root = try repo()
+        let root = try waitingRepo()
         for role in [LeadLaunch.Role.lead, .worker, .verifier] {
-            #expect(!killStatus(in: root, environment: LeadLaunch.environment(role)).left, "\(role)")
+            let killed = try killStatus(in: root, environment: LeadLaunch.environment(role))
+            #expect(!killed.held, "\(role) took index.lock")
+            #expect(!killed.left, "\(role)")
         }
     }
+}
+
+/// Whether `pid` is stopped: a SIGSTOP sent to it has taken effect, not only been sent.
+func stopped(_ pid: pid_t) -> Bool {
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+    var info = kinfo_proc()
+    var size = MemoryLayout<kinfo_proc>.stride
+    return sysctl(&mib, 4, &info, &size, nil, 0) == 0 && size > 0 && Int32(info.kp_proc.p_stat) == SSTOP
 }
 
 /// A process that holds `path` open (and made it, as git makes its lock), until it's stopped.
