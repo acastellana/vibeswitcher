@@ -46,7 +46,11 @@ enum CodexTrust {
         func call(_ id: Int, _ method: String, _ params: [String: Any]) throws -> [String: Any] {
             try send(["jsonrpc": "2.0", "id": id, "method": method, "params": params])
             while Date() < deadline {
-                guard let line = reader.nextLine(timeout: deadline.timeIntervalSinceNow) else { break }
+                guard let line = reader.nextLine(timeout: deadline.timeIntervalSinceNow) else {
+                    // Its output ended: it quit, however much time was left.
+                    if reader.ended { throw Failure.quit }
+                    break
+                }
                 guard let message = (try? JSONSerialization.jsonObject(with: Data(line.utf8))) as? [String: Any],
                       message["id"] as? Int == id else { continue }
                 if let error = message["error"] as? [String: Any] {
@@ -54,7 +58,8 @@ enum CodexTrust {
                 }
                 return message["result"] as? [String: Any] ?? [:]
             }
-            throw Failure.timeout
+            // Out of time: slow only if it's still there (a process it started may hold its output open after it quit).
+            throw process.isRunning ? Failure.timeout : Failure.quit
         }
 
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
@@ -129,6 +134,13 @@ private final class LineReader {
         }
         lock.broadcast()
         lock.unlock()
+    }
+
+    /// Whether its output ended and every line was read.
+    var ended: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return closed && lines.isEmpty
     }
 
     func nextLine(timeout: TimeInterval) -> String? {
