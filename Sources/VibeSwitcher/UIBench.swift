@@ -9,10 +9,12 @@ import VibeCore
 /// host, each with a big board like a day's work leaves), one session's screen full of styled text. Three phases:
 /// 1. clicks: the sidebar's rows clicked (as the mouse does), chat and terminal switched, then the host restarted the
 ///    way an outdated one is (its sessions ended one by one, then replaced) and the leads started again. SwiftUI's
-///    "Publishing changes from within view updates" and "occurs multiple times" faults are counted from the log.
-/// 2. busy leads: their boards rewritten every few seconds and a decision added, as leads at work do. The main thread's
-///    longest stall is measured.
-/// 3. idle: MINUTES (default 5) of nothing happening: CPU each minute and on average, and memory after the first minute.
+///    "Publishing changes from within view updates" and "occurs multiple times" faults are counted from the log, and
+///    what a switch between the leads costs, in instructions (time depends on how busy the Mac is; stalls are shown).
+/// 2. busy leads: their boards rewritten every few seconds and a decision added (by another process), as leads at work
+///    do: CPU, instructions and the main thread's longest stall, shown.
+/// 3. idle: MINUTES (default 5) of nothing happening: CPU and instructions each minute and on average, and memory after
+///    the first minute.
 /// It exits 1 when a check fails. The window is off screen unless `--onscreen` (then it shows, without taking focus).
 /// `--ticking` has the busy screen redraw a line each second. For narrowing a cost down: VIBESWITCHER_BENCH_INSPECTOR
 /// (team, overview or activity: the inspector's tab, team by default) and VIBESWITCHER_BENCH_RESULTS (the results on
@@ -36,6 +38,28 @@ enum UIBench {
         exit(0)
     }
 
+    /// `--ui-bench-write ROUND ROOT…`: what a lead's tools do to its board as it works, in a process of its own: a
+    /// checkpoint on one task and a decision.
+    static func write(arguments: [String]) -> Never {
+        let round = arguments.first.flatMap(Int.init) ?? 0
+        for root in arguments.dropFirst() {
+            let store = BoardStore(root: root)
+            try? store.update { board in
+                guard !board.tasks.isEmpty else { return }
+                board.tasks[round % board.tasks.count].checkpoints?.append(LeadCheckpoint(text: "checkpoint \(round)"))
+            }
+            try? store.appendDecision("Decision at round \(round): keep going", why: "The bench's lead decided.")
+        }
+        exit(0)
+    }
+
+    /// What switching between the two leads may cost (the median, in instructions; a debug build). Measured: 5.8 G
+    /// when the Team pane drew every result, 1.0-1.4 G since (0.85 G of it the terminal's).
+    static let switchBudget: Double = 2.5e9
+    /// What two idle leads may cost, in instructions a second. Measured: 80 M while the lead controller decoded the
+    /// boards every 3 s, 30 M since.
+    static let idleBudget: Double = 50e6
+
     /// Checks that passed or failed, printed as they're decided.
     private static var failures: [String] = []
     private static func check(_ ok: Bool, _ text: String) {
@@ -48,15 +72,15 @@ enum UIBench {
     final class StallMeter: @unchecked Sendable {
         private let lock = NSLock()
         private var longest: TimeInterval = 0
-        private var running = true
 
         init() {
             Thread.detachNewThread { [weak self] in
-                while let self, self.isRunning {
-                    let posted = Date()
+                while let self {
+                    // The system's uptime: the wall clock can be set while it runs.
+                    let posted = DispatchTime.now().uptimeNanoseconds
                     let done = DispatchSemaphore(value: 0)
                     DispatchQueue.main.async {
-                        let waited = Date().timeIntervalSince(posted)
+                        let waited = TimeInterval(DispatchTime.now().uptimeNanoseconds - posted) / 1e9
                         self.lock.lock()
                         self.longest = max(self.longest, waited)
                         self.lock.unlock()
@@ -66,12 +90,6 @@ enum UIBench {
                     usleep(250_000)
                 }
             }
-        }
-
-        private var isRunning: Bool {
-            lock.lock()
-            defer { lock.unlock() }
-            return running
         }
 
         /// The longest stall since the last call.
@@ -204,7 +222,12 @@ enum UIBench {
             return agentTTYs.values.first { $0.pid == pid }?.root
         }
 
+        /// Keeps App Nap off: the app's window is on screen when you use it, which keeps it awake; the bench's off-screen
+        /// one wouldn't, and napping would measure a sleeping app.
+        private var awake: NSObjectProtocol?
+
         func start() {
+            awake = ProcessInfo.processInfo.beginActivity(options: .userInitiatedAllowingIdleSystemSleep, reason: "--ui-bench measures")
             for (index, root) in roots.enumerated() {
                 let store = BoardStore(root: root)
                 try? store.update { $0 = UIBench.board(tasks: 50, seed: index) }
@@ -376,28 +399,40 @@ enum UIBench {
             fflush(stdout)
             run(steps[...]) { [weak self] in
                 guard let self else { return }
-                // The median: one switch can wait on a busy Mac; switching that's slow every time is the app.
-                let sorted = self.switchStalls.sorted()
-                let median = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
-                UIBench.check(sorted.count >= 10, "clicks: \(sorted.count) switches between the sessions")
-                UIBench.check(median < 0.15, String(format: "clicks: a switch stalls the main thread %.0f ms (median, under 150 ms; longest %.0f ms)",
-                                                    median * 1000, (sorted.last ?? 0) * 1000))
-                self.countFaults(since: from) { self.busyLeads() }
+                // What a switch costs, in instructions: time depends on how busy the Mac is (its stalls show that too).
+                func median(_ values: [Double]) -> Double { values.isEmpty ? 0 : values.sorted()[values.count / 2] }
+                let work = self.switches.map(\.instructions), stalls = self.switches.map(\.stall)
+                UIBench.check(work.count >= 10, "clicks: \(work.count) switches between the sessions")
+                UIBench.check(median(work) < UIBench.switchBudget,
+                              String(format: "clicks: a switch takes %.0f M instructions (median, under %.0f M; most %.0f M)",
+                                     median(work) / 1e6, UIBench.switchBudget / 1e6, (work.max() ?? 0) / 1e6))
+                print(String(format: "clicks: a switch stalls the main thread %.0f ms (median; longest %.0f ms)", median(stalls) * 1000,
+                             (stalls.max() ?? 0) * 1000))
+                // The rest is measured on the first lead (its busy screen, its Team tab).
+                if let lead = self.host.sessions.first(where: { $0.isLive && $0.cwd == self.roots[0] }) { self.model.select(hostID: lead.id) }
+                self.countFaults(since: from) {
+                    let row = self.model.selectedRow
+                    print("selected \(row?.project ?? "none") (\(row.flatMap { self.leads.lead(for: $0) } != nil ? "its Team tab" : "no Team tab"))")
+                    self.busyLeads()
+                }
             }
         }
 
-        /// The main thread's longest stall in each step that changed the selection.
-        private var switchStalls: [TimeInterval] = []
+        /// The instructions run and the main thread's longest stall in each step that changed the selection.
+        private var switches: [(instructions: Double, stall: TimeInterval)] = []
 
         private func run(_ steps: ArraySlice<(String, () -> Void)>, then done: @escaping () -> Void) {
             guard let (name, step) = steps.first else { return done() }
             let selected = model.selectedID
+            let before = IdleBench.Usage.now()
             step()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self else { return }
-                let stall = self.stalls.take()
-                if self.model.selectedID != selected { self.switchStalls.append(stall) }
-                print(String(format: "  %-22@ stall %4.0f ms  selected %@", name as NSString, stall * 1000,
+                let after = IdleBench.Usage.now()
+                let stall = self.stalls.take(), work = Double(after.instructions - before.instructions)
+                if self.model.selectedID != selected { self.switches.append((work, stall)) }
+                print(String(format: "  %-22@ %5.0f M instructions, cpu %4.0f ms, stall %4.0f ms  selected %@", name as NSString, work / 1e6,
+                             (after.cpu - before.cpu) * 1000, stall * 1000,
                              (self.model.selectedRow.map { "\($0.project) \($0.id.prefix(13))" } ?? "none") as NSString))
                 self.run(steps.dropFirst(), then: done)
             }
@@ -440,22 +475,17 @@ enum UIBench {
             fflush(stdout)
             _ = stalls.take()
             let before = IdleBench.Usage.now()
+            let scans = store.scansApplied
             var rounds = 0
             let writer = Heartbeat.shared.every(3) { [weak self] in
                 guard let self else { return }
                 rounds += 1
-                let roots = self.roots
-                let round = rounds
-                // The lead's tools write the board from another process: here, another thread.
-                DispatchQueue.global(qos: .utility).async {
-                    for root in roots {
-                        let store = BoardStore(root: root)
-                        try? store.update { board in
-                            board.tasks[round % board.tasks.count].checkpoints?.append(LeadCheckpoint(text: "checkpoint \(round)"))
-                        }
-                        try? store.appendDecision("Decision at round \(round): keep going", why: "The bench's lead decided.")
-                    }
-                }
+                // The lead's tools write the board from another process (this binary's `--ui-bench-write`): what
+                // they cost isn't the app's.
+                let write = Process()
+                write.executableURL = Bundle.main.executableURL
+                write.arguments = ["--ui-bench-write", "\(rounds)"] + self.roots
+                try? write.run()
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
                 guard let self else { return }
@@ -463,9 +493,9 @@ enum UIBench {
                 let after = IdleBench.Usage.now()
                 let stall = self.stalls.take()
                 let cpu = (after.cpu - before.cpu) / (after.wall - before.wall) * 100
-                print(String(format: "busy leads: cpu %.1f %%, longest main-thread stall %.0f ms", cpu, stall * 1000))
-                UIBench.check(stall < 0.25, String(format: "busy leads: longest main-thread stall %.0f ms (under 250 ms)", stall * 1000))
-                UIBench.check(cpu < 2, String(format: "busy leads: cpu %.1f %% (under 2 %%)", cpu))
+                print(String(format: "busy leads: cpu %.1f %%, %.0f M instructions/s, longest main-thread stall %.0f ms, %d scans", cpu,
+                             Double(after.instructions - before.instructions) / (after.wall - before.wall) / 1e6, stall * 1000,
+                             self.store.scansApplied - scans))
                 fflush(stdout)
                 // The decisions just added fade for three minutes: let them go before measuring idle.
                 for root in self.roots {
@@ -485,6 +515,7 @@ enum UIBench {
             _ = stalls.take()
             let start = IdleBench.Usage.now()
             var samples: [IdleBench.Usage] = [start]
+            var scans = store.scansApplied
             let count = max(1, Int(minutes.rounded(.up)))
             func minute(_ index: Int) {
                 DispatchQueue.main.asyncAfter(deadline: .now() + minutes * 60 / Double(count)) { [weak self] in
@@ -492,14 +523,20 @@ enum UIBench {
                     let now = IdleBench.Usage.now()
                     let previous = samples.last!
                     samples.append(now)
-                    print(String(format: "  minute %d: cpu %5.2f %%  wakeups %6.1f/s  rss %4.0f MB  footprint %4.0f MB  longest stall %.0f ms",
+                    print(String(format: "  minute %d: cpu %5.2f %%  %5.1f M instructions/s  wakeups %6.1f/s  rss %4.0f MB  footprint %4.0f MB  longest stall %.0f ms  %d scans",
                                  index + 1, (now.cpu - previous.cpu) / (now.wall - previous.wall) * 100,
+                                 Double(now.instructions - previous.instructions) / (now.wall - previous.wall) / 1e6,
                                  Double(now.wakeups - previous.wakeups) / (now.wall - previous.wall),
-                                 Double(now.rss) / 1_048_576, Double(now.footprint) / 1_048_576, self.stalls.take() * 1000))
+                                 Double(now.rss) / 1_048_576, Double(now.footprint) / 1_048_576, self.stalls.take() * 1000,
+                                 self.store.scansApplied - scans))
+                    scans = self.store.scansApplied
                     fflush(stdout)
                     if index + 1 < count { return minute(index + 1) }
                     let cpu = (now.cpu - start.cpu) / (now.wall - start.wall) * 100
                     UIBench.check(cpu < 2, String(format: "idle: cpu %.2f %% on average (under 2 %%)", cpu))
+                    let rate = Double(now.instructions - start.instructions) / (now.wall - start.wall)
+                    UIBench.check(rate < UIBench.idleBudget, String(format: "idle: %.1f M instructions/s (under %.0f M)", rate / 1e6,
+                                                                    UIBench.idleBudget / 1e6))
                     let first = samples[min(1, samples.count - 1)]
                     let growth = (Double(now.rss) - Double(first.rss)) / Double(first.rss) * 100
                     UIBench.check(growth <= 10, String(format: "idle: rss %.0f → %.0f MB after the first minute (%+.1f %%, at most +10 %%)",

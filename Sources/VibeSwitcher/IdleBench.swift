@@ -264,11 +264,13 @@ enum IdleBench {
         }
     }
 
-    /// The process's CPU time, wakeups and memory now (also for `--ui-bench`).
+    /// The process's CPU time, wakeups, instructions and memory now (also for `--ui-bench`).
     struct Usage {
         let wall: TimeInterval
         let cpu: TimeInterval
         let wakeups: UInt64
+        /// Instructions retired: the work done, whichever cores did it and however busy the Mac is.
+        var instructions: UInt64 = 0
         let rss: UInt64
         let footprint: UInt64
 
@@ -278,15 +280,16 @@ enum IdleBench {
             let cpu = TimeInterval(usage.ru_utime.tv_sec + usage.ru_stime.tv_sec)
                 + TimeInterval(usage.ru_utime.tv_usec + usage.ru_stime.tv_usec) / 1_000_000
             var info = rusage_info_v4()
-            let wakeups: UInt64 = withUnsafeMutablePointer(to: &info) { pointer in
+            let read = withUnsafeMutablePointer(to: &info) { pointer in
                 pointer.withMemoryRebound(to: rusage_info_t?.self, capacity: 1) { proc_pid_rusage(getpid(), RUSAGE_INFO_V4, $0) }
-            } == 0 ? info.ri_pkg_idle_wkups + info.ri_interrupt_wkups : 0
+            } == 0
+            let wakeups: UInt64 = read ? info.ri_pkg_idle_wkups + info.ri_interrupt_wkups : 0
             var vm = task_vm_info_data_t()
             var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
             let ok = withUnsafeMutablePointer(to: &vm) { pointer in
                 pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
             } == KERN_SUCCESS
-            return Usage(wall: Date().timeIntervalSinceReferenceDate, cpu: cpu, wakeups: wakeups,
+            return Usage(wall: Date().timeIntervalSinceReferenceDate, cpu: cpu, wakeups: wakeups, instructions: read ? info.ri_instructions : 0,
                          rss: ok ? vm.resident_size : 0, footprint: ok ? vm.phys_footprint : 0)
         }
     }
