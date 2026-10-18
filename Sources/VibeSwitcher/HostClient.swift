@@ -532,6 +532,8 @@ final class HostClient: ObservableObject {
             _ = try? connection?.send(.input(id: id, bytes: bytes, reply: true))
             return
         }
+        // Taken on the way: none of it goes to the session (a replaced lead's, see `LeadController.takeInput`).
+        if let inputGate, inputGate(id, bytes) { done?(true); return }
         if done == nil, pacedInput[id] == nil, bytes.count <= Self.inputPiece {
             guard let connection else {
                 inputCut(id, 0, bytes.count, "VibeSwitcher isn't connected to the session host.")
@@ -548,6 +550,9 @@ final class HostClient: ObservableObject {
         pacedInput[id, default: PacedInput()].queue.append(PacedInput.Item(left: bytes, total: bytes.count, done: done))
         pumpInput(id)
     }
+
+    /// Looks at input for a session before it's sent (not the terminal's answers to queries): true when it took it.
+    var inputGate: ((UUID, Data) -> Bool)?
 
     /// Largest piece of input sent in one message (a frame holds ~768 KB of input once encoded).
     static let inputPiece = 256 * 1024

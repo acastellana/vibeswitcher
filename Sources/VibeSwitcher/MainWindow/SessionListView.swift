@@ -31,7 +31,7 @@ struct SessionListView: View {
                         WindowRowView(row: row, showProject: model.grouping == .attention, role: model.role(of: row),
                                       team: arranged.teams[row.id], board: arranged.teams[row.id] == nil ? nil : leads.lead(for: row)?.board,
                                       questions: model.role(of: row) == .lead ? leads.lead(for: row).map { ($0.board.openQuestions.count, $0.board.blockingQuestions) } : nil,
-                                      label: model.label(of:), nested: arranged.nested.contains(row.id),
+                                      label: model.label(of:), replaced: model.replaced(row), nested: arranged.nested.contains(row.id),
                                       teamOpen: model.expandedTeams.contains(row.id)) { model.toggleTeam(row.id) }
                             .tag(row.id as String?)
                             .contextMenu { RowMenu(row: row, actions: actions) }
@@ -121,6 +121,8 @@ struct WindowRowView: View {
     var questions: (open: Int, blocking: Int)?
     /// Window sessions' labels (who's a verifier).
     var label: (WindowRow) -> String? = { $0.hosted?.label }
+    /// A lead another session replaced: it says where to continue instead of its status.
+    var replaced: ReplacedLead?
     /// A team row shown under its lead.
     var nested = false
     var teamOpen = false
@@ -129,7 +131,7 @@ struct WindowRowView: View {
     var body: some View {
         TimelineView(.ticking(every: 30)) { context in
             // A worker's or verifier's normal end doesn't read as a failure.
-            let state = nested ? LeadTeams.state(of: row, now: context.date) : row.state(now: context.date)
+            let state = replaced?.rowState ?? (nested ? LeadTeams.state(of: row, now: context.date) : row.state(now: context.date))
             HStack(spacing: 9) {
                 if nested {
                     Image(systemName: role == .verifier ? "checkmark.seal" : "hammer").font(.system(size: 10)).foregroundStyle(.tertiary)
@@ -140,7 +142,7 @@ struct WindowRowView: View {
                     HStack(spacing: 4) {
                         if role == .lead {
                             Text("LEAD").font(.system(size: 9, weight: .bold)).padding(.horizontal, 4).padding(.vertical, 1)
-                                .foregroundStyle(.white).background(Capsule().fill(Color.accentColor))
+                                .foregroundStyle(.white).background(Capsule().fill(replaced == nil ? Color.accentColor : Color.gray))
                         }
                         Text(row.title).font(.system(size: nested ? 12 : 13, weight: .medium)).lineLimit(1)
                         Spacer(minLength: 4)
@@ -154,7 +156,8 @@ struct WindowRowView: View {
                             Text(row.project).foregroundStyle(.secondary)
                             Text("·").foregroundStyle(.tertiary)
                         }
-                        Text(state.text).foregroundStyle(state.group == .needsYou ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                        Text(state.text).foregroundStyle(replaced != nil ? AnyShapeStyle(Color.purple)
+                            : state.group == .needsYou ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
                         if let questions, questions.open > 0 {
                             Text("·").foregroundStyle(.tertiary)
                             Label("\(questions.open)", systemImage: "questionmark.bubble.fill")

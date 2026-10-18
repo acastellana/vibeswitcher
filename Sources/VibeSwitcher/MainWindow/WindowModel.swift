@@ -21,6 +21,8 @@ final class WindowModel: ObservableObject {
     @Published private(set) var hostLabels: [UUID: String] = [:]
     /// Leads (row ids) whose team is shown under them.
     @Published var expandedTeams: Set<String> = []
+    /// Leads another session of their project replaced (see `LeadController.replacedLeads`), by window session.
+    @Published var replacedLeads: [UUID: ReplacedLead] = [:]
     /// The agent's own session id last seen in each window session, so it can be resumed once it ends.
     private(set) var agentSessions: [UUID: (agent: Agent, sessionID: String, transcript: String?)] = [:]
     /// The middle pane shows the conversation (Chat) rather than the terminal, where there is one.
@@ -58,6 +60,12 @@ final class WindowModel: ObservableObject {
     }
 
     func role(of row: WindowRow) -> LeadLaunch.Role? { LeadTeams.role(label: label(of: row)) }
+
+    /// The lead that replaced this row's, if it's a replaced lead.
+    func replaced(_ row: WindowRow) -> ReplacedLead? { row.hostID.flatMap { replacedLeads[$0] } }
+
+    /// What the row says of its session: a replaced lead says where to continue, whatever its agent is doing.
+    func state(of row: WindowRow, now: Date) -> RowState { replaced(row)?.rowState ?? row.state(now: now) }
 
     func toggleTeam(_ lead: String) {
         if expandedTeams.contains(lead) { expandedTeams.remove(lead) } else { expandedTeams.insert(lead) }
@@ -122,7 +130,7 @@ final class WindowModel: ObservableObject {
             let start = rows.firstIndex { $0.id == selectedID } ?? -1
             for step in 1...rows.count {
                 let row = rows[(start + step) % rows.count]
-                if row.state(now: Date()).group == .needsYou {
+                if state(of: row, now: Date()).group == .needsYou {
                     if clearsFilter { filter = "" }
                     selectedID = row.id
                     return

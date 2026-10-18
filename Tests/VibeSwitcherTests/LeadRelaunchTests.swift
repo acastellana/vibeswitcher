@@ -193,6 +193,7 @@ struct LeadRelaunchTests {
         #expect(refused.text.contains("VibeSwitcher started a new lead"), "\(refused.text)")
         #expect(refused.text.contains("session \(new.id.uuidString.prefix(8))"))
         #expect(refused.text.contains("continue in that session"))
+        #expect(refused.text.contains("Messages typed into this session go to that lead"))
         #expect(!refused.text.contains("/mcp"))
     }
 }

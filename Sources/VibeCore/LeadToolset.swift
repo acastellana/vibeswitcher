@@ -179,7 +179,8 @@ public final class LeadToolset: MCPToolset {
         let label = ((try? runtime.sessions()) ?? []).first { $0.id == session }?.label
         let named = "session \(session.prefix(8))" + (label.map { " (‘\($0)’)" } ?? "")
         return "This session no longer holds \(whose): \(starter) at \(LeadBoard.clock(holder.issuedAt)), in \(named). \(off) "
-            + (role == .lead ? "Tell the user to continue in that session, and to tell it anything they told you here since then."
+            + (role == .lead ? "Tell the user to continue in that session. Messages typed into this session go to that lead now: "
+                + "VibeSwitcher sends them on as the user's, and that lead read your last turns with the user as it started."
                 : "Stop here: that session carries on with the task.")
     }
 

@@ -370,7 +370,7 @@ public enum LeadPrompts {
         let memory = "Read status, the workflow notes, \(folder)/decisions.md (every decision: one may hold a task back from "
             + "merging or its branch from deletion) and the end of \(folder)/progress.md"
         let handover = replaced.map {
-            " You replace the lead on \($0.tty), whose tools are off: what the user told it went nowhere. Before greeting, read "
+            " You replace the lead on \($0.tty), whose tools are off now: what the user told it may never have reached the board. Before greeting, read "
                 + "\($0.turnsFile) (its last turns: what the user asked, what it answered) and act on what the user asked there "
                 + "(add the tasks, start the workers, answer what's open), then say in your greeting what you took over from it."
         } ?? ""

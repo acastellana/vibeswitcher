@@ -141,6 +141,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         leads.$boards.receive(on: RunLoop.main)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.updateTitleAndBadge() } }
             .store(in: &cancellables)
+        leads.$replacedLeads.receive(on: RunLoop.main)
+            .sink { [weak self] replaced in
+                guard let self else { return }
+                if self.model.replacedLeads != replaced { self.model.replacedLeads = replaced }
+                DispatchQueue.main.async { self.updateTitleAndBadge() }
+            }
+            .store(in: &cancellables)
         model.$showsChat.removeDuplicates().receive(on: RunLoop.main)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.showSelection() } }
             .store(in: &cancellables)
@@ -370,8 +377,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             NSSound.beep()
             return false
         }
-        Breadcrumbs.shared.note("composer: send \(text.count) chars to \(row.id)")
         let key = row.draftKey
+        // A replaced lead: to the live lead instead, never typed in there.
+        if leads.route(text, typedInto: id) {
+            chat.handedOff(key: key, message: text)
+            return true
+        }
+        Breadcrumbs.shared.note("composer: send \(text.count) chars to \(row.id)")
         // The composer's outbox keeps the message until the host confirms it (and the conversation shows it).
         host.send(id, writes: ComposerText.writes(text, bracketed: pane.bracketedPaste(id))) { [weak self] ok in
             if !ok { Breadcrumbs.shared.note("composer: the host didn't confirm \(text.count) chars for \(row.id)") }
@@ -388,6 +400,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return false
         }
         if session.agent == .codex { return row.hostID != nil ? sendToSelected(text) : false }
+        // A replaced lead's hook would hand it to a lead with no tools: the live lead gets it.
+        if let id = row.hostID, model.replacedLeads[id] != nil { return sendToSelected(text) }
         // Not working after all (its turn ended since the composer last looked): a steer would wait for a next step
         // that never comes. A window session gets it typed in instead.
         if LeadDelivery.way(for: HookState.load(from: VibePaths.stateFile(tty: session.tty))) == .type {
@@ -443,7 +457,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private func updateTitleAndBadge() {
         window?.title = model.selectedRow.map { "\($0.title) — \($0.project)" } ?? "VibeSwitcher"
         guard let window, window.isVisible || window.isMiniaturized else { return }
-        let waiting = model.allRows.filter { $0.state(now: Date()).group == .needsYou }.count
+        let waiting = model.allRows.filter { model.state(of: $0, now: Date()).group == .needsYou }.count
             + leads.boards.values.reduce(0) { $0 + $1.blockingQuestions }
         NSApp.dockTile.badgeLabel = waiting > 0 ? "\(waiting)" : nil
     }

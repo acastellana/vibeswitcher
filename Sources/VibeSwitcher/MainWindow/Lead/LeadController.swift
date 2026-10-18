@@ -127,21 +127,38 @@ final class LeadController: ObservableObject {
     /// The boards and decisions as last read: the refresh reads them again only when their files changed.
     private var reads = LeadFiles()
     private let vault: LeadVault
+    /// Leads whose role another session of their project holds now (VibeSwitcher started a new lead), by window
+    /// session: the window says so, and what's typed into them goes to the live lead (see `ReplacedLead`).
+    @Published private(set) var replacedLeads: [UUID: ReplacedLead] = [:]
+    /// Lead sessions a start replaced, by root: replaced from that moment, before the new lead's board names it.
+    private var replacing: [UUID: String] = [:]
+    /// What's typed into each replaced lead so far.
+    private var lines: [UUID: HostInput.Line] = [:]
+    /// The leads' inboxes, and the home whose agents' folders hold transcripts (scratch ones in tests).
+    private let inbox: URL
+    private let home: String
+    /// Whether the lead the board names runs on its terminal. Faked in tests (their leads aren't Claude).
+    var leadRuns: (LeadAgent) -> Bool = { agent in ProcessTable.info(pid: agent.pid).map { $0.tty == agent.tty && $0.agent != nil } == true }
     /// Asks the user (an alert): the index of the button chosen. Faked in tests.
     var confirm: (_ title: String, _ text: String, _ buttons: [String]) -> Int = LeadController.runAlert
     /// Answers Claude's trust question in a lead the app started (off in tests: no real host to ask).
     var answersTrust = true
 
-    init(host: HostClient, store: SessionStore, vault: LeadVault = .standard, claudeCommand: @escaping (String) -> String) {
+    init(host: HostClient, store: SessionStore, vault: LeadVault = .standard, inbox: URL = VibePaths.root,
+         home: String = NSHomeDirectory(), claudeCommand: @escaping (String) -> String) {
         self.host = host
         self.store = store
         self.vault = vault
+        self.inbox = inbox
+        self.home = home
         baseMoves = BaseMoves(vault: vault)
         self.claudeCommand = claudeCommand
         summaries.lookup = { [weak host, weak store] id in
             (host?.sessions.first { $0.id.uuidString == id }, store?.sessions.first { $0.hostID?.uuidString == id }?.transcriptPath)
         }
         timer = Heartbeat.shared.every(3) { [weak self] in self?.refresh() }
+        // Whatever is typed into a replaced lead (its terminal, the composer, the phone) comes here, never to it.
+        host.inputGate = { [weak self] id, bytes in self?.takeInput(bytes, for: id) ?? false }
         // The host's welcome says which sessions run: the starts that waited for it, and the running leads, go on.
         hostWelcome = host.$state.receive(on: DispatchQueue.main).sink { [weak self] _ in
             self?.startPending()
@@ -165,11 +182,17 @@ final class LeadController: ObservableObject {
     static let commandLineNote = "any process on this Mac can send one, so it isn't vouched for as the user's"
     static let commandLine = SteerMessage.Sender.system("vibeswitcher --lead on the command line; \(commandLineNote)")
 
-    /// The live window sessions that are leads, by root.
+    /// The live window sessions that are leads, by root. Where a replaced lead runs on beside the one that replaced
+    /// it: the one the board names, else the newest.
     private var leadSessions: [String: HostSession] {
         var result: [String: HostSession] = [:]
         for session in host.sessions where session.isLive && LeadTeams.role(label: session.label) == .lead {
-            result[(session.cwd as NSString).standardizingPath] = session
+            let root = (session.cwd as NSString).standardizingPath
+            if let other = result[root] {
+                let named = reads.board(root).leadSession
+                if other.id.uuidString == named || (session.id.uuidString != named && session.startedAt < other.startedAt) { continue }
+            }
+            result[root] = session
         }
         return result
     }
@@ -309,8 +332,15 @@ final class LeadController: ObservableObject {
         let base = claudeCommand(root)
         let boardStore = BoardStore(root: root)
         let vault = self.vault
+        let (inbox, home) = (self.inbox, self.home)
+        // The lead this start may replace, and where its conversation is: the new lead reads its last turns.
+        let running = leadSessions[root]
+        let transcripts = Dictionary(store.sessions.compactMap { session in
+            session.hostID.flatMap { id in session.transcriptPath.map { (id.uuidString, $0) } }
+        }, uniquingKeysWith: { $1 })
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var issued: String?
+            var replacedSession: UUID?
             var waiting: [SteerMessage] = []
             let prepared = Result<(grant: String, launch: LeadLaunch.Prepared), Error> {
                 let workflowPath = try boardStore.prepare()
@@ -329,16 +359,30 @@ final class LeadController: ObservableObject {
                 issued = grant
                 // The role is the new session's from now on: the lead it replaces gets nothing more, and what waited
                 // for it goes to the new one (see `LeadHandover`).
-                let handover = try LeadHandover.begin(boardStore)
+                let handover = try LeadHandover.begin(boardStore, inbox: inbox)
                 waiting = handover.waiting
                 if let replaced = handover.replaced {
                     Breadcrumbs.shared.note("lead: replacing the lead on \(replaced.tty); \(waiting.count) message(s) for it go to the new one")
                 }
                 let name = "lead-\(Slug.make(project, taken: []))"
+                // The replaced lead (the one the board named, else the session running as the lead) is marked as such
+                // in the window from now on, and what the user told it there goes to the new lead first.
+                var handed: (tty: String, turnsFile: String)?
+                let old = handover.replaced.flatMap { $0.session.flatMap(UUID.init(uuidString:)) } ?? running?.id
+                if let old, let tty = handover.replaced?.tty ?? running?.tty {
+                    replacedSession = old
+                    let transcript = transcripts[old.uuidString]
+                        ?? running.flatMap { TranscriptLocator.claude(cwd: root, name: name, startedAt: $0.startedAt, home: home) }
+                    let turns = transcript.flatMap { LastTurns.read(transcript: $0, tty: tty, home: home) }
+                    if let file = try LeadLaunch.writeTurns(turns, root: root) { handed = (tty, file) }
+                    Breadcrumbs.shared.note("lead: the replaced lead on \(tty) " + (handed != nil ? "left its last turns for the new one"
+                        : "left no turns (\(transcript == nil ? "no transcript" : "nothing the user said"))"))
+                }
+                DispatchQueue.main.sync { if let old = replacedSession { self?.replacing[old] = root } }
                 let launch = try LeadLaunch.prepare(
                     role: .lead, root: root, task: nil, base: base,
                     prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow),
-                    start: LeadPrompts.leadStart(root: root, goal: goal, note: Self.commandLineNote),
+                    start: LeadPrompts.leadStart(root: root, goal: goal, note: Self.commandLineNote, replaced: handed),
                     server: Self.serverPath, name: name, folder: vault.runFolder(root: root, name: name))
                 return (grant, launch)
             }
@@ -348,7 +392,9 @@ final class LeadController: ObservableObject {
                 self.startingLeads.remove(root)
                 if !waiting.isEmpty { self.held[root, default: []] += waiting.map { (text: $0.text, sender: $0.from) } }
                 switch prepared {
-                case .failure(let error): self.alert("The lead didn't start.", "\(error)")
+                case .failure(let error):
+                    self.replacing = self.replacing.filter { $0.value != root }
+                    self.alert("The lead didn't start.", "\(error)")
                 case .success(let (grant, launch)): self.spawnLead(root: root, project: project, grant: grant, launch: launch, show: show)
                 }
             }
@@ -375,6 +421,7 @@ final class LeadController: ObservableObject {
                 self?.refresh()
             case .failure(let error):
                 DispatchQueue.global(qos: .userInitiated).async { try? vault.revoke(grant, root: root) }
+                self?.replacing = self?.replacing.filter { $0.value != root } ?? [:]
                 self?.alert("The lead didn't start.", error.message)
             }
         }
@@ -436,18 +483,75 @@ final class LeadController: ObservableObject {
 
     /// Steered in while the lead works; while it's idle the message waits in its inbox and `flush` types it as soon
     /// as its input box is empty (never into your draft; a draft you send takes it along).
-    private func deliver(_ text: String, from sender: SteerMessage.Sender, root: String) {
+    /// Returns whether it reached the lead's inbox (false: held until a lead runs).
+    @discardableResult
+    private func deliver(_ text: String, from sender: SteerMessage.Sender, root: String) -> Bool {
         // The board as it is now names the lead that holds the role (none while a new one starts, see
         // `LeadHandover`); if that one is gone (a restart under way), the message would be dropped by the next lead's
         // hook: keep it until a lead runs again.
-        guard let agent = LeadHandover.named(reads.board(root)),
-              ProcessTable.info(pid: agent.pid).map({ $0.tty == agent.tty && $0.agent != nil }) == true else {
+        guard let agent = LeadHandover.named(reads.board(root)), leadRuns(agent),
+              (try? LeadDelivery.deliver(text, from: sender, to: agent, state: HookState.load(from: VibePaths.stateFile(tty: agent.tty)),
+                                         inputIsEmpty: nil, typeInto: nil, root: inbox)) != nil else {
             held[root, default: []].append((text, sender))
             Breadcrumbs.shared.note("lead: holding a message for \((root as NSString).lastPathComponent) (no lead running)")
-            return
+            return false
         }
-        try? LeadDelivery.deliver(text, from: sender, to: agent, inputIsEmpty: nil, typeInto: nil)
         wake(root: root)
+        return true
+    }
+
+    // MARK: Replaced leads
+
+    /// Input for a window session, before it's sent (`HostClient.inputGate`): a replaced lead's never reaches its
+    /// program. What's typed there makes a line (see `HostInput.Line`), and Enter sends it to the live lead (see
+    /// `route`). Returns whether it was taken.
+    func takeInput(_ bytes: Data, for id: UUID) -> Bool {
+        guard replacedLeads[id] != nil else { return false }
+        var line = lines[id] ?? HostInput.Line()
+        let submitted = line.feed(bytes)
+        lines[id] = line
+        if replacedLeads[id]?.draft != line.draft { replacedLeads[id]?.draft = line.draft }
+        for text in submitted { route(text, typedInto: id) }
+        return true
+    }
+
+    /// Text sent to a replaced lead's session (typed, pasted, from the composer or the phone) goes to the live lead
+    /// instead, as the user's message (sealed on the way, as every message of theirs), saying where it was typed; the
+    /// replaced session says where it went. Returns false when `id` isn't a replaced lead.
+    @discardableResult
+    func route(_ text: String, typedInto id: UUID) -> Bool {
+        guard let replaced = replacedLeads[id] else { return false }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return true }
+        let went = deliver(replaced.routed(trimmed), from: .user, root: replaced.root)
+        replacedLeads[id]?.notice = ReplacedLead.notice(trimmed, to: replaced.project, at: Date().timeIntervalSince1970, held: !went)
+        Breadcrumbs.shared.note("lead: \(trimmed.count) chars typed into the replaced lead on \(replaced.tty) "
+                                + (went ? "went to" : "wait for") + " the lead of \(replaced.project)")
+        return true
+    }
+
+    /// Which lead sessions are replaced: another holds the role (`StatusRules.replacedLeads`), or a start replaced
+    /// them and the new lead is still starting. What was said of each is kept.
+    private func markReplaced() {
+        let live = host.sessions.filter { $0.isLive && LeadTeams.role(label: $0.label) == .lead }
+        let roots = Dictionary(uniqueKeysWithValues: live.map { ($0.id, ($0.cwd as NSString).standardizingPath) })
+        replacing = replacing.filter { roots[$0.key] != nil }
+        var holders: [String: UUID] = [:]
+        for root in Set(roots.values) {
+            if let id = reads.board(root).leadSession.flatMap(UUID.init(uuidString:)) { holders[root] = id }
+        }
+        let replacedBy = StatusRules.replacedLeads(roots.map { (id: $0.key, root: $0.value) }, holders: holders)
+        var marked: [UUID: ReplacedLead] = [:]
+        for session in live {
+            let root = roots[session.id]!
+            guard replacedBy[session.id] != nil || (replacing[session.id] == root && holders[root] != session.id) else { continue }
+            var lead = replacedLeads[session.id] ?? ReplacedLead(root: root, project: (root as NSString).lastPathComponent, tty: session.tty, live: nil)
+            lead.live = replacedBy[session.id]
+            lead.draft = lines[session.id]?.draft ?? ""
+            marked[session.id] = lead
+        }
+        lines = lines.filter { marked[$0.key] != nil }
+        if marked != replacedLeads { replacedLeads = marked }
     }
 
     /// Wakes an idle lead that reports wait for (see `LeadWake`): one short prompt for all of them, typed into its
@@ -549,6 +653,7 @@ final class LeadController: ObservableObject {
     private func refresh() {
         startPending()
         keepRunningLeads()
+        markReplaced()
         let roots = Set(leadSessions.keys)
         runTimers(roots)
         var loaded: [String: LeadBoard] = [:]
@@ -695,8 +800,8 @@ final class LeadController: ObservableObject {
         let chosen = confirm("The lead of \(project) is running, but without its role.",
                              "Its session (‘\(running.label)’, \(running.id.uuidString.prefix(8))) still runs, with its conversation, but the "
                                 + "session host no longer gives it the lead's role, so its tools are off. A new lead takes the role: the "
-                                + "running one is then told, when it next uses its tools, to send you to the new one. Anything you told it "
-                                + "that isn't on the board yet, tell the new lead.",
+                                + "running one is then told, when it next uses its tools, to send you to the new one. The new lead reads its "
+                                + "last turns with you first, and what you type into it from then on goes to the new lead.",
                              ["Show the Running Lead", "Start a New Lead"])
         return chosen == 1
     }

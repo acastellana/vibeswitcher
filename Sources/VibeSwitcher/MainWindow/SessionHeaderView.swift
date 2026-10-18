@@ -18,13 +18,21 @@ struct SessionHeaderView: View {
                             Text(row.title).font(.system(size: 14, weight: .semibold)).lineLimit(1).layoutPriority(1)
                                 .onTapGesture(count: 2) { if let session = row.session { actions.rename(session) } }
                                 .help(row.session != nil ? "Double-click to rename" : "")
-                            StatusPill(row: row, now: context.date)
+                            StatusPill(row: row, now: context.date, replaced: model.replaced(row))
                         }
-                        details(row).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                        if let replaced = model.replaced(row) {
+                            Text(Self.replacedLine(replaced)).font(.system(size: 11)).foregroundStyle(.purple).lineLimit(1)
+                        } else {
+                            details(row).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+                        }
                     }
                 }
                 Spacer(minLength: 8)
                 hostState
+                if let live = model.replaced(row)?.live {
+                    Button("Continue in \(model.replaced(row)!.liveName)") { model.select(hostID: live) }
+                        .help("Go to the lead that holds the role now")
+                }
                 if model.chatPath(for: row) != nil {
                     Picker("View", selection: $model.showsChat) {
                         Image(systemName: "terminal").help("Terminal (⌥⌘1)").tag(false)
@@ -63,6 +71,14 @@ struct SessionHeaderView: View {
         if let activity = row.session?.activity { parts.append(activity) }
         if let program = row.hosted?.liveProgramStatus, let said = StatusRules.detail(for: program) { parts.append(said) }
         return Text(parts.joined(separator: "  ·  "))
+    }
+
+    /// A replaced lead's second line: where to continue, and where what's typed into it goes (or went).
+    static func replacedLine(_ replaced: ReplacedLead) -> String {
+        let typing = replaced.draft.isEmpty ? nil : "Enter sends to \(replaced.liveName): \(replaced.draft.replacingOccurrences(of: "\n", with: " "))"
+        let said = typing ?? replaced.notice
+            ?? "What you type here goes to \(replaced.liveName) as your message: this session has no tools"
+        return "\(replaced.label)  ·  \(said)"
     }
 
     @ViewBuilder private func buttons(_ row: WindowRow) -> some View {
@@ -107,12 +123,13 @@ struct SessionHeaderView: View {
 struct StatusPill: View {
     let row: WindowRow
     let now: Date
+    var replaced: ReplacedLead?
 
     var body: some View {
-        let state = row.state(now: now)
-        let color = row.statusColor
+        let state = replaced?.rowState ?? row.state(now: now)
+        let color = replaced == nil ? row.statusColor : .purple
         HStack(spacing: 4) {
-            Text(row.pillLabel(state))
+            Text(replaced == nil ? row.pillLabel(state) : "Replaced")
             if let since = state.since {
                 Text("· \(Durations.compact(now.timeIntervalSince(since)))").monospacedDigit()
             }
