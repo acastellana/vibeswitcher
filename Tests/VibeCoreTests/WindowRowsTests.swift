@@ -49,6 +49,18 @@ struct WindowRowsTests {
         #expect(sections.first?.rows.first?.hostID == shell.id)
     }
 
+    /// A host restart ends the window sessions one by one; until the next scan the store still lists their agents.
+    /// The ended session is the agent's row then, not a second one with the same id (SwiftUI's ForEach warns
+    /// "the ID host:… occurs multiple times" and the list misbehaves).
+    @Test func aWindowSessionEndedBeforeTheScanKnowsIsOneRow() {
+        let info = hosted("ttys001", cwd: "/x/alpha", live: false)
+        let id = info.id
+        let sessions = [agent("ttys001", project: "alpha", host: id)]
+        let rows = WindowRows.sections(sessions: sessions, hosted: [info], projectName: { ($0 as NSString).lastPathComponent })
+            .flatMap(\.rows)
+        #expect(rows.map(\.id) == ["host:\(id)"])
+    }
+
     @Test func aWindowSessionKeepsItsRowIDWhenItsAgentEnds() {
         let id = UUID()
         let running = WindowRow(content: .agent(agent("ttys001", project: "a", host: id)), project: "a")

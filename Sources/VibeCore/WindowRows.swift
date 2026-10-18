@@ -59,7 +59,11 @@ public enum WindowRows {
     public static func sections(sessions: [Session], hosted: [HostSession], projectName: (String) -> String) -> [WindowSection] {
         var order: [String] = []
         var rows: [String: [WindowRow]] = [:]
+        // One row per id: a window session ended a moment ago (a host restart ends them one by one) is still the
+        // scan's agent until the next scan, and the list can't show two rows with one id.
+        var ids: Set<String> = []
         func add(_ row: WindowRow) {
+            guard ids.insert(row.id).inserted else { return }
             if rows[row.project] == nil { order.append(row.project) }
             rows[row.project, default: []].append(row)
         }
