@@ -136,6 +136,19 @@ listed too and open there. Settings (⌘,) has launch presets (per project: comm
 Terminal) and the terminal's font, colors, cursor, scrollback and bell. Tools run inside window sessions ask for
 privacy permissions (Desktop, Documents…) as VibeSwitcher rather than Terminal.
 
+An app update also updates the session host without ending its sessions (a **handover**). When the app finds an
+older host running, it asks that host to become the bundled build: the host first runs the new binary as a probe
+that reads the state it would be handed, and only if the probe says it can take over does the host re-execute itself
+in place as the new build. It's the same process, so every session's program stays its child (exits are still
+reported with their real status), and the PTYs, the lock and the socket stay open across the exec. Each session's
+details, what it printed and any input not yet written go in a state file only you can read (beside the host's lock),
+which the new build reads and deletes; it rebuilds each screen from what the session printed and nudges full-screen
+programs to repaint. Secrets the host keeps in memory go through an inherited socket, never into that file. The app
+loses its connection for a moment and reattaches every view. If the new build can't start, the old host carries on
+as it was; if it starts but can't restore, it goes back to the old build's own copy, which restores the sessions. A
+host from before handovers can't do this: it's still replaced only once its sessions are gone, or from the window's
+**Restart Session Host**, which ends them. Once a host that can hand over runs, that button reads "keeps sessions".
+
 **Today** (at the bottom of the list): how long agents were working today (in a turn; background jobs are
 listed per project, since a leftover dev server isn't work), and how long sessions were waiting on you:
 a question or permission prompt, or a finished turn you hadn't looked at (its first 30 minutes; after that

@@ -303,8 +303,10 @@ public final class HostServer {
                     throw HostHandover.exec(executable, arguments: arguments, inherit: state.descriptors)
                 } catch {
                     if let secretFD { Darwin.close(secretFD) }
-                    // Answered ok already when the exec itself failed: the client sees the connection carry on.
                     fail(error)
+                    // Answered ok already when the exec itself failed: clients waiting for the new build come back to
+                    // this one's welcome.
+                    if case HostHandover.Failure.exec = error { self.clients.values.forEach { $0.close() } }
                 }
             }
         }

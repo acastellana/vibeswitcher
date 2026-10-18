@@ -74,6 +74,7 @@ struct HostMessageTests {
             .attach(id: id, cols: 80, rows: 24), .detach(id: id),
             .input(id: id, bytes: Data([0x1b, 0x5b, 0x41]), reply: false), .resize(id: id, cols: 100, rows: 30),
             .screen(id: id), .styledScreen(id: id), .history(id: id, lines: 500), .kill(id: id), .remove(id: id), .shutdown,
+            .handover(executable: "/Applications/VibeSwitcher.app/Contents/MacOS/vibeswitcher-host"),
         ]
         for request in requests {
             let data = try HostCoding.encode(HostRequestEnvelope(seq: 7, request: request))
