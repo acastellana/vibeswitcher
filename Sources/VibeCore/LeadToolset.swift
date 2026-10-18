@@ -299,7 +299,10 @@ public final class LeadToolset: MCPToolset {
                                          "verifier_model": P(type: "string", description: "The verifier's model (e.g. sonnet, opus); a different one than the workers' gives a second opinion"),
                                          "max_workers": P(type: "integer", description: "How many workers may run at once (at least 1)"),
                                          "disk_warning_gb": P(type: "number", description: "Free space (GB) on the worktrees' volume below which you're told, once, what takes the space (default 10)"),
-                                         "disk_floor_gb": P(type: "number", description: "Free space (GB) below which start_worker refuses (default 3)")]),
+                                         "disk_floor_gb": P(type: "number", description: "Free space (GB) below which start_worker refuses (default 3)"),
+                                         "merge_policy": P(type: "string", description: "How merges are handled, as the owner chose once: auto (audited work merges, the user gets an update afterwards), ask_sensitive (a commit touching sensitive_paths waits for the user's approval of that exact commit), ask_all (every merge waits)",
+                                                           options: LeadWorkflow.MergePolicy.allCases.map(\.rawValue)),
+                                         "sensitive_paths": P(type: "string", description: "The globs ask_sensitive holds back, comma-separated, as in .gitignore (empty: Claude's settings and instructions, .github, .env files, entitlements, keys)")]),
             ]
         }
     }
@@ -661,6 +664,7 @@ public final class LeadToolset: MCPToolset {
         guard verdict.commit == head else {
             throw Problem(text: "agent/\(slug) has commits the verifier didn't see (audited \(verdict.commit.prefix(8)), now \(head.prefix(8))). Run audit again.")
         }
+        try checkMergePolicy(task, commit: verdict.commit)
         guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/merge-\(slug).lock")) else {
             throw Problem(text: "A merge of \(slug) is already running; wait for its result.")
         }
@@ -715,6 +719,24 @@ public final class LeadToolset: MCPToolset {
         case .refused(let reason):
             throw Problem(text: "Not merged: \(reason)")
         }
+    }
+
+    /// The owner's merge policy (workflow.md's merge_policy): a commit it holds back waits for the user's answer
+    /// approving that exact commit (`LeadWorkflow.approves`), as the app recorded it on the board.
+    private func checkMergePolicy(_ task: LeadTask, commit: String) throws {
+        let workflow = self.workflow
+        guard workflow.mergePolicy != .auto else { return }
+        let diff = Git.run(["diff", "--name-only", "\(workflow.base)...\(commit)"], in: root)
+        guard diff.ok else { throw Problem(text: "Not merged: can't tell which files \(task.slug) changes (\(diff.error)), so the merge policy can't be checked.") }
+        let changed = diff.output.split(whereSeparator: \.isNewline).map(String.init)
+        guard let files = workflow.filesNeedingApproval(changed),
+              !store.load().questions.contains(where: { LeadWorkflow.approves($0, commit: commit) }) else { return }
+        let policy = workflow.mergePolicy?.rawValue ?? "ask_sensitive (no merge_policy is set yet: ask the owner once which one they want, then set it with configure)"
+        let touches = files.isEmpty ? "" : " It touches " + files.prefix(8).joined(separator: ", ") + (files.count > 8 ? ", …" : "") + "."
+        throw Problem(text: "Not merged yet: the merge policy is \(policy), so the user approves \(task.slug) at \(commit.prefix(8)) first.\(touches) "
+            + "Ask once: ask_user(question: \"Merge \(task.slug) (\(task.title)) at \(commit.prefix(8))? …what it changes and the risk…\", "
+            + "options: [\"\(LeadWorkflow.approval(of: commit))\", \"Not yet\"], priority: blocking), with no timer, and merge again when they approve. "
+            + "The approval covers this commit only: a new commit needs a new one.")
     }
 
     /// A failed merge's test run, told by what failed: the failing tests and their lines first (the output's end
@@ -905,6 +927,9 @@ public final class LeadToolset: MCPToolset {
     private func postUpdate(_ arguments: [String: Any]) throws -> MCPToolResult {
         guard let title = arguments["title"] as? String, let body = arguments["body"] as? String else { throw Problem(text: "An update needs a title and a body.") }
         try store.update { board in board.updates.append(LeadUpdate(title: title, body: body, images: strings(arguments["images"]))) }
+        // In the log too, so a later lead sees the updates, check-ins and retrospectives.
+        let first = body.split(whereSeparator: \.isNewline).first.map { Self.clip(String($0), 200) }
+        try? store.appendProgress("Update: \(Self.clip(title, 200))" + (first.map { " — \($0)" } ?? ""))
         return MCPToolResult(text: "Posted.")
     }
 
@@ -923,7 +948,8 @@ public final class LeadToolset: MCPToolset {
         for key in LeadWorkflow.configurable {
             guard let given = arguments[key], !(given is NSNull) else { continue }
             var value: String
-            if let text = given as? String { value = text.trimmingCharacters(in: .whitespaces) }
+            if key == "sensitive_paths", let list = given as? [Any] { value = list.compactMap { $0 as? String }.joined(separator: ", ") }
+            else if let text = given as? String { value = text.trimmingCharacters(in: .whitespaces) }
             else if let number = given as? NSNumber { value = number.stringValue }
             else { throw Problem(text: "\(key) must be a string.") }
             guard !value.contains(where: \.isNewline) else { throw Problem(text: "\(key) must be one line.") }
@@ -935,6 +961,13 @@ public final class LeadToolset: MCPToolset {
                 guard !value.isEmpty else { break }
                 guard let size = LeadWorkflow.gigabytes(value) else { throw Problem(text: "\(key) must be a number of GB, 0 or more.") }
                 value = Self.gb(size)
+            case "merge_policy" where !value.isEmpty:
+                guard let policy = LeadWorkflow.MergePolicy(text: value) else {
+                    throw Problem(text: "merge_policy is one of \(LeadWorkflow.MergePolicy.allCases.map(\.rawValue).joined(separator: ", ")).")
+                }
+                value = policy.rawValue
+            case "sensitive_paths":
+                value = LeadWorkflow.globs(value)?.joined(separator: ", ") ?? ""
             case "base_branch" where !value.isEmpty:
                 guard Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(value)"], in: root).ok else {
                     throw Problem(text: "There's no local branch \(value) to work on.")
@@ -953,7 +986,8 @@ public final class LeadToolset: MCPToolset {
         let read: [String: String] = ["test_command": after.testCommand ?? "", "init_command": after.initCommand ?? "",
                                       "base_branch": after.baseBranch ?? "", "verifier_model": after.verifierModel ?? "",
                                       "max_workers": String(after.maxWorkers),
-                                      "disk_warning_gb": Self.gb(after.diskWarningGB), "disk_floor_gb": Self.gb(after.diskFloorGB)]
+                                      "disk_warning_gb": Self.gb(after.diskWarningGB), "disk_floor_gb": Self.gb(after.diskFloorGB),
+                                      "merge_policy": after.mergePolicy?.rawValue ?? "", "sensitive_paths": after.sensitivePaths?.joined(separator: ", ") ?? ""]
         // A disk limit cleared reads back as its default.
         let defaults = ["disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB)]
         for change in changes where read[change.key] != (change.value.isEmpty ? defaults[change.key] ?? "" : change.value) {
@@ -1309,6 +1343,9 @@ public final class LeadToolset: MCPToolset {
                      "- max_workers: \(workflow.maxWorkers)",
                      "- disk_warning_gb: \(Self.gb(workflow.diskWarningGB)) (the lead is told below this much free space)",
                      "- disk_floor_gb: \(Self.gb(workflow.diskFloorGB)) (start_worker refuses below it)"]
+        let policy = workflow.mergePolicy.map { "\($0.rawValue) (\($0.meaning))" } ?? "not set: ask the owner once; until then merges are handled as ask_sensitive"
+        lines.append("- merge_policy: \(policy)")
+        lines.append("- sensitive_paths: \(workflow.sensitiveGlobs.joined(separator: ", "))\(workflow.sensitivePaths == nil ? " (the defaults)" : "")")
         let warnings = workflowWarnings(workflow)
         if !warnings.isEmpty { lines += [""] + warnings }
         return lines.joined(separator: "\n")
