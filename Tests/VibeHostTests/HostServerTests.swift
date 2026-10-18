@@ -206,7 +206,7 @@ struct HostServerTests {
     @Test func killEndsTheSessionAndRemoveForgetsIt() throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        let session = try client.spawn("sleep 30 & sleep 30; wait")
+        let session = try client.spawn("\(keepRunning) & \(keepRunning); wait")
         let early = client.send(.remove(id: session.id))
         #expect(eventually { client.reply(to: early) != nil })
         #expect(client.reply(to: early) == .error("The session is still running."))
