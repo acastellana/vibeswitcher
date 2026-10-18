@@ -8,11 +8,22 @@ struct SessionListView: View {
     @ObservedObject var leads: LeadController
     let actions: WindowActions
     @FocusState private var filterFocused: Bool
+    /// The list's selection, passed on to the model once the list's update is over. A click sets it while SwiftUI
+    /// updates views: the model publishing right then is a fault ("Publishing changes from within view updates"),
+    /// one for each view that watches it.
+    @State private var selection: String?
+
+    init(model: WindowModel, leads: LeadController, actions: WindowActions) {
+        self.model = model
+        self.leads = leads
+        self.actions = actions
+        _selection = State(initialValue: model.selectedID)
+    }
 
     var body: some View {
         let arranged = model.arranged
         let sections = WindowGroups.filter(arranged.sections, query: model.filter)
-        List(selection: $model.selectedID) {
+        List(selection: $selection) {
             ForEach(sections) { section in
                 Section {
                     // Ended sessions of finished tasks leave with them (WL-1).
@@ -87,6 +98,8 @@ struct SessionListView: View {
             .padding(.bottom, 8)
         }
         .onChange(of: model.filterFocusRequests) { filterFocused = true }
+        .onChange(of: selection) { if model.selectedID != selection { model.selectedID = selection } }
+        .onChange(of: model.selectedID) { if selection != model.selectedID { selection = model.selectedID } }
     }
 
     private var countText: String {
