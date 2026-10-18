@@ -19,7 +19,7 @@ final class ScratchHostProcess {
     let newBuild: Int
     let process = Process()
 
-    init() throws {
+    init(arguments extra: [String] = []) throws {
         // Short: a socket's path has a 104-byte limit.
         dir = "/tmp/vsho-\(UUID().uuidString.prefix(8))"
         home = dir + "/home"
@@ -39,7 +39,7 @@ final class ScratchHostProcess {
         newBuild = HostBuild.id(ofExecutableAt: newBinary)
 
         process.executableURL = URL(fileURLWithPath: oldBinary)
-        process.arguments = ["--socket", socket, "--lock", lock, "--idle-exit", "600"]
+        process.arguments = ["--socket", socket, "--lock", lock, "--idle-exit", "600"] + extra
         process.environment = ["HOME": home, "CFFIXED_USER_HOME": home, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin",
                                "TMPDIR": dir + "/"]
         files.createFile(atPath: dir + "/host.log", contents: nil)
@@ -145,8 +145,8 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         var live: [HostSession] { [counter, shell, job, painted] }
     }
 
-    func scene() throws -> Scene {
-        let host = try ScratchHostProcess()
+    func scene(arguments: [String] = []) throws -> Scene {
+        let host = try ScratchHostProcess(arguments: arguments)
         let (client, _, build, _, capabilities, pid, startedAt) = try TestClient.welcomed(host.socket)
         #expect(build == host.oldBuild && pid == host.pid && startedAt != nil)
         #expect(capabilities?.contains(HostProtocol.Capability.handover) == true)
@@ -257,6 +257,31 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         scene.client.close()
         try expectCarriedOn(scene, build: scene.host.oldBuild, screens: screens, counterBefore: counterBefore)
         #expect(scene.host.runningExecutable == URL(fileURLWithPath: scene.host.oldBinary).resolvingSymlinksInPath().path)
+    }
+
+    /// What the host keeps in memory reaches the new build through the inherited channel, never through the state file.
+    @Test func secretsReachTheNewBuildAndNeverTheStateFile() throws {
+        let secret = "secret-\(UUID().uuidString)"
+        let scene = try scene(arguments: ["--handover-test-secret", secret])
+        defer { end(scene) }
+        let copy = scene.host.dir + "/state-as-handed-over"
+        // The new build, keeping a copy of the state it's handed.
+        let copying = scene.host.script("copying-host", """
+            case " $* " in *" --handover-probe "*) exec '\(scene.host.newBinary)' "$@";; esac
+            next=0; for word in "$@"; do [ $next = 1 ] && cp "$word" '\(copy)'; next=0; [ "$word" = --handover ] && next=1; done
+            exec '\(scene.host.newBinary)' "$@"
+            """)
+        let seq = scene.client.send(.handover(executable: copying))
+        #expect(eventually(timeout: 20) { scene.client.reply(to: seq) != nil })
+        #expect(scene.client.reply(to: seq) == .ok, "\(scene.host.log)")
+        #expect(eventually(timeout: 20) { scene.host.log.contains("took over") })
+        #expect(scene.host.log.contains("test secret carried: yes"))
+        #expect(scene.host.log.contains("and \(secret.utf8.count) bytes of secrets"))
+        let handedOver = FileManager.default.contents(atPath: copy) ?? Data()
+        #expect(!handedOver.isEmpty)
+        #expect(handedOver.range(of: Data(secret.utf8)) == nil)
+        let state = try HostHandover.read(from: copy)
+        #expect(state.secretFD != nil && state.sessions.count == 5)
     }
 
     /// The new build passes the probe, then can't restore: it executes the old build's own copy, which does.

@@ -48,7 +48,9 @@ public final class HostServer {
     /// Called (on `queue`) after an idle exit or an accepted `shutdown`, once everything is closed.
     public var onExit: (() -> Void)?
     /// What this host keeps in memory that the next build must have too, never written to disk (see
-    /// `HostHandover.SecretChannel`). Called on `queue` just before a handover.
+    /// `HostHandover.SecretChannel`): any bytes, up to a few megabytes (more fails the handover, and this host carries
+    /// on). Called on `queue` just before the exec. The new build gets exactly these bytes from
+    /// `HostHandover.takeSecrets(from:)` (before it makes its server) or from `start(restoring:)`.
     public var secretsForHandover: (() -> Data)?
 
     private let config: Config
@@ -97,7 +99,8 @@ public final class HostServer {
         startedAt = state.startedAt
         listenFD = state.listenFD
         for fd in [lockFD, listenFD] { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
-        let secrets = state.secretFD.flatMap { HostHandover.isOpen($0) ? HostHandover.SecretChannel.take($0) : nil }
+        var state = state
+        let secrets = HostHandover.takeSecrets(from: &state)
         queue.sync {
             for saved in state.sessions {
                 register(HostedSession.restore(saved, ringCapacity: config.ringCapacity, queue: queue))

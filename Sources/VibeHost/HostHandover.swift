@@ -230,6 +230,15 @@ public enum HostHandover {
         return .exec(result == 0 ? EINVAL : result)
     }
 
+    /// The secrets the build before handed over (`HostServer.secretsForHandover`), exactly the bytes it gave; nil when
+    /// it gave none. Read once: the channel is closed and `state` no longer names it, so `HostServer.start(restoring:)`
+    /// returns nil for them after this.
+    public static func takeSecrets(from state: inout State) -> Data? {
+        guard let fd = state.secretFD else { return nil }
+        state.secretFD = nil
+        return isOpen(fd) ? SecretChannel.take(fd) : nil
+    }
+
     /// Whether `fd` is an open descriptor.
     static func isOpen(_ fd: Int32) -> Bool { fd >= 0 && fcntl(fd, F_GETFD) != -1 }
 

@@ -61,28 +61,49 @@ config.fallback = config.launcher == executable ? nil : config.launcher
 
 func log(_ text: String) { FileHandle.standardError.write(Data("vibeswitcher-host: \(text)\n".utf8)) }
 
-let server = HostServer(config: config)
-server.onExit = { exit(0) }
-if let statePath = value(after: "--handover") {
-    // The build before handed its sessions over, by executing this one in its place (same process).
+/// Back to the build that handed over, after this one couldn't take over: it reads its own state (keeping every
+/// descriptor this image inherited). Nobody able to carry the sessions, this host quits: that hangs up their terminals,
+/// rather than leaving them running where nothing reaches them.
+func goBack(_ statePath: String, _ error: Error) -> Never {
+    log("couldn't take over: \(error)")
+    if let fallback = value(after: "--handover-fallback") {
+        log("going back to \(fallback)")
+        log("\(HostHandover.exec(fallback, arguments: config.arguments + ["--handover", statePath], inherit: nil))")
+    }
+    unlink(statePath)
+    exit(1)
+}
+
+// The build before handed its sessions over, by executing this one in its place (same process). Read before the
+// server is made: what it kept in memory (`HostServer.secretsForHandover`) can go into this one's config.
+let handoverPath = value(after: "--handover")
+var restoring: HostHandover.State?
+var restoredSecrets: Data?
+if let handoverPath {
     do {
         // A test of the fallback: as if this build couldn't read the state.
         if arguments.contains("--handover-fail-restore") { throw HostHandover.Failure.unreadable("--handover-fail-restore") }
-        let state = try HostHandover.read(from: statePath)
-        _ = try server.start(restoring: state)
-        unlink(statePath)
-        log("took over \(state.sessions.count) sessions from build \(state.fromBuild) \(Date())")
+        var state = try HostHandover.read(from: handoverPath)
+        restoredSecrets = HostHandover.takeSecrets(from: &state)
+        restoring = state
     } catch {
-        log("couldn't take over: \(error)")
-        // Back to the build that handed over: it reads its own state (keeping every descriptor this image inherited).
-        if let fallback = value(after: "--handover-fallback") {
-            log("going back to \(fallback)")
-            let failure = HostHandover.exec(fallback, arguments: config.arguments + ["--handover", statePath], inherit: nil)
-            log("\(failure)")
-        }
-        // Nobody can carry the sessions: quitting hangs up their terminals, rather than leaving them running unreachable.
-        unlink(statePath)
-        exit(1)
+        goBack(handoverPath, error)
+    }
+}
+
+let server = HostServer(config: config)
+server.onExit = { exit(0) }
+// A test of the secret channel: these bytes are handed over, and the next build says whether it got them.
+let testSecret = value(after: "--handover-test-secret").map { Data($0.utf8) }
+if let testSecret { server.secretsForHandover = { testSecret } }
+if let handoverPath, let state = restoring {
+    do {
+        _ = try server.start(restoring: state)
+        unlink(handoverPath)
+        if let testSecret { log("test secret carried: \(restoredSecrets == testSecret ? "yes" : "no")") }
+        log("took over \(state.sessions.count) sessions\(restoredSecrets.map { " and \($0.count) bytes of secrets" } ?? "") from build \(state.fromBuild) \(Date())")
+    } catch {
+        goBack(handoverPath, error)
     }
 } else {
     do {
