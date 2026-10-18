@@ -82,20 +82,14 @@ extension TestClient {
     static func welcomed(_ socket: String) throws -> (TestClient, protocolVersion: Int, build: Int, sessions: [HostSession], capabilities: [String]?,
                                                      pid: Int32?, startedAt: Date?) {
         var connected: TestClient?
-        #expect(eventually(timeout: 15) { connected = try? TestClient(socket: socket); return connected != nil })
+        #expect(eventually { connected = try? TestClient(socket: socket); return connected != nil })
         guard let client = connected else { throw CancellationError() }
         let seq = client.send(.hello(protocolVersion: HostProtocol.version, app: "test"))
-        #expect(eventually(timeout: 15) { client.reply(to: seq) != nil })
+        #expect(eventually { client.reply(to: seq) != nil })
         guard case .welcome(let version, let build, let sessions, let capabilities, let pid, let startedAt) = client.reply(to: seq) else {
             throw CancellationError()
         }
         return (client, version, build, sessions, capabilities, pid, startedAt)
-    }
-
-    func screen(_ id: UUID) -> String? {
-        let seq = send(.screen(id: id))
-        guard eventually({ reply(to: seq) != nil }), case .screenText(_, let text) = reply(to: seq) else { return nil }
-        return text
     }
 
     func exitStatus(_ id: UUID) -> Int32? {
@@ -128,9 +122,9 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
 @Suite(.serialized) struct HostHandoverTests {
     static let counter = "i=0; while :; do i=$((i+1)); echo n=$i; sleep 0.1; done"
     /// A job in a process group of its own (job control), then a line read and a telling exit status.
-    static let job = "set -m; sleep 600 & echo bg=$!; read line; echo got:$line; exit 7"
+    static let job = "set -m; \(keepRunning) & echo bg=$!; read line; echo got:$line; exit 7"
     /// A full-screen program's screen: drawn with cursor moves, then left as it is.
-    static let painted = "printf '\\033[2J\\033[H\\033[5;10HBOX\\033[10;1Hstatus line'; sleep 600"
+    static let painted = "printf '\\033[2J\\033[H\\033[5;10HBOX\\033[10;1Hstatus line'; \(keepRunning)"
 
     struct Scene {
         let host: ScratchHostProcess
@@ -191,7 +185,7 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         #expect(screens[scene.done.id]?.contains("finished-early") == true && screens[scene.painted.id]?.contains("BOX") == true)
 
         client.attach(scene.counter.id)
-        #expect(eventually(timeout: 10) { counted(client.text(scene.counter.id)).last ?? 0 >= counterBefore + 15 })
+        #expect(eventually { counted(client.text(scene.counter.id)).last ?? 0 >= counterBefore + 15 })
         let numbers = counted(client.text(scene.counter.id))
         #expect(isUnbroken(numbers), "the counter's output after reattach: \(numbers)")
         #expect(numbers.count > counterBefore)
@@ -211,7 +205,7 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         #expect(eventually { client.text(scene.painted.id).contains("typed-into-painted") })
         #expect(eventually { client.text(scene.job.id).contains("got:hello") })
         // Reaped by the host (still its parent): the program's own status.
-        #expect(eventually(timeout: 5) { client.exitStatus(scene.job.id) == 7 })
+        #expect(eventually { client.exitStatus(scene.job.id) == 7 })
         // The job in its own process group carried on too.
         #expect(kill(scene.background, 0) == 0 && getpgid(scene.background) == scene.background)
         // Nothing left on disk.
@@ -227,9 +221,9 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         let counterBefore = counted(scene.client.text(scene.counter.id)).last ?? 0
 
         let seq = scene.client.send(.handover(executable: scene.host.newBinary))
-        #expect(eventually(timeout: 20) { scene.client.reply(to: seq) != nil })
+        #expect(eventually { scene.client.reply(to: seq) != nil })
         #expect(scene.client.reply(to: seq) == .ok, "\(scene.host.log)")
-        #expect(eventually(timeout: 20) { scene.client.closed })
+        #expect(eventually { scene.client.closed })
 
         try expectCarriedOn(scene, build: scene.host.newBuild, screens: screens, counterBefore: counterBefore)
         #expect(scene.host.pid == pid)
@@ -244,7 +238,7 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         let broken = scene.host.script("broken-host", "echo 'dyld: missing symbol' >&2; exit 3")
         for target in [broken, scene.host.dir + "/no-such-host", "/etc/hosts"] {
             let seq = scene.client.send(.handover(executable: target))
-            #expect(eventually(timeout: 20) { scene.client.reply(to: seq) != nil })
+            #expect(eventually { scene.client.reply(to: seq) != nil })
             guard case .error(let message)? = scene.client.reply(to: seq) else {
                 Issue.record("handover to \(target): \(String(describing: scene.client.reply(to: seq)))")
                 continue
@@ -272,9 +266,9 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
             exec '\(scene.host.newBinary)' "$@"
             """)
         let seq = scene.client.send(.handover(executable: copying))
-        #expect(eventually(timeout: 20) { scene.client.reply(to: seq) != nil })
+        #expect(eventually { scene.client.reply(to: seq) != nil })
         #expect(scene.client.reply(to: seq) == .ok, "\(scene.host.log)")
-        #expect(eventually(timeout: 20) { scene.host.log.contains("took over") })
+        #expect(eventually { scene.host.log.contains("took over") })
         #expect(scene.host.log.contains("test secret carried: yes"))
         #expect(scene.host.log.contains("and \(secret.utf8.count) bytes of secrets"))
         let handedOver = FileManager.default.contents(atPath: copy) ?? Data()
@@ -297,9 +291,9 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         scene.client.attach(scene.counter.id)
         let counterBefore = counted(scene.client.text(scene.counter.id)).last ?? 0
         let seq = scene.client.send(.handover(executable: failing))
-        #expect(eventually(timeout: 20) { scene.client.reply(to: seq) != nil })
+        #expect(eventually { scene.client.reply(to: seq) != nil })
         #expect(scene.client.reply(to: seq) == .ok, "\(scene.host.log)")
-        #expect(eventually(timeout: 20) { scene.client.closed })
+        #expect(eventually { scene.client.closed })
 
         try expectCarriedOn(scene, build: scene.host.oldBuild, screens: screens, counterBefore: counterBefore)
         #expect(scene.host.pid == pid)
