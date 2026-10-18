@@ -27,6 +27,9 @@ public enum LeadWitness {
         public var compactedAt: Double?
         /// A shell of its own runs (a command in the foreground or the background).
         public var shellRunning: Bool
+        /// The shells of its own the store's last scan found running (see `Session.backgroundJobs`): between turns,
+        /// background work it waits on, whether or not its transcript's read window names the task.
+        public var shells: [BackgroundJob]
         /// The oldest message waiting in its inbox, and who sent it.
         public var heldSince: Double?
         public var heldFrom: String?
@@ -37,9 +40,18 @@ public enum LeadWitness {
         /// How it ended, in words; its exit code when that wasn't said.
         var ending: String { cause ?? "exit \(exit ?? 0)" }
 
+        /// Between turns, the work of its own it waits on, in words: the background task its transcript names, or
+        /// else its shells, as the lead's status says them ("1 shell: bash calm-check.sh", "2 shells"). Its turn goes
+        /// on when that's done.
+        public var waitingOn: String? {
+            if case .idle(let running?)? = activity { return running }
+            guard activity?.betweenTurns ?? [.done, .idle, .background].contains(status ?? .unknown), let first = shells.first else { return nil }
+            return shells.count == 1 ? "1 shell: \(first.command.prefix(80))" : "\(shells.count) shells"
+        }
+
         public init(live: Bool, exit: Int32? = nil, cause: String? = nil, status: SessionStatus? = nil, since: Date? = nil, detail: String? = nil,
                     agentQuit: Bool = false, apiError: String? = nil, apiErrorAt: Double? = nil, activity: LeadActivity? = nil,
-                    lastActivity: Double? = nil, compactedAt: Double? = nil, shellRunning: Bool = false,
+                    lastActivity: Double? = nil, compactedAt: Double? = nil, shellRunning: Bool = false, shells: [BackgroundJob] = [],
                     heldSince: Double? = nil, heldFrom: String? = nil, started: Double? = nil) {
             self.live = live
             self.started = started
@@ -47,6 +59,7 @@ public enum LeadWitness {
             self.lastActivity = lastActivity
             self.compactedAt = compactedAt
             self.shellRunning = shellRunning
+            self.shells = shells
             self.heldSince = heldSince
             self.heldFrom = heldFrom
             self.agentQuit = agentQuit
@@ -197,8 +210,8 @@ public enum LeadWitness {
     private static func waiting(_ info: Seen, session: String, now: Date, input: String, stopped: String?) -> (key: String, text: String)? {
         let since = Int(info.since?.timeIntervalSince1970 ?? 0)
         if info.status == .needsInput { return ("\(session)|input-\(since)", input) }
-        // Waiting on its own background task (a long test run), its turn goes on when that's done.
-        if case .idle(_?)? = info.activity { return nil }
+        // Waiting on its own background task (a long test run) or shell, its turn goes on when that's done.
+        if info.waitingOn != nil { return nil }
         guard let stopped, let status = info.status, [.done, .idle].contains(status), let at = info.since else { return nil }
         // Its hooks or transcript, read after the status, say it's mid-turn: the status is stale.
         if case .working? = info.activity { return nil }

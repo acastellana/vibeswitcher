@@ -358,6 +358,89 @@ struct LeadStallTests {
         #expect(LeadStall.detect(waiting, task: Self.task(), now: Date(timeIntervalSince1970: Self.loadRunsReportedAt + 11 * 60)).map(\.reason) == [.idle])
     }
 
+    /// stale-git-index-lock's worker on 2026-10-18 at 22:35: told to wait for the load to drop and then run the full
+    /// checks, it ran a bounded wait-and-run script in the background and ended its turn. Its transcript's read window
+    /// named no background task; the scan found the shell, and status said "waiting on its background task (1 shell:
+    /// bash .scratch/calm-check.sh 7)". Ten minutes on the witness called it stalled, between turns without reporting.
+    static func calmCheck(startedAt: Double) -> [BackgroundJob] {
+        [BackgroundJob(pid: 4242, command: "bash .scratch/calm-check.sh 7", startedAt: Date(timeIntervalSince1970: startedAt))]
+    }
+
+    @Test func aWorkerWaitingOnItsBackgroundShellIsntStalled() throws {
+        let ended = 1_800_000_000.0
+        var seen = Self.seen(Self.turnOver(at: ended))
+        // The store reads a quiet session with shells of its own as in the background.
+        seen.status = .background
+        seen.since = Date(timeIntervalSince1970: ended)
+        #expect(seen.activity == .idle(background: nil))
+        let eleven = Date(timeIntervalSince1970: ended + 11 * 60)
+        // Without its shells (the witness's reading tonight): stalled, and the lead told to read_session.
+        let tonight = LeadWitness.events(board: Self.board(), seen: ["w1": seen], now: eleven)
+        #expect(tonight.contains { $0.text.contains("stalled: it's between turns without having reported") && $0.text.contains("read_session(fix)") })
+
+        seen.shells = Self.calmCheck(startedAt: ended - 5)
+        #expect(seen.waitingOn == "1 shell: bash .scratch/calm-check.sh 7")
+        // What status says of it, from the same shells.
+        #expect(LeadActivity.resolve(hook: nil, transcript: TranscriptTail.read(Self.turnOver(at: ended)), background: seen.waitingOn).text
+                == "waiting on its background task (1 shell: bash .scratch/calm-check.sh 7)")
+        // Past the stall window and up to the ceiling: not stalled, no wake-up; nor with a status read before the scan.
+        for minutes in [11.0, 30, 44] {
+            let now = Date(timeIntervalSince1970: ended + minutes * 60)
+            #expect(LeadStall.detect(seen, task: Self.task(), now: now).isEmpty)
+            #expect(LeadWitness.events(board: Self.board(), seen: ["w1": seen], now: now).isEmpty)
+            var done = seen
+            done.status = .done
+            #expect(LeadWitness.events(board: Self.board(), seen: ["w1": done], now: now).isEmpty)
+            #expect(LeadWitness.stalls(board: Self.board(), seen: ["w1": seen], now: now).isEmpty)
+        }
+        // Past the ceiling with no word from it: stalled, saying what it waits on.
+        let late = Date(timeIntervalSince1970: ended + 46 * 60)
+        let stall = try #require(LeadStall.detect(seen, task: Self.task(), now: late).first)
+        #expect(stall.text(now: late) == "stalled: it has waited on its background task (1 shell: bash .scratch/calm-check.sh 7) for over 45 min without having reported, last activity 46 min ago")
+        // Several: how many.
+        seen.shells += [BackgroundJob(pid: 4243, command: "swift test", startedAt: Date(timeIntervalSince1970: ended))]
+        #expect(seen.waitingOn == "2 shells")
+        // The task its transcript names wins over its shells.
+        var named = Self.seen(Self.waitingOnItsLoadRuns)
+        named.shells = Self.calmCheck(startedAt: Self.loadRunsStarted)
+        #expect(named.waitingOn == "Final swift test and two load runs, started \(Self.clock(Self.loadRunsStarted))")
+        // Mid-turn, a shell of its own is the command it runs, not work it waits on.
+        var working = Self.seen(Self.midTurn(at: ended))
+        working.shells = Self.calmCheck(startedAt: ended)
+        #expect(working.waitingOn == nil)
+        // With a question to the lead pending, not even past the ceiling.
+        var asked = Self.task()
+        asked.leadQuestionAt = ended
+        #expect(LeadStall.detect(seen, task: asked, now: late).isEmpty)
+    }
+
+    @Test func aBackgroundShellThatEndsWithoutAReportIsAStallAfterTheUsualQuiet() throws {
+        let ended = 1_800_000_000.0
+        var seen = Self.seen(Self.turnOver(at: ended))
+        seen.shells = Self.calmCheck(startedAt: ended - 5)
+        #expect(LeadStall.detect(seen, task: Self.task(), now: Date(timeIntervalSince1970: ended + 30 * 60)).isEmpty)
+        // At 30 min the script ends: Claude Code types its notice in, the worker takes a turn and ends it without
+        // reporting. Idle from then: stalled 10 min on, as any worker between turns.
+        let reported = ended + 30 * 60
+        var data = Self.turnOver(at: ended)
+        data.append(Self.lines([
+            #"{"type":"user","timestamp":"\#(Self.stamp(reported))","isSidechain":false,"message":{"role":"user","content":"<task-notification>\n<task-id>bcalm7</task-id>\n<status>completed</status>\n<summary>Background command \"bash .scratch/calm-check.sh 7\" completed (exit code 0)</summary>\n</task-notification>"},"origin":{"kind":"task-notification"}}"#,
+            #"{"type":"assistant","timestamp":"\#(Self.stamp(reported + 20))","isSidechain":false,"message":{"role":"assistant","content":[{"type":"text","text":"Checks pass."}],"stop_reason":"end_turn"}}"#,
+            #"{"type":"system","subtype":"turn_duration","timestamp":"\#(Self.stamp(reported + 21))","isSidechain":false}"#,
+        ]))
+        var after = Self.seen(data)
+        after.since = Date(timeIntervalSince1970: reported + 21)
+        #expect(after.activity == .idle(background: nil) && after.waitingOn == nil)
+        #expect(LeadStall.detect(after, task: Self.task(), now: Date(timeIntervalSince1970: reported + 9 * 60)).isEmpty)
+        let now = Date(timeIntervalSince1970: reported + 21 + 11 * 60)
+        let events = LeadWitness.events(board: Self.board(), seen: ["w1": after], now: now).filter { $0.key.contains("|stalled-") }
+        #expect(events.count == 1)
+        #expect(events.first?.text.contains("stalled: it's between turns without having reported, and has no question to the lead pending, last activity 11 min ago") == true)
+        // Gone with no notice written: nothing will start its turn again, so it's stalled already.
+        seen.shells = []
+        #expect(LeadStall.detect(seen, task: Self.task(), now: Date(timeIntervalSince1970: reported)).map(\.reason) == [.idle])
+    }
+
     @Test func backgroundAgentsAndNoticesMidTurnAreReadToo() throws {
         let at = 1_800_000_000.0
         // A background agent (its description in the result) and a shell (its command, having no description).

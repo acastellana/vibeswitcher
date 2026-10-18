@@ -598,12 +598,15 @@ final class LeadController: ObservableObject {
             var apiError: (text: String, at: Double?)?
             var watched: (activity: LeadActivity, tail: TranscriptTail?, progress: TranscriptProgress?)?
             var shellRunning = false
+            var shells: [BackgroundJob] = []
             var held: SteerMessage?
             if info.isLive, let session, session.status != .working || workers.contains(id) {
                 let reading = observer.watching(info, agentPid: session.pid)
                 watched = reading
                 if session.status != .working, case .apiError(let error) = reading.activity { apiError = (error, reading.tail?.at) }
                 if workers.contains(id) {
+                    // Between turns, the shells it waits on (status names them too), from the store's last scan as below.
+                    shells = session.backgroundJobs
                     if let last = reading.progress?.lastWritten, now.timeIntervalSince1970 - last >= LeadStall.silentAfter {
                         // From the store's last scan, which reads the process table off the main thread. Reading it
                         // here froze the window for minutes at a time on a loaded Mac (sysctl walks every process).
@@ -618,7 +621,7 @@ final class LeadController: ObservableObject {
                                         agentQuit: session == nil && info.agentQuit(now: now), apiError: apiError?.text,
                                         apiErrorAt: apiError?.at, activity: watched?.activity,
                                         lastActivity: watched?.progress?.lastWritten, compactedAt: watched?.progress?.compactedAt,
-                                        shellRunning: shellRunning, heldSince: held?.at, heldFrom: held.map { Self.sender($0.from) },
+                                        shellRunning: shellRunning, shells: shells, heldSince: held?.at, heldFrom: held.map { Self.sender($0.from) },
                                         started: info.startedAt.timeIntervalSince1970)
             if info.isLive, let session { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
         }

@@ -22,7 +22,7 @@ public struct LeadStall: Codable, Equatable, Sendable {
     /// For `undelivered`: since when the message has waited, and who sent it.
     public var waitingSince: Double?
     public var waitingFrom: String?
-    /// For `idle`: the background task it still waits on, past `backgroundCeiling` (see `TranscriptTail.waitingOn`).
+    /// For `idle`: the background task it still waits on, past `backgroundCeiling` (see `LeadWitness.Seen.waitingOn`).
     public var background: String?
 
     public init(reason: Reason, lastActivity: Double, at: Double = Date().timeIntervalSince1970,
@@ -40,8 +40,8 @@ public struct LeadStall: Codable, Equatable, Sendable {
     public static let idleAfter: TimeInterval = 10 * 60
     public static let compactedAfter: TimeInterval = 5 * 60
     public static let undeliveredAfter: TimeInterval = 5 * 60
-    /// Between turns waiting on its own background task (a long test run), it's idle only past this; once the task
-    /// is told complete, `idleAfter` counts from then.
+    /// Between turns waiting on its own background task or shell (a long test run), it's idle only past this; once
+    /// the task is told complete, `idleAfter` counts from then.
     public static let backgroundCeiling: TimeInterval = 45 * 60
 
     /// The reason in words.
@@ -93,8 +93,8 @@ public struct LeadStall: Codable, Equatable, Sendable {
         var stalls: [LeadStall] = []
         let working = seen.status == .working || seen.activity.map { if case .working = $0 { return true } else { return false } } ?? false
         let betweenTurns = seen.activity?.betweenTurns ?? [.done, .idle, .background].contains(seen.status ?? .unknown)
-        // Between turns waiting on its own background task (its transcript says, see `LeadActivity`).
-        let background: String? = if case .idle(let running?)? = seen.activity { running } else { nil }
+        // Between turns waiting on its own background task: its transcript says (see `LeadActivity`), or its shells.
+        let background = betweenTurns ? seen.waitingOn : nil
         // Between turns with no transcript to read, its status says since when.
         if let last = seen.lastActivity ?? (betweenTurns ? seen.since?.timeIntervalSince1970 : nil) {
             let quiet = at - last
