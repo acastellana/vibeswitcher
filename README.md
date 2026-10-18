@@ -81,7 +81,12 @@ kept task, naming why, until the lead sets it back. A new lead reads `decisions.
 board, before it acts. The grunt work stays out of your way:
 workers and verifiers fold under their lead in the list, and the lead's chat shows a strip with the team's state.
 It only asks you what's really yours to decide; its questions show as cards you answer without stopping it (the
-answer reaches it at its next step), and you can message it any time the same way. VibeSwitcher is its witness:
+answer reaches it at its next step), and you can message it any time the same way. For a reversible choice it
+proposes its answer with a timer instead: the card says "Going with SQLite in 8 min" with a small countdown, the
+proposal highlighted; pick another option, or Hold to stop the timer and keep it an ordinary question. Silence means
+go: when the time runs out the lead is told once to go ahead, and it's recorded as its decision (an answer that comes
+later reaches it as a note). There's never a timer on a blocking question, a merge of a sensitive path, deleting or
+discarding work, or anything outward-facing; those wait for you. VibeSwitcher is its witness:
 it tells the lead when a worker waits for input, stops without reporting, or dies, and when one has stalled
 whatever its screen says: it reads as working but its transcript hasn't grown for 15 minutes with no shell of its
 running, it's been between turns for 10 minutes without reporting or asking the lead anything, its transcript ends

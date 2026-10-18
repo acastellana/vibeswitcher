@@ -169,7 +169,11 @@ public struct LeadQuestion: Codable, Equatable, Sendable, Identifiable {
         public static func < (a: Priority, b: Priority) -> Bool { a.rank < b.rank }
     }
 
-    public enum State: String, Sendable { case open, answered, withdrawn }
+    /// `autoDecided`: its timer ran out unanswered and the lead went ahead with its proposal.
+    public enum State: String, Sendable { case open, answered, withdrawn, autoDecided }
+
+    /// How long a proposal's timer runs when the lead doesn't say (minutes).
+    public static let defaultDecideIn = 10
 
     /// A wording the question had before a revision, and why it changed.
     public struct Revision: Codable, Equatable, Sendable {
@@ -206,15 +210,30 @@ public struct LeadQuestion: Codable, Equatable, Sendable, Identifiable {
     public var answeredVersion: Int?
     public var withdrawnAt: Double?
     public var withdrawReason: String?
+    /// The answer the lead proposes (one of the options), with a timer: unless you answer or hold it by `decideBy`,
+    /// the lead goes ahead with it.
+    public var proposal: String?
+    /// The timer's length in minutes, and when it runs out: an absolute time, so it survives a relaunch.
+    public var decideIn: Int?
+    public var decideBy: Double?
+    /// You held it: the timer stopped, and it's an ordinary open question.
+    public var heldAt: Double?
+    /// When the timer ran out and the lead went ahead with its proposal.
+    public var autoDecidedAt: Double?
 
     public init(id: String = UUID().uuidString, text: String, options: [String], priority: Priority? = nil, whyNow: String? = nil,
-                at: Double = Date().timeIntervalSince1970) {
+                proposal: String? = nil, decideIn: Int? = nil, at: Double = Date().timeIntervalSince1970) {
         self.id = id
         self.text = text
         self.options = options
         self.priority = priority
         self.whyNow = whyNow
         self.askedAt = at
+        if let proposal {
+            self.proposal = proposal
+            self.decideIn = decideIn ?? Self.defaultDecideIn
+            decideBy = at + Double(self.decideIn!) * 60
+        }
     }
 
     /// Old questions (no priority) count as important.
@@ -223,8 +242,14 @@ public struct LeadQuestion: Codable, Equatable, Sendable, Identifiable {
     public var version: Int { (revisions?.count ?? 0) + 1 }
     /// The latest revision: when the current wording came, and why.
     public var lastRevision: Revision? { revisions?.last }
-    /// A withdrawn question stays withdrawn, even if an answer came in late.
-    public var state: State { withdrawnAt != nil ? .withdrawn : answer != nil ? .answered : .open }
+    /// A withdrawn question stays withdrawn, and an auto-decided one auto-decided, even if an answer came in late.
+    public var state: State {
+        withdrawnAt != nil ? .withdrawn : autoDecidedAt != nil ? .autoDecided : answer != nil ? .answered : .open
+    }
+    /// Its timer runs: it's open, with a proposal and a deadline, and you haven't held it.
+    public var isCounting: Bool { isOpen && proposal != nil && decideBy != nil && heldAt == nil }
+    /// "10 min": how long its timer ran (or runs).
+    public var decideInText: String { "\(decideIn ?? Self.defaultDecideIn) min" }
     public var isOpen: Bool { state == .open }
     public var short: String { String(id.prefix(8)) }
 
@@ -236,6 +261,57 @@ public struct LeadQuestion: Codable, Equatable, Sendable, Identifiable {
 
     /// When it was last asked or reworded.
     public var updatedAt: Double { lastRevision?.at ?? askedAt }
+
+    /// What the lead is told when the timer runs out: once, when the question turns auto-decided.
+    public var autoDecisionMessage: String {
+        "No answer in \(decideInText): going with your proposal ‘\(proposal ?? "")’\n"
+            + "That's your question \(short) “\(text)”, now recorded as your decision. Go ahead with it; if the user answers "
+            + "later you'll hear."
+    }
+
+    /// The decision recorded for it when its timer runs out.
+    public var autoDecision: (decision: String, why: String) {
+        ("\(text) → \(proposal ?? "")",
+         "The lead proposed it with a \(decideInText) timer and the user didn't answer in time, so it went ahead (question \(short))."
+            + (whyNow.map { " Why it was asked: \($0)" } ?? ""))
+    }
+
+    /// Why a question can't carry a timer, if it can't: a timer is for reversible choices only, never for one that
+    /// holds up work (blocking), merges a sensitive path, deletes or discards work, or reaches outside the project
+    /// (publishing, pushing, sending). The words of the question, its options and why-now are checked.
+    public static func timerRefusal(text: String, options: [String], whyNow: String?, priority: Priority?) -> String? {
+        if priority == .blocking {
+            return "No timer on a blocking question: work waits on the user's say, so silence can't mean go. Ask it without proposal and decide_in."
+        }
+        let words = ([text, whyNow ?? ""] + options).joined(separator: "\n")
+        func found(_ patterns: [String]) -> String? {
+            for pattern in patterns {
+                if let range = words.range(of: pattern, options: [.regularExpression, .caseInsensitive]) { return String(words[range]) }
+            }
+            return nil
+        }
+        let advice = "Ask it without proposal and decide_in: only reversible choices go ahead on silence."
+        if let word = found([#"\bdelet\w*"#, #"\bdiscard\w*"#, #"\babandon\w*"#, #"\bwip(e|es|ed|ing)\b"#, #"\beras\w*"#,
+                             #"\bpurg\w*"#, #"\bdestroy\w*"#, #"\bthrow\w* (it |them |\w+ )?away\b"#, #"\boverwrit\w*"#,
+                             #"\bforce[- ]?push\w*"#, #"\bpush\w* --force\b"#, #"\breset --hard\b"#, #"\brm -\w*r"#,
+                             #"\bdrop\w* (the |this |that |its |their )?(branch|work|commits?|changes|worktree|stash|table|database)"#]) {
+            return "No timer on this one: it's about deleting or discarding work (“\(word)”). \(advice)"
+        }
+        let sensitive = #"(\.claude\b|CLAUDE(\.local)?\.md|AGENTS\.md|\.mcp\.json|\.github|\.env\b|secret|credential|password|token|private key|"#
+            + #"\bauth\w*|permission|entitlement|signing|keychain|hooks?\b|settings\.json|sensitive)"#
+        if words.range(of: #"\bmerg\w*"#, options: [.regularExpression, .caseInsensitive]) != nil, let word = found([sensitive]) {
+            return "No timer on this one: it's about merging a sensitive path (“\(word)”). \(advice)"
+        }
+        if let word = found([#"\bpublish\w*"#, #"\brelease[sd]?\b"#, #"\breleasing\b"#, #"\bdeploy\w*"#, #"\bproduction\b"#, #"\bprod\b"#,
+                             #"\bgit push\b"#, #"\bpush\w* (it |them |this |the \w+ )?(to )?(origin|remote|upstream|github|main)\b"#,
+                             #"\bpull request"#, #"\bopen\w* a PR\b"#, #"\bupload\w*"#, #"\bsubmit\w* (it |this )?to\b"#,
+                             #"\be-?mail\w*"#, #"\bslack\b"#, #"\btweet\w*"#, #"\bannounc\w*"#, #"\bpost\w* (it |this )?(to|on)\b"#,
+                             #"\bsend\w* (it |this |an? \w+ )?to (the )?(users?|customers?|clients?|team|list|everyone)\b"#,
+                             #"\bcustomers?\b"#, #"\bapp store\b"#, #"\bnotar\w*"#, #"\binvit\w*"#]) {
+            return "No timer on this one: it reaches outside the project (“\(word)”). \(advice)"
+        }
+        return nil
+    }
 }
 
 /// What happened to an answer (see `LeadBoard.answer`).
@@ -245,6 +321,8 @@ public enum LeadAnswerOutcome: Equatable, Sendable {
     case answered(LeadQuestion, saw: Int)
     /// The lead had withdrawn it; the answer is kept on it, the question stays withdrawn.
     case withdrawn(LeadQuestion)
+    /// Its timer had run out and the lead went ahead with its proposal; the answer is kept on it, as a note.
+    case afterAutoDecision(LeadQuestion)
     /// It was answered already (another window, the phone).
     case alreadyAnswered(LeadQuestion)
     case missing
@@ -263,6 +341,15 @@ public enum LeadAnswerOutcome: Equatable, Sendable {
         case .withdrawn(let question):
             return "The user answered your withdrawn question \(question.short) “\(question.text)” (withdrawn: \(question.withdrawReason ?? "no reason")) anyway: \(text)\n"
                 + "Take it as a note; nothing waits on it."
+        case .afterAutoDecision(let question):
+            let proposal = question.proposal ?? ""
+            let went = "The user answered your question \(question.short) “\(question.text)” after its timer ran out (no answer in "
+                + "\(question.decideInText)) and you went ahead with your proposal ‘\(proposal)’"
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).caseInsensitiveCompare(proposal) == .orderedSame {
+                return went + ": they agree (\(text)). Nothing to change."
+            }
+            return went + ". They would have chosen otherwise: \(text)\n"
+                + "Take it as a note: weigh changing course (it was a reversible choice), and record_decision if you do."
         case .alreadyAnswered, .missing:
             return nil
         }
@@ -366,14 +453,21 @@ public struct LeadBoard: Codable, Equatable, Sendable {
         questions.filter(\.isOpen).sorted { ($0.rank, $0.askedAt) < ($1.rank, $1.askedAt) }
     }
 
-    /// How long a withdrawn question stays in the stack, collapsed, so you see it went and why.
+    /// How long a withdrawn or auto-decided question stays in the stack, collapsed, so you see it went and why.
     public static let withdrawnShown: Double = 30 * 60
 
-    /// The "Questions for you" stack: the open questions in order, then the ones withdrawn lately (newest first) as
-    /// collapsed lines.
+    /// The "Questions for you" stack: the open questions in order, then the ones withdrawn or auto-decided lately
+    /// (newest first) as collapsed lines.
     public func questionStack(now: Double = Date().timeIntervalSince1970) -> [LeadQuestion] {
-        let withdrawn = questions.filter { $0.state == .withdrawn && now - ($0.withdrawnAt ?? 0) < Self.withdrawnShown }
-        return openQuestions + withdrawn.sorted { ($0.withdrawnAt ?? 0) > ($1.withdrawnAt ?? 0) }
+        func closed(_ question: LeadQuestion) -> Double? {
+            switch question.state {
+            case .withdrawn: return question.withdrawnAt
+            case .autoDecided: return question.autoDecidedAt
+            case .open, .answered: return nil
+            }
+        }
+        let lately = questions.filter { closed($0).map { now - $0 < Self.withdrawnShown } ?? false }
+        return openQuestions + lately.sorted { (closed($0) ?? 0) > (closed($1) ?? 0) }
     }
 
     /// Open questions that hold up work: what the Dock badge counts.
@@ -391,10 +485,11 @@ public struct LeadBoard: Codable, Equatable, Sendable {
         return index
     }
 
+    /// A `proposal` starts its timer: `decideIn` minutes (10 when nil) from `at`.
     @discardableResult
     public mutating func ask(_ text: String, options: [String], priority: LeadQuestion.Priority?, whyNow: String?,
-                             at: Double = Date().timeIntervalSince1970) -> LeadQuestion {
-        let question = LeadQuestion(text: text, options: options, priority: priority, whyNow: whyNow, at: at)
+                             proposal: String? = nil, decideIn: Int? = nil, at: Double = Date().timeIntervalSince1970) -> LeadQuestion {
+        let question = LeadQuestion(text: text, options: options, priority: priority, whyNow: whyNow, proposal: proposal, decideIn: decideIn, at: at)
         questions.append(question)
         return question
     }
@@ -414,8 +509,45 @@ public struct LeadBoard: Codable, Equatable, Sendable {
         question.revisions = (question.revisions ?? []) + [LeadQuestion.Revision(text: question.text, options: question.options, note: note, at: at)]
         question.text = newText
         question.options = newOptions
+        // A running timer starts again, so the new wording gets its full time; when the proposal is no longer an
+        // option, or the new wording is one no timer may carry (`timerRefusal`), it becomes an ordinary question.
+        if question.isCounting {
+            if let proposal = question.proposal, newOptions.contains(proposal),
+               LeadQuestion.timerRefusal(text: newText, options: newOptions, whyNow: question.whyNow, priority: question.priority) == nil {
+                question.decideBy = at + Double(question.decideIn ?? LeadQuestion.defaultDecideIn) * 60
+            } else {
+                question.proposal = nil
+                question.decideBy = nil
+            }
+        }
         questions[index] = question
         return question
+    }
+
+    /// You hold a question with a timer: the timer stops and it waits for your answer like any other.
+    @discardableResult
+    public mutating func hold(_ id: String, at: Double = Date().timeIntervalSince1970) throws -> LeadQuestion {
+        let index = try questionIndex(id)
+        guard questions[index].isOpen else { throw BoardError(text: Self.closed(questions[index])) }
+        guard questions[index].isCounting else { throw BoardError(text: "Question \(questions[index].short) has no timer running.") }
+        questions[index].heldAt = at
+        return questions[index]
+    }
+
+    /// The questions whose timer runs out by `now`, now auto-decided: the lead goes ahead with each proposal.
+    /// Each turns auto-decided once; a later call finds nothing more to do for it.
+    public mutating func expire(now: Double = Date().timeIntervalSince1970) -> [LeadQuestion] {
+        var expired: [LeadQuestion] = []
+        for index in questions.indices where questions[index].isCounting && (questions[index].decideBy ?? .infinity) <= now {
+            questions[index].autoDecidedAt = now
+            expired.append(questions[index])
+        }
+        return expired
+    }
+
+    /// Some timer has run out by `now` (`expire` would change the board).
+    public func hasExpired(now: Double = Date().timeIntervalSince1970) -> Bool {
+        questions.contains { $0.isCounting && ($0.decideBy ?? .infinity) <= now }
     }
 
     @discardableResult
@@ -434,19 +566,25 @@ public struct LeadBoard: Codable, Equatable, Sendable {
         guard let index = questions.firstIndex(where: { $0.id == id }) else { return .missing }
         switch questions[index].state {
         case .answered: return .alreadyAnswered(questions[index])
-        case .open, .withdrawn: break
+        case .autoDecided where questions[index].answer != nil: return .alreadyAnswered(questions[index])
+        case .open, .withdrawn, .autoDecided: break
         }
         let saw = min(max(version, 1), questions[index].version)
         questions[index].answer = text
         questions[index].answeredAt = at
         questions[index].answeredVersion = saw
-        return questions[index].state == .withdrawn ? .withdrawn(questions[index]) : .answered(questions[index], saw: saw)
+        switch questions[index].state {
+        case .withdrawn: return .withdrawn(questions[index])
+        case .autoDecided: return .afterAutoDecision(questions[index])
+        case .open, .answered: return .answered(questions[index], saw: saw)
+        }
     }
 
     private static func closed(_ question: LeadQuestion) -> String {
         switch question.state {
         case .withdrawn: return "Question \(question.short) is withdrawn already (\(question.withdrawReason ?? "no reason"))."
         case .answered: return "The user answered question \(question.short) already: \(question.answer ?? ""). Ask a new one if you need more."
+        case .autoDecided: return "Question \(question.short) is decided already: its timer ran out and you went ahead with ‘\(question.proposal ?? "")’."
         case .open: return ""
         }
     }
@@ -543,6 +681,24 @@ public final class BoardStore: @unchecked Sendable {
 
     public func appendProgress(_ line: String) throws {
         try append("- \(Self.stamp()) \(line)\n", to: "progress.md", header: "# Progress\n\n")
+    }
+
+    /// Runs out the timers due by `now`. Each such question turns auto-decided, is recorded as the lead's decision
+    /// (`appendDecision`, as record_decision writes it) and goes into the lead's reports (its status lists it even if
+    /// the message never reaches it), all under the board's lock: it happens once, however many windows watch the
+    /// board and across relaunches. Returns each one with the message for the lead.
+    public func runTimers(now: Double = Date().timeIntervalSince1970) throws -> [(question: LeadQuestion, message: String)] {
+        // Checked first without writing: this runs every few seconds.
+        guard load().hasExpired(now: now) else { return [] }
+        return try update { board in
+            let expired = board.expire(now: now)
+            for question in expired {
+                try appendDecision(question.autoDecision.decision, why: question.autoDecision.why)
+                board.reports = ((board.reports ?? []) + [LeadReport(about: "timer", text: question.autoDecisionMessage, at: now)])
+                    .suffix(LeadBoard.keptReports)
+            }
+            return expired.map { ($0, $0.autoDecisionMessage) }
+        }
     }
 
     /// A decision under a `## <date and time> <decision>` heading (one line), its reason below.

@@ -262,12 +262,14 @@ public final class LeadToolset: MCPToolset {
                             properties: ["task": task], required: ["task"]),
                 MCPToolInfo(name: "cleanup", description: "End a task's sessions and remove its worktree and branch (after merging, or force to abandon it).",
                             properties: ["task": task, "force": P(type: "boolean", description: "Also discard unmerged work")], required: ["task"]),
-                MCPToolInfo(name: "ask_user", description: "Ask the user something. It doesn't block: keep working; the answer arrives as a message. Your open questions are a queue the user answers in any order: revise one when you learn something (revise_question), withdraw one that no longer applies (withdraw_question).",
+                MCPToolInfo(name: "ask_user", description: "Ask the user something. It doesn't block: keep working; the answer arrives as a message. Your open questions are a queue the user answers in any order: revise one when you learn something (revise_question), withdraw one that no longer applies (withdraw_question). For a reversible choice, prefer proposing your answer with a timer (proposal, decide_in): the user can pick another option or hold it, and if no answer comes in time you get a message to go ahead with your proposal, recorded as your decision. Never a timer on a blocking question, on merging a sensitive path, on deleting or discarding work, or on anything outward-facing (publishing, pushing, sending): those are refused.",
                             properties: ["question": P(type: "string", description: "One clear question"),
                                          "options": P(type: "array", description: "Suggested answers (the user can also write their own)", items: "string"),
                                          "priority": P(type: "string", description: "blocking (work waits on it; it badges the Dock), important (the default), or whenever",
                                                        options: LeadQuestion.Priority.allCases.map(\.rawValue)),
-                                         "why_now": P(type: "string", description: "One line: why you need it now (shown with the question)")],
+                                         "why_now": P(type: "string", description: "One line: why you need it now (shown with the question)"),
+                                         "proposal": P(type: "string", description: "Your proposed answer, one of the options: it starts a timer, and silence means you go ahead with it (reversible choices only)"),
+                                         "decide_in": P(type: "integer", description: "Minutes until you go ahead with the proposal (default \(LeadQuestion.defaultDecideIn))")],
                             required: ["question"]),
                 MCPToolInfo(name: "revise_question", description: "Reword an open question when you've learned something: it keeps its place and id, the user sees what changed and why, and an answer to the earlier wording says so.",
                             properties: ["id": P(type: "string", description: "The question's id (its first 8 characters will do)"),
@@ -800,8 +802,36 @@ public final class LeadToolset: MCPToolset {
         guard let question = arguments["question"] as? String, !question.isEmpty else { throw Problem(text: "Ask something.") }
         let priority = try self.priority(arguments["priority"])
         let whyNow = (arguments["why_now"] as? String).flatMap { $0.isEmpty ? nil : $0 }
-        let asked = try store.update { board in board.ask(question, options: strings(arguments["options"]), priority: priority, whyNow: whyNow) }
-        return MCPToolResult(text: "Asked (\(asked.short), \(asked.rank.rawValue)). Keep working; the answer arrives as a message. If it stops applying, withdraw_question(\(asked.short)); if you learn something, revise_question.")
+        let options = strings(arguments["options"])
+        var proposal = (arguments["proposal"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if proposal?.isEmpty == true { proposal = nil }
+        let decideIn = try minutes(arguments["decide_in"])
+        if decideIn != nil, proposal == nil { throw Problem(text: "decide_in needs a proposal: the answer you'd go ahead with.") }
+        if let given = proposal {
+            if let refusal = LeadQuestion.timerRefusal(text: question, options: options, whyNow: whyNow, priority: priority) { throw Problem(text: refusal) }
+            guard let option = options.first(where: { $0.caseInsensitiveCompare(given) == .orderedSame }) else {
+                throw Problem(text: "The proposal must be one of the options (\(options.isEmpty ? "there are none" : options.joined(separator: " | "))).")
+            }
+            proposal = option
+        }
+        let asked = try store.update { board in
+            board.ask(question, options: options, priority: priority, whyNow: whyNow, proposal: proposal, decideIn: decideIn)
+        }
+        let timer = asked.proposal.map { proposal in
+            " You proposed ‘\(proposal)’: unless the user answers or holds it, a message at \(LeadBoard.clock(asked.decideBy ?? 0)) (in \(asked.decideInText)) "
+                + "tells you to go ahead with it. Until then, don't act on it."
+        } ?? ""
+        return MCPToolResult(text: "Asked (\(asked.short), \(asked.rank.rawValue)).\(timer) Keep working; the answer arrives as a message. If it stops applying, withdraw_question(\(asked.short)); if you learn something, revise_question.")
+    }
+
+    /// A timer's length: whole minutes, at least 1, at most a day.
+    private func minutes(_ value: Any?) throws -> Int? {
+        guard let value, !(value is NSNull) else { return nil }
+        let number: Double? = (value as? NSNumber)?.doubleValue ?? (value as? String).flatMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard let number, number.rounded() == number, number >= 1, number <= 24 * 60 else {
+            throw Problem(text: "decide_in is whole minutes, from 1 to \(24 * 60).")
+        }
+        return Int(number)
     }
 
     private func priority(_ value: Any?) throws -> LeadQuestion.Priority? {
@@ -819,8 +849,19 @@ public final class LeadToolset: MCPToolset {
         let text = arguments["text"] as? String
         let options = arguments["options"].map { strings($0) }
         guard text?.isEmpty == false || options != nil else { throw Problem(text: "Give the new text, new options, or both.") }
+        let board = try store.read()
+        let before = (try? board.questionIndex(id)).map { board.questions[$0] }
         let revised = try boardChange { board in try board.revise(id, text: text, options: options, note: note) }
-        return MCPToolResult(text: "Revised \(revised.short) (now version \(revised.version)). The user sees the new wording and your note; an answer to an earlier wording says which one it was.")
+        var timer = ""
+        if revised.isCounting {
+            timer = " Its timer starts again: you go ahead with ‘\(revised.proposal ?? "")’ at \(LeadBoard.clock(revised.decideBy ?? 0)) unless the user answers."
+        } else if before?.isCounting == true, let proposal = before?.proposal, revised.options.contains(proposal),
+                  let refusal = LeadQuestion.timerRefusal(text: revised.text, options: revised.options, whyNow: revised.whyNow, priority: revised.priority) {
+            timer = " Its timer is off, it waits for the user's answer: \(refusal)"
+        } else if before?.isCounting == true {
+            timer = " Your proposal isn't one of the options any more, so its timer is off: it waits for the user's answer."
+        }
+        return MCPToolResult(text: "Revised \(revised.short) (now version \(revised.version)). The user sees the new wording and your note; an answer to an earlier wording says which one it was.\(timer)")
     }
 
     private func withdrawQuestion(_ arguments: [String: Any]) throws -> MCPToolResult {
@@ -1091,7 +1132,12 @@ public final class LeadToolset: MCPToolset {
                 var line = "- \(question.short) [\(question.rank.rawValue), asked \(Self.age(now - question.askedAt)) ago"
                 if question.version > 1 { line += ", revised \(Self.age(now - question.updatedAt)) ago" }
                 line += "] \(question.text)"
-                if now - question.updatedAt > LeadBoard.staleQuestion {
+                if question.isCounting, let proposal = question.proposal {
+                    line += " — you go ahead with ‘\(proposal)’ at \(LeadBoard.clock(question.decideBy ?? now)) unless the user answers"
+                } else if question.heldAt != nil {
+                    line += " — the user is holding it (timer off): wait for their answer"
+                }
+                if !question.isCounting, now - question.updatedAt > LeadBoard.staleQuestion {
                     line += " — still relevant? Over an hour open: revise_question or withdraw_question if it's changed or settled."
                 }
                 return line
@@ -1187,6 +1233,19 @@ public final class LeadToolset: MCPToolset {
             if question.state == .withdrawn {
                 lines.append("  withdrawn \(Self.age(now - (question.withdrawnAt ?? now))) ago: \(question.withdrawReason ?? "")")
             }
+            if let proposal = question.proposal {
+                switch question.state {
+                case .autoDecided:
+                    lines.append("  no answer in \(question.decideInText): you went ahead with ‘\(proposal)’ \(Self.age(now - (question.autoDecidedAt ?? now))) ago"
+                                 + (question.answer.map { "; the user answered later: \($0)" } ?? ""))
+                case .open where question.heldAt != nil:
+                    lines.append("  proposal ‘\(proposal)’; the user held it \(Self.age(now - (question.heldAt ?? now))) ago: no timer, wait for the answer")
+                case .open:
+                    lines.append("  proposal ‘\(proposal)’: you go ahead at \(LeadBoard.clock(question.decideBy ?? now)) unless the user answers")
+                case .answered, .withdrawn:
+                    lines.append("  proposal ‘\(proposal)’")
+                }
+            }
             return lines
         }
         var lines: [String] = []
@@ -1195,6 +1254,8 @@ public final class LeadToolset: MCPToolset {
         lines += open.flatMap(block)
         let answered = board.questions.filter { $0.state == .answered }
         if !answered.isEmpty { lines += ["", "Answered:"] + answered.reversed().flatMap(block) }
+        let decided = board.questions.filter { $0.state == .autoDecided }
+        if !decided.isEmpty { lines += ["", "Decided on your proposal (no answer in time):"] + decided.reversed().flatMap(block) }
         let withdrawn = board.questions.filter { $0.state == .withdrawn }
         if !withdrawn.isEmpty { lines += ["", "Withdrawn:"] + withdrawn.reversed().flatMap(block) }
         return lines.joined(separator: "\n")

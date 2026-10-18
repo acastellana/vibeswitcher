@@ -119,6 +119,24 @@ extension LeadQuestion.Priority {
     }
 }
 
+/// Holding a lead's question (its timer stops). Set where the window's views are made, so every stack of the
+/// lead's questions (the chat, the Team tab) can hold one.
+private struct HoldLeadQuestionKey: EnvironmentKey {
+    static let defaultValue: (LeadQuestion) -> Void = { _ in }
+}
+
+extension EnvironmentValues {
+    var holdLeadQuestion: (LeadQuestion) -> Void {
+        get { self[HoldLeadQuestionKey.self] }
+        set { self[HoldLeadQuestionKey.self] = newValue }
+    }
+}
+
+/// "8 min", "45 s": what's left of a question's timer, rounded up (a timer at 7:42 is going "in 8 min").
+func timeLeft(_ seconds: Double) -> String {
+    seconds >= 60 ? "\(Int((seconds / 60).rounded(.up))) min" : "\(max(1, Int(seconds.rounded(.up)))) s"
+}
+
 /// "1 report waiting", "3 reports waiting"; nothing for none.
 func reportsWaiting(_ count: Int) -> String? { count > 0 ? "\(count) report\(count == 1 ? "" : "s") waiting" : nil }
 
@@ -126,8 +144,8 @@ func reportsWaiting(_ count: Int) -> String? { count > 0 ? "\(count) report\(cou
 func questionCount(_ count: Int) -> String { "\(count) question\(count == 1 ? "" : "s") for you" }
 
 /// The lead's questions as one stack (see `LeadBoard.questionStack`): the open ones, most important first, each
-/// answered on its own (the answer goes to the lead without stopping it), then the ones it withdrew lately as dim
-/// lines.
+/// answered on its own (the answer goes to the lead without stopping it), then the ones it withdrew lately and the
+/// ones it went ahead on when their timer ran out, as dim lines.
 struct LeadQuestionStack: View {
     let questions: [LeadQuestion]
     /// What became of answers that didn't land as answers, by question id.
@@ -166,12 +184,13 @@ private struct LeadQuestionCard: View {
     @State var showHistory: Bool
     /// The answer being written: kept through a revision, and through a withdrawal (to send anyway or discard).
     @State var text: String
+    @Environment(\.holdLeadQuestion) private var hold
 
     var body: some View {
-        if question.state == .withdrawn {
-            withdrawn
-        } else {
-            card
+        switch question.state {
+        case .withdrawn: withdrawn
+        case .autoDecided: decided
+        case .open, .answered: card
         }
     }
 
@@ -193,14 +212,34 @@ private struct LeadQuestionCard: View {
                 Text(why).font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             }
             if let revision = question.lastRevision { history(revision) }
+            if question.isCounting, let proposal = question.proposal, let deadline = question.decideBy {
+                countdown(proposal: proposal, deadline: deadline)
+            } else if question.heldAt != nil, let proposal = question.proposal {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "pause.circle.fill").foregroundStyle(.secondary)
+                    (Text("Held: the timer is off. The lead proposed ") + Text(proposal).fontWeight(.semibold) + Text("; it waits for your answer."))
+                        .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.system(size: 11.5))
+            }
             if !question.options.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(question.options, id: \.self) { option in
+                        let proposed = option == question.proposal
                         Button { answer(question, option) } label: {
-                            Text(option).font(.system(size: 13)).frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 12).padding(.vertical, 8)
-                                .background(RoundedRectangle(cornerRadius: 9).fill(Color.secondary.opacity(0.08)))
-                                .contentShape(Rectangle())
+                            HStack(spacing: 6) {
+                                Text(option).font(.system(size: 13, weight: proposed ? .semibold : .regular))
+                                Spacer(minLength: 4)
+                                if proposed {
+                                    Text("PROPOSED").font(.system(size: 9, weight: .bold)).foregroundStyle(Color.accentColor)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .background(RoundedRectangle(cornerRadius: 9).fill(proposed ? Color.accentColor.opacity(question.isCounting ? 0.16 : 0.08)
+                                                                                         : Color.secondary.opacity(0.08)))
+                            .overlay(RoundedRectangle(cornerRadius: 9).strokeBorder(Color.accentColor.opacity(proposed && question.isCounting ? 0.6 : 0)))
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
                     }
@@ -214,11 +253,86 @@ private struct LeadQuestionCard: View {
                     .disabled(text.trimmingCharacters(in: .whitespaces).isEmpty)
             }
             if let notice { Text(notice).font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true) }
-            Text("It keeps working while you think; the answer reaches it at its next step.").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+            if question.isCounting, let proposal = question.proposal {
+                Text("Pick another answer or hold it; if you don't, the lead goes ahead with \(proposal) at \(LeadBoard.clock(question.decideBy ?? 0)).")
+                    .font(.system(size: 10.5)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+            } else {
+                Text("It keeps working while you think; the answer reaches it at its next step.").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+            }
         }
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder((question.rank == .blocking ? Color.red : Color.accentColor).opacity(0.45)))
+    }
+
+    /// "Going with <proposal> in 8 min", a ring that empties as the time runs out, and Hold.
+    private func countdown(proposal: String, deadline: Double) -> some View {
+        let length = Double(question.decideIn ?? LeadQuestion.defaultDecideIn) * 60
+        return TimelineView(.periodic(from: .now, by: 1)) { context in
+            let left = max(0, deadline - context.date.timeIntervalSince1970)
+            HStack(spacing: 8) {
+                ZStack {
+                    Circle().stroke(Color.accentColor.opacity(0.2), lineWidth: 2.5)
+                    Circle().trim(from: 0, to: max(0, min(1, left / length)))
+                        .stroke(Color.accentColor, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                .frame(width: 15, height: 15)
+                let going = (Text("Going with ") + Text(proposal).fontWeight(.semibold) + Text(left > 0 ? " in \(timeLeft(left))" : " now"))
+                    .font(.system(size: 12.5))
+                // The seconds only where they fit on the line (not in the inspector's narrow column).
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: 8) {
+                        going.fixedSize()
+                        Text(String(format: "%d:%02d", Int(left) / 60, Int(left) % 60)).font(.system(size: 10.5).monospacedDigit())
+                            .foregroundStyle(.tertiary).fixedSize()
+                    }
+                    going.lineLimit(2)
+                }
+                Spacer(minLength: 4)
+                Button { hold(question) } label: { Label("Hold", systemImage: "pause.fill") }
+                    .controlSize(.small)
+                    .help("Stop the timer: the lead waits for your answer")
+            }
+            .padding(.horizontal, 10).padding(.vertical, 7)
+            .background(RoundedRectangle(cornerRadius: 9).fill(Color.accentColor.opacity(0.08)))
+        }
+    }
+
+    /// The timer ran out and the lead went ahead with its proposal: one line, and the other options to tell it you'd
+    /// have chosen otherwise (as a note).
+    private var decided: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor.opacity(0.8))
+                VStack(alignment: .leading, spacing: 1) {
+                    (Text("Went ahead with ") + Text(question.proposal ?? "").fontWeight(.semibold) + Text(": no answer in \(question.decideInText)"))
+                        .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
+                    Text(question.text).font(.system(size: 11)).foregroundStyle(.tertiary).lineLimit(1)
+                }
+                Spacer(minLength: 0)
+                Text(LeadBoard.clock(question.autoDecidedAt ?? 0)).font(.system(size: 10.5)).foregroundStyle(.tertiary)
+            }
+            if let notice {
+                Text(notice).font(.system(size: 11)).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+            } else if let late = question.answer {
+                Text("You answered later: \(late). The lead got it as a note.").font(.system(size: 11)).foregroundStyle(.secondary)
+            } else {
+                let others = question.options.filter { $0 != question.proposal }
+                if !others.isEmpty {
+                    HStack(spacing: 6) {
+                        Text("Rather:").font(.system(size: 11)).foregroundStyle(.secondary)
+                        ForEach(others, id: \.self) { option in
+                            Button(option) { answer(question, option) }.controlSize(.small)
+                        }
+                    }
+                    .help("Tell the lead you'd have chosen otherwise; it gets it as a note")
+                }
+            }
+        }
+        .padding(.horizontal, 12).padding(.vertical, 8)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.accentColor.opacity(0.05)))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.accentColor.opacity(0.22)))
     }
 
     /// "Updated 17:42: <note>", and the earlier wordings behind a disclosure.
@@ -309,6 +423,11 @@ private struct ClosedQuestionRow: View {
                 if let answer = question.answer {
                     Text("Answered anyway → \(answer)").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
+            } else if question.state == .autoDecided {
+                Text(question.text).font(.system(size: 12))
+                Text("→ \(question.proposal ?? "")").font(.system(size: 12, weight: .medium)).foregroundStyle(Color.accentColor)
+                Text("No answer in \(question.decideInText): the lead went ahead" + (question.answer.map { "; you answered later: \($0)" } ?? ""))
+                    .font(.system(size: 10.5)).foregroundStyle(.secondary)
             } else {
                 Text(question.wording(saw).text).font(.system(size: 12))
                 Text("→ \(question.answer ?? "")").font(.system(size: 12, weight: .medium)).foregroundStyle(Color.accentColor)

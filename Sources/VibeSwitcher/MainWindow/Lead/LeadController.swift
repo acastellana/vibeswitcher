@@ -214,13 +214,46 @@ final class LeadController: ObservableObject {
         case .answered: answerNotices[question.id] = nil
         case .withdrawn(let withdrawn):
             answerNotices[question.id] = "Withdrawn before your answer: \(withdrawn.withdrawReason ?? "no reason given"). The lead got your answer as a note."
+        case .afterAutoDecision(let decided):
+            answerNotices[question.id] = "The timer had run out: the lead went ahead with ‘\(decided.proposal ?? "")’. Your answer reached it as a note."
         case .alreadyAnswered(let answered):
-            answerNotices[question.id] = "Already answered: \(answered.answer ?? ""). Your new answer wasn't sent."
+            answerNotices[question.id] = "Already answered: \(answered.answer ?? answered.proposal ?? ""). Your new answer wasn't sent."
         case .missing:
             answerNotices[question.id] = "That question is no longer on the board. Your answer wasn't sent."
         }
         if let message = outcome.message(given: text) { deliver(message, from: .user, to: store.load(), root: root) }
         refresh()
+    }
+
+    /// You hold a question with a timer: the timer stops, it waits for your answer like any other, and the lead is
+    /// told not to go ahead.
+    func hold(_ question: LeadQuestion) {
+        guard let root = boards.first(where: { $0.value.questions.contains { $0.id == question.id } })?.key else { return }
+        let store = BoardStore(root: root)
+        do {
+            let held = try store.update { board in try board.hold(question.id) }
+            answerNotices[question.id] = nil
+            deliver("The user is holding your question \(held.short) “\(held.text)”: its timer is off, so don't go ahead with ‘\(held.proposal ?? "")’; "
+                    + "wait for their answer.", from: .user, to: store.load(), root: root)
+        } catch {
+            answerNotices[question.id] = "\(error)"
+        }
+        refresh()
+    }
+
+    /// Runs out the timers of the leads' questions (see `BoardStore.runTimers`): the lead is told to go ahead with
+    /// each proposal no one answered, once.
+    private func runTimers(_ roots: Set<String>) {
+        for root in roots {
+            let store = BoardStore(root: root)
+            guard let fired = try? store.runTimers(), !fired.isEmpty else { continue }
+            let board = store.load()
+            let project = (root as NSString).lastPathComponent
+            for (question, message) in fired {
+                deliver(message, from: .system("timer"), to: board, root: root)
+                notify("The lead of \(project) went ahead with ‘\(question.proposal ?? "")’", question.text)
+            }
+        }
     }
 
     /// Steered in while the lead works; while it's idle the message waits in its inbox and `flush` types it as soon
@@ -334,6 +367,7 @@ final class LeadController: ObservableObject {
 
     private func refresh() {
         let roots = Set(leadSessions.keys)
+        runTimers(roots)
         var loaded: [String: LeadBoard] = [:]
         for root in roots { loaded[root] = BoardStore(root: root).load() }
         if loaded != boards { boards = loaded }
@@ -342,7 +376,8 @@ final class LeadController: ObservableObject {
         for (root, board) in loaded {
             for question in board.openQuestions where seenQuestions.insert("\(question.id)#\(question.version)").inserted {
                 let project = (root as NSString).lastPathComponent
-                notify(question.version > 1 ? "The lead of \(project) updated a question" : "The lead of \(project) asks", question.text)
+                let timer = question.isCounting ? "Going with ‘\(question.proposal ?? "")’ in \(question.decideInText) unless you answer: " : ""
+                notify(question.version > 1 ? "The lead of \(project) updated a question" : "The lead of \(project) asks", timer + question.text)
             }
             witness(root: root, board: board)
         }

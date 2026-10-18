@@ -46,14 +46,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             guard delta != 0 else { return }
             self?.sendKeys(Array(repeating: delta > 0 ? [27, 91, 67] : [27, 91, 68], count: abs(delta)).flatMap { $0 })
         },
-        showTerminal: { [weak self] in self?.model.showsChat = false }))
+        showTerminal: { [weak self] in self?.model.showsChat = false })
+        .environment(\.holdLeadQuestion) { [weak leads] question in leads?.hold(question) })
     }
 
     private func mountViews() {
         guard !mounted else { return }
         mounted = true
         sidebarHost.rootView = AnyView(SessionListView(model: model, leads: leads, actions: actions))
-        inspectorHost.rootView = AnyView(InspectorView(model: model, host: host, leads: leads))
+        inspectorHost.rootView = AnyView(InspectorView(model: model, host: host, leads: leads)
+            .environment(\.holdLeadQuestion) { [weak leads] question in leads?.hold(question) })
         headerHost.rootView = AnyView(SessionHeaderView(model: model, host: host, actions: actions))
         endedHost.rootView = AnyView(EndedBar(model: model, actions: actions))
         chatHost.rootView = makeChat()

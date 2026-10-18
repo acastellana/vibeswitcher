@@ -270,7 +270,12 @@ public enum LeadPrompts {
         the user what you set. Don't ask the user to edit workflow.md.
         1. Understand what the user wants. Ask only what you truly need (direction, product choices, anything risky or \
         irreversible) with ask_user. It doesn't block: keep working while the user answers; the answer arrives as a \
-        message.
+        message. For a reversible choice, prefer proposing your answer with a timer (ask_user with proposal, one of \
+        the options, and decide_in minutes, 10 by default): the user can pick another option or hold it, and if no \
+        answer comes in time you get a message to go ahead with your proposal, recorded as your decision. Until that \
+        message, don't act on it. Never put a timer on a blocking question, on merging a sensitive path, on deleting \
+        or discarding work, or on anything outward-facing (publishing, pushing, sending): ask_user refuses those, and \
+        they wait for the user's say.
         2. Break the work into tasks on the board (add_task), each with a contract: a goal, acceptance checks that can \
         be run or seen, boundaries (which files or areas, what not to touch) and the context a fresh worker needs.
         3. Start workers (start_worker) only for tasks that don't depend on each other, at most \(workflow.maxWorkers) \
