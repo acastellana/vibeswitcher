@@ -20,7 +20,7 @@ struct FastExitTests {
             }
             lock.lock(); sessions[i] = session; lock.unlock()
         }
-        _ = eventually(timeout: 8) { probes.allSatisfy { $0.lastChange?.exit != nil } }
+        _ = eventually { probes.allSatisfy { $0.lastChange?.exit != nil } }
         let noExit = probes.indices.filter { probes[$0].lastChange?.exit?.status != 3 }
         let noOutput = probes.indices.filter { !probes[$0].text.contains("quick-\($0)") }
         #expect(noExit.isEmpty, "no exit code: \(noExit.map { "\($0):\(String(describing: probes[$0].lastChange?.exit?.status)) out=\(probes[$0].text.debugDescription)" })")

@@ -228,7 +228,7 @@ struct StyledScreenHostTests {
     @Test func theHostAnswersWithHowTheScreenIsDrawn() throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        let session = try client.spawn("printf 'typed \\033[2mfaint\\033[22m\\n'; sleep 5")
+        let session = try client.spawn("printf 'typed \\033[2mfaint\\033[22m\\n'; \(keepRunning)")
         var screen: LeadDelivery.Screen?
         #expect(eventually {
             screen = HostCall.styledScreen(session.id, socket: host.socket)
@@ -243,19 +243,21 @@ struct StyledScreenHostTests {
     @Test func anOlderHostGivesThePlainScreen() throws {
         let path = scratchSocketPath()
         let listener = try UnixSocket.listen(path: path)
-        defer {
-            close(listener)
-            unlink(path)
-        }
+        // It answers every connection until the test is done (a busy Mac can make a call give up and ask again), and
+        // closes its socket itself then, so it never accepts on a number handed out again since.
+        let testDone = Flag()
+        defer { testDone.set() }
         Thread.detachNewThread {
-            for _ in 0..<2 {
-                var fd: Int32 = -1
-                let deadline = Date().addingTimeInterval(5)
-                while fd < 0, Date() < deadline {
-                    fd = accept(listener, nil, nil)
-                    if fd < 0 { usleep(5_000) }
+            defer {
+                close(listener)
+                unlink(path)
+            }
+            while !testDone.isSet {
+                let fd = accept(listener, nil, nil)
+                guard fd >= 0 else {
+                    usleep(5_000)
+                    continue
                 }
-                guard fd >= 0 else { return }
                 _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) & ~O_NONBLOCK)
                 func answer(_ seq: Int, _ event: HostEvent) {
                     guard let payload = try? HostCoding.encode(HostEventEnvelope(replyTo: seq, event: event)) else { return }
@@ -283,10 +285,21 @@ struct StyledScreenHostTests {
                         }
                     }
                 }
-                usleep(50_000)
+                // Closed once the caller has hung up: closing with its request unread could reset the answer away.
+                while read(fd, &buffer, buffer.count) > 0 {}
                 close(fd)
             }
         }
-        #expect(HostCall.styledScreen(UUID(), socket: path) == LeadDelivery.Screen(text: "❯ plain", runs: nil))
+        // Each call gives up after its own 10 s; it's asked until one is answered.
+        #expect(eventually { HostCall.styledScreen(UUID(), socket: path) == LeadDelivery.Screen(text: "❯ plain", runs: nil) })
     }
+}
+
+/// A flag set from one thread and read from another.
+final class Flag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+
+    var isSet: Bool { lock.withLock { value } }
+    func set() { lock.withLock { value = true } }
 }

@@ -91,8 +91,9 @@ struct HostedSessionTests {
 
     @Test func inputReachesTheProgram() throws {
         let probe = SessionProbe()
-        let session = try start("read line; echo got:$line", probe: probe)
-        Thread.sleep(forTimeInterval: 0.3)
+        // Typed once it's reading (what's typed while the shell starts up may be flushed).
+        let session = try start("echo reading; read line; echo got:$line", probe: probe)
+        #expect(eventually { probe.text.contains("reading") }, "\(probe.diagnosis(session))")
         probe.queue.sync { session.write(Data("hello\r".utf8)) }
         #expect(eventually { probe.text.contains("got:hello") }, "\(probe.diagnosis(session))")
         probe.queue.sync { session.close() }
@@ -109,7 +110,7 @@ struct HostedSessionTests {
         #expect(eventually { probe.text.contains("winch") }, "\(probe.diagnosis(session))")
         #expect(probe.queue.sync { (session.info.cols, session.info.rows) } == (100, 30))
         probe.queue.sync { session.terminate() }
-        #expect(eventually(timeout: 8) { probe.lastChange?.exit != nil })
+        #expect(eventually { probe.lastChange?.exit != nil })
         probe.queue.sync { session.close() }
     }
 
@@ -133,18 +134,19 @@ struct HostedSessionTests {
     /// in its own foreground group may not): it must not keep running with the terminal after "ended".
     @Test func endingStopsAProgramThatIgnoresSIGHUP() throws {
         let probe = SessionProbe()
-        let session = try start("perl -e '$SIG{HUP}=q(IGNORE); $|=1; print qq(pid=$$\\n); sleep 60'; echo after", probe: probe)
+        // It would run for longer than the test waits: gone means stopped.
+        let session = try start("perl -e '$SIG{HUP}=q(IGNORE); $|=1; print qq(pid=$$\\n); sleep 3600'; echo after", probe: probe)
         #expect(eventually { probe.text.contains("pid=") }, "\(probe.diagnosis(session))")
         let pid = probe.text.components(separatedBy: "pid=").last.flatMap { Int32($0.prefix { $0.isNumber }) } ?? 0
         #expect(pid > 0)
         probe.queue.sync { session.terminate() }
-        #expect(eventually(timeout: 9) { kill(pid, 0) != 0 }, "pid \(pid) still running")
+        #expect(eventually { kill(pid, 0) != 0 }, "pid \(pid) still running")
         probe.queue.sync { session.close() }
     }
 
     @Test func titleAndScreenComeFromTheHeadlessTerminal() throws {
         let probe = SessionProbe()
-        let session = try start("printf '\\033]0;My Title\\007line one\\nline two\\n'; sleep 5", probe: probe)
+        let session = try start("printf '\\033]0;My Title\\007line one\\nline two\\n'; \(keepRunning)", probe: probe)
         #expect(eventually { probe.lastChange?.title == "My Title" }, "output: \(probe.text.debugDescription) change: \(String(describing: probe.lastChange))")
         #expect(eventually { probe.queue.sync { session.screenText() }.contains("line two") })
         let history = probe.queue.sync { session.historyText(lines: 100) }
@@ -155,15 +157,22 @@ struct HostedSessionTests {
     @Test func headlessAnswersQueriesOnlyWhenNoClient() throws {
         // A device-status query (ESC[6n) expects a cursor report (ESC[row;colR) on the program's input.
         let probe = SessionProbe()
-        let script = "stty raw -echo; printf '\\033[6n'; dd bs=1 count=6 2>/dev/null | od -c | head -1; stty sane; sleep 5"
+        let script = "stty raw -echo; printf '\\033[6n'; dd bs=1 count=6 2>/dev/null | od -c | head -1; stty sane; \(keepRunning)"
         let session = try start(script, probe: probe)
         #expect(eventually { probe.text.contains("033") }, "\(probe.diagnosis(session))")   // od printed the reply's ESC: answered
         probe.queue.sync { session.terminate(); session.close() }
 
+        // Asks once it's told to go (with a view attached by then), then reads one byte: the host's answer if it gave
+        // one, else the Z typed after the question showed (the headless terminal answers as it takes the question in).
         let probe2 = SessionProbe()
-        let attached = try start("stty raw -echo; sleep 0.5; printf '\\033[6n'; dd bs=1 count=1 2>/dev/null | od -c; stty sane", probe: probe2)
+        let attached = try start("stty raw -echo; printf 'go?'; dd bs=1 count=1 2>/dev/null >/dev/null; printf '\\033[6n'; "
+            + "dd bs=1 count=1 2>/dev/null | od -c; stty sane; \(keepRunning)", probe: probe2)
         probe2.queue.sync { attached.clientsAttached = true }   // a view would answer; the host must not
-        Thread.sleep(forTimeInterval: 1.5)
+        #expect(eventually { probe2.text.contains("go?") }, "\(probe2.diagnosis(attached))")
+        probe2.queue.sync { attached.write(Data("g".utf8)) }
+        #expect(eventually { probe2.text.contains("\u{1B}[6n") }, "\(probe2.diagnosis(attached))")
+        probe2.queue.sync { attached.write(Data("Z".utf8)) }
+        #expect(eventually { probe2.text.contains("Z") }, "\(probe2.diagnosis(attached))")
         #expect(!probe2.text.contains("033"))
         probe2.queue.sync { attached.terminate(); attached.close() }
     }
@@ -200,7 +209,7 @@ struct HostedSessionTests {
 
     @Test func replayHoldsEarlierOutput() throws {
         let probe = SessionProbe()
-        let session = try start("echo first; sleep 5", probe: probe)
+        let session = try start("echo first; \(keepRunning)", probe: probe)
         #expect(eventually { probe.text.contains("first") }, "\(probe.diagnosis(session))")
         #expect(String(decoding: probe.queue.sync { session.replay() }, as: UTF8.self).contains("first"))
         probe.queue.sync { session.terminate(); session.close() }

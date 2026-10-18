@@ -74,13 +74,20 @@ final class TestClient {
         let seq = send(.attach(id: id, cols: 80, rows: 24))
         #expect(eventually { reply(to: seq) == .attached(id: id) })
     }
+
+    /// The session's screen as the host draws it now: asks, and waits for the answer.
+    func screen(_ id: UUID) -> String? {
+        let seq = send(.screen(id: id))
+        guard eventually({ reply(to: seq) != nil }), case .screenText(_, let text) = reply(to: seq) else { return nil }
+        return text
+    }
 }
 
 struct HostServerTests {
     @Test func helloListsSessionsAndTheBuild() throws {
         let host = try TestHost(build: 42)
         let client = try TestClient(host)
-        let session = try client.spawn("sleep 5")
+        let session = try client.spawn(keepRunning)
         let seq = client.send(.hello(protocolVersion: HostProtocol.version, app: "test"))
         #expect(eventually { client.reply(to: seq) != nil })
         guard case .welcome(let version, let build, let sessions, let capabilities, let pid, let startedAt) = client.reply(to: seq) else {
@@ -97,7 +104,7 @@ struct HostServerTests {
     @Test func inputAndOutputFlowThroughAnAttachedSession() throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        let session = try client.spawn("read x; echo got:$x; sleep 5")
+        let session = try client.spawn("read x; echo got:$x; \(keepRunning)")
         client.attach(session.id)
         client.send(.input(id: session.id, bytes: Data("hi\r".utf8), reply: false))
         #expect(eventually { client.text(session.id).contains("got:hi") })
@@ -106,7 +113,7 @@ struct HostServerTests {
     @Test func reattachReplaysEarlierOutput() throws {
         let host = try TestHost()
         let first = try TestClient(host)
-        let session = try first.spawn("echo first-line; sleep 10")
+        let session = try first.spawn("echo first-line; \(keepRunning)")
         first.attach(session.id)
         #expect(eventually { first.text(session.id).contains("first-line") })
         first.close()
@@ -125,7 +132,7 @@ struct HostServerTests {
     @Test func repliesFromNonPrimaryClientAreDropped() throws {
         let host = try TestHost()
         let a = try TestClient(host)
-        let session = try a.spawn("read x; echo got:$x; sleep 5")
+        let session = try a.spawn("read x; echo got:$x; \(keepRunning)")
         a.attach(session.id)
         let b = try TestClient(host)
         b.attach(session.id)   // the latest to attach is primary
@@ -139,37 +146,39 @@ struct HostServerTests {
     @Test func slowClientGetsResyncAndProgramKeepsRunning() throws {
         let host = try TestHost()
         let watcher = try TestClient(host)
-        // Half as much again as a client may have queued: a client that never reads must overflow.
-        let session = try watcher.spawn("sleep 0.5; head -c \(ClientConnection.maxQueued * 3 / 2) /dev/zero | tr '\\0' x; echo; echo all-done; sleep 5")
+        // Half as much again as a client may have queued: a client that never reads must overflow. It starts once
+        // the slow client is attached (told to go), however long that takes.
+        let session = try watcher.spawn("read go; head -c \(ClientConnection.maxQueued * 3 / 2) /dev/zero | tr '\\0' x; echo; echo all-done; "
+            + keepRunning)
         // A client that attaches and then never reads: the host must not wait for it.
         let fd = try UnixSocket.connect(path: host.socket)
         defer { close(fd) }
         let attach = HostFrame.encode(.control, try HostCoding.encode(HostRequestEnvelope(seq: 1, request:
             .attach(id: session.id, cols: 80, rows: 24))))
         _ = attach.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+        var decoder = HostFrameDecoder()
+        var buffer = [UInt8](repeating: 0, count: 65_536)
+        /// Reads what the slow client has been sent until `done` says stop (or the hang guard passes).
+        func readSlowClient(until done: (HostEvent) -> Bool) throws -> Bool {
+            let deadline = Date().addingTimeInterval(hangGuard)
+            while Date() < deadline {
+                let count = read(fd, &buffer, buffer.count)
+                if count > 0 { decoder.append(Data(buffer[0..<count])) } else { Thread.sleep(forTimeInterval: 0.01) }
+                while let frame = try decoder.next() {
+                    if frame.kind == .control, let envelope = try? HostCoding.decode(HostEventEnvelope.self, from: frame.payload),
+                       done(envelope.event) { return true }
+                }
+            }
+            return false
+        }
+        // It reads only until it's attached, and never again.
+        #expect(try readSlowClient { $0 == .attached(id: session.id) })
+        watcher.send(.input(id: session.id, bytes: Data("go\r".utf8), reply: false))
         // The program finishes (its output wasn't blocked), which the host reports on screen. Blocked, it never
         // would; the time is the host taking in 24 MB, which a busy Mac stretches (10 s alone, 12-16 s in the suite).
-        #expect(eventually(timeout: 90) {
-            let seq = watcher.send(.screen(id: session.id))
-            Thread.sleep(forTimeInterval: 0.2)
-            if case .screenText(_, let text) = watcher.reply(to: seq) { return text.contains("all-done") }
-            return false
-        })
+        #expect(eventually { watcher.screen(session.id)?.contains("all-done") == true })
         // Now drain the slow client: somewhere in its stream is a resync.
-        var decoder = HostFrameDecoder()
-        var sawResync = false
-        var buffer = [UInt8](repeating: 0, count: 65_536)
-        let deadline = Date().addingTimeInterval(10)
-        while !sawResync, Date() < deadline {
-            let count = read(fd, &buffer, buffer.count)
-            if count > 0 { decoder.append(Data(buffer[0..<count])) } else { Thread.sleep(forTimeInterval: 0.01) }
-            while let frame = try decoder.next() {
-                if frame.kind == .control,
-                   let envelope = try? HostCoding.decode(HostEventEnvelope.self, from: frame.payload),
-                   envelope.event == .resync(id: session.id) { sawResync = true }
-            }
-        }
-        #expect(sawResync)
+        #expect(try readSlowClient { $0 == .resync(id: session.id) })
     }
 
     /// Scrollback of wide lines (3-byte box drawing) can exceed a frame: the reply is trimmed to fit,
@@ -177,18 +186,14 @@ struct HostServerTests {
     @Test func historyLargerThanAFrameIsTrimmedNotDropped() throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        let seq0 = client.send(.spawn(SpawnRequest(cwd: "/tmp", command: "perl -CS -e 'print qq(\\x{2500}) x 900, qq(\\n) for 1..2000; print qq(wide-done\\n)'; sleep 30",
+        let seq0 = client.send(.spawn(SpawnRequest(cwd: "/tmp", command: "perl -CS -e 'print qq(\\x{2500}) x 900, qq(\\n) for 1..2000; print qq(wide-done\\n)'; \(keepRunning)",
                                                    env: [:], cols: 1000, rows: 24, keepShell: false, label: "Test", agent: nil)))
         #expect(eventually { client.reply(to: seq0) != nil })
         guard case .spawned(let session) = client.reply(to: seq0) else { Issue.record("no spawn"); return }
-        #expect(eventually(timeout: 20) {
-            let seq = client.send(.screen(id: session.id))
-            Thread.sleep(forTimeInterval: 0.2)
-            if case .screenText(_, let text) = client.reply(to: seq) { return text.contains("wide-done") }
-            return false
-        })
+        // The host takes in 5 MB of wide lines first, which a busy Mac stretches (over 20 s at load 110).
+        #expect(eventually { client.screen(session.id)?.contains("wide-done") == true })
         let seq = client.send(.history(id: session.id, lines: 5_000))
-        #expect(eventually(timeout: 10) { client.reply(to: seq) != nil })
+        #expect(eventually { client.reply(to: seq) != nil })
         guard case .historyText(_, let history, _) = client.reply(to: seq) else { Issue.record("no history reply"); return }
         #expect(!history.isEmpty)
         #expect(history.utf8.count < HostFrame.maxPayload)
@@ -202,7 +207,7 @@ struct HostServerTests {
         #expect(eventually { client.reply(to: early) != nil })
         #expect(client.reply(to: early) == .error("The session is still running."))
         client.send(.kill(id: session.id))
-        #expect(eventually(timeout: 8) { client.hasEvent { if case .sessionChanged(let s) = $0 { return s.id == session.id && s.exit != nil }; return false } })
+        #expect(eventually { client.hasEvent { if case .sessionChanged(let s) = $0 { return s.id == session.id && s.exit != nil }; return false } })
         let seq = client.send(.remove(id: session.id))
         #expect(eventually { client.reply(to: seq) == .ok })
         #expect(eventually { client.hasEvent { $0 == .sessionRemoved(id: session.id) } })
@@ -220,7 +225,7 @@ struct HostServerTests {
     @Test func shutdownWaitsForLiveSessions() throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        _ = try client.spawn("sleep 30")
+        _ = try client.spawn(keepRunning)
         let seq = client.send(.shutdown)
         #expect(eventually { client.reply(to: seq) != nil })
         #expect(client.reply(to: seq) == .error("Sessions are running."))
@@ -283,10 +288,12 @@ struct HostCallTests {
         let session = try client.spawn("cat")
         client.attach(session.id)
         let started = Date()
-        try HostCall.send(.input(id: session.id, bytes: Data("ping\n".utf8), reply: false), socket: host.socket)
-        #expect(Date().timeIntervalSince(started) < 1)
+        try HostCall.send(.input(id: session.id, bytes: Data("ping\n".utf8), reply: false), socket: host.socket, timeout: hangGuard)
+        // Well inside its own timeout: it returned on the host's answer to what followed, not by giving up.
+        #expect(Date().timeIntervalSince(started) < hangGuard / 2)
         #expect(eventually { client.text(session.id).contains("ping") })
         // A request the host doesn't answer still times out through `request`, so callers must use `send` for it.
+        // (The host never answers it: a busy Mac can only make this time out, as it should.)
         #expect(throws: HostCall.Failure.self) {
             try HostCall.request(.input(id: session.id, bytes: Data(), reply: false), socket: host.socket, timeout: 0.3)
         }
@@ -297,18 +304,20 @@ struct HostCallTests {
         // waiting to go out (over ~8 KB), while the caller reported the message as typed.
         let path = FileManager.default.temporaryDirectory.appendingPathComponent("busy-\(UUID().uuidString.prefix(8)).sock").path
         let listener = try UnixSocket.listen(path: path)
-        defer {
-            close(listener)
-            unlink(path)
-        }
         final class Seen: @unchecked Sendable { var bytes = 0 }
         let seen = Seen()
         let finished = DispatchSemaphore(value: 0)
+        // The fake host closes its socket itself, so it never accepts on a number handed out again after the test.
+        let testDone = Flag()
+        defer { testDone.set() }
         Thread.detachNewThread {
-            defer { finished.signal() }
+            defer {
+                close(listener)
+                unlink(path)
+                finished.signal()
+            }
             var fd: Int32 = -1
-            let deadline = Date().addingTimeInterval(5)
-            while fd < 0, Date() < deadline {
+            while fd < 0, !testDone.isSet {
                 fd = accept(listener, nil, nil)
                 if fd < 0 { usleep(5_000) }
             }
@@ -324,7 +333,8 @@ struct HostCallTests {
                 _ = frame.withUnsafeBytes { Darwin.write(fd, $0.baseAddress, $0.count) }
             }
             while true {
-                // Busy for a while once it has said hello (another client, a big replay).
+                // Busy for a while once it has said hello (another client, a big replay). The case itself, not a
+                // wait: a busy Mac only makes it busier.
                 if welcomed, !rested {
                     rested = true
                     usleep(300_000)
@@ -345,8 +355,8 @@ struct HostCallTests {
                 }
             }
         }
-        try HostCall.send(.input(id: UUID(), bytes: Data(repeating: 0x61, count: 64_000), reply: false), socket: path)
-        #expect(finished.wait(timeout: .now() + 5) == .success)
+        try HostCall.send(.input(id: UUID(), bytes: Data(repeating: 0x61, count: 64_000), reply: false), socket: path, timeout: hangGuard)
+        #expect(finished.wait(timeout: .now() + hangGuard) == .success)
         #expect(seen.bytes == 64_000)
     }
 
@@ -373,7 +383,7 @@ struct HostCallTests {
         let app = try TestClient(host)
         let session = try app.spawn("cat")
         app.attach(session.id)
-        try HostCall.send(.input(id: session.id, bytes: Data("typed\n".utf8), reply: false), socket: host.socket)
+        try HostCall.send(.input(id: session.id, bytes: Data("typed\n".utf8), reply: false), socket: host.socket, timeout: hangGuard)
         #expect(eventually { app.text(session.id).contains("typed") })
         // The app's terminal still answers the program (its replies go through only from the primary client).
         app.send(.input(id: session.id, bytes: Data("answer\n".utf8), reply: true))
