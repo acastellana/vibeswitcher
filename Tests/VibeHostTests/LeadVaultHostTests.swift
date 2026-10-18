@@ -55,6 +55,15 @@ struct LeadVaultHostTests {
         // The lead (as the app starts it), and the lead's worker, each a session of the host.
         let lead = try app.spawn("read x; echo lead-got:$x; sleep 30")
         let script = folder.appendingPathComponent("attack.sh").path
+        let requests = folder.appendingPathComponent("requests.bin")
+        let answers = folder.appendingPathComponent("answers.bin")
+        // The worker's shell, written before it starts: it waits for `go`, then sends the requests written below.
+        try """
+        while [ ! -f '\(folder.path)/go' ]; do sleep 0.05; done
+        (cat '\(requests.path)'; sleep 1.5) | /usr/bin/nc -U '\(host.socket)' > '\(answers.path)'
+        touch '\(folder.path)/done'
+        sleep 30
+        """.write(toFile: script, atomically: true, encoding: .utf8)
         let worker = try app.spawn("sh '\(script)'")
         guard case .grant(let leadGrant) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else {
             Issue.record("no lead grant"); return
@@ -78,17 +87,9 @@ struct LeadVaultHostTests {
             .vault(.setHead(root: root, branch: "main", commit: "0123abcd")),
             .input(id: lead.id, bytes: Data("PWNED\r".utf8), reply: false),
         ])
-        let requests = folder.appendingPathComponent("requests.bin")
-        let answers = folder.appendingPathComponent("answers.bin")
         try attack.write(to: requests)
-        try """
-        while [ ! -f '\(folder.path)/go' ]; do sleep 0.05; done
-        (cat '\(requests.path)'; sleep 1.5) | /usr/bin/nc -U '\(host.socket)' > '\(answers.path)'
-        touch '\(folder.path)/done'
-        sleep 30
-        """.write(toFile: script, atomically: true, encoding: .utf8)
         FileManager.default.createFile(atPath: folder.appendingPathComponent("go").path, contents: nil)
-        #expect(eventually(timeout: 10) { FileManager.default.fileExists(atPath: folder.appendingPathComponent("done").path) })
+        #expect(eventually { FileManager.default.fileExists(atPath: folder.appendingPathComponent("done").path) })
 
         let got = try replies(Data(contentsOf: answers))
         // The host knows it's the worker (so it isn't refusing everyone)...
