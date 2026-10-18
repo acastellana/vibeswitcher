@@ -32,4 +32,19 @@ struct HostClientPlanTests {
         #expect(HostClient.plan(version: current, build: 8, bundled: 9, sessions: 2, canHandOver: false, handedOverTo: nil) == .keepOutdated)
         #expect(HostClient.plan(version: current + 1, build: 8, bundled: 9, sessions: 2, canHandOver: false, handedOverTo: nil) == .keepOutdated)
     }
+
+    /// The window's restart, asked for: the handover when the host has it; else, even when it speaks our protocol and
+    /// has live sessions (which the welcome's plan keeps), the replace, ending them.
+    @Test func aRestartOfACompatibleHostWithSessionsReplacesItUnlessItCanHandOver() {
+        #expect(HostClient.plan(version: current, build: 8, bundled: 9, sessions: 2, canHandOver: false, handedOverTo: nil) == .keepOutdated)
+        #expect(HostClient.restartPlan(canHandOver: false, live: 2) == .endAndReplace(live: 2))
+        #expect(HostClient.restartPlan(canHandOver: true, live: 2) == .handOver)
+        // Its sessions all ended: nothing to end, it's replaced at once.
+        #expect(HostClient.restartPlan(canHandOver: false, live: 0) == .endAndReplace(live: 0))
+    }
+
+    /// Nothing to restart unless the host is outdated.
+    @Test func noRestartIsOfferedWithoutAnOutdatedHost() {
+        #expect(HostClient().restartOffer == nil)
+    }
 }

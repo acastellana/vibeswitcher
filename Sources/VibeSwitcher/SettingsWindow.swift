@@ -17,7 +17,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var watching = false
 
     init(preferences: Preferences, setup: SetupModel, phoneAccess: PhoneAccess,
-         recentProjects: @escaping () -> [String], showWelcome: @escaping () -> Void) {
+         recentProjects: @escaping () -> [String], showWelcome: @escaping () -> Void, host: HostClient? = nil) {
         self.setup = setup
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.size),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -27,7 +27,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
         window.contentView = NSHostingView(rootView: SettingsView(preferences: preferences, setup: setup, phoneAccess: phoneAccess,
                                                                   selection: selection, recentProjects: recentProjects,
-                                                                  showWelcome: showWelcome))
+                                                                  showWelcome: showWelcome, host: host))
         window.center()
     }
 
@@ -55,10 +55,11 @@ struct SettingsView: View {
     @ObservedObject var selection: SettingsSelection
     let recentProjects: () -> [String]
     let showWelcome: () -> Void
+    var host: HostClient? = nil
 
     var body: some View {
         TabView(selection: $selection.tab) {
-            GeneralSettings(preferences: preferences, setup: setup, showWelcome: showWelcome)
+            GeneralSettings(preferences: preferences, setup: setup, showWelcome: showWelcome, host: host)
                 .tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsTab.general)
             AgentsSettings(setup: setup)
                 .tabItem { Label("Agents", systemImage: "waveform.path.ecg") }.tag(SettingsTab.agents)
@@ -78,6 +79,7 @@ struct GeneralSettings: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var setup: SetupModel
     let showWelcome: () -> Void
+    var host: HostClient? = nil
 
     var body: some View {
         Form {
@@ -89,6 +91,7 @@ struct GeneralSettings: View {
             } footer: {
                 SettingsFooter("Window sessions keep running when VibeSwitcher quits or updates. Ended sessions stay listed for a day.")
             }
+            if let host { HostRestartSection(host: host) }
             Section("Menu bar") {
                 Picker("Order sessions", selection: $preferences.sessionOrder) {
                     ForEach(SessionOrder.allCases, id: \.self) { Text($0.label).tag($0) }

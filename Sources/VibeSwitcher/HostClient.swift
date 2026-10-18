@@ -375,16 +375,38 @@ final class HostClient: ObservableObject {
         }
     }
 
+    /// What restarting an outdated host does (`restartHost`), asked for from the window, the menu or Settings.
+    enum RestartPlan: Equatable {
+        /// It becomes the bundled build, every session kept.
+        case handOver
+        /// Its live sessions, in every project, are ended; then it's replaced like an empty host.
+        case endAndReplace(live: Int)
+    }
+
+    /// Whatever the host speaks and however many sessions it has: the handover when it can, else the replace.
+    static func restartPlan(canHandOver: Bool, live: Int) -> RestartPlan {
+        canHandOver ? .handOver : .endAndReplace(live: live)
+    }
+
+    /// The restart on offer: nil unless the host is outdated.
+    var restartOffer: RestartPlan? {
+        guard case .outdated = state else { return nil }
+        return Self.restartPlan(canHandOver: canHandOver, live: sessions.filter(\.isLive).count)
+    }
+
     /// Updates an outdated host: a host that can hand over becomes the bundled build with every session kept; any
-    /// other has every window session ended, then is replaced.
+    /// other has every session (in every project) ended, then is replaced.
     func restartHost() {
-        if canHandOver {
+        let live = sessions.filter(\.isLive)
+        switch Self.restartPlan(canHandOver: canHandOver, live: live.count) {
+        case .handOver:
             handedOverTo = nil
-            return handOver()
+            handOver()
+        case .endAndReplace:
+            restartWhenEnded = true
+            live.forEach { kill($0.id) }
+            if live.isEmpty { restartWhenEnded = false; replaceHost() }
         }
-        restartWhenEnded = true
-        sessions.filter(\.isLive).forEach { kill($0.id) }
-        if !sessions.contains(where: \.isLive) { restartWhenEnded = false; replaceHost() }
     }
 
     private func request(_ request: HostRequest, reply: ((HostEvent) -> Void)? = nil) {

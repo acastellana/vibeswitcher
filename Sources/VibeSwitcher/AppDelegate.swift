@@ -492,7 +492,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             settingsWindow = SettingsWindowController(
                 preferences: preferences, setup: setup, phoneAccess: phoneAccess,
                 recentProjects: { [weak self] in self?.popoverState.recentProjects.map(\.path) ?? [] },
-                showWelcome: { [weak self] in self?.showWelcome(firstRun: false) })
+                showWelcome: { [weak self] in self?.showWelcome(firstRun: false) }, host: hostClient)
         }
         loadRecentProjects()
         settingsWindow?.show(tab: tab)

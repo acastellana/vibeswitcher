@@ -5,6 +5,9 @@ import AppKit
 enum MainMenu {
     /// End Session…: ⇧⌘⌫, well away from ⌘W (which only ever closes a window), and unbound in text views.
     static let endSessionKey = String(Character(UnicodeScalar(NSBackspaceCharacter)!))
+    /// Retitled while the menu is open with what the restart does (`HostClient.RestartPlan.title`); off unless the
+    /// host is outdated.
+    static let restartHostTitle = "Restart Session Host"
 
     /// Sets the menu bar, and the menus AppKit fills in itself (the window list, the help search).
     static func install() {
@@ -40,6 +43,7 @@ enum MainMenu {
             item("About VibeSwitcher", #selector(NSApplication.orderFrontStandardAboutPanel(_:))),
             .separator(),
             item("Settings…", Selector(("showSettings:")), ","),
+            item(restartHostTitle, #selector(AppDelegate.restartSessionHost(_:))),
             .separator(),
             services,
             .separator(),

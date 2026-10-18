@@ -90,20 +90,11 @@ struct SessionHeaderView: View {
             Text("Connecting…").font(.caption).foregroundStyle(.orange)
         case .failed(let reason):
             Text(reason).font(.caption).foregroundStyle(.red).lineLimit(1)
-        case .outdated(_, let compatible):
-            let live = host.sessions.filter(\.isLive).count
-            if host.canHandOver {
-                // The automatic handover didn't happen (it failed): try again.
-                Button("Restart Session Host (keeps sessions)") { host.restartHost() }
-                    .help("Updates the session host to this app's version; the sessions keep running.")
-            } else if compatible {
-                if live > 0 {
-                    Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 11)).foregroundStyle(.tertiary)
-                        .help(live == 1 ? "An older session host runs this window's session; it's replaced once that session ends."
-                                        : "An older session host runs this window's \(live) sessions; it's replaced once they end.")
-                }
-            } else {
-                Button("Restart Session Host (ends \(live))") { host.restartHost() }
+        case .outdated:
+            // Always on offer: a host that can hand over (its automatic one failed) keeps the sessions; any other,
+            // even one that still speaks this app's protocol, ends them in all projects, after asking.
+            if let plan = host.restartOffer {
+                HostRestartButton(plan: plan) { HostRestart.confirmAndRestart(host) }
             }
         case .connected, .notRunning:
             EmptyView()
