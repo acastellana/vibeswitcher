@@ -133,9 +133,13 @@ extension LeadDelivery {
         // The first becomes the prompt (marked as its sender's) and is the only one marked delivered; the rest stay
         // first in line, and the prompt's own hook hands them to the agent with it. Not typed: all of them wait, in
         // order, for the next try, none marked delivered.
+        // A long message whose first parts it got at its steps (see `SteerReply.nextPart`): the rest, whole.
         var typedIt = false
         SteerInbox.deliver(tty: agent.tty, agentPid: agent.pid, root: root) { messages in
-            guard let first = messages.first, typeInto(typed(first.text, from: first.from)) else { return 0 }
+            guard let first = messages.first else { return 0 }
+            let text = (first.handedOver ?? 0) > 0 ? "(The rest of the long message whose first part reached you earlier.) " + first.remainingText
+                : first.text
+            guard typeInto(typed(text, from: first.from)) else { return 0 }
             typedIt = true
             return 1
         }

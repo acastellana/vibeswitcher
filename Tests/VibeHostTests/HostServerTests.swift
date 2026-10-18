@@ -436,6 +436,39 @@ struct HostCallTests {
         #expect(!client.text(session.id).contains("aaaa"))
     }
 
+    /// E-05: a lead's 30 KB message to an idle agent is typed into its terminal whole (a scratch PTY: a program that
+    /// copies what it reads to a file).
+    @Test func aLongLeadMessageIsTypedWholeIntoAnIdleSession() throws {
+        let host = try TestHost()
+        let client = try TestClient(host)
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("typed-\(UUID().uuidString.prefix(8))").path
+        defer { unlink(out) }
+        let session = try client.spawn("stty raw -echo; echo ready; exec cat > \(out)")
+        client.attach(session.id)
+        #expect(eventually { client.text(session.id).contains("ready") })
+        let brief = (0..<600).map { "Line \($0): " + String(repeating: "brief ", count: 8) }.joined(separator: "\n")
+        #expect(brief.utf8.count > 30_000)
+        let rule = String(repeating: "─", count: 40)
+        let empty = LeadDelivery.Screen(text: "\(rule)\n❯ \n\(rule)")
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("lead-\(UUID().uuidString.prefix(8))")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let agent = LeadAgent(pid: 7, tty: "ttys908", session: session.id.uuidString)
+        let delivered = try LeadDelivery.deliver(brief, from: .lead("lead"), to: agent, activity: .idle(background: nil), styledScreen: { empty },
+                                                 typeInto: { text in
+            for write in ComposerText.writes(text, bracketed: true) {
+                if write.delay > 0 { usleep(useconds_t(write.delay * 1_000_000)) }
+                guard (try? HostCall.send(.input(id: session.id, bytes: Data(write.bytes), reply: false), socket: host.socket,
+                                          timeout: hangGuard)) != nil else { return false }
+            }
+            return true
+        }, root: root)
+        #expect(delivered == .typed)
+        // As typed: a paste of the marked message (trailing spaces dropped), then Enter.
+        let typed = "\u{1b}[200~" + LeadDelivery.typed(brief, from: .lead("lead")).trimmingCharacters(in: .whitespaces) + "\u{1b}[201~\r"
+        #expect(eventually { (try? String(contentsOfFile: out, encoding: .utf8)) == typed })
+        #expect(SteerInbox.pending(tty: agent.tty, root: root).isEmpty)
+    }
+
     @Test func aConnectionRefusesToSendWhatNoFrameHolds() throws {
         let host = try TestHost()
         let client = try TestClient(host)

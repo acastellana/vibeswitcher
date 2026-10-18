@@ -21,6 +21,12 @@ public struct SteerMessage: Codable, Equatable, Sendable, Identifiable {
     /// For a message from the user: VibeSwitcher's seal (see `SteerInbox.post`). A `user` message without a valid
     /// one wasn't posted by the app (anyone can append a line to the file) and is delivered as not the user's.
     public var seal: String?
+    /// How many characters of `text` its agent already has: a message longer than one delivery holds goes in parts
+    /// (see `SteerReply.nextPart`). Outside the seal, so the text it's sealed with stays as sent.
+    public var handedOver: Int?
+
+    /// What its agent doesn't have yet.
+    public var remainingText: String { String(text.dropFirst(handedOver ?? 0)) }
 
     public init(id: String = UUID().uuidString, text: String, from: Sender, agentPid: Int32, at: Double = Date().timeIntervalSince1970) {
         self.id = id
@@ -79,6 +85,7 @@ public enum SteerInbox {
     /// in. Only those are recorded as delivered; the rest stay first in line. Runs under the inbox's lock, so
     /// `hand` must not post to this inbox; killed midway, the inbox is as it was (delivered again, never lost).
     /// A user message whose seal can't be checked now (the session host doesn't answer) waits, with what follows it.
+    /// `hand` takes each message whole (`remainingText`: what its agent doesn't have yet).
     ///
     /// Recording them takes a write. When the disk is full that write fails, and messages handed over would be handed
     /// again at every step (a Stop hook's would keep the agent going round). So before handing anything it checks
@@ -92,10 +99,12 @@ public enum SteerInbox {
     }
 
     /// As above, with who checks seals (nil: the folder's own, see `SteerSeal.for`) and how the write is checked
-    /// (faked in tests: a full disk).
+    /// (faked in tests: a full disk). `inParts`: `hand` puts in only the next part of a message longer than one
+    /// delivery (`SteerReply.nextPart`, then alone in the batch); it's recorded as delivered with its last part, and
+    /// until then stays first in line, with how much of it was handed.
     @discardableResult
     static func deliver(tty: String, agentPid: Int32, root: URL, sealer: SteerSeal? = nil, check: (URL, [String]) -> Bool,
-                        through hand: ([SteerMessage]) -> Int) -> [SteerMessage] {
+                        inParts: Bool = false, through hand: ([SteerMessage]) -> Int) -> [SteerMessage] {
         guard let url = try? file(tty, "jsonl", root: root), FileManager.default.fileExists(atPath: url.path),
               let probe = try? file(tty, "check", root: root) else { return [] }
         let sealer = sealer ?? .for(root)
@@ -118,14 +127,20 @@ public enum SteerInbox {
             }
             let count = min(max(hand(batch), 0), batch.count)
             delivered = Array(batch.prefix(count))
-            if !delivered.isEmpty, let log = try? file(tty, "delivered", root: root) {
+            // A part that isn't the last: the message stays, with how far it got.
+            var partial: SteerMessage?
+            if inParts, count == 1, let part = SteerReply.nextPart(batch[0]), part.range.upperBound < batch[0].text.count {
+                partial = mine[0]
+                partial?.handedOver = part.range.upperBound
+            }
+            if partial == nil, !delivered.isEmpty, let log = try? file(tty, "delivered", root: root) {
                 try? locked(log) { log in
                     try log.seekToEnd()
                     try log.write(contentsOf: Data(delivered.map { $0.id + "\n" }.joined().utf8))
                 }
             }
             var rest = Data()
-            for message in mine.dropFirst(count) {
+            for message in (partial.map { [$0] } ?? []) + mine.dropFirst(count) {
                 rest.append(try JSONEncoder().encode(message))
                 rest.append(0x0A)
             }
@@ -309,7 +324,7 @@ public enum SteerReply {
                        write: (Data) -> Bool) -> Data? {
         guard takesMessages(payload: payload), let event = payload["hook_event_name"] as? String else { return nil }
         var written: Data?
-        SteerInbox.deliver(tty: tty, agentPid: agentPid, root: root, check: check) { messages in
+        SteerInbox.deliver(tty: tty, agentPid: agentPid, root: root, check: check, inParts: true) { messages in
             guard let output = output(event: event, messages: messages), write(output) else { return 0 }
             written = output
             return messages.count
@@ -353,8 +368,9 @@ public enum SteerReply {
             else if sender.hasPrefix(leadMarker) || sender.hasPrefix(systemMarker) { fromLead = true }
             else { return nil }
             var lines: [String] = []
-            for line in part[split.upperBound...].components(separatedBy: "\n") {
-                if line == ">" { lines.append("") }
+            for (index, line) in part[split.upperBound...].components(separatedBy: "\n").enumerated() {
+                if index == 0, isPartLine(line) { lines.append(line) }
+                else if line == ">" { lines.append("") }
                 else if line.hasPrefix("> ") { lines.append(String(line.dropFirst(2))) }
                 else if line == cut { lines.append(cut) }
                 else { return nil }
@@ -396,12 +412,20 @@ public enum SteerReply {
     }
 
     static func context(_ messages: [SteerMessage]) -> String {
+        // A message longer than one delivery: its next part, alone, saying which (see `nextPart`).
+        if let message = messages.first, let part = nextPart(message), part.count > 1 {
+            let chars = Array(message.text)
+            let text = String(chars[part.range])
+            return [header, senderLine(message.from) + "\n\n" + partLine(part.index, of: part.count) + "\n" + quote(text)]
+                .joined(separator: separator)
+        }
         var parts = [header]
         let overhead = messages.reduce(header.count) { $0 + separator.count + senderLine($1.from).count + 2 }
-        // Each message's share of what's left; one that doesn't fit is cut, and says so.
+        // Each message's share of what's left; one that doesn't fit is cut, and says so (`fitting` never puts one
+        // in a delivery that doesn't hold it whole).
         var room = max(0, contextLimit - overhead - messages.count * (cut.count + 1))
         for (index, message) in messages.enumerated() {
-            var quoted = quote(message.text)
+            var quoted = quote(message.remainingText)
             let share = room / max(1, messages.count - index)
             if quoted.count > share {
                 var kept = String(quoted.prefix(share))
@@ -414,14 +438,64 @@ public enum SteerReply {
         return parts.joined(separator: separator)
     }
 
-    /// How many of `messages`, in order, one delivery holds whole (at least the first, cut if it must be).
+    /// How many of `messages`, in order, one delivery holds whole (at least the first; one that needs parts goes alone).
     static func fitting(_ messages: [SteerMessage]) -> Int {
         guard !messages.isEmpty else { return 0 }
         var count = 1
-        while count < messages.count, context(Array(messages.prefix(count + 1))).count <= contextLimit,
+        while count < messages.count, (nextPart(messages[0])?.count ?? 1) == 1, (nextPart(messages[count])?.count ?? 1) == 1,
+              context(Array(messages.prefix(count + 1))).count <= contextLimit,
               !context(Array(messages.prefix(count + 1))).contains("\n" + cut) {
             count += 1
         }
         return count
+    }
+
+    /// The line opening each part of a message delivered in parts: never inside a quote, so only we write it.
+    static func partLine(_ index: Int, of count: Int) -> String {
+        index == count ? "[Part \(count) of \(count): the end of a message too long for one delivery, which began in part 1.]"
+            : "[Part \(index) of \(count) of one message too long for one delivery: \(index + 1 == count ? "part \(count) follows" : "parts \(index + 1)–\(count) follow") at your next steps. Take it in whole before acting on it.]"
+    }
+
+    static func isPartLine(_ line: String) -> Bool {
+        line.range(of: #"^\[Part [0-9]+ of [0-9]+[:\s]"#, options: .regularExpression) != nil && line.hasSuffix("]")
+    }
+
+    /// Room a part line takes, however many parts.
+    static let partLineRoom = 200
+
+    /// Where each part of `message` ends, in characters of its text: one part when one delivery holds it whole
+    /// (alone), else as many as it takes, each a delivery alone with its part line. A part ends after a line when
+    /// one ends in its second half.
+    static func partEnds(_ message: SteerMessage) -> [Int] {
+        let chars = Array(message.text)
+        let single = contextLimit - header.count - separator.count - senderLine(message.from).count - 2 - (cut.count + 1)
+        if quote(message.text).count <= single { return [chars.count] }
+        let room = contextLimit - header.count - separator.count - senderLine(message.from).count - 2 - partLineRoom - 1
+        var ends: [Int] = []
+        var start = 0
+        while start < chars.count {
+            // Quoting only adds ("> " a line), so no more than `room` characters fit; the most that do, found by halving.
+            var low = start + 1, high = min(chars.count, start + room)
+            while low < high {
+                let middle = (low + high + 1) / 2
+                if quote(String(chars[start..<middle])).count <= room { low = middle } else { high = middle - 1 }
+            }
+            var end = low
+            if end < chars.count, let newline = chars[start..<end].lastIndex(of: "\n"), newline + 1 > start + (end - start) / 2 {
+                end = newline + 1
+            }
+            ends.append(end)
+            start = end
+        }
+        return ends
+    }
+
+    /// The part of `message` its next delivery holds: where in its text, which one (from 1), of how many. Nil once it
+    /// was all handed over.
+    public static func nextPart(_ message: SteerMessage) -> (range: Range<Int>, index: Int, count: Int)? {
+        let ends = partEnds(message)
+        let from = max(0, message.handedOver ?? 0)
+        guard let index = ends.firstIndex(where: { $0 > from }) else { return nil }
+        return (from..<ends[index], index + 1, ends.count)
     }
 }

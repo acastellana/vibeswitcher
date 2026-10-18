@@ -152,6 +152,82 @@ struct SteerTests {
         #expect(SteerInbox.take(tty: "ttys001", agentPid: 42, root: root).map(\.id) == ["a", "b", "c"])
     }
 
+    /// What each hook reply hands the agent: the messages in it, as the transcript would show them.
+    func answers(tty: String, root: URL, event: String = "PostToolUse", max: Int = 50) throws -> [[(text: String, fromLead: Bool)]] {
+        var replies: [[(text: String, fromLead: Bool)]] = []
+        for _ in 0..<max {
+            guard let data = SteerReply.answer(["hook_event_name": event], tty: tty, agentPid: 42, root: root, check: { _, _ in true },
+                                               write: { _ in true }) else { break }
+            let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+            let context = event == "Stop" ? object["reason"] as? String ?? ""
+                : (object["hookSpecificOutput"] as? [String: Any])?["additionalContext"] as? String ?? ""
+            #expect(context.count <= SteerReply.contextLimit)
+            replies.append(SteerReply.messages(inContext: context))
+        }
+        return replies
+    }
+
+    /// E-05: one message longer than a delivery holds (a lead's long brief) arrives whole: in labelled parts, in
+    /// order, one per step, and is marked delivered only with its last part. Nothing is cut.
+    @Test func aMessageLongerThanOneDeliveryArrivesWholeInParts() throws {
+        let root = try root()
+        let brief = (0..<600).map { "Line \($0): " + String(repeating: "brief ", count: 8) }.joined(separator: "\n")   // ~32 KB
+        #expect(brief.count > 30_000)
+        try SteerInbox.post(message(brief, from: .lead("lead"), id: "long"), tty: "ttys001", root: root)
+        try SteerInbox.post(message("and the short one after", from: .lead("lead"), id: "next"), tty: "ttys001", root: root)
+        var replies: [[(text: String, fromLead: Bool)]] = []
+        for event in ["PostToolUse", "Stop", "UserPromptSubmit", "PostToolUse", "PostToolUse", "PostToolUse"] {
+            replies += try answers(tty: "ttys001", root: root, event: event, max: 1)
+            if replies.count == 1 { #expect(SteerInbox.delivered(tty: "ttys001", root: root).isEmpty) }
+        }
+        replies += try answers(tty: "ttys001", root: root)
+        let parts = replies.dropLast()
+        #expect(parts.count >= 4)
+        #expect(parts.allSatisfy { $0.count == 1 && $0[0].fromLead })
+        // Each part says which it is, of how many; together they're the message, as it was sent.
+        let count = parts.count
+        var joined = ""
+        for (index, part) in parts.enumerated() {
+            let lines = part[0].text.components(separatedBy: "\n")
+            #expect(lines[0].hasPrefix("[Part \(index + 1) of \(count)"), "\(lines[0])")
+            joined += lines.dropFirst().joined(separator: "\n")
+        }
+        #expect(joined == brief)
+        #expect(!joined.contains(SteerReply.cut))
+        // The one after it comes next, and both are recorded delivered only now.
+        #expect(replies.last?.map(\.text) == ["and the short one after"])
+        #expect(SteerInbox.delivered(tty: "ttys001", root: root) == ["long", "next"])
+        #expect(SteerInbox.pending(tty: "ttys001", root: root).isEmpty)
+    }
+
+    /// The user's long message keeps its seal (the text isn't touched; only how much of it was handed over is) and so
+    /// comes through as the user's in every part.
+    @Test func aLongUserMessageIsTheUsersInEveryPart() throws {
+        let root = try root()
+        let text = String(repeating: "please also check the edge cases. ", count: 700)
+        try SteerInbox.post(message(text, id: "mine"), tty: "ttys001", root: root)
+        let replies = try answers(tty: "ttys001", root: root)
+        #expect(replies.count >= 2)
+        #expect(replies.allSatisfy { $0.count == 1 && !$0[0].fromLead })
+        #expect(replies.map { $0[0].text.components(separatedBy: "\n").dropFirst().joined(separator: "\n") }.joined() == text)
+    }
+
+    /// An idle agent that got the first parts is typed the rest, whole, as one prompt.
+    @Test func whatsLeftOfALongMessageIsTypedWholeToAnIdleAgent() throws {
+        let root = try root()
+        let brief = String(repeating: "0123456789", count: 3_000)
+        try SteerInbox.post(message(brief, from: .lead("lead"), id: "long"), tty: "ttys001", root: root)
+        let first = try answers(tty: "ttys001", root: root, max: 1)
+        let handed = try #require(first.first?.first?.text.components(separatedBy: "\n").dropFirst().joined(separator: "\n"))
+        var typed: [String] = []
+        let agent = LeadAgent(pid: 42, tty: "ttys001", session: nil)
+        #expect(LeadDelivery.flush(agent, betweenTurns: true, inputIsEmpty: { true }, typeInto: { typed.append($0); return true }, root: root))
+        let prompt = try #require(typed.first)
+        #expect(prompt.hasSuffix(String(brief.dropFirst(handed.count))))
+        #expect(prompt.contains("rest of"))
+        #expect(SteerInbox.delivered(tty: "ttys001", root: root) == ["long"])
+    }
+
     @Test func longMessagesAreCutToTheHookLimit() throws {
         let big = message(String(repeating: "x", count: 20_000))
         let data = try #require(SteerReply.output(event: "PostToolUse", messages: [big]))
