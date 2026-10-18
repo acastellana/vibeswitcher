@@ -294,6 +294,7 @@ final class SessionStore: ObservableObject {
             session.transcriptPath = transcripts[item.tty]
             session.hostID = window?.id
             session.agentSessionID = item.hook?.sessionId
+            session.backgroundJobs = item.backgroundJobs
             // Only the visible tab counts: a window full of session tabs sits on one desktop, but
             // you can only be looking at the selected one.
             session.windowOnCurrentDesktop = tab?.position?.desktop.map { currentDesktops.contains($0) } ?? false

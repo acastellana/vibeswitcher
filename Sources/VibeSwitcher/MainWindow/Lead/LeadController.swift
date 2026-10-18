@@ -474,8 +474,6 @@ final class LeadController: ObservableObject {
         var seen: [String: LeadWitness.Seen] = [:]
         let now = Date()
         let workers = Set(board.tasks.compactMap(\.worker))
-        // The process table, read once and only when a quiet worker's shells are in question.
-        var processes: [Int32: ProcInfo]??
         for id in board.tasks.flatMap({ [$0.worker, $0.verifier] }).compactMap({ $0 }) {
             guard let info = hosted[id] else { continue }
             let session = store.sessions.first { $0.hostID?.uuidString == id }
@@ -491,14 +489,9 @@ final class LeadController: ObservableObject {
                 if session.status != .working, case .apiError(let error) = reading.activity { apiError = (error, reading.tail?.at) }
                 if workers.contains(id) {
                     if let last = reading.progress?.lastWritten, now.timeIntervalSince1970 - last >= LeadStall.silentAfter {
-                        if processes == nil { processes = .some(ProcessTable.trySnapshot()) }
-                        if let table = processes ?? nil {
-                            shellRunning = !BackgroundJobs.jobs(forAgent: session.pid, in: table, arguments: {
-                                ProcessTable.arguments(pid: $0.pid, start: Int($0.startTime.timeIntervalSince1970), comm: $0.comm)
-                            }).isEmpty
-                        } else {
-                            shellRunning = true  // Unknown: not taken for silence.
-                        }
+                        // From the store's last scan, which reads the process table off the main thread. Reading it
+                        // here froze the window for minutes at a time on a loaded Mac (sysctl walks every process).
+                        shellRunning = !session.backgroundJobs.isEmpty
                     }
                     held = SteerInbox.pending(tty: session.tty).filter { $0.agentPid == session.pid }.min { $0.at < $1.at }
                 }

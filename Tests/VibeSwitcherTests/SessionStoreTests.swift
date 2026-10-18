@@ -72,4 +72,15 @@ struct SessionStoreTests {
         }
         #expect(publishes == 1)
     }
+
+    /// Whether a quiet worker still has a shell running is answered by the scan (off the main thread), so each
+    /// session carries its background shells: the lead's witness reads them there instead of the process table.
+    @Test func sessionsCarryTheirBackgroundShells() async throws {
+        AppStatus.enabled = false
+        defer { try? FileManager.default.removeItem(at: stateDir) }
+        let store = try store(started: Date())
+        try await refreshAndSettle(store)
+        #expect(store.sessions.first { $0.tty == "ttys971" }?.backgroundJobs.map(\.command) == ["npm run dev"])
+        #expect(store.sessions.first { $0.tty == "ttys970" }?.backgroundJobs == [])
+    }
 }

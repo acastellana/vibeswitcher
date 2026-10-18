@@ -96,6 +96,9 @@ public struct Session: Identifiable, Equatable, Sendable {
     public var inWindow: Bool { hostID != nil }
     /// The agent's own session id (from its hooks): what `--resume` takes.
     public var agentSessionID: String?
+    /// Claude only: shells still running under the agent (background commands, monitor loops) as of the last scan,
+    /// which reads the process table off the main thread; nobody on it should read that table again.
+    public var backgroundJobs: [BackgroundJob] = []
 
     public init(tty: String, agent: Agent, pid: Int32, startedAt: Date, cwd: String?, project: String, task: String?,
                 status: SessionStatus, statusSince: Date, detail: String?, hasHooks: Bool, inTerminalApp: Bool) {
