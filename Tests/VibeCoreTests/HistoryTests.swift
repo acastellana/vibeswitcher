@@ -59,6 +59,7 @@ struct ScrollbackTests {
 }
 
 struct TranscriptReaderTests {
+    let temp = Scratch()
     func jsonl(_ objects: [[String: Any]]) -> Data {
         Data(objects.map { String(decoding: try! JSONSerialization.data(withJSONObject: $0), as: UTF8.self) + "\n" }.joined().utf8)
     }
@@ -170,7 +171,7 @@ struct TranscriptReaderTests {
     }
 
     @Test func transcriptPathsMustStayInTheAgentFolders() throws {
-        let home = FileManager.default.temporaryDirectory.appendingPathComponent("vs-home-\(UUID().uuidString)")
+        let home = temp.url("vs-home")
         let projects = home.appendingPathComponent(".claude/projects/p")
         let sessions = home.appendingPathComponent(".codex/sessions/2026/10/03")
         try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)

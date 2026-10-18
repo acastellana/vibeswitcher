@@ -11,7 +11,7 @@ struct SetupTests {
     private func withSuite(_ body: (UserDefaults, URL) throws -> Void) throws {
         let name = "dev.vibeswitcher.tests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: name))
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+        let folder = scratchRoot.appendingPathComponent(name)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer {
             defaults.removePersistentDomain(forName: name)
@@ -128,7 +128,7 @@ struct SetupTests {
     }
 
     @Test func setupReadsTheLiveStateAndSaysItInWords() async throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let folder = scratchRoot.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: folder) }
         let name = "dev.vibeswitcher.tests.\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: name))

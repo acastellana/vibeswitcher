@@ -91,8 +91,9 @@ enum ClaudeScreens {
 }
 
 struct StyledScreenTests {
+    let temp = Scratch()
     func scratch() -> URL {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("styled-\(UUID().uuidString)")
+        let root = temp.url("styled")
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
     }
@@ -226,8 +227,9 @@ struct StyledScreenTests {
 /// clear_draft against Claude's grey suggestion (genswap, 10-18: 8 refusals, 4 with clear_draft on, every one a
 /// suggestion read through a session host too old to say what's dim).
 struct ClearDraftTests {
+    let temp = Scratch()
     func scratch() -> URL {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("clear-\(UUID().uuidString)")
+        let root = temp.url("clear")
         try? FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         return root
     }

@@ -5,10 +5,12 @@ import Testing
 /// What the board keeps for a task's lane: workers' checkpoints, how long it's been where it is, and the rounds of
 /// rework a failed task goes through (the lead messaging its worker, or starting a new one).
 struct LeadProgressTests: LeadTeamFixture {
-    let vault = Self.newVault()
+    let temp = Scratch()
+    let vault: LeadVault
+    init() { vault = Self.newVault(in: temp) }
 
     func repo() throws -> String {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("lead-\(UUID().uuidString)")
+        let url = temp.url("lead")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let root = url.resolvingSymlinksInPath().path
         for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: root) }

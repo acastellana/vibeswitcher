@@ -5,6 +5,7 @@ import Testing
 /// Stalled workers are noticed without the user pointing at them: from what their transcripts, shells and inboxes
 /// say, whatever their screens show.
 struct LeadStallTests {
+    let temp = Scratch()
     static func task(_ slug: String = "fix", _ status: LeadTask.Status = .running) -> LeadTask {
         var task = LeadTask(slug: slug, title: slug, contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))
         task.status = status
@@ -171,7 +172,7 @@ struct LeadStallTests {
     }
 
     @Test func subagentsWritingCountsAsActivity() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("stall-\(UUID().uuidString)")
+        let folder = temp.url("stall")
         let file = folder.appendingPathComponent("abc.jsonl")
         try FileManager.default.createDirectory(at: folder.appendingPathComponent("abc/subagents"), withIntermediateDirectories: true)
         let then = Date().timeIntervalSince1970 - 3_600
@@ -268,7 +269,7 @@ struct LeadStallTests {
     /// between turns, and the compaction made it read as working. Read as the app's flush reads it (its hooks' Stop
     /// a moment before the turn's last line, its transcript where the hooks say), it's between turns, and typed in.
     @Test func theChatLayoutWorkersWaitingMessageIsTypedByTheIdleFlush() throws {
-        let home = FileManager.default.temporaryDirectory.appendingPathComponent("stall-\(UUID().uuidString)").resolvingSymlinksInPath()
+        let home = temp.url("stall").resolvingSymlinksInPath()
         let transcript = home.appendingPathComponent(".claude/projects/-Users-albert-dev-vibeswitcher--vibeswitcher-worktrees-fix-the-chat-layout/5f0c9a1e.jsonl")
         try FileManager.default.createDirectory(at: transcript.deletingLastPathComponent(), withIntermediateDirectories: true)
         try Self.compactedWhileIdle.write(to: transcript)
@@ -456,10 +457,12 @@ struct LeadStallTests {
 
 /// status lists stalled workers first, with why; ask_lead and the lead's answer say whether one waits on the lead.
 struct LeadStallStatusTests: LeadTeamFixture {
-    let vault = Self.newVault()
+    let temp = Scratch()
+    let vault: LeadVault
+    init() { vault = Self.newVault(in: temp) }
 
     func repo() throws -> String {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("lead-\(UUID().uuidString)")
+        let url = temp.url("lead")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let root = url.resolvingSymlinksInPath().path
         for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: root) }

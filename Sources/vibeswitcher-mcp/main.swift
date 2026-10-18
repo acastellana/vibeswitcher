@@ -7,6 +7,14 @@ import Darwin
 import Foundation
 import VibeCore
 
+// `vibeswitcher-mcp --test-failures FILE`, for scripts/test-under-load.sh: the failing tests in a saved `swift test`
+// output, as the lead's tools report them; nothing printed when it shows none.
+if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--test-failures" {
+    let output = FileManager.default.contents(atPath: CommandLine.arguments[2]).map { String(decoding: $0, as: UTF8.self) } ?? ""
+    if let summary = TestFailures(output: output).summary() { print(summary) }
+    exit(0)
+}
+
 /// The real world behind the lead's tools.
 final class HostRuntime: LeadRuntime {
     var server: String {

@@ -54,7 +54,7 @@ struct LaunchPresetsTests {
     }
 
     @Test func loadFallsBackToBuiltInsAndSaveRoundTrips() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let dir = scratchRoot.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = dir.appendingPathComponent("presets.json")
@@ -72,7 +72,7 @@ struct LaunchPresetsTests {
 
     /// E-01: one bad field used to drop the whole file for the built-ins, and the next edit saved them over it.
     @Test func aBadFieldKeepsTheRestAndTheFileIsCopiedAsideFirst() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let dir = scratchRoot.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = dir.appendingPathComponent("presets.json")
@@ -127,7 +127,7 @@ struct LaunchPresetsTests {
     }
 
     @Test func aCleanFileHasNothingToSay() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let dir = scratchRoot.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: dir) }
         let file = dir.appendingPathComponent("presets.json")

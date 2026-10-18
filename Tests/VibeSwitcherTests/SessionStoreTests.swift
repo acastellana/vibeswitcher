@@ -8,7 +8,7 @@ import VibeCore
 /// popover or sidebar, and recomputes the window's sections.
 @MainActor
 struct SessionStoreTests {
-    private let stateDir = FileManager.default.temporaryDirectory.appendingPathComponent("store-tests-\(UUID().uuidString)")
+    private let stateDir = scratchRoot.appendingPathComponent("store-tests-\(UUID().uuidString)")
 
     /// A working agent and one whose turn is over with a background shell still running (its age is in the detail).
     private func store(started: Date) throws -> SessionStore {
@@ -37,20 +37,27 @@ struct SessionStoreTests {
             arguments: { $0.pid == 972 ? ["/bin/zsh", "-c", "source /h/.claude/shell-snapshots/a.sh && eval 'npm run dev' < /dev/null"] : [] }))
     }
 
+    /// The store's time: it moves only when the test says, however long the scans take.
+    private final class Clock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var time = Date()
+        var now: Date { lock.lock(); defer { lock.unlock() }; return time }
+        func advance(_ seconds: TimeInterval) { lock.lock(); time += seconds; lock.unlock() }
+    }
+
     /// Refreshes, and waits for that scan to land: it runs on the store's queue and lands back on the main thread.
-    /// The next one starts no sooner than 400 ms after this one, so the clock moves on between scans.
     private func refreshAndSettle(_ store: SessionStore) async throws {
         let before = store.scansApplied
-        let earliestNext = ContinuousClock.now + .milliseconds(400)
         store.refresh()
         #expect(await until { store.scansApplied > before })
-        try await Task.sleep(until: earliestNext)
     }
 
     @Test func scansThatFindNothingNewDontRepublish() async throws {
         AppStatus.enabled = false
         defer { try? FileManager.default.removeItem(at: stateDir) }
-        let store = try store(started: Date())
+        let clock = Clock()
+        let store = try store(started: clock.now)
+        store.clock = { clock.now }
         var publishes = 0
         let watching = store.$sessions.dropFirst().sink { _ in publishes += 1 }
         defer { watching.cancel() }
@@ -60,6 +67,7 @@ struct SessionStoreTests {
         #expect(publishes == 1)
         // Seconds later: the background shell is older, the working agent's tool has run longer; nothing shown changed.
         for _ in 0..<3 {
+            clock.advance(2)
             try await refreshAndSettle(store)
         }
         #expect(publishes == 1)

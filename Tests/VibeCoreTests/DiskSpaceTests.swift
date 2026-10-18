@@ -6,11 +6,13 @@ import Testing
 /// before the disk fills, start_worker refuses on a nearly full disk, and a full disk doesn't send an agent the same
 /// messages round and round.
 struct DiskSpaceTests: LeadTeamFixture {
-    let vault = Self.newVault()
+    let temp = Scratch()
+    let vault: LeadVault
+    init() { vault = Self.newVault(in: temp) }
     static let gb = DiskSpace.gigabyte
 
     func folder(_ name: String) throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(name)-\(UUID().uuidString)")
+        let url = temp.url(name)
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url.resolvingSymlinksInPath()
     }
@@ -222,7 +224,7 @@ struct DiskSpaceTests: LeadTeamFixture {
     }
 
     @Test func aFullDiskTellsTheAgentOnceAndThenStaysQuiet() throws {
-        let root = try FileManager.default.temporaryDirectory.appendingPathComponent("steer-\(UUID().uuidString)")
+        let root = temp.url("steer")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         for index in 1...7 {
             try SteerInbox.post(SteerMessage(id: "r\(index)", text: "report \(index)", from: .system("worker"), agentPid: 42), tty: "ttys001", root: root)
@@ -255,7 +257,7 @@ struct DiskSpaceTests: LeadTeamFixture {
     }
 
     @Test func theAppTypesTheNoticeOnceToo() throws {
-        let root = try FileManager.default.temporaryDirectory.appendingPathComponent("steer-\(UUID().uuidString)")
+        let root = temp.url("steer")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try SteerInbox.post(SteerMessage(id: "a", text: "hello", from: .lead("lead"), agentPid: 42), tty: "ttys001", root: root)
         var handed: [[String]] = []

@@ -297,7 +297,7 @@ struct TeamRowsTests {
     }
 
     @Test func aTaskAtWorkGetsItsSummaryCachedAndRedoneOnlyWhenItsTranscriptChangedThreeMinutesOn() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let folder = scratchRoot.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let path = try Self.transcript(folder, steps: 2)

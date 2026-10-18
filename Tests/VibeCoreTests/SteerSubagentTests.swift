@@ -5,6 +5,7 @@ import Testing
 /// Messages for an agent reach its main thread, never a subagent's tool result (seen live: a verifier's report for the
 /// lead landed in the WebFetch result of a background subagent the lead had started, and the lead never got it).
 struct SteerSubagentTests {
+    let temp = Scratch()
     /// Hook payloads recorded from Claude Code 2.1.302 (`claude -p`, a foreground general-purpose subagent running one
     /// Bash command), in the order they fired; paths shortened, prompts and tool results trimmed.
     static let recorded: [(name: String, json: String)] = [
@@ -24,7 +25,7 @@ struct SteerSubagentTests {
     }
 
     func root() throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("steer-sub-\(UUID().uuidString)")
+        let url = temp.url("steer-sub")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

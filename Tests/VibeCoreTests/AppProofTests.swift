@@ -21,7 +21,7 @@ struct AppProofTests {
     /// (none would be any application). `security find-generic-password -w` in a worker's shell is another program,
     /// so macOS asks you first.
     @Test func theKeychainItemIsTheAppsAlone() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("app-proof-\(UUID().uuidString)")
+        let folder = scratchRoot.appendingPathComponent("app-proof-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let password = UUID().uuidString

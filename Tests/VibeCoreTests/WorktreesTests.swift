@@ -3,9 +3,10 @@ import Testing
 @testable import VibeCore
 
 struct WorktreesTests {
+    let temp = Scratch()
     /// A repository on `main` with one commit.
     func repo() throws -> String {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("wt-\(UUID().uuidString)")
+        let url = temp.url("wt")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let root = url.resolvingSymlinksInPath().path
         for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"]] {
@@ -57,7 +58,7 @@ struct WorktreesTests {
         #expect(try String(contentsOfFile: worktree + "/a.txt", encoding: .utf8) == "worker\n")
     }
 
-    func scratch() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent("wt-scratch-\(UUID().uuidString)/merge") }
+    func scratch() -> URL { temp.url("wt-scratch").appendingPathComponent("merge") }
 
     @Test func anAuditedCommitWithoutMergesIsRebasedCommitByCommit() throws {
         let root = try repo()
@@ -285,15 +286,16 @@ struct WorktreesTests {
 }
 
 struct ExcludeTests {
+    let temp = Scratch()
     @Test func aRepositoryWhoseGitIsAFileIsExcludedToo() throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("ex-\(UUID().uuidString)")
+        let url = temp.url("ex")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let root = url.resolvingSymlinksInPath().path
         for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"], ["commit", "-q", "--allow-empty", "-m", "first"]] {
             Git.run(args, in: root)
         }
         // A worktree: its .git is a file pointing at the main repository.
-        let other = root + "-wt"
+        let other = temp.adopt(URL(fileURLWithPath: root + "-wt")).path
         Git.run(["worktree", "add", "-q", "-b", "side", other], in: root)
         try BoardStore(root: other).ensureExcluded()
         #expect(Git.run(["check-ignore", "-q", ".vibeswitcher/board.json"], in: other).ok)
@@ -301,6 +303,7 @@ struct ExcludeTests {
 }
 
 struct ShellTests {
+    let temp = Scratch()
     /// How long the children below run, in seconds: twice the hang guard, so a run that returns within the guard
     /// and a child gone within the guard after that mean the child was killed, not waited for or left to end.
     static let childRuns = Int(2 * hangGuard)
@@ -322,7 +325,7 @@ struct ShellTests {
     }
 
     @Test func aTimedOutCommandTakesItsChildrenWithIt() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("shell-\(UUID().uuidString)").path
+        let dir = temp.url("shell").path
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let run = runUntilTimedOut("sleep \(Self.childRuns) & echo $! > child; wait", in: dir)
         #expect(run.took < hangGuard)
@@ -331,7 +334,7 @@ struct ShellTests {
     }
 
     @Test func aCommandThatIgnoresTermIsKilled() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("shell-\(UUID().uuidString)").path
+        let dir = temp.url("shell").path
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         let run = runUntilTimedOut("trap '' TERM; sleep \(Self.childRuns) & echo $! > child; wait", in: dir, grace: 1)
         // It returned long before its child would have ended: the child was killed, not waited for.
@@ -341,7 +344,7 @@ struct ShellTests {
     }
 
     @Test func aChildLeftBehindByItsParentIsKilledToo() throws {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("shell-\(UUID().uuidString)").path
+        let dir = temp.url("shell").path
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         // The shell dies on TERM; the child it started ignores TERM and is left to launchd (still holding the output
         // pipe, so the call would wait for it).

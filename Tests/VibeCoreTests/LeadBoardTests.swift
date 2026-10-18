@@ -3,8 +3,9 @@ import Testing
 @testable import VibeCore
 
 struct LeadBoardTests {
+    let temp = Scratch()
     func repo() throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("board-\(UUID().uuidString)")
+        let url = temp.url("board")
         try FileManager.default.createDirectory(at: url.appendingPathComponent(".git/info"), withIntermediateDirectories: true)
         return url
     }
@@ -64,8 +65,9 @@ struct LeadBoardTests {
 }
 
 struct BoardSafetyTests {
+    let temp = Scratch()
     @Test func anUnreadableBoardIsNeverOverwritten() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("board-\(UUID().uuidString)").path
+        let root = temp.url("board").path
         let store = BoardStore(root: root)
         try store.update { $0.tasks.append(LeadTask(slug: "one", title: "One", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))) }
         let file = root + "/.vibeswitcher/board.json"
@@ -76,7 +78,7 @@ struct BoardSafetyTests {
     }
 
     @Test func aHeldLockIsReported() throws {
-        let path = FileManager.default.temporaryDirectory.appendingPathComponent("lock-\(UUID().uuidString)").path
+        let path = temp.url("lock").path
         let held = FileLock.attempt(path)
         #expect(held != nil)
         #expect(FileLock.attempt(path) == nil)
@@ -86,8 +88,9 @@ struct BoardSafetyTests {
 }
 
 struct LeadSetupTests {
+    let temp = Scratch()
     @Test func aRepositoryWithNoLeadFolderYetIsSetUp() throws {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("setup-\(UUID().uuidString)")
+        let url = temp.url("setup")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let root = url.resolvingSymlinksInPath().path
         Git.run(["init", "-q", "-b", "main"], in: root)

@@ -5,12 +5,13 @@ import Testing
 /// Findings from the history review: symlinked agent folders, non-files named .jsonl, entries without
 /// ids, pasted HTML prompts, and odd characters in the scrollback.
 struct HistoryHardeningTests {
+    let temp = Scratch()
     func jsonl(_ objects: [[String: Any]]) -> Data {
         Data(objects.map { String(decoding: try! JSONSerialization.data(withJSONObject: $0), as: UTF8.self) + "\n" }.joined().utf8)
     }
 
     func tempHome() throws -> URL {
-        let home = FileManager.default.temporaryDirectory.appendingPathComponent("vs-home-\(UUID().uuidString)")
+        let home = temp.url("vs-home")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         return home
     }

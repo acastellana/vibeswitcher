@@ -4,7 +4,8 @@ import Testing
 
 /// Reports wake an idle lead (see `LeadWake`): a fake screen and a fake terminal, a scratch inbox; no real session.
 struct LeadWakeTests {
-    func scratch() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent("wake-\(UUID().uuidString)") }
+    let temp = Scratch()
+    func scratch() -> URL { temp.url("wake") }
 
     let lead = LeadAgent(pid: 4242, tty: "ttys940", session: "lead-session")
     let idle = LeadActivity.idle(background: nil)

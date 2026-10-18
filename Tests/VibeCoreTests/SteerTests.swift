@@ -3,8 +3,9 @@ import Testing
 @testable import VibeCore
 
 struct SteerTests {
+    let temp = Scratch()
     func root() throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("steer-\(UUID().uuidString)")
+        let url = temp.url("steer")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

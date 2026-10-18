@@ -24,15 +24,21 @@ done
 shift $((OPTIND - 1))
 [[ $# -eq 2 ]] || { echo "usage: $0 [options] A.jsonl B.jsonl" >&2; exit 64; }
 
+# The scratch home goes when the bench ends (Ctrl-C too): copies of the transcripts filled the disk otherwise. What
+# the runs printed stays in .build/chat-bench-settle (replaced by the next run).
 home=$(mktemp -d "${TMPDIR:-/tmp}/chat-bench-settle.XXXXXX")
-mkdir -p "$home/.claude/projects/bench" "$home/out"
+trap 'rm -r "$home" < /dev/null' EXIT
+trap 'exit 130' INT TERM
+outputs=.build/chat-bench-settle
+[[ -d $outputs ]] && rm -r "$outputs" < /dev/null
+mkdir -p "$home/.claude/projects/bench" "$outputs/out"
 cp -c "$1" "$home/.claude/projects/bench/a.jsonl" 2>/dev/null || cp "$1" "$home/.claude/projects/bench/a.jsonl"
 cp -c "$2" "$home/.claude/projects/bench/b.jsonl" 2>/dev/null || cp "$2" "$home/.claude/projects/bench/b.jsonl"
 a="$home/.claude/projects/bench/a.jsonl" b="$home/.claude/projects/bench/b.jsonl"
 
 one() {
     local scenario=$1 width=$2 variant=$3 run=$4
-    local out="$home/out/$scenario-$width-$variant-$run.txt"
+    local out="$outputs/out/$scenario-$width-$variant-$run.txt"
     local settings=(CFFIXED_USER_HOME="$home" VIBESWITCHER_BENCH_SECONDS=10 VIBESWITCHER_BENCH_SIZE="${width}x909"
                     VIBESWITCHER_BENCH_TICKS=1 VIBESWITCHER_BENCH_UPDATES=$updates)
     [[ -n ${VIBESWITCHER_BENCH_FONT:-} ]] && settings+=(VIBESWITCHER_BENCH_FONT="$VIBESWITCHER_BENCH_FONT")
@@ -52,21 +58,21 @@ one() {
     printf '%-7s %5s %-7s #%-2s status=%s %s\n' "$scenario" "$width" "$variant" "$run" "$status" "${verdict:-no verdict}"
 }
 export -f one
-export home a b binary board updates
+export home outputs a b binary board updates
 
 for scenario in $scenarios; do for width in $widths; do for variant in $variants; do for run in $(seq 1 "$runs"); do
     echo "$scenario $width $variant $run"
-done; done; done; done | xargs -P "$jobs" -L 1 bash -c 'one "$@"' _ | tee "$home/results.txt"
+done; done; done; done | xargs -P "$jobs" -L 1 bash -c 'one "$@"' _ | tee "$outputs/results.txt"
 
 echo
 echo "per case: passing runs, and the content heights the runs settled at"
 failed=0
 for scenario in $scenarios; do for width in $widths; do for variant in $variants; do
-    lines=$(grep -E "^$scenario +$width $variant " "$home/results.txt" || true)
+    lines=$(grep -E "^$scenario +$width $variant " "$outputs/results.txt" || true)
     passed=$(grep -c "status=0 settled" <<< "$lines" || true)
     heights=$(grep -oE "settled.* height=[0-9]+" <<< "$lines" | grep -oE "[0-9]+$" | sort -u | tr '\n' ' ' || true)
     printf '%-7s %5s %-7s %2s/%s  %s\n' "$scenario" "$width" "$variant" "$passed" "$runs" "$heights"
     [[ $passed -eq $runs ]] || failed=1
 done; done; done
-echo "outputs: $home/out"
+echo "outputs: $outputs/out"
 exit $failed

@@ -69,12 +69,13 @@ extension LeadVaultHostTests {
         #expect(eventually { other.reply(to: screen) != nil })
         #expect(book.appKey == nil)
 
-        // The app's code: its key is the first, and the only one.
+        // The app's code: its key is the first, and the only one. Enrolling gets no answer: the screen asked after it
+        // on the same connection is answered once the host has handled it.
         let first = SymmetricKey(size: .bits256), second = SymmetricKey(size: .bits256)
-        _ = try viaNC(host.socket, proof: nil, [.enrollApp(key: first.data)])
+        _ = try viaNC(host.socket, proof: nil, [.enrollApp(key: first.data), .screen(id: UUID())])
         #expect(book.appKey?.data == first.data)
-        #expect(logged(sessionLog()).contains("took the app's first key"))
-        _ = try viaNC(host.socket, proof: nil, [.enrollApp(key: second.data)])
+        #expect(eventually { logged(sessionLog()).contains("took the app's first key") })
+        _ = try viaNC(host.socket, proof: nil, [.enrollApp(key: second.data), .screen(id: UUID())])
         #expect(book.appKey?.data == first.data)
         #expect(sealed(try viaNC(host.socket, proof: first, [.vault(.seal(message))])[2]))
         #expect(refused(try viaNC(host.socket, proof: second, [.vault(.seal(message))])[2]))

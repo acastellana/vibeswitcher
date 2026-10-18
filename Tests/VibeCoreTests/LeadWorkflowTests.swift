@@ -3,6 +3,7 @@ import Testing
 @testable import VibeCore
 
 struct LeadWorkflowTests {
+    let temp = Scratch()
     @Test func frontMatterSetsTheLimitsAndTheRestIsNotes() {
         let workflow = LeadWorkflow.parse("---\nmax_workers: 2\ntest_command: swift test\ninit_command: \"swift build\"\nverifier_model: sonnet\n---\nPrefer small PRs.")
         #expect(workflow.maxWorkers == 2)
@@ -23,7 +24,7 @@ struct LeadWorkflowTests {
     // MARK: Reading what's on disk (E-04)
 
     func file(_ bytes: Data) throws -> String {
-        let path = FileManager.default.temporaryDirectory.appendingPathComponent("workflow-\(UUID().uuidString).md").path
+        let path = temp.adopt(scratchRoot.appendingPathComponent("workflow-\(UUID().uuidString).md")).path
         try bytes.write(to: URL(fileURLWithPath: path))
         return path
     }
@@ -108,7 +109,7 @@ struct LeadWorkflowTests {
     // MARK: Detection
 
     func project(_ files: [String: String]) throws -> String {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("detect-\(UUID().uuidString)").path
+        let root = temp.url("detect").path
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
         for (name, text) in files { try text.write(toFile: root + "/" + name, atomically: true, encoding: .utf8) }
         return root

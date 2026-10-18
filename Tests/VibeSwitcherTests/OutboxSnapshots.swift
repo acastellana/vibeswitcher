@@ -13,7 +13,7 @@ struct OutboxSnapshots {
 
     @Test(.enabled(if: folder != nil)) func drawOutboxStrip() throws {
         let folder = try #require(Self.folder)
-        let file = FileManager.default.temporaryDirectory.appendingPathComponent("outbox-snapshot-\(UUID().uuidString).json")
+        let file = scratchRoot.appendingPathComponent("outbox-snapshot-\(UUID().uuidString).json")
         defer { try? FileManager.default.removeItem(at: file) }
         let key = "host:snapshot"
         let image = "/Users/albert/.vibeswitcher/attachments/pasted-2026-10-17-164759-3B80.png"

@@ -107,7 +107,9 @@ public final class HostedSession {
         guard let child = PTYSpawn.spawn(launcher: launcher, executable: shell, args: args, env: env, directory: request.cwd, size: &size) else {
             throw Failure.spawnFailed
         }
-        let name = ptsname(child.masterFD).map { String(cString: $0) } ?? ""
+        // ptsname_r: ptsname's buffer is shared between threads, and sessions start from several at once.
+        var buffer = [CChar](repeating: 0, count: 128)
+        let name = ptsname_r(child.masterFD, &buffer, buffer.count) == 0 ? String(cString: buffer) : ""
         let tty = name.hasPrefix("/dev/") ? String(name.dropFirst(5)) : name
         _ = fcntl(child.masterFD, F_SETFL, fcntl(child.masterFD, F_GETFL) | O_NONBLOCK)
         // Not inherited by sessions started later: another session holding this PTY open would keep it alive.

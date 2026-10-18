@@ -32,7 +32,7 @@ struct EndedSessionTests {
     /// Spawns and ends sessions on a host of its own (a process, so other tests' descriptors don't count) and
     /// counts that host's open descriptors.
     @Test func endedSessionsCloseTheirPTYs() throws {
-        let home = FileManager.default.temporaryDirectory.appendingPathComponent("vsh-home-\(UUID().uuidString.prefix(8))")
+        let home = scratchRoot.appendingPathComponent("vsh-home-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         let socket = scratchSocketPath()
         let host = Process()
@@ -43,7 +43,11 @@ struct EndedSessionTests {
         host.standardError = FileHandle.nullDevice
         try host.run()
         defer {
-            if host.isRunning { host.terminate() }
+            if host.isRunning {
+                host.terminate()
+                host.waitUntilExit()
+            }
+            unlink(socket)
             unlink(socket + ".lock")
             try? FileManager.default.removeItem(at: home)
         }

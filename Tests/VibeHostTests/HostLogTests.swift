@@ -6,7 +6,7 @@ import Testing
 /// The host's session log, on a private host with a scratch log file: what started each session, how each one
 /// ended (a signal or an exit code), and who asked to kill a session or shut the host down.
 struct HostLogTests {
-    func scratchLog() -> String { "/tmp/vsh-log-\(UUID().uuidString.prefix(8)).log" }
+    func scratchLog() -> String { "\(shortScratchRoot)/vsh-log-\(UUID().uuidString.prefix(8)).log" }
 
     func log(_ path: String) -> String { (try? String(contentsOfFile: path, encoding: .utf8)) ?? "" }
 
@@ -63,9 +63,10 @@ struct HostLogTests {
     /// The built host on a private socket, lock, log and home: a SIGTERM is logged with its sender, and still ends it.
     @Test func theHostLogsWhoSignalledIt() throws {
         let path = scratchLog(), socket = scratchSocketPath()
-        let home = FileManager.default.temporaryDirectory.appendingPathComponent("vsh-home-\(UUID().uuidString.prefix(8))")
+        let home = scratchRoot.appendingPathComponent("vsh-home-\(UUID().uuidString.prefix(8))")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
-        defer { unlink(path); unlink(socket + ".lock"); try? FileManager.default.removeItem(at: home) }
+        // The signal ends it before it can remove its socket.
+        defer { unlink(path); unlink(socket); unlink(socket + ".lock"); try? FileManager.default.removeItem(at: home) }
         let host = Process()
         host.executableURL = URL(fileURLWithPath: hostLauncher)
         host.arguments = ["--socket", socket, "--lock", socket + ".lock", "--log", path, "--idle-exit", "60"]

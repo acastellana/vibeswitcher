@@ -180,7 +180,7 @@ struct HookInstallerTests {
     /// E-13: a dotfiles user's `settings.json` is a symlink; installing used to replace the link with a plain file.
     @Test func installAndUninstallEditThroughASymlinkedSettingsFile() throws {
         let fm = FileManager.default
-        let home = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let home = scratchRoot.appendingPathComponent(UUID().uuidString)
         defer { try? fm.removeItem(at: home) }
         let dotfiles = home.appendingPathComponent("dotfiles/claude")
         try fm.createDirectory(at: dotfiles, withIntermediateDirectories: true)
@@ -212,7 +212,7 @@ struct HookInstallerTests {
 
     @Test func aLinkToAFileNotThereYetIsCreatedThereAndALoopIsAnError() throws {
         let fm = FileManager.default
-        let home = fm.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let home = scratchRoot.appendingPathComponent(UUID().uuidString)
         try fm.createDirectory(at: home, withIntermediateDirectories: true)
         defer { try? fm.removeItem(at: home) }
         let link = home.appendingPathComponent("hooks.json")

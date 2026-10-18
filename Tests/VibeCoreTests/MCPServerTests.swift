@@ -99,6 +99,7 @@ struct MCPServerTests {
 }
 
 struct StaleServerTests {
+    let temp = Scratch()
     /// The binary on disk as the tests replace it: `nil` is a missing file.
     final class Disk: @unchecked Sendable {
         var binary: BinaryWatch.Identity? = BinaryWatch.Identity(modified: 100, size: 5_000, inode: 7)
@@ -147,7 +148,7 @@ struct StaleServerTests {
     }
 
     @Test func aRealFileIsIdentifiedAndItsReplacementNoticed() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("binary-watch-\(UUID().uuidString)")
+        let folder = temp.url("binary-watch")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let binary = folder.appendingPathComponent("vibeswitcher-mcp")

@@ -161,8 +161,9 @@ struct LeadActivityTests {
 }
 
 struct LeadObserverTests {
+    let temp = Scratch()
     func scratch() -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("observer-\(UUID().uuidString)")
+        let url = temp.url("observer")
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url.resolvingSymlinksInPath()
     }
@@ -219,14 +220,15 @@ struct LeadObserverTests {
     @Test func theLaunchNameIsReadBackFromTheCommand() throws {
         let prepared = try LeadLaunch.prepare(role: .worker, root: "/tmp/r", task: "t", base: "claude", prompt: "p", start: "go",
                                               server: "/s", name: "worker-t",
-                                              folder: FileManager.default.temporaryDirectory.appendingPathComponent("launch-\(UUID().uuidString)"))
+                                              folder: temp.url("launch"))
         #expect(LeadLaunch.name(inCommand: prepared.command) == "worker-t")
         #expect(LeadLaunch.name(inCommand: "claude") == nil)
     }
 }
 
 struct LeadDeliveryByActivityTests {
-    func scratch() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent("deliver-\(UUID().uuidString)") }
+    let temp = Scratch()
+    func scratch() -> URL { temp.url("deliver") }
 
     let empty = """
     ✻ Cogitated for 10s · done 1:17 AM
@@ -435,10 +437,12 @@ struct LeadWitnessStopsAndErrorsTests {
 }
 
 struct LeadMessageToolTests: LeadTeamFixture {
-    let vault = Self.newVault()
+    let temp = Scratch()
+    let vault: LeadVault
+    init() { vault = Self.newVault(in: temp) }
 
     func repo() throws -> String {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("lead-\(UUID().uuidString)")
+        let url = temp.url("lead")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let root = url.resolvingSymlinksInPath().path
         for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: root) }

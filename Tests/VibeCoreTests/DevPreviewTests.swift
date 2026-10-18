@@ -535,11 +535,14 @@ struct PreviewProxyTests {
             PreviewProxy.Context(owner: "me@example.com", ownOrigin: "https://mac.example.ts.net:8444",
                                  siblingOrigins: Set((8443...8447).map { "https://mac.example.ts.net:\($0)" }), publicPort: 8444)
         }, redeem: { $0 == "TICKET" ? redeemed : nil }, resolve: { $0 == "TOK" ? target : nil })
-        let port: UInt16 = try await withCheckedThrowingContinuation { continuation in
-            proxy.start(port: 0, callbackQueue: .global(), onReady: { continuation.resume(returning: proxy.port!) },
+        // A busy Mac can take seconds to resolve localhost and connect; a dev server that's down still fails at once.
+        proxy.connectTimeout = hangGuard
+        // The port is read once `start` has returned (it keeps the listener then): ready can come first on a busy Mac.
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            proxy.start(port: 0, callbackQueue: .global(), onReady: { continuation.resume() },
                         onFailure: { continuation.resume(throwing: ProxyStartFailure(message: $0)) })
         }
-        return (proxy, port)
+        return (proxy, try #require(proxy.port))
     }
 
     func text(_ data: Data) -> String { String(decoding: data, as: UTF8.self) }

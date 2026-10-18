@@ -26,7 +26,7 @@ final class ScratchHostProcess {
 
     init(arguments extra: [String] = []) throws {
         // Short: a socket's path has a 104-byte limit.
-        dir = "/tmp/vsho-\(UUID().uuidString.prefix(8))"
+        dir = "\(shortScratchRoot)/vsho-\(UUID().uuidString.prefix(8))"
         home = dir + "/home"
         socket = dir + "/h.sock"
         lock = dir + "/h.lock"
@@ -222,7 +222,8 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         // The job in its own process group carried on too.
         #expect(kill(scene.background, 0) == 0 && getpgid(scene.background) == scene.background)
         // Nothing left on disk.
-        #expect(!FileManager.default.fileExists(atPath: scene.host.lock + ".handover"))
+        // Removed once the restored host has started serving, not before: a client can get here first.
+        #expect(eventually { !FileManager.default.fileExists(atPath: scene.host.lock + ".handover") })
     }
 
     @Test func aHandoverKeepsEverySession() throws {
@@ -241,7 +242,7 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         try expectCarriedOn(scene, build: scene.host.newBuild, screens: screens, counterBefore: counterBefore)
         #expect(scene.host.pid == pid)
         #expect(scene.host.runningExecutable == URL(fileURLWithPath: scene.host.newBinary).resolvingSymlinksInPath().path)
-        #expect(scene.host.log.contains("took over 5 sessions"))
+        #expect(eventually { scene.host.log.contains("took over 5 sessions") }, "\(scene.host.log)")
     }
 
     /// A session carried over by a handover still ends in the session log, and with its signal, as one started by
@@ -252,15 +253,15 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         let signalled = try scene.client.spawn("exec sleep 600"), killed = try scene.client.spawn("sleep 600")
         #expect(eventually { (ProcessTable.info(pid: signalled.childPID)?.comm ?? "") == "sleep" })
         let seq = scene.client.send(.handover(executable: scene.host.newBinary))
-        #expect(eventually(timeout: 20) { scene.client.reply(to: seq) != nil })
+        #expect(eventually { scene.client.reply(to: seq) != nil })
         #expect(scene.client.reply(to: seq) == .ok, "\(scene.host.log)")
-        #expect(eventually(timeout: 20) { scene.host.log.contains("took over") })
+        #expect(eventually { scene.host.log.contains("took over") })
 
         let (client, _, build, _, _, _, _) = try TestClient.welcomed(scene.host.socket, appKey: scene.host.appKey)
         #expect(build == scene.host.newBuild)
         kill(signalled.childPID, SIGTERM)
         client.send(.kill(id: killed.id))
-        #expect(eventually(timeout: 10) { client.latest(signalled.id)?.exit != nil && client.latest(killed.id)?.exit != nil })
+        #expect(eventually { client.latest(signalled.id)?.exit != nil && client.latest(killed.id)?.exit != nil })
         let death = try #require(client.latest(signalled.id)?.exit), kill = try #require(client.latest(killed.id)?.exit)
         #expect(death.status == 143 && death.signal == SIGTERM && death.cause == "killed by SIGTERM")
         #expect(kill.signal == SIGHUP && kill.killedBy == getpid())
@@ -342,7 +343,7 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         try expectCarriedOn(scene, build: scene.host.oldBuild, screens: screens, counterBefore: counterBefore)
         #expect(scene.host.pid == pid)
         #expect(scene.host.log.contains("couldn't take over"))
-        #expect(scene.host.log.contains("took over 5 sessions"))
+        #expect(eventually { scene.host.log.contains("took over 5 sessions") }, "\(scene.host.log)")
         // The old build's own copy, the one it started its sessions with.
         #expect(scene.host.runningExecutable?.hasSuffix("/.vibeswitcher/host/launcher-\(scene.host.oldBuild)") == true)
     }
@@ -350,7 +351,7 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
 
 struct HostHandoverStateTests {
     @Test func theStateFileIsPrivateAndReadBack() throws {
-        let path = "/tmp/vsho-state-\(UUID().uuidString.prefix(8))"
+        let path = "\(shortScratchRoot)/vsho-state-\(UUID().uuidString.prefix(8))"
         defer { unlink(path) }
         let info = HostSession(id: UUID(), tty: "ttys009", childPID: 123, cwd: "/tmp", command: "claude", label: "Claude", agent: "claude",
                                title: "⠋ Fix", startedAt: Date(timeIntervalSince1970: 1_000), cols: 100, rows: 30, exit: nil)
@@ -364,7 +365,7 @@ struct HostHandoverStateTests {
     }
 
     @Test func aStateOfAnotherFormatIsRefused() throws {
-        let path = "/tmp/vsho-state-\(UUID().uuidString.prefix(8))"
+        let path = "\(shortScratchRoot)/vsho-state-\(UUID().uuidString.prefix(8))"
         defer { unlink(path) }
         let encoder = PropertyListEncoder()
         encoder.outputFormat = .binary
@@ -378,7 +379,16 @@ struct HostHandoverStateTests {
         let secret = Data((0..<300_000).map { UInt8($0 % 251) })
         let fd = try HostHandover.SecretChannel.make(secret)
         #expect(HostHandover.isOpen(fd))
+        let channel = Self.identity(fd)
         #expect(HostHandover.SecretChannel.take(fd) == secret)
-        #expect(!HostHandover.isOpen(fd))
+        // Closed: the number may already be another test's descriptor (they run in parallel), but not the channel.
+        #expect(!HostHandover.isOpen(fd) || Self.identity(fd) != channel)
+    }
+
+    /// What the descriptor is open on (device and inode), nil when it's closed.
+    static func identity(_ fd: Int32) -> [UInt64]? {
+        var info = stat()
+        guard fstat(fd, &info) == 0 else { return nil }
+        return [UInt64(UInt32(bitPattern: info.st_dev)), info.st_ino]
     }
 }

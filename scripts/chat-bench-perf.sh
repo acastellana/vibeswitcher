@@ -23,8 +23,14 @@ while [[ $# -gt 0 && $1 != -- ]]; do builds+=("$1"); shift; done
 [[ $# -gt 1 && ${#builds[@]} -gt 0 ]] || { echo "usage: $0 [options] NAME=BINARY... -- T.jsonl..." >&2; exit 64; }
 shift
 
+# The scratch home goes when the bench ends (Ctrl-C too): copies of the transcripts filled the disk otherwise. What
+# the runs printed stays in .build/chat-bench-perf (replaced by the next run).
 home=$(mktemp -d "${TMPDIR:-/tmp}/chat-bench-perf.XXXXXX")
-mkdir -p "$home/.claude/projects/bench" "$home/out"
+trap 'rm -r "$home" < /dev/null' EXIT
+trap 'exit 130' INT TERM
+outputs=.build/chat-bench-perf
+[[ -d $outputs ]] && rm -r "$outputs" < /dev/null
+mkdir -p "$home/.claude/projects/bench" "$outputs/out"
 transcripts=()
 for path in "$@"; do
     name=$(basename "$path" .jsonl)
@@ -34,14 +40,14 @@ done
 
 for run in $(seq 1 "$runs"); do for t in "${transcripts[@]}"; do for variant in $variants; do for build in "${builds[@]}"; do
     while load=$(sysctl -n vm.loadavg | awk '{print $2}'); ! awk "BEGIN { exit !($load < $limit) }"; do sleep 5; done
-    out="$home/out/${build%%=*}~$t~$variant~$run"
+    out="$outputs/out/${build%%=*}~$t~$variant~$run"
     settings=(CFFIXED_USER_HOME="$home")
     [[ $variant != plain ]] && settings+=("VIBESWITCHER_BENCH_$variant=1")
     /usr/bin/time -l env "${settings[@]}" "${build#*=}" --chat-bench "$home/.claude/projects/bench/$t.jsonl" > "$out.txt" 2> "$out.time" || true
     echo "load=$load" > "$out.load"
 done; done; done; done
 
-python3 - "$home/out" <<'EOF'
+python3 - "$outputs/out" <<'EOF'
 import collections, glob, os, re, statistics, sys
 rows = collections.defaultdict(list)
 for path in glob.glob(sys.argv[1] + "/*.txt"):
@@ -60,4 +66,4 @@ for (t, build), r in sorted(rows.items()):
     col = lambda i, f: f"{f % statistics.median(x[i] for x in r)} / {f % max(x[i] for x in r)}"
     print(f"| {t} | {build} | {len(r)} | {col(0, '%.2f')} s | {col(1, '%.2f')} s | {col(2, '%.0f')} MB | {col(3, '%.1f')} s |")
 EOF
-echo "outputs: $home/out"
+echo "outputs: $outputs/out"

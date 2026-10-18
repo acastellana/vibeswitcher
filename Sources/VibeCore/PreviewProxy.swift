@@ -41,6 +41,9 @@ public final class PreviewProxy: @unchecked Sendable {
     private let resolve: (String) -> PreviewTarget?
     /// Whether a session token is still live, without counting as use.
     private let isLive: (String) -> Bool
+    /// How long the dev server has to accept a connection before the phone gets a 502. Set before `start`; tests
+    /// give a busy Mac longer.
+    public var connectTimeout: TimeInterval = 5
 
     public init(label: String, context: @escaping () -> Context?,
                 redeem: @escaping (String) -> (path: String, sessionToken: String, clearSite: Bool)?,
@@ -223,7 +226,7 @@ public final class PreviewProxy: @unchecked Sendable {
             }
         }
         upstream.start(queue: queue)
-        queue.asyncAfter(deadline: .now() + 5) { if !settled.value { fail() } }
+        queue.asyncAfter(deadline: .now() + connectTimeout) { if !settled.value { fail() } }
     }
 
     /// `failed`: the dev server's connection ended with an error (not a clean close).

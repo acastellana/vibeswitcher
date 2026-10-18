@@ -3,8 +3,9 @@ import Testing
 @testable import VibeCore
 
 struct ComposerHelpersTests {
+    let temp = Scratch()
     func folder() throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("composer-\(UUID().uuidString)")
+        let url = temp.url("composer")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }

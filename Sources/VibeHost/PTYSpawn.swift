@@ -26,7 +26,10 @@ public enum PTYSpawn {
         var slave: Int32 = -1
         guard openpty(&master, &slave, nil, nil, &size) == 0 else { return nil }
         _ = fcntl(master, F_SETFD, FD_CLOEXEC)
-        let name = ttyname(slave).map { String(cString: $0) }
+        // From the master (the kernel names it): ttyname's buffer is shared between threads, and on a busy Mac it
+        // can find no name yet for a terminal just made.
+        var buffer = [CChar](repeating: 0, count: 128)
+        let name = ptsname_r(master, &buffer, buffer.count) == 0 ? String(cString: buffer) : nil
         close(slave)
         guard let name else {
             close(master)

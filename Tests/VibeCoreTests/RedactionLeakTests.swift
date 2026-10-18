@@ -166,20 +166,25 @@ struct RedactionLeakTests {
     static let benign = flood("drwxr-xr-x  12 me  staff   384 Oct 17 21:27 Sources\nCompiling VibeCore Redaction.swift\n"
         + "Build complete! The quick brown fox jumps over the lazy dog.\n")
 
-    /// The best of three runs: a busy machine can stall any single one.
-    static func best(_ input: String) -> TimeInterval {
-        var best = TimeInterval.infinity
-        for _ in 0..<3 {
-            let start = Date()
+    /// What masking `benign` and `hostile` costs: the CPU time of this thread, which a busy machine keeping it
+    /// waiting doesn't add to, and the best of five runs taken in turns, so a slower core or a stall hits both alike.
+    static func costs(benign: String, hostile: String) -> (benign: TimeInterval, hostile: TimeInterval) {
+        func cost(_ input: String) -> TimeInterval {
+            let start = clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)
             _ = Redaction.secrets(in: input)
-            best = min(best, Date().timeIntervalSince(start))
+            return TimeInterval(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID) - start) / 1e9
+        }
+        var best = (benign: TimeInterval.infinity, hostile: TimeInterval.infinity)
+        for _ in 0..<5 {
+            best.benign = min(best.benign, cost(benign))
+            best.hostile = min(best.hostile, cost(hostile))
         }
         return best
     }
 
     @Test(arguments: inputs.indices) func hostileInputIsMaskedQuickly(_ index: Int) {
         let input = Self.inputs[index]
-        let benign = Self.best(Self.benign), hostile = Self.best(input)
+        let (benign, hostile) = Self.costs(benign: Self.benign, hostile: input)
         // One line per case, to compare runs.
         print("RedactionSpeed #\(index) \(input.prefix(24).debugDescription) \(String(format: "%.1f", hostile * 1000)) ms, "
             + "benign \(String(format: "%.1f", benign * 1000)) ms, \(String(format: "%.1f", hostile / benign))x")

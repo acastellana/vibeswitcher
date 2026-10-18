@@ -18,12 +18,13 @@ final class Courier {
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
     }
 
-    /// The session's command.
+    /// The session's command. Each round stays connected until the test has its replies (`stop<n>`): however long a
+    /// busy Mac takes to answer, nc doesn't hang up first.
     var command: String {
         """
         i=1; while :; do while [ ! -f '\(folder)/go'$i ]; do sleep 0.05; done; \
-        (cat '\(folder)/req'$i; sleep 1) | /usr/bin/nc -U '\(socket)' > '\(folder)/ans'$i.partial; \
-        mv '\(folder)/ans'$i.partial '\(folder)/ans'$i; i=$((i+1)); done
+        (cat '\(folder)/req'$i; while [ ! -f '\(folder)/stop'$i ]; do sleep 0.05; done) | /usr/bin/nc -U '\(socket)' > '\(folder)/ans'$i; \
+        i=$((i+1)); done
         """
     }
 
@@ -37,16 +38,21 @@ final class Courier {
         try data.write(to: URL(fileURLWithPath: "\(folder)/req\(round)"))
         FileManager.default.createFile(atPath: "\(folder)/go\(round)", contents: nil)
         let answers = "\(folder)/ans\(round)"
-        #expect(eventually { FileManager.default.fileExists(atPath: answers) })
-        var decoder = HostFrameDecoder()
-        decoder.append(try Data(contentsOf: URL(fileURLWithPath: answers)))
-        var replies: [Int: HostEvent] = [:]
-        while let frame = try decoder.next() {
-            guard frame.kind == .control, let envelope = try? HostCoding.decode(HostEventEnvelope.self, from: frame.payload),
-                  let seq = envelope.replyTo else { continue }
-            replies[seq] = envelope.event
+        func replies() throws -> [Int: HostEvent] {
+            var decoder = HostFrameDecoder()
+            decoder.append((try? Data(contentsOf: URL(fileURLWithPath: answers))) ?? Data())
+            var replies: [Int: HostEvent] = [:]
+            while let frame = try decoder.next() {
+                guard frame.kind == .control, let envelope = try? HostCoding.decode(HostEventEnvelope.self, from: frame.payload),
+                      let seq = envelope.replyTo else { continue }
+                replies[seq] = envelope.event
+            }
+            return replies
         }
-        return replies
+        let expected = repliedTo(requests)
+        #expect(eventually { (try? replies()).map { got in expected.allSatisfy { got[$0] != nil } } ?? false })
+        FileManager.default.createFile(atPath: "\(folder)/stop\(round)", contents: nil)
+        return try replies()
     }
 }
 

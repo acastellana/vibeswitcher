@@ -84,8 +84,8 @@ private let booksLock = NSLock()
 nonisolated(unsafe) private var books: [String: LeadVault.Book] = [:]
 
 extension LeadTeamFixture {
-    static func newVault() -> LeadVault {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("vault-\(UUID().uuidString)")
+    static func newVault(in temp: Scratch) -> LeadVault {
+        let folder = temp.url("vault")
         let book = LeadVault.Book()
         booksLock.lock()
         books[folder.path] = book
@@ -153,10 +153,12 @@ extension LeadTeamFixture {
 }
 
 struct LeadToolsetTests: LeadTeamFixture {
-    let vault = Self.newVault()
+    let temp = Scratch()
+    let vault: LeadVault
+    init() { vault = Self.newVault(in: temp) }
 
     func repo() throws -> String {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("lead-\(UUID().uuidString)")
+        let url = temp.url("lead")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let root = url.resolvingSymlinksInPath().path
         for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: root) }

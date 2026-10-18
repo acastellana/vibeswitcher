@@ -39,6 +39,7 @@ struct StallDetectorSleepTests {
 }
 
 struct BreadcrumbsTests {
+    let temp = Scratch()
     @Test func keepsTheLatestLines() throws {
         let crumbs = Breadcrumbs(capacity: 3)
         for index in 1...5 { crumbs.note("event \(index)") }
@@ -49,7 +50,7 @@ struct BreadcrumbsTests {
     }
 
     @Test func theLogFileStaysSmall() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("log-\(UUID().uuidString)")
+        let folder = temp.url("log")
         let crumbs = Breadcrumbs(capacity: 10, file: folder.appendingPathComponent("app.log"), maxFileBytes: 2_000)
         for index in 0..<200 { crumbs.note("a line that takes some room \(index)") }
         crumbs.flush()

@@ -410,6 +410,17 @@ swift build && swift test      # Swift Testing; works with Command Line Tools on
 ./scripts/build-app.sh --install
 ```
 
+When you add or change a host, timing or concurrency test, run `scripts/test-under-load.sh`: the whole
+suite 3 times at once beside a busy loop per core, as on a Mac running several sessions. It fails naming
+the failing tests, so a wait that only holds on an idle Mac is caught before it reaches project-lead. A
+test waits for what it waits for (`eventually`, with `hangGuard` only as a hang guard) or compares
+against a measure taken in the same run, never a fixed sleep or time. It won't start with under 15 GB
+free, stops its runs if the disk falls under 5 GB, and reports the lowest free space it saw.
+
+It also fails when a run leaves anything in its TMPDIR. Tests put scratch files under `scratchRoot`
+(`$TMPDIR`, which Foundation's `temporaryDirectory` ignores) and remove them: a suite keeps a `Scratch`
+(`let temp = Scratch()`, then `temp.url("name")`), which removes what its test made when the test ends.
+
 Run `./scripts/setup-signing.sh` once: it creates a self-signed signing identity in its own keychain
 file (`~/.vibeswitcher/signing`, your login keychain is untouched) so every rebuild keeps the same code
 identity, and trusts that certificate for code signing (your user only; macOS asks for your password).

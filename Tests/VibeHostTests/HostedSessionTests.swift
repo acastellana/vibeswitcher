@@ -181,12 +181,18 @@ struct HostedSessionTests {
     /// speak it, so the host answers even with one attached, and keeps the program's own record (not its tasks').
     @Test func answersProgramStatusQueriesAndKeepsTheStatus() throws {
         let probe = SessionProbe()
-        let script = "stty raw -echo; sleep 0.5; printf '\\033]7501;?\\033\\\\'; dd bs=1 count=10 2>/dev/null | od -c | head -1; stty sane; "
-            + "printf '\\033]7501;state=working:app=claude-code\\007'; sleep 0.3; "
-            + "printf '\\033]7501;state=blocked:app=claude-code:kind=permission:msg=QmFzaA\\033\\\\'; sleep 0.3; "
-            + "printf '\\033]7501;state=done:id=task-1\\007'; printf 'reported\\n'; read line; printf '\\033]7501;state=clear\\007'; sleep 5"
+        // It asks once the test says a view is attached (a byte), and runs until the test ends it.
+        let script = "stty raw -echo; echo ready; dd bs=1 count=1 >/dev/null 2>&1; "
+            + "printf '\\033]7501;?\\033\\\\'; dd bs=1 count=10 2>/dev/null | od -c | head -1; stty sane; "
+            + "printf '\\033]7501;state=working:app=claude-code\\007'; "
+            + "printf '\\033]7501;state=blocked:app=claude-code:kind=permission:msg=QmFzaA\\033\\\\'; "
+            + "printf '\\033]7501;state=done:id=task-1\\007'; printf 'reported\\n'; read line; printf '\\033]7501;state=clear\\007'; \(keepRunning)"
         let session = try start(script, probe: probe)
-        probe.queue.sync { session.clientsAttached = true }
+        #expect(eventually { probe.text.contains("ready") }, "\(probe.diagnosis(session))")
+        probe.queue.sync {
+            session.clientsAttached = true
+            session.write(Data("g".utf8))
+        }
         #expect(eventually { probe.text.contains("]   7   5   0   1   ;   ?") }, "\(probe.diagnosis(session))")
         #expect(eventually { probe.lastChange?.programStatus?.state == .working || probe.lastChange?.programStatus?.state == .blocked },
                 "\(probe.diagnosis(session))")
@@ -196,12 +202,17 @@ struct HostedSessionTests {
         #expect(blocked.kind == "permission" && blocked.message == "Bash" && blocked.app == "claude-code")
         probe.queue.sync { session.write(Data("\r".utf8)) }
         #expect(eventually { probe.lastChange?.programStatus == nil }, "\(probe.diagnosis(session))")
+        // Cleared by the program, which is still running.
+        #expect(probe.lastChange?.exit == nil)
         probe.queue.sync { session.terminate(); session.close() }
     }
 
     @Test func aProgramThatEndsWithoutClearingItsStatusHasNone() throws {
         let probe = SessionProbe()
-        let session = try start("printf '\\033]7501;state=working:app=claude-code\\007'; sleep 0.5; exit 1", probe: probe)
+        // It ends once the test has seen its status.
+        let session = try start("printf '\\033]7501;state=working:app=claude-code\\007'; read line; exit 1", probe: probe)
+        #expect(eventually { probe.lastChange?.programStatus?.state == .working }, "\(probe.diagnosis(session))")
+        probe.queue.sync { session.write(Data("\r".utf8)) }
         #expect(eventually { probe.lastChange?.exit != nil }, "\(probe.diagnosis(session))")
         #expect(probe.lastChange?.programStatus == nil)
         probe.queue.sync { session.close() }

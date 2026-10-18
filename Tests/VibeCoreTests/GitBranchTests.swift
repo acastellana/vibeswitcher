@@ -3,8 +3,9 @@ import Testing
 @testable import VibeCore
 
 struct GitBranchTests {
+    let temp = Scratch()
     func folder() throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("gitbranch-\(UUID().uuidString)")
+        let url = temp.url("gitbranch")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url.resolvingSymlinksInPath()
     }

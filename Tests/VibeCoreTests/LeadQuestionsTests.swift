@@ -5,10 +5,12 @@ import Testing
 /// The lead's questions as a queue: asked, revised (keeping their history), withdrawn, answered against the version
 /// the user saw, and ordered by priority then age.
 struct LeadQuestionsTests: LeadTeamFixture {
-    let vault = Self.newVault()
+    let temp = Scratch()
+    let vault: LeadVault
+    init() { vault = Self.newVault(in: temp) }
 
     func repo() throws -> String {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("questions-\(UUID().uuidString)")
+        let url = temp.url("questions")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let root = url.resolvingSymlinksInPath().path
         for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: root) }

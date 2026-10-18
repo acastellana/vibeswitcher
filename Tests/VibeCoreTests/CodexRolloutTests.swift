@@ -4,6 +4,7 @@ import Testing
 
 /// Compressed rollouts: Codex 0.157+ can write `rollout-*.jsonl.zst` (zstd), and its app server compresses cold ones.
 struct CompressedRolloutTests {
+    let temp = Scratch()
     /// A scratch Codex 0.163.0 rollout (paths shortened; its developer prompt dropped), compressed by `zstd -19`
     /// (one frame, XXH64 checksum, Huffman literals and FSE sequences).
     static let rollout = Data(base64Encoded: [
@@ -48,7 +49,7 @@ struct CompressedRolloutTests {
 
     /// A temp home with Codex's sessions folder.
     private func home() throws -> (URL, URL) {
-        let home = FileManager.default.temporaryDirectory.appendingPathComponent("rollout-\(UUID().uuidString)")
+        let home = temp.url("rollout")
         let sessions = home.appendingPathComponent(".codex/sessions/2026/10/17")
         try FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
         return (home, sessions)

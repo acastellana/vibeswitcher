@@ -99,7 +99,7 @@ struct TeamSummariesTests {
     }
 
     @Test func aTranscriptsStepsAndFingerprint() throws {
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let folder = scratchRoot.appendingPathComponent(UUID().uuidString)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: folder) }
         let path = folder.appendingPathComponent("t.jsonl").path
@@ -130,9 +130,11 @@ struct TeamSummariesTests {
     }
 
     @Test func aSlowOrFailingRunGivesNothingInTime() {
-        // Late: it would answer after twice the hang guard. Given up on, it returns long before that.
+        // Late: it would answer after twice the hang guard. Given up on, it returns long before that. Only once its
+        // sleep ends well: the family is stopped children first, and a busy Mac can let the shell go on to the echo
+        // between the sleep's signal and its own.
         let start = Date()
-        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "sleep \(Int(2 * hangGuard)); echo late"], timeout: 0.5) == nil)
+        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "sleep \(Int(2 * hangGuard)) && echo late"], timeout: 0.5) == nil)
         #expect(Date().timeIntervalSince(start) < hangGuard)
         // These end by themselves: the timeout is only a hang guard.
         #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "echo nope; exit 1"], timeout: hangGuard) == nil)
@@ -177,7 +179,7 @@ struct TeamSummariesTests {
     }
 
     @Test func aRecordedDecisionReadsBackToTheSecond() throws {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString).path
+        let root = scratchRoot.appendingPathComponent(UUID().uuidString).path
         defer { try? FileManager.default.removeItem(atPath: root) }
         let store = BoardStore(root: root)
         #expect(store.decisions().isEmpty)

@@ -26,6 +26,8 @@ final class SessionStore: ObservableObject {
     private var scanning = false
     /// Scans that have landed on the main thread, for tests to wait on one (`refresh` returns before its scan runs).
     private(set) var scansApplied = 0
+    /// The time a scan reads; tests set their own, so ages don't depend on how long a busy Mac takes.
+    var clock: @Sendable () -> Date = { Date() }
     private var rescanRequested = false
     private var forceTerminalRequested = false
 
@@ -172,9 +174,10 @@ final class SessionStore: ObservableObject {
         // While you're in Terminal, check which tab you're on every second so the "viewing" ring keeps up.
         let terminalInterval: TimeInterval =
             NSWorkspace.shared.frontmostApplication?.bundleIdentifier == TerminalBridge.bundleID ? 1.5 : 4
+        let clock = self.clock
         queue.async { [weak self] in
             guard let self else { return }
-            let now = Date()
+            let now = clock()
             let raw = self.scanner.scan(now: now)
             let transcripts = Self.transcripts(for: raw)
             // AppleScript is the expensive part; query at most every `terminalInterval` unless forced.

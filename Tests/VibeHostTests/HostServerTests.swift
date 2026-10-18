@@ -154,6 +154,7 @@ struct HostServerTests {
         let host = try TestHost()
         let config = HostServer.Config(socketPath: scratchSocketPath(), lockPath: host.lock, shell: "/bin/sh",
                                        launcher: hostLauncher, baseEnvironment: [:], hostBuild: 1)
+        defer { unlink(config.socketPath) }
         #expect(throws: HostServer.Failure.alreadyRunning) { try HostServer(config: config).start() }
     }
 
@@ -191,6 +192,8 @@ struct HostServerTests {
             let deadline = Date().addingTimeInterval(hangGuard)
             while Date() < deadline {
                 let count = read(fd, &buffer, buffer.count)
+                // Closed by the host: nothing more will come.
+                if count == 0 { return false }
                 if count > 0 { decoder.append(Data(buffer[0..<count])) } else { Thread.sleep(forTimeInterval: 0.01) }
                 while let frame = try decoder.next() {
                     if frame.kind == .control, let envelope = try? HostCoding.decode(HostEventEnvelope.self, from: frame.payload),
@@ -279,7 +282,7 @@ struct HostServerTests {
     @Test func inputBeyondTheBufferIsRefusedOutLoudNeverLost() throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        let out = FileManager.default.temporaryDirectory.appendingPathComponent("paste-\(UUID().uuidString.prefix(8))").path
+        let out = scratchRoot.appendingPathComponent("paste-\(UUID().uuidString.prefix(8))").path
         defer { unlink(out) }
         // It reads nothing until the test says go (a file appears), however long sending 3 MB takes.
         let go = out + ".go"
@@ -334,7 +337,7 @@ struct HostCallTests {
     @Test func inputLargerThanTheSocketBufferReachesABusyHost() throws {
         // E-06: `send` used to close 50 ms after queueing; a host busy for longer than that lost what was still
         // waiting to go out (over ~8 KB), while the caller reported the message as typed.
-        let path = FileManager.default.temporaryDirectory.appendingPathComponent("busy-\(UUID().uuidString.prefix(8)).sock").path
+        let path = scratchRoot.appendingPathComponent("busy-\(UUID().uuidString.prefix(8)).sock").path
         let listener = try UnixSocket.listen(path: path)
         final class Seen: @unchecked Sendable { var bytes = 0 }
         let seen = Seen()

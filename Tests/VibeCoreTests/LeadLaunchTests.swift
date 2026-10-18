@@ -3,8 +3,9 @@ import Testing
 @testable import VibeCore
 
 struct LeadLaunchTests {
+    let temp = Scratch()
     func root() throws -> String {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("launch-\(UUID().uuidString)")
+        let url = temp.url("launch")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url.path
     }
@@ -57,7 +58,7 @@ struct LeadLaunchTests {
 
     @Test func theLaunchFilesArePrivateAndHoldNoRole() throws {
         let root = try root()
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("run-\(UUID().uuidString)/verify-x")
+        let folder = temp.url("run").appendingPathComponent("verify-x")
         let launch = try LeadLaunch.prepare(role: .verifier, root: root, task: "x", base: "claude", prompt: "p", start: "Check.",
                                             server: "/s", name: "verify-x", folder: folder)
         #expect(launch.mcpFile.hasPrefix(folder.path))

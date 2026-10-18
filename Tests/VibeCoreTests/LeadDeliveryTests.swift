@@ -3,6 +3,7 @@ import Testing
 @testable import VibeCore
 
 struct LeadDeliveryTests {
+    let temp = Scratch()
     func state(_ event: String) -> HookState { HookState(agent: .claude, tty: "ttys1", lastEvent: event, lastEventAt: 0) }
 
     @Test func idleAgentsGetATypedPromptWorkingOnesASteer() {
@@ -23,7 +24,7 @@ struct LeadDeliveryTests {
         #expect(LeadDelivery.typed("SQLite", from: .user) == "SQLite")
     }
 
-    func scratch() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent("deliver-\(UUID().uuidString)") }
+    func scratch() -> URL { temp.url("deliver") }
 
     @Test func typedOnlyIntoTheEmptyBoxOfAnIdleAgent() throws {
         let root = scratch()

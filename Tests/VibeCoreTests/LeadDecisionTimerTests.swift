@@ -5,10 +5,12 @@ import Testing
 /// Decisions with a timer: the lead proposes an answer, the user can pick another or hold it, and when the timer runs
 /// out unanswered the lead is told, once, to go ahead, and it's recorded as the lead's decision.
 struct LeadDecisionTimerTests: LeadTeamFixture {
-    let vault = Self.newVault()
+    let temp = Scratch()
+    let vault: LeadVault
+    init() { vault = Self.newVault(in: temp) }
 
     func repo() throws -> String {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("timer-\(UUID().uuidString)")
+        let url = temp.url("timer")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let root = url.resolvingSymlinksInPath().path
         for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: root) }

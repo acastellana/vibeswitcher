@@ -7,7 +7,7 @@ struct ComposerOutboxTests {
     let sent = Date(timeIntervalSince1970: 1_792_258_000)
 
     func file() -> URL {
-        FileManager.default.temporaryDirectory.appendingPathComponent("outbox-\(UUID().uuidString).json")
+        scratchRoot.appendingPathComponent("outbox-\(UUID().uuidString).json")
     }
 
     /// The composer's message for this text and these images: the text, then the quoted paths.

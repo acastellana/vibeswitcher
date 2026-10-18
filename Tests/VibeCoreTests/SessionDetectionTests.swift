@@ -309,10 +309,11 @@ struct TerminalPollingCostTests {
 
 /// The scanner over a fake process table and a temporary state folder (never `~/.vibeswitcher`).
 final class SessionScannerTests {
+    let temp = Scratch()
     private let stateDir: URL
 
     init() throws {
-        stateDir = FileManager.default.temporaryDirectory.appendingPathComponent("scanner-\(UUID().uuidString)")
+        stateDir = temp.url("scanner")
         try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
     }
 

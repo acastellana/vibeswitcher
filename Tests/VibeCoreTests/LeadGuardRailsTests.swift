@@ -4,10 +4,12 @@ import Testing
 
 /// What a prompt-injected worker tries (docs/eval/security.md, F-L1 to F-L5), and that it doesn't work.
 struct LeadGuardRailsTests: LeadTeamFixture {
-    let vault = Self.newVault()
+    let temp = Scratch()
+    let vault: LeadVault
+    init() { vault = Self.newVault(in: temp) }
 
     func repo() throws -> String {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("guard-\(UUID().uuidString)")
+        let url = temp.url("guard")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let root = url.resolvingSymlinksInPath().path
         for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: root) }

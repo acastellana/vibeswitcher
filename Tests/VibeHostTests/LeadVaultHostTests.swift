@@ -9,7 +9,9 @@ import Testing
 /// script of yours could (`nc -U`), and the sealed file the host keeps.
 struct LeadVaultHostTests {
     let root = "/tmp/vault-host-repo"
-    let folder = FileManager.default.temporaryDirectory.appendingPathComponent("vault-host-\(UUID().uuidString)")
+    let temp = Scratch()
+    let folder: URL
+    init() { folder = temp.url("vault-host") }
 
     /// Frames for the host, one request each after the hello, numbered from 2.
     func frames(_ requests: [HostRequest]) throws -> Data {
@@ -31,6 +33,32 @@ struct LeadVaultHostTests {
             if let seq = envelope.replyTo { result[seq] = envelope.event }
         }
         return result
+    }
+
+    /// Whether `file` holds the host's replies to every request in `seqs`.
+    func answered(_ file: URL, _ seqs: ClosedRange<Int>) -> Bool {
+        guard let data = try? Data(contentsOf: file), let got = try? replies(data) else { return false }
+        return seqs.allSatisfy { got[$0] != nil }
+    }
+
+    /// A shell line sending `requests` to the host over `nc -U` (as any script of a worker's could), its replies into
+    /// `answers`. The connection stays open until `stop` exists, which the test makes once the replies are in: however
+    /// long a busy Mac takes to answer, nc doesn't hang up first.
+    func nc(_ host: TestHost, _ requests: URL, _ answers: URL, until stop: URL) -> String {
+        "(cat '\(requests.path)'; while [ ! -f '\(stop.path)' ]; do sleep 0.05; done) | /usr/bin/nc -U '\(host.socket)' > '\(answers.path)'"
+    }
+
+    /// `nc(…)` from this process (outside every session), once the replies to `seqs` are in.
+    func ask(_ host: TestHost, _ requests: URL, expecting seqs: ClosedRange<Int>) throws -> [Int: HostEvent] {
+        let answers = requests.appendingPathExtension("answers"), stop = requests.appendingPathExtension("stop")
+        let nc = Process()
+        nc.executableURL = URL(fileURLWithPath: "/bin/sh")
+        nc.arguments = ["-c", self.nc(host, requests, answers, until: stop)]
+        try nc.run()
+        #expect(eventually { answered(answers, seqs) })
+        FileManager.default.createFile(atPath: stop.path, contents: nil)
+        nc.waitUntilExit()
+        return try replies(Data(contentsOf: answers))
     }
 
     func screen(_ client: TestClient, _ id: UUID) -> String {
@@ -72,8 +100,25 @@ struct LeadVaultHostTests {
         }
         data.append(try frames(requests))
         input.fileHandleForWriting.write(data)
-        // The replies come in a moment; then nc's stdin ends and so does it.
-        Thread.sleep(forTimeInterval: 1.5)
+        // Once every request that's answered has its reply (however long a busy Mac takes), nc's stdin ends and so
+        // does it. Input sent without asking for a reply gets none.
+        let expected = repliedTo(requests)
+        func answeredAll() -> Bool {
+            guard let got = try? replies(received) else { return false }
+            return expected.allSatisfy { got[$0] != nil }
+        }
+        // Read without blocking, so a reply that never comes fails at the hang guard instead of hanging the run.
+        let fd = output.fileHandleForReading.fileDescriptor
+        let flags = fcntl(fd, F_GETFL)
+        _ = fcntl(fd, F_SETFL, flags | O_NONBLOCK)
+        let deadline = Date().addingTimeInterval(hangGuard)
+        var buffer = [UInt8](repeating: 0, count: 65_536)
+        while !answeredAll(), Date() < deadline {
+            let count = read(fd, &buffer, buffer.count)
+            if count > 0 { received.append(contentsOf: buffer[0..<count]) } else if count == 0 { break } else { Thread.sleep(forTimeInterval: 0.02) }
+        }
+        _ = fcntl(fd, F_SETFL, flags)
+        #expect(answeredAll(), "replies to \(expected): \((try? replies(received)) ?? [:])")
         try input.fileHandleForWriting.close()
         received.append(output.fileHandleForReading.readDataToEndOfFile())
         return try replies(received)
@@ -99,7 +144,7 @@ struct LeadVaultHostTests {
         // The worker's shell, written before it starts: it waits for `go`, then sends the requests written below.
         try """
         while [ ! -f '\(folder.path)/go' ]; do sleep 0.05; done
-        (cat '\(requests.path)'; sleep 1.5) | /usr/bin/nc -U '\(host.socket)' > '\(answers.path)'
+        \(nc(host, requests, answers, until: folder.appendingPathComponent("stop")))
         touch '\(folder.path)/done'
         sleep 30
         """.write(toFile: script, atomically: true, encoding: .utf8)
@@ -128,6 +173,8 @@ struct LeadVaultHostTests {
         ])
         try attack.write(to: requests)
         FileManager.default.createFile(atPath: folder.appendingPathComponent("go").path, contents: nil)
+        #expect(eventually { answered(answers, 2...8) })
+        FileManager.default.createFile(atPath: folder.appendingPathComponent("stop").path, contents: nil)
         #expect(eventually { FileManager.default.fileExists(atPath: folder.appendingPathComponent("done").path) })
 
         let got = try replies(Data(contentsOf: answers))
@@ -174,15 +221,7 @@ struct LeadVaultHostTests {
         try frames([.vault(.seal(SteerMessage(text: "x", from: .user, agentPid: 1))),
                     .vault(.whoami(root: root)),
                     .input(id: lead.id, bytes: Data("PWNED\r".utf8), reply: false)]).write(to: requests)
-        let nc = Process()
-        nc.executableURL = URL(fileURLWithPath: "/bin/sh")
-        nc.arguments = ["-c", "(cat '\(requests.path)'; sleep 1.5) | /usr/bin/nc -U '\(host.socket)'"]
-        let out = Pipe()
-        nc.standardOutput = out
-        try nc.run()
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        nc.waitUntilExit()
-        let got = try replies(data)
+        let got = try ask(host, requests, expecting: 2...3)
         #expect(refused(got[2]))
         #expect(got[3] == .vault(.member(nil)))
         Thread.sleep(forTimeInterval: 0.5)
@@ -210,19 +249,24 @@ struct LeadVaultHostTests {
         select(undef, undef, undef, 0.05) until -e $go;
         socket(my $s, PF_UNIX, SOCK_STREAM, 0) or die; connect($s, sockaddr_un($sock)) or die "connect: $!";
         if (fork()) { exec "/usr/bin/nc", "-lU", $listen; }
-        select(undef, undef, undef, 2.0);
+        select(undef, undef, undef, 0.05) until -S $listen;
         open(my $r, '<', $req) or die; binmode $r; my $data = do { local $/; <$r> };
         syswrite($s, $data);
         my ($out, $in) = ('', ''); vec($in, fileno($s), 1) = 1;
-        while (select(my $ready = $in, undef, undef, 1.5)) { my $n = sysread($s, my $buf, 65536); last unless $n; $out .= $buf; }
+        until (-e "$ans.stop") {
+            next unless select(my $ready = $in, undef, undef, 0.05);
+            my $n = sysread($s, my $buf, 65536); last unless $n; $out .= $buf;
+            open(my $a, '>', "$ans.partial") or die; binmode $a; print $a $out; close $a; rename "$ans.partial", $ans;
+        }
         kill 'TERM', getppid(); unlink $listen;
-        open(my $a, '>', "$ans.partial") or die; binmode $a; print $a $out; close $a; rename "$ans.partial", $ans;
         """#.write(toFile: attack, atomically: true, encoding: .utf8)
+        // Each attempt sends once its exec is done (nc listens on `listen`), and reads the replies until the test has
+        // them all (`.answers.stop`).
         let attempts = ["prompt", "late"]
+        let listens = Dictionary(uniqueKeysWithValues: attempts.map { ($0, "\(shortScratchRoot)/vsn-\(UUID().uuidString.prefix(8)).sock") })
         try attempts.map { name in
             let file = folder.appendingPathComponent(name).path
-            let listen = "/tmp/vsn-\(UUID().uuidString.prefix(8)).sock"
-            return "/usr/bin/perl '\(attack)' '\(host.socket)' '\(requests.path)' '\(file).answers' '\(file).go' '\(listen)'"
+            return "/usr/bin/perl '\(attack)' '\(host.socket)' '\(requests.path)' '\(file).answers' '\(file).go' '\(listens[name]!)'"
         }.joined(separator: "\n").appending("\nsleep 30\n").write(toFile: script, atomically: true, encoding: .utf8)
 
         let worker = try app.spawn("sh '\(script)'")
@@ -250,9 +294,13 @@ struct LeadVaultHostTests {
         for name in attempts {
             let file = folder.appendingPathComponent(name).path
             // "late": the host accepts only after the exec, when LOCAL_PEERTOKEN already names nc.
-            if name == "late" { host.server.queue.async { Thread.sleep(forTimeInterval: 1) } }
+            if name == "late" {
+                let listen = listens[name]!
+                host.server.queue.async { _ = eventually { FileManager.default.fileExists(atPath: listen) } }
+            }
             FileManager.default.createFile(atPath: file + ".go", contents: nil)
-            #expect(eventually { FileManager.default.fileExists(atPath: file + ".answers") }, "\(name)")
+            #expect(eventually { answered(URL(fileURLWithPath: file + ".answers"), 2...4) }, "\(name)")
+            FileManager.default.createFile(atPath: file + ".answers.stop", contents: nil)
             let got = try replies(Data(contentsOf: URL(fileURLWithPath: file + ".answers")))
             for seq in 2...4 { #expect(refused(got[seq]), "\(name), request \(seq): \(String(describing: got[seq]))") }
         }
