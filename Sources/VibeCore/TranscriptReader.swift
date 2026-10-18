@@ -438,11 +438,43 @@ public struct TranscriptTail: Equatable, Sendable {
         case turnOver(apiError: String?)
     }
 
+    /// Work it started in the background (a `run_in_background` shell, a background agent) whose completion
+    /// notification hasn't come yet: when its turn is over, it's waiting on these.
+    public struct Background: Equatable, Sendable {
+        /// Claude Code's id for it (the shell's task id, the agent's id), which its notification names.
+        public var id: String
+        /// What it is: the call's description, or its command.
+        public var what: String
+        public var startedAt: Double?
+
+        public init(id: String, what: String, startedAt: Double?) {
+            self.id = id
+            self.what = what
+            self.startedAt = startedAt
+        }
+
+        /// "Final swift test and two load runs, started 14:17".
+        public var text: String {
+            guard let startedAt else { return what }
+            let formatter = DateFormatter()
+            formatter.dateFormat = "HH:mm"
+            return "\(what), started \(formatter.string(from: Date(timeIntervalSince1970: startedAt)))"
+        }
+    }
+
     public var state: State
     /// When the line that says so was written.
     public var at: Double?
+    /// Its background work still running, oldest first (only what the read window shows started).
+    public var background: [Background] = []
 
     public var midTurn: Bool { if case .turnOver = state { return false } else { return true } }
+
+    /// What it waits on between turns, in words: "Final swift test and two load runs, started 14:17", nil for nothing.
+    public var waitingOn: String? {
+        guard let first = background.first else { return nil }
+        return background.count == 1 ? first.text : "\(first.text), and \(background.count - 1) more"
+    }
 
     /// How much of the file's end is read: the last few steps, whatever their size (a tool's result can be big).
     public static let window = 256 * 1024
@@ -462,10 +494,18 @@ public struct TranscriptTail: Equatable, Sendable {
     public static func read(_ data: Data) -> TranscriptTail? {
         var lines = data.split(separator: 0x0A)
         if data.last != 0x0A, !lines.isEmpty { lines.removeLast() }
+        guard var tail = state(lines) else { return nil }
+        tail.background = background(lines)
+        return tail
+    }
+
+    private static func state(_ lines: [Data.SubSequence]) -> TranscriptTail? {
         var ended: Double?
         for line in lines.reversed() where !TranscriptReader.skippable(line) {
+            // A compaction's summary is written as a prompt, but it starts no turn: Claude compacts idle sessions too.
             guard let object = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
-                  object["isSidechain"] as? Bool != true, object["isMeta"] as? Bool != true else { continue }
+                  object["isSidechain"] as? Bool != true, object["isMeta"] as? Bool != true,
+                  object["isCompactSummary"] as? Bool != true else { continue }
             let at = ChatReader.date(object["timestamp"])?.timeIntervalSince1970
             switch step(object) {
             case nil: continue
@@ -485,9 +525,69 @@ public struct TranscriptTail: Equatable, Sendable {
         return ended.map { TranscriptTail(state: .turnOver(apiError: nil), at: $0) }
     }
 
-    private enum Step { case over, apiError(String), reply, state(State) }
+    /// The background work started on the main thread and not yet told complete. A shell's call returns at once
+    /// with `backgroundTaskId` (an agent's with `async_launched` and its `agentId`); when it ends, Claude Code writes
+    /// a `<task-notification>` naming its id: queued (`queue-operation`), as an attachment mid-turn, or as the prompt
+    /// of the turn it starts.
+    private static func background(_ lines: [Data.SubSequence]) -> [Background] {
+        // Only the lines that can say so are parsed.
+        let marks = ["backgroundTaskId", "async_launched", "task-notification"].map { Data($0.utf8) }
+        var started: [(id: String, call: String?, what: String?, at: Double?)] = []
+        var done = Set<String>()
+        for line in lines where marks.contains(where: { line.range(of: $0) != nil }) {
+            guard let object = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
+                  object["isSidechain"] as? Bool != true else { continue }
+            for text in notifications(in: object) {
+                for tag in ["task-id", "tool-use-id"] {
+                    if let open = text.range(of: "<\(tag)>"), let close = text.range(of: "</\(tag)>", range: open.upperBound..<text.endIndex) {
+                        done.insert(String(text[open.upperBound..<close.lowerBound]))
+                    }
+                }
+            }
+            guard object["type"] as? String == "user", let result = object["toolUseResult"] as? [String: Any] else { continue }
+            let id = result["backgroundTaskId"] as? String ?? (result["status"] as? String == "async_launched" ? result["agentId"] as? String : nil)
+            guard let id else { continue }
+            let call = ((object["message"] as? [String: Any])?["content"] as? [[String: Any]])?
+                .first { $0["type"] as? String == "tool_result" }?["tool_use_id"] as? String
+            started.append((id, call, result["description"] as? String, ChatReader.date(object["timestamp"])?.timeIntervalSince1970))
+        }
+        let open = started.filter { !done.contains($0.id) && !($0.call.map(done.contains) ?? false) }
+        return open.map { Background(id: $0.id, what: $0.what ?? $0.call.flatMap { description(of: $0, in: lines) } ?? "a background task",
+                                     startedAt: $0.at) }
+    }
 
-    private static func step(_ line: [String: Any]) -> Step? {
+    /// The texts of `<task-notification>`s a line carries.
+    private static func notifications(in object: [String: Any]) -> [String] {
+        let texts: [String?]
+        switch object["type"] as? String {
+        case "queue-operation": texts = [object["content"] as? String]
+        case "attachment": texts = [(object["attachment"] as? [String: Any])?["prompt"] as? String]
+        case "user":
+            let content = (object["message"] as? [String: Any])?["content"]
+            texts = [content as? String] + ((content as? [[String: Any]]) ?? []).map { $0["text"] as? String }
+        default: texts = []
+        }
+        return texts.compactMap { $0 }.filter { $0.hasPrefix("<task-notification>") }
+    }
+
+    /// The description of the tool call `id` (its command when it has none), from the call itself.
+    private static func description(of id: String, in lines: [Data.SubSequence]) -> String? {
+        let mark = Data(id.utf8)
+        for line in lines.reversed() where line.range(of: mark) != nil {
+            guard let object = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any], object["type"] as? String == "assistant",
+                  let blocks = (object["message"] as? [String: Any])?["content"] as? [[String: Any]],
+                  let call = blocks.first(where: { $0["id"] as? String == id }) else { continue }
+            let input = call["input"] as? [String: Any] ?? [:]
+            if let text = input["description"] as? String, !text.isEmpty { return text }
+            if let command = input["command"] as? String { return String(command.prefix(80)) }
+            return call["name"] as? String
+        }
+        return nil
+    }
+
+    enum Step { case over, apiError(String), reply, state(State) }
+
+    static func step(_ line: [String: Any]) -> Step? {
         switch line["type"] as? String {
         case "system":
             // A turn's end; the rest (away summaries, compaction, notices) aren't steps of the conversation.

@@ -12,7 +12,8 @@ public enum LeadActivity: Equatable, Sendable {
     case working(String?)
     /// Stopped on a question or a permission prompt (what it asks, when known).
     case needsInput(String?)
-    /// Between turns; `background` is work of its own it still waits on (its turn resumes when that reports back).
+    /// Between turns; `background` is work of its own it still waits on (its turn resumes when that reports back):
+    /// the background tasks its transcript shows running, or else the shells of its own still running.
     case idle(background: String?)
     /// Its turn ended on an API error rather than on its reply: it's between turns, but not done.
     case apiError(String)
@@ -33,7 +34,7 @@ public enum LeadActivity: Equatable, Sendable {
         case .working(let detail): return detail.map { "working: \($0)" } ?? "working"
         case .needsInput(let asked): return asked.map { "needs input: \($0)" } ?? "needs input"
         case .idle(nil): return "finished its turn"
-        case .idle(let background?): return "finished its turn; its background work still runs (\(background))"
+        case .idle(let background?): return "waiting on its background task (\(background))"
         case .apiError(let error): return "its turn ended on an API error (\(error)); message it to go on"
         case .unknown: return "running (nothing from its hooks or transcript yet)"
         }
@@ -41,7 +42,9 @@ public enum LeadActivity: Equatable, Sendable {
 
     /// The hooks' last event and the transcript's tail, put together: the one written later wins, except that a
     /// prompt on screen (which the transcript can't show) stands while the transcript only shows the call that raised it.
-    public static func resolve(hook: HookState?, transcript: TranscriptTail?, background: String? = nil) -> LeadActivity {
+    /// `background` is the shells of its own still running, for when the transcript names no background task.
+    public static func resolve(hook: HookState?, transcript: TranscriptTail?, background shells: String? = nil) -> LeadActivity {
+        let background = transcript?.waitingOn ?? shells
         let fromHook = hook.map(StatusRules.status(for:))
         let hookAt = hook?.lastEventAt ?? -.infinity
         if let transcript, hook == nil || (transcript.at ?? -.infinity) > hookAt {

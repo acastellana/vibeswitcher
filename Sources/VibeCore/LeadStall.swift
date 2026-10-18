@@ -22,14 +22,17 @@ public struct LeadStall: Codable, Equatable, Sendable {
     /// For `undelivered`: since when the message has waited, and who sent it.
     public var waitingSince: Double?
     public var waitingFrom: String?
+    /// For `idle`: the background task it still waits on, past `backgroundCeiling` (see `TranscriptTail.waitingOn`).
+    public var background: String?
 
     public init(reason: Reason, lastActivity: Double, at: Double = Date().timeIntervalSince1970,
-                waitingSince: Double? = nil, waitingFrom: String? = nil) {
+                waitingSince: Double? = nil, waitingFrom: String? = nil, background: String? = nil) {
         self.reason = reason
         self.lastActivity = lastActivity
         self.at = at
         self.waitingSince = waitingSince
         self.waitingFrom = waitingFrom
+        self.background = background
     }
 
     /// How long each takes to count as a stall.
@@ -37,12 +40,17 @@ public struct LeadStall: Codable, Equatable, Sendable {
     public static let idleAfter: TimeInterval = 10 * 60
     public static let compactedAfter: TimeInterval = 5 * 60
     public static let undeliveredAfter: TimeInterval = 5 * 60
+    /// Between turns waiting on its own background task (a long test run), it's idle only past this; once the task
+    /// is told complete, `idleAfter` counts from then.
+    public static let backgroundCeiling: TimeInterval = 45 * 60
 
     /// The reason in words.
     public func why(now: Date = Date()) -> String {
         switch reason {
         case .silent: return "it reads as working, but its transcript hasn't grown and no shell of its runs"
-        case .idle: return "it's between turns without having reported, and has no question to the lead pending"
+        case .idle:
+            if let background { return "it has waited on its background task (\(background)) for over \(Int(Self.backgroundCeiling / 60)) min without having reported" }
+            return "it's between turns without having reported, and has no question to the lead pending"
         case .compacted: return "its transcript ends at a context-compaction summary and nothing followed"
         case .undelivered:
             let waited = LeadToolset.age(now.timeIntervalSince1970 - (waitingSince ?? at))
@@ -85,15 +93,18 @@ public struct LeadStall: Codable, Equatable, Sendable {
         var stalls: [LeadStall] = []
         let working = seen.status == .working || seen.activity.map { if case .working = $0 { return true } else { return false } } ?? false
         let betweenTurns = seen.activity?.betweenTurns ?? [.done, .idle, .background].contains(seen.status ?? .unknown)
+        // Between turns waiting on its own background task (its transcript says, see `LeadActivity`).
+        let background: String? = if case .idle(let running?)? = seen.activity { running } else { nil }
         // Between turns with no transcript to read, its status says since when.
         if let last = seen.lastActivity ?? (betweenTurns ? seen.since?.timeIntervalSince1970 : nil) {
             let quiet = at - last
-            if let compacted = seen.compactedAt, quiet >= compactedAfter {
+            // A compaction once its turn was over is Claude tidying an idle session: it's idle, if anything.
+            if let compacted = seen.compactedAt, !betweenTurns, quiet >= compactedAfter {
                 stalls.append(LeadStall(reason: .compacted, lastActivity: max(last, compacted), at: at))
             } else if working, !seen.shellRunning, quiet >= silentAfter {
                 stalls.append(LeadStall(reason: .silent, lastActivity: last, at: at))
-            } else if betweenTurns, task.leadQuestionAt == nil, quiet >= idleAfter {
-                stalls.append(LeadStall(reason: .idle, lastActivity: last, at: at))
+            } else if betweenTurns, task.leadQuestionAt == nil, quiet >= (background == nil ? idleAfter : backgroundCeiling) {
+                stalls.append(LeadStall(reason: .idle, lastActivity: last, at: at, background: background))
             }
         }
         // A worker at work with a shell running takes the message at its next step.
@@ -110,7 +121,8 @@ public struct LeadStall: Codable, Equatable, Sendable {
 public struct TranscriptProgress: Equatable, Sendable {
     /// The latest timestamped entry (the main thread's or a subagent's), not counting notices written while idle.
     public var lastWritten: Double?
-    /// When the conversation's last entry is a compaction (Claude Code's boundary and summary), its time.
+    /// When the conversation's last entry is a compaction (Claude Code's boundary and summary) made mid-turn, its
+    /// time. One made after the turn was over (Claude compacts idle sessions) is neither this nor activity.
     public var compactedAt: Double?
 
     public init(lastWritten: Double?, compactedAt: Double?) {
@@ -144,23 +156,36 @@ public struct TranscriptProgress: Equatable, Sendable {
         var lines = data.split(separator: 0x0A)
         if data.last != 0x0A, !lines.isEmpty { lines.removeLast() }
         var lastWritten: Double?
-        var compactedAt: Double?
-        var lastEntryFound = false
+        // While the conversation ends at a compaction: when it was, and the latest entry written before it.
+        var compaction: Double?
+        var writtenBefore: Double?
         for line in lines.reversed() {
             guard let object = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any] else { continue }
             let type = object["type"] as? String
             let subtype = object["subtype"] as? String
             let at = ChatReader.date(object["timestamp"])?.timeIntervalSince1970
             if type == "system", notices.contains(subtype ?? "") { continue }
+            let compacting = object["isCompactSummary"] as? Bool == true || subtype == "compact_boundary"
             if lastWritten == nil, let at { lastWritten = at }
+            if compaction != nil, !compacting, writtenBefore == nil, let at { writtenBefore = at }
             // The conversation's last entry: a step of the main thread (attachments and bookkeeping lines aren't).
-            if !lastEntryFound, object["isSidechain"] as? Bool != true, ["user", "assistant", "system"].contains(type ?? "") {
-                if type == "user", object["isMeta"] as? Bool == true { continue }
-                lastEntryFound = true
-                if object["isCompactSummary"] as? Bool == true || subtype == "compact_boundary" { compactedAt = at ?? 0 }
+            guard object["isSidechain"] as? Bool != true, ["user", "assistant", "system"].contains(type ?? "") else { continue }
+            if type == "user", object["isMeta"] as? Bool == true { continue }
+            if compacting {
+                if compaction == nil { compaction = at ?? 0 }
+                continue
             }
-            if lastWritten != nil, lastEntryFound { break }
+            if let compaction {
+                switch TranscriptTail.step(object) {
+                case nil: continue
+                // Compacted mid-turn: it should have gone on from the summary.
+                case .state?: return TranscriptProgress(lastWritten: lastWritten, compactedAt: compaction)
+                // Compacted after its turn was over: Claude tidying an idle session, not the agent doing anything.
+                default: return TranscriptProgress(lastWritten: writtenBefore ?? at, compactedAt: nil)
+                }
+            }
+            if lastWritten != nil { break }
         }
-        return TranscriptProgress(lastWritten: lastWritten, compactedAt: compactedAt)
+        return TranscriptProgress(lastWritten: lastWritten, compactedAt: compaction)
     }
 }

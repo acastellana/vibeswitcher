@@ -193,6 +193,8 @@ public enum LeadWitness {
     private static func waiting(_ info: Seen, session: String, now: Date, input: String, stopped: String?) -> (key: String, text: String)? {
         let since = Int(info.since?.timeIntervalSince1970 ?? 0)
         if info.status == .needsInput { return ("\(session)|input-\(since)", input) }
+        // Waiting on its own background task (a long test run), its turn goes on when that's done.
+        if case .idle(_?)? = info.activity { return nil }
         if let stopped, let status = info.status, [.done, .idle].contains(status), let at = info.since, now.timeIntervalSince(at) > quiet {
             return ("\(session)|stopped-\(since)", stopped)
         }
