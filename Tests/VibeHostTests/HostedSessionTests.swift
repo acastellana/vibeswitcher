@@ -168,6 +168,28 @@ struct HostedSessionTests {
         probe2.queue.sync { attached.terminate(); attached.close() }
     }
 
+    /// Claude Code 2.1.295+ reports its status over OSC 7501 only to a terminal that answers `OSC 7501 ; ?`. Views don't
+    /// speak it, so the host answers even with one attached, and keeps the program's own record (not its tasks').
+    @Test func answersProgramStatusQueriesAndKeepsTheStatus() throws {
+        let probe = SessionProbe()
+        let script = "stty raw -echo; sleep 0.5; printf '\\033]7501;?\\033\\\\'; dd bs=1 count=10 2>/dev/null | od -c | head -1; stty sane; "
+            + "printf '\\033]7501;state=working:app=claude-code\\007'; sleep 0.3; "
+            + "printf '\\033]7501;state=blocked:app=claude-code:kind=permission:msg=QmFzaA\\033\\\\'; sleep 0.3; "
+            + "printf '\\033]7501;state=done:id=task-1\\007'; printf 'reported\\n'; read line; printf '\\033]7501;state=clear\\007'; sleep 5"
+        let session = try start(script, probe: probe)
+        probe.queue.sync { session.clientsAttached = true }
+        #expect(eventually { probe.text.contains("]   7   5   0   1   ;   ?") }, "\(probe.diagnosis(session))")
+        #expect(eventually { probe.lastChange?.programStatus?.state == .working || probe.lastChange?.programStatus?.state == .blocked },
+                "\(probe.diagnosis(session))")
+        #expect(eventually { probe.text.contains("reported") && probe.lastChange?.programStatus?.state == .blocked },
+                "\(probe.diagnosis(session))")
+        let blocked = try #require(probe.lastChange?.programStatus)
+        #expect(blocked.kind == "permission" && blocked.message == "Bash" && blocked.app == "claude-code")
+        probe.queue.sync { session.write(Data("\r".utf8)) }
+        #expect(eventually { probe.lastChange?.programStatus == nil }, "\(probe.diagnosis(session))")
+        probe.queue.sync { session.terminate(); session.close() }
+    }
+
     @Test func replayHoldsEarlierOutput() throws {
         let probe = SessionProbe()
         let session = try start("echo first; sleep 5", probe: probe)

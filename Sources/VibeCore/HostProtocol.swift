@@ -132,6 +132,9 @@ public struct HostSession: Codable, Equatable, Sendable, Identifiable {
     public var cols: Int
     public var rows: Int
     public var exit: Exit?
+    /// What the program last reported over OSC 7501 (its own record, not its tasks'); nil when it hasn't, or cleared it.
+    /// Optional, so apps and hosts from before it still decode each other's sessions.
+    public var programStatus: ProgramStatus?
 
     public var isLive: Bool { exit == nil }
 
@@ -147,7 +150,7 @@ public struct HostSession: Codable, Equatable, Sendable, Identifiable {
     }
 
     public init(id: UUID, tty: String, childPID: Int32, cwd: String, command: String?, label: String, agent: String?,
-                title: String, startedAt: Date, cols: Int, rows: Int, exit: Exit?) {
+                title: String, startedAt: Date, cols: Int, rows: Int, exit: Exit?, programStatus: ProgramStatus? = nil) {
         self.id = id
         self.tty = tty
         self.childPID = childPID
@@ -160,6 +163,7 @@ public struct HostSession: Codable, Equatable, Sendable, Identifiable {
         self.cols = cols
         self.rows = rows
         self.exit = exit
+        self.programStatus = programStatus
     }
 }
 

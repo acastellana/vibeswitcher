@@ -149,6 +149,8 @@ public final class HostedSession {
             self.onChange?(self.info)
         }
         headless.onBell = { [weak self] in self?.onBell?() }
+        headless.onProgramStatus = { [weak self] report in self?.programStatus(report) }
+        headless.listen(to: terminal)
 
         let read = DispatchSource.makeReadSource(fileDescriptor: masterFD, queue: queue)
         read.setEventHandler { [weak self] in self?.drain() }
@@ -188,6 +190,29 @@ public final class HostedSession {
             readSource = nil
             return
         }
+    }
+
+    /// The host answers the OSC 7501 query even while a view is attached (views don't speak it), and keeps the
+    /// program's own record; its tasks' (reports with an `id`) are left out.
+    private func programStatus(_ report: ProgramStatus.Report) {
+        let status: ProgramStatus?
+        switch report {
+        case .query:
+            write(ProgramStatus.queryReply)
+            return
+        case .clear(let id):
+            guard id == nil else { return }
+            status = nil
+        case .status(let id, let reported):
+            guard id == nil else { return }
+            status = reported
+        }
+        // A repeated report keeps its `since`: the state didn't change then.
+        var previous = info.programStatus
+        if let status { previous?.since = status.since }
+        guard status != previous else { return }
+        info.programStatus = status
+        onChange?(info)
     }
 
     private func reap() {
@@ -422,11 +447,20 @@ public final class HostedSession {
     }
 }
 
-/// The headless terminal's delegate: replies to queries, title, bell.
+/// The headless terminal's delegate: replies to queries, title, bell, program status (OSC 7501).
 final class HeadlessDelegate: TerminalDelegate {
     var onReply: ((Data) -> Void)?
     var onTitle: ((String) -> Void)?
     var onBell: (() -> Void)?
+    var onProgramStatus: ((ProgramStatus.Report) -> Void)?
+
+    /// SwiftTerm leaves OSC 7501 alone otherwise.
+    func listen(to terminal: Terminal) {
+        terminal.registerOscHandler(code: ProgramStatus.code) { [weak self] payload in
+            guard let report = ProgramStatus.parse(String(decoding: payload, as: UTF8.self), at: Date()) else { return }
+            self?.onProgramStatus?(report)
+        }
+    }
 
     func send(source: Terminal, data: ArraySlice<UInt8>) { onReply?(Data(data)) }
     func setTerminalTitle(source: Terminal, title: String) { onTitle?(title) }
