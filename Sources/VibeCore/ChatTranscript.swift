@@ -299,7 +299,7 @@ public enum ChatReader {
     public static func read(_ data: Data, format: TranscriptReader.Format) -> (events: [ChatEvent], consumed: Int) {
         guard let lastNewline = data.lastIndex(of: 0x0A) else { return ([], 0) }
         var events: [ChatEvent] = []
-        for line in data[data.startIndex..<lastNewline].split(separator: 0x0A) {
+        for line in data[data.startIndex..<lastNewline].split(separator: 0x0A) where !TranscriptReader.skippable(line) {
             guard let object = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any] else { continue }
             let lineID = stableID(line)
             events += format == .claude ? claude(object, lineID: lineID) : codex(object, lineID: lineID)

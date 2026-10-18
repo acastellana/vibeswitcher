@@ -187,6 +187,22 @@ public enum TranscriptReader {
         return openAsyncQuestion(in: data)
     }
 
+    /// The line kinds the readers act on: Claude Code's conversation, Codex's rollout items.
+    static let conversationKinds: Set<String> = ["user", "assistant", "attachment", "system", "response_item", "event_msg", "turn_context"]
+    private static let typeFirst = Array(#"{"type":""#.utf8)
+
+    /// Whether a transcript line is a kind no reader uses, told by its first bytes without parsing it: it starts
+    /// `{"type":"<kind>"` with a kind not in `conversationKinds`. Claude Code 2.1.300+ records each API request's
+    /// system prompt, tools and parameters (`api-request`, `-blob`, `-shape`), half or more of a transcript's bytes, and
+    /// titles, modes and file history the same way. Lines with another first key are read (Claude's conversation
+    /// lines start with "parentUuid", Codex's with "timestamp").
+    public static func skippable(_ line: Data.SubSequence) -> Bool {
+        guard line.count > typeFirst.count, line.starts(with: typeFirst) else { return false }
+        let kindStart = line.startIndex + typeFirst.count
+        guard let quote = line[kindStart..<min(line.endIndex, kindStart + 40)].firstIndex(of: 0x22) else { return false }
+        return !conversationKinds.contains(String(decoding: line[kindStart..<quote], as: UTF8.self))
+    }
+
     /// For a read that starts in the middle of a file: the offset of the first complete line.
     public static func tailStart(_ data: Data) -> Int {
         guard let newline = data.firstIndex(of: 0x0A) else { return data.count }
@@ -200,7 +216,7 @@ public enum TranscriptReader {
         let consumed = lastNewline - data.startIndex + 1
         var entries: [TranscriptEntry] = []
         var toolIndex: [String: Int] = [:]
-        for line in data[data.startIndex..<lastNewline].split(separator: 0x0A) {
+        for line in data[data.startIndex..<lastNewline].split(separator: 0x0A) where !skippable(line) {
             guard let object = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any] else { continue }
             // For lines without an id: the same line gets the same id on every read.
             let lineID = stableID(line)
@@ -447,7 +463,7 @@ public struct TranscriptTail: Equatable, Sendable {
         var lines = data.split(separator: 0x0A)
         if data.last != 0x0A, !lines.isEmpty { lines.removeLast() }
         var ended: Double?
-        for line in lines.reversed() {
+        for line in lines.reversed() where !TranscriptReader.skippable(line) {
             guard let object = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
                   object["isSidechain"] as? Bool != true, object["isMeta"] as? Bool != true else { continue }
             let at = ChatReader.date(object["timestamp"])?.timeIntervalSince1970
