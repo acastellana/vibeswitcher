@@ -15,6 +15,10 @@ final class ClientConnection {
     /// Who that process is to the lead's vault, told when the host accepted it; `.unknown` for good once anything
     /// else sends on the connection.
     var caller: LeadVault.Caller = .unknown
+    /// The process accepted runs the app's code, outside every session: it's the app once it answers `challenge`
+    /// (see `AppProof`), and never if anything else sends on the connection first.
+    var runsAppCode = false
+    let challenge = AppProof.challenge()
     /// The app (or tool server) on the other end, as it was when it connected.
     let peerPID: pid_t?
     var attached: Set<UUID> = []

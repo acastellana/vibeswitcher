@@ -291,7 +291,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.leadNotification, object: nil,
                                                             queue: .main) { [weak self] note in
             guard let folder = note.object as? String else { return }
-            self?.leadController.startLead(in: folder, goal: note.userInfo?["goal"] as? String, show: false)
+            // Any process can post this: the start never takes a moved branch as the lead's.
+            self?.leadController.startLead(in: folder, goal: note.userInfo?["goal"] as? String, show: false, askAboutMovedHead: false)
         }
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.captureNotification, object: nil,
                                                             queue: .main) { [weak self] note in

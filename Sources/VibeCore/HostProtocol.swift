@@ -16,6 +16,9 @@ public enum HostProtocol {
         public static let handover = "handover"
         /// Answers `HostRequest.vault`: the lead's vault and the user's sealing key live in the host.
         public static let leadVault = "leadVault"
+        /// Sends each connection a `HostEvent.challenge` and takes nothing from it as the app's until it answered
+        /// (`HostRequest.proveApp`, see `AppProof`): `handover`, `kill` of another's session and the app's vault requests.
+        public static let appProof = "appProof"
     }
 
     /// The error a spawn gets once the host agreed to shut down.
@@ -246,6 +249,11 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// with `ok` just before, then the connection closes; connect again for the new build's welcome. An error: the
     /// running host carries on as it was.
     case handover(executable: String)
+    /// The answer to this connection's `HostEvent.challenge` (see `AppProof`). Not answered; a wrong one is ignored.
+    case proveApp(answer: Data)
+    /// The app's key, for a host that holds none (its challenge says so). Taken only from a connection the host tells
+    /// is the app's code, and only while it holds none. Not answered.
+    case enrollApp(key: Data)
 }
 
 public enum HostEvent: Codable, Equatable, Sendable {
@@ -267,6 +275,9 @@ public enum HostEvent: Codable, Equatable, Sendable {
     case error(String)
     case ok
     case vault(LeadVault.Reply)
+    /// Sent once to each connection as it's accepted, before anything else: what the app answers to be the app on it
+    /// (`HostRequest.proveApp`). `keyless`: the host holds no app key yet (`HostRequest.enrollApp`).
+    case challenge(Data, keyless: Bool)
 }
 
 /// A run of characters on one screen row drawn alike, when that isn't plain: faint (SGR 2), inverse (SGR 7: an

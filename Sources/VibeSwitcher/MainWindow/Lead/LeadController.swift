@@ -102,7 +102,8 @@ final class LeadController: ObservableObject {
     /// Starts the project lead for the repository holding `folder`, or shows the one already running. A `goal` (from
     /// `vibeswitcher --lead`) goes into its first prompt (or to the running lead), not as the user's: any process can
     /// post that notification. `show: false` leaves the window's selection alone.
-    func startLead(in folder: String, goal: String? = nil, show: Bool = true) {
+    /// `askAboutMovedHead`: you asked in the app (not the notification), so a moved branch is yours to take.
+    func startLead(in folder: String, goal: String? = nil, show: Bool = true, askAboutMovedHead: Bool = true) {
         // git can be slow (a network volume, a git shim): find the repository off the main thread.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let top = Git.run(["rev-parse", "--show-toplevel"], in: folder)
@@ -116,12 +117,12 @@ final class LeadController: ObservableObject {
                 guard hasCommits else {
                     return self.alert("The repository has no commits yet.", "Workers branch from main: make a first commit in \(root), then start the lead.")
                 }
-                self.startLead(root: root, goal: goal, show: show)
+                self.startLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead)
             }
         }
     }
 
-    private func startLead(root: String, goal: String?, show: Bool) {
+    private func startLead(root: String, goal: String?, show: Bool, askAboutMovedHead: Bool) {
         if let running = leadSessions[root] {
             if let goal { deliver("New goal: \(goal)", from: Self.commandLine, to: BoardStore(root: root).load(), root: root) }
             if show { select(running.id) }
@@ -145,9 +146,15 @@ final class LeadController: ObservableObject {
                 var workflow = LeadWorkflow.load(from: workflowPath)
                 workflow.baseBranch = workflow.baseBranch ?? boardStore.load().baseBranch
                 // Only the app makes a lead (the session host tells the app from the team): its grant (the lead's
-                // tools, once bound to its session) and the branch as you start it, which merges then check nothing
-                // else has moved.
-                let grant = try vault.startLead(root: root, branch: workflow.baseBranch ?? Worktrees.mainBranch(root: root))
+                // tools, once bound to its session). Merges check nothing else moved the branch since the lead last
+                // left it; a start takes the branch as it is only when you say so here, shown the move (a start asked
+                // for from outside the app never does: anything can ask).
+                let branch = workflow.baseBranch ?? Worktrees.mainBranch(root: root)
+                var takeHead = false
+                if askAboutMovedHead, let moved = vault.headMoved(root: root, branch: branch) {
+                    takeHead = DispatchQueue.main.sync { self?.askToTakeHead(branch: branch, moved) ?? false }
+                }
+                let grant = try vault.startLead(root: root, branch: branch, takeHead: takeHead)
                 issued = grant
                 let name = "lead-\(Slug.make(project, taken: []))"
                 let launch = try LeadLaunch.prepare(
@@ -449,6 +456,19 @@ final class LeadController: ObservableObject {
         alert.addButton(withTitle: "Cancel")
         NSApp.activate()
         if alert.runModal() == .alertFirstButtonReturn { host.restartHost() }
+    }
+
+    /// The lead's branch moved since the lead last left it, not through its merges: whether to take it as it is now.
+    private func askToTakeHead(branch: String, _ moved: (recorded: String, now: String)) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "\(branch) moved since the lead last left it, and not through its merges."
+        alert.informativeText = "It was at \(moved.recorded.prefix(8)) and is at \(moved.now.prefix(8)) (`git log \(moved.recorded.prefix(8))..\(branch)` "
+            + "shows what came in). If you moved it, take it as it is: merges start from there. Otherwise keep it checked, and the lead's merges "
+            + "stay refused until it's back where the lead left it."
+        alert.addButton(withTitle: "Keep Checking")
+        alert.addButton(withTitle: "I Moved It: Take \(branch) As It Is")
+        NSApp.activate()
+        return alert.runModal() == .alertSecondButtonReturn
     }
 
     private func alert(_ title: String, _ text: String) {

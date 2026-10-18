@@ -29,6 +29,8 @@ public enum HostHandover {
         public var pendingInput: Data
         /// An ended session's last screen, how it was drawn, and the lines above it (it has no replay any more).
         public var ended: Ended?
+        /// The session whose process asked for this one (see `HostServer`'s kill rule); nil: the app or no session.
+        public var startedBy: UUID?
 
         public struct Ended: Codable, Equatable {
             public var screen: String
@@ -36,8 +38,9 @@ public enum HostHandover {
             public var history: String
         }
 
-        public init(info: HostSession, masterFD: Int32?, output: Data, pendingInput: Data, ended: Ended? = nil) {
+        public init(info: HostSession, masterFD: Int32?, output: Data, pendingInput: Data, ended: Ended? = nil, startedBy: UUID? = nil) {
             self.info = info
+            self.startedBy = startedBy
             self.masterFD = masterFD
             self.output = output
             self.pendingInput = pendingInput

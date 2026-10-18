@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CryptoKit
 import VibeCore
 
 struct HostClientError: Error, LocalizedError {
@@ -63,6 +64,15 @@ final class HostClient: ObservableObject {
     /// Pieces of input the host refused, per session (the program wasn't reading and its buffer was full).
     private var refusedInput: [UUID: Int] = [:]
 
+    /// The key the app proves itself with to the host (see `AppProof`), from the login Keychain; every connection
+    /// the app makes answers its challenge with it (the lead's vault calls too).
+    static let appKey: SymmetricKey? = {
+        let key = AppProof.keychainKey()
+        if key == nil { Breadcrumbs.shared.note("host: no app key from the Keychain; the host won't take this app as VibeSwitcher") }
+        HostConnection.appKey = key
+        return key
+    }()
+
     static var hostExecutable: URL {
         Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host")
     }
@@ -114,7 +124,7 @@ final class HostClient: ObservableObject {
     @discardableResult
     private func connect() -> Bool {
         if connection != nil { return true }
-        guard let connection = try? HostConnection(path: VibePaths.hostSocket.path, queue: .main) else { return false }
+        guard let connection = try? HostConnection(path: VibePaths.hostSocket.path, queue: .main, appKey: Self.appKey) else { return false }
         self.connection = connection
         state = .connecting
         connection.onEvent = { [weak self] in self?.handle($0) }
@@ -137,7 +147,16 @@ final class HostClient: ObservableObject {
         var actions: posix_spawn_file_actions_t?
         posix_spawn_file_actions_init(&actions)
         defer { posix_spawn_file_actions_destroy(&actions) }
-        posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+        // Stdin: the app's key, then nothing (see `HostStart`); the pipe holds it, so it's written before the spawn.
+        var keyPipe: [Int32] = [-1, -1]
+        if let key = Self.appKey, pipe(&keyPipe) == 0 {
+            _ = key.data.withUnsafeBytes { write(keyPipe[1], $0.baseAddress, $0.count) }
+            close(keyPipe[1])
+            posix_spawn_file_actions_adddup2(&actions, keyPipe[0], 0)
+        } else {
+            posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+        }
+        defer { if keyPipe[0] >= 0 { close(keyPipe[0]) } }
         posix_spawn_file_actions_addopen(&actions, 1, VibePaths.hostLog.path, O_WRONLY | O_CREAT | O_APPEND, 0o600)
         posix_spawn_file_actions_adddup2(&actions, 1, 2)
         let argv: [UnsafeMutablePointer<CChar>?] = [strdup(path), nil]

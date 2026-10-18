@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 import VibeCore
@@ -24,6 +25,8 @@ public final class HostServer {
         /// The app's executable: a process running its code (by cdhash, see `AppCode`), outside every session, is the
         /// app to the vault.
         public var appExecutable: String?
+        /// The key the app proves itself with (see `AppProof`) for a host that keeps no vault; with one, the vault's.
+        public var appKey: SymmetricKey?
         /// The session log (see `HostLog`); nil: none (a scratch host).
         public var logPath: String?
         /// What this host was started with after its executable (socket, lock, idle exit): a build it hands over to is
@@ -66,6 +69,8 @@ public final class HostServer {
     private var sessions: [UUID: HostedSession] = [:]
     private var order: [UUID] = []
     private var clients: [ObjectIdentifier: ClientConnection] = [:]
+    /// Per session, the session whose process asked for it (see `mayKill`).
+    private var startedBy: [UUID: UUID] = [:]
     /// Per session, the client whose terminal answers queries and sets the size: the last to attach or type.
     private var primary: [UUID: ObjectIdentifier] = [:]
     private var lockFD: Int32 = -1
@@ -79,7 +84,7 @@ public final class HostServer {
     /// When this host started: a build it hands over to is the same host, started then.
     private var startedAt = Date()
     static let capabilities = [HostProtocol.Capability.styledScreen, HostProtocol.Capability.inputRefusals, HostProtocol.Capability.handover,
-                               HostProtocol.Capability.leadVault]
+                               HostProtocol.Capability.leadVault, HostProtocol.Capability.appProof]
     private var handingOver = false
 
     public init(config: Config) {
@@ -115,6 +120,7 @@ public final class HostServer {
         queue.sync {
             for saved in state.sessions {
                 register(HostedSession.restore(saved, ringCapacity: config.ringCapacity, queue: queue))
+                startedBy[saved.info.id] = saved.startedBy
             }
         }
         serve()
@@ -175,7 +181,11 @@ public final class HostServer {
             UnixSocket.configure(fd)
             let client = ClientConnection(fd: fd, queue: queue)
             client.peer = UnixSocket.peerToken(fd)
-            client.caller = identify(client.peer)
+            // The app's code is the app only once it answers the challenge.
+            switch identify(client.peer) {
+            case .app: client.runsAppCode = true
+            case let caller: client.caller = caller
+            }
             let key = ObjectIdentifier(client)
             client.onRead = { [weak self, weak client] in
                 guard let self, let client else { return }
@@ -187,7 +197,45 @@ public final class HostServer {
             }
             client.onClose = { [weak self] in self?.dropClient(key) }
             clients[key] = client
+            client.send(HostEventEnvelope(replyTo: nil, event: .challenge(client.challenge, keyless: appKey == nil)))
             client.start()
+        }
+    }
+
+    /// The key the app proves itself with: the vault's, or (a host that keeps none) the configured or enrolled one.
+    private var appKey: SymmetricKey? { config.vault?.appKey ?? looseAppKey }
+    private lazy var looseAppKey: SymmetricKey? = config.appKey
+
+    /// The app's answer to its connection's challenge: from then on the connection is the app's, while nothing
+    /// else sends on it.
+    private func prove(_ answer: Data, from client: ClientConnection) {
+        guard client.runsAppCode, let key = appKey, AppProof.isValid(answer, to: client.challenge, key: key) else {
+            return log("pid \(client.peer?.pid ?? 0) didn't prove it's the app")
+        }
+        client.caller = .app
+    }
+
+    /// A host with no app key takes the first one the app's code gives it (a build before challenges handed over).
+    private func enroll(_ key: Data, from client: ClientConnection) {
+        guard client.runsAppCode, appKey == nil, key.count == AppProof.keySize else { return }
+        if let vault = config.vault { vault.adoptAppKey(key) } else { looseAppKey = SymmetricKey(data: key) }
+        log.note("host: took the app's key from pid \(client.peer?.pid ?? 0)")
+    }
+
+    /// Whether `caller` may end `id`: the app; a session itself or one started from it, all the way down; a team's
+    /// lead, its team's sessions.
+    private func mayKill(_ id: UUID, from caller: LeadVault.Caller) -> Bool {
+        switch caller {
+        case .app: return true
+        case .unknown: return false
+        case .session(let from):
+            var current: UUID? = id
+            var seen: Set<UUID> = []
+            while let session = current, seen.insert(session).inserted {
+                if session.uuidString == from { return true }
+                current = startedBy[session]
+            }
+            return config.vault?.leads(id.uuidString, caller: caller) == true
         }
     }
 
@@ -216,6 +264,7 @@ public final class HostServer {
                 let session = try HostedSession.spawn(request, shell: config.shell, launcher: config.launcher, baseEnvironment: config.baseEnvironment,
                                                       ringCapacity: config.ringCapacity, queue: queue)
                 register(session)
+                if case .session(let from) = caller(of: client) { startedBy[session.id] = UUID(uuidString: from) }
                 let info = session.info
                 log.note("spawn \(Self.short(info.id)) pid \(info.childPID) label '\(info.label)' cwd '\(info.cwd)'\(info.agent.map { " agent \($0)" } ?? ""), \(HostLog.peer(client.peerPID))")
                 reply(.spawned(session.info))
@@ -273,6 +322,10 @@ public final class HostServer {
             let text = session.historyText(lines: max(1, min(lines, 5_000)))
             reply(.historyText(id: id, history: Self.fitting(text.history, besides: text.screen), screen: text.screen))
         case .kill(let id):
+            guard mayKill(id, from: caller(of: client)) else {
+                log.note("kill \(Self.short(id)) refused: not the app, the session itself or its lead, \(HostLog.peer(client.peerPID))")
+                return reply(.error("Only VibeSwitcher, the session itself (or the one that started it) or its team's lead ends a session."))
+            }
             if let session = sessions[id] {
                 log.note("kill \(Self.short(id)) pid \(session.info.childPID) label '\(session.info.label)'\(session.info.isLive ? "" : " (already ended)"), \(HostLog.peer(client.peerPID))")
             } else {
@@ -289,7 +342,16 @@ public final class HostServer {
             guard let vault = config.vault else { return reply(.vault(.refused("This session host keeps no lead vault."))) }
             reply(.vault(vault.answer(request, from: caller(of: client))))
         case .handover(let executable):
+            // The new build inherits every session's terminal and the socket: only the app picks it.
+            guard caller(of: client) == .app else {
+                log.note("handover refused: not the app, \(HostLog.peer(client.peerPID))")
+                return reply(.error("Only VibeSwitcher hands the session host over."))
+            }
             handOver(to: executable, reply: reply)
+        case .proveApp(let answer):
+            prove(answer, from: client)
+        case .enrollApp(let key):
+            enroll(key, from: client)
         case .shutdown:
             let live = sessions.values.filter { $0.info.isLive }.count
             guard live == 0 else {
@@ -313,10 +375,11 @@ public final class HostServer {
     /// connector forks a child to write and execs the app's binary (or anything else), the token names the child,
     /// or the new image. Anything but the process accepted makes the connection nobody's.
     private func checkPeer(_ client: ClientConnection) {
-        guard client.caller != .unknown else { return }
+        guard client.caller != .unknown || client.runsAppCode else { return }
         if let accepted = client.peer, let now = UnixSocket.peerToken(client.fd), now.sameImage(as: accepted) { return }
         log("pid \(client.peer?.pid ?? 0) is no longer the one sending on its connection: it's no one to the vault now")
         client.caller = .unknown
+        client.runsAppCode = false
     }
 
     /// Who the process `token` names is: a process in one of the live sessions (its program or anything under it,
@@ -396,7 +459,13 @@ public final class HostServer {
 
     private func handoverState(secretFD: Int32?) -> HostHandover.State {
         HostHandover.State(fromBuild: config.hostBuild, startedAt: startedAt, lockFD: lockFD, listenFD: listenFD, secretFD: secretFD,
-                           sessions: order.compactMap { sessions[$0]?.saved() })
+                           sessions: order.compactMap { id in
+                               sessions[id].map { session in
+                                   var saved = session.saved()
+                                   saved.startedBy = startedBy[id]
+                                   return saved
+                               }
+                           })
     }
 
     private func log(_ text: String) {
@@ -463,6 +532,7 @@ public final class HostServer {
 
     private func forget(_ id: UUID) {
         sessions.removeValue(forKey: id)?.close()
+        startedBy[id] = nil
         order.removeAll { $0 == id }
         primary[id] = nil
         for client in clients.values { client.attached.remove(id) }

@@ -17,10 +17,17 @@ public struct VaultStorage {
         self.key = key
     }
 
-    /// The vault as saved, or a new one; it saves itself after each change when there's a key.
-    public func book() -> LeadVault.Book {
-        let book = LeadVault.Book(restoring: load())
-        if key != nil { book.onChange = { data in try? self.save(data) } }
+    /// The vault a handover carried (`handedOver`, the build before's memory), else as saved, else a new one (noting
+    /// that it starts over when there was one it can't read); it saves itself after each change when there's a key.
+    public func book(handedOver: Data? = nil) -> LeadVault.Book {
+        let handedOver = handedOver.flatMap { LeadVault.Book.reads($0) ? $0 : nil }
+        let saved = handedOver ?? load()
+        let book = LeadVault.Book(restoring: saved, startingOver: saved == nil && FileManager.default.fileExists(atPath: file.path))
+        if key != nil {
+            book.onChange = { data in try? self.save(data) }
+            // What came from memory goes to disk too (the build before may have had no key to save it with).
+            if handedOver != nil { try? save(book.serialized) }
+        }
         return book
     }
 

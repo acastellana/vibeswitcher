@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 
@@ -16,10 +17,18 @@ public final class HostConnection {
     private var outgoing = Data()
     private var nextSeq = 1
     private var closed = false
+    /// The app's key (see `AppProof`): set by the app only, for every connection it makes (its tool calls too).
+    nonisolated(unsafe) public static var appKey: SymmetricKey?
+    private let appKey: SymmetricKey?
+    /// Requests held until the host's challenge is answered (they'd otherwise arrive before the proof): nil once
+    /// it was, or with no key to answer it with.
+    private var held: Data?
 
-    public init(path: String, queue: DispatchQueue) throws {
+    public init(path: String, queue: DispatchQueue, appKey: SymmetricKey? = HostConnection.appKey) throws {
         fd = try UnixSocket.connect(path: path)
         self.queue = queue
+        self.appKey = appKey
+        held = appKey == nil ? nil : Data()
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
         source.setEventHandler { [weak self] in self?.readAvailable() }
         source.setCancelHandler { [fd] in Darwin.close(fd) }
@@ -36,9 +45,39 @@ public final class HostConnection {
         nextSeq += 1
         guard !closed, let payload = try? HostCoding.encode(HostRequestEnvelope(seq: seq, request: request)),
               payload.count <= HostFrame.maxPayload else { return seq }
+        // The hello goes at once: an older host sends no challenge, only its welcome.
+        if held != nil, !Self.isHello(request) {
+            held?.append(HostFrame.encode(.control, payload))
+            return seq
+        }
         outgoing.append(HostFrame.encode(.control, payload))
         flush()
         return seq
+    }
+
+    private static func isHello(_ request: HostRequest) -> Bool {
+        if case .hello = request { return true }
+        return false
+    }
+
+    /// The host's challenge, answered (and the key given first to a host that holds none); then what was held.
+    private func answer(_ challenge: Data, keyless: Bool) {
+        guard let appKey, held != nil else { return }
+        let proof = keyless ? [HostRequest.enrollApp(key: appKey.data), .proveApp(answer: AppProof.answer(challenge, key: appKey))]
+            : [.proveApp(answer: AppProof.answer(challenge, key: appKey))]
+        for request in proof {
+            let seq = nextSeq
+            nextSeq += 1
+            if let payload = try? HostCoding.encode(HostRequestEnvelope(seq: seq, request: request)) { outgoing.append(HostFrame.encode(.control, payload)) }
+        }
+        release()
+    }
+
+    private func release() {
+        guard let pending = held else { return }
+        held = nil
+        outgoing.append(pending)
+        flush()
     }
 
     /// A control message as is (tests: what a newer or broken client might send).
@@ -93,7 +132,14 @@ public final class HostConnection {
                 switch frame.kind {
                 case .control:
                     // An event this app doesn't know (a newer host) is skipped, not fatal.
-                    if let envelope = try? HostCoding.decode(HostEventEnvelope.self, from: frame.payload) { onEvent?(envelope) }
+                    guard let envelope = try? HostCoding.decode(HostEventEnvelope.self, from: frame.payload) else { break }
+                    if case .challenge(let challenge, let keyless) = envelope.event {
+                        answer(challenge, keyless: keyless)
+                    } else if case .welcome = envelope.event {
+                        // A host that sent no challenge first (older than it) won't send one.
+                        release()
+                    }
+                    onEvent?(envelope)
                 case .output:
                     if let (id, bytes) = HostFrame.parseOutput(frame.payload) { onOutput?(id, bytes) }
                 }

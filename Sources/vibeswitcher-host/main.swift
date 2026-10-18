@@ -100,11 +100,19 @@ if let handoverPath {
 config.appExecutable = URL(fileURLWithPath: executable).deletingLastPathComponent().appendingPathComponent("VibeSwitcher").path
 // The lead's vault: the user's host keeps it sealed under ~/.vibeswitcher/lead with its Keychain key; a scratch host
 // (on its own lock) keeps one in memory only, never touching the user's.
+// After a handover, the vault is the one the build before held in memory (its secrets), not what's on disk.
 let vaultFile = VibePaths.root.appendingPathComponent("lead/vault.sealed")
-config.vault = ownsLaunchers ? VaultStorage(file: vaultFile, key: VaultStorage.keychainKey()).book() : LeadVault.Book()
+config.vault = ownsLaunchers ? VaultStorage(file: vaultFile, key: VaultStorage.keychainKey()).book(handedOver: restoredSecrets)
+    : LeadVault.Book(restoring: restoredSecrets)
+// The app that started this host gives it its key on stdin (see `AppProof`): taken while the vault holds none.
+if let key = HostStart.appKeyFromStdin(), let vault = config.vault, !vault.adoptAppKey(key) {
+    log("the app key on stdin isn't the one the vault holds: kept the vault's")
+}
 
 let server = HostServer(config: config)
 server.onExit = { exit(0) }
+// The vault is what a build this one hands over to must hold in memory too.
+if let vault = config.vault { server.secretsForHandover = { vault.serialized } }
 // A test of the secret channel: these bytes are handed over, and the next build says whether it got them.
 let testSecret = value(after: "--handover-test-secret").map { Data($0.utf8) }
 if let testSecret { server.secretsForHandover = { testSecret } }

@@ -80,6 +80,8 @@ public struct LeadVault: Sendable {
         case seal(SteerMessage)
         /// Which of these carry a valid seal.
         case verify([SteerMessage])
+        /// When the vault began empty in place of one that couldn't be read (`Reply.startedOver`).
+        case startedOver
     }
 
     public enum Reply: Codable, Equatable, Sendable {
@@ -91,6 +93,7 @@ public struct LeadVault: Sendable {
         case seal(String)
         case verified([Bool])
         case refused(String)
+        case startedOver(Double?)
     }
 
     /// The host said no, or couldn't be asked.
@@ -143,13 +146,26 @@ public struct LeadVault: Sendable {
         _ = try call(.retire(root: root, task: task))
     }
 
-    /// The lead starts (from VibeSwitcher, at your request): a grant for it, and `branch` taken as it is now, as the
-    /// head merges start from.
-    public func startLead(root: String, branch: String) throws -> String {
+    /// The lead starts (from VibeSwitcher): a grant for it. `branch` as it is now becomes the head merges start from
+    /// only when none is recorded, or when `takeHead` (you said so in the app, having been shown the move): starting
+    /// the lead again (anything can ask for that) doesn't make a move nobody merged look like the lead's.
+    public func startLead(root: String, branch: String, takeHead: Bool = false) throws -> String {
         let grant = try issue(role: .lead, root: root, task: nil)
-        let head = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"], in: root)
-        if head.ok, !head.output.isEmpty { try setHead(head.output, root: root, branch: branch) }
+        if let now = Self.branchHead(branch, root: root), takeHead || head(root: root, branch: branch) == nil {
+            try setHead(now, root: root, branch: branch)
+        }
         return grant
+    }
+
+    /// The branch moved since the lead last left it, and not through its merges: where it was left, and where it is.
+    public func headMoved(root: String, branch: String) -> (recorded: String, now: String)? {
+        guard let recorded = head(root: root, branch: branch), let now = Self.branchHead(branch, root: root), recorded != now else { return nil }
+        return (recorded, now)
+    }
+
+    static func branchHead(_ branch: String, root: String) -> String? {
+        let head = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"], in: root)
+        return head.ok && !head.output.isEmpty ? head.output : nil
     }
 
     /// The caller's own role in this repository, if it holds a current one.
@@ -181,6 +197,14 @@ public struct LeadVault: Sendable {
 
     public func clearVerdict(root: String, task: String) throws {
         _ = try call(.clearVerdict(root: root, task: task))
+    }
+
+    /// Why `task` has no verdict here when that isn't the whole story: the vault began empty after an earlier
+    /// session host's couldn't be read, so an audit recorded before then is lost (not missing). Nil otherwise.
+    public func missingVerdictReason(root: String, task: String) -> String? {
+        guard verdict(root: root, task: task) == nil, case .startedOver(let since?)? = try? call(.startedOver) else { return nil }
+        let when = Date(timeIntervalSince1970: since).formatted(date: .abbreviated, time: .shortened)
+        return "\(task) has no verdict in the session host's vault: the audit was recorded by an earlier session host; re-run audit. (The vault began empty \(when): the one kept before couldn't be read, its Keychain key unreadable by this build.)"
     }
 
     // MARK: The lead's branch
@@ -273,6 +297,11 @@ extension LeadVault {
             var teams: [String: Team] = [:]
             /// HMAC key for the user's steered messages (see `SteerInbox`).
             var senderKey: Data
+            /// The key the app proves itself with on each connection (see `AppProof`); nil until the app gave it.
+            var appKey: Data?
+            /// When this vault began empty because the one kept before couldn't be read (an earlier session host's,
+            /// sealed with a Keychain key this build can't read): what it held, verdicts included, is lost.
+            var startedOver: Double?
         }
 
         private var state: State
@@ -280,12 +309,65 @@ extension LeadVault {
         /// The whole state, encoded, after each change (the host keeps it sealed on disk).
         public var onChange: ((Data) -> Void)?
 
-        /// A vault as it was saved (`saved`, from `onChange`), or a new one when there's none or it doesn't read.
-        public init(restoring saved: Data? = nil) {
-            if let saved, let state = try? JSONDecoder().decode(State.self, from: saved), state.senderKey.count == 32 {
+        /// A vault as it was saved (`saved`, from `onChange` or `serialized`), or a new one when there's none or it
+        /// doesn't read. `startingOver`: a new one stands in for one that was kept but couldn't be read.
+        public init(restoring saved: Data? = nil, startingOver: Bool = false) {
+            if let saved, let state = Self.state(saved) {
                 self.state = state
             } else {
                 state = State(senderKey: SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) })
+                if startingOver { state.startedOver = Date().timeIntervalSince1970 }
+            }
+        }
+
+        private static func state(_ data: Data) -> State? {
+            guard let state = try? JSONDecoder().decode(State.self, from: data), state.senderKey.count == 32 else { return nil }
+            return state
+        }
+
+        /// `data` is a vault `init(restoring:)` reads (not a new one in its place).
+        public static func reads(_ data: Data) -> Bool { state(data) != nil }
+
+        /// The whole vault, encoded as `init(restoring:)` reads it: what a handover carries to the next build.
+        public var serialized: Data {
+            lock.lock()
+            defer { lock.unlock() }
+            return (try? JSONEncoder().encode(state)) ?? Data()
+        }
+
+        // MARK: The app's key
+
+        /// The key the app proves itself with (see `AppProof`), once the app gave it.
+        public var appKey: SymmetricKey? {
+            lock.lock()
+            defer { lock.unlock() }
+            return state.appKey.map { SymmetricKey(data: $0) }
+        }
+
+        /// Takes `key` as the app's, only while the vault holds none: once it has one, only that one proves the app.
+        /// True when `key` is the app's key now.
+        @discardableResult
+        public func adoptAppKey(_ key: Data) -> Bool {
+            lock.lock()
+            var changed = false
+            if state.appKey == nil, key.count == AppProof.keySize {
+                state.appKey = key
+                changed = true
+            }
+            let adopted = state.appKey == key
+            let data = changed ? try? JSONEncoder().encode(state) : nil
+            lock.unlock()
+            if let data { onChange?(data) }
+            return adopted
+        }
+
+        /// Whether `caller` is the lead of a team `session` holds a role in.
+        public func leads(_ session: String, caller: Caller) -> Bool {
+            guard case .session(let from) = caller else { return false }
+            lock.lock()
+            defer { lock.unlock() }
+            return state.teams.values.contains { team in
+                team.members.contains { $0.role == .lead && $0.session == from } && team.members.contains { $0.session == session }
             }
         }
 
@@ -405,6 +487,8 @@ extension LeadVault {
             case .verify(let messages):
                 let key = SymmetricKey(data: state.senderKey)
                 return .verified(messages.map { message in message.seal.map { $0 == SteerInbox.seal(message, key: key) } ?? false })
+            case .startedOver:
+                return .startedOver(state.startedOver)
             }
         }
 
