@@ -275,6 +275,47 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(BoardStore(root: root).load().task("fix")?.status == .running)
     }
 
+    /// A merge into agent/<slug> its last worker left unfinished is the next worker's to finish: started as it is,
+    /// told (as is the lead) what's staged and unresolved. recover: true aborts it instead.
+    @Test func startWorkerLeavesAMergeOnTheBranchForTheWorkerToFinish() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = call(lead, "add_task", ["title": "Fix", "goal": "g", "acceptance": ["a"], "boundaries": ["b"]])
+        let worktree = try Worktrees.create(root: root, slug: "fix")
+        for (dir, text) in [(worktree, "worker\n"), (root, "main\n")] {
+            for file in ["a.txt", "b.txt"] { try text.write(toFile: dir + "/" + file, atomically: true, encoding: .utf8) }
+            Git.run(["add", "a.txt", "b.txt"], in: dir)
+            Git.run(["commit", "-q", "-m", "both files"], in: dir)
+        }
+        let head = Git.run(["rev-parse", "HEAD"], in: worktree).output
+        #expect(!Git.run(["merge", "main"], in: worktree).ok)
+        // Half resolved: a.txt staged, b.txt still conflicted.
+        try "resolved\n".write(toFile: worktree + "/a.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "a.txt"], in: worktree)
+
+        let started = call(lead, "start_worker", ["task": "fix"])
+        #expect(!started.isError, "\(started.text)")
+        #expect(started.text.contains("middle of a merge") && started.text.contains("Staged: a.txt; unresolved: b.txt"))
+        #expect(started.text.contains("recover: true"))
+        let first = try #require(runtime.spawned.first)
+        #expect(first.cwd == worktree)
+        #expect(first.command.contains("in the middle of a merge") && first.command.contains("Staged: a.txt; unresolved: b.txt"))
+        // Nothing undone: the merge and its resolution are there for the worker.
+        #expect(try String(contentsOfFile: worktree + "/a.txt", encoding: .utf8) == "resolved\n")
+        #expect(Worktrees.interrupted(root: root, slug: "fix")?.kind == .merge)
+
+        // Started again with recover (its worker gone), the merge is aborted back to the branch's head.
+        runtime.killed.append(first.id)
+        let recovered = call(lead, "start_worker", ["task": "fix", "recover": true])
+        #expect(!recovered.isError, "\(recovered.text)")
+        #expect(recovered.text.contains("Aborted the merge"))
+        #expect(runtime.spawned.last?.command.contains("middle of a merge") == false)
+        #expect(Worktrees.interrupted(root: root, slug: "fix") == nil)
+        #expect(Git.run(["rev-parse", "refs/heads/agent/fix"], in: root).output == head)
+        #expect(Git.run(["rev-parse", "HEAD"], in: worktree).output == head)
+    }
+
     /// A folder that's another repository is still refused, recover or not, and left as it is.
     @Test func startWorkerStillRefusesAFolderThatIsntTheTasks() throws {
         let root = try repo()

@@ -307,10 +307,12 @@ public enum Worktrees {
     }
 
     /// The task's worktree: the existing one, or a new one. An empty leftover folder is replaced; one with files
-    /// in it is never touched (they might be someone's). One stopped partway through a rebase or merge of the
-    /// task's branch is thrown as `Interrupted`, or, with `recover`, aborted back to the branch first.
+    /// in it is never touched (they might be someone's). One stopped partway through a rebase of the task's branch,
+    /// or a merge on a detached HEAD, is thrown as `Interrupted`, or, with `recover`, aborted back to the branch
+    /// first. A merge into the branch itself is the worker's to finish: opened as it is, unless `recover`.
     public static func open(root: String, slug: String, base: String? = nil, recover: Bool = false) throws -> String {
         if let stuck = interrupted(root: root, slug: slug) {
+            if !recover, stuck.kind == .merge, !stuck.detached { return stuck.path }
             guard recover else { throw stuck }
             return try self.recover(root: root, slug: slug)
         }

@@ -206,7 +206,10 @@ struct WorktreesTests {
         let stuck = try #require(Worktrees.interrupted(root: root, slug: "m"))
         #expect(stuck.staged == ["a.txt"] && stuck.conflicted.isEmpty && !stuck.detached && stuck.unsafe == nil)
         #expect(stuck.description.contains("merging") && stuck.description.contains("into agent/m"))
-        #expect(throws: Worktrees.Interrupted.self) { try Worktrees.open(root: root, slug: "m") }
+        // On the branch, it's the worker's to finish: opened as it is, the merge and its resolution kept.
+        #expect(try Worktrees.open(root: root, slug: "m") == worktree)
+        #expect(Worktrees.interrupted(root: root, slug: "m")?.staged == ["a.txt"])
+        #expect(try String(contentsOfFile: worktree + "/a.txt", encoding: .utf8) == "both\n")
         #expect(try Worktrees.open(root: root, slug: "m", recover: true) == worktree)
         #expect(Git.run(["rev-parse", "refs/heads/agent/m"], in: root).output == head)
         #expect(Git.run(["rev-parse", "--abbrev-ref", "HEAD"], in: worktree).output == "agent/m")
@@ -224,6 +227,7 @@ struct WorktreesTests {
         #expect(!Git.run(["merge", "main"], in: worktree).ok)
         let stuck = try #require(Worktrees.interrupted(root: root, slug: "d"))
         #expect(stuck.kind == .merge && stuck.detached)
+        #expect(throws: Worktrees.Interrupted.self) { try Worktrees.open(root: root, slug: "d") }
         #expect(try Worktrees.open(root: root, slug: "d", recover: true) == worktree)
         #expect(Git.run(["rev-parse", "--abbrev-ref", "HEAD"], in: worktree).output == "agent/d")
         #expect(Git.run(["rev-parse", "refs/heads/agent/d"], in: root).output == head)

@@ -488,9 +488,12 @@ public final class LeadToolset: MCPToolset {
                 ?? "start_worker with recover: true runs `git \(stuck.kind.rawValue) --abort` there: the worktree goes back on \(stuck.branch) at \(stuck.head.prefix(8)) with all its commits (what's staged in the middle of the \(stuck.kind.rawValue) is dropped), then the worker starts."
             throw Problem(text: "Not started: \(stuck) \(way)")
         }
+        // A merge into the branch that its last worker left unfinished: the new one finishes its resolution.
+        let merging = recover ? nil : stuck.flatMap { $0.kind == .merge && !$0.detached ? $0 : nil }
+        let finish = merging.map { " Your worktree is in the middle of a merge: \($0) Finish it first: resolve what's unresolved, `git add` the files, then `git commit`, each command on its own; `git merge --abort` starts the merge over." } ?? ""
         let session = try launch(.worker, task: slug, name: "worker-\(slug)", in: worktree, label: "Worker: \(task.title)", trust: true,
                                  prompt: LeadPrompts.worker(task: task, root: root, workflow: workflow),
-                                 start: "Start on your task (it's in your instructions). Call progress at each milestone. When done, call report.", branch: base)
+                                 start: "Start on your task (it's in your instructions)." + finish + " Call progress at each milestone. When done, call report.", branch: base)
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             // A failed task started again is a new round of work; its setback stays to say why.
@@ -507,7 +510,8 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].evidence = nil
         }
         try? store.appendProgress("Started a worker on \(slug)")
-        let recovered = stuck.map { "Aborted the \($0.kind.rawValue) its worktree was stuck in; it's back on \($0.branch) at \($0.head.prefix(8)). " } ?? ""
+        let recovered = merging.map { "Its worktree is in the middle of a merge, which the worker was told to finish (start_worker with recover: true aborts it instead): \($0) " }
+            ?? stuck.map { "Aborted the \($0.kind.rawValue) its worktree was stuck in; it's back on \($0.branch) at \($0.head.prefix(8)). " } ?? ""
         return MCPToolResult(text: recovered + "Worker started on \(slug) in \(worktree) (branch agent/\(slug)). You'll get a message when it reports, needs input or stalls.")
     }
 
