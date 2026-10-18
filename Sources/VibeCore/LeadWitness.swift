@@ -30,6 +30,9 @@ public enum LeadWitness {
         /// The oldest message waiting in its inbox, and who sent it.
         public var heldSince: Double?
         public var heldFrom: String?
+        /// When this session was started (the host spawned it): a status or quiet from before then is another
+        /// session's (the terminal it reuses, or none read yet).
+        public var started: Double?
 
         /// How it ended, in words; its exit code when that wasn't said.
         var ending: String { cause ?? "exit \(exit ?? 0)" }
@@ -37,8 +40,9 @@ public enum LeadWitness {
         public init(live: Bool, exit: Int32? = nil, cause: String? = nil, status: SessionStatus? = nil, since: Date? = nil, detail: String? = nil,
                     agentQuit: Bool = false, apiError: String? = nil, apiErrorAt: Double? = nil, activity: LeadActivity? = nil,
                     lastActivity: Double? = nil, compactedAt: Double? = nil, shellRunning: Bool = false,
-                    heldSince: Double? = nil, heldFrom: String? = nil) {
+                    heldSince: Double? = nil, heldFrom: String? = nil, started: Double? = nil) {
             self.live = live
+            self.started = started
             self.activity = activity
             self.lastActivity = lastActivity
             self.compactedAt = compactedAt
@@ -195,9 +199,13 @@ public enum LeadWitness {
         if info.status == .needsInput { return ("\(session)|input-\(since)", input) }
         // Waiting on its own background task (a long test run), its turn goes on when that's done.
         if case .idle(_?)? = info.activity { return nil }
-        if let stopped, let status = info.status, [.done, .idle].contains(status), let at = info.since, now.timeIntervalSince(at) > quiet {
-            return ("\(session)|stopped-\(since)", stopped)
-        }
-        return nil
+        guard let stopped, let status = info.status, [.done, .idle].contains(status), let at = info.since else { return nil }
+        // Its hooks or transcript, read after the status, say it's mid-turn: the status is stale.
+        if case .working? = info.activity { return nil }
+        // Quiet since the last of: its turn ending, this session starting (a session first seen before its hooks
+        // fire reads as finished since ever, one on a reused terminal as the earlier session finished), and its
+        // transcript's last write.
+        let quietSince = max(at.timeIntervalSince1970, info.started ?? -.infinity, info.lastActivity ?? -.infinity)
+        return now.timeIntervalSince1970 - quietSince > quiet ? ("\(session)|stopped-\(since)", stopped) : nil
     }
 }

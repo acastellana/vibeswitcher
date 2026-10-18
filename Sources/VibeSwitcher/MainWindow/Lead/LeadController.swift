@@ -513,7 +513,8 @@ final class LeadController: ObservableObject {
                                         agentQuit: session == nil && info.agentQuit(now: now), apiError: apiError?.text,
                                         apiErrorAt: apiError?.at, activity: watched?.activity,
                                         lastActivity: watched?.progress?.lastWritten, compactedAt: watched?.progress?.compactedAt,
-                                        shellRunning: shellRunning, heldSince: held?.at, heldFrom: held.map { Self.sender($0.from) })
+                                        shellRunning: shellRunning, heldSince: held?.at, heldFrom: held.map { Self.sender($0.from) },
+                                        started: info.startedAt.timeIntervalSince1970)
             if info.isLive, let session { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
         }
         // Sessions that ended together (a stray kill, the app relaunched over them) are told in one message.

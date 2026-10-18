@@ -127,5 +127,74 @@ struct LeadWitnessTests {
         let closed = LeadWitness.events(board: board, seen: ["w1": .init(live: false, exit: 129)], now: now)
         #expect(closed.map(\.key) == ["w1|ended"])
     }
+
+    /// 2026-10-18 ~19:40, twice (a-successful-handover-is, the-user-s-own): audit() started a verifier, and seconds
+    /// later the witness said it stopped without calling submit_audit; it had only just begun, and passed minutes on.
+    /// Its first sighting reads as finished, since long ago: before its hooks fire there is only the title's ✳ and no
+    /// time (`.distantPast`), or the status the terminal it reuses had under an earlier session.
+    @Test func aJustStartedVerifierIsntStopped() {
+        let t0 = Date(timeIntervalSince1970: 1_792_352_400)  // 2026-10-18 19:40
+        let started = t0.timeIntervalSince1970
+        let reviewing = { (passed: Bool?) in
+            var board = LeadBoard()
+            board.tasks = [self.task("the-user-s-own", .review, worker: "w1", verifier: "v2", passed: passed)]
+            return board
+        }
+        let firstSightings: [LeadWitness.Seen] = [
+            // Nothing from its hooks or transcript yet.
+            .init(live: true, status: .idle, since: .distantPast, activity: .unknown, started: started),
+            // The prompt and one command in its transcript.
+            .init(live: true, status: .idle, since: .distantPast, activity: .working("Bash"), lastActivity: started + 3, started: started),
+            // The terminal's earlier session finished there a quarter of an hour ago.
+            .init(live: true, status: .done, since: t0 - 900, activity: .unknown, started: started),
+        ]
+        for seen in firstSightings {
+            for after in [2.0, 4, 10] {
+                let events = LeadWitness.events(board: reviewing(nil), seen: ["v2": seen, "w1": .init(live: false, exit: 0)], now: t0 + after)
+                #expect(events.isEmpty, "\(after)s in: \(events.map(\.text))")
+            }
+        }
+        // At work, then its verdict: nothing to tell either.
+        let working = LeadWitness.Seen(live: true, status: .working, since: t0 + 5, activity: .working("Bash"), lastActivity: started + 60, started: started)
+        #expect(LeadWitness.events(board: reviewing(nil), seen: ["v2": working], now: t0 + 120).isEmpty)
+        let submitted = LeadWitness.Seen(live: true, status: .done, since: t0 + 360, activity: .idle(background: nil), lastActivity: started + 360, started: started)
+        #expect(LeadWitness.events(board: reviewing(true), seen: ["v2": submitted], now: t0 + 600).isEmpty)
+    }
+
+    /// A verifier whose turn really ended without a verdict is still told, once it has been quiet a while.
+    @Test func aVerifierWhoseTurnEndedWithoutAVerdictIsTold() {
+        let t0 = Date(timeIntervalSince1970: 1_792_352_400)
+        let started = t0.timeIntervalSince1970
+        var board = LeadBoard()
+        board.tasks = [task("checked", .review, worker: "w1", verifier: "v2")]
+        let ended = LeadWitness.Seen(live: true, status: .done, since: t0 + 240, activity: .idle(background: nil), lastActivity: started + 239, started: started)
+        #expect(LeadWitness.events(board: board, seen: ["v2": ended], now: t0 + 240 + 30).isEmpty)
+        let told = LeadWitness.events(board: board, seen: ["v2": ended], now: t0 + 240 + LeadWitness.quiet + 1)
+        #expect(told.count == 1, "\(told.map(\.text))")
+        #expect(told.first?.key.hasPrefix("v2|stopped-") == true)
+        #expect(told.first?.text.contains("The verifier on checked stopped without calling submit_audit") == true)
+        // Never moving at all once started counts too, though its status gives no time of its own.
+        let idle = LeadWitness.Seen(live: true, status: .idle, since: .distantPast, activity: .unknown, started: started)
+        #expect(LeadWitness.events(board: board, seen: ["v2": idle], now: t0 + LeadWitness.quiet + 1).map(\.text)
+                    .contains { $0.contains("stopped without calling submit_audit") })
+    }
+
+    /// A task audited again: its earlier verifier (ended, or sitting at its prompt) tells nothing about the new one.
+    @Test func anEarlierVerifierOfTheTaskTellsNothingAboutTheNewOne() {
+        let t0 = Date(timeIntervalSince1970: 1_792_352_400)
+        var board = LeadBoard()
+        board.tasks = [task("a-successful-handover-is", .review, worker: "w1", verifier: "v2")]
+        // The new one runs on the terminal the earlier one had, and inherits its status and since.
+        let fresh = LeadWitness.Seen(live: true, status: .done, since: t0 - 1_200, activity: .unknown, started: t0.timeIntervalSince1970)
+        for earlier in [LeadWitness.Seen(live: false, exit: 0),
+                        LeadWitness.Seen(live: true, status: .done, since: t0 - 1_200, activity: .idle(background: nil),
+                                         lastActivity: t0.timeIntervalSince1970 - 1_200, started: t0.timeIntervalSince1970 - 1_800)] {
+            for after in [1.0, 5, 30] {
+                let seen = ["v1": earlier, "v2": fresh]
+                #expect(LeadWitness.events(board: board, seen: seen, now: t0 + after).isEmpty)
+                #expect(LeadWitness.messages(board: board, seen: seen, now: t0 + after, told: { _ in false }).isEmpty)
+            }
+        }
+    }
 }
 
