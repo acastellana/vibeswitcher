@@ -86,4 +86,27 @@ struct LeadLaunchTests {
         }
         #expect(launch.command.contains("--model 'sonnet'"))
     }
+
+    /// Checked with claude 2.1.302 on a scratch repository with these files: in auto mode (the default since 2.1.284,
+    /// and the user's `defaultMode`) the deny rules still refuse (a worker's tag, checkout of main, branch -D, push; a
+    /// verifier's Write, touch, commit) and the allowed ones run; in default mode the VibeSwitcher tools run only
+    /// because of `mcp__vibeswitcher__*` (without it: "you haven't granted it yet").
+    @Test func everyRoleMayUseItsToolsByTheServersWholeNameInAnyPermissionMode() throws {
+        for role in [LeadLaunch.Role.lead, .worker, .verifier] {
+            let launch = try LeadLaunch.prepare(role: role, root: try root(), task: "x", base: "claude", prompt: "p", start: "Go.",
+                                                server: "/s", name: "\(role.rawValue)-x", branch: "project-lead")
+            let mcp = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.mcpFile))) as? [String: Any]
+            #expect((mcp?["mcpServers"] as? [String: Any])?.keys.sorted() == ["vibeswitcher"])
+            let settings = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any])
+            let permissions = try #require(settings["permissions"] as? [String: Any])
+            // The permission mode stays the user's (auto, by default): the rules don't pick one.
+            #expect(permissions.keys.sorted() == ["allow", "deny"])
+            #expect(!launch.command.contains("--permission-mode"))
+            let allow = permissions["allow"] as? [String] ?? [], deny = permissions["deny"] as? [String] ?? []
+            // 2.1.299+: `mcp__<server>__*` with the whole name; a bare `mcp__vibeswitcher` or a prefix no longer reads the same.
+            #expect(allow.filter { $0.hasPrefix("mcp__") } == ["mcp__vibeswitcher__*"])
+            #expect(!deny.contains { $0.hasPrefix("mcp__") })
+            #expect(allow.contains("Bash(git log:*)"))
+        }
+    }
 }

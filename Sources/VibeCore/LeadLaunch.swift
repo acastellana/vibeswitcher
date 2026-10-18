@@ -65,10 +65,15 @@ public enum LeadLaunch {
         }
     }
 
-    /// What each role may do without asking, the deny rules permitting: reading git at any time (after a denied
-    /// command too), and for a worker, committing and bringing its branch up to date with `base`.
+    /// The VibeSwitcher tool server's tools, by the server's whole name (Claude Code 2.1.299+ reads `mcp__<server>__*`
+    /// as that server only). Which tools a role gets is its capability's business (see `LeadVault`).
+    static let ownTools = "mcp__vibeswitcher__*"
+
+    /// What each role may do without asking, the deny rules permitting: its VibeSwitcher tools (they never wait on a
+    /// prompt, whether or not auto mode, the default since Claude Code 2.1.284, is on), reading git at any time
+    /// (after a denied command too), and for a worker, committing and bringing its branch up to date with `base`.
     public static func allow(_ role: Role, base: String? = nil) -> [String] {
-        let reads = ["Bash(git log:*)", "Bash(git diff:*)", "Bash(git status:*)", "Bash(git show:*)", "Bash(git rev-parse:*)",
+        let reads = [ownTools, "Bash(git log:*)", "Bash(git diff:*)", "Bash(git status:*)", "Bash(git show:*)", "Bash(git rev-parse:*)",
                      "Bash(git merge-base:*)", "Bash(git ls-files:*)", "Bash(git blame:*)", "Bash(git branch --show-current)"]
         guard role == .worker else { return reads }
         var rules = reads + ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git rebase --continue)", "Bash(git rebase --abort)",
