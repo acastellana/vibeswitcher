@@ -41,12 +41,9 @@ struct EndedSessionTests {
         // Its own ~/.vibeswitcher (for the launcher copy), never the user's.
         host.environment = ["CFFIXED_USER_HOME": home.path, "HOME": home.path, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin"]
         host.standardError = FileHandle.nullDevice
-        try host.run()
+        try TestHosts.run(host)
         defer {
-            if host.isRunning {
-                host.terminate()
-                host.waitUntilExit()
-            }
+            TestHosts.end(host)
             unlink(socket)
             unlink(socket + ".lock")
             try? FileManager.default.removeItem(at: home)

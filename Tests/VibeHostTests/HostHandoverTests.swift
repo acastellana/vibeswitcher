@@ -60,7 +60,7 @@ final class ScratchHostProcess {
         stdin.fileHandleForWriting.write(appKey.data)
         try stdin.fileHandleForWriting.close()
         process.standardInput = stdin
-        try process.run()
+        try TestHosts.run(process)
         #expect(eventually { (try? UnixSocket.connect(path: socket)).map { Darwin.close($0); return true } ?? false })
     }
 
@@ -81,13 +81,14 @@ final class ScratchHostProcess {
         return path
     }
 
+    /// Ends the host (by its pid) and removes its files. Also when this goes, so a test that throws or fails before
+    /// it stops its host (or never stops it) leaves none running.
     func stop() {
-        if process.isRunning {
-            kill(pid, SIGTERM)
-            process.waitUntilExit()
-        }
+        TestHosts.end(process)
         try? FileManager.default.removeItem(atPath: dir)
     }
+
+    deinit { stop() }
 }
 
 extension TestClient {

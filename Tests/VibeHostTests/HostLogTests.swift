@@ -73,7 +73,8 @@ struct HostLogTests {
         // Its own ~/.vibeswitcher (for the launcher copy), never the user's.
         host.environment = ["CFFIXED_USER_HOME": home.path, "HOME": home.path, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin"]
         host.standardError = FileHandle.nullDevice
-        try host.run()
+        try TestHosts.run(host)
+        defer { TestHosts.end(host) }
         #expect(eventually { log(path).contains("host: started") })
         kill(host.processIdentifier, SIGTERM)
         host.waitUntilExit()

@@ -71,11 +71,11 @@ struct ParserCostTests {
         host.arguments = ["--socket", socket, "--lock", dir + "/h.lock", "--idle-exit", "600", "--log", dir + "/session.log"]
         host.environment = ["HOME": home, "CFFIXED_USER_HOME": home, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin", "TMPDIR": dir + "/"]
         host.standardError = FileHandle.nullDevice
-        try host.run()
+        try TestHosts.run(host)
         var sessions: [HostSession] = []
         defer {
             for session in sessions where kill(session.childPID, 0) == 0 { kill(-session.childPID, SIGKILL) }
-            if host.isRunning { kill(host.processIdentifier, SIGTERM); host.waitUntilExit() }
+            TestHosts.end(host)
             try? FileManager.default.removeItem(atPath: dir)
         }
         #expect(eventually { FileManager.default.fileExists(atPath: socket) })
