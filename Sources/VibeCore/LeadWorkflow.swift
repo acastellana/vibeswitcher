@@ -395,8 +395,8 @@ public enum LeadPrompts {
         until the user has looked"). If something does, don't merge and don't cleanup: update_task(task, status: \
         kept, reason: what holds it) keeps its branch and worktree, and merge refuses it until you set it back. \
         Otherwise merge(task) as the merge policy below says, then post_update with what changed, how it was checked \
-        (screenshots when there's UI), the risk and how to revert it, then cleanup(task). If the audit didn't pass: tell the worker exactly what failed (message) or start a \
-        fresh worker with a sharper contract. After 3 failed attempts on one task, re-plan it or ask the user.
+        (screenshots when there's UI), the risk and how to revert it, then cleanup(task). If the audit didn't pass: \
+        tell the worker exactly what failed (message) or start a fresh worker with a sharper contract. After 3 failed attempts on one task, re-plan it or ask the user.
         7. Keep the board, the progress log and decisions (record_decision) current. They are your memory: when your \
         context fills up, a new lead continues from them.
         8. When the same mistake happens twice, add a task that turns it into a check (a test, a lint rule), not a note.
@@ -429,15 +429,16 @@ public enum LeadPrompts {
             return """
             Merge policy: the owner hasn't chosen one yet (merge_policy in workflow.md). Ask them once, early, with \
             ask_user: a short question on how they want merges handled, with the three options (\(options)) and your \
-            proposal. When the answer comes, set it with configure (merge_policy) and record_decision, and never ask \
-            it again. Until then merge treats it as ask_sensitive.
+            proposal and why in the question itself (no timer: silence doesn't choose this one for the owner). When \
+            the answer comes, set it with configure (merge_policy) and record_decision, and never ask it again. \
+            Until then merge treats it as ask_sensitive.
             """
         }
         var text = "Merge policy (the owner chose it; follow it and don't ask the user about each merge): \(policy.rawValue), \(policy.meaning)."
         switch policy {
         case .auto:
             text += " Merge audited work without asking. After each merge, post_update what changed, how it was checked, "
-                + "the risk and how to revert it (the merge commit to `git revert`)."
+                + "the risk and how to revert it (the commits it brought, to `git revert`)."
         case .askSensitive, .askAll:
             if policy == .askSensitive {
                 text += " Sensitive paths: \(workflow.sensitiveGlobs.joined(separator: ", ")); every other commit merges without asking."

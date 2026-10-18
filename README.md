@@ -78,7 +78,18 @@ removes the worktree and branch, and tells you what landed in a few lines. Befor
 holds the task back (a recorded decision, the task's notes, your word, e.g. "prototype: never merge until I've
 looked"): such a task it sets to **kept** with the reason, which keeps its branch and worktree, and `merge` refuses a
 kept task, naming why, until the lead sets it back. A new lead reads `decisions.md` and `progress.md`, not just the
-board, before it acts. The grunt work stays out of your way:
+board, before it acts. How merges are handled is yours to choose once per project, as `merge_policy:` in
+`workflow.md`: `auto` (audited work merges, and the lead posts what changed, how it was checked, the risk and how to
+revert it afterwards), `ask_sensitive` (a commit touching `sensitive_paths:`, comma-separated globs as in
+`.gitignore`, by default Claude's settings and instructions, `.github`, `.env` files, entitlements and keys, waits for
+you) or `ask_all` (every merge waits). Until you've chosen, the lead asks you once, early, proposing one, records your
+answer with `configure` and as a decision, and doesn't ask again; meanwhile merges are handled as `ask_sensitive`. A
+merge that waits refuses until you answer the lead's question with "Approve <commit>", which names the whole
+commit: it approves that commit only, so anything committed after it needs a new approval, and a timer running out
+never counts as one. The lead also checks in every few merges or couple of hours of work (what landed, what's stuck,
+what's next, and at most one question that matters), and after a batch of work, or when the same kind of setback
+happens twice, it runs a short retrospective whose changes become tasks, checks or workflow tweaks; its updates go
+into `progress.md` too. The grunt work stays out of your way:
 workers and verifiers fold under their lead in the list, and the lead's chat shows a strip with the team's state.
 It only asks you what's really yours to decide; its questions show as cards you answer without stopping it (the
 answer reaches it at its next step), and you can message it any time the same way. For a reversible choice it
