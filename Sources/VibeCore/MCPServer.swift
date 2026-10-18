@@ -1,3 +1,5 @@
+import CryptoKit
+import Darwin
 import Foundation
 
 /// A tool as `tools/list` describes it; its arguments are an object of named properties.
@@ -51,15 +53,14 @@ public struct MCPToolResult {
     }
 }
 
-/// Whether the binary this server runs from is still the one on disk. An app update replaces it, but a running
-/// server keeps the code it started with (an old lead's tools would still branch from main, say) until its client
-/// reconnects it; killing it isn't enough, Claude Code doesn't start it again by itself. So once the file at `path`
-/// is another binary, every tool result says so, until this process ends.
+/// Whether the binary this server runs from is still the one on disk. An app update replaces it, and a running server
+/// keeps the code it started with (an old lead's tools would still branch from main, say) unless it switches: so once
+/// the file at `path` is another build, the server switches to it in place, between requests (see `MCPHandover`).
+/// Only when that fails do tool results say so.
 public final class BinaryWatch: @unchecked Sendable {
-    public static let notice = "VibeSwitcher was updated; reconnect the vibeswitcher tools: /mcp"
-
-    /// A file as `stat` sees it: an install writes a new file (another inode) or rewrites it (another time or size).
-    public struct Identity: Equatable {
+    /// A file as `stat` sees it, which is what tells builds apart: an install writes a new file (another inode) or
+    /// rewrites it (another time or size).
+    public struct Identity: Equatable, Codable {
         public var modified: TimeInterval
         public var size: Int64
         public var inode: UInt64
@@ -70,26 +71,51 @@ public final class BinaryWatch: @unchecked Sendable {
         }
     }
 
-    private let path: String
+    public let path: String
     private let identify: (String) -> Identity?
-    private let started: Identity?
+    /// The build this process runs.
+    let running: Identity?
     private let lock = NSLock()
-    private var replaced = false
+    private var failure: (build: Identity, at: Date, why: String)?
+    /// How long a build that couldn't take over waits before it's tried again (a busy Mac can make its probe time out).
+    var retry: TimeInterval = 60
 
-    /// Takes the binary's identity now: create it as the server starts.
-    public init(path: String, identify: @escaping (String) -> Identity? = BinaryWatch.identity(of:)) {
+    /// `running`: the build this process was executed from, when the one before it says (it checked the file just
+    /// before); else the file as it is now: create it as the server starts.
+    public init(path: String, running: Identity? = nil, identify: @escaping (String) -> Identity? = BinaryWatch.identity(of:)) {
         self.path = path
         self.identify = identify
-        started = identify(path)
+        self.running = running ?? identify(path)
     }
 
-    /// The notice for a tool result, or nil while the binary is the one this server started from. A missing file
-    /// (mid-install, or moved) is no notice, and neither is a binary that couldn't be read at start: no way to tell.
+    /// The build on disk when it isn't the one this process runs and it's time to switch to it. A missing file
+    /// (mid-install, or moved) is no update, and neither is anything when the binary couldn't be read at start: no way
+    /// to tell old from new.
+    public func update(now: Date = Date()) -> Identity? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard let running, let disk = identify(path) else { return nil }
+        guard disk != running else {
+            failure = nil
+            return nil
+        }
+        if let failure, failure.build == disk, now.timeIntervalSince(failure.at) < retry { return nil }
+        return disk
+    }
+
+    /// Switching to `build` failed: it's tried again after `retry`, or as soon as another build replaces it.
+    public func failed(_ build: Identity, because why: String, at now: Date = Date()) {
+        lock.lock()
+        failure = (build, now, why)
+        lock.unlock()
+    }
+
+    /// The notice for a tool result: nil unless switching to a newer build failed.
     public func notice() -> String? {
         lock.lock()
         defer { lock.unlock() }
-        if !replaced, let started, let now = identify(path), now != started { replaced = true }
-        return replaced ? Self.notice : nil
+        guard let failure else { return nil }
+        return "VibeSwitcher was updated, but this tool server couldn't switch to the new build (\(failure.why)); it runs the old one and tries again in a minute."
     }
 
     public static func identity(of path: String) -> Identity? {
@@ -100,6 +126,221 @@ public final class BinaryWatch: @unchecked Sendable {
     }
 }
 
+/// The MCP session as the client set it up: what a new build needs to go on answering the same client, with no
+/// new initialize.
+public struct MCPSession: Codable, Equatable {
+    /// The revision `initialize` settled on.
+    public var protocolVersion: String?
+    /// What the client said of itself in `initialize`: `clientInfo` and `capabilities`, as JSON.
+    public var client: Data?
+    /// The client sent `notifications/initialized`.
+    public var initialized = false
+    /// The client was told that this server announces changes to its tools (`tools.listChanged`).
+    public var announcesToolChanges = false
+    /// A digest of the last `tools/list` the client got: a build with other tools tells it to ask again.
+    public var tools: String?
+
+    public init() {}
+}
+
+/// A tool server's switch to a new build, in place: the same process (Claude Code's child, on the same pipes) runs the
+/// new binary from the next request on, so the client sees no disconnect and sends no new initialize.
+///
+/// The new build gets the MCP session and the input not handled yet (`State`), in a file only this process holds (an
+/// unlinked one, open on a descriptor the new image inherits). Never a role: the new build asks the session host which
+/// session it runs in, as at a fresh start, and the host answers from the process (the same pid, parent and terminal),
+/// not from anything the old build says. A build that can't take the state never replaces the running one: it's run
+/// first as a probe that reads it, and the exec happens only when the probe says it can.
+public enum MCPHandover {
+    /// Bumped whenever `State` changes shape: a build takes only its own.
+    public static let format = 1
+    /// How the probe is run: `vibeswitcher-mcp --mcp-handover-probe`, the state on its stdin.
+    public static let probeFlag = "--mcp-handover-probe"
+    /// What the probe prints when it can take over.
+    static let probeAnswer = "vibeswitcher-mcp handover \(format) ok"
+    /// Names the descriptor holding the state, in the new build's environment.
+    static let variable = "VIBESWITCHER_MCP_HANDOVER"
+
+    public struct State: Codable, Equatable {
+        public var format = MCPHandover.format
+        public var session: MCPSession
+        /// Input read from the client but not handled yet: the new build handles it first.
+        public var input: Data
+        /// The build being switched to, as the file was just before (see `BinaryWatch.running`).
+        public var binary: BinaryWatch.Identity?
+
+        public init(session: MCPSession, input: Data, binary: BinaryWatch.Identity?) {
+            self.session = session
+            self.input = input
+            self.binary = binary
+        }
+    }
+
+    /// The state when it's one this build takes (`format`), else nil.
+    static func decode(_ data: Data) -> State? {
+        guard let state = try? JSONDecoder().decode(State.self, from: data), state.format == format else { return nil }
+        return state
+    }
+
+    /// The probe, in the new build: reads the state on stdin and says whether it takes it. Exits.
+    public static func answerProbe() -> Never {
+        let data = FileHandle.standardInput.readDataToEndOfFile()
+        guard decode(data) != nil else {
+            FileHandle.standardError.write(Data("vibeswitcher-mcp: handover probe: not a state this build takes (format \(format))\n".utf8))
+            exit(1)
+        }
+        print(probeAnswer)
+        exit(0)
+    }
+
+    /// Replaces this process's image with `executable` (run with `arguments`), handing it `state`. Returns only when
+    /// that didn't happen, saying why; nothing changed then. Call it between requests, with none running.
+    public static func replace(with executable: String, arguments: [String], state: State, probeTimeout: TimeInterval = 20) -> String {
+        guard let data = try? JSONEncoder().encode(state) else { return "the session couldn't be written" }
+        var template = Array((NSTemporaryDirectory() as NSString).appendingPathComponent("vibeswitcher-mcp-handover.XXXXXX").utf8CString)
+        let fd = mkstemp(&template)
+        guard fd >= 0 else { return "no state file: \(String(cString: strerror(errno)))" }
+        defer { Darwin.close(fd) }
+        // Only this descriptor holds it: nothing to clean up, nothing anyone else can open.
+        unlink(template)
+        _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
+        guard writeAll(fd, data) else { return "the state file couldn't be written: \(String(cString: strerror(errno)))" }
+        // The probe reads it from the start (it shares the offset), and so does the new build.
+        guard lseek(fd, 0, SEEK_SET) == 0 else { return "the state file couldn't be rewound" }
+        if let failure = probe(executable, stateFD: fd, timeout: probeTimeout) { return failure }
+        guard lseek(fd, 0, SEEK_SET) == 0 else { return "the state file couldn't be rewound" }
+        fflush(stdout)
+        return exec(executable, arguments: arguments, stateFD: fd)
+    }
+
+    /// The state the build before handed this process, in the new build (once: the descriptor is closed after).
+    public static func take() -> State? {
+        guard let value = getenv(variable) else { return nil }
+        let named = Int32(String(cString: value))
+        unsetenv(variable)
+        guard let fd = named, fd > 2, fcntl(fd, F_GETFD) != -1 else { return nil }
+        defer { Darwin.close(fd) }
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 65_536)
+        while true {
+            let count = pread(fd, &buffer, buffer.count, off_t(data.count))
+            if count < 0, errno == EINTR { continue }
+            guard count > 0 else { break }
+            data.append(contentsOf: buffer[0..<count])
+        }
+        guard let state = decode(data) else {
+            FileHandle.standardError.write(Data("vibeswitcher-mcp: the build before handed over a session this one can't read; starting afresh\n".utf8))
+            return nil
+        }
+        return state
+    }
+
+    private static func writeAll(_ fd: Int32, _ data: Data) -> Bool {
+        data.withUnsafeBytes { raw in
+            var written = 0
+            while written < raw.count {
+                let count = Darwin.write(fd, raw.baseAddress! + written, raw.count - written)
+                if count < 0, errno == EINTR { continue }
+                guard count > 0 else { return false }
+                written += count
+            }
+            return true
+        }
+    }
+
+    /// Runs `executable --mcp-handover-probe` on the state and waits (up to `timeout`) for it to say it takes it; nil
+    /// when it does, else why not.
+    static func probe(_ executable: String, stateFD: Int32, timeout: TimeInterval) -> String? {
+        var pipe: [Int32] = [-1, -1]
+        guard Darwin.pipe(&pipe) == 0 else { return "no pipe for its probe" }
+        defer { Darwin.close(pipe[0]) }
+        var attributes: posix_spawnattr_t?
+        posix_spawnattr_init(&attributes)
+        defer { posix_spawnattr_destroy(&attributes) }
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
+        var all: sigset_t = ~0
+        var none: sigset_t = 0
+        posix_spawnattr_setsigdefault(&attributes, &all)
+        posix_spawnattr_setsigmask(&attributes, &none)
+        var actions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&actions)
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        posix_spawn_file_actions_adddup2(&actions, stateFD, 0)
+        posix_spawn_file_actions_adddup2(&actions, pipe[1], 1)
+        posix_spawn_file_actions_addinherit_np(&actions, 2)
+        let words = [executable, probeFlag]
+        let argv: [UnsafeMutablePointer<CChar>?] = words.map { strdup($0) } + [nil]
+        defer { argv.forEach { free($0) } }
+        var pid: pid_t = 0
+        let spawned = posix_spawn(&pid, executable, &actions, &attributes, argv, environ)
+        Darwin.close(pipe[1])
+        guard spawned == 0 else { return "it couldn't start: \(String(cString: strerror(spawned)))" }
+
+        _ = fcntl(pipe[0], F_SETFL, fcntl(pipe[0], F_GETFL) | O_NONBLOCK)
+        var output = Data()
+        var status: Int32 = 0
+        let deadline = Date().addingTimeInterval(timeout)
+        while waitpid(pid, &status, WNOHANG) == 0 {
+            guard Date() < deadline else {
+                kill(pid, SIGKILL)
+                waitpid(pid, &status, 0)
+                return "its probe didn't answer"
+            }
+            output.append(drain(pipe[0]))
+            usleep(10_000)
+        }
+        output.append(drain(pipe[0]))
+        let answer = String(decoding: output, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard status == 0, answer.hasSuffix(probeAnswer) else {
+            let exit = status & 0x7f == 0 ? "exited with status \((status >> 8) & 0xff)" : "was killed by signal \(status & 0x7f)"
+            return answer.isEmpty ? "its probe \(exit)" : "its probe said \(answer.suffix(200))"
+        }
+        return nil
+    }
+
+    private static func drain(_ fd: Int32) -> Data {
+        var data = Data()
+        var buffer = [UInt8](repeating: 0, count: 4_096)
+        while true {
+            let count = Darwin.read(fd, &buffer, buffer.count)
+            guard count > 0 else { return data }
+            data.append(contentsOf: buffer[0..<count])
+        }
+    }
+
+    /// The exec itself: the new image keeps the pid and gets stdin, stdout, stderr and the state's descriptor (named in
+    /// its environment), nothing else. Returns only when it failed.
+    private static func exec(_ executable: String, arguments: [String], stateFD: Int32) -> String {
+        var attributes: posix_spawnattr_t?
+        posix_spawnattr_init(&attributes)
+        defer { posix_spawnattr_destroy(&attributes) }
+        posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETEXEC | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK))
+        // Default handling and an empty mask, as at a fresh start.
+        var all: sigset_t = ~0
+        var none: sigset_t = 0
+        posix_spawnattr_setsigdefault(&attributes, &all)
+        posix_spawnattr_setsigmask(&attributes, &none)
+        var actions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&actions)
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        for fd in [0, 1, 2, stateFD] { posix_spawn_file_actions_addinherit_np(&actions, fd) }
+        // An in-place exec refuses to hand on a descriptor marked close-on-exec (EBADF): unmark the state's while it
+        // runs, and mark it again if it fails.
+        _ = fcntl(stateFD, F_SETFD, 0)
+        defer { _ = fcntl(stateFD, F_SETFD, FD_CLOEXEC) }
+        let words = [executable] + arguments
+        let argv: [UnsafeMutablePointer<CChar>?] = words.map { strdup($0) } + [nil]
+        defer { argv.forEach { free($0) } }
+        var environment = ProcessInfo.processInfo.environment
+        environment[variable] = "\(stateFD)"
+        let envp: [UnsafeMutablePointer<CChar>?] = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
+        defer { envp.forEach { free($0) } }
+        var pid: pid_t = 0
+        let result = posix_spawn(&pid, executable, &actions, &attributes, argv, envp)
+        return "it couldn't be executed: \(String(cString: strerror(result == 0 ? EINVAL : result)))"
+    }
+}
+
 public protocol MCPToolset: AnyObject {
     var tools: [MCPToolInfo] { get }
     func call(_ name: String, _ arguments: [String: Any]) -> MCPToolResult
@@ -107,7 +348,8 @@ public protocol MCPToolset: AnyObject {
 
 /// MCP over stdio: one JSON-RPC 2.0 message per line in, one reply per line out (none for notifications). Tool
 /// calls run side by side (a 20-minute merge doesn't make `status` or `ping` wait), and a cancelled call's commands
-/// are stopped. With a `watch`, results say when the app was updated under the running server.
+/// are stopped. With a `watch`, the server switches to a new build of itself when one is installed, between requests
+/// (see `MCPHandover`); it tells the client when the new build's tools differ.
 public final class MCPServer: @unchecked Sendable {
     private let name: String
     private let version: String
@@ -115,6 +357,11 @@ public final class MCPServer: @unchecked Sendable {
     private let watch: BinaryWatch?
     private let lock = NSLock()
     private var running: [String: ShellCancel] = [:]
+    private var session: MCPSession
+    /// Input the build before read but didn't handle (see `MCPHandover.State.input`).
+    private var carried: Data
+    /// Written to when a tool call ends: the reader looks again whether it can switch builds.
+    private var wake: Int32 = -1
 
     /// The MCP revisions this server speaks, newest first: tools only, text results, no JSON-RPC batches (2025-03-26
     /// has them), which reads the same in each. Not 2026-07-28, which has no initialize (a `server/discover`, a `_meta`
@@ -128,24 +375,114 @@ public final class MCPServer: @unchecked Sendable {
         requested.flatMap { protocolVersions.contains($0) ? $0 : nil } ?? protocolVersions[0]
     }
 
-    public init(name: String, version: String, toolset: MCPToolset, watch: BinaryWatch? = nil) {
+    /// `resuming`: what the build before this one handed over, when this process was that build a moment ago.
+    public init(name: String, version: String, toolset: MCPToolset, watch: BinaryWatch? = nil, resuming: MCPHandover.State? = nil) {
         self.name = name
         self.version = version
         self.toolset = toolset
         self.watch = watch
+        session = resuming?.session ?? MCPSession()
+        carried = resuming?.input ?? Data()
     }
 
-    /// Reads requests from stdin until it closes, answering on stdout.
-    public func serve() {
-        let output = NSLock()
-        while let line = readLine(strippingNewline: true) {
-            guard !line.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
-            receive(Data(line.utf8)) { reply in
-                output.lock()
-                FileHandle.standardOutput.write(reply + Data([0x0A]))
-                output.unlock()
+    /// The session as the client has set it up so far.
+    public var currentSession: MCPSession {
+        lock.lock()
+        defer { lock.unlock() }
+        return session
+    }
+
+    /// Reads requests from `input` until it closes, answering on `output`. Between requests, with no tool call
+    /// running, it switches to a new build when one is installed (and goes on here when that fails).
+    public func serve(input: Int32 = STDIN_FILENO, output: Int32 = STDOUT_FILENO) {
+        let out = FileHandle(fileDescriptor: output, closeOnDealloc: false)
+        let writing = NSLock()
+        let respond: (Data) -> Void = { reply in
+            writing.lock()
+            out.write(reply + Data([0x0A]))
+            writing.unlock()
+        }
+        var wakeup: [Int32] = [-1, -1]
+        if Darwin.pipe(&wakeup) == 0 {
+            for fd in wakeup {
+                _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
+                _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
             }
         }
+        lock.lock()
+        wake = wakeup[1]
+        var pending = carried
+        carried = Data()
+        lock.unlock()
+        defer {
+            lock.lock()
+            wake = -1
+            lock.unlock()
+            for fd in wakeup where fd >= 0 { Darwin.close(fd) }
+        }
+        if let changed = toolsChanged() { respond(changed) }
+
+        var chunk = [UInt8](repeating: 0, count: 65_536)
+        while true {
+            switchIfDue(pending: pending)
+            if let end = pending.firstIndex(of: 0x0A) {
+                var line = Data(pending[pending.startIndex..<end])
+                pending = Data(pending[pending.index(after: end)...])
+                if line.last == 0x0D { line.removeLast() }
+                if !Self.isBlank(line) { receive(line, respond: respond) }
+                continue
+            }
+            // A second at most: an idle server switches too, and the client hears of new tools before it asks.
+            var fds = [pollfd(fd: input, events: Int16(POLLIN), revents: 0), pollfd(fd: wakeup[0], events: Int16(POLLIN), revents: 0)]
+            let ready = poll(&fds, wakeup[0] >= 0 ? 2 : 1, 1_000)
+            if ready < 0 {
+                if errno == EINTR { continue }
+                return
+            }
+            if fds[1].revents != 0 { while Darwin.read(wakeup[0], &chunk, chunk.count) > 0 {} }
+            guard fds[0].revents != 0 else { continue }
+            let count = Darwin.read(input, &chunk, chunk.count)
+            if count > 0 {
+                pending.append(contentsOf: chunk[0..<count])
+            } else if count == 0 || (errno != EINTR && errno != EAGAIN) {
+                // Closed: the last line may have no newline.
+                if !Self.isBlank(pending) { receive(pending, respond: respond) }
+                return
+            }
+        }
+    }
+
+    private static func isBlank(_ line: Data) -> Bool {
+        line.allSatisfy { $0 == 0x20 || $0 == 0x09 || $0 == 0x0D }
+    }
+
+    /// Switches to the build on disk when it's another one and no tool call is running (only this thread starts them,
+    /// so none starts in between). Returns only when it didn't switch.
+    private func switchIfDue(pending: Data) {
+        guard let watch else { return }
+        lock.lock()
+        let idle = running.isEmpty
+        let state = MCPHandover.State(session: session, input: pending, binary: nil)
+        lock.unlock()
+        guard idle, let build = watch.update() else { return }
+        var handover = state
+        handover.binary = build
+        let why = MCPHandover.replace(with: watch.path, arguments: Array(CommandLine.arguments.dropFirst()), state: handover)
+        watch.failed(build, because: why)
+        FileHandle.standardError.write(Data("vibeswitcher-mcp: couldn't switch to the new build at \(watch.path): \(why); this build serves on\n".utf8))
+    }
+
+    /// The notification that the tools changed, for a client that got another build's list and was told they may.
+    private func toolsChanged() -> Data? {
+        lock.lock()
+        defer { lock.unlock() }
+        guard session.initialized, session.announcesToolChanges, let told = session.tools, told != Self.digest(toolset.tools) else { return nil }
+        return encode(["jsonrpc": "2.0", "method": "notifications/tools/list_changed"])
+    }
+
+    static func digest(_ tools: [MCPToolInfo]) -> String {
+        let data = (try? JSONSerialization.data(withJSONObject: tools.map(\.json), options: [.sortedKeys])) ?? Data()
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     /// One incoming message: tool calls are answered when they finish (on another thread), the rest at once.
@@ -162,10 +499,13 @@ public final class MCPServer: @unchecked Sendable {
             // pool is busy (a build, other calls) it wouldn't even start; a cancel would find nothing running.
             Thread.detachNewThread { [self] in
                 let reply = ShellCancel.with(token) { handle(data) }
+                // Answered before it counts as ended: a switch of builds waits for no call, and loses none.
+                if let reply { respond(reply) }
                 lock.lock()
                 running[key] = nil
+                let wake = self.wake
                 lock.unlock()
-                if let reply { respond(reply) }
+                if wake >= 0 { _ = Darwin.write(wake, [UInt8(1)], 1) }
             }
             return
         }
@@ -183,17 +523,27 @@ public final class MCPServer: @unchecked Sendable {
         }
         let id = message["id"]
         let method = message["method"] as? String ?? ""
+        let params = message["params"] as? [String: Any] ?? [:]
+        if method == "notifications/initialized" { remember { $0.initialized = true } }
         // Notifications (no id) get no reply.
         guard let id else { return nil }
-        let params = message["params"] as? [String: Any] ?? [:]
         switch method {
         case "initialize":
-            return reply(id, ["protocolVersion": Self.negotiate(params["protocolVersion"] as? String),
-                              "capabilities": ["tools": [String: Any]()], "serverInfo": ["name": name, "version": version]])
+            let negotiated = Self.negotiate(params["protocolVersion"] as? String)
+            let client = ["clientInfo": params["clientInfo"] ?? NSNull(), "capabilities": params["capabilities"] ?? NSNull()]
+            remember {
+                $0.protocolVersion = negotiated
+                $0.client = try? JSONSerialization.data(withJSONObject: client, options: [.sortedKeys])
+                $0.announcesToolChanges = true
+            }
+            return reply(id, ["protocolVersion": negotiated,
+                              "capabilities": ["tools": ["listChanged": true]], "serverInfo": ["name": name, "version": version]])
         case "ping":
             return reply(id, [String: Any]())
         case "tools/list":
-            return reply(id, ["tools": toolset.tools.map(\.json)])
+            let tools = toolset.tools
+            remember { $0.tools = Self.digest(tools) }
+            return reply(id, ["tools": tools.map(\.json)])
         case "tools/call":
             let tool = params["name"] as? String ?? ""
             let arguments = params["arguments"] as? [String: Any] ?? [:]
@@ -204,6 +554,12 @@ public final class MCPServer: @unchecked Sendable {
         default:
             return encode(["jsonrpc": "2.0", "id": id, "error": ["code": -32601, "message": "Method not found: \(method)"]])
         }
+    }
+
+    private func remember(_ change: (inout MCPSession) -> Void) {
+        lock.lock()
+        change(&session)
+        lock.unlock()
     }
 
     private func reply(_ id: Any, _ result: [String: Any]) -> Data? {

@@ -15,6 +15,40 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--test-failure
     exit(0)
 }
 
+// A build switching to this one asks first whether it takes the session (see `MCPHandover`).
+if CommandLine.arguments.count == 2, CommandLine.arguments[1] == MCPHandover.probeFlag { MCPHandover.answerProbe() }
+
+// The MCP session the build before handed over, when this process ran it a moment ago (the client goes on, with no
+// new initialize). The role isn't in it: the toolset asks the session host, as at a fresh start.
+let handover = MCPHandover.take()
+if handover != nil { FileHandle.standardError.write(Data("vibeswitcher-mcp: switched in place to the new build\n".utf8)) }
+
+/// For MCPHandoverTests: a server with no host behind it whose tools say which build answers.
+/// `VIBESWITCHER_MCP_TEST_BUILD` names the build (a script standing in for one sets it), `VIBESWITCHER_MCP_TEST_BINARY`
+/// is where it's installed.
+final class TestBuild: MCPToolset {
+    let build: String
+    init(_ build: String) { self.build = build }
+
+    var tools: [MCPToolInfo] {
+        [MCPToolInfo(name: "build", description: "Which build answers, and its process"),
+         MCPToolInfo(name: "slow", description: "Answers after a while", properties: ["seconds": .init(type: "number", description: "How long")]),
+         MCPToolInfo(name: "only-\(build)", description: "A tool only this build has")]
+    }
+
+    func call(_ name: String, _ arguments: [String: Any]) -> MCPToolResult {
+        if name == "slow" { Thread.sleep(forTimeInterval: arguments["seconds"] as? Double ?? 1) }
+        return MCPToolResult(text: "\(build) \(getpid())")
+    }
+}
+
+let environment = ProcessInfo.processInfo.environment
+if let build = environment["VIBESWITCHER_MCP_TEST_BUILD"], let installed = environment["VIBESWITCHER_MCP_TEST_BINARY"] {
+    MCPServer(name: "vibeswitcher", version: "1", toolset: TestBuild(build),
+              watch: BinaryWatch(path: installed, running: handover?.binary), resuming: handover).serve()
+    exit(0)
+}
+
 /// The real world behind the lead's tools.
 final class HostRuntime: LeadRuntime {
     var server: String {
@@ -157,8 +191,9 @@ final class HostRuntime: LeadRuntime {
 }
 
 let runtime = HostRuntime()
-// This binary as it is now: an app update replaces it under the running server, which then says so in its results.
-let watch = BinaryWatch(path: runtime.server)
-// The session can start before VibeSwitcher has bound its role to it: give that a moment.
+// This binary as it is now: when an app update replaces it, the server switches to the new one between requests.
+let watch = BinaryWatch(path: runtime.server, running: handover?.binary)
+// The session can start before VibeSwitcher has bound its role to it: give that a moment. After a switch of builds
+// too: the role comes from the session host, never from the build before.
 let toolset = LeadToolset(arguments: Array(CommandLine.arguments.dropFirst()), runtime: runtime, wait: 3)
-MCPServer(name: "vibeswitcher", version: "1", toolset: toolset, watch: watch).serve()
+MCPServer(name: "vibeswitcher", version: "1", toolset: toolset, watch: watch, resuming: handover).serve()
