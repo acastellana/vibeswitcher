@@ -463,6 +463,8 @@ struct LeadTeamView: View {
     var decisions: [LeadDecision] = []
     var openDecisions: Set<String> = []
     var showEarlier = false
+    /// The earlier results unfolded, to begin with.
+    var showEarlierResults = false
     /// The plain-language lines written so far (see `TeamSummaryModel`).
     var summary: (TeamRow) -> String? = { _ in nil }
     var decisionSummary: (LeadDecision) -> String? = { _ in nil }
@@ -471,15 +473,15 @@ struct LeadTeamView: View {
 
     var body: some View {
         let fading = !DecisionFeed.split(decisions, now: (clock ?? Date()).timeIntervalSince1970, reduceMotion: false).recent.isEmpty
-        TimelineView(.ticking(every: fading ? 1 : 10)) { context in
-            let now = clock ?? context.date
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    glance(now: now)
-                    rest
+        ScrollView {
+            VStack(alignment: .leading, spacing: 18) {
+                // Only what tells time is drawn again as the clock ticks (every second while a decision fades).
+                TimelineView(.ticking(every: fading ? 1 : 10)) { context in
+                    glance(now: clock ?? context.date)
                 }
-                .padding(14)
+                rest
             }
+            .padding(14)
         }
     }
 
@@ -512,25 +514,7 @@ struct LeadTeamView: View {
         }
         if !board.updates.isEmpty {
             section("Results") {
-                ForEach(board.updates.reversed()) { update in
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text(update.title).font(.system(size: 12.5, weight: .semibold))
-                            Spacer()
-                            Text(Date(timeIntervalSince1970: update.at).formatted(date: .omitted, time: .shortened))
-                                .font(.system(size: 10.5)).foregroundStyle(.tertiary)
-                        }
-                        MarkdownView(text: update.body, fontSize: 12)
-                        ForEach(update.images, id: \.self) { path in
-                            if let image = NSImage(contentsOfFile: path) {
-                                Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(maxHeight: 160)
-                                    .clipShape(RoundedRectangle(cornerRadius: 6))
-                                    .onTapGesture { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
-                            }
-                        }
-                    }
-                    .padding(10).background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))
-                }
+                ResultsList(updates: board.updates, showEarlier: showEarlierResults)
             }
         }
         section("Files") {
@@ -553,5 +537,49 @@ struct LeadTeamView: View {
             Text(title.uppercased()).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.secondary)
             content()
         }
+    }
+}
+
+/// The lead's results, newest first: the latest few in full, the rest folded into "Earlier results (n)". Each one's
+/// markdown is selectable text, which AppKit hosts view by view: a day's results drawn whole made every switch to the
+/// lead take seconds and held a hundred-odd MB.
+struct ResultsList: View {
+    static let shown = 3
+    let updates: [LeadUpdate]
+    @State var showEarlier = false
+
+    var body: some View {
+        let newest = Array(updates.reversed())
+        let earlier = newest.dropFirst(Self.shown)
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(newest.prefix(Self.shown)) { update in card(update) }
+            if !earlier.isEmpty {
+                Fold(title: "Earlier results (\(earlier.count))", isOpen: $showEarlier, hint: "the lead's earlier results")
+                    .padding(.horizontal, -8)
+                if showEarlier {
+                    ForEach(earlier) { update in card(update) }
+                }
+            }
+        }
+    }
+
+    private func card(_ update: LeadUpdate) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(update.title).font(.system(size: 12.5, weight: .semibold))
+                Spacer()
+                Text(Date(timeIntervalSince1970: update.at).formatted(date: .omitted, time: .shortened))
+                    .font(.system(size: 10.5)).foregroundStyle(.tertiary)
+            }
+            MarkdownView(text: update.body, fontSize: 12)
+            ForEach(update.images, id: \.self) { path in
+                if let image = NSImage(contentsOfFile: path) {
+                    Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(maxHeight: 160)
+                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                        .onTapGesture { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+                }
+            }
+        }
+        .padding(10).background(RoundedRectangle(cornerRadius: 8).fill(Color.secondary.opacity(0.06)))
     }
 }
