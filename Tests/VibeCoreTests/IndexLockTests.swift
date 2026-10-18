@@ -243,6 +243,28 @@ struct IndexLockHolderTests {
         #expect(!FileManager.default.fileExists(atPath: path))
     }
 
+    /// On a busy Mac (every core busy twice over) a stale lock is still found stale within the default time limit:
+    /// checked, not "couldn't check who holds it in time".
+    @Test func aStaleLockIsCheckedInTimeOnABusyMac() throws {
+        let root = try repo()
+        let path = root + "/.git/index.lock"
+        leaveStaleLock(path, age: 10 * 60)
+        var burners: [Process] = []
+        defer {
+            for burner in burners where burner.isRunning { kill(burner.processIdentifier, SIGKILL) }
+            for burner in burners { burner.waitUntilExit() }
+        }
+        for _ in 0..<(2 * ProcessInfo.processInfo.activeProcessorCount) {
+            let burner = Process()
+            burner.executableURL = URL(fileURLWithPath: "/usr/bin/yes")
+            burner.standardOutput = FileHandle.nullDevice
+            try burner.run()
+            burners.append(burner)
+        }
+        let lock = try #require(IndexLock.find(in: root))
+        #expect(lock.checked && lock.stale, "\(lock.description)")
+    }
+
     @Test func aWorktreesLockIsItsOwn() throws {
         let root = try repo()
         let worktree = try Worktrees.create(root: root, slug: "w")
