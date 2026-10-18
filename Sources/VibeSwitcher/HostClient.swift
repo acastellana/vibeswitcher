@@ -46,8 +46,12 @@ final class HostClient: ObservableObject {
     private var sinks: [UUID: (sink: Sink, cols: Int, rows: Int)] = [:]
     private var whenReady: [(String?) -> Void] = []
     private var replacing = false
-    /// A handover was asked of the running host; the bundled build's welcome follows.
-    private var handingOver = false
+    /// A handover asked of the running host: its pid then (the host re-executes itself, so the new build keeps it) and
+    /// the bundled build asked for. The connection drops by design; the next welcome says whether it went through.
+    private var handover: (pid: Int32?, build: Int)?
+    private var handingOver: Bool { handover != nil }
+    /// The pid the connected host gave in its welcome (nil from an older host).
+    private var hostPID: Int32?
     /// The bundled build a handover was last asked for: asked once per build, so a failing one isn't asked again
     /// and again (the window's restart asks once more).
     private var handedOverTo: Int?
@@ -74,9 +78,24 @@ final class HostClient: ObservableObject {
         return key
     }()
 
-    init(socketPath: String = VibePaths.hostSocket.path, appKey: @escaping () -> SymmetricKey? = { HostClient.appKey }) {
+    /// What this client does, for app.log (a test's own list instead).
+    private let note: (String) -> Void
+    /// The bundled host's build (see `HostBuild`); a test's fake build instead.
+    private let bundledBuild: () -> Int
+    /// How long to wait before each attempt to get back to a host that dropped the connection; then it's gone.
+    private let reconnectDelays: [TimeInterval]
+
+    /// The reply every request still waiting gets when the connection drops.
+    static let wentAway = "The session host went away."
+
+    init(socketPath: String = VibePaths.hostSocket.path, appKey: @escaping () -> SymmetricKey? = { HostClient.appKey },
+         bundledBuild: @escaping () -> Int = { HostBuild.id(ofExecutableAt: HostClient.hostExecutable.path) },
+         reconnectDelays: [TimeInterval] = [0.2, 0.5, 1, 2, 3, 5], note: @escaping (String) -> Void = { Breadcrumbs.shared.note($0) }) {
         self.socketPath = socketPath
         proofKey = appKey
+        self.bundledBuild = bundledBuild
+        self.reconnectDelays = reconnectDelays
+        self.note = note
     }
 
     static var hostExecutable: URL {
@@ -146,7 +165,7 @@ final class HostClient: ObservableObject {
     private var offeredKeyReset = false
 
     private func proofRefused(_ reason: String) {
-        Breadcrumbs.shared.note("host: proof refused: \(reason)")
+        note("host: proof refused: \(reason)")
         guard !offeredKeyReset, let key = Self.appKey else { return }
         offeredKeyReset = true
         let live = sessions.filter(\.isLive).count
@@ -161,7 +180,7 @@ final class HostClient: ObservableObject {
         guard alert.runModal() == .alertFirstButtonReturn, live == 0 else { return }
         request(.replaceAppKey(key: key.data)) { [weak self] event in
             guard let self else { return }
-            guard case .ok = event else { return Breadcrumbs.shared.note("host: key not replaced: \(event)") }
+            guard case .ok = event else { return note("host: key not replaced: \(event)") }
             // A new connection, with a new challenge, answered with the key the host now holds.
             self.connection?.close()
             self.connectionLost()
@@ -211,13 +230,13 @@ final class HostClient: ObservableObject {
 
     private func connectionLost() {
         let welcomed = state != .connecting
-        Breadcrumbs.shared.note("host: connection lost (welcomed=\(welcomed), replacing=\(replacing), waiting=\(whenReady.count))")
+        note("host: connection lost (welcomed=\(welcomed), replacing=\(replacing), waiting=\(whenReady.count))")
         connection = nil
         hostCapabilities = []
         sentInput = [:]
         let pending = replies
         replies = [:]
-        pending.values.forEach { $0(.error("The session host went away.")) }
+        pending.values.forEach { $0(.error(Self.wentAway)) }
         if replacing {
             replacing = false
             try? startHost()
@@ -237,7 +256,7 @@ final class HostClient: ObservableObject {
     }
 
     private func reconnect() {
-        let delays: [TimeInterval] = [0.2, 0.5, 1, 2, 3, 5]
+        let delays = reconnectDelays
         guard reconnectAttempt < delays.count else { return hostGone() }
         let delay = delays[reconnectAttempt]
         reconnectAttempt += 1
@@ -249,7 +268,11 @@ final class HostClient: ObservableObject {
 
     /// The host is gone and took its sessions with it: they stay listed as ended, with their last screen.
     private func hostGone() {
-        Breadcrumbs.shared.note("host: gone; \(sessions.filter(\.isLive).count) sessions marked ended")
+        if let asked = handover {
+            note("host: handover failed: the host (pid \(asked.pid.map(String.init) ?? "?")) went away and no build answered")
+            handover = nil
+        }
+        note("host: gone; \(sessions.filter(\.isLive).count) sessions marked ended")
         reconnectAttempt = 0
         let now = Date()
         sessions = sessions.map { session in
@@ -266,22 +289,26 @@ final class HostClient: ObservableObject {
         if let seq = envelope.replyTo, let reply = replies.removeValue(forKey: seq) { reply(envelope.event) }
         if let seq = envelope.replyTo, !sentInput.isEmpty {
             if case .error(let message) = envelope.event, let input = sentInput[seq] {
-                Breadcrumbs.shared.note("host: \(input.count) bytes of input refused: \(message)")
+                note("host: \(input.count) bytes of input refused: \(message)")
                 inputCut(input.id, 0, input.count, message)
             }
             sentInput = sentInput.filter { $0.key > seq }
         }
         switch envelope.event {
         case .welcome(let version, let build, let list, let capabilities, let pid, _):
-            Breadcrumbs.shared.note("host: welcome v\(version) build \(build) pid \(pid.map(String.init) ?? "?"), \(list.count) sessions")
+            note("host: welcome v\(version) build \(build) pid \(pid.map(String.init) ?? "?"), \(list.count) sessions")
             hostCapabilities = Set(capabilities ?? [])
             reconnectAttempt = 0
             restartedForWaiting = false
-            handingOver = false
+            hostPID = pid
+            if let asked = handover {
+                note(Self.handoverOutcome(asked: asked, pid: pid, build: build))
+                handover = nil
+            }
             sessions = list
             canHandOver = hostCapabilities.contains(HostProtocol.Capability.handover)
             let live = list.filter(\.isLive).count
-            let bundled = HostBuild.id(ofExecutableAt: Self.hostExecutable.path)
+            let bundled = bundledBuild()
             switch Self.plan(version: version, build: build, bundled: bundled, sessions: list.count,
                              canHandOver: canHandOver, handedOverTo: handedOverTo) {
             case .use:
@@ -355,17 +382,34 @@ final class HostClient: ObservableObject {
         return canHandOver && handedOverTo != bundled ? .handOver : .keepOutdated
     }
 
+    /// The line for app.log when the first welcome after a handover was asked comes: handed over when the bundled build
+    /// answers from the same process (the host re-executes itself in place), else a failure that says who answered.
+    static func handoverOutcome(asked: (pid: Int32?, build: Int), pid: Int32?, build: Int) -> String {
+        let shown = { (pid: Int32?) in pid.map(String.init) ?? "?" }
+        if let was = asked.pid, pid != was {
+            return "host: handover failed: a different host answered (pid \(shown(pid)), build \(build); was pid \(was))"
+        }
+        guard build == asked.build else {
+            return "host: handover failed: the old build answered (pid \(shown(pid)), build \(build); asked for \(asked.build))"
+        }
+        return "host: handed over (pid \(shown(pid)), build \(build))"
+    }
+
     /// Asks the running host to become the bundled build, keeping every session: it answers ok, the connection drops
     /// and the new build's welcome comes on the next one (`connectionLost` reconnects).
     private func handOver() {
         guard !handingOver else { return }
-        Breadcrumbs.shared.note("host: handing over to the bundled build")
-        handingOver = true
-        handedOverTo = HostBuild.id(ofExecutableAt: Self.hostExecutable.path)
+        let bundled = bundledBuild()
+        note("host: handing over to the bundled build \(bundled) (pid \(hostPID.map(String.init) ?? "?"))")
+        handover = (hostPID, bundled)
+        handedOverTo = bundled
         request(.handover(executable: Self.hostExecutable.path)) { [weak self] event in
             guard let self, case .error(let message) = event, self.handingOver else { return }
-            Breadcrumbs.shared.note("host: handover failed: \(message)")
-            self.handingOver = false
+            // The host re-executes itself: the connection drops by design (its ok can go with it). The next welcome
+            // says how it went (`handoverOutcome`), or `hostGone` that no build came back.
+            guard message != Self.wentAway else { return note("host: connection dropped for the handover; waiting for the new build") }
+            note("host: handover failed: \(message)")
+            self.handover = nil
             // Carry on with the old build, as without a handover.
             if !self.isUsable { self.finishWaiting("The session host is out of date. Restart it from the window.") }
         }
@@ -374,7 +418,7 @@ final class HostClient: ObservableObject {
     /// Asks an idle host to quit; `connectionLost` then starts the bundled one.
     private func replaceHost() {
         guard !replacing else { return }
-        Breadcrumbs.shared.note("host: replacing an outdated host")
+        note("host: replacing an outdated host")
         replacing = true
         request(.shutdown) { [weak self] event in
             if case .error = event { self?.replacing = false }
@@ -424,7 +468,7 @@ final class HostClient: ObservableObject {
         do {
             seq = try connection.send(request)
         } catch {
-            Breadcrumbs.shared.note("host: not sent: \(error)")
+            note("host: not sent: \(error)")
             reply?(.error("\(error)"))
             return
         }
@@ -437,7 +481,7 @@ final class HostClient: ObservableObject {
     }
 
     func spawn(_ spawn: SpawnRequest, completion: @escaping (Result<HostSession, HostClientError>) -> Void) {
-        Breadcrumbs.shared.note("host: spawn \(spawn.label) in \((spawn.cwd as NSString).lastPathComponent)")
+        note("host: spawn \(spawn.label) in \((spawn.cwd as NSString).lastPathComponent)")
         ensureHost { error in
             if let error { return completion(.failure(HostClientError(message: error))) }
             self.request(.spawn(spawn)) { event in
@@ -518,7 +562,7 @@ final class HostClient: ObservableObject {
 
     /// Input that didn't all go in: to `onInputCut` when set (tests), else the user is told how much did.
     private func inputCut(_ id: UUID, _ went: Int, _ total: Int, _ reason: String) {
-        Breadcrumbs.shared.note("host: input to \(id.uuidString.prefix(8)) cut: \(went) of \(total) bytes went in: \(reason)")
+        note("host: input to \(id.uuidString.prefix(8)) cut: \(went) of \(total) bytes went in: \(reason)")
         if let onInputCut { return onInputCut(id, went, total, reason) }
         unshownCuts.append((id, went, total, reason))
         guard !showingCut else { return }
@@ -615,7 +659,7 @@ final class HostClient: ObservableObject {
     /// (`inputCut`).
     private func giveUpInput(_ id: UUID, _ reason: String) {
         guard let paced = pacedInput.removeValue(forKey: id) else { return }
-        Breadcrumbs.shared.note("host: input to \(id.uuidString.prefix(8)) given up: \(reason)")
+        note("host: input to \(id.uuidString.prefix(8)) given up: \(reason)")
         let untold = paced.queue.filter { $0.done == nil }
         if !untold.isEmpty {
             let went = untold.reduce(0) { $0 + $1.total - $1.left.count }
