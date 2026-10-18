@@ -4,6 +4,9 @@ import VibeCore
 
 /// What the app hands the host it starts.
 public enum HostStart {
+    /// The app's key comes on stdin (`appKeyFromStdin`); without it, stdin is left alone.
+    public static let appKeyFlag = AppProof.hostStdinFlag
+
     /// The app's key (see `AppProof`), when stdin is a pipe that carries exactly one: the app writes it and closes
     /// its end before the host reads. Stdin is /dev/null afterwards. Nil for anything else (a host run by hand, or
     /// by an app from before keys).

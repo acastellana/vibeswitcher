@@ -10,6 +10,8 @@ import Security
 /// reads it.
 public enum AppProof {
     public static let keySize = 32
+    /// What the app starts the host with when it gives it the key on stdin.
+    public static let hostStdinFlag = "--app-key-stdin"
 
     /// A fresh challenge for one connection.
     public static func challenge() -> Data { SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) } }

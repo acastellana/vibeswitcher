@@ -187,7 +187,7 @@ final class HostClient: ObservableObject {
         defer { if keyPipe[0] >= 0 { close(keyPipe[0]) } }
         posix_spawn_file_actions_addopen(&actions, 1, VibePaths.hostLog.path, O_WRONLY | O_CREAT | O_APPEND, 0o600)
         posix_spawn_file_actions_adddup2(&actions, 1, 2)
-        let argv: [UnsafeMutablePointer<CChar>?] = [strdup(path), nil]
+        let argv: [UnsafeMutablePointer<CChar>?] = [strdup(path)] + (keyPipe[0] >= 0 ? [strdup(AppProof.hostStdinFlag)] : []) + [nil]
         defer { argv.forEach { free($0) } }
         var pid: pid_t = 0
         let result = posix_spawn(&pid, path, &actions, &attributes, argv, environ)

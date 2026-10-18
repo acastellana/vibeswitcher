@@ -55,7 +55,8 @@ config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600
 // The user's host logs its sessions (see `HostLog`); a scratch host only where it's told to.
 config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.appendingPathComponent("debug/host.log").path : nil)
 // What a build this one hands over to is started with: the same, without this start's handover.
-let handoverFlags: [String: Bool] = ["--handover": true, "--handover-fallback": true, "--handover-fail-restore": false]
+let handoverFlags: [String: Bool] = ["--handover": true, "--handover-fallback": true, "--handover-fail-restore": false,
+                                     HostStart.appKeyFlag: false]
 config.arguments = arguments.dropFirst().enumerated().reduce(into: (kept: [String](), skip: false)) { result, item in
     if result.skip { result.skip = false; return }
     if let takesValue = handoverFlags[item.element] { result.skip = takesValue; return }
@@ -104,8 +105,9 @@ config.appExecutable = URL(fileURLWithPath: executable).deletingLastPathComponen
 let vaultFile = VibePaths.root.appendingPathComponent("lead/vault.sealed")
 config.vault = ownsLaunchers ? VaultStorage(file: vaultFile, key: VaultStorage.keychainKey()).book(handedOver: restoredSecrets)
     : LeadVault.Book(restoring: restoredSecrets)
-// The app that started this host gives it its key on stdin (see `AppProof`): taken while the vault holds none.
-if let key = HostStart.appKeyFromStdin(), let vault = config.vault, !vault.adoptAppKey(key) {
+// The app that started this host gives it its key on stdin (see `AppProof`), and says so: taken while the vault
+// holds none.
+if arguments.contains(HostStart.appKeyFlag), let key = HostStart.appKeyFromStdin(), let vault = config.vault, !vault.adoptAppKey(key) {
     log("the app key on stdin isn't the one the vault holds: kept the vault's")
 }
 

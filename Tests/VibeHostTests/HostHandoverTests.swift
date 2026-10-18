@@ -49,7 +49,7 @@ final class ScratchHostProcess {
         newBuild = HostBuild.id(ofExecutableAt: newBinary)
 
         process.executableURL = URL(fileURLWithPath: oldBinary)
-        process.arguments = ["--socket", socket, "--lock", lock, "--idle-exit", "600", "--log", sessionLog] + extra
+        process.arguments = ["--socket", socket, "--lock", lock, "--idle-exit", "600", "--log", sessionLog, AppProof.hostStdinFlag] + extra
         process.environment = ["HOME": home, "CFFIXED_USER_HOME": home, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin",
                                "TMPDIR": dir + "/"]
         files.createFile(atPath: dir + "/host.log", contents: nil)
