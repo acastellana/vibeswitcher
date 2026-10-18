@@ -13,6 +13,11 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// The branch the lead builds on and merges into (`base_branch:`; otherwise the one checked out when the lead
     /// first started there, kept on its board).
     public var baseBranch: String?
+    /// Free space (GB) on the volume holding the worktrees below which the lead is warned (`disk_warning_gb:`), and
+    /// below which start_worker refuses (`disk_floor_gb:`): a worker started on a full disk fails, and so does
+    /// every session.
+    public var diskWarningGB: Double = 10
+    public var diskFloorGB: Double = 3
     public var notes = ""
     /// Why the file's settings couldn't be read (missing, unreadable, no front matter); nil when they were.
     public var problem: String?
@@ -37,6 +42,8 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "worker_agent": workflow.workerAgent = present ?? "claude"
                 case "verifier_model": workflow.verifierModel = present
                 case "base_branch": workflow.baseBranch = present
+                case "disk_warning_gb": workflow.diskWarningGB = gigabytes(value) ?? 10
+                case "disk_floor_gb": workflow.diskFloorGB = gigabytes(value) ?? 3
                 default: break
                 }
             }
@@ -47,6 +54,14 @@ public struct LeadWorkflow: Equatable, Sendable {
         workflow.notes = body.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         return workflow
     }
+
+    /// A size in GB (at least 0); nil when it isn't one.
+    static func gigabytes(_ value: String) -> Double? {
+        Double(value).flatMap { $0.isFinite && $0 >= 0 ? $0 : nil }
+    }
+
+    var diskWarning: Int64 { DiskSpace.bytes(diskWarningGB) }
+    var diskFloor: Int64 { DiskSpace.bytes(diskFloorGB) }
 
     /// Reads `workflow.md` whatever its line endings, BOM or stray bytes; `problem` says when it couldn't be used.
     public static func load(from path: String) -> LeadWorkflow {
@@ -101,7 +116,8 @@ public struct LeadWorkflow: Equatable, Sendable {
     // MARK: Changing settings
 
     /// The settings the lead may change with `configure`.
-    public static let configurable = ["test_command", "init_command", "base_branch", "verifier_model", "max_workers"]
+    public static let configurable = ["test_command", "init_command", "base_branch", "verifier_model", "max_workers",
+                                      "disk_warning_gb", "disk_floor_gb"]
 
     /// `data` with each setting's line changed (an empty value clears it), added when missing; every other line, the
     /// comments, unknown keys, the notes, the line endings and a BOM stay as they were.
@@ -213,6 +229,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     # The branch workers start from and verified work is merged into. Empty: the one checked out when the lead first
     # started here.
     base_branch:
+    # Free space (GB) on the volume holding the worktrees: below disk_warning_gb the lead is told (once, with the
+    # biggest task folders); below disk_floor_gb start_worker refuses.
+    disk_warning_gb: 10
+    disk_floor_gb: 3
     ---
     Notes for the lead: conventions, priorities, what not to touch. The lead reads this at the start of every session.
     """
@@ -273,7 +293,9 @@ public enum LeadPrompts {
         \(workflow.testCommand.map { "run `\($0)` to see where things stand; " } ?? "")look at the code you'll touch.
         While working: stay inside the boundaries. Commit small, descriptive commits as you go. Don't switch to \(workflow.base), \
         don't push, don't delete branches; the lead merges. At each milestone (a part working, checks \
-        passing, what's next), call progress with one line: the lead and the user see it on your task's lane.
+        passing, what's next), call progress with one line: the lead and the user see it on your task's lane. \
+        Keep your temporary folder small: build or download into the worktree, not your scratchpad, and delete big \
+        scratch files once you're done with them (a full disk stops every session).
         Out of date: when the lead says your branch conflicts with \(workflow.base), bring it up to date here: run \
         `git rebase \(workflow.base)`, resolve each conflict, `git add` the files and `git rebase --continue` (`git rebase \
         --abort` starts over; `git merge \(workflow.base)` then `git commit` works too). Then run the checks again, \
