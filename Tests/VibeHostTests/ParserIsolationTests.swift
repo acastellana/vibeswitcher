@@ -78,11 +78,14 @@ import Testing
         var all: [TimeInterval] { lock.lock(); defer { lock.unlock() }; return delays }
     }
 
-    /// One session's parser hangs mid-parse: another session's output still reaches its view within 100 ms, its
-    /// screen is still answered, the stalled session's own output still flows, and the watchdog logs the stall
-    /// (with the session) and replaces the parser, whose screen then shows what came after.
+    /// One session's parser hangs mid-parse: while it's stuck (the watchdog not there yet) another session's output
+    /// still reaches its view, never held up for the time the watchdog takes, its screen is answered while the stalled
+    /// session's isn't, the stalled session's own output still flows, and the watchdog logs the stall (with the
+    /// session) and replaces the parser, whose screen then shows what came after. Each wait is for what it checks: a
+    /// loaded Mac runs the clock late, but not by the stall limit.
     @Test func aStalledParserHoldsUpOnlyItsSession() throws {
-        let (host, client) = try host(stallLimit: 3)
+        let stallLimit: TimeInterval = 10
+        let (host, client) = try host(stallLimit: stallLimit)
         let clock = try client.spawn(Self.clock)
         let lateness = Lateness(client, session: clock.id)
         client.attach(clock.id)
@@ -92,24 +95,24 @@ import Testing
         client.attach(stalled.id)
         // Past the hook: its parser is stuck now, the watchdog not there yet.
         #expect(eventually { client.text(stalled.id).contains("after-1") })
+        let stuckScreen = client.send(.screen(id: stalled.id))
         lateness.reset()
-        let started = Date()
-        while Date().timeIntervalSince(started) < 2 { Thread.sleep(forTimeInterval: 0.05) }
+        #expect(eventually { lateness.all.count >= 20 }, "the clock's lines while the other parser was stuck: \(lateness.all.count)")
         let delays = lateness.all
-        #expect(delays.count >= 20, "the clock's lines while the other parser was stuck: \(delays.count)")
-        #expect((delays.max() ?? 1) < 0.1, "the clock's lines arrived up to \(delays.max() ?? 0) s late")
-        let asked = Date()
+        // Held up by the stalled parser, a line would wait for the watchdog to replace it.
+        #expect((delays.max() ?? stallLimit) < stallLimit / 2, "the clock's lines arrived up to \(delays.max() ?? 0) s late")
         #expect(client.screen(clock.id)?.contains("t=") == true)
-        #expect(Date().timeIntervalSince(asked) < 1)
+        #expect(client.reply(to: stuckScreen) == nil, "the stalled session's screen was answered while its parser was stuck")
+        // All of it while the other parser was still stuck.
         #expect(!sessionLog(host).contains("watchdog"), "the watchdog came early: \(sessionLog(host))")
 
         let short = HostServer.short(stalled.id)
-        #expect(eventually(timeout: 30) { sessionLog(host).contains("watchdog: session \(short)'s parser") })
+        #expect(eventually { sessionLog(host).contains("watchdog: session \(short)'s parser") })
         let line = sessionLog(host).split(separator: "\n").first { $0.contains("watchdog: session \(short)'s parser") } ?? ""
         #expect(line.contains("stalled for") && line.contains("started another"), "\(line)")
         #expect(!sessionLog(host).contains("watchdog: session \(HostServer.short(clock.id))"))
         // Every "after-" line before the restart was left unparsed: one on the screen came through the new parser.
-        #expect(eventually(timeout: 30) { client.screen(stalled.id)?.contains("after-") == true }, "\(client.screen(stalled.id) ?? "no screen")")
+        #expect(eventually { client.screen(stalled.id)?.contains("after-") == true }, "\(client.screen(stalled.id) ?? "no screen")")
         #expect(kill(stalled.childPID, 0) == 0 && host.process.isRunning)
         #expect(eventually { parsers(of: host.pid).count == 2 })
     }
