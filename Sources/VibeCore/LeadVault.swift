@@ -311,6 +311,19 @@ extension LeadVault {
             var heads: [String: String] = [:]
             /// The git commands sessions ran here that can move a branch, newest last (optional: older vaults have none).
             var runs: [GitRun]?
+            /// Sessions of workers and verifiers whose grant went (a newer one replaced it, the task was retired) while
+            /// they may still run: they hold no role, but they're still the lead's to end. Newest last (optional:
+            /// older vaults have none).
+            var former: [String]?
+
+            /// Takes the members `drop` picks out; the sessions the workers and verifiers among them were bound to
+            /// become `former`.
+            mutating func remove(where drop: (Member) -> Bool) {
+                let gone = members.filter { drop($0) && $0.role != .lead }.compactMap(\.session)
+                members.removeAll(where: drop)
+                guard !gone.isEmpty else { return }
+                former = Array(((former ?? []).filter { !gone.contains($0) } + gone).suffix(200))
+            }
         }
 
         struct State: Codable {
@@ -381,13 +394,14 @@ extension LeadVault {
             return adopted
         }
 
-        /// Whether `caller` is the lead of a team `session` holds a role in.
+        /// Whether `caller` is the lead of a team `session` holds a role in, or held one in as a worker or verifier.
         public func leads(_ session: String, caller: Caller) -> Bool {
             guard case .session(let from) = caller else { return false }
             lock.lock()
             defer { lock.unlock() }
             return state.teams.values.contains { team in
-                team.members.contains { $0.role == .lead && $0.session == from } && team.members.contains { $0.session == session }
+                team.members.contains { $0.role == .lead && $0.session == from }
+                    && (team.members.contains { $0.session == session } || team.former?.contains(session) == true)
             }
         }
 
@@ -481,7 +495,7 @@ extension LeadVault {
                 let member = Member(id: UUID().uuidString, role: role, task: role == .lead ? nil : task, session: nil,
                                     auditing: auditing, issuedAt: Date().timeIntervalSince1970, issuer: caller)
                 change(root, &changed) { team in
-                    team.members.removeAll { $0.role == role && $0.task == member.task }
+                    team.remove { $0.role == role && $0.task == member.task }
                     if role == .verifier, let task { team.verdicts[task] = nil }
                     team.members.append(member)
                 }
@@ -502,12 +516,12 @@ extension LeadVault {
             case .revoke(let grant, let root):
                 guard let member = team(root)?.members.first(where: { $0.id == grant }) else { return .ok }
                 guard member.issuer == caller else { return .refused("That grant isn't yours to withdraw.") }
-                change(root, &changed) { team in team.members.removeAll { $0.id == grant } }
+                change(root, &changed) { team in team.remove { $0.id == grant } }
                 return .ok
             case .retire(let root, let task):
                 guard isLead(caller, root) else { return .refused("Only the repository's lead retires a task.") }
                 change(root, &changed) { team in
-                    team.members.removeAll { $0.task == task }
+                    team.remove { $0.task == task }
                     team.verdicts[task] = nil
                 }
                 return .ok

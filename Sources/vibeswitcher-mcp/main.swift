@@ -108,9 +108,13 @@ final class HostRuntime: LeadRuntime {
         }
     }
 
-    func kill(_ session: String) {
-        guard let id = UUID(uuidString: session) else { return }
-        _ = try? HostCall.request(.kill(id: id), timeout: 3)
+    func kill(_ session: String) throws {
+        guard let id = UUID(uuidString: session) else { throw HostCall.Failure(description: "\(session) isn't a session of the host's.") }
+        switch try HostCall.request(.kill(id: id), timeout: 3) {
+        case .ok: return
+        case .error(let message): throw HostCall.Failure(description: message)
+        default: throw HostCall.Failure(description: "The session host answered something else; it may be older than the tool server.")
+        }
     }
 
     func forget(_ session: String) {
@@ -169,7 +173,8 @@ final class HostRuntime: LeadRuntime {
     func sessions() throws -> [LeadSessionInfo] {
         try HostCall.sessions().map { session in
             LeadSessionInfo(id: session.id.uuidString, cwd: session.cwd, label: session.label, live: session.isLive,
-                            status: session.isLive ? activity(of: session, agent: Self.agentPid(on: session.tty)).text : nil, tty: session.tty)
+                            status: session.isLive ? activity(of: session, agent: Self.agentPid(on: session.tty)).text : nil, tty: session.tty,
+                            pid: session.childPID)
         }
     }
 

@@ -20,7 +20,7 @@ extension LeadToolsetTests {
         runtime.refusals["session-1"] = Self.refusal
         let stopped = call(lead, "stop_worker", ["task": "one"])
         #expect(stopped.isError)
-        #expect(stopped.text.contains("couldn't end pid \(getpid()): \(Self.refusal)"), "\(stopped.text)")
+        #expect(stopped.text.contains("couldn't end pid \(getpid()) (Worker: One): \(Self.refusal)"), "\(stopped.text)")
         #expect(!stopped.text.contains("Stopped"))
         // Not stopped, so not said to be on the board either.
         #expect(BoardStore(root: root).load().task("one")?.stopped == nil)
@@ -29,7 +29,7 @@ extension LeadToolsetTests {
         runtime.refusals = [:]
         let again = call(lead, "stop_worker", ["task": "one"])
         #expect(!again.isError)
-        #expect(again.text.contains("Stopped the worker on one (ended pid \(getpid()))"), "\(again.text)")
+        #expect(again.text.contains("Stopped the worker on one: ended pid \(getpid()) (Worker: One)."), "\(again.text)")
     }
 
     @Test func stopWorkerSaysWhenTheWorkerOutlivesTheWait() throws {
@@ -59,7 +59,7 @@ extension LeadToolsetTests {
         let cleaned = call(lead, "cleanup", ["task": "one", "force": true])
         #expect(!cleaned.isError, "\(cleaned.text)")
         #expect(Set(runtime.killed) == ["session-1", "session-2", "session-3"])
-        #expect(cleaned.text.contains("ended pid \(getppid())"), "\(cleaned.text)")
+        #expect(cleaned.text.contains("ended pid \(getppid()) (Verifier: One)"), "\(cleaned.text)")
         #expect(try runtime.sessions().isEmpty)
     }
 
@@ -73,7 +73,7 @@ extension LeadToolsetTests {
         runtime.refusals["session-1"] = Self.refusal
         let cleaned = call(lead, "cleanup", ["task": "one", "force": true])
         #expect(cleaned.isError)
-        #expect(cleaned.text.contains("couldn't end pid \(getpid()): \(Self.refusal)"), "\(cleaned.text)")
+        #expect(cleaned.text.contains("couldn't end pid \(getpid()) (Worker: One): \(Self.refusal)"), "\(cleaned.text)")
         #expect(!cleaned.text.contains("Cleaned up"))
         #expect(FileManager.default.fileExists(atPath: Worktrees.path(root: root, slug: "one")))
     }

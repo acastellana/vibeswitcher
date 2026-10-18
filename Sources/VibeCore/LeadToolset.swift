@@ -85,8 +85,9 @@ public final class LeadToolset: MCPToolset {
     let refusal: String?
     private var introduced = false
     private let introducing = NSLock()
-    /// How long cleanup waits for a task's sessions to end (the host hangs up, then kills after 5 s).
-    var stopWait: TimeInterval = 8
+    /// How long cleanup and stop_worker wait for a session's process to be gone (the host hangs up, then kills
+    /// after 5 s).
+    var stopWait: TimeInterval = 10
     /// The bytes free on the volume holding a path (see `DiskSpace.free`), and where Claude Code keeps its sessions'
     /// temporary folders (see `ClaudeScratch`). Faked in tests.
     var freeSpace: (String) -> Int64? = DiskSpace.free(at:)
@@ -180,7 +181,7 @@ public final class LeadToolset: MCPToolset {
         guard let session = holder.session else {
             return "This session no longer holds \(whose): \(starter) at \(LeadBoard.clock(holder.issuedAt)), still starting. \(off)"
         }
-        let label = ((try? runtime.sessions()) ?? []).first { $0.id == session }?.label
+        let label = ((try? listed()) ?? []).first { $0.id == session }?.label
         let named = "session \(session.prefix(8))" + (label.map { " (‘\($0)’)" } ?? "")
         return "This session no longer holds \(whose): \(starter) at \(LeadBoard.clock(holder.issuedAt)), in \(named). \(off) "
             + (role == .lead ? "Tell the user to continue in that session. Messages typed into this session go to that lead now: "
@@ -582,10 +583,13 @@ public final class LeadToolset: MCPToolset {
 
     private func stopWorker(_ slug: String) throws -> MCPToolResult {
         guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
-        let sessions = try hostSessions("\(slug)'s worker wasn't stopped")
+        let refused = "\(slug)'s worker wasn't stopped"
         // A session that's gone (ended, or lost with a replaced host) has nothing left to kill.
-        let running = task.worker.map { worker in sessions.contains { $0.id == worker && $0.live } } ?? false
-        if running, let worker = task.worker { try? runtime.kill(worker) }
+        let running = try task.worker.flatMap { worker in try hostSessions(refused).first { $0.id == worker && $0.live } }
+        let ended = try running.map { try end([$0], refused: refused)[0] }
+        if let ended, ended.failure != nil {
+            throw Problem(text: "\(slug)'s worker wasn't stopped: \(ended.said). It's still running; if the host keeps refusing, tell the user (they can end it in VibeSwitcher).")
+        }
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].stopped = task.worker
@@ -594,7 +598,7 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].blocker = "The lead stopped its worker."
             }
         }
-        return MCPToolResult(text: (running ? "Stopped the worker on \(slug)." : "\(slug)'s worker had already ended.")
+        return MCPToolResult(text: (ended.map { "Stopped the worker on \(slug): \($0.said)." } ?? "\(slug)'s worker had already ended.")
                              + " Its worktree and commits stay; start_worker continues there.")
     }
 
@@ -610,7 +614,7 @@ public final class LeadToolset: MCPToolset {
         // Telling a failed or blocked task's live worker what to do sends it back to work: a failed one starts a
         // rework round (its setback stays to say why).
         // (Delivered already: a host that can't be read now only leaves the board's state as it was.)
-        if (try? runtime.sessions())?.contains(where: { $0.id == worker && $0.live }) == true {
+        if (try? listed())?.contains(where: { $0.id == worker && $0.live }) == true {
             try store.update { board in
                 guard let index = board.taskIndex(slug), board.tasks[index].worker == worker,
                       [.failed, .blocked].contains(board.tasks[index].status) else { return }
@@ -857,21 +861,18 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "\(slug) isn't merged. Use force: true to abandon its work.")
         }
         // Only the ones still running are ended: a session that's gone (lost with a replaced host) has nothing to kill.
+        // Its worker and verifier, and any earlier one still running in its worktree (a verifier a later audit
+        // replaced is off the board, not ended).
         let refused = "\(slug)'s sessions can't be checked; nothing was cleaned up"
-        let live = Set(try hostSessions(refused).filter(\.live).map(\.id))
-        let sessions = [task.worker, task.verifier].compactMap { $0 }.filter(live.contains)
-        sessions.forEach { try? runtime.kill($0) }
-        // Not under a session that's still writing there (its next write would leave a stray folder behind).
-        let deadline = Date().addingTimeInterval(stopWait)
-        var running = sessions
-        while !running.isEmpty {
-            let live = Set(try hostSessions(refused).filter(\.live).map(\.id))
-            running = sessions.filter(live.contains)
-            guard !running.isEmpty, Date() < deadline else { break }
-            usleep(200_000)
+        let folder = (Worktrees.path(root: root, slug: slug) as NSString).standardizingPath
+        let sessions = try hostSessions(refused).filter { session in
+            session.live && ([task.worker, task.verifier].contains(session.id) || Self.isTeamSession(session, in: folder))
         }
-        guard running.isEmpty else {
-            throw Problem(text: "\(slug)'s sessions haven't ended yet; cleanup again in a moment.")
+        let endings = try end(sessions, refused: refused)
+        // Not under a session that's still writing there (its next write would leave a stray folder behind).
+        let failed = endings.filter { $0.failure != nil }
+        guard failed.isEmpty else {
+            throw Problem(text: "Not cleaned up: \(failed.map(\.said).joined(separator: "; ")). Its worktree stays while a session may still write there. If the host refuses, tell the user (they can end it in VibeSwitcher), then cleanup again.")
         }
         // Its sessions' temporary folders, found by the worktree's path while it's still there to resolve.
         let worktree = Worktrees.path(root: root, slug: slug)
@@ -891,12 +892,46 @@ public final class LeadToolset: MCPToolset {
             if board.tasks[index].status != .done { board.tasks[index].status = .failed }
         }
         // Its workers and verifiers, this one and any before it, are history now: off the session list.
-        let folder = (Worktrees.path(root: root, slug: slug) as NSString).standardizingPath
-        for session in (try? runtime.sessions()) ?? [] where !session.live && (session.cwd as NSString).standardizingPath == folder
-            && [.worker, .verifier].contains(LeadTeams.role(label: session.label)) {
+        for session in (try? listed()) ?? [] where !session.live && Self.isTeamSession(session, in: folder) {
             runtime.forget(session.id)
         }
-        return MCPToolResult(text: "Cleaned up \(slug)" + (freed > 0 ? " (freed \(DiskSpace.text(freed)) of build output and temporary folders)." : "."))
+        let ended = endings.isEmpty ? "" : "; " + endings.map(\.said).joined(separator: ", ")
+        return MCPToolResult(text: "Cleaned up \(slug)" + ended + (freed > 0 ? " (freed \(DiskSpace.text(freed)) of build output and temporary folders)." : "."))
+    }
+
+    /// A worker's or verifier's session in the worktree `folder` (standardized).
+    private static func isTeamSession(_ session: LeadSessionInfo, in folder: String) -> Bool {
+        (session.cwd as NSString).standardizingPath == folder && [.worker, .verifier].contains(LeadTeams.role(label: session.label))
+    }
+
+    /// What became of a session asked to end: `failure` nil when its process is gone.
+    struct Ending {
+        let session: LeadSessionInfo
+        let failure: String?
+
+        /// "ended pid N (label)", or "couldn't end pid N (label): why".
+        var said: String {
+            let which = session.pid.map { "pid \($0)" } ?? "session \(session.id.prefix(8))"
+            return failure.map { "couldn't end \(which) (\(session.label)): \($0)" } ?? "ended \(which) (\(session.label))"
+        }
+    }
+
+    /// Asks the host to end each of `sessions`, then waits (up to `stopWait`) until each one it took is gone. A refusal
+    /// is said with the host's own words, never taken for an end.
+    private func end(_ sessions: [LeadSessionInfo], refused: String) throws -> [Ending] {
+        var failures: [String: String] = [:]
+        for session in sessions {
+            do { try runtime.kill(session.id) } catch { failures[session.id] = "\(error)" }
+        }
+        var running = Set(sessions.map(\.id)).subtracting(failures.keys)
+        let deadline = Date().addingTimeInterval(stopWait)
+        while !running.isEmpty {
+            running.formIntersection(try hostSessions(refused).filter(\.live).map(\.id))
+            guard !running.isEmpty, Date() < deadline else { break }
+            usleep(200_000)
+        }
+        for id in running { failures[id] = "it's still running \(Int(stopWait.rounded(.up))) s after the host was asked to end it" }
+        return sessions.map { Ending(session: $0, failure: failures[$0.id]) }
     }
 
     /// Removes a folder, if it's there; returns what it took.
@@ -910,7 +945,7 @@ public final class LeadToolset: MCPToolset {
     /// merged or abandoned whose worktree is gone, with no session running there.
     private func sweepFinished(_ board: LeadBoard, except slug: String) -> Int64 {
         // Which folders sessions still run in isn't known: nothing goes.
-        guard let sessions = try? runtime.sessions() else { return 0 }
+        guard let sessions = try? listed() else { return 0 }
         let live = Set(sessions.filter(\.live).map { ($0.cwd as NSString).standardizingPath })
         var freed: Int64 = 0
         for task in board.tasks where task.slug != slug && task.worktree == nil && [.done, .failed].contains(task.status) {
@@ -1011,8 +1046,17 @@ public final class LeadToolset: MCPToolset {
     /// The host's sessions. One that can't be read is a refusal saying what didn't happen (`refused`), never "no
     /// sessions": a second worker started in a live worktree would undo the first's work.
     private func hostSessions(_ refused: String) throws -> [LeadSessionInfo] {
-        do { return try runtime.sessions() } catch {
+        do { return try listed() } catch {
             throw Problem(text: "The session host can't be read (\(error)), so \(refused). Try again in a moment; if it keeps failing, tell the user (VibeSwitcher may be restarting its session host).")
+        }
+    }
+
+    /// The host's sessions, a live one whose process is gone (the host hadn't seen it end yet) as ended.
+    private func listed() throws -> [LeadSessionInfo] {
+        try runtime.sessions().map { session in
+            var session = session
+            if session.live, let pid = session.pid, Darwin.kill(pid, 0) != 0, errno == ESRCH { session.live = false }
+            return session
         }
     }
 
@@ -1222,7 +1266,7 @@ public final class LeadToolset: MCPToolset {
     private func status() -> String {
         let board = store.load()
         // nil: the host can't be read (what workers do isn't known), never "none running".
-        let sessions = (try? runtime.sessions()).map { Dictionary($0.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) }
+        let sessions = (try? listed()).map { Dictionary($0.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) }
         let workflow = self.workflow
         var lines = ["Project \(project) on branch \(workflow.base) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once."]
         lines += workflowWarnings(workflow)
@@ -1461,7 +1505,7 @@ public final class LeadToolset: MCPToolset {
     /// in full, with the reports about it.
     private func boardText(task wanted: String?) throws -> String {
         let board = store.load()
-        let sessions = (try? runtime.sessions()).map { Dictionary($0.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) }
+        let sessions = (try? listed()).map { Dictionary($0.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) }
         if let wanted, !wanted.isEmpty {
             guard let task = board.task(wanted) else { throw Problem(text: "No task \(wanted) on the board. board without task lists them.") }
             let encoder = JSONEncoder()
@@ -1497,7 +1541,7 @@ public final class LeadToolset: MCPToolset {
 
     private func sessionsText() -> String {
         let all: [LeadSessionInfo]
-        do { all = try runtime.sessions() } catch { return "The session host can't be read: \(error)" }
+        do { all = try listed() } catch { return "The session host can't be read: \(error)" }
         let mine = all.filter { $0.cwd == root || $0.cwd.hasPrefix(root + "/") }
         guard !mine.isEmpty else { return "No window sessions in this project." }
         return mine.map { "- \($0.id): \($0.label) — \($0.live ? ($0.status ?? "running") : "ended") — \($0.cwd)" }.joined(separator: "\n")
