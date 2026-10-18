@@ -376,18 +376,28 @@ enum UIBench {
             fflush(stdout)
             run(steps[...]) { [weak self] in
                 guard let self else { return }
-                let stall = self.stalls.take()
-                print(String(format: "clicks: longest main-thread stall %.0f ms, selected %@", stall * 1000, self.model.selectedID ?? "none"))
+                // The median: one switch can wait on a busy Mac; switching that's slow every time is the app.
+                let sorted = self.switchStalls.sorted()
+                let median = sorted.isEmpty ? 0 : sorted[sorted.count / 2]
+                UIBench.check(sorted.count >= 10, "clicks: \(sorted.count) switches between the sessions")
+                UIBench.check(median < 0.15, String(format: "clicks: a switch stalls the main thread %.0f ms (median, under 150 ms; longest %.0f ms)",
+                                                    median * 1000, (sorted.last ?? 0) * 1000))
                 self.countFaults(since: from) { self.busyLeads() }
             }
         }
 
+        /// The main thread's longest stall in each step that changed the selection.
+        private var switchStalls: [TimeInterval] = []
+
         private func run(_ steps: ArraySlice<(String, () -> Void)>, then done: @escaping () -> Void) {
             guard let (name, step) = steps.first else { return done() }
+            let selected = model.selectedID
             step()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 guard let self else { return }
-                print(String(format: "  %-22@ stall %4.0f ms  selected %@", name as NSString, self.stalls.take() * 1000,
+                let stall = self.stalls.take()
+                if self.model.selectedID != selected { self.switchStalls.append(stall) }
+                print(String(format: "  %-22@ stall %4.0f ms  selected %@", name as NSString, stall * 1000,
                              (self.model.selectedRow.map { "\($0.project) \($0.id.prefix(13))" } ?? "none") as NSString))
                 self.run(steps.dropFirst(), then: done)
             }
@@ -455,6 +465,7 @@ enum UIBench {
                 let cpu = (after.cpu - before.cpu) / (after.wall - before.wall) * 100
                 print(String(format: "busy leads: cpu %.1f %%, longest main-thread stall %.0f ms", cpu, stall * 1000))
                 UIBench.check(stall < 0.25, String(format: "busy leads: longest main-thread stall %.0f ms (under 250 ms)", stall * 1000))
+                UIBench.check(cpu < 2, String(format: "busy leads: cpu %.1f %% (under 2 %%)", cpu))
                 fflush(stdout)
                 // The decisions just added fade for three minutes: let them go before measuring idle.
                 for root in self.roots {
