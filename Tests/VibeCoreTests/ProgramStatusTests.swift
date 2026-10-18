@@ -61,6 +61,18 @@ struct ProgramStatusTests {
         #expect(ProgramStatus.parse("state=working:progress=101", at: now) == nil)
     }
 
+    /// A scratch plan-mode session of claude 2.1.302 reported these, in order, around asking for and approving a plan.
+    @Test func reportsReadAsSessionStatuses() throws {
+        let reports = ["state=idle:app=claude-code", "state=working:app=claude-code",
+                       "state=blocked:app=claude-code:kind=permission:msg=YXBwcm92ZSBwbGFu", "state=working:app=claude-code",
+                       "state=working:app=claude-code:msg=Q3JlYXRpbmcgaGVsbG8udHh0IHdpdGggImhpIiBhbmQgcmVhZCBpdCBiYWNr",
+                       "state=done:app=claude-code", "state=error:app=claude-code"]
+        let statuses = try reports.map { try #require(status($0)) }
+        #expect(statuses.map(StatusRules.status(for:)) == [.idle, .working, .needsInput, .working, .working, .done, .done])
+        #expect(statuses[2].kind == "permission" && statuses[2].message == "approve plan")
+        #expect(statuses[4].message == #"Creating hello.txt with "hi" and read it back"#)
+    }
+
     /// The host sends it; an app from before it ignores the field, and a host from before it sends none.
     @Test func hostSessionsDecodeAcrossVersions() throws {
         var session = HostSession(id: UUID(), tty: "ttys012", childPID: 42, cwd: "/tmp", command: "claude", label: "Claude",

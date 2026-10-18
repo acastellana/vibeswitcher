@@ -34,6 +34,17 @@ public enum StatusRules {
         }
     }
 
+    /// What a program says over OSC 7501 (`HostSession.programStatus`: window sessions whose host answered Claude Code's
+    /// query): a status that needs no hooks. A turn that ended on an error has ended, like one that ended on a reply.
+    public static func status(for program: ProgramStatus) -> SessionStatus {
+        switch program.state {
+        case .idle: return .idle
+        case .working: return .working
+        case .blocked: return .needsInput
+        case .done, .error: return .done
+        }
+    }
+
     /// Combines hook facts with the terminal title glyph.
     ///
     /// Hooks are authoritative, but they miss some transitions: Claude fires no Stop hook when you
