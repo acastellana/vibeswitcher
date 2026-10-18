@@ -62,7 +62,7 @@ struct ComposerView: View {
                 }
             }
             HStack(alignment: .bottom, spacing: 8) {
-                Button(action: attach) { Image(systemName: "paperclip").font(.system(size: 14)) }
+                Button(action: attach) { Image(systemName: "paperclip").font(.system(size: 14)).accessibilityLabel("Attach files") }
                     .buttonStyle(.borderless).padding(.bottom, 9).help("Attach files or images")
                 ZStack(alignment: .topLeading) {
                     if text.wrappedValue.isEmpty {
@@ -83,17 +83,20 @@ struct ComposerView: View {
                 if working && !steerOnly {
                     Button(action: actions.stop) {
                         Image(systemName: "stop.fill").font(.system(size: 11, weight: .bold)).foregroundStyle(.white)
+                            .accessibilityLabel("Stop the agent")
                             .frame(width: 30, height: 30).background(Circle().fill(Color.red.opacity(0.85)))
                     }
                     .buttonStyle(.plain).padding(.bottom, 4).help("Stop (⌘.) — like pressing Esc in the terminal")
                 }
                 Button { submit(queue: false) } label: {
                     Image(systemName: working ? "arrow.turn.down.right" : "arrow.up").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                        .accessibilityLabel(working ? "Steer" : "Send")
                         .frame(width: 30, height: 30)
                         .background(Circle().fill(text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty
                                                   ? Color.secondary.opacity(0.4) : working ? Color.orange : Color.accentColor))
                 }
                 .buttonStyle(.plain).padding(.bottom, 4)
+                .help(working ? "Steer: send it to the agent's next step (↩)" : "Send (↩)")
                 .help(working ? "Steer (↩): it gets this at its next step, without stopping. ⌥↩ queues it for after the turn." : "Send (↩)")
             }
             if !steerOnly {
@@ -215,6 +218,7 @@ private struct SuggestionList: View {
             ForEach(Array(suggestions.items.prefix(8).enumerated()), id: \.offset) { index, item in
                 HStack(spacing: 8) {
                     Image(systemName: item.symbol).font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 16)
+                        .accessibilityHidden(true)
                     Text(item.title).font(.system(size: 12.5, weight: .medium))
                     Text(item.subtitle).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                     Spacer(minLength: 0)
@@ -317,7 +321,7 @@ private struct ContextMeter: View {
                 .frame(width: 44, height: 5)
                 Text("\(Int(share * 100))% context").font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
             } else {
-                Image(systemName: "text.word.spacing").font(.system(size: 10)).foregroundStyle(.secondary)
+                Image(systemName: "text.word.spacing").font(.system(size: 10)).foregroundStyle(.secondary).accessibilityHidden(true)
                 Text("\(TokenCount.short(tokens)) context").font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
             }
         }
@@ -410,8 +414,10 @@ private struct AttachedThumbnail: View {
             }
             Button(action: remove) {
                 Image(systemName: "xmark.circle.fill").font(.system(size: 13)).foregroundStyle(.white, .black.opacity(0.6))
+                    .accessibilityLabel("Remove \((path as NSString).lastPathComponent)")
             }
             .buttonStyle(.plain).offset(x: 5, y: -5)
+            .help("Remove this attachment")
         }
         .help(path)
         .padding(.leading, 30)

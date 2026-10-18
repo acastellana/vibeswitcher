@@ -3,7 +3,9 @@
 
 const $ = id => document.getElementById(id);
 const STATUS_COLORS = {
-  needsInput: '#ff453a', working: '#ff9f0a', background: '#0a84ff', done: '#30d158', idle: '#8e8e93', unknown: 'transparent',
+  // The AA palette in style.css, which switches with the colour scheme.
+  needsInput: 'var(--st-needsInput)', working: 'var(--st-working)', background: 'var(--st-background)', done: 'var(--st-done)',
+  idle: 'var(--st-idle)', unknown: 'transparent',
 };
 const ORDER = ['needsInput', 'working', 'background', 'done'];
 const LABELS = { needsInput: 'need you', working: 'working', background: 'background', done: 'done' };

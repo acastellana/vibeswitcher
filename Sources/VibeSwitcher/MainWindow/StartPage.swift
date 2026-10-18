@@ -46,6 +46,7 @@ private struct ProjectRow: View {
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "folder.fill").font(.system(size: 18)).foregroundStyle(.secondary).frame(width: 20)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 1) {
                 Text((path as NSString).lastPathComponent).font(.system(size: 13, weight: .semibold)).lineLimit(1)
                 Text(path.replacingOccurrences(of: NSHomeDirectory(), with: "~")).font(.system(size: 11)).foregroundStyle(.secondary)
@@ -98,6 +99,7 @@ struct EndedBar: View {
             HStack(spacing: 10) {
                 Image(systemName: exit.status == 0 ? "checkmark.circle" : "exclamationmark.circle")
                     .foregroundStyle(exit.status == 0 ? Color.secondary : Color.orange)
+                    .accessibilityHidden(true)  // the line next to it says how it ended
                 Text("Ended \(exit.at.formatted(date: .omitted, time: .shortened)) · exit \(exit.status)")
                     .font(.system(size: 12)).foregroundStyle(.secondary)
                 Spacer()

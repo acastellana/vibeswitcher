@@ -96,7 +96,7 @@ struct OutboxStrip: View {
                 ForEach(entries) { entry in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack(spacing: 6) {
-                            Image(systemName: "exclamationmark.bubble").foregroundStyle(.orange)
+                            Image(systemName: "exclamationmark.bubble").foregroundStyle(.orange).accessibilityLabel("Not sent")
                             Text(entry.text.isEmpty ? "(no text)" : String(entry.text.prefix(500)))
                                 .font(.system(size: 12.5)).lineLimit(3).truncationMode(.tail)
                             if !entry.attachments.isEmpty {

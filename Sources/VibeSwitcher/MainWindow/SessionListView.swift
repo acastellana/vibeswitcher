@@ -75,14 +75,14 @@ struct SessionListView: View {
             VStack(alignment: .leading, spacing: 6) {
                 Divider()
                 HStack(spacing: 6) {
-                    Image(systemName: "line.3.horizontal.decrease").foregroundStyle(.secondary)
+                    Image(systemName: "line.3.horizontal.decrease").foregroundStyle(.secondary).accessibilityHidden(true)
                     TextField("Filter", text: $model.filter)
                         .textFieldStyle(.plain)
                         .focused($filterFocused)
                         .onExitCommand { model.filter = ""; filterFocused = false }
                     if !model.filter.isEmpty {
-                        Button { model.filter = "" } label: { Image(systemName: "xmark.circle.fill") }
-                            .buttonStyle(.borderless).foregroundStyle(.secondary)
+                        Button { model.filter = "" } label: { Image(systemName: "xmark.circle.fill").accessibilityLabel("Clear filter") }
+                            .buttonStyle(.borderless).foregroundStyle(.secondary).help("Clear the filter")
                     }
                 }
                 .font(.system(size: 12))
@@ -135,9 +135,11 @@ struct WindowRowView: View {
             HStack(spacing: 9) {
                 if nested {
                     Image(systemName: role == .verifier ? "checkmark.seal" : "hammer").font(.system(size: 10)).foregroundStyle(.tertiary)
+                        .accessibilityLabel(role == .verifier ? "Verifier" : "Worker")
                         .frame(width: 12).padding(.leading, 8)
                 }
-                AgentMark(kind: row.markKind, status: row.statusColor, hollow: row.statusIsHollow, size: nested ? 18 : 22)
+                AgentMark(kind: row.markKind, status: row.statusColor, hollow: row.statusIsHollow, size: nested ? 18 : 22, mark: row.statusMark,
+                          spoken: row.spokenStatus)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 4) {
                         if role == .lead {
@@ -156,8 +158,12 @@ struct WindowRowView: View {
                             Text(row.project).foregroundStyle(.secondary)
                             Text("·").foregroundStyle(.tertiary)
                         }
-                        Text(state.text).foregroundStyle(replaced != nil ? AnyShapeStyle(Color.purple)
-                            : state.group == .needsYou ? AnyShapeStyle(.red) : AnyShapeStyle(.secondary))
+                        if replaced != nil {
+                            // A shape as well as the colour; the words beside it say "replaced".
+                            Image(systemName: "arrow.turn.up.right").foregroundStyle(ReplacedLead.color).accessibilityHidden(true)
+                        }
+                        Text(state.text).foregroundStyle(replaced != nil ? AnyShapeStyle(ReplacedLead.color)
+                            : state.group == .needsYou ? AnyShapeStyle(SessionStatus.needsInput.color) : AnyShapeStyle(.secondary))
                         if let questions, questions.open > 0 {
                             Text("·").foregroundStyle(.tertiary)
                             Label("\(questions.open)", systemImage: "questionmark.bubble.fill")
@@ -173,6 +179,7 @@ struct WindowRowView: View {
                                     Text(board.map { TeamRows.summary(TeamRows.rows($0, seen: TeamRows.seen(team, now: context.date))) }
                                         ?? LeadTeams.summary(team, label: label, board: nil, now: context.date))
                                     Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold)).rotationEffect(.degrees(teamOpen ? 90 : 0))
+                                        .accessibilityHidden(true)
                                 }
                             }
                             .buttonStyle(.plain).foregroundStyle(Color.accentColor)
@@ -181,6 +188,7 @@ struct WindowRowView: View {
                         Spacer(minLength: 0)
                         if row.session?.inTerminalApp == true {
                             Image(systemName: "macwindow").foregroundStyle(.tertiary).help("Runs in Terminal")
+                                .accessibilityLabel("Runs in Terminal")
                         }
                     }
                     .font(.system(size: 11))
@@ -257,7 +265,12 @@ struct NewSessionMenu: View {
                 Button("Project Lead") { actions.startLead(folder) }
             }
         } label: {
-            if let title { Text(title) } else { Image(systemName: "plus") }
+            if let title {
+                Text(title)
+            } else {
+                Image(systemName: "plus")
+                    .accessibilityLabel(folder.map { "New session in \(($0 as NSString).lastPathComponent)" } ?? "New session")
+            }
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)

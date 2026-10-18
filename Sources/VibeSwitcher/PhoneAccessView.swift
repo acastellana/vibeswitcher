@@ -134,6 +134,7 @@ struct PhoneAccessView: View {
                     HStack {
                         Image(systemName: device.push != nil ? "bell.fill" : "iphone").foregroundStyle(.secondary)
                             .help(device.push != nil ? "Gets notifications" : "No notifications")
+                            .accessibilityLabel(device.push != nil ? "Gets notifications" : "No notifications")
                         VStack(alignment: .leading, spacing: 1) {
                             Text(device.name)
                             Text("Paired \(device.pairedAt.formatted(date: .abbreviated, time: .shortened))"

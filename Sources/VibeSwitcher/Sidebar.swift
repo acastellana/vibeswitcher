@@ -278,7 +278,7 @@ final class SidebarController {
         let id = transition
         animating = true
         NSAnimationContext.runAnimationGroup({ context in
-            context.duration = 0.16
+            context.duration = Motion.isReduced ? 0 : 0.16
             context.timingFunction = CAMediaTimingFunction(name: .easeOut)
             panel.animator().setFrame(docked, display: true)
         }, completionHandler: { [weak self] in
@@ -309,7 +309,7 @@ final class SidebarController {
             self.hostingView.rootView = AnyView(EmptyView()) // no SwiftUI work while hidden
             self.note("conceal #\(id) done")
         }
-        guard animated else { return finish() }
+        guard animated, !Motion.isReduced else { return finish() }
         animating = true
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.14

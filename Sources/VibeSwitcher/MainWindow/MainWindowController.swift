@@ -549,7 +549,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     @objc func selectSessionByTag(_ sender: NSMenuItem) { model.select(index: sender.tag - 1) }
 
     @objc func toggleInspectorAction(_ sender: Any?) {
-        inspectorItem.animator().isCollapsed.toggle()
+        if Motion.isReduced { inspectorItem.isCollapsed.toggle() } else { inspectorItem.animator().isCollapsed.toggle() }
         // The animator proxy already reports the new value.
         UserDefaults.standard.set(inspectorItem.isCollapsed, forKey: "inspectorCollapsed")
     }

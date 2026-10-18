@@ -267,7 +267,7 @@ struct TerminalMirror: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: "macwindow").font(.system(size: 16)).foregroundStyle(.secondary)
+                Image(systemName: "macwindow").font(.system(size: 16)).foregroundStyle(.secondary).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Runs in Terminal").font(.system(size: 13, weight: .semibold))
                     Text(move != nil ? "Terminal shares only plain text. Move it here for full color."
@@ -357,6 +357,7 @@ extension HostTerminalView {
         overlay.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.25).cgColor
         overlay.autoresizingMask = [.width, .height]
         addSubview(overlay)
+        // a11y: kept with Reduce Motion: a fade in place, nothing moves, and it's the bell you asked to see.
         NSAnimationContext.runAnimationGroup({ context in
             context.duration = 0.25
             overlay.animator().alphaValue = 0

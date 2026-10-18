@@ -264,7 +264,7 @@ struct SetupStatusLabel: View {
         Label {
             Text(text).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         } icon: {
-            Image(systemName: symbol).foregroundStyle(color)
+            Image(systemName: symbol).foregroundStyle(color).accessibilityHidden(true)
         }
         .font(.callout)
     }
@@ -432,15 +432,16 @@ struct OnboardingView: View {
         isDone(step) ? "done" : flow.skipped.contains(step) ? "skipped" : step == flow.step ? "current" : "to do"
     }
 
+    /// Hidden from VoiceOver: the rail row says "<step>, done" (or skipped, current, to do).
     @ViewBuilder private func railSymbol(_ step: OnboardingStep) -> some View {
         if isDone(step) {
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green).accessibilityHidden(true)
         } else if flow.skipped.contains(step) {
-            Image(systemName: "minus.circle").foregroundStyle(.secondary)
+            Image(systemName: "minus.circle").foregroundStyle(.secondary).accessibilityHidden(true)
         } else if step == flow.step {
-            Image(systemName: "circle.circle.fill").foregroundStyle(Color.accentColor)
+            Image(systemName: "circle.circle.fill").foregroundStyle(Color.accentColor).accessibilityHidden(true)
         } else {
-            Image(systemName: "circle").foregroundStyle(.tertiary)
+            Image(systemName: "circle").foregroundStyle(.tertiary).accessibilityHidden(true)
         }
     }
 
@@ -458,7 +459,7 @@ struct OnboardingView: View {
 
     private func header(_ symbol: String, _ title: String, _ why: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            Image(systemName: symbol).font(.system(size: 30)).foregroundStyle(Color.accentColor)
+            Image(systemName: symbol).font(.system(size: 30)).foregroundStyle(Color.accentColor).accessibilityHidden(true)
             Text(title).font(.title2.weight(.semibold))
             Text(why).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
         }

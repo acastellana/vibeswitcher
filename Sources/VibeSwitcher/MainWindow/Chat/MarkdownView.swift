@@ -156,6 +156,7 @@ private struct BlockView: View {
         if let checked = item.checked {
             Image(systemName: checked ? "checkmark.square.fill" : "square")
                 .foregroundStyle(checked ? Color.accentColor : .secondary).font(.system(size: fontSize - 1))
+                .accessibilityLabel(checked ? "Checked" : "Unchecked")
         } else if ordered {
             Text("\(number).").font(.system(size: fontSize).monospacedDigit()).foregroundStyle(.secondary)
         } else {

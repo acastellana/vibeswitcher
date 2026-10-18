@@ -259,8 +259,10 @@ struct LaunchSettings: View {
                 }
                 .frame(width: 220)
                 HStack {
-                    Button { add() } label: { Image(systemName: "plus") }
-                    Button { removeSelected() } label: { Image(systemName: "minus") }.disabled(selected == nil || list.count <= 1 && project == nil)
+                    Button { add() } label: { Image(systemName: "plus").accessibilityLabel("Add preset") }
+                        .help("Add a preset")
+                    Button { removeSelected() } label: { Image(systemName: "minus").accessibilityLabel("Remove preset") }
+                        .help("Remove the selected preset").disabled(selected == nil || list.count <= 1 && project == nil)
                     Spacer()
                     if let project {
                         Menu("Default") {

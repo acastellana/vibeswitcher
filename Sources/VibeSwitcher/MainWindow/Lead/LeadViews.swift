@@ -39,7 +39,7 @@ struct TeamStrip: View {
         let order = LeadTask.Status.attentionOrder
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Image(systemName: "person.3.fill").foregroundStyle(Color.accentColor)
+                Image(systemName: "person.3.fill").foregroundStyle(Color.accentColor).accessibilityHidden(true)
                 Text("Team").font(.system(size: 12, weight: .semibold))
                 ForEach(order, id: \.self) { status in
                     let count = board.tasks.filter { $0.status == status }.count
@@ -73,6 +73,7 @@ struct TeamStrip: View {
                                     if let evidence = task.evidence {
                                         Image(systemName: evidence.passes ? "checkmark.seal.fill" : "xmark.seal.fill")
                                             .font(.system(size: 10)).foregroundStyle(evidence.passes ? .green : .red)
+                                            .accessibilityLabel(evidence.passes ? "Checks pass" : "Checks fail")
                                     }
                                 }
                                 .padding(.horizontal, 9).padding(.vertical, 4)
@@ -162,6 +163,7 @@ struct LeadQuestionStack: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
                     Image(systemName: "questionmark.bubble.fill").foregroundStyle(open.contains { $0.rank == .blocking } ? Color.red : Color.accentColor)
+                        .accessibilityHidden(true)
                     Text(open.isEmpty ? "No questions waiting" : questionCount(open.count)).font(.system(size: 12, weight: .semibold))
                     Spacer()
                     if open.count > 1 {
@@ -216,7 +218,7 @@ private struct LeadQuestionCard: View {
                 countdown(proposal: proposal, deadline: deadline)
             } else if question.heldAt != nil, let proposal = question.proposal {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
-                    Image(systemName: "pause.circle.fill").foregroundStyle(.secondary)
+                    Image(systemName: "pause.circle.fill").foregroundStyle(.secondary).accessibilityHidden(true)
                     (Text("Held: the timer is off. The lead proposed ") + Text(proposal).fontWeight(.semibold) + Text("; it waits for your answer."))
                         .foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
@@ -304,7 +306,7 @@ private struct LeadQuestionCard: View {
     private var decided: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor.opacity(0.8))
+                Image(systemName: "checkmark.circle.fill").foregroundStyle(Color.accentColor.opacity(0.8)).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     (Text("Went ahead with ") + Text(question.proposal ?? "").fontWeight(.semibold) + Text(": no answer in \(question.decideInText)"))
                         .font(.system(size: 12)).fixedSize(horizontal: false, vertical: true)
@@ -340,12 +342,12 @@ private struct LeadQuestionCard: View {
         VStack(alignment: .leading, spacing: 6) {
             Button { showHistory.toggle() } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
-                    Image(systemName: "pencil.circle.fill").foregroundStyle(.orange)
+                    Image(systemName: "pencil.circle.fill").foregroundStyle(.orange).accessibilityHidden(true)
                     Text("Updated \(LeadBoard.clock(revision.at)): \(revision.note)").foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true).multilineTextAlignment(.leading)
                     Spacer(minLength: 4)
                     Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold)).foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(showHistory ? 90 : 0))
+                        .rotationEffect(.degrees(showHistory ? 90 : 0)).accessibilityHidden(true)
                 }
                 .font(.system(size: 11)).contentShape(Rectangle())
             }
@@ -377,7 +379,7 @@ private struct LeadQuestionCard: View {
     private var withdrawn: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Image(systemName: "xmark.circle").foregroundStyle(.secondary)
+                Image(systemName: "xmark.circle").foregroundStyle(.secondary).accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Withdrawn: \(question.withdrawReason ?? "no reason given")").font(.system(size: 12)).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -607,7 +609,7 @@ struct BaseMoveCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 6) {
-                Image(systemName: "arrow.triangle.branch").foregroundStyle(.orange)
+                Image(systemName: "arrow.triangle.branch").foregroundStyle(.orange).accessibilityHidden(true)
                 Text("\(move.branch) moved outside the lead's merges").font(.system(size: 12, weight: .semibold))
                 Spacer()
                 Text("\(move.from.prefix(8)) → \(move.to.prefix(8))").font(.system(size: 10.5).monospaced()).foregroundStyle(.tertiary)

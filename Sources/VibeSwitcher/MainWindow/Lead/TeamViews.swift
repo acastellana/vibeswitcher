@@ -195,6 +195,7 @@ struct Fold: View {
         Button { isOpen.toggle() } label: {
             HStack(spacing: 5) {
                 Image(systemName: "chevron.right").font(.system(size: 8.5, weight: .semibold)).rotationEffect(.degrees(isOpen ? 90 : 0))
+                    .accessibilityHidden(true)
                 Text(title).font(.system(size: 11.5, weight: .medium))
                 Spacer()
             }
@@ -247,7 +248,7 @@ struct DecisionFeedView: View {
         return VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Image(systemName: "signpost.right.fill").font(.system(size: 9)).foregroundStyle(Color.accentColor.opacity(dim ? 0.5 : 1))
-                    .frame(width: 12)
+                    .frame(width: 12).accessibilityHidden(true)
                 Text(DecisionFeed.line(decision, summary: summary(decision))).font(.system(size: 12, weight: dim ? .regular : .medium))
                     .foregroundStyle(dim ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary)).lineLimit(1)
                 Spacer(minLength: 8)

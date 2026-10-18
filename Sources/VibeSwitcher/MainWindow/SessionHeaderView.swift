@@ -11,7 +11,7 @@ struct SessionHeaderView: View {
     var body: some View {
         HStack(spacing: 10) {
             if let row = model.selectedRow {
-                AgentMark(kind: row.markKind, status: row.statusColor, hollow: row.statusIsHollow, size: 28)
+                AgentMark(kind: row.markKind, status: row.statusColor, hollow: row.statusIsHollow, size: 28, mark: row.statusMark, spoken: row.spokenStatus)
                 TimelineView(.ticking(every: 30)) { context in
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 8) {
@@ -21,7 +21,7 @@ struct SessionHeaderView: View {
                             StatusPill(row: row, now: context.date, replaced: model.replaced(row))
                         }
                         if let replaced = model.replaced(row) {
-                            Text(Self.replacedLine(replaced)).font(.system(size: 11)).foregroundStyle(.purple).lineLimit(1)
+                            Text(Self.replacedLine(replaced)).font(.system(size: 11)).foregroundStyle(ReplacedLead.color).lineLimit(1)
                         } else {
                             details(row).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
                         }
@@ -32,18 +32,19 @@ struct SessionHeaderView: View {
                 if let live = model.replaced(row)?.live {
                     Button("Continue in \(model.replaced(row)!.liveName)") { model.select(hostID: live) }
                         .help("Go to the lead that holds the role now")
+                        .accessibilityLabel("Continue in \(model.replaced(row)!.liveName)")
                 }
                 if model.chatPath(for: row) != nil {
                     Picker("View", selection: $model.showsChat) {
-                        Image(systemName: "terminal").help("Terminal (⌥⌘1)").tag(false)
-                        Image(systemName: "bubble.left.and.text.bubble.right").help("Chat (⌥⌘2)").tag(true)
+                        Image(systemName: "terminal").accessibilityLabel("Terminal").help("Terminal (⌥⌘1)").tag(false)
+                        Image(systemName: "bubble.left.and.text.bubble.right").accessibilityLabel("Chat").help("Chat (⌥⌘2)").tag(true)
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
                     .fixedSize()
                 }
                 buttons(row)
-                Menu { RowMenu(row: row, actions: actions) } label: { Image(systemName: "ellipsis.circle") }
+                Menu { RowMenu(row: row, actions: actions) } label: { Image(systemName: "ellipsis.circle").accessibilityLabel("More actions") }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
@@ -83,19 +84,19 @@ struct SessionHeaderView: View {
 
     @ViewBuilder private func buttons(_ row: WindowRow) -> some View {
         if let session = row.session, session.inTerminalApp {
-            Button { actions.openInTerminal(session) } label: { Image(systemName: "arrow.up.forward.app") }
+            Button { actions.openInTerminal(session) } label: { Image(systemName: "arrow.up.forward.app").accessibilityLabel("Open in Terminal") }
                 .help("Open in Terminal (⌘O)")
         }
         if row.hostID != nil {
             if actions.isLive(row) {
-                Button { actions.endSession(row) } label: { Image(systemName: "stop.circle") }
+                Button { actions.endSession(row) } label: { Image(systemName: "stop.circle").accessibilityLabel("End session") }
                     .help("End this session… (⇧⌘⌫)")
             } else {
                 if actions.canResume(row) {
-                    Button { actions.resume(row) } label: { Image(systemName: "arrow.clockwise") }
+                    Button { actions.resume(row) } label: { Image(systemName: "arrow.clockwise").accessibilityLabel("Resume") }
                         .help("Resume: start the agent again on this conversation")
                 }
-                Button { actions.remove(row) } label: { Image(systemName: "trash") }
+                Button { actions.remove(row) } label: { Image(systemName: "trash").accessibilityLabel("Remove from list") }
                     .help("Remove from the list")
             }
         }
@@ -127,8 +128,11 @@ struct StatusPill: View {
 
     var body: some View {
         let state = replaced?.rowState ?? row.state(now: now)
-        let color = replaced == nil ? row.statusColor : .purple
+        let color = replaced == nil ? row.statusColor : ReplacedLead.color
         HStack(spacing: 4) {
+            if replaced != nil {
+                Image(systemName: "arrow.turn.up.right").accessibilityHidden(true)  // a shape as well as the colour
+            }
             Text(replaced == nil ? row.pillLabel(state) : "Replaced")
             if let since = state.since {
                 Text("· \(Durations.compact(now.timeIntervalSince(since)))").monospacedDigit()
@@ -137,8 +141,11 @@ struct StatusPill: View {
         .font(.system(size: 11, weight: .medium))
         .padding(.horizontal, 7).padding(.vertical, 2)
         .foregroundStyle(color)
-        .background(Capsule().fill(color.opacity(0.15)))
+        .overlay(Capsule().strokeBorder(color.opacity(0.6)))  // a tinted fill took the text under 4.5:1
         .fixedSize()
+        .help(replaced.map { "This lead was \($0.label)" } ?? "")
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(replaced.map { "Replaced: continue in \($0.liveName)" } ?? row.pillLabel(state))
     }
 }
 

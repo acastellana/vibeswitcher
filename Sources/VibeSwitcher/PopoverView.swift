@@ -48,6 +48,10 @@ struct PopoverView: View {
                                     .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            // "1, acme-web, needs input", then what it's doing.
+                            .accessibilityLabel(StatusSummary.spoken(number: index + 1, name: session.displayName,
+                                                                     status: session.status, paused: session.isPaused))
+                            .accessibilityValue(session.detail ?? session.task ?? "")
                             .onHover { if $0 { state.selectedIndex = index } }
                             .contextMenu {
                                 Button("Switch to Session") { onOpen(session) }
@@ -97,7 +101,7 @@ struct PopoverView: View {
         HStack(spacing: 12) {
             Text(isSidebar ? "Sessions" : "VibeSwitcher").font(.headline).lineLimit(1).fixedSize()
             newSessionMenu
-            Button { onOpenWindow() } label: { Image(systemName: "macwindow") }
+            Button { onOpenWindow() } label: { Image(systemName: "macwindow").accessibilityLabel("Open VibeSwitcher window") }
                 .buttonStyle(.borderless)
                 .help("Open the VibeSwitcher window (⌘-click the menu bar icon)")
             Spacer(minLength: 8)
@@ -117,21 +121,25 @@ struct PopoverView: View {
                 let count = store.sessions.filter { $0.status == status && !$0.isPaused }.count
                 if count > 0 {
                     HStack(spacing: 4) {
-                        Circle().fill(status.color).frame(width: 8, height: 8)
+                        StatusMarkView(StatusMark(status: status), color: status.color, size: 9)
                         Text(words ? "\(count) \(status.label.lowercased())" : "\(count)")
                             .font(.caption).foregroundStyle(.secondary).fixedSize()
                     }
                     .help("\(count) \(status.label.lowercased())")
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("\(count) \(status.label.lowercased())")
                 }
             }
             let paused = store.sessions.filter(\.isPaused).count
             if paused > 0 {
                 HStack(spacing: 3) {
-                    Image(systemName: "pause.circle").imageScale(.small)
+                    Image(systemName: "pause.circle").imageScale(.small).accessibilityHidden(true)
                     Text(words ? "\(paused) paused" : "\(paused)").fixedSize()
                 }
                 .font(.caption).foregroundStyle(.secondary)
                 .help("\(paused) paused: no notifications until you resume them")
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("\(paused) paused")
             }
         }
     }
@@ -157,7 +165,7 @@ struct PopoverView: View {
             Divider()
             Button("Launch Presets…", action: onEditCommands)
         } label: {
-            Image(systemName: "plus.circle")
+            Image(systemName: "plus.circle").accessibilityLabel("New session")
         }
 
         .menuStyle(.borderlessButton)
@@ -228,11 +236,12 @@ struct PopoverView: View {
                 Button("Settings…", action: onSettings)
                 Button("Quit VibeSwitcher", action: onQuit)
             } label: {
-                Image(systemName: "gearshape")
+                Image(systemName: "gearshape").accessibilityLabel("Settings and options")
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
+            .help("Settings and options")
         }
         .padding(.horizontal, 12).padding(.vertical, 8)
     }
@@ -248,7 +257,7 @@ private struct TodaySummary: View {
             Button { expanded.toggle() } label: {
                 HStack(spacing: 6) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right").imageScale(.small)
-                        .foregroundStyle(.tertiary).frame(width: 10)
+                        .foregroundStyle(.tertiary).frame(width: 10).accessibilityHidden(true)
                     Text("Today").font(.caption.weight(.semibold))
                     Spacer()
                     stat(SessionStatus.working.color, ledger.agentsWorking, "agents working")
@@ -257,6 +266,7 @@ private struct TodaySummary: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .accessibilityValue(expanded ? "expanded" : "collapsed")
             .help("Agents working: time at least one agent was in a turn. Waiting on you: time, while you were "
                   + "at the Mac, that at least one session needed your answer or had finished unseen "
                   + "(its first 30 min). Background jobs are listed per project.")
@@ -331,7 +341,7 @@ struct SessionRow: View {
                             .help("Mission Control desktop this session's Terminal window is on")
                     }
                     if session.isCurrent, !compact {
-                        Label("Viewing", systemImage: "eye.fill")
+                        Label("Viewing", systemImage: "eye.fill")  // a11y: labelled by its title
                             .font(.system(size: 10, weight: .semibold))
                             .lineLimit(1).fixedSize()   // never "Viewi / ng": the desktop label gives way instead
                             .padding(.horizontal, 5).padding(.vertical, 1)
@@ -339,7 +349,8 @@ struct SessionRow: View {
                             .help("The Terminal tab you're looking at right now")
                     }
                     if session.isPaused {
-                        Label(compact ? "" : "Paused", systemImage: "pause.fill")
+                        Label("Paused", systemImage: "pause.fill")  // a11y: labelled by its title
+                            .labelStyle(PausedLabelStyle(compact: compact))
                             .font(.system(size: 10, weight: .semibold))
                             .padding(.horizontal, 5).padding(.vertical, 1)
                             .background(Capsule().fill(Color.primary.opacity(0.08)))
@@ -347,7 +358,11 @@ struct SessionRow: View {
                     }
                     Spacer(minLength: 6)
                     HStack(spacing: 4) {
-                        if !compact { Text(session.status.label).foregroundStyle(session.isPaused ? Color.secondary : session.status.color) }
+                        // The status as a shape and a word, not just the badge's colour.
+                        StatusMarkView(session: session, size: 9).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                        Text(compact ? session.status.shortLabel : session.status.label)
+                            .foregroundStyle(session.isPaused ? Color.secondary : session.status.color)
+                            .lineLimit(1).fixedSize()
                         if session.statusSince > Date.distantPast.addingTimeInterval(1) {
                             TimelineView(.ticking(every: 1)) { context in
                                 Text(Self.elapsed(from: session.statusSince, to: context.date))
@@ -371,7 +386,7 @@ struct SessionRow: View {
                     TimelineView(.ticking(every: 1)) { context in
                         let seconds = context.date.timeIntervalSince(since)
                         HStack(spacing: 4) {
-                            Image(systemName: "gearshape.2").imageScale(.small)
+                            Image(systemName: "gearshape.2").imageScale(.small).accessibilityHidden(true)
                             Text(activity).lineLimit(1).truncationMode(.middle)
                             Text("· " + Self.elapsed(from: since, to: context.date))
                                 .foregroundStyle(seconds > 600 ? AnyShapeStyle(SessionStatus.working.color) : AnyShapeStyle(.secondary))
@@ -432,9 +447,10 @@ private struct NumberBadge: View {
             } else {
                 Circle().fill(status.color)
             }
+            // White on light-mode fills, near-black on dark-mode ones: at least 4.5:1 (StatusPalette).
             Text("\(number)")
                 .font(.system(size: 11, weight: .bold, design: .rounded))
-                .foregroundStyle(isPaused || status == .unknown || status == .idle ? Color.primary : Color.white)
+                .foregroundStyle(status == .unknown && !isPaused ? Color.primary : SessionStatus.onInk)
         }
         .frame(width: 20, height: 20)
         .overlay {
@@ -450,13 +466,28 @@ private struct NumberBadge: View {
     }
 }
 
+/// The paused tag: icon and word in the popover, icon only (still spoken as "Paused") in the narrow sidebar.
+private struct PausedLabelStyle: LabelStyle {
+    let compact: Bool
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 3) {
+            configuration.icon
+            if !compact { configuration.title }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Paused")
+    }
+}
+
 struct AgentBadge: View {
     let agent: Agent
+    /// Claude's orange, darker in light mode and lighter in dark so the 9 pt name reads (5:1 on the popover).
+    static let claude = Color(nsColor: NSColor(name: nil) { StatusPalette.RGB(hex: $0.isDark ? 0xE8876A : 0xA34A2A).nsColor })
     var body: some View {
         Text(agent == .claude ? "Claude" : "Codex")
             .font(.system(size: 9, weight: .bold))
             .padding(.horizontal, 4).padding(.vertical, 1)
-            .foregroundStyle(agent == .claude ? Color(red: 0.85, green: 0.47, blue: 0.34) : .primary)
+            .foregroundStyle(agent == .claude ? Self.claude : .primary)
             .overlay(RoundedRectangle(cornerRadius: 3).stroke(.secondary.opacity(0.4)))
     }
 }

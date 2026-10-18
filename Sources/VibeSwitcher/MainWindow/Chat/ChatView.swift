@@ -84,6 +84,8 @@ struct ChatView: View {
     @State private var bottom = BottomTracker()
     @State private var viewing: ChatImage?
     @State private var didInitialScroll = false
+    /// With Reduce Motion, scrolls jump instead of gliding.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let items = chat.items
@@ -197,7 +199,7 @@ struct ChatView: View {
             }
             .overlay(alignment: .bottomTrailing) {
                 if chat.state == .ready {
-                    LatestButton(bottom: bottom) { withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+                    LatestButton(bottom: bottom) { withAnimation(reduceMotion ? nil : .default) { proxy.scrollTo("bottom", anchor: .bottom) } }
                 }
             }
             .onChange(of: chat.state) { _, state in
@@ -217,9 +219,11 @@ struct ChatView: View {
             .onChange(of: chat.log.entries.count) { _, _ in
                 if bottom.atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
             }
-            .onChange(of: chat.scrollToBottomRequests) { _, _ in withAnimation { proxy.scrollTo("bottom", anchor: .bottom) } }
+            .onChange(of: chat.scrollToBottomRequests) { _, _ in
+                withAnimation(reduceMotion ? nil : .default) { proxy.scrollTo("bottom", anchor: .bottom) }
+            }
             .onChange(of: current) { _, id in
-                if let id { withAnimation { proxy.scrollTo(id, anchor: .center) } }
+                if let id { withAnimation(reduceMotion ? nil : .default) { proxy.scrollTo(id, anchor: .center) } }
             }
             .onAppear {
                 if chat.state == .ready, !didInitialScroll {
@@ -422,6 +426,7 @@ private struct LiveStateView: View {
                 case .needsInput:
                     HStack(alignment: .top, spacing: 10) {
                         Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(.red).font(.system(size: 16))
+                            .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 4) {
                             Text("\(session.agent.displayName) is asking in the terminal").font(.system(size: 13, weight: .semibold))
                             if let detail = session.detail, !detail.isEmpty {
@@ -456,7 +461,7 @@ private struct ChatSearchBar: View {
     var body: some View {
         let count = ChatSearch.matches(chat.items, query: chat.searchQuery).count
         HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
+            Image(systemName: "magnifyingglass").foregroundStyle(.secondary).accessibilityHidden(true)
             TextField("Search this conversation", text: $chat.searchQuery)
                 .textFieldStyle(.plain)
                 .focused($focused)
@@ -470,8 +475,10 @@ private struct ChatSearchBar: View {
             if !chat.searchQuery.isEmpty {
                 Text(count == 0 ? "No matches" : "\(min(chat.searchIndex, count - 1) + 1) of \(count)")
                     .font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary)
-                Button { step(-1, count) } label: { Image(systemName: "chevron.up") }.buttonStyle(.borderless).disabled(count == 0)
-                Button { step(1, count) } label: { Image(systemName: "chevron.down") }.buttonStyle(.borderless).disabled(count == 0)
+                Button { step(-1, count) } label: { Image(systemName: "chevron.up").accessibilityLabel("Previous match") }
+                    .buttonStyle(.borderless).disabled(count == 0).help("Previous match (⇧↩)")
+                Button { step(1, count) } label: { Image(systemName: "chevron.down").accessibilityLabel("Next match") }
+                    .buttonStyle(.borderless).disabled(count == 0).help("Next match (↩)")
             }
             Button("Done") { close() }.buttonStyle(.borderless)
         }
@@ -498,7 +505,7 @@ private struct TerminalReplyHint: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "macwindow").foregroundStyle(.secondary)
+            Image(systemName: "macwindow").foregroundStyle(.secondary).accessibilityHidden(true)
             Text(canMove ? "Runs in Terminal. Move it here to reply from this window."
                          : "Runs in Terminal. Reply there (Move to Window is offered between turns).")
                 .font(.system(size: 12)).foregroundStyle(.secondary)
@@ -539,6 +546,7 @@ private struct AnswerCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 Image(systemName: "questionmark.bubble.fill").foregroundStyle(Color.accentColor).font(.system(size: 15))
+                    .accessibilityHidden(true)
                 Text("\(agent) is asking").font(.system(size: 13, weight: .semibold))
                 if questionTabs.count > 1, let current = menu.currentTab {
                     Text("Question \(min(current, questionTabs.count - 1) + 1) of \(questionTabs.count)")
@@ -653,7 +661,7 @@ private struct TodoPanel: View {
         VStack(alignment: .leading, spacing: 8) {
             Button { open.toggle() } label: {
                 HStack(spacing: 6) {
-                    Image(systemName: "checklist").foregroundStyle(Color.accentColor)
+                    Image(systemName: "checklist").foregroundStyle(Color.accentColor).accessibilityHidden(true)
                     Text("Plan").font(.system(size: 12, weight: .semibold))
                     Text("\(todos.filter { $0.status == .done }.count) of \(todos.count) done").font(.system(size: 11.5)).foregroundStyle(.secondary)
                     if let active = todos.first(where: { $0.status == .active }), !open {
@@ -661,7 +669,7 @@ private struct TodoPanel: View {
                     }
                     Spacer()
                     Image(systemName: "chevron.down").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(open ? 0 : -90))
+                        .rotationEffect(.degrees(open ? 0 : -90)).accessibilityHidden(true)
                 }
                 .contentShape(Rectangle())
             }

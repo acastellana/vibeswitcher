@@ -91,7 +91,7 @@ private struct CommandPaletteView: View {
         let results = self.results
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: "magnifyingglass").font(.system(size: 16)).foregroundStyle(.secondary)
+                Image(systemName: "magnifyingglass").font(.system(size: 16)).foregroundStyle(.secondary).accessibilityHidden(true)
                 TextField("Go to a session or run a command", text: $query)
                     .textFieldStyle(.plain)
                     .font(.system(size: 17))
@@ -139,7 +139,7 @@ private struct PaletteRow: View {
             case .mark(let kind, let status):
                 AgentMark(kind: kind, status: status, size: 22)
             case .symbol(let name):
-                Image(systemName: name).font(.system(size: 13)).frame(width: 22, height: 22)
+                Image(systemName: name).font(.system(size: 13)).frame(width: 22, height: 22).accessibilityHidden(true)
                     .foregroundStyle(selected ? .white : .secondary)
             }
             VStack(alignment: .leading, spacing: 1) {

@@ -78,12 +78,21 @@ struct FloatingDotsView: View {
     let onOpen: (Session) -> Void
     let onShowList: () -> Void
 
+    var body: some View { FloatingDots(sessions: store.sessions, onOpen: onOpen, onShowList: onShowList) }
+}
+
+/// The pill's content for a list of sessions.
+struct FloatingDots: View {
+    let sessions: [Session]
+    let onOpen: (Session) -> Void
+    let onShowList: () -> Void
+
     var body: some View {
-        HStack(spacing: 5) {
-            if store.sessions.isEmpty {
-                Image(systemName: "terminal").foregroundStyle(.secondary)
+        HStack(spacing: 7) {
+            if sessions.isEmpty {
+                Image(systemName: "terminal").foregroundStyle(.secondary).accessibilityLabel("No sessions")
             }
-            ForEach(Array(store.sessions.enumerated()), id: \.element.id) { index, session in
+            ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
                 Button { onOpen(session) } label: {
                     ZStack {
                         if session.dotIsHollow {
@@ -91,22 +100,32 @@ struct FloatingDotsView: View {
                         } else {
                             Circle().fill(session.dotColor)
                         }
+                        // White on light-mode fills, near-black on dark-mode ones: at least 4.5:1 (StatusPalette).
                         Text("\(index + 1)")
-                            .font(.system(size: 9.5, weight: .bold, design: .rounded))
-                            .foregroundStyle(session.isPaused || session.status == .unknown || session.status == .idle
-                                             ? Color.primary.opacity(session.isPaused ? 0.5 : 1) : Color.white)
+                            .font(.system(size: 10, weight: .bold, design: .rounded))
+                            .foregroundStyle(session.dotIsHollow ? Color.primary : SessionStatus.onInk)
                     }
                     .frame(width: 17, height: 17)
                     .padding(2)
                     .overlay {
                         if session.isCurrent { Circle().stroke(Color.primary, lineWidth: 1.5) }
                     }
+                    // The status's shape on the corner, so it reads without colour.
+                    .overlay(alignment: .bottomTrailing) {
+                        StatusMarkView(session: session, size: 8)
+                            .padding(1)
+                            .background(Circle().fill(Color(nsColor: .windowBackgroundColor)))
+                            .offset(x: 2, y: 2)
+                    }
                 }
                 .buttonStyle(.plain)
                 .help("\(index + 1). \(session.title) · \(session.status.label)" + (session.isPaused ? " · paused" : ""))
+                .accessibilityLabel(StatusSummary.spoken(number: index + 1, name: session.title, status: session.status,
+                                                         paused: session.isPaused))
             }
             Button(action: onShowList) {
                 Image(systemName: "list.bullet").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                    .accessibilityLabel("Show all sessions")
             }
             .buttonStyle(.plain)
             .help("Show all sessions")

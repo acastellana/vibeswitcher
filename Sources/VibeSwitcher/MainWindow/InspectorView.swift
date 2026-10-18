@@ -93,7 +93,7 @@ private struct OverviewView: View {
                         LabeledContent("Session") {
                             HStack(spacing: 4) {
                                 Text(id.prefix(8) + "…").textSelection(.enabled).help(id)
-                                Button { Pasteboard.copy(id) } label: { Image(systemName: "doc.on.doc") }
+                                Button { Pasteboard.copy(id) } label: { Image(systemName: "doc.on.doc").accessibilityLabel("Copy session ID") }
                                     .buttonStyle(.borderless).help("Copy session ID")
                             }
                         }
@@ -176,6 +176,7 @@ private struct ActivityRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 8) {
             Image(systemName: icon).font(.system(size: 11)).foregroundStyle(iconColor).frame(width: 14).padding(.top, 2)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
                 switch entry.kind {
                 case .prompt:

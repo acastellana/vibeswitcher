@@ -36,18 +36,25 @@ struct AgentMark: View {
     var status: Color?
     var hollow = false
     var size: CGFloat = 22
+    /// The status's shape in that dot ("!" needs you, a spinner arc working, a check done), so it reads without colour.
+    var mark: StatusMark?
+    /// The status in words, for VoiceOver: "Claude, needs input".
+    var spoken: String?
 
     var body: some View {
         RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
             .fill(kind.color.gradient)
             .frame(width: size, height: size)
-            .overlay(Image(systemName: kind.symbol).font(.system(size: size * 0.48, weight: .semibold)).foregroundStyle(.white))
+            .overlay(Image(systemName: kind.symbol).font(.system(size: size * 0.48, weight: .semibold)).foregroundStyle(.white)
+                .accessibilityHidden(true))
             .overlay(alignment: .bottomTrailing) {
                 if let status {
                     let dot = size * 0.42
                     ZStack {
                         Circle().fill(Color(nsColor: .windowBackgroundColor))
-                        if hollow {
+                        if let mark {
+                            StatusMarkView(mark, color: status, size: dot - 3)
+                        } else if hollow {
                             Circle().strokeBorder(status, lineWidth: 1.5).padding(2)
                         } else {
                             Circle().fill(status).padding(2)
@@ -57,7 +64,8 @@ struct AgentMark: View {
                     .offset(x: dot * 0.3, y: dot * 0.3)
                 }
             }
-            .accessibilityLabel(kind.name)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(spoken.map { "\(kind.name), \($0.lowercased())" } ?? kind.name)
     }
 }
 
@@ -73,15 +81,30 @@ extension WindowRow {
     var statusColor: Color {
         switch content {
         case .hosted(let info):
-            if !info.isLive { return .gray.opacity(0.5) }
+            if !info.isLive { return SessionStatus.unknown.color }
             if let program = info.liveProgramStatus { return StatusRules.status(for: program).color }
-            return state(now: Date()).group == .working ? .orange.opacity(0.6) : .gray.opacity(0.6)
+            return state(now: Date()).group == .working ? SessionStatus.working.color : SessionStatus.idle.color
         case .agent(let session):
             return session.dotColor
         }
     }
 
     var statusIsHollow: Bool { session?.dotIsHollow ?? false }
+
+    /// The status dot's shape, matching `statusColor`.
+    var statusMark: StatusMark {
+        switch content {
+        case .hosted(let info):
+            if !info.isLive { return .outline }
+            if let program = info.liveProgramStatus { return StatusMark(status: StatusRules.status(for: program)) }
+            return state(now: Date()).group == .working ? .spinner : .smallDot
+        case .agent(let session):
+            return session.mark
+        }
+    }
+
+    /// The status in words, as the header's pill says it: "Needs input", "Working", "Ended"…
+    var spokenStatus: String { pillLabel(state(now: Date())) }
 
     var isDimmed: Bool {
         if case .hosted(let info) = content { return !info.isLive }

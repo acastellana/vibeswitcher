@@ -10,6 +10,7 @@ struct ToolGroupView: View {
     let chat: ChatModel
     let expanded: Set<String>
     let openImage: (ChatImage) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let open = expanded.contains(id)
@@ -17,11 +18,12 @@ struct ToolGroupView: View {
         let failed = tools.contains { $0.result?.failed == true }
         let running = tools.contains { $0.result == nil }
         VStack(alignment: .leading, spacing: 8) {
-            Button { withAnimation(.easeOut(duration: 0.15)) { chat.toggle(id) } } label: {
+            Button { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { chat.toggle(id) } } label: {
                 HStack(spacing: 8) {
                     HStack(spacing: -4) {
                         ForEach(Array(Set(tools.map(ToolStyle.symbol)).sorted().prefix(4)), id: \.self) { symbol in
                             Image(systemName: symbol).font(.system(size: 10, weight: .semibold)).foregroundStyle(.secondary)
+                                .accessibilityHidden(true)
                                 .frame(width: 20, height: 20)
                                 .background(Circle().fill(Color(nsColor: .controlBackgroundColor)))
                                 .overlay(Circle().strokeBorder(Color.secondary.opacity(0.25)))
@@ -34,7 +36,7 @@ struct ToolGroupView: View {
                         Text(Durations.short(total)).font(.system(size: 11).monospacedDigit()).foregroundStyle(.tertiary)
                     }
                     Image(systemName: "chevron.right").font(.system(size: 10, weight: .semibold)).foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(open ? 90 : 0))
+                        .rotationEffect(.degrees(open ? 90 : 0)).accessibilityHidden(true)
                     Spacer(minLength: 0)
                 }
                 .contentShape(Rectangle())
@@ -94,6 +96,8 @@ struct ToolRowView: View {
                 HStack(spacing: 7) {
                     Image(systemName: tool.result?.failed == true ? "xmark.octagon.fill" : ToolStyle.symbol(tool))
                         .font(.system(size: 11)).foregroundStyle(tool.result?.failed == true ? .red : .secondary).frame(width: 16)
+                        // Spoken only when it says the call failed; otherwise it just repeats the tool's name.
+                        .accessibilityLabel("Failed").accessibilityHidden(tool.result?.failed != true)
                     Text(tool.title).font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
                     if tool.result == nil { ProgressView().controlSize(.mini) }
                     Spacer(minLength: 6)
@@ -101,7 +105,7 @@ struct ToolRowView: View {
                         Text(Durations.short(duration)).font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.tertiary)
                     }
                     Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(open ? 90 : 0))
+                        .rotationEffect(.degrees(open ? 90 : 0)).accessibilityHidden(true)
                 }
                 .padding(.vertical, 3)
                 .contentShape(Rectangle())
@@ -203,6 +207,7 @@ struct TodoListView: View {
                     Image(systemName: todo.status == .done ? "checkmark.circle.fill" : todo.status == .active ? "circle.dotted.circle" : "circle")
                         .foregroundStyle(todo.status == .done ? Color.green : todo.status == .active ? Color.accentColor : Color.secondary)
                         .font(.system(size: 12))
+                        .accessibilityLabel(todo.status == .done ? "Done" : todo.status == .active ? "In progress" : "To do")
                     Text(todo.text).font(.system(size: 12.5, weight: todo.status == .active ? .semibold : .regular))
                         .strikethrough(todo.status == .done, color: .secondary)
                         .foregroundStyle(todo.status == .done ? .secondary : .primary)
@@ -217,10 +222,12 @@ private struct PathLabel: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: "doc").font(.system(size: 10)).foregroundStyle(.secondary)
+            Image(systemName: "doc").font(.system(size: 10)).foregroundStyle(.secondary).accessibilityHidden(true)
             Text(path.replacingOccurrences(of: NSHomeDirectory(), with: "~")).font(.system(size: 11, design: .monospaced))
                 .lineLimit(1).truncationMode(.head)
-            Button { NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "") } label: { Image(systemName: "arrow.up.forward.square") }
+            Button { NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "") } label: {
+                Image(systemName: "arrow.up.forward.square").accessibilityLabel("Reveal in Finder")
+            }
                 .buttonStyle(.borderless).font(.system(size: 10.5)).help("Reveal in Finder")
         }
     }
@@ -319,7 +326,7 @@ private struct FlowChips: View {
     @ViewBuilder private var chips: some View {
         ForEach(options, id: \.self) { option in
             HStack(spacing: 4) {
-                if option == chosen { Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)) }
+                if option == chosen { Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).accessibilityLabel("Chosen") }
                 Text(option).font(.system(size: 11.5))
             }
             .padding(.horizontal, 9).padding(.vertical, 4)

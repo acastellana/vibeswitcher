@@ -149,6 +149,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         statusItem.button?.action = #selector(statusItemClicked)
         statusItem.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         statusItem.button?.image = StatusIcon.image(for: [])
+        statusItem.button?.setAccessibilityLabel(StatusSummary.spoken([]))
 
         let view = PopoverView(store: store, state: popoverState, preferences: preferences,
                                onOpen: { [weak self] in self?.open($0) },
@@ -187,7 +188,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                                                           object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
             self.store.refresh(forceTerminal: true)
-            if self.preferences.sidebarMode { self.sidebar.flash() }
+            // Not with Reduce Motion: a slide at the screen edge on every desktop switch.
+            if self.preferences.sidebarMode, !Motion.isReduced { self.sidebar.flash() }
         }
         preferences.$minimizeOnPause
             .sink { [weak self] enabled in self?.store.minimizeOnPause = enabled }
@@ -237,6 +239,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 if signature != self.iconSignature {
                     self.iconSignature = signature
                     self.statusItem.button?.image = StatusIcon.image(for: sessions)
+                    // VoiceOver: "VibeSwitcher: 2 need you, 3 working".
+                    self.statusItem.button?.setAccessibilityLabel(StatusSummary.spoken(sessions))
                     DispatchQueue.main.async { self.updateDotToolTips() }
                 }
                 self.popoverState.selectedIndex = min(self.popoverState.selectedIndex, max(0, sessions.count - 1))
