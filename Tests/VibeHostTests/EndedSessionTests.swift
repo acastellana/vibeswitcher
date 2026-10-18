@@ -55,13 +55,20 @@ struct EndedSessionTests {
 
         let warmUp = try client.spawn("exit 0")
         #expect(eventually { ended(warmUp.id) })
-        Thread.sleep(forTimeInterval: 0.3)
+        // The rest of what's open, once the warm-up has let go of its PTY.
+        #expect(eventually { ptyMasters(of: host.processIdentifier) == 0 })
         let baseline = openDescriptors(of: host.processIdentifier)
 
         let count = 20
-        let sessions = try (0..<count).map { try client.spawn("sleep 3; echo ended-\($0)") }
+        // Each ends when told to, so all are still live when counted, however long starting 20 takes.
+        let sessions = try (0..<count).map { try client.spawn("echo waiting; read go; echo ended-\($0)") }
         #expect(openDescriptors(of: host.processIdentifier) >= baseline + count, "each live session holds its PTY")
-        #expect(eventually(timeout: 15) { sessions.allSatisfy { ended($0.id) } })
+        #expect(ptyMasters(of: host.processIdentifier) == count)
+        for session in sessions {
+            #expect(eventually { client.screen(session.id)?.contains("waiting") == true })
+            client.send(.input(id: session.id, bytes: Data("go\r".utf8), reply: false))
+        }
+        #expect(eventually { sessions.allSatisfy { ended($0.id) } })
         #expect(eventually { openDescriptors(of: host.processIdentifier) == baseline },
                 "open: \(openDescriptors(of: host.processIdentifier)), at first: \(baseline)")
 
@@ -79,6 +86,20 @@ struct EndedSessionTests {
         let shutdown = client.send(.shutdown)
         #expect(eventually { client.reply(to: shutdown) == .ok })
         #expect(eventually { !host.isRunning })
+    }
+
+    /// The PTYs' own ends (`/dev/ptmx`) the process has open.
+    private func ptyMasters(of pid: pid_t) -> Int {
+        let size = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
+        guard size > 0 else { return -1 }
+        var fds = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(size) / MemoryLayout<proc_fdinfo>.stride + 16)
+        let used = fds.withUnsafeMutableBytes { proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count)) }
+        return fds.prefix(Int(used) / MemoryLayout<proc_fdinfo>.stride).filter { fd in
+            guard fd.proc_fdtype == PROX_FDTYPE_VNODE else { return false }
+            var info = vnode_fdinfowithpath()
+            guard proc_pidfdinfo(pid, fd.proc_fd, PROC_PIDFDVNODEPATHINFO, &info, Int32(MemoryLayout<vnode_fdinfowithpath>.size)) > 0 else { return false }
+            return withUnsafeBytes(of: info.pvip.vip_path) { String(cString: $0.bindMemory(to: CChar.self).baseAddress!) } == "/dev/ptmx"
+        }.count
     }
 
     private func openDescriptors(of pid: pid_t) -> Int {

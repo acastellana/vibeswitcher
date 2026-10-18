@@ -8,7 +8,9 @@ final class TestHost {
     let socket = scratchSocketPath()
     let lock: String
     let server: HostServer
+    /// Just before and just after the server was made and started.
     let startedAt = Date()
+    private(set) var readyAt = Date.distantFuture
 
     init(build: Int = 42) throws {
         lock = socket + ".lock"
@@ -18,6 +20,7 @@ final class TestHost {
         config.ringCapacity = 1 << 20
         server = HostServer(config: config)
         try server.start()
+        readyAt = Date()
     }
 
     deinit {
@@ -98,7 +101,8 @@ struct HostServerTests {
         #expect(capabilities?.contains(HostProtocol.Capability.styledScreen) == true)
         #expect(capabilities?.contains(HostProtocol.Capability.inputRefusals) == true)
         #expect(pid == getpid())
-        #expect(startedAt.map { abs($0.timeIntervalSince(host.startedAt)) < 1 } == true)
+        // Stamped while the test host was being made (a millisecond's slack for the encoding).
+        #expect(startedAt.map { $0.timeIntervalSince(host.startedAt) > -0.001 && host.readyAt.timeIntervalSince($0) > -0.001 } == true)
     }
 
     @Test func inputAndOutputFlowThroughAnAttachedSession() throws {
@@ -237,7 +241,7 @@ struct HostServerTests {
         let client = try TestClient(host)
         let other = try TestClient(host)
         let shutdown = client.send(.shutdown)
-        let spawn = client.send(.spawn(SpawnRequest(cwd: "/tmp", command: "sleep 30", env: [:], cols: 80, rows: 24,
+        let spawn = client.send(.spawn(SpawnRequest(cwd: "/tmp", command: keepRunning, env: [:], cols: 80, rows: 24,
                                                     keepShell: false, label: "Test", agent: nil)))
         #expect(eventually { client.reply(to: spawn) != nil })
         #expect(client.reply(to: shutdown) == .ok)
@@ -253,7 +257,10 @@ struct HostServerTests {
         let client = try TestClient(host)
         let out = FileManager.default.temporaryDirectory.appendingPathComponent("paste-\(UUID().uuidString.prefix(8))").path
         defer { unlink(out) }
-        let session = try client.spawn("stty raw -echo; echo ready; sleep 2; exec cat > \(out)")
+        // It reads nothing until the test says go (a file appears), however long sending 3 MB takes.
+        let go = out + ".go"
+        defer { unlink(go) }
+        let session = try client.spawn("stty raw -echo; echo ready; while [ ! -e \(go) ]; do sleep 0.05; done; exec cat > \(out)")
         client.attach(session.id)
         #expect(eventually { client.text(session.id).contains("ready") })
         let piece = 64 << 10
@@ -266,8 +273,9 @@ struct HostServerTests {
             #expect(client.reply(to: seqs[index]).map { if case .error(let m) = $0 { return m.contains("\(piece) bytes") }; return false } == true)
         }
         #expect(!refused.isEmpty, "3 MB fit into a program that wasn't reading?")
+        #expect(FileManager.default.createFile(atPath: go, contents: nil))
         let expected = seqs.indices.filter { !refused.contains($0) }.reduce(into: Data()) { $0.append(pieces[$1]) }
-        #expect(eventually(timeout: 20) { (try? Data(contentsOf: URL(fileURLWithPath: out)))?.count == expected.count })
+        #expect(eventually { (try? Data(contentsOf: URL(fileURLWithPath: out)))?.count == expected.count })
         #expect((try? Data(contentsOf: URL(fileURLWithPath: out))) == expected)
     }
 
@@ -364,13 +372,14 @@ struct HostCallTests {
     @Test func refusedInputIsAnError() throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        let session = try client.spawn("stty raw -echo; echo ready; sleep 30")
+        let session = try client.spawn("stty raw -echo; echo ready; \(keepRunning)")
         client.attach(session.id)
         #expect(eventually { client.text(session.id).contains("ready") })
         var refusal: String?
         for _ in 0..<6 where refusal == nil {
             do {
-                try HostCall.send(.input(id: session.id, bytes: Data(repeating: 0x61, count: 512 << 10), reply: false), socket: host.socket)
+                try HostCall.send(.input(id: session.id, bytes: Data(repeating: 0x61, count: 512 << 10), reply: false), socket: host.socket,
+                                  timeout: hangGuard)
             } catch {
                 refusal = "\(error)"
             }
