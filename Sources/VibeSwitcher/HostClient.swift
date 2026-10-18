@@ -39,6 +39,9 @@ final class HostClient: ObservableObject {
     private(set) var screens: [String: String] = [:]
 
     private var connection: HostConnection?
+    /// The user's host; a test's scratch host instead (it never starts one: see `connectIfRunning`).
+    private let socketPath: String
+    private let proofKey: () -> SymmetricKey?
     private var replies: [Int: (HostEvent) -> Void] = [:]
     private var sinks: [UUID: (sink: Sink, cols: Int, rows: Int)] = [:]
     private var whenReady: [(String?) -> Void] = []
@@ -72,6 +75,11 @@ final class HostClient: ObservableObject {
         HostConnection.appKey = key
         return key
     }()
+
+    init(socketPath: String = VibePaths.hostSocket.path, appKey: @escaping () -> SymmetricKey? = { HostClient.appKey }) {
+        self.socketPath = socketPath
+        proofKey = appKey
+    }
 
     static var hostExecutable: URL {
         Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host")
@@ -124,7 +132,7 @@ final class HostClient: ObservableObject {
     @discardableResult
     private func connect() -> Bool {
         if connection != nil { return true }
-        guard let connection = try? HostConnection(path: VibePaths.hostSocket.path, queue: .main, appKey: Self.appKey) else { return false }
+        guard let connection = try? HostConnection(path: socketPath, queue: .main, appKey: proofKey()) else { return false }
         self.connection = connection
         state = .connecting
         connection.onEvent = { [weak self] in self?.handle($0) }

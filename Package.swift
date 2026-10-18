@@ -26,8 +26,8 @@ let package = Package(
         // output captured from scratch programs.
         .testTarget(name: "VibeHostTests", dependencies: ["VibeHost", "VibeCore", "vibeswitcher-host"],
                     resources: [.copy("Fixtures")]),
-        // The app's menus and window commands.
-        .testTarget(name: "VibeSwitcherTests", dependencies: ["VibeSwitcher", "VibeCore"]),
+        // The app's menus and window commands. The host too: a scratch one runs the sessions of a test of the app's client.
+        .testTarget(name: "VibeSwitcherTests", dependencies: ["VibeSwitcher", "VibeCore", "VibeHost", "vibeswitcher-host"]),
     ],
     swiftLanguageModes: [.v5]
 )
