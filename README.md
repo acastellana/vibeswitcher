@@ -214,6 +214,20 @@ as it was; if it starts but can't restore, it goes back to the old build's own c
 host from before handovers can't do this: it's still replaced only once its sessions are gone, or from the window's
 **Restart Session Host**, which ends them. Once a host that can hand over runs, that button reads "keeps sessions".
 
+Each running session's output is parsed in a small process of its own (`vibeswitcher-host --parse-session`, a child
+of the host): it holds that session's headless terminal (screen, 5,000 lines of scrollback, title, answers to the
+program's queries, its OSC 7501 status) and no PTY. The host keeps every PTY, what each session printed and the
+connections to views, and passes output to views without waiting on any parser, so a trap or a hang while parsing one
+session's output ends or holds up only that parser. A watchdog notices a parser that ended, or one with output or a
+request waiting and no progress for 10 s; it ends it and starts another, rebuilt from what the session printed minus
+the bytes the old one hadn't parsed (they may be what it can't parse; the program is nudged to repaint). Each time,
+`~/.vibeswitcher/debug/host.log` gets a line like `watchdog: session 1A2B3C4D's parser (pid 4242) stalled for 10.3 s
+with 324 bytes unparsed: started another (pid 4250) without those bytes` (or `ended (wait status 0x0005, signal 5
+(SIGTRAP), no core)`). A session whose parser fails more than 5 times in a minute runs on without one: its output still
+reaches views, but its screen, title and status stay as last shown (`…: no parser now, its screen stays the last one
+shown`). A parser ends with its host, and a handover ends them all before the exec; the new build starts its own.
+Each parser costs about 3–4 MB (macOS footprint) on top of its scrollback.
+
 **Today** (at the bottom of the list): how long agents were working today (in a turn; background jobs are
 listed per project, since a leftover dev server isn't work), and how long sessions were waiting on you:
 a question or permission prompt, or a finished turn you hadn't looked at (its first 30 minutes; after that
