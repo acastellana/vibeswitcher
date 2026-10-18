@@ -23,8 +23,12 @@ public final class HostedSession {
 
     private let masterFD: Int32
     private let queue: DispatchQueue
-    private var ring: OutputRing
-    private let terminal: Terminal
+    /// Both let go once the session ended (see `release`).
+    private var ring: OutputRing?
+    private var terminal: Terminal?
+    /// What an ended session keeps: its last screen, how it was drawn, and the last lines above it.
+    private var ended: (screen: String, runs: [ScreenRun], history: String)?
+    static let endedHistoryLines = 500
     private let headless = HeadlessDelegate()
     private var readSource: DispatchSourceRead?
     private var writeSource: DispatchSourceWrite?
@@ -33,6 +37,8 @@ public final class HostedSession {
     /// asynchronously, and a process that already exited can't be watched).
     private var exitPoll: DispatchSourceTimer?
     private var pendingInput = Data()
+    /// Input was refused for lack of room: more is refused until what waits went in, so none lands out of order.
+    private var refusingInput = false
     private var closed = false
     static let maxPendingInput = 1 << 20
 
@@ -120,15 +126,16 @@ public final class HostedSession {
         exitPoll = poll
     }
 
-    /// Reads what's available; never blocks (the PTY is nonblocking), so the program never waits on us.
-    private func drain() {
+    /// Reads what's available, up to `reads` × 64 KB; never blocks (the PTY is nonblocking), so the program never
+    /// waits on us.
+    private func drain(reads: Int = 16) {
         var buffer = [UInt8](repeating: 0, count: 65_536)
-        for _ in 0..<16 {
+        for _ in 0..<reads {
             let count = Darwin.read(masterFD, &buffer, buffer.count)
             if count > 0 {
                 let chunk = Data(buffer[0..<count])
-                ring.append(chunk)
-                terminal.feed(buffer: buffer[0..<count])
+                ring?.append(chunk)
+                terminal?.feed(buffer: buffer[0..<count])
                 onOutput?(chunk)
                 continue
             }
@@ -150,23 +157,84 @@ public final class HostedSession {
         exitPoll?.cancel()
         exitPoll = nil
         info.exit = .init(status: code, at: Date())
+        // What it printed last is still in the PTY.
+        if readSource != nil { drain(reads: 256) }
+        release()
         onChange?(info)
     }
 
-    /// Replays at most 1 MB: the program redraws its screen on attach anyway (see `OutputRing.replay`).
-    public func replay() -> Data { ring.replay(limit: 1 << 20) }
+    /// Lets go of what only a running session needs: the PTY (from the system's pool, shared with Terminal), the
+    /// replay buffer and the terminal with its 5,000 lines. Kept: the last screen and the lines just above it.
+    /// Whatever the program left running on the terminal loses it, as when a Terminal tab closes.
+    private func release() {
+        guard let terminal else { return }
+        let history = historyText(lines: Self.endedHistoryLines).history
+        let screen = Self.styledScreen(of: terminal)
+        ended = (screen.text, screen.runs, history)
+        self.terminal = nil
+        ring = nil
+        pendingInput = Data()
+        close()
+    }
 
-    /// Writes to the program's input; what doesn't fit right now waits (up to 1 MB) for room.
-    public func write(_ bytes: Data) {
-        guard !closed, !bytes.isEmpty else { return }
+    /// Whether it still holds a running session's PTY, replay buffer or terminal.
+    var holdsLiveResources: Bool { !closed || terminal != nil || ring != nil }
+
+    /// Replays at most 1 MB: the program redraws its screen on attach anyway (see `OutputRing.replay`). An ended
+    /// session's replay draws its last screen (see `drawing`).
+    public func replay() -> Data {
+        if let ring { return ring.replay(limit: 1 << 20) }
+        return ended.map { Self.drawing(history: $0.history, screen: $0.screen, runs: $0.runs) } ?? Data()
+    }
+
+    /// The lines above the screen, then the screen as it was drawn (`styledScreen`'s text and runs).
+    static func drawing(history: String, screen: String, runs: [ScreenRun]) -> Data {
+        var out = history.isEmpty ? "" : history.replacingOccurrences(of: "\n", with: "\r\n") + "\r\n"
+        let byRow = Dictionary(grouping: runs, by: \.row)
+        for (row, line) in screen.components(separatedBy: "\n").enumerated() {
+            if row > 0 { out += "\r\n" }
+            // A wide character's second cell is an empty character in the text; the wide one fills both cells.
+            let characters = Array(line)
+            var column = 0
+            for run in (byRow[row] ?? []).sorted(by: { $0.column < $1.column }) where run.column >= column {
+                let start = min(run.column, characters.count), end = min(run.column + run.length, characters.count)
+                out += String(characters[column..<start]) + sgr(run) + String(characters[start..<end]) + "\u{1b}[0m"
+                column = end
+            }
+            out += String(characters[min(column, characters.count)...])
+        }
+        return Data(out.replacingOccurrences(of: "\u{0}", with: "").utf8)
+    }
+
+    private static func sgr(_ run: ScreenRun) -> String {
+        var codes: [String] = []
+        if run.faint { codes.append("2") }
+        if run.inverse { codes.append("7") }
+        switch run.color {
+        case .palette(let code)?: codes.append("38;5;\(code)")
+        case .rgb(let red, let green, let blue)?: codes.append("38;2;\(red);\(green);\(blue)")
+        case nil: break
+        }
+        return "\u{1b}[\(codes.joined(separator: ";"))m"
+    }
+
+    /// Writes to the program's input; what doesn't fit right now waits (up to 1 MB) for room. False: none of it went
+    /// in (no room, the session ended or its terminal failed).
+    @discardableResult
+    public func write(_ bytes: Data) -> Bool {
+        guard !bytes.isEmpty else { return true }
+        guard !closed else { return false }
         if pendingInput.isEmpty {
             let written = bytes.withUnsafeBytes { Darwin.write(masterFD, $0.baseAddress, $0.count) }
-            if written == bytes.count { return }
+            if written == bytes.count { return true }
             let rest = written > 0 ? bytes.dropFirst(written) : bytes[...]
-            guard written >= 0 || errno == EAGAIN || errno == EINTR else { return }
+            guard written >= 0 || errno == EAGAIN || errno == EINTR else { return false }
             pendingInput = Data(rest)
         } else {
-            guard pendingInput.count + bytes.count <= Self.maxPendingInput else { return }
+            guard !refusingInput, pendingInput.count + bytes.count <= Self.maxPendingInput else {
+                refusingInput = true
+                return false
+            }
             pendingInput.append(bytes)
         }
         if writeSource == nil {
@@ -175,6 +243,7 @@ public final class HostedSession {
             source.resume()
             writeSource = source
         }
+        return true
     }
 
     private func flushInput() {
@@ -182,6 +251,7 @@ public final class HostedSession {
         if written > 0 { pendingInput = Data(pendingInput.dropFirst(written)) }
         if pendingInput.isEmpty || (written < 0 && errno != EAGAIN && errno != EINTR) {
             pendingInput = Data()
+            refusingInput = false
             writeSource?.cancel()
             writeSource = nil
         }
@@ -189,7 +259,7 @@ public final class HostedSession {
 
     public func resize(cols: Int, rows: Int) {
         let cols = max(2, min(cols, 1000)), rows = max(2, min(rows, 500))
-        guard cols != info.cols || rows != info.rows else { return }
+        guard let terminal, cols != info.cols || rows != info.rows else { return }
         setWindowSize(cols: cols, rows: rows)
         terminal.resize(cols: cols, rows: rows)
         info.cols = cols
@@ -209,17 +279,22 @@ public final class HostedSession {
     }
 
     private func setWindowSize(cols: Int, rows: Int) {
+        guard !closed else { return }
         var size = winsize(ws_row: UInt16(rows), ws_col: UInt16(cols), ws_xpixel: 0, ws_ypixel: 0)
         _ = PseudoTerminalHelpers.setWinSize(masterPtyDescriptor: masterFD, windowSize: &size)
     }
 
     public func screenText() -> String {
-        (0..<terminal.rows).compactMap { terminal.getLine(row: $0)?.translateToString(trimRight: true) }
+        guard let terminal else { return ended?.screen ?? "" }
+        return (0..<terminal.rows).compactMap { terminal.getLine(row: $0)?.translateToString(trimRight: true) }
             .joined(separator: "\n")
     }
 
     /// `screenText`, and how its characters are drawn (see `ScreenRun`).
-    public func styledScreen() -> (text: String, runs: [ScreenRun]) { Self.styledScreen(of: terminal) }
+    public func styledScreen() -> (text: String, runs: [ScreenRun]) {
+        guard let terminal else { return (ended?.screen ?? "", ended?.runs ?? []) }
+        return Self.styledScreen(of: terminal)
+    }
 
     /// The text matches `screenText`'s (one character per cell, trimmed on the right); runs cover what isn't plain.
     /// Read cell by cell: a wide character's second cell is an empty character of its own, and a cell that joins
@@ -259,8 +334,13 @@ public final class HostedSession {
         }
     }
 
-    /// The last `lines` lines above the screen (normal buffer), and the screen itself.
+    /// The last `lines` lines above the screen (normal buffer), and the screen itself. At most
+    /// `endedHistoryLines` once the session ended.
     public func historyText(lines: Int) -> (history: String, screen: String) {
+        guard let terminal else {
+            let history = ended?.history.split(separator: "\n", omittingEmptySubsequences: false).suffix(lines) ?? []
+            return (history.joined(separator: "\n"), screenText())
+        }
         let all = String(decoding: terminal.getBufferAsData(kind: .normal), as: UTF8.self)
             .components(separatedBy: "\n")
         let screenRows = terminal.rows

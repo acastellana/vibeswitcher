@@ -48,6 +48,13 @@ final class HostClient: ObservableObject {
     private var reconnectAttempt = 0
     /// The connection was lost before a welcome while sessions waited for the host: start it once more.
     private var restartedForWaiting = false
+    /// What the connected host can do beyond the protocol version (see `HostProtocol.Capability`).
+    private(set) var hostCapabilities: Set<String> = []
+    /// Typed input sent, by seq, that the host could still refuse (it answers only input it refuses, and handles
+    /// requests in order: a reply to a later request means these went in).
+    private var sentInput: [Int: (id: UUID, count: Int)] = [:]
+    /// Pieces of input the host refused, per session (the program wasn't reading and its buffer was full).
+    private var refusedInput: [UUID: Int] = [:]
 
     static var hostExecutable: URL {
         Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host")
@@ -146,6 +153,8 @@ final class HostClient: ObservableObject {
         let welcomed = state != .connecting
         Breadcrumbs.shared.note("host: connection lost (welcomed=\(welcomed), replacing=\(replacing), waiting=\(whenReady.count))")
         connection = nil
+        hostCapabilities = []
+        sentInput = [:]
         let pending = replies
         replies = [:]
         pending.values.forEach { $0(.error("The session host went away.")) }
@@ -195,9 +204,17 @@ final class HostClient: ObservableObject {
 
     private func handle(_ envelope: HostEventEnvelope) {
         if let seq = envelope.replyTo, let reply = replies.removeValue(forKey: seq) { reply(envelope.event) }
+        if let seq = envelope.replyTo, !sentInput.isEmpty {
+            if case .error(let message) = envelope.event, let input = sentInput[seq] {
+                Breadcrumbs.shared.note("host: \(input.count) bytes of input refused: \(message)")
+                refusedInput[input.id, default: 0] += 1
+            }
+            sentInput = sentInput.filter { $0.key > seq }
+        }
         switch envelope.event {
-        case .welcome(let version, let build, let list):
-            Breadcrumbs.shared.note("host: welcome v\(version) build \(build), \(list.count) sessions")
+        case .welcome(let version, let build, let list, let capabilities, let pid, _):
+            Breadcrumbs.shared.note("host: welcome v\(version) build \(build) pid \(pid.map(String.init) ?? "?"), \(list.count) sessions")
+            hostCapabilities = Set(capabilities ?? [])
             reconnectAttempt = 0
             restartedForWaiting = false
             sessions = list
@@ -289,6 +306,12 @@ final class HostClient: ObservableObject {
                 case .spawned(let session):
                     self.upsert(session)
                     completion(.success(session))
+                case .error(HostProtocol.shuttingDown) where self.replacing:
+                    // Asked while the host we're replacing quits: the new one takes it.
+                    self.whenReady.append { error in
+                        if let error { return completion(.failure(HostClientError(message: error))) }
+                        self.spawn(spawn, completion: completion)
+                    }
                 case .error(let message):
                     completion(.failure(HostClientError(message: message)))
                 default:
@@ -320,15 +343,19 @@ final class HostClient: ObservableObject {
         var start = bytes.startIndex
         repeat {
             let end = bytes.index(start, offsetBy: piece, limitedBy: bytes.endIndex) ?? bytes.endIndex
-            request(.input(id: id, bytes: bytes.subdata(in: start..<end), reply: reply))
+            if let seq = connection?.send(.input(id: id, bytes: bytes.subdata(in: start..<end), reply: reply)),
+               !reply, hostCapabilities.contains(HostProtocol.Capability.inputRefusals) {
+                sentInput[seq] = (id, end - start)
+            }
             start = end
         } while start < bytes.endIndex
     }
 
     /// Writes these into the session, each after its delay, then tells `confirmed` whether the host took them. The
-    /// host handles a connection's requests in order and doesn't answer input, so the answer to a screen read
-    /// sent after the last write is the receipt; no answer (not connected, gone, too slow) is false.
+    /// host handles a connection's requests in order and answers only input it refuses, so the answer to a screen
+    /// read sent after the last write is the receipt; no answer (not connected, gone, too slow) or a refusal is false.
     func send(_ id: UUID, writes: [HostInput.Write], confirmed: @escaping (Bool) -> Void) {
+        let refusedBefore = refusedInput[id, default: 0]
         var at: TimeInterval = 0
         for write in writes {
             at += write.delay
@@ -338,8 +365,9 @@ final class HostClient: ObservableObject {
         }
         DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
             guard let self else { return confirmed(false) }
-            self.request(.screen(id: id)) { event in
-                if case .screenText = event { confirmed(true) } else { confirmed(false) }
+            self.request(.screen(id: id)) { [weak self] event in
+                guard case .screenText = event else { return confirmed(false) }
+                confirmed(self?.refusedInput[id, default: 0] == refusedBefore)
             }
         }
     }

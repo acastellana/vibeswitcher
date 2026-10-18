@@ -51,6 +51,10 @@ public final class HostServer {
     private var housekeeping: DispatchSourceTimer?
     private var lastBusy = Date()
     private var stopped = false
+    /// A `shutdown` was accepted: the host stops in a moment and starts nothing more.
+    private var shuttingDown = false
+    private let startedAt = Date()
+    static let capabilities = [HostProtocol.Capability.styledScreen, HostProtocol.Capability.inputRefusals]
 
     public init(config: Config) {
         self.config = config
@@ -141,8 +145,11 @@ public final class HostServer {
         let missing = HostEvent.error("No such session.")
         switch envelope.request {
         case .hello:
-            reply(.welcome(protocolVersion: HostProtocol.version, hostBuild: config.hostBuild, sessions: allInfo))
+            reply(.welcome(protocolVersion: HostProtocol.version, hostBuild: config.hostBuild, sessions: allInfo,
+                           capabilities: Self.capabilities, pid: getpid(), startedAt: startedAt))
         case .spawn(let request):
+            // Started now, it would be torn down with the host a moment later.
+            guard !shuttingDown else { return reply(.error(HostProtocol.shuttingDown)) }
             do {
                 let session = try HostedSession.spawn(request, shell: config.shell, launcher: config.launcher, baseEnvironment: config.baseEnvironment,
                                                       ringCapacity: config.ringCapacity, queue: queue)
@@ -180,7 +187,8 @@ public final class HostServer {
                 // keys (the lead's tool server, one connection per call) doesn't take the session over.
                 primary[id] = key
             }
-            session.write(bytes)
+            guard !session.write(bytes), session.info.isLive else { return }
+            reply(.error("Input refused: the program isn't reading it and the host's buffer is full. None of these \(bytes.count) bytes went in."))
         case .resize(let id, let cols, let rows):
             guard let session = sessions[id], primary[id] == nil || primary[id] == key else { return }
             session.resize(cols: cols, rows: rows)
@@ -203,6 +211,7 @@ public final class HostServer {
             reply(.ok)
         case .shutdown:
             guard !sessions.values.contains(where: { $0.info.isLive }) else { return reply(.error("Sessions are running.")) }
+            shuttingDown = true
             reply(.ok)
             queue.asyncAfter(deadline: .now() + 0.1) { [weak self] in
                 self?.stop(terminateSessions: false)

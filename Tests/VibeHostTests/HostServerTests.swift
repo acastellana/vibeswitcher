@@ -8,6 +8,7 @@ final class TestHost {
     let socket = scratchSocketPath()
     let lock: String
     let server: HostServer
+    let startedAt = Date()
 
     init(build: Int = 42) throws {
         lock = socket + ".lock"
@@ -78,9 +79,15 @@ struct HostServerTests {
         let session = try client.spawn("sleep 5")
         let seq = client.send(.hello(protocolVersion: HostProtocol.version, app: "test"))
         #expect(eventually { client.reply(to: seq) != nil })
-        guard case .welcome(let version, let build, let sessions) = client.reply(to: seq) else { Issue.record("no welcome"); return }
+        guard case .welcome(let version, let build, let sessions, let capabilities, let pid, let startedAt) = client.reply(to: seq) else {
+            Issue.record("no welcome"); return
+        }
         #expect(version == HostProtocol.version && build == 42)
         #expect(sessions.map(\.id) == [session.id])
+        #expect(capabilities?.contains(HostProtocol.Capability.styledScreen) == true)
+        #expect(capabilities?.contains(HostProtocol.Capability.inputRefusals) == true)
+        #expect(pid == getpid())
+        #expect(startedAt.map { abs($0.timeIntervalSince(host.startedAt)) < 1 } == true)
     }
 
     @Test func inputAndOutputFlowThroughAnAttachedSession() throws {

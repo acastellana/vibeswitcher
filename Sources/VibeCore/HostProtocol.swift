@@ -4,6 +4,18 @@ import Foundation
 public enum HostProtocol {
     /// Bumped whenever a message changes shape; app and host talk only when theirs match.
     public static let version = 1
+
+    /// What a host can do beyond `version`, listed in its welcome (a host older than the list sends none).
+    public enum Capability {
+        /// Answers `styledScreen`.
+        public static let styledScreen = "styledScreen"
+        /// Answers input it can't take (the program isn't reading and its buffer is full) with an error, replying to
+        /// that input's `seq`; older hosts dropped it silently.
+        public static let inputRefusals = "inputRefusals"
+    }
+
+    /// The error a spawn gets once the host agreed to shut down.
+    public static let shuttingDown = "The session host is shutting down."
 }
 
 /// Framing on the socket: a 4-byte big-endian length (kind byte + payload), the kind byte, the payload.
@@ -195,7 +207,9 @@ public enum HostRequest: Codable, Equatable, Sendable {
 
 public enum HostEvent: Codable, Equatable, Sendable {
     /// `hostBuild`: identifies the host binary (see `HostBuild`), so the app can tell an outdated host.
-    case welcome(protocolVersion: Int, hostBuild: Int, sessions: [HostSession])
+    /// `capabilities` (see `HostProtocol.Capability`), `pid` and `startedAt` (the host's): nil from an older host.
+    case welcome(protocolVersion: Int, hostBuild: Int, sessions: [HostSession], capabilities: [String]? = nil,
+                 pid: Int32? = nil, startedAt: Date? = nil)
     case spawned(HostSession)
     /// Replay is over; live output follows.
     case attached(id: UUID)

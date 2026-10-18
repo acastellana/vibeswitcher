@@ -7,6 +7,7 @@ import VibeCore
 final class ClientConnection {
     /// More than a full replay (8 MB ring) plus room for live output.
     static let maxQueued = 16 << 20
+    static let tooLarge = HostEvent.error("The reply was too large to send.")
 
     let fd: Int32
     var attached: Set<UUID> = []
@@ -42,7 +43,14 @@ final class ClientConnection {
     }
 
     func send(_ envelope: HostEventEnvelope) {
-        guard let payload = try? HostCoding.encode(envelope), payload.count <= HostFrame.maxPayload else { return }
+        guard let payload = try? HostCoding.encode(envelope), payload.count <= HostFrame.maxPayload else {
+            // Too large for a frame (or not encodable): a reply says so instead, or its asker would wait for it.
+            // (A case with values reflects as one child named after the case; describing the event could be megabytes.)
+            let name = Mirror(reflecting: envelope.event).children.first?.label ?? "\(envelope.event)"
+            FileHandle.standardError.write(Data("vibeswitcher-host: \(name) too large to send\n".utf8))
+            guard let seq = envelope.replyTo, envelope.event != Self.tooLarge else { return }
+            return send(HostEventEnvelope(replyTo: seq, event: Self.tooLarge))
+        }
         // A client that stopped reading (a hung app) would collect status changes forever: let it go; it
         // reconnects and gets a fresh welcome.
         guard queuedBytes <= Self.maxQueued * 4 else { return close() }

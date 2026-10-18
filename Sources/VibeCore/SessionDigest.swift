@@ -97,7 +97,7 @@ public enum HostCall {
             done.signal()
         }
         connection.onEvent = { envelope in
-            if case .welcome(_, _, let list) = envelope.event, sessions == nil {
+            if case .welcome(_, _, let list, _, _, _) = envelope.event, sessions == nil {
                 sessions = list
                 if let request {
                     waitingFor = connection.send(request)
