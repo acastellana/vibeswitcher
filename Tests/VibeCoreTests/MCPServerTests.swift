@@ -18,6 +18,48 @@ struct MCPServerTests {
         return try JSONSerialization.jsonObject(with: reply) as? [String: Any]
     }
 
+    /// What claude 2.1.302 sent a scratch stdio server (recorded): by default `server/discover` in the 2026-07-28 envelope,
+    /// then, on "method not found", initialize with 2025-11-25; with `MCP_PROTOCOL_NEGOTIATION=legacy` initialize alone.
+    static let discover = #"{"jsonrpc":"2.0","id":"server-discover-probe-1","method":"server/discover","params":{"_meta":{"io.modelcontextprotocol/protocolVersion":"2026-07-28","io.modelcontextprotocol/clientInfo":{"name":"claude-code","title":"Claude Code","version":"2.1.302","description":"Anthropic's agentic coding tool","websiteUrl":"https://claude.com/claude-code"},"io.modelcontextprotocol/clientCapabilities":{"roots":{"listChanged":true},"elicitation":{"form":{},"url":{}}}}}}"#
+    static let initialize = #"{"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{"roots":{"listChanged":true},"elicitation":{"form":{},"url":{}}},"clientInfo":{"name":"claude-code","title":"Claude Code","version":"2.1.302","description":"Anthropic's agentic coding tool","websiteUrl":"https://claude.com/claude-code"}},"jsonrpc":"2.0","id":0}"#
+    static let call = #"{"method":"tools/call","params":{"name":"echo","arguments":{"text":"hi"},"_meta":{"claudecode/toolUseId":"toolu_013Ffh6GpR6G7hQBksHPoZ4q","progressToken":2}},"jsonrpc":"2.0","id":2}"#
+
+    func send(_ server: MCPServer, line: String) throws -> [String: Any]? {
+        guard let reply = server.handle(Data(line.utf8)) else { return nil }
+        return try JSONSerialization.jsonObject(with: reply) as? [String: Any]
+    }
+
+    @Test func aClientOfThe20260728RevisionFallsBackToInitialize() throws {
+        let server = MCPServer(name: "vibeswitcher", version: "1", toolset: Echo())
+        let discovered = try #require(try send(server, line: Self.discover))
+        #expect(discovered["id"] as? String == "server-discover-probe-1")
+        #expect((discovered["error"] as? [String: Any])?["code"] as? Int == -32601)
+        let initialized = try #require(try send(server, line: Self.initialize))
+        #expect((initialized["result"] as? [String: Any])?["protocolVersion"] as? String == "2025-11-25")
+        let called = try #require(try send(server, line: Self.call))
+        #expect(((called["result"] as? [String: Any])?["content"] as? [[String: Any]])?.first?["text"] as? String == "echo: hi")
+    }
+
+    @Test func aLegacyClientGetsTheVersionItAskedFor() throws {
+        let server = MCPServer(name: "vibeswitcher", version: "1", toolset: Echo())
+        let initialized = try #require(try send(server, line: Self.initialize))
+        #expect((initialized["result"] as? [String: Any])?["protocolVersion"] as? String == "2025-11-25")
+        for version in ["2025-06-18", "2024-11-05"] {
+            let reply = try #require(try send(server, ["jsonrpc": "2.0", "id": 1, "method": "initialize", "params": ["protocolVersion": version]]))
+            #expect((reply["result"] as? [String: Any])?["protocolVersion"] as? String == version)
+        }
+    }
+
+    /// Never echoed blindly: a version this server doesn't speak gets the newest one it does.
+    @Test func anUnknownVersionGetsTheNewestSupportedOne() throws {
+        let server = MCPServer(name: "vibeswitcher", version: "1", toolset: Echo())
+        for asked: Any in ["2026-07-28", "2025-03-26", "2099-01-01", "nonsense", NSNull()] {
+            let reply = try #require(try send(server, ["jsonrpc": "2.0", "id": 1, "method": "initialize", "params": ["protocolVersion": asked]]))
+            #expect((reply["result"] as? [String: Any])?["protocolVersion"] as? String == "2025-11-25")
+        }
+        #expect(MCPServer.negotiate(nil) == "2025-11-25")
+    }
+
     @Test func handshakeListAndCall() throws {
         let server = MCPServer(name: "vibeswitcher", version: "1", toolset: Echo())
         let initialized = try #require(try send(server, ["jsonrpc": "2.0", "id": 1, "method": "initialize",

@@ -116,6 +116,18 @@ public final class MCPServer: @unchecked Sendable {
     private let lock = NSLock()
     private var running: [String: ShellCancel] = [:]
 
+    /// The MCP revisions this server speaks, newest first: tools only, text results, no JSON-RPC batches (2025-03-26
+    /// has them), which reads the same in each. Not 2026-07-28, which has no initialize (a `server/discover`, a `_meta`
+    /// envelope on every request, `resultType`, `ttlMs` and `cacheScope` on results). Claude Code 2.1.302 asks
+    /// `server/discover` first, gets "method not found" and falls back to initialize with 2025-11-25.
+    public static let protocolVersions = ["2025-11-25", "2025-06-18", "2024-11-05"]
+
+    /// The version a client asked for when this server speaks it, else the newest it does (the client then decides
+    /// whether to go on): never one it doesn't, as an echo would.
+    public static func negotiate(_ requested: String?) -> String {
+        requested.flatMap { protocolVersions.contains($0) ? $0 : nil } ?? protocolVersions[0]
+    }
+
     public init(name: String, version: String, toolset: MCPToolset, watch: BinaryWatch? = nil) {
         self.name = name
         self.version = version
@@ -176,9 +188,8 @@ public final class MCPServer: @unchecked Sendable {
         let params = message["params"] as? [String: Any] ?? [:]
         switch method {
         case "initialize":
-            let requested = params["protocolVersion"] as? String ?? "2025-06-18"
-            return reply(id, ["protocolVersion": requested, "capabilities": ["tools": [String: Any]()],
-                              "serverInfo": ["name": name, "version": version]])
+            return reply(id, ["protocolVersion": Self.negotiate(params["protocolVersion"] as? String),
+                              "capabilities": ["tools": [String: Any]()], "serverInfo": ["name": name, "version": version]])
         case "ping":
             return reply(id, [String: Any]())
         case "tools/list":
