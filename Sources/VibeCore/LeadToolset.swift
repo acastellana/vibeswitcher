@@ -250,7 +250,7 @@ public final class LeadToolset: MCPToolset {
                             required: ["task"]),
                 MCPToolInfo(name: "audit", description: "Start the read-only verifier on a task's branch. Its report, not the worker's, decides.",
                             properties: ["task": task], required: ["task"]),
-                MCPToolInfo(name: "merge", description: "Merge a task whose audit passed: rebase onto the lead's branch, run the test command, fast-forward that branch.",
+                MCPToolInfo(name: "merge", description: "Merge a task whose audit passed: rebase onto the lead's branch (squashed when the worker merged it in), run the test command, fast-forward that branch.",
                             properties: ["task": task], required: ["task"]),
                 MCPToolInfo(name: "cleanup", description: "End a task's sessions and remove its worktree and branch (after merging, or force to abandon it).",
                             properties: ["task": task, "force": P(type: "boolean", description: "Also discard unmerged work")], required: ["task"]),
@@ -581,7 +581,7 @@ public final class LeadToolset: MCPToolset {
         case .passed(let commit): tested = commit
         case .conflict:
             try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Conflicts with \(base): the branch needs bringing up to date."))
-            throw Problem(text: "\(slug) conflicts with \(base). Message its worker to rebase its branch onto \(base) (`git rebase \(base)` in its worktree), resolve the conflicts, run the tests and report again (start_worker again if it has stopped), then audit again.")
+            throw Problem(text: "\(slug) conflicts with \(base). Message its worker to bring its branch up to date by merging, in its worktree: `git merge \(base)`, resolve the conflicts, `git add` the files, then `git commit`, each command on its own (no pipes, && or 2>&1); then run the tests and report again (start_worker again if it has stopped). Then audit again; merge puts the work on top of \(base) itself.")
         case .failed(let output):
             // The setback names the failing tests; the output's last line only when none is named.
             let tests = TestFailures(output: output).tests.joined(separator: ", ")

@@ -296,13 +296,13 @@ public enum LeadPrompts {
         passing, what's next), call progress with one line: the lead and the user see it on your task's lane. \
         Keep your temporary folder small: build or download into the worktree, not your scratchpad, and delete big \
         scratch files once you're done with them (a full disk stops every session).
-        Out of date: when the lead says your branch conflicts with \(workflow.base), bring it up to date here: run \
-        `git rebase \(workflow.base)`, resolve each conflict, `git add` the files and `git rebase --continue` (`git rebase \
-        --abort` starts over; `git merge \(workflow.base)` then `git commit` works too). Then run the checks again, \
-        commit and report. Run git in this worktree as it is, without `git -C`, and type these commands exactly as \
-        written, with nothing in front: git opens no editor here (--continue and a merge's commit keep their \
-        message), and a variable or option put before git is refused. git log, diff, status and show are always \
-        open to you.
+        Out of date: when the lead says your branch conflicts with \(workflow.base), bring it up to date here by \
+        merging: run `git merge \(workflow.base)`, resolve each conflict, `git add` the files, then `git commit` \
+        (`git merge --abort` starts over). Then run the checks again, commit and report. The lead's merge puts your \
+        work on top of \(workflow.base) itself; don't rebase or amend. Run git in this worktree as it is, without \
+        `git -C`, and type each of these commands exactly as written, on its own: nothing in front, no pipes, no && \
+        or ; after it, no 2>&1. git opens no editor here (the merge's commit keeps its message), and anything else \
+        around a git command is refused. git log, diff, status and show are always open to you.
         Done: every acceptance check passes\(workflow.testCommand.map { " and `\($0)` passes" } ?? ""), everything is \
         committed. Then reply with a short report: what changed, how you checked it, anything left or doubtful. A \
         verifier will check your branch independently.

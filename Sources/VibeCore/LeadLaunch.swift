@@ -43,8 +43,8 @@ public enum LeadLaunch {
         case .lead, .verifier:
             return readOnly + gitWrites + gitAround + fileWrites + privateFiles
         case .worker:
-            // Edits and commits on its own branch, and brings it up to date with the lead's (`git rebase <base>`,
-            // `git merge <base>`); nothing that moves the lead's branch or another one. Rebase and merge only move
+            // Edits and commits on its own branch, and brings it up to date with the lead's (`git merge <base>`, what
+            // the brief gives, or `git rebase <base>`); nothing that moves the lead's branch or another one. Rebase and merge only move
             // the branch checked out here, which can't be another: a second branch named after `git rebase` would
             // be checked out and rebased.
             let protected: [String] = Array(Set(["main", "master"] + (base.map { [$0] } ?? []))).sorted()

@@ -369,28 +369,28 @@ struct LeadGuardRailsTests: LeadTeamFixture {
             }
         }
 
-        // And the allowed forms do what they say: the base moves on with a conflicting change, the worker rebases onto
-        // it, resolves and continues; its branch is on top of the base, which (like main) didn't move.
+        // And the commands the brief gives do what they say: the base moves on with a conflicting change, the worker
+        // merges it in, resolves and commits; its branch has the base in it, which (like main) didn't move.
         Git.run(["checkout", "-q", base], in: root)
         try commit("b.txt", "lead\n", in: root)
         Git.run(["checkout", "-q", "main"], in: root)
         let baseHead = head(base, root), mainHead = head("main", root)
-        let rebase = Git.run(["rebase", base], in: worktree)
-        #expect(!rebase.ok)
+        let merge = Git.run(["merge", base], in: worktree)
+        #expect(!merge.ok)
         try "bee and lead\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
         Git.run(["add", "b.txt"], in: worktree)
-        // --continue asks the editor for the message (one that fails stops it); the worker's session has one that
-        // keeps it, so the bare command goes on.
-        #expect(!Shell.run(executable: "/usr/bin/git", args: ["rebase", "--continue"], in: worktree, env: ["GIT_EDITOR": "false"]).ok)
+        // The commit that ends a merge asks the editor for the message (one that fails stops it); the worker's
+        // session has one that keeps it, so the bare command goes on.
+        #expect(!Shell.run(executable: "/usr/bin/git", args: ["commit"], in: worktree, env: ["GIT_EDITOR": "false"]).ok)
         let env = try environment("worker-add-b", runtime)
         #expect(env["GIT_EDITOR"] == "true")
-        #expect(Shell.run(executable: "/usr/bin/git", args: ["rebase", "--continue"], in: worktree, env: env).ok)
+        #expect(Shell.run(executable: "/usr/bin/git", args: ["commit"], in: worktree, env: env).ok)
         #expect(head(base, root) == baseHead && head("main", root) == mainHead)
         #expect(Git.run(["merge-base", "--is-ancestor", base, "agent/add-b"], in: root).ok)
         #expect(try String(contentsOfFile: worktree + "/b.txt", encoding: .utf8) == "bee and lead\n")
     }
 
-    @Test func theCommandsTheBriefGivesForARebaseAreTheOnesTheRulesAllow() throws {
+    @Test func theCommandsTheBriefGivesToCatchUpAreTheOnesTheRulesAllow() throws {
         let root = try repo()
         Git.run(["branch", "project-lead"], in: root)
         try BoardStore(root: root).prepare()
@@ -406,34 +406,56 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         let part = String(brief[start.lowerBound..<end.lowerBound])
         let commands = part.matches(of: #/`([^`]+)`/#).map { String($0.1) }
         let told = commands.filter { !part.contains("without `\($0)`") }
-        #expect(told.contains("git rebase project-lead") && told.contains("git rebase --continue") && told.contains("git merge project-lead"))
+        #expect(["git merge project-lead", "git add", "git commit", "git merge --abort"].allSatisfy(told.contains), "\(told)")
+        // Merging is the one way: auto mode refuses a rebase (and an amend) as destructive.
+        #expect(!part.contains("git rebase") && !part.contains("--continue") && !part.contains("--amend"))
         for command in told {
             #expect(command.hasPrefix("git "), "said with something in front: \(command)")
+            for joint in ["|", "&&", ";", "2>&1", ">"] { #expect(!command.contains(joint), "said with \(joint): \(command)") }
             #expect(Self.allowed(command, by: rules), "the brief says it, the rules refuse it: \(command)")
         }
         for command in commands where !told.contains(command) { #expect(Self.denied(command, by: rules.deny), "\(command)") }
         // A worker that types env in front of one (to keep git's editor away) is refused: the session has no need.
-        #expect(!Self.allowed("GIT_EDITOR=true git rebase --continue", by: rules))
+        #expect(!Self.allowed("GIT_EDITOR=true git commit", by: rules))
         #expect(try environment("worker-add-b", runtime) == LeadLaunch.environment(.worker))
     }
 
-    @Test func aConflictAtMergeAsksForARebaseAndTheBriefSaysHow() throws {
+    @Test func aConflictAtMergeAsksForAMergeAndTheBriefSaysHow() throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
-        _ = try reported(lead, runtime, root: root)
+        let worktree = try reported(lead, runtime, root: root)
         try passingAudit(lead, runtime)
         // main gets its own b.txt (as through another task's merge).
         try commit("b.txt", "main's own\n", in: root)
-        try vault.setHead(head("main", root), root: root, branch: "main")
+        let mainBefore = head("main", root)
+        try vault.setHead(mainBefore, root: root, branch: "main")
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(merged.isError)
-        #expect(merged.text.contains("conflicts with main") && merged.text.contains("`git rebase main`"))
+        #expect(merged.text.contains("conflicts with main"))
+        for step in ["`git merge main`", "`git add`", "`git commit`"] { #expect(merged.text.contains(step), "\(step)") }
+        #expect(!merged.text.contains("rebase"))
         let brief = LeadPrompts.worker(task: try #require(BoardStore(root: root).load().task("add-b")), root: root,
                                        workflow: LeadWorkflow.parse("---\nbase_branch: main\n---"))
-        for step in ["`git rebase main`", "`git rebase --continue`", "`git merge main`", "without `git -C`"] {
+        for step in ["`git merge main`", "`git add`", "`git commit`", "`git merge --abort`", "without `git -C`"] {
             #expect(brief.contains(step), "\(step)")
         }
+        #expect(!brief.contains("`git rebase"))
+
+        // The worker does just that, reports, passes its audit again, and merge lands it: main stays a line, the work
+        // one commit on top of what main was, holding the worker's resolution.
+        #expect(!Git.run(["merge", "main"], in: worktree).ok)
+        try "bee and main's own\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "b.txt"], in: worktree)
+        #expect(Shell.run(executable: "/usr/bin/git", args: ["commit"], in: worktree, env: try environment("worker-add-b", runtime)).ok)
+        _ = try seat("worker-add-b", runtime).call("report", ["status": "done", "summary": "merged main in"])
+        try passingAudit(lead, runtime)
+        let landed = lead.call("merge", ["task": "add-b"])
+        #expect(!landed.isError, "\(landed.text)")
+        #expect(Git.run(["rev-list", "--merges", "main"], in: root).output.isEmpty)
+        #expect(head("main~1", root) == mainBefore)
+        #expect(Git.run(["show", "main:b.txt"], in: root).output == "bee and main's own")
+        #expect(Git.run(["log", "-1", "--format=%s", "main"], in: root).output == "change b.txt")
     }
 }
 

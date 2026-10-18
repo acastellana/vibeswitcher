@@ -114,7 +114,8 @@ to you, outside the repository), and its tools come from that, so a worker can't
 verifier or the lead. Only the verifier the lead last started on a task gives its verdict, about the commit it was
 started on. `merge` reads that verdict from there, not from `board.json`; it refuses when the lead's branch was
 moved by anything but its own merges since the lead last left it (starting the lead again takes the branch as it
-is), rebases exactly the audited commit in a worktree no agent works in, runs the test command there and
+is), rebases exactly the audited commit in a worktree no agent works in (squashing it into one commit when the
+worker merged the base in, so the lead's history stays a line), runs the test command there and
 fast-forwards to exactly what was tested. Verifiers start without the branch's project settings, hooks and MCP servers, and
 VibeSwitcher doesn't answer Claude's trust question for a branch that changes them. Messages reach the lead quoted
 under a line naming their sender, so a worker's report can't pass for the user's words, and only the app sends as
@@ -122,10 +123,11 @@ the user. They reach the lead's own conversation, never a subagent it started (a
 hooks; the message waits for the lead's next step), and count as delivered only once they're in it; `status` also
 lists every report that came in since the lead last asked. Claude Code permission rules add a second layer: the lead and verifiers are denied file edits, shell
 file writes and git writes; workers are denied pushing, moving refs, checking out, switching to or resetting hard onto
-the lead's branch or another `agent/` branch, and rebasing any branch but their own. A worker can bring its own branch
-up to date: `git rebase <base>` or `git merge <base>`, resolving and going on with `--continue` (or `--abort`); its
-session runs with `GIT_EDITOR=true`, so those bare commands never wait on an editor and need nothing in front. When
-`merge` finds a branch conflicting it asks the lead to have that worker rebase. Every session reads git (log, diff,
+the lead's branch or another `agent/` branch, and rebasing any branch but their own. A worker brings its own branch
+up to date by merging: `git merge <base>`, resolve, `git add`, then `git commit` (`git merge --abort` starts over), each
+typed on its own with no pipes or `&&`, the one form Claude Code's auto mode doesn't refuse as destructive (it refuses
+a rebase and an amend). Its session runs with `GIT_EDITOR=true`, so those bare commands never wait on an editor and
+need nothing in front. When `merge` finds a branch conflicting it asks the lead to have that worker merge the base in. Every session reads git (log, diff,
 status, show) without asking, after a denied command too.
 Their tools come from `vibeswitcher-mcp`, a tool server bundled with the app.
 
