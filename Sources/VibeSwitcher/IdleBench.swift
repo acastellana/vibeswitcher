@@ -264,7 +264,8 @@ enum IdleBench {
         }
     }
 
-    private struct Usage {
+    /// The process's CPU time, wakeups and memory now (also for `--ui-bench`).
+    struct Usage {
         let wall: TimeInterval
         let cpu: TimeInterval
         let wakeups: UInt64

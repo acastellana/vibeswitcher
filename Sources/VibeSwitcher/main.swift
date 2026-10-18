@@ -12,6 +12,11 @@ if let index = arguments.firstIndex(of: "--idle-bench") {
     // while nothing changes (see `IdleBench`). Needs CFFIXED_USER_HOME set to a scratch folder.
     IdleBench.run(arguments: Array(arguments[(index + 1)...]))
 }
+if let index = arguments.firstIndex(of: "--ui-bench") {
+    // Debug aid: the window as you use it on two made-up leads in this process: clicks, a host restart, busy leads and
+    // idle, checking SwiftUI's faults, main-thread stalls, CPU and memory (see `UIBench`). Needs CFFIXED_USER_HOME.
+    UIBench.run(arguments: Array(arguments[(index + 1)...]))
+}
 if arguments.contains("--install-hooks") {
     let problems = HookSetup.installAll()
     problems.forEach { print("problem: \($0)") }

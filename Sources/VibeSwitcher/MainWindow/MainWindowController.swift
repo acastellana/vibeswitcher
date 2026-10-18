@@ -252,6 +252,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         showSelection()
     }
 
+    /// `--ui-bench --onscreen`: the window on screen, drawn, without a Dock icon or taking the keyboard.
+    func presentWithoutFocus() {
+        mountViews()
+        window?.orderFrontRegardless()
+        shownID = nil
+        showSelection()
+    }
+
     private func showSelection() {
         guard window?.isVisible == true else { return }
         defer {
