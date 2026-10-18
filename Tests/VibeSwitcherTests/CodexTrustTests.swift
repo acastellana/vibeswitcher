@@ -19,10 +19,17 @@ struct CodexTrustTests {
         #expect(error?.localizedDescription == "codex app-server quit before it was done")
     }
 
+    /// One that takes the call and quits without answering it quit; it didn't fail to answer in time (it's gone long
+    /// before the time is up). Each write reaches it: it reads every line it's sent.
+    @Test func anAppServerThatQuitsWithoutAnsweringQuit() {
+        let error = failure(#"read -r; print -r -- '{"jsonrpc":"2.0","id":1,"result":{}}'; read -r; read -r; exit 0"#)
+        #expect(error as? CodexTrust.Failure == .quit, "\(String(describing: error))")
+    }
+
     @Test func anAppServerThatExitsAtOnceIsAnErrorNotACrash() {
         for _ in 0..<5 {
             let error = failure("exit 0")
-            #expect(error as? CodexTrust.Failure == .quit || error as? CodexTrust.Failure == .timeout, "\(String(describing: error))")
+            #expect(error as? CodexTrust.Failure == .quit, "\(String(describing: error))")
         }
     }
 }
