@@ -57,6 +57,50 @@ struct WorktreesTests {
         #expect(try String(contentsOfFile: worktree + "/a.txt", encoding: .utf8) == "worker\n")
     }
 
+    func scratch() -> URL { FileManager.default.temporaryDirectory.appendingPathComponent("wt-scratch-\(UUID().uuidString)/merge") }
+
+    @Test func anAuditedCommitWithoutMergesIsRebasedCommitByCommit() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "l")
+        try commit("l.txt", "l\n", in: worktree)
+        try commit("m.txt", "m\n", in: worktree)
+        try commit("c.txt", "c\n", in: root)
+        let main = Git.run(["rev-parse", "main"], in: root).output
+        let tip = Git.run(["rev-parse", "HEAD"], in: worktree).output
+        guard case .passed(let tested) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test -f l.txt", scratch: scratch())
+        else { Issue.record("not passed"); return }
+        #expect(Git.run(["log", "--format=%s", "\(main)..\(tested)"], in: root).output == "change m.txt\nchange l.txt")
+        #expect(Git.run(["rev-parse", "\(tested)~2"], in: root).output == main)
+    }
+
+    @Test func anAuditedCommitThatMergedTheBaseInLandsAsOneCommitOnTopOfIt() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "s")
+        try commit("a.txt", "worker\n", in: worktree)
+        try commit("s.txt", "s\n", in: worktree)
+        try commit("a.txt", "main\n", in: root)
+        // The worker merges main in and resolves; main moves on again meanwhile, without conflict.
+        #expect(!Git.run(["merge", "main"], in: worktree).ok)
+        try "worker and main\n".write(toFile: worktree + "/a.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "a.txt"], in: worktree)
+        #expect(Git.run(["commit", "-q", "--no-edit"], in: worktree).ok)
+        try commit("c.txt", "c\n", in: root)
+        let main = Git.run(["rev-parse", "main"], in: root).output
+        let tip = Git.run(["rev-parse", "HEAD"], in: worktree).output
+        // A rebase would replay the first commit onto main and conflict again; the branch is squashed instead.
+        guard case .passed(let tested) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test -f c.txt && test -f s.txt",
+                                                                 scratch: scratch())
+        else { Issue.record("not passed"); return }
+        #expect(Git.run(["rev-parse", "\(tested)~1"], in: root).output == main)
+        #expect(Git.run(["rev-list", "--merges", tested], in: root).output.isEmpty)
+        #expect(Git.run(["show", "\(tested):a.txt"], in: root).output == "worker and main")
+        #expect(Git.run(["log", "-1", "--format=%B", tested], in: root).output == "change a.txt\n\n- change s.txt")
+        // A merge whose changes conflict with the base is still a conflict.
+        try commit("s.txt", "main's s\n", in: root)
+        let moved = Git.run(["rev-parse", "main"], in: root).output
+        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: moved, test: "true", scratch: scratch()) == .conflict)
+    }
+
     @Test func mergingRefusesADirtyMainCheckout() throws {
         let root = try repo()
         let worktree = try Worktrees.create(root: root, slug: "y")

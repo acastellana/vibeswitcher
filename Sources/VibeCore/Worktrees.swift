@@ -283,8 +283,15 @@ public enum Worktrees {
             try? FileManager.default.removeItem(atPath: path)
             Git.run(["worktree", "prune"], in: root)
         }
-        guard Git.run(["rebase", "-q", base], in: path).ok else {
-            Git.run(["rebase", "--abort"], in: path)
+        // A worker brings its branch up to date by merging the base in. Rebasing would drop that merge and replay
+        // the commits before it, conflicts and all, so such a branch lands as one commit on top of the base; either
+        // way the base's history stays a line.
+        if Git.run(["rev-list", "--merges", "--max-count=1", "\(base)..HEAD"], in: path).output.isEmpty {
+            guard Git.run(["rebase", "-q", base], in: path).ok else {
+                Git.run(["rebase", "--abort"], in: path)
+                return .conflict
+            }
+        } else if !squash(onto: base, in: path) {
             return .conflict
         }
         let tested = Git.run(["rev-parse", "HEAD"], in: path).output
@@ -297,6 +304,25 @@ public enum Worktrees {
             }
         }
         return .passed(tested)
+    }
+
+    /// Replaces the detached HEAD at `path` with one commit on `base` holding the branch's changes, titled after the
+    /// branch's own commits (merges left out) and authored by the last of them. False when they conflict with `base`.
+    static func squash(onto base: String, in path: String) -> Bool {
+        let tip = Git.run(["rev-parse", "HEAD"], in: path).output
+        let subjects = Git.run(["log", "--reverse", "--no-merges", "--format=%s", "\(base)..\(tip)"], in: path).output
+            .split(whereSeparator: \.isNewline).map(String.init)
+        let author = Git.run(["log", "-1", "--no-merges", "--format=%an <%ae>", "\(base)..\(tip)"], in: path).output
+        guard Git.run(["checkout", "-q", "--detach", base], in: path).ok else { return false }
+        guard Git.run(["merge", "--squash", "-q", tip], in: path).ok else {
+            Git.run(["reset", "-q", "--hard"], in: path)
+            return false
+        }
+        // Nothing of its own beyond what it merged: the base is the result, as a rebase would leave it.
+        if Git.run(["diff", "--cached", "--quiet"], in: path).ok { return true }
+        let message = (subjects.first.map { [$0] } ?? ["Changes from \(tip.prefix(8))"])
+            + (subjects.count > 1 ? [""] + subjects.dropFirst().map { "- \($0)" } : [])
+        return Git.run(["commit", "-q", "-m", message.joined(separator: "\n")] + (author.isEmpty ? [] : ["--author", author]), in: path).ok
     }
 
     /// Files Claude Code reads as settings or instructions (project settings and hooks under `.claude/`, `.mcp.json`,
