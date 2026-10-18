@@ -409,7 +409,8 @@ public final class HostServer {
     }
 
     /// Who the process `token` names is: a process in one of the live sessions (its program or anything under it,
-    /// by parent processes, or with the session's terminal), else the app (its code, outside every session), else
+    /// by parent processes, or with the session's terminal), else the app's code, outside every session (the app once
+    /// it answers its connection's challenge, see `prove`), else
     /// unknown. Told once, when the connection is accepted: a process can leave its session's tree, never join
     /// another's.
     func identify(_ token: audit_token_t?) -> LeadVault.Caller {

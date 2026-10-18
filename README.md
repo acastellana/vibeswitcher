@@ -116,30 +116,49 @@ and notes; when there's no test command, `status` says so and suggests one from 
 (the whole team runs as you, so a file one of them can read, all of them can): the team's records (who holds which
 role, verdicts, where the lead left its branch) and the key that seals your messages are held by the session host
 (`vibeswitcher-host`) in its memory, and kept on disk only sealed with a key in your login Keychain that the host
-reads without asking you (other programs make macOS ask). The host tells who asks by the process on the other end
+reads without asking you (other programs make macOS ask). A host update (a handover) carries the vault to the new
+build in memory, through an inherited socket, never through a file; a host that's replaced instead reads it back
+from that sealed file. The host tells who asks by the process on the other end
 of its socket, never by what it says: by its audit token as the host accepted the connection, then the session whose
-process tree it's in, or for the app, the code it runs (its cdhash, the one of the app beside the host, not its
-path); a connection that anything else then sends on (a child it forked, or the same pid after an exec) counts as
-no one. So a worker's Bash,
+process tree it's in; a connection that anything else then sends on (a child it forked, or the same pid after an
+exec) counts as no one. The app is the app only once it proves it on that connection: the host greets each
+connection with a fresh challenge, and only the app's code (its cdhash, the one of the app beside the host, not its
+path), outside every session, answering with an HMAC under the app's key, counts as the app. That key sits in your
+login Keychain in an item only the app's code reads without asking (`security find-generic-password -w` in a
+worker's shell makes macOS ask you), and in the host's vault; the app hands it to a host it starts on the host's
+stdin, and neither ever logs it or an answer. So whatever the kernel names as the connection's process when the host
+reads it, a connection the app didn't make isn't the app's. So a worker's Bash,
 whether it runs the tool server as the verifier or the lead or writes to the socket itself, is the worker (or,
-once it leaves its session's process tree, no one, even when it execs the app's binary after the host accepted
-it), and it
-can't give a verdict, take the lead's tools, record the lead's branch, seal a message as yours or type into the
-lead's terminal (a session in a team takes keys only from the app, itself or its lead). Only the verifier the
+once it leaves its session's process tree, no one, even when it execs the app's binary), and it
+can't give a verdict, take the lead's tools, record the lead's branch, seal a message as yours, type into the
+lead's terminal (a session in a team takes keys only from the app, itself or its lead), hand the host over to a
+program of its choosing (only the app may ask for a handover; anyone else's is refused before the host runs
+anything), or end another session through the host (only the app, the session itself or one started from it, and
+its team's lead may). Only the verifier the
 lead last started on a task gives its verdict, from its own session, about the commit it was started on. Not
 protected: anything that runs code as the app or the host (a debugger, a library injected into the app's binary,
 which isn't built with the hardened runtime, or the app's files rewritten: they're yours to write), or
 that changes what the sessions run (the hook binary in `~/.vibeswitcher/bin`, Claude settings, `CLAUDE.md`);
-the app's window itself when a worker drives it through Accessibility; ordinary (non-team) sessions, which still
-take keys from anyone running as you; messages labelled as the lead's or VibeSwitcher's, which aren't sealed; and
-two known gaps, both closed once the app answers a challenge on each connection (planned): a process that writes
-its requests, then execs the app's binary before the host accepts its connection, can pass as the app (by then the
-kernel names the connection's process by the app's code), and any connection can ask the host for a handover.
+another program you run yourself with your full rights; you approving a Keychain prompt for anything but
+VibeSwitcher; the app's window itself when a worker drives it through Accessibility; signals (any process running
+as you can end any other, a session's program or the host itself, without asking the host); ordinary (non-team)
+sessions, which still take keys from anyone running as you; messages labelled as the lead's or VibeSwitcher's,
+which aren't sealed; and three narrow windows where the host learns the app's key without a proof. A host that holds
+no key yet (the first one after an update from a host before keys, or a host whose vault couldn't be read and that
+VibeSwitcher didn't start) takes the first key given on a connection by the app's code, logged in
+`~/.vibeswitcher/debug/host.log`: the app sends it as it reconnects right after the update, and a process that
+leaves its session and execs the app's binary could race it then. If the app's Keychain item is gone (deleted, or
+you refused the new build), the app offers to teach the host a new key: the host takes it only from the app's code
+and only while no session runs, logged; a process that escaped an ended session could race that too. And a process
+that ends the host (taking every session with it) and starts one itself, when that host can't read its Keychain key,
+chooses the key of the host it started; VibeSwitcher then isn't recognised there and says so.
 A goal sent with `vibeswitcher --lead` (any process can send one) reaches the lead as not vouched for. With an
 ad-hoc signed build (no `scripts/setup-signing.sh`) the rebuilt host can't read its Keychain key, so the vault
-starts empty after a host restart. `merge` reads that verdict from there, not from `board.json`; it refuses when the lead's branch was
-moved by anything but its own merges since the lead last left it (starting the lead again takes the branch as it
-is), rebases exactly the audited commit in a worktree no agent works in (squashing it into one commit when the
+starts empty after a host replacement (a handover keeps it), and `merge` then says an audit was recorded by an
+earlier session host and needs running again. `merge` reads that verdict from there, not from `board.json`; it refuses when the lead's branch was
+moved by anything but its own merges since the lead last left it. Starting the lead again doesn't take the branch
+as it is (anything can ask for that, `vibeswitcher --lead` included); starting it from the app does, once it has
+shown you the move and you said you made it. `merge` rebases exactly the audited commit in a worktree no agent works in (squashing it into one commit when the
 worker merged the base in, so the lead's history stays a line), runs the test command there and
 fast-forwards to exactly what was tested. Verifiers start without the branch's project settings, hooks and MCP servers, and
 VibeSwitcher doesn't answer Claude's trust question for a branch that changes them (a git-ignored file counts only
@@ -182,7 +201,8 @@ in place as the new build. It's the same process, so every session's program sta
 reported with their real status), and the PTYs, the lock and the socket stay open across the exec. Each session's
 details, what it printed and any input not yet written go in a state file only you can read (beside the host's lock),
 which the new build reads and deletes; it rebuilds each screen from what the session printed and nudges full-screen
-programs to repaint. Secrets the host keeps in memory go through an inherited socket, never into that file. The app
+programs to repaint. Secrets the host keeps in memory (the lead's vault: its teams, verdicts and the key that seals your
+messages) go through an inherited socket, never into that file. Only the app may ask for a handover. The app
 loses its connection for a moment and reattaches every view. If the new build can't start, the old host carries on
 as it was; if it starts but can't restore, it goes back to the old build's own copy, which restores the sessions. A
 host from before handovers can't do this: it's still replaced only once its sessions are gone, or from the window's
