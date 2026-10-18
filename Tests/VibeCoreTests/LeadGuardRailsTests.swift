@@ -329,24 +329,31 @@ struct LeadGuardRailsTests: LeadTeamFixture {
 
     /// A genswap worker's `pkill -f "cat" -n` SIGTERMed 3 workers, 2 verifiers, every tool server and the app: BSD
     /// pkill takes the `-n` after a pattern as a second pattern, which every role's `--name` matches (and "cat" is in
-    /// /Applications). Shown on a scratch process shaped like a role's session, with pgrep (which only lists).
+    /// /Applications). Shown on a scratch process shaped like a role's session, with pgrep (which only lists), among
+    /// this test process's children only: the machine's other processes are no business of this test.
     @Test func aStrayPkillIsRefusedToEveryRole() throws {
         let token = "vsguard-\(UUID().uuidString.prefix(8))"
         let scratch = Process()
         scratch.executableURL = URL(fileURLWithPath: "/bin/sh")
-        // `; :` keeps sh from exec'ing sleep, so its arguments stay as they are.
-        scratch.arguments = ["-c", "sleep 30; :", token, "--name", "worker-\(token)"]
+        // `; :` keeps sh from exec'ing sleep, so its arguments stay as they are. It runs until it's stopped below (the
+        // sleep is a hang guard): pgrep reads the whole process table, which takes long on a loaded Mac.
+        scratch.arguments = ["-c", "sleep \(Int(hangGuard)); :", token, "--name", "worker-\(token)"]
         try scratch.run()
-        defer { scratch.terminate() }
+        // Its group: the sleep too.
+        defer {
+            kill(-scratch.processIdentifier, SIGTERM)
+            scratch.waitUntilExit()
+        }
         let pgrep = Process()
         pgrep.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
         // A pattern that matches nothing, then "-n": what that worker typed.
-        pgrep.arguments = ["-f", "zz-\(UUID().uuidString)", "-n"]
+        pgrep.arguments = ["-P", "\(getpid())", "-f", "zz-\(UUID().uuidString)", "-n"]
         let out = Pipe()
         pgrep.standardOutput = out
         try pgrep.run()
+        let listed = out.fileHandleForReading.readDataToEndOfFile()
         pgrep.waitUntilExit()
-        let matched = String(decoding: out.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self).split(separator: "\n")
+        let matched = String(decoding: listed, as: UTF8.self).split(separator: "\n")
         #expect(matched.contains("\(scratch.processIdentifier)"), "-n read as a pattern matches a role's --name")
 
         for role in [LeadLaunch.Role.lead, .worker, .verifier] {
