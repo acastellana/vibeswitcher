@@ -28,22 +28,36 @@ public enum AppProof {
     /// The app's key from the login Keychain, made the first time. The app may ask you (it has a window to ask from):
     /// a rebuild without the stable signing identity (scripts/setup-signing.sh) is another program to the Keychain.
     /// Nil when there's none to be had (you said no): the app then isn't the app to the host.
-    public static func keychainKey(service: String = keychainService, account: String = "app") -> SymmetricKey? {
+    /// `keychain`: another keychain than the login one (tests).
+    public static func keychainKey(service: String = keychainService, account: String = "app", keychain: SecKeychain? = nil) -> SymmetricKey? {
         let item: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
                                    kSecAttrAccount as String: account]
         var found: CFTypeRef?
         var query = item
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
+        if let keychain { query[kSecMatchSearchList as String] = [keychain] }
         let status = SecItemCopyMatching(query as CFDictionary, &found)
         if status == errSecSuccess, let data = found as? Data, data.count == keySize { return SymmetricKey(data: data) }
         // Only when there's none: one you refused stays yours (a new key would never match the host's).
-        guard status == errSecItemNotFound else { return nil }
+        guard status == errSecItemNotFound, let access = appOnlyAccess() else { return nil }
         let data = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
         var add = item
         add[kSecValueData as String] = data
         add[kSecAttrLabel as String] = "VibeSwitcher app key"
+        add[kSecAttrAccess as String] = access
+        if let keychain { add[kSecUseKeychain as String] = keychain }
         return SecItemAdd(add as CFDictionary, nil) == errSecSuccess ? SymmetricKey(data: data) : nil
+    }
+
+    /// Who reads the item without macOS asking you: this program's code only (never "any application"); anything
+    /// else that asks (`security find-generic-password -w` in a worker's shell) gets a prompt naming it.
+    static func appOnlyAccess() -> SecAccess? {
+        var me: SecTrustedApplication?
+        var access: SecAccess?
+        guard SecTrustedApplicationCreateFromPath(nil, &me) == errSecSuccess, let me,
+              SecAccessCreate("VibeSwitcher app key" as CFString, [me] as CFArray, &access) == errSecSuccess else { return nil }
+        return access
     }
 }
 

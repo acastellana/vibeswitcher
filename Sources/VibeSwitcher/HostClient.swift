@@ -130,8 +130,36 @@ final class HostClient: ObservableObject {
         connection.onEvent = { [weak self] in self?.handle($0) }
         connection.onOutput = { [weak self] id, bytes in self?.sinks[id]?.sink.output(bytes) }
         connection.onClose = { [weak self] in self?.connectionLost() }
+        connection.onProofRefused = { [weak self] reason in self?.proofRefused(reason) }
         connection.send(.hello(protocolVersion: HostProtocol.version, app: "VibeSwitcher"))
         return true
+    }
+
+    /// The host didn't take this app as VibeSwitcher (see `AppProof`): the lead's tools, a handover and ending
+    /// sessions are off until it does. Asked once per launch.
+    private var offeredKeyReset = false
+
+    private func proofRefused(_ reason: String) {
+        Breadcrumbs.shared.note("host: proof refused: \(reason)")
+        guard !offeredKeyReset, let key = Self.appKey else { return }
+        offeredKeyReset = true
+        let live = sessions.filter(\.isLive).count
+        let alert = NSAlert()
+        alert.messageText = "The session host doesn't recognise this VibeSwitcher."
+        alert.informativeText = reason + " The project lead's tools, updating the host in place and ending sessions from the app are off until it does. "
+            + (live > 0 ? "If VibeSwitcher's Keychain item was deleted, end every session (\(live) running) and reopen VibeSwitcher to teach the host this app's new key."
+                : "If VibeSwitcher's Keychain item was deleted, teach the host this app's new key (it's logged in ~/.vibeswitcher/debug/host.log).")
+        if live == 0 { alert.addButton(withTitle: "Teach It This App's Key") }
+        alert.addButton(withTitle: live == 0 ? "Not Now" : "OK")
+        NSApp.activate()
+        guard alert.runModal() == .alertFirstButtonReturn, live == 0 else { return }
+        request(.replaceAppKey(key: key.data)) { [weak self] event in
+            guard let self else { return }
+            guard case .ok = event else { return Breadcrumbs.shared.note("host: key not replaced: \(event)") }
+            // A new connection, with a new challenge, answered with the key the host now holds.
+            self.connection?.close()
+            self.connectionLost()
+        }
     }
 
     /// Detached (own session, not our child for signals), stdout/stderr appended to host.log.

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Testing
 @testable import VibeCore
@@ -11,13 +12,23 @@ final class TestHost {
     /// Just before and just after the server was made and started.
     let startedAt = Date()
     private(set) var readyAt = Date.distantFuture
+    /// The app's key (see `AppProof`): a `TestClient` of this host answers its challenge with it, as the app does.
+    let appKey = SymmetricKey(size: .bits256)
 
-    init(build: Int = 42, vault: LeadVault.Book? = nil, appExecutable: String? = nil, log: String? = nil) throws {
+    /// `appExecutable`: by default this test process's own binary, so its clients are the app (they answer the
+    /// challenge too).
+    /// `holdsKey: false`: a host that holds no app key yet (one handed over from a build before keys).
+    init(build: Int = 42, vault: LeadVault.Book? = nil, appExecutable: String? = HostServer.executable(of: getpid()), log: String? = nil,
+         holdsKey: Bool = true) throws {
         lock = socket + ".lock"
         var config = HostServer.Config(socketPath: socket, lockPath: lock, shell: "/bin/sh",
                                        launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: build)
         config.idleExit = nil
         config.vault = vault
+        if holdsKey {
+            vault?.adoptAppKey(appKey.data)
+            config.appKey = appKey
+        }
         config.appExecutable = appExecutable
         config.ringCapacity = 1 << 20
         config.logPath = log
@@ -41,11 +52,12 @@ final class TestClient {
     private(set) var closed = false
     var connection: HostConnection!
 
-    convenience init(_ host: TestHost) throws { try self.init(socket: host.socket) }
+    /// Answers the host's challenge with its app key (the app's client); `asApp: false`, it doesn't (another process).
+    convenience init(_ host: TestHost, asApp: Bool = true) throws { try self.init(socket: host.socket, appKey: asApp ? host.appKey : nil) }
 
-    init(socket: String) throws {
+    init(socket: String, appKey: SymmetricKey? = nil) throws {
         try queue.sync {
-            connection = try HostConnection(path: socket, queue: queue)
+            connection = try HostConnection(path: socket, queue: queue, appKey: appKey)
             connection.onEvent = { [weak self] e in self?.with { $0.events.append(e) } }
             connection.onOutput = { [weak self] id, data in self?.with { $0.output[id, default: Data()].append(data) } }
             connection.onClose = { [weak self] in self?.with { $0.closed = true } }

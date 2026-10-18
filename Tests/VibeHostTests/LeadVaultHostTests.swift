@@ -40,6 +40,45 @@ struct LeadVaultHostTests {
         return ""
     }
 
+    /// `nc -U` on the host's socket, sending `requests` (numbered from 2, as `frames`) and returning the replies. With
+    /// `proof`, the challenge the host sent first is answered with that key before them, as the app's connection does.
+    func viaNC(_ socket: String, proof key: SymmetricKey?, _ requests: [HostRequest]) throws -> [Int: HostEvent] {
+        let nc = Process()
+        nc.executableURL = URL(fileURLWithPath: "/usr/bin/nc")
+        nc.arguments = ["-U", socket]
+        let input = Pipe(), output = Pipe()
+        nc.standardInput = input
+        nc.standardOutput = output
+        try nc.run()
+        defer { nc.waitUntilExit() }
+        var received = Data()
+        var challenge: Data?
+        while challenge == nil {
+            let chunk = output.fileHandleForReading.availableData
+            guard !chunk.isEmpty else { break }
+            received.append(chunk)
+            var decoder = HostFrameDecoder()
+            decoder.append(received)
+            while let frame = try decoder.next() {
+                guard frame.kind == .control, case .challenge(let sent, _)? = try? HostCoding.decode(HostEventEnvelope.self, from: frame.payload).event
+                else { continue }
+                challenge = sent
+            }
+        }
+        var data = Data()
+        if let key {
+            let answer = AppProof.answer(try #require(challenge), key: key)
+            data.append(HostFrame.encode(.control, try HostCoding.encode(HostRequestEnvelope(seq: 0, request: .proveApp(answer: answer)))))
+        }
+        data.append(try frames(requests))
+        input.fileHandleForWriting.write(data)
+        // The replies come in a moment; then nc's stdin ends and so does it.
+        Thread.sleep(forTimeInterval: 1.5)
+        try input.fileHandleForWriting.close()
+        received.append(output.fileHandleForReading.readDataToEndOfFile())
+        return try replies(received)
+    }
+
     func refused(_ event: HostEvent?) -> Bool {
         if case .vault(.refused)? = event { return true }
         return false
@@ -202,17 +241,9 @@ struct LeadVaultHostTests {
                     .vault(.issue(role: .lead, root: root, task: nil, auditing: nil)),
                     .vault(.setHead(root: root, branch: "main", commit: "0123abcd")),
                     .input(id: lead.id, bytes: Data("PWNED\r".utf8), reply: false)]).write(to: requests)
-        // The control: nc itself, outside every session, is the app (so a refusal below isn't nc going unrecognised).
-        let control = folder.appendingPathComponent("control.bin")
-        try frames([.vault(.seal(forged)), .input(id: lead.id, bytes: Data("CONTROL\r".utf8), reply: false)]).write(to: control)
-        let nc = Process()
-        nc.executableURL = URL(fileURLWithPath: "/bin/sh")
-        nc.arguments = ["-c", "(cat '\(control.path)'; sleep 1.5) | /usr/bin/nc -U '\(host.socket)'"]
-        let out = Pipe()
-        nc.standardOutput = out
-        try nc.run()
-        let controlled = try replies(out.fileHandleForReading.readDataToEndOfFile())
-        nc.waitUntilExit()
+        // The control: nc itself, outside every session, answering the challenge with the app's key, is the app (so a
+        // refusal below isn't nc going unrecognised).
+        let controlled = try viaNC(host.socket, proof: host.appKey, [.vault(.seal(forged)), .input(id: lead.id, bytes: Data("CONTROL\r".utf8), reply: false)])
         guard case .vault(.seal)? = controlled[2] else { Issue.record("nc isn't the app: \(String(describing: controlled[2]))"); return }
         #expect(eventually { screen(app, lead.id).contains("lead-got:CONTROL") })
 
@@ -232,6 +263,105 @@ struct LeadVaultHostTests {
         #expect(current.id == leadGrant)
         Thread.sleep(forTimeInterval: 0.5)
         #expect(!screen(app, lead.id).contains("PWNED"))
+    }
+
+    /// The LOCAL_PEERTOKEN race, from the host's side: whatever sent the bytes, the kernel names the process accepted,
+    /// running the app's code, at every read (here it is nc, the app, that writes them all). That no longer makes it
+    /// the app: only an answer to its connection's challenge under the app's key does.
+    @Test func theAppsCodeIsntTheAppUntilItAnswersTheChallenge() throws {
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let book = LeadVault.Book()
+        let host = try TestHost(vault: book, appExecutable: "/usr/bin/nc")
+        let app = try TestClient(host, asApp: false)
+        let lead = try app.spawn("read x; echo lead-got:$x; sleep 30")
+        guard case .grant(let grant) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else { return }
+        _ = book.answer(.bind(grant: grant, root: root, session: lead.id.uuidString), from: .app)
+        let ran = folder.appendingPathComponent("would-be-build-ran").path
+        let wouldBe = folder.appendingPathComponent("would-be-build").path
+        FileManager.default.createFile(atPath: wouldBe, contents: Data("#!/bin/sh\ntouch '\(ran)'\n".utf8), attributes: [.posixPermissions: 0o755])
+        let message = SteerMessage(text: "x", from: .user, agentPid: 1)
+        let asked: [HostRequest] = [.vault(.seal(message)), .vault(.setHead(root: root, branch: "main", commit: "0123abcd")),
+                                    .kill(id: lead.id), .handover(executable: wouldBe)]
+
+        // No answer, and an answer under another key: refused everything the app alone may do.
+        for proof in [nil, SymmetricKey(size: .bits256)] {
+            let got = try viaNC(host.socket, proof: proof, asked)
+            #expect(refused(got[2]) && refused(got[3]), "\(String(describing: got[2])), \(String(describing: got[3]))")
+            for seq in 4...5 {
+                guard case .error? = got[seq] else { Issue.record("request \(seq): \(String(describing: got[seq]))"); continue }
+            }
+        }
+        #expect(book.answer(.head(root: root, branch: "main"), from: .app) == .head(nil))
+        #expect(app.latest(lead.id)?.isLive != false && kill(lead.childPID, 0) == 0)
+        #expect(!FileManager.default.fileExists(atPath: ran))
+
+        // The app's key: it's the app (the seal, the head), as the app's own connections are.
+        let got = try viaNC(host.socket, proof: host.appKey, Array(asked.prefix(2)))
+        guard case .vault(.seal)? = got[2] else { Issue.record("the key didn't make nc the app: \(String(describing: got[2]))"); return }
+        #expect(got[3] == .vault(.ok))
+    }
+
+    @Test func aProcessOutsideEverySessionCantKillOrHandOver() throws {
+        let host = try TestHost()
+        let app = try TestClient(host)
+        let other = try TestClient(host, asApp: false)
+        let session = try app.spawn("sleep 30")
+        let kill = other.send(.kill(id: session.id))
+        let handover = other.send(.handover(executable: "/usr/bin/true"))
+        #expect(eventually { other.reply(to: kill) != nil && other.reply(to: handover) != nil })
+        guard case .error? = other.reply(to: kill), case .error? = other.reply(to: handover) else {
+            Issue.record("\(String(describing: other.reply(to: kill))), \(String(describing: other.reply(to: handover)))"); return
+        }
+        Thread.sleep(forTimeInterval: 0.3)
+        #expect(app.latest(session.id)?.isLive != false)
+        // The app may.
+        let killed = app.send(.kill(id: session.id))
+        #expect(eventually { app.reply(to: killed) == .ok })
+        #expect(eventually { app.latest(session.id)?.isLive == false })
+    }
+
+    /// A host replaced (not handed over): the next one reads the vault back from disk, verdicts too. One that can't
+    /// read it (an ad-hoc rebuild, another Keychain key) says the audit was an earlier host's, not that there was none.
+    @Test func aVerdictSurvivesAHostReplacementOrIsSaidToBeLost() throws {
+        let file = folder.appendingPathComponent("lead/vault.sealed")
+        let key = SymmetricKey(size: .bits256)
+        let book = VaultStorage(file: file, key: key).book()
+        guard case .grant(let lead) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else { return }
+        _ = book.answer(.bind(grant: lead, root: root, session: "lead-session"), from: .app)
+        guard case .grant(let verifier) = book.answer(.issue(role: .verifier, root: root, task: "t", auditing: "c0ffee"), from: .session("lead-session")) else { return }
+        _ = book.answer(.bind(grant: verifier, root: root, session: "verifier-session"), from: .session("lead-session"))
+        guard case .verdict(let verdict?) = book.answer(.submitVerdict(root: root, completion: .complete, integrity: .clean, summary: "ok"),
+                                                        from: .session("verifier-session")) else { Issue.record("no verdict"); return }
+        book.adoptAppKey(Data(repeating: 9, count: 32))
+
+        let replaced = VaultStorage(file: file, key: key).book().vault(folder: folder) { .app }
+        #expect(replaced.verdict(root: root, task: "t") == verdict)
+        #expect(replaced.missingVerdictReason(root: root, task: "t") == nil)
+        #expect(VaultStorage(file: file, key: key).book().appKey?.data == Data(repeating: 9, count: 32))
+
+        for unreadable in [VaultStorage(file: file, key: SymmetricKey(size: .bits256)), VaultStorage(file: file, key: nil)] {
+            let lost = unreadable.book().vault(folder: folder) { .app }
+            #expect(lost.verdict(root: root, task: "t") == nil)
+            let reason = try #require(lost.missingVerdictReason(root: root, task: "t"))
+            #expect(reason.contains("the audit was recorded by an earlier session host; re-run audit"), "\(reason)")
+        }
+        // A vault that never held one says nothing of the kind: the task just has no audit.
+        let fresh = VaultStorage(file: folder.appendingPathComponent("other/vault.sealed"), key: key).book().vault(folder: folder) { .app }
+        #expect(fresh.missingVerdictReason(root: root, task: "t") == nil)
+    }
+
+    /// What a handover carries is the vault itself; the build after reads it as the one before held it.
+    @Test func theVaultIsWhatAHandoverCarries() throws {
+        let book = LeadVault.Book()
+        guard case .grant(let lead) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else { return }
+        book.adoptAppKey(Data(repeating: 4, count: 32))
+        let next = LeadVault.Book(restoring: book.serialized)
+        guard case .member(let member?) = next.answer(.current(role: .lead, root: root, task: nil), from: .app) else { Issue.record("no lead"); return }
+        #expect(member.id == lead)
+        #expect(next.appKey?.data == Data(repeating: 4, count: 32))
+        // Once it holds a key, another isn't taken.
+        #expect(!next.adoptAppKey(Data(repeating: 5, count: 32)))
+        #expect(next.appKey?.data == Data(repeating: 4, count: 32))
     }
 
     @Test func theVaultOnDiskIsSealedAndAForgedOneIsntTaken() throws {

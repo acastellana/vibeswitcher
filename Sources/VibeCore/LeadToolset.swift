@@ -630,7 +630,8 @@ public final class LeadToolset: MCPToolset {
         // The verdict as the verifier's own tool server recorded it in the vault (the board's copy is for showing):
         // from the verifier VibeSwitcher started last for this task, on the commit it was started on.
         guard let verdict = vault.verdict(root: root, task: slug), verdict.passes else {
-            throw Problem(text: "\(slug) has no passing audit. Run audit and wait for a complete, clean verdict.")
+            throw Problem(text: vault.missingVerdictReason(root: root, task: slug)
+                ?? "\(slug) has no passing audit. Run audit and wait for a complete, clean verdict.")
         }
         guard let verifier = vault.current(.verifier, root: root, task: slug), verifier.id == verdict.verifier,
               verifier.session == verdict.session, verifier.auditing == verdict.commit else {

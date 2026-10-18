@@ -182,6 +182,36 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         #expect(head("main", root) == unaudited)
     }
 
+    /// The worker moves main, then gets the lead started again (any process can post `vibeswitcher --lead`, and the
+    /// lead's process can be ended): the restart doesn't take main as it is, so the move is still caught. Only you,
+    /// shown the move in the app, take it.
+    @Test func aBaseMoveIsStillCaughtAfterTheLeadStartsAgain() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let worktree = try reported(lead, runtime, root: root)
+        try passingAudit(lead, runtime)
+        let known = try #require(vault.head(root: root, branch: "main"))
+        let unaudited = Git.run(["commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "unaudited"], in: worktree).output
+        #expect(Git.run(["update-ref", "refs/heads/main", unaudited], in: worktree).ok)
+
+        let restarted = try self.lead(root, runtime)
+        #expect(vault.head(root: root, branch: "main") == known)
+        #expect(vault.headMoved(root: root, branch: "main")?.now == unaudited)
+        let merged = restarted.call("merge", ["task": "add-b"])
+        #expect(merged.isError)
+        #expect(merged.text.contains("moved since the lead last left it"), "\(merged.text)")
+        #expect(head("main", root) == unaudited)
+
+        // You moved it (you say so in the app): from now on merges start from there.
+        let grant = try vault.startLead(root: root, branch: "main", takeHead: true)
+        try vault.bind(grant, root: root, session: try #require(runtime.me.session))
+        #expect(vault.head(root: root, branch: "main") == unaudited)
+        #expect(vault.headMoved(root: root, branch: "main") == nil)
+        let taken = LeadToolset(root: root, runtime: runtime, vault: vault(for: runtime)).call("merge", ["task": "add-b"])
+        #expect(!taken.text.contains("moved since the lead last left it"), "\(taken.text)")
+    }
+
     @Test func theLeadsOwnMergesKeepTheBaseKnown() throws {
         let root = try repo()
         let runtime = FakeRuntime()

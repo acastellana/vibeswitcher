@@ -249,11 +249,15 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// with `ok` just before, then the connection closes; connect again for the new build's welcome. An error: the
     /// running host carries on as it was.
     case handover(executable: String)
-    /// The answer to this connection's `HostEvent.challenge` (see `AppProof`). Not answered; a wrong one is ignored.
+    /// The answer to this connection's `HostEvent.challenge` (see `AppProof`). Answered `ok`, or an error saying why
+    /// the connection isn't the app's (it then isn't).
     case proveApp(answer: Data)
     /// The app's key, for a host that holds none (its challenge says so). Taken only from a connection the host tells
     /// is the app's code, and only while it holds none. Not answered.
     case enrollApp(key: Data)
+    /// The app lost its key (its Keychain item is gone): the host takes this one in place of the one it holds, only
+    /// from the app's code and only while no session runs, and logs it. Answered `ok` or with an error.
+    case replaceAppKey(key: Data)
 }
 
 public enum HostEvent: Codable, Equatable, Sendable {

@@ -8,6 +8,9 @@ public final class HostConnection {
     public var onOutput: ((UUID, Data) -> Void)?
     /// The connection ended (the host quit or crashed, or sent something unreadable). Called once.
     public var onClose: (() -> Void)?
+    /// The host didn't take this connection as the app's (see `AppProof`): its reason.
+    public var onProofRefused: ((String) -> Void)?
+    private var proofSeq: Int?
 
     private let fd: Int32
     private let queue: DispatchQueue
@@ -68,6 +71,7 @@ public final class HostConnection {
         for request in proof {
             let seq = nextSeq
             nextSeq += 1
+            if case .proveApp = request { proofSeq = seq }
             if let payload = try? HostCoding.encode(HostRequestEnvelope(seq: seq, request: request)) { outgoing.append(HostFrame.encode(.control, payload)) }
         }
         release()
@@ -133,6 +137,9 @@ public final class HostConnection {
                 case .control:
                     // An event this app doesn't know (a newer host) is skipped, not fatal.
                     guard let envelope = try? HostCoding.decode(HostEventEnvelope.self, from: frame.payload) else { break }
+                    if let proofSeq, envelope.replyTo == proofSeq, case .error(let reason) = envelope.event {
+                        onProofRefused?(reason)
+                    }
                     if case .challenge(let challenge, let keyless) = envelope.event {
                         answer(challenge, keyless: keyless)
                     } else if case .welcome = envelope.event {

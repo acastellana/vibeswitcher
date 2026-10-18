@@ -208,18 +208,42 @@ public final class HostServer {
 
     /// The app's answer to its connection's challenge: from then on the connection is the app's, while nothing
     /// else sends on it.
-    private func prove(_ answer: Data, from client: ClientConnection) {
-        guard client.runsAppCode, let key = appKey, AppProof.isValid(answer, to: client.challenge, key: key) else {
-            return log("pid \(client.peer?.pid ?? 0) didn't prove it's the app")
+    private func prove(_ answer: Data, from client: ClientConnection) -> HostEvent {
+        let refusal: String
+        if !client.runsAppCode {
+            refusal = "This connection isn't VibeSwitcher's: its process doesn't run the app's code outside every session, or something else sent on it."
+        } else if let key = appKey {
+            if AppProof.isValid(answer, to: client.challenge, key: key) {
+                client.caller = .app
+                return .ok
+            }
+            refusal = "That isn't the key this session host knows for VibeSwitcher."
+        } else {
+            refusal = "This session host holds no key for VibeSwitcher yet."
         }
-        client.caller = .app
+        log("pid \(client.peer?.pid ?? 0) didn't prove it's the app")
+        return .error(refusal)
     }
 
     /// A host with no app key takes the first one the app's code gives it (a build before challenges handed over).
     private func enroll(_ key: Data, from client: ClientConnection) {
         guard client.runsAppCode, appKey == nil, key.count == AppProof.keySize else { return }
         if let vault = config.vault { vault.adoptAppKey(key) } else { looseAppKey = SymmetricKey(data: key) }
-        log.note("host: took the app's key from pid \(client.peer?.pid ?? 0)")
+        log.note("host: took the app's first key (it held none), \(HostLog.peer(client.peerPID))")
+    }
+
+    /// The app lost its key: a new one replaces the one held, from the app's code, while no session runs (no worker or
+    /// verifier is there to race it).
+    private func replaceAppKey(_ key: Data, from client: ClientConnection) -> HostEvent {
+        let live = sessions.values.filter { $0.info.isLive }.count
+        guard client.runsAppCode, live == 0, key.count == AppProof.keySize else {
+            log.note("host: refused to replace the app's key (\(client.runsAppCode ? "\(live) sessions live" : "not the app's code")), \(HostLog.peer(client.peerPID))")
+            return .error(client.runsAppCode ? "End every session first: the session host replaces VibeSwitcher's key only while none runs."
+                : "Only VibeSwitcher replaces its key.")
+        }
+        if let vault = config.vault { vault.adoptAppKey(key, replacing: true) } else { looseAppKey = SymmetricKey(data: key) }
+        log.note("host: replaced the app's key at the app's request, no session running, \(HostLog.peer(client.peerPID))")
+        return .ok
     }
 
     /// Whether `caller` may end `id`: the app; a session itself or one started from it, all the way down; a team's
@@ -349,9 +373,11 @@ public final class HostServer {
             }
             handOver(to: executable, reply: reply)
         case .proveApp(let answer):
-            prove(answer, from: client)
+            reply(prove(answer, from: client))
         case .enrollApp(let key):
             enroll(key, from: client)
+        case .replaceAppKey(let key):
+            reply(replaceAppKey(key, from: client))
         case .shutdown:
             let live = sessions.values.filter { $0.info.isLive }.count
             guard live == 0 else {

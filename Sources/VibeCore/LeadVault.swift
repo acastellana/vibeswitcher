@@ -344,13 +344,13 @@ extension LeadVault {
             return state.appKey.map { SymmetricKey(data: $0) }
         }
 
-        /// Takes `key` as the app's, only while the vault holds none: once it has one, only that one proves the app.
-        /// True when `key` is the app's key now.
+        /// Takes `key` as the app's, only while the vault holds none (or `replacing` the one it holds: the host decides
+        /// when): once it has one, only that one proves the app. True when `key` is the app's key now.
         @discardableResult
-        public func adoptAppKey(_ key: Data) -> Bool {
+        public func adoptAppKey(_ key: Data, replacing: Bool = false) -> Bool {
             lock.lock()
             var changed = false
-            if state.appKey == nil, key.count == AppProof.keySize {
+            if state.appKey == nil || replacing, state.appKey != key, key.count == AppProof.keySize {
                 state.appKey = key
                 changed = true
             }

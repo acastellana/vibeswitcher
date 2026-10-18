@@ -75,6 +75,7 @@ struct HostMessageTests {
             .input(id: id, bytes: Data([0x1b, 0x5b, 0x41]), reply: false), .resize(id: id, cols: 100, rows: 30),
             .screen(id: id), .styledScreen(id: id), .history(id: id, lines: 500), .kill(id: id), .remove(id: id), .shutdown,
             .handover(executable: "/Applications/VibeSwitcher.app/Contents/MacOS/vibeswitcher-host"),
+            .proveApp(answer: Data(repeating: 1, count: 32)), .enrollApp(key: Data(repeating: 2, count: 32)), .replaceAppKey(key: Data(repeating: 6, count: 32)),
         ]
         for request in requests {
             let data = try HostCoding.encode(HostRequestEnvelope(seq: 7, request: request))
@@ -91,6 +92,7 @@ struct HostMessageTests {
                                                          ScreenRun(row: 1, column: 0, length: 3, color: .palette(244))]),
             .historyText(id: id, history: "a\nb", screen: "c"),
             .sessionChanged(session), .sessionRemoved(id: id), .resync(id: id), .bell(id: id), .error("nope"), .ok,
+            .challenge(Data(repeating: 3, count: 32), keyless: true), .vault(.startedOver(1_234)),
         ]
         for event in events {
             let data = try HostCoding.encode(HostEventEnvelope(replyTo: 3, event: event))

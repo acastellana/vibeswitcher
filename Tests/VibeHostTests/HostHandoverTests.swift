@@ -1,3 +1,4 @@
+import CryptoKit
 import Darwin
 import Foundation
 import SwiftTerm
@@ -20,6 +21,8 @@ final class ScratchHostProcess {
     /// The session log (see `HostLog`), the same file through every build.
     let sessionLog: String
     let process = Process()
+    /// The app's key, as the app hands it to the host it starts.
+    let appKey = SymmetricKey(size: .bits256)
 
     init(arguments extra: [String] = []) throws {
         // Short: a socket's path has a 104-byte limit.
@@ -35,6 +38,10 @@ final class ScratchHostProcess {
         // APFS clones: no extra disk for the copies.
         try files.copyItem(atPath: hostLauncher, toPath: oldBinary)
         try files.copyItem(atPath: hostLauncher, toPath: newBinary)
+        // The app beside each build is this test process's own binary (the same code, so the same cdhash): its
+        // clients are the app once they answer the challenge with `appKey`, given to the host on stdin as the app does.
+        let runner = try #require(HostServer.executable(of: getpid()))
+        for folder in ["old", "new"] { try files.copyItem(atPath: runner, toPath: dir + "/\(folder)/VibeSwitcher") }
         let now = Date().timeIntervalSince1970.rounded(.down)
         try files.setAttributes([.modificationDate: Date(timeIntervalSince1970: now - 2_000)], ofItemAtPath: oldBinary)
         try files.setAttributes([.modificationDate: Date(timeIntervalSince1970: now - 1_000)], ofItemAtPath: newBinary)
@@ -49,7 +56,10 @@ final class ScratchHostProcess {
         let log = try FileHandle(forWritingTo: URL(fileURLWithPath: dir + "/host.log"))
         process.standardOutput = log
         process.standardError = log
-        process.standardInput = FileHandle.nullDevice
+        let stdin = Pipe()
+        stdin.fileHandleForWriting.write(appKey.data)
+        try stdin.fileHandleForWriting.close()
+        process.standardInput = stdin
         try process.run()
         #expect(eventually { (try? UnixSocket.connect(path: socket)).map { Darwin.close($0); return true } ?? false })
     }
@@ -82,10 +92,10 @@ final class ScratchHostProcess {
 
 extension TestClient {
     /// Connects and waits for the welcome.
-    static func welcomed(_ socket: String) throws -> (TestClient, protocolVersion: Int, build: Int, sessions: [HostSession], capabilities: [String]?,
+    static func welcomed(_ socket: String, appKey: SymmetricKey? = nil) throws -> (TestClient, protocolVersion: Int, build: Int, sessions: [HostSession], capabilities: [String]?,
                                                      pid: Int32?, startedAt: Date?) {
         var connected: TestClient?
-        #expect(eventually { connected = try? TestClient(socket: socket); return connected != nil })
+        #expect(eventually { connected = try? TestClient(socket: socket, appKey: appKey); return connected != nil })
         guard let client = connected else { throw CancellationError() }
         let seq = client.send(.hello(protocolVersion: HostProtocol.version, app: "test"))
         #expect(eventually { client.reply(to: seq) != nil })
@@ -144,7 +154,7 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
 
     func scene(arguments: [String] = []) throws -> Scene {
         let host = try ScratchHostProcess(arguments: arguments)
-        let (client, _, build, _, capabilities, pid, startedAt) = try TestClient.welcomed(host.socket)
+        let (client, _, build, _, capabilities, pid, startedAt) = try TestClient.welcomed(host.socket, appKey: host.appKey)
         #expect(build == host.oldBuild && pid == host.pid && startedAt != nil)
         #expect(capabilities?.contains(HostProtocol.Capability.handover) == true)
         let counter = try client.spawn(Self.counter)
@@ -173,7 +183,7 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
     /// After a handover (or one that went back): the same process, every session as it was, the counter unbroken,
     /// input reaching each session, and a session ending with its real status.
     func expectCarriedOn(_ scene: Scene, build: Int, screens: [UUID: String], counterBefore: Int) throws {
-        let (client, _, welcomeBuild, sessions, _, pid, startedAt) = try TestClient.welcomed(scene.host.socket)
+        let (client, _, welcomeBuild, sessions, _, pid, startedAt) = try TestClient.welcomed(scene.host.socket, appKey: scene.host.appKey)
         #expect(welcomeBuild == build)
         // The same host: its process, started when it was.
         #expect(pid == scene.host.pid && startedAt == scene.startedAt)
@@ -246,7 +256,7 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         #expect(scene.client.reply(to: seq) == .ok, "\(scene.host.log)")
         #expect(eventually(timeout: 20) { scene.host.log.contains("took over") })
 
-        let (client, _, build, _, _, _, _) = try TestClient.welcomed(scene.host.socket)
+        let (client, _, build, _, _, _, _) = try TestClient.welcomed(scene.host.socket, appKey: scene.host.appKey)
         #expect(build == scene.host.newBuild)
         kill(signalled.childPID, SIGTERM)
         client.send(.kill(id: killed.id))
