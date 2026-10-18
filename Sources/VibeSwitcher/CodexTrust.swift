@@ -6,28 +6,32 @@ import VibeCore
 /// them under `hooks.state` in `~/.codex/config.toml` (`config/batchWrite`). Only VibeSwitcher's own
 /// hooks are touched.
 enum CodexTrust {
-    enum Failure: LocalizedError {
-        case launch(String), protocolError(String), timeout
+    enum Failure: LocalizedError, Equatable {
+        case launch(String), protocolError(String), timeout, quit
         var errorDescription: String? {
             switch self {
             case .launch(let message): return "Could not start codex app-server: \(message)"
             case .protocolError(let message): return "codex app-server: \(message)"
             case .timeout: return "codex app-server did not answer in time"
+            case .quit: return "codex app-server quit before it was done"
             }
         }
     }
 
-    /// Returns how many hooks were newly trusted.
+    /// Returns how many hooks were newly trusted. `arguments` are for tests: zsh running a stand-in app-server.
     @discardableResult
-    static func trustOurHooks(timeout: TimeInterval = 30) throws -> Int {
+    static func trustOurHooks(timeout: TimeInterval = 30, arguments: [String] = ["-lc", "exec codex app-server"]) throws -> Int {
         let process = Process()
         // A login shell, so Homebrew's `codex` and the `node` it runs on are on PATH even when launched from Finder.
         process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-lc", "exec codex app-server"]
+        process.arguments = arguments
         let input = Pipe(), output = Pipe()
         process.standardInput = input
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
+        // The app doesn't ignore SIGPIPE (its children would inherit that): a write after the app-server quits must
+        // fail with EPIPE on this pipe rather than kill VibeSwitcher.
+        _ = fcntl(input.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
         do { try process.run() } catch { throw Failure.launch(error.localizedDescription) }
         defer { if process.isRunning { process.terminate() } }
 
@@ -37,7 +41,7 @@ enum CodexTrust {
         func send(_ message: [String: Any]) throws {
             var data = try JSONSerialization.data(withJSONObject: message)
             data.append(0x0A)
-            input.fileHandleForWriting.write(data)
+            do { try input.fileHandleForWriting.write(contentsOf: data) } catch { throw Failure.quit }
         }
         func call(_ id: Int, _ method: String, _ params: [String: Any]) throws -> [String: Any] {
             try send(["jsonrpc": "2.0", "id": id, "method": method, "params": params])
