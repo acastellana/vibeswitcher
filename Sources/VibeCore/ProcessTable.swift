@@ -72,6 +72,29 @@ public enum ProcessTable {
         return result
     }
 
+    /// Every process's name (the kernel's `comm`) by pid, and nothing else; nil when the list couldn't be read. Not
+    /// from KERN_PROC_ALL, as `trySnapshot` is: on a Mac running several test suites (load 100) that sysctl stalled
+    /// for 10 to 80 s at a time, and then failed, while this list took at most 10 ms.
+    public static func names() -> [Int32: String]? {
+        let count = proc_listallpids(nil, 0)
+        guard count > 0 else { return nil }
+        // Room for processes started meanwhile.
+        var pids = [pid_t](repeating: 0, count: Int(count) + 64)
+        let listed = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) }
+        guard listed > 0 else { return nil }
+        var names: [Int32: String] = [:]
+        for pid in pids.prefix(Int(listed)) where pid > 0 {
+            var info = proc_bsdshortinfo()
+            let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
+            // Gone meanwhile.
+            guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &info, size) == size else { continue }
+            names[pid] = withUnsafePointer(to: &info.pbsi_comm) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXCOMLEN) + 1) { String(cString: $0) }
+            }
+        }
+        return names
+    }
+
     public static func info(pid: Int32) -> ProcInfo? {
         var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
         var proc = kinfo_proc()

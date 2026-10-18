@@ -800,31 +800,42 @@ public struct IndexLock: Equatable, Sendable, CustomStringConvertible {
         return String(cString: resolved)
     }
 
-    /// The search `find` makes by default: processes with the file open, then gits running in the checkout.
+    /// The search `find` makes by default: gits with the file open or running in the checkout, then any other process
+    /// with it open.
     public static let holder: Search = { path, checkout, deadline in holder(of: path, checkout: checkout, deadline: deadline) }
 
     private static func holder(of path: String, checkout: String, deadline: Date) -> Holding {
         let resolved = real
         let target = resolved(path)
-        // A table that couldn't be read says nothing: not that nobody holds it.
-        guard let table = ProcessTable.trySnapshot() else { return .unknown }
+        // A list that couldn't be read says nothing: not that nobody holds it. Names only: the whole table (with
+        // ttys, see `ProcessTable.names`) stalled for a minute on a busy Mac, past every time limit.
+        guard let names = ProcessTable.names() else { return .unknown }
         let me = getpid()
-        let command = { (info: ProcInfo) -> Holding in
-            let words = ProcessTable.arguments(pid: info.pid, start: Int(info.startTime.timeIntervalSince1970), comm: info.comm)
-            let line = words.isEmpty ? info.comm : words.joined(separator: " ")
-            return .held(Holder(pid: info.pid, command: line.count > 120 ? line.prefix(119) + "…" : line))
+        let command = { (pid: Int32) -> Holding in
+            let words = ProcessTable.readArguments(pid: pid)
+            let line = words.isEmpty ? names[pid] ?? "" : words.joined(separator: " ")
+            return .held(Holder(pid: pid, command: line.count > 120 ? line.prefix(119) + "…" : line))
         }
-        for info in table.values.sorted(by: { $0.pid < $1.pid }) where info.pid > 0 && info.pid != me {
+        let pids = names.keys.filter { $0 > 0 && $0 != me }.sorted()
+        // The gits first: they're few, and the holder is nearly always one.
+        let gits = pids.filter { names[$0] == "git" || names[$0]?.hasPrefix("git-") == true }
+        for pid in gits {
             guard Date() < deadline else { return .unknown }
-            if opens(info.pid, target) { return command(info) }
+            if opens(pid, target) { return command(pid) }
         }
         let place = resolved(checkout)
-        for info in table.values.sorted(by: { $0.pid < $1.pid }) where info.comm == "git" || info.comm.hasPrefix("git-") {
+        for pid in gits {
             guard Date() < deadline else { return .unknown }
-            guard let cwd = ProcessTable.cwd(pid: info.pid).map(resolved), cwd == place || cwd.hasPrefix(place + "/") else { continue }
+            guard let cwd = ProcessTable.cwd(pid: pid).map(resolved), cwd == place || cwd.hasPrefix(place + "/") else { continue }
             // The main checkout holds the worktrees' folders too: only a git working on this index.
             let its = Git.run(["rev-parse", "--path-format=absolute", "--git-path", "index.lock"], in: cwd)
-            if its.ok, resolved(its.output) == target { return command(info) }
+            if its.ok, resolved(its.output) == target { return command(pid) }
+        }
+        // Then any other process with it open, in the time that's left.
+        let checked = Set(gits)
+        for pid in pids where !checked.contains(pid) {
+            guard Date() < deadline else { return .unknown }
+            if opens(pid, target) { return command(pid) }
         }
         return Date() < deadline ? .none : .unknown
     }
