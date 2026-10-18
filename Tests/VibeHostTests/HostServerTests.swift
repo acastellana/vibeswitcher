@@ -35,9 +35,11 @@ final class TestClient {
     private(set) var closed = false
     var connection: HostConnection!
 
-    init(_ host: TestHost) throws {
+    convenience init(_ host: TestHost) throws { try self.init(socket: host.socket) }
+
+    init(socket: String) throws {
         try queue.sync {
-            connection = try HostConnection(path: host.socket, queue: queue)
+            connection = try HostConnection(path: socket, queue: queue)
             connection.onEvent = { [weak self] e in self?.with { $0.events.append(e) } }
             connection.onOutput = { [weak self] id, data in self?.with { $0.output[id, default: Data()].append(data) } }
             connection.onClose = { [weak self] in self?.with { $0.closed = true } }
@@ -222,6 +224,46 @@ struct HostServerTests {
         #expect(client.reply(to: seq) == .error("Sessions are running."))
     }
 
+    /// E-38: a spawn that arrives once a shutdown was accepted is refused, not started and torn down with the host.
+    @Test func noSpawnOnceAShutdownWasAccepted() throws {
+        let host = try TestHost()
+        let client = try TestClient(host)
+        let other = try TestClient(host)
+        let shutdown = client.send(.shutdown)
+        let spawn = client.send(.spawn(SpawnRequest(cwd: "/tmp", command: "sleep 30", env: [:], cols: 80, rows: 24,
+                                                    keepShell: false, label: "Test", agent: nil)))
+        #expect(eventually { client.reply(to: spawn) != nil })
+        #expect(client.reply(to: shutdown) == .ok)
+        #expect(client.reply(to: spawn) == .error(HostProtocol.shuttingDown))
+        #expect(!other.hasEvent { if case .sessionChanged = $0 { return true }; return false })
+        #expect(eventually { other.closed })
+    }
+
+    /// E-07: a paste larger than the host's input buffer into a program that isn't reading yet: every piece either
+    /// goes in, in order, or is answered with an error naming how many of its bytes didn't.
+    @Test func inputBeyondTheBufferIsRefusedOutLoudNeverLost() throws {
+        let host = try TestHost()
+        let client = try TestClient(host)
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("paste-\(UUID().uuidString.prefix(8))").path
+        defer { unlink(out) }
+        let session = try client.spawn("stty raw -echo; echo ready; sleep 2; exec cat > \(out)")
+        client.attach(session.id)
+        #expect(eventually { client.text(session.id).contains("ready") })
+        let piece = 64 << 10
+        let pieces = (0..<48).map { Data(repeating: UInt8(ascii: "A") + UInt8($0 % 26), count: piece) }   // 3 MB
+        let seqs = pieces.map { client.send(.input(id: session.id, bytes: $0, reply: false)) }
+        let receipt = client.send(.screen(id: session.id))
+        #expect(eventually { client.reply(to: receipt) != nil })
+        let refused = seqs.indices.filter { client.reply(to: seqs[$0]) != nil }
+        for index in refused {
+            #expect(client.reply(to: seqs[index]).map { if case .error(let m) = $0 { return m.contains("\(piece) bytes") }; return false } == true)
+        }
+        #expect(!refused.isEmpty, "3 MB fit into a program that wasn't reading?")
+        let expected = seqs.indices.filter { !refused.contains($0) }.reduce(into: Data()) { $0.append(pieces[$1]) }
+        #expect(eventually(timeout: 20) { (try? Data(contentsOf: URL(fileURLWithPath: out)))?.count == expected.count })
+        #expect((try? Data(contentsOf: URL(fileURLWithPath: out))) == expected)
+    }
+
     @Test func connectionsComeFromThisUser() throws {
         let host = try TestHost()
         let fd = try UnixSocket.connect(path: host.socket)
@@ -304,6 +346,24 @@ struct HostCallTests {
         try HostCall.send(.input(id: UUID(), bytes: Data(repeating: 0x61, count: 64_000), reply: false), socket: path)
         #expect(finished.wait(timeout: .now() + 5) == .success)
         #expect(seen.bytes == 64_000)
+    }
+
+    /// E-07: input the host refuses (the program isn't reading and the buffer is full) fails the call.
+    @Test func refusedInputIsAnError() throws {
+        let host = try TestHost()
+        let client = try TestClient(host)
+        let session = try client.spawn("stty raw -echo; echo ready; sleep 30")
+        client.attach(session.id)
+        #expect(eventually { client.text(session.id).contains("ready") })
+        var refusal: String?
+        for _ in 0..<6 where refusal == nil {
+            do {
+                try HostCall.send(.input(id: session.id, bytes: Data(repeating: 0x61, count: 512 << 10), reply: false), socket: host.socket)
+            } catch {
+                refusal = "\(error)"
+            }
+        }
+        #expect(refusal?.contains("Input refused") == true, "\(String(describing: refusal))")
     }
 
     @Test func aOneShotSenderDoesntTakeTheSessionFromTheApp() throws {

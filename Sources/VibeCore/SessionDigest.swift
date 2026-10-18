@@ -74,22 +74,25 @@ public enum HostCall {
     /// writing would lose what's still in the socket's buffer, over ~8 KB).
     public static func send(_ request: HostRequest, socket: String = VibePaths.hostSocket.path, timeout: TimeInterval = 5) throws {
         if case .input(let id, _, _) = request {
-            guard try exchange(request, then: .screen(id: id), socket: socket, timeout: timeout).reply != nil else {
-                throw Failure(description: "The session host didn't take the input.")
-            }
+            let answer = try exchange(request, then: .screen(id: id), socket: socket, timeout: timeout)
+            // A host answers input only to refuse it (its buffer for that program is full).
+            if let refusal = answer.refusal { throw Failure(description: refusal) }
+            guard answer.reply != nil else { throw Failure(description: "The session host didn't take the input.") }
             return
         }
         _ = try exchange(request, socket: socket, timeout: timeout, expectsReply: false)
     }
 
     private static func exchange(_ request: HostRequest?, then follow: HostRequest? = nil, socket: String, timeout: TimeInterval,
-                                 expectsReply: Bool = true) throws -> (sessions: [HostSession], reply: HostEvent?) {
+                                 expectsReply: Bool = true) throws -> (sessions: [HostSession], reply: HostEvent?, refusal: String?) {
         let queue = DispatchQueue(label: "vibeswitcher.host-call")
         let connection = try HostConnection(path: socket, queue: queue)
         defer { queue.sync { connection.close() } }
         let done = DispatchSemaphore(value: 0)
         var sessions: [HostSession]?
         var reply: HostEvent?
+        var refusal: String?
+        var requestSeq: Int?
         var waitingFor: Int?
         var closed = false
         connection.onClose = {
@@ -101,6 +104,7 @@ public enum HostCall {
                 sessions = list
                 if let request {
                     waitingFor = connection.send(request)
+                    requestSeq = waitingFor
                     // Its answer is the follow-up's: it comes once the host has read both.
                     if let follow { waitingFor = connection.send(follow) }
                     // Nothing comes back for it: give the write a moment to leave, then we're done.
@@ -108,6 +112,8 @@ public enum HostCall {
                 } else {
                     done.signal()
                 }
+            } else if follow != nil, envelope.replyTo == requestSeq, case .error(let message) = envelope.event {
+                refusal = message
             } else if let waitingFor, envelope.replyTo == waitingFor {
                 reply = envelope.event
                 done.signal()
@@ -116,8 +122,8 @@ public enum HostCall {
         queue.sync { _ = connection.send(.hello(protocolVersion: HostProtocol.version, app: "vibeswitcher-mcp")) }
         guard done.wait(timeout: .now() + timeout) == .success else { throw Failure(description: "The session host didn't answer in time.") }
         return queue.sync {
-            if closed && sessions == nil { return ([], nil) }
-            return (sessions ?? [], reply)
+            if closed && sessions == nil { return ([], nil, nil) }
+            return (sessions ?? [], reply, refusal)
         }
     }
 }

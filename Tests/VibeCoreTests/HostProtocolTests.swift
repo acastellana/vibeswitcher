@@ -80,7 +80,10 @@ struct HostMessageTests {
             #expect(try HostCoding.decode(HostRequestEnvelope.self, from: data) == HostRequestEnvelope(seq: 7, request: request))
         }
         let events: [HostEvent] = [
-            .welcome(protocolVersion: 1, hostBuild: 123, sessions: [session]), .spawned(session), .attached(id: id),
+            .welcome(protocolVersion: 1, hostBuild: 123, sessions: [session]),
+            .welcome(protocolVersion: 1, hostBuild: 123, sessions: [session], capabilities: ["styledScreen"], pid: 4242,
+                     startedAt: Date(timeIntervalSince1970: 1_500)),
+            .spawned(session), .attached(id: id),
             .screenText(id: id, text: "hi"),
             .styledScreenText(id: id, text: "❯ hi", runs: [ScreenRun(row: 0, column: 2, length: 2, faint: true),
                                                          ScreenRun(row: 0, column: 0, length: 1, inverse: true, color: .rgb(153, 153, 153)),
@@ -92,6 +95,21 @@ struct HostMessageTests {
             let data = try HostCoding.encode(HostEventEnvelope(replyTo: 3, event: event))
             #expect(try HostCoding.decode(HostEventEnvelope.self, from: data) == HostEventEnvelope(replyTo: 3, event: event))
         }
+    }
+
+    /// The welcome's capabilities, pid and start time are additions: an older app reads a newer host's welcome, and
+    /// this app reads an older host's.
+    @Test func welcomeAdditionsKeepTheOldShapeReadable() throws {
+        enum OldEvent: Codable, Equatable { case welcome(protocolVersion: Int, hostBuild: Int, sessions: [HostSession]) }
+        struct OldEnvelope: Codable, Equatable { var replyTo: Int?; var event: OldEvent }
+        let started = Date(timeIntervalSince1970: 1_500)
+        let new = HostEventEnvelope(replyTo: 1, event: .welcome(protocolVersion: 1, hostBuild: 7, sessions: [],
+                                                                capabilities: ["styledScreen", "handover"], pid: 99, startedAt: started))
+        #expect(try HostCoding.decode(OldEnvelope.self, from: HostCoding.encode(new))
+                == OldEnvelope(replyTo: 1, event: .welcome(protocolVersion: 1, hostBuild: 7, sessions: [])))
+        let old = try HostCoding.encode(OldEnvelope(replyTo: 1, event: .welcome(protocolVersion: 1, hostBuild: 7, sessions: [])))
+        #expect(try HostCoding.decode(HostEventEnvelope.self, from: old)
+                == HostEventEnvelope(replyTo: 1, event: .welcome(protocolVersion: 1, hostBuild: 7, sessions: [], capabilities: nil, pid: nil, startedAt: nil)))
     }
 
     @Test func liveMeansNotExited() {
