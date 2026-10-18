@@ -53,6 +53,13 @@ public struct ChatTodo: Equatable, Sendable {
         self.status = status
     }
 
+    /// "Task #3 created successfully: Write c.txt" → "3".
+    static func createdTaskID(_ output: String?) -> String? {
+        guard let output, let range = output.range(of: "Task #") else { return nil }
+        let id = output[range.upperBound...].prefix { !$0.isWhitespace && $0 != ":" }
+        return id.isEmpty ? nil : String(id)
+    }
+
     init(text: String, statusName: String) {
         self.text = text
         switch statusName {
@@ -115,6 +122,12 @@ public struct ChatTool: Equatable, Sendable {
         guard let start = at, let end = result?.at else { return nil }
         return max(0, end.timeIntervalSince(start))
     }
+
+    /// An input value of a tool shown as fields ("subject" of a TaskCreate).
+    func field(_ name: String) -> String? {
+        guard case .fields(let fields) = detail else { return nil }
+        return fields.first { $0.name == name }?.value
+    }
 }
 
 public struct ChatEntry: Equatable, Sendable, Identifiable {
@@ -162,12 +175,41 @@ public struct ChatLog: Equatable, Sendable {
         return nil
     }
 
-    /// The latest to-do list or plan steps.
+    /// The latest to-do list or plan steps: a TodoWrite or `update_plan` list, or the task list TaskCreate and
+    /// TaskUpdate keep, whichever came last. Claude Code 2.1.268+ offers none of these tools on 5.x models (unless
+    /// `CLAUDE_CODE_ENABLE_TODO_TOOLS=1`), so there it's nil.
     public var todos: [ChatTodo]? {
-        for entry in entries.reversed() {
-            if case .tool(let tool) = entry.kind, case .todos(let todos) = tool.detail { return todos }
+        var list: [ChatTodo]?
+        var tasks: [(id: String, todo: ChatTodo)] = []
+        var created = 0
+        var tasksLast = false
+        for entry in entries {
+            guard case .tool(let tool) = entry.kind, tool.result?.failed != true else { continue }
+            if case .todos(let todos) = tool.detail {
+                list = todos
+                tasksLast = false
+                continue
+            }
+            switch tool.name {
+            case "TaskCreate":
+                guard let subject = tool.field("subject") else { continue }
+                created += 1
+                tasks.append((ChatTodo.createdTaskID(tool.result?.output) ?? String(created), ChatTodo(text: subject, status: .pending)))
+                tasksLast = true
+            case "TaskUpdate":
+                guard let id = tool.field("taskId"), let index = tasks.firstIndex(where: { $0.id == id }) else { continue }
+                if tool.field("status") == "deleted" {
+                    tasks.remove(at: index)
+                } else {
+                    if let status = tool.field("status") { tasks[index].todo.status = ChatTodo(text: "", statusName: status).status }
+                    if let subject = tool.field("subject") { tasks[index].todo.text = subject }
+                }
+                tasksLast = true
+            default:
+                break
+            }
         }
-        return nil
+        return tasksLast ? tasks.map(\.todo) : list
     }
 
     private mutating func record(_ new: ChatUsage) {
@@ -362,6 +404,8 @@ public enum ChatReader {
                 })
             }
         case "Write":
+            // Plan mode on 5.x models writes the plan to ~/.claude/plans/<slug>.md before ExitPlanMode (which may carry none).
+            if let path = text("file_path"), isPlanFile(path), let plan = text("content") { return .plan(clip(plan)) }
             if let path = text("file_path") { return .write(path: path, content: clip(text("content") ?? "")) }
         case "Read":
             if let path = text("file_path") { return .read(path: path) }
@@ -388,6 +432,10 @@ public enum ChatReader {
             break
         }
         return fields(input)
+    }
+
+    static func isPlanFile(_ path: String) -> Bool {
+        path.hasSuffix(".md") && (path as NSString).deletingLastPathComponent.hasSuffix("/.claude/plans")
     }
 
     static func claudeImage(_ block: [String: Any], id: String) -> ChatImage? {

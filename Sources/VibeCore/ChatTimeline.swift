@@ -52,7 +52,7 @@ public enum ChatTimeline {
             if tool.result?.failed == true { failed += 1 }
             switch (tool.name, tool.detail) {
             case (_, .thought): thoughts += 1
-            case (_, .todos): todoUpdates += 1
+            case (_, .todos), ("TaskCreate", _), ("TaskUpdate", _): todoUpdates += 1
             case (_, .plan): plans += 1
             case (_, .edit(let path, _)), (_, .write(let path, _)): edited.insert(path)
             case (_, .patch): edited.insert(tool.id)
