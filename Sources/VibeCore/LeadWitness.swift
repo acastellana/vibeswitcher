@@ -101,6 +101,50 @@ public enum LeadWitness {
         return found
     }
 
+    /// Watches the free space on the volume holding a project's worktrees: when it drops below the workflow's
+    /// warning, the lead is told once (until it's back up, see `DiskWatch`), with the task folders that take most.
+    public struct Disk {
+        let free: (String) -> Int64?
+        let scratch: URL
+        public private(set) var watch = DiskWatch()
+
+        public init(free: @escaping (String) -> Int64? = DiskSpace.free(at:), scratch: URL = ClaudeScratch.root) {
+            self.free = free
+            self.scratch = scratch
+        }
+
+        /// The free space to tell the lead about now (once per episode); nil otherwise. Cheap: sizing the folders
+        /// is `text`'s.
+        public mutating func check(root: String, workflow: LeadWorkflow) -> Int64? {
+            let free = self.free((root as NSString).appendingPathComponent(".vibeswitcher/worktrees"))
+            return watch.check(free: free, warning: workflow.diskWarning) ? free : nil
+        }
+
+        /// What to tell the lead: the space left, and the biggest task folders (sized now: it takes a while).
+        public func text(free: Int64, root: String, board: LeadBoard, workflow: LeadWorkflow,
+                         size: (String) -> Int64 = DiskSpace.size(of:)) -> String {
+            LeadWitness.diskText(free: free, workflow: workflow, folders: TaskFolder.all(root: root, board: board, scratch: scratch, size: size))
+        }
+
+        /// Both at once.
+        public mutating func event(root: String, board: LeadBoard, workflow: LeadWorkflow,
+                                   size: (String) -> Int64 = DiskSpace.size(of:)) -> String? {
+            check(root: root, workflow: workflow).map { text(free: $0, root: root, board: board, workflow: workflow, size: size) }
+        }
+    }
+
+    /// "Disk space is low: 7.4 GB free … Biggest task folders: …".
+    public static func diskText(free: Int64, workflow: LeadWorkflow, folders: [TaskFolder]) -> String {
+        let biggest = folders.prefix(5).map(\.text)
+        let finished = folders.contains(where: \.finished)
+        return "Disk space is low: \(DiskSpace.text(free)) free on the volume holding the worktrees (the warning is at \(LeadToolset.gb(workflow.diskWarningGB)) GB; "
+            + "start_worker refuses below \(LeadToolset.gb(workflow.diskFloorGB)) GB, and at 0 every session stops). "
+            + (biggest.isEmpty ? "No task folder takes much of it; tell the user what else fills the disk."
+               : "Biggest task folders: \(biggest.joined(separator: "; ")). "
+               + (finished ? "cleanup the finished tasks to free theirs; " : "")
+               + "tell the user if it stays low.")
+    }
+
     private static func waiting(_ info: Seen, session: String, now: Date, input: String, stopped: String?) -> (key: String, text: String)? {
         let since = Int(info.since?.timeIntervalSince1970 ?? 0)
         if info.status == .needsInput { return ("\(session)|input-\(since)", input) }

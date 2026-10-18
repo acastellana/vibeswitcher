@@ -43,6 +43,8 @@ final class LeadController: ObservableObject {
     @Published private(set) var answerNotices: [String: String] = [:]
     /// Witness events already told, so each is told once.
     private var told: Set<String> = []
+    /// Each project's free disk space, watched (see `LeadWitness.Disk`), by root.
+    private var disks: [String: LeadWitness.Disk] = [:]
     /// Ended team sessions the host has been asked to drop.
     private var forgetting: Set<UUID> = []
     /// Terminals being flushed, and when a message was last typed into each (its hooks need a moment to say it's
@@ -387,6 +389,17 @@ final class LeadController: ObservableObject {
         for event in LeadWitness.events(board: board, seen: seen, now: now) where told.insert("\(root)|\(event.key)").inserted {
             deliver(event.text, from: .system("witness"), to: board, root: root)
         }
+        // Low disk space, once per episode; what takes it is sized off the main thread.
+        var disk = disks[root] ?? LeadWitness.Disk()
+        let workflow = LeadWorkflow.load(from: (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md"))
+        if let free = disk.check(root: root, workflow: workflow) {
+            let sizing = disk
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                let text = sizing.text(free: free, root: root, board: board, workflow: workflow)
+                DispatchQueue.main.async { self?.deliver(text, from: .system("witness"), to: board, root: root) }
+            }
+        }
+        disks[root] = disk
         // On the board too, for status and the Team view, until the worker moves again.
         let stalls = LeadWitness.stalls(board: board, seen: seen, now: now)
         var noted = board
