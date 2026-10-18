@@ -84,7 +84,7 @@ final class LeadController: ObservableObject {
     /// The Team view's plain-language lines.
     let summaries = TeamSummaryModel()
     /// The leads' bases, when they moved other than through merges (see `BaseMoves`).
-    let baseMoves = BaseMoves()
+    let baseMoves: BaseMoves
 
     private let host: HostClient
     private let store: SessionStore
@@ -117,17 +117,36 @@ final class LeadController: ObservableObject {
     private let observer = LeadObserver()
     /// Roots whose lead is being prepared (off the main thread) right now.
     private var startingLeads: Set<String> = []
+    /// Starts asked for before the host said which sessions run (right after a relaunch), by root: decided then.
+    private var pendingStarts: [String: (goal: String?, show: Bool, askAboutMovedHead: Bool)] = [:]
+    /// The leads found running (after a relaunch, an install) whose role the vault binds to their session: bound
+    /// again, by root. Each live lead session is looked at once.
+    @Published private(set) var keptLeads: [String: UUID] = [:]
+    private var adopting: Set<UUID> = []
+    private var hostWelcome: AnyCancellable?
     /// The boards and decisions as last read: the refresh reads them again only when their files changed.
     private var reads = LeadFiles()
+    private let vault: LeadVault
+    /// Asks the user (an alert): the index of the button chosen. Faked in tests.
+    var confirm: (_ title: String, _ text: String, _ buttons: [String]) -> Int = LeadController.runAlert
+    /// Answers Claude's trust question in a lead the app started (off in tests: no real host to ask).
+    var answersTrust = true
 
-    init(host: HostClient, store: SessionStore, claudeCommand: @escaping (String) -> String) {
+    init(host: HostClient, store: SessionStore, vault: LeadVault = .standard, claudeCommand: @escaping (String) -> String) {
         self.host = host
         self.store = store
+        self.vault = vault
+        baseMoves = BaseMoves(vault: vault)
         self.claudeCommand = claudeCommand
         summaries.lookup = { [weak host, weak store] id in
             (host?.sessions.first { $0.id.uuidString == id }, store?.sessions.first { $0.hostID?.uuidString == id }?.transcriptPath)
         }
         timer = Heartbeat.shared.every(3) { [weak self] in self?.refresh() }
+        // The host's welcome says which sessions run: the starts that waited for it, and the running leads, go on.
+        hostWelcome = host.$state.receive(on: DispatchQueue.main).sink { [weak self] _ in
+            self?.startPending()
+            self?.keepRunningLeads()
+        }
         baseMoves.onAsk = { [weak self] root, move in
             self?.notify("\(move.branch) moved outside the lead's merges", "\(move.count) in \((root as NSString).lastPathComponent): accept them in the lead's chat, or keep its merges refused.")
         }
@@ -189,12 +208,96 @@ final class LeadController: ObservableObject {
         }
     }
 
+    /// What a start does with the lead that may be running already.
+    enum StartPlan: Equatable {
+        /// The host hasn't said yet which sessions run (the app just relaunched): decided once it has.
+        case wait
+        /// No lead runs for the project.
+        case start
+        /// The lead runs (and holds its role, or nothing here may replace it): shown, never replaced.
+        case show(UUID)
+        /// The lead runs without its role (the vault binds it to no session, or another): you're asked first.
+        case askToReplace(UUID)
+    }
+
+    /// `running`: the project's live lead session, if any; `holdsRole`: whether the vault binds the lead's role to it
+    /// (nil: the vault couldn't be asked); `fromUser`: you asked in the app (not `vibeswitcher --lead`, which anything
+    /// can post).
+    static func plan(hostState: HostClient.State, running: UUID?, holdsRole: Bool?, fromUser: Bool) -> StartPlan {
+        if hostState == .connecting { return .wait }
+        guard let running else { return .start }
+        return holdsRole == false && fromUser ? .askToReplace(running) : .show(running)
+    }
+
     private func startLead(root: String, goal: String?, show: Bool, askAboutMovedHead: Bool) {
-        if let running = leadSessions[root] {
-            if let goal { deliver("New goal: \(goal)", from: Self.commandLine, root: root) }
-            if show { select(running.id) }
-            return
+        guard let running = leadSessions[root] else {
+            if Self.plan(hostState: host.state, running: nil, holdsRole: nil, fromUser: askAboutMovedHead) == .wait {
+                // A relaunched app's session list is empty until the host's welcome: that's no sign no lead runs.
+                pendingStarts[root] = (goal, show, askAboutMovedHead)
+                return
+            }
+            return prepareLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead)
         }
+        // Whether it holds its role, the vault says (off the main thread: it's a call to the host); held, it's bound
+        // to its session again, as at a relaunch.
+        let vault = self.vault
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let holds: Bool?
+            do { holds = try vault.rebindLead(root: root, session: running.id.uuidString) != nil } catch { holds = nil }
+            DispatchQueue.main.async {
+                guard let self else { return }
+                switch Self.plan(hostState: self.host.state, running: running.id, holdsRole: holds, fromUser: askAboutMovedHead) {
+                case .wait:
+                    self.pendingStarts[root] = (goal, show, askAboutMovedHead)
+                case .start:
+                    self.prepareLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead)
+                case .show(let id):
+                    if let goal { self.deliver("New goal: \(goal)", from: Self.commandLine, root: root) }
+                    if show { self.select(id) }
+                case .askToReplace(let id):
+                    if self.askToReplace(root: root, running: running) {
+                        self.prepareLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead)
+                    } else if show {
+                        self.select(id)
+                    }
+                }
+            }
+        }
+    }
+
+    /// The starts that waited for the host's sessions, decided now that they're known.
+    private func startPending() {
+        guard host.state != .connecting, !pendingStarts.isEmpty else { return }
+        let pending = pendingStarts
+        pendingStarts = [:]
+        for (root, start) in pending { startLead(root: root, goal: start.goal, show: start.show, askAboutMovedHead: start.askAboutMovedHead) }
+    }
+
+    /// The leads still running when the app starts again (a relaunch, an install handed their sessions over): each
+    /// keeps its role, bound again to its session when the vault binds it there; none is replaced. One the vault
+    /// gives no role stays as it is (its tools say so); Project Lead then asks before starting another.
+    private func keepRunningLeads() {
+        guard host.state != .connecting else { return }
+        for (root, session) in leadSessions where adopting.insert(session.id).inserted {
+            let vault = self.vault
+            let project = (root as NSString).lastPathComponent
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                let kept: LeadVault.Member?
+                do { kept = try vault.rebindLead(root: root, session: session.id.uuidString) } catch {
+                    Breadcrumbs.shared.note("lead: couldn't bind the running lead of \(project) again: \(error)")
+                    DispatchQueue.main.async { self?.adopting.remove(session.id) }  // Tried again on the next refresh.
+                    return
+                }
+                Breadcrumbs.shared.note(kept != nil
+                    ? "lead: kept the running lead of \(project) (session \(session.id.uuidString.prefix(8)))"
+                    : "lead: the running lead of \(project) (session \(session.id.uuidString.prefix(8))) holds no role in the vault; left as it is")
+                guard kept != nil else { return }
+                DispatchQueue.main.async { self?.keptLeads[root] = session.id }
+            }
+        }
+    }
+
+    private func prepareLead(root: String, goal: String?, show: Bool, askAboutMovedHead: Bool) {
         // The lead's vault lives in the session host: an older one still serving its sessions can't hold it (and
         // one too old to hand over stays until restarted).
         if case .outdated = host.state, !host.hostCapabilities.contains(HostProtocol.Capability.leadVault) {
@@ -205,7 +308,7 @@ final class LeadController: ObservableObject {
         let project = (root as NSString).lastPathComponent
         let base = claudeCommand(root)
         let boardStore = BoardStore(root: root)
-        let vault = LeadVault.standard
+        let vault = self.vault
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var issued: String?
             var waiting: [SteerMessage] = []
@@ -254,7 +357,7 @@ final class LeadController: ObservableObject {
 
     private func spawnLead(root: String, project: String, grant: String, launch: LeadLaunch.Prepared, show: Bool) {
         let boardStore = BoardStore(root: root)
-        let vault = LeadVault.standard
+        let vault = self.vault
         host.spawn(SpawnRequest(cwd: root, command: launch.command, env: [:], cols: 120, rows: 40, keepShell: false,
                                 label: "Lead · \(project)", agent: "claude")) { [weak self] result in
             switch result {
@@ -267,7 +370,7 @@ final class LeadController: ObservableObject {
                 }
                 try? boardStore.update { board in LeadHandover.started(session.id.uuidString, on: &board) }
                 // You chose to start the lead here: answer Claude's trust question for this folder.
-                self?.answerTrust(session.id, folder: root)
+                if self?.answersTrust == true { self?.answerTrust(session.id, folder: root) }
                 if show { self?.select(session.id) }
                 self?.refresh()
             case .failure(let error):
@@ -444,6 +547,8 @@ final class LeadController: ObservableObject {
     // MARK: Refresh and witness
 
     private func refresh() {
+        startPending()
+        keepRunningLeads()
         let roots = Set(leadSessions.keys)
         runTimers(roots)
         var loaded: [String: LeadBoard] = [:]
@@ -580,11 +685,29 @@ final class LeadController: ObservableObject {
         return alert.runModal() == .alertSecondButtonReturn
     }
 
+    /// The project's lead runs without its role: whether to start a new one (the running one is told where to go on
+    /// when it next uses its tools; its conversation stays where it is).
+    private func askToReplace(root: String, running: HostSession) -> Bool {
+        let project = (root as NSString).lastPathComponent
+        let chosen = confirm("The lead of \(project) is running, but without its role.",
+                             "Its session (‘\(running.label)’, \(running.id.uuidString.prefix(8))) still runs, with its conversation, but the "
+                                + "session host no longer gives it the lead's role, so its tools are off. A new lead takes the role: the "
+                                + "running one is then told, when it next uses its tools, to send you to the new one. Anything you told it "
+                                + "that isn't on the board yet, tell the new lead.",
+                             ["Show the Running Lead", "Start a New Lead"])
+        return chosen == 1
+    }
+
     private func alert(_ title: String, _ text: String) {
+        _ = confirm(title, text, ["OK"])
+    }
+
+    static func runAlert(_ title: String, _ text: String, _ buttons: [String]) -> Int {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = text
+        buttons.forEach { alert.addButton(withTitle: $0) }
         NSApp.activate()
-        alert.runModal()
+        return alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
     }
 }

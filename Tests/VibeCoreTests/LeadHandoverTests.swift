@@ -57,9 +57,10 @@ struct LeadHandoverTests: LeadTeamFixture {
         #expect(!report("fourth try").text.contains("no lead"))
         #expect(runtime.steered.map(\.target) == ["agent:4242", "agent:7777"])
 
-        // The old lead's tools are off: it can't take the reports off the list either.
+        // The old lead's tools are off (it's sent to the new lead's session): it can't take the reports off the list either.
         let refused = call(first, "status")
-        #expect(refused.isError && refused.text.contains("withdrawn"))
+        #expect(refused.isError && refused.text.contains("no longer holds the lead's role"), "\(refused.text)")
+        #expect(refused.text.contains("session lead-ses") && !refused.text.contains("/mcp"))
         // None is lost: the new lead's status lists every one, the one the old lead never got to as well.
         let status = call(second, "status").text
         let listed = try #require(status.components(separatedBy: "Reports since your last status").last)

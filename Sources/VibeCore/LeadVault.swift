@@ -164,6 +164,17 @@ public struct LeadVault: Sendable {
         return grant
     }
 
+    /// The lead that's still running when VibeSwitcher starts again (a relaunch, an install): its role bound to its
+    /// session once more (the app). Only to the session the vault already binds the role to: nil when it binds it to
+    /// none or to another (a vault that started over, a newer lead), and the session gets no role back.
+    @discardableResult
+    public func rebindLead(root: String, session: String) throws -> Member? {
+        guard case .member(let member) = try call(.current(role: .lead, root: root, task: nil)) else { throw Self.unexpected }
+        guard let member, member.session == session else { return nil }
+        try bind(member.id, root: root, session: session)
+        return member
+    }
+
     /// The branch moved since the lead last left it, and not through its merges: where it was left, and where it is.
     public func headMoved(root: String, branch: String) -> (recorded: String, now: String)? {
         guard let recorded = head(root: root, branch: branch), let now = Self.branchHead(branch, root: root), recorded != now else { return nil }

@@ -157,10 +157,30 @@ public final class LeadToolset: MCPToolset {
         guard let grant, role != nil else { throw Problem(text: refusal ?? "This tool server has no role.") }
         let member: LeadVault.Member?
         do { member = try vault.whoami(root: root) } catch { throw Problem(text: "\(error)") }
-        guard let member, member.id == grant else {
-            throw Problem(text: "This session's role was withdrawn (VibeSwitcher started another session for it). Its tools are off.")
-        }
+        guard let member, member.id == grant else { throw Problem(text: withdrawn()) }
         return member
+    }
+
+    /// Why this session's role is gone, and where to go on: the session that holds it now, by name, or that none
+    /// does. Reconnecting this server wouldn't bring the tools back (it'd ask the same host), so it isn't suggested.
+    func withdrawn() -> String {
+        let whose = role == .lead ? "the lead's role" : "task \(taskID ?? "?")'s \(role?.rawValue ?? "") role"
+        let off = "Its tools are off here, and reconnecting them won't bring them back."
+        guard let role, let holder = vault.current(role, root: root, task: taskID) else {
+            return "This session no longer holds \(whose), and no other session does: the session host doesn't know it any more "
+                + "(it began with an empty vault, after an install whose host couldn't carry it over, say). \(off) "
+                + (role == .lead ? "Tell the user: to give this project a working lead, start one from VibeSwitcher (Project Lead); "
+                    + "until then, say what you'd do with the tools." : "Tell the lead.")
+        }
+        let starter = role == .lead ? "VibeSwitcher started a new lead" : "The lead started another \(role.rawValue)"
+        guard let session = holder.session else {
+            return "This session no longer holds \(whose): \(starter) at \(LeadBoard.clock(holder.issuedAt)), still starting. \(off)"
+        }
+        let label = ((try? runtime.sessions()) ?? []).first { $0.id == session }?.label
+        let named = "session \(session.prefix(8))" + (label.map { " (‘\($0)’)" } ?? "")
+        return "This session no longer holds \(whose): \(starter) at \(LeadBoard.clock(holder.issuedAt)), in \(named). \(off) "
+            + (role == .lead ? "Tell the user to continue in that session, and to tell it anything they told you here since then."
+                : "Stop here: that session carries on with the task.")
     }
 
     /// The workflow notes, with the lead's branch resolved.
