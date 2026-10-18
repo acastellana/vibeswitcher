@@ -46,7 +46,13 @@ public enum SessionParser {
     public static func runIfAsked(_ arguments: [String]) {
         guard arguments.count >= 4, arguments[1] == "--parse-session", let cols = Int(arguments[2]), let rows = Int(arguments[3]) else { return }
         signal(SIGPIPE, SIG_IGN)
-        run(fd: 0, cols: cols, rows: rows, testHooks: arguments.contains("--parser-test-hooks"))
+        // Ends with the host, even while stuck mid-parse (when it would never read the end of the link).
+        let host = getppid()
+        let watch = DispatchSource.makeProcessSource(identifier: host, eventMask: .exit, queue: .global())
+        watch.setEventHandler { _exit(0) }
+        watch.resume()
+        if getppid() != host || host == 1 { _exit(0) }
+        withExtendedLifetime(watch) { run(fd: 0, cols: cols, rows: rows, testHooks: arguments.contains("--parser-test-hooks")) }
         exit(0)
     }
 
