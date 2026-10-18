@@ -213,15 +213,19 @@ extension Array {
 }
 
 /// Runs a code block's command in the session: typed in as `! command`, so it runs in the session's shell and the
-/// output joins the conversation. Shown only while a window session you can type into is selected.
+/// output joins the conversation. Shown only while a window session you can type into is selected. Anything longer than
+/// one plain line is shown in full first (see `RunnableCommand`).
 private struct RunButton: View {
     @ObservedObject var runner: ChatRunner
-    let prompt: String
+    let runnable: RunnableCommand.Runnable
     @State private var sent = false
+
+    private var prompt: String { runnable.prompt }
 
     var body: some View {
         if runner.canRun {
             Button {
+                guard !runnable.needsConfirmation || Self.confirm(prompt) else { return }
                 guard runner.run(prompt) else { return NSSound.beep() }
                 sent = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { sent = false }
@@ -231,6 +235,26 @@ private struct RunButton: View {
             .buttonStyle(.borderless)
             .help("Runs it in this session: \(prompt)")
         }
+    }
+
+    /// The exact text that will be typed, wrapped so nothing sits off to the side.
+    private static func confirm(_ prompt: String) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Run this in the session?"
+        alert.informativeText = "This is exactly what will be typed:"
+        let scroll = NSTextView.scrollableTextView()
+        scroll.frame = NSRect(x: 0, y: 0, width: 460, height: 160)
+        scroll.hasVerticalScroller = true
+        if let text = scroll.documentView as? NSTextView {
+            text.string = prompt
+            text.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
+            text.isEditable = false
+            text.isSelectable = true
+        }
+        alert.accessoryView = scroll
+        alert.addButton(withTitle: "Run")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 }
 
@@ -252,8 +276,10 @@ struct CodeBlockView: View {
             HStack {
                 Text(language?.lowercased() ?? "code").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.secondary)
                 Spacer()
-                if let runner, let prompt = RunnableCommand.prompt(code: code, language: language) {
-                    RunButton(runner: runner, prompt: prompt)
+                // No Run while lines are hidden behind "Show all".
+                if let runner, let runnable = RunnableCommand.runnable(code: code, language: language,
+                                                                       visibleLines: limited ? maxLines : nil) {
+                    RunButton(runner: runner, runnable: runnable)
                 }
                 Button {
                     NSPasteboard.general.clearContents()
