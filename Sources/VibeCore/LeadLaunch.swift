@@ -136,6 +136,26 @@ public enum LeadLaunch {
         return Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: mcpFile, settingsFile: settingsFile)
     }
 
+    /// Where a new lead finds the last turns of the lead it replaces: in the project's `.vibeswitcher` folder (kept out
+    /// of git), which its tools may read (the vault's run folder is closed to them).
+    public static func turnsFile(root: String) -> String {
+        (root as NSString).appendingPathComponent(".vibeswitcher/replaced-lead-turns.md")
+    }
+
+    /// Writes the replaced lead's last turns (0600) for the new lead and returns the file; with none, removes an
+    /// earlier lead's file and returns nil (the prompt then names no file).
+    @discardableResult
+    public static func writeTurns(_ turns: String?, root: String) throws -> String? {
+        let file = turnsFile(root: root)
+        guard let turns, !turns.isEmpty else {
+            unlink(file)
+            return nil
+        }
+        try FileManager.default.createDirectory(atPath: (file as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try LeadVault.writePrivate(Data(turns.utf8), to: URL(fileURLWithPath: file))
+        return file
+    }
+
     /// The `--name` a command line from `prepare` gives its session (Claude writes it into the transcript).
     public static func name(inCommand command: String) -> String? {
         guard let range = command.range(of: #"--name '[^']*'"#, options: .regularExpression) else { return nil }

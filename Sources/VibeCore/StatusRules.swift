@@ -161,3 +161,60 @@ public enum BackgroundWork {
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
+
+/// A lead session whose role went to another session of its project (VibeSwitcher started a new lead): the window
+/// says so, and what you type into it goes to the live lead as your message, never into its own box (its tools are
+/// off: it would answer with none, and nothing it said would reach the board).
+public struct ReplacedLead: Equatable, Sendable {
+    public var root: String
+    public var project: String
+    /// Its own terminal.
+    public var tty: String
+    /// The session holding the role now; nil while the new lead is still starting.
+    public var live: UUID?
+    /// Where the last text typed into it went.
+    public var notice: String?
+    /// What's typed into it so far: it goes to the live lead on Enter.
+    public var draft = ""
+
+    public init(root: String, project: String, tty: String, live: UUID?) {
+        self.root = root
+        self.project = project
+        self.tty = tty
+        self.live = live
+    }
+
+    /// The live lead's window session, as the window names it.
+    public var liveName: String { "Lead · \(project)" }
+    public var label: String { "replaced — continue in \(liveName)" }
+    /// Not one of the ordinary statuses: whatever its agent does, it isn't the lead any more (and isn't ready or
+    /// waiting on you).
+    public var rowState: RowState { RowState(text: label, since: nil, group: .idle) }
+
+    /// What the live lead gets: your words, and where you typed them.
+    public func routed(_ text: String) -> String {
+        "(typed into the replaced lead's session on \(tty), which has no tools; VibeSwitcher sent it on to you) \(text)"
+    }
+
+    /// The one line the replaced session shows once text went on.
+    public static func notice(_ text: String, to project: String, at: Double, held: Bool) -> String {
+        let quoted = text.count > 60 ? String(text.prefix(60)) + "…" : text
+        let flat = quoted.replacingOccurrences(of: "\n", with: " ")
+        return held ? "“\(flat)” waits for Lead · \(project), starting (\(LeadBoard.clock(at))): it gets it as your message"
+            : "“\(flat)” went to Lead · \(project) as your message (\(LeadBoard.clock(at)))"
+    }
+}
+
+extension StatusRules {
+    /// The live lead sessions another has replaced: each project's sessions labelled as its lead other than the one
+    /// its board names (`holders`, by root), while that one runs too. `leads`: the live lead sessions, with their roots.
+    public static func replacedLeads(_ leads: [(id: UUID, root: String)], holders: [String: UUID]) -> [UUID: UUID] {
+        var replaced: [UUID: UUID] = [:]
+        for lead in leads {
+            guard let holder = holders[lead.root], holder != lead.id,
+                  leads.contains(where: { $0.id == holder && $0.root == lead.root }) else { continue }
+            replaced[lead.id] = holder
+        }
+        return replaced
+    }
+}

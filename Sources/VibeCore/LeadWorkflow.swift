@@ -358,17 +358,27 @@ public struct LeadWorkflow: Equatable, Sendable {
 public enum LeadPrompts {
     public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, record_decision, merge, cleanup, configure"
 
+    /// How every lead's start prompt opens (a replaced lead's last turns leave it out: it isn't the user's).
+    public static let startOpening = "You're starting as the project lead."
+
     /// What a new lead is told to do first: the board, and the memory earlier leads left (their decisions hold
     /// back merges and deletions a fresh lead can't otherwise know about). `goal`: one given with `vibeswitcher --lead`.
-    public static func leadStart(root: String, goal: String?, note: String) -> String {
+    /// `replaced`: the lead this one replaces (its terminal) and the file holding its last turns (see `LastTurns`):
+    /// what the user told it there never reached the board (it had no tools), so it's read and acted on first.
+    public static func leadStart(root: String, goal: String?, note: String, replaced: (tty: String, turnsFile: String)? = nil) -> String {
         let folder = (root as NSString).appendingPathComponent(".vibeswitcher")
         let memory = "Read status, the workflow notes, \(folder)/decisions.md (every decision: one may hold a task back from "
             + "merging or its branch from deletion) and the end of \(folder)/progress.md"
+        let handover = replaced.map {
+            " You replace the lead on \($0.tty), whose tools are off: what the user told it went nowhere. Before greeting, read "
+                + "\($0.turnsFile) (its last turns: what the user asked, what it answered) and act on what the user asked there "
+                + "(add the tasks, start the workers, answer what's open), then say in your greeting what you took over from it."
+        } ?? ""
         if let goal {
-            return "You're starting as the project lead. A goal given with vibeswitcher --lead (\(note)): \(goal)\n"
+            return "\(startOpening)\(handover) A goal given with vibeswitcher --lead (\(note)): \(goal)\n"
                 + "\(memory); then plan the goal into tasks with contracts, start the workers, and tell the user your plan in a few lines."
         }
-        return "You're starting as the project lead. \(memory); then greet the user in one short line: what's on the board, and "
+        return "\(startOpening)\(handover) \(memory); then greet the user in one short line: what's on the board, and "
             + "what they'd like to build next. Merge or clean up nothing a decision or the user holds back."
     }
 

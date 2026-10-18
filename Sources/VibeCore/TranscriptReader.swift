@@ -668,3 +668,89 @@ public enum TranscriptLocator {
         return data
     }
 }
+
+/// A replaced lead's last turns, for the lead that replaces it: what the user told it, and what it answered.
+public enum LastTurns {
+    public static let prompts = 10
+    public static let limit = 12_000
+    /// How much of the end of a transcript is read.
+    public static let tailBytes = 4 << 20
+
+    /// One of the user's prompts and the replies that followed it (tool calls left out).
+    public struct Turn: Equatable, Sendable {
+        public var prompt: TranscriptEntry
+        public var replies: [TranscriptEntry]
+        public var answered: Bool { !replies.isEmpty }
+    }
+
+    /// The last `prompts` of the user's prompts with their replies, and any earlier prompt that got no reply. The
+    /// lead's start prompt isn't the user's: it's left out.
+    public static func turns(_ entries: [TranscriptEntry], prompts: Int = prompts) -> [Turn] {
+        var turns: [Turn] = []
+        for entry in entries {
+            switch entry.kind {
+            case .prompt:
+                if entry.text.hasPrefix(LeadPrompts.startOpening) { continue }
+                turns.append(Turn(prompt: entry, replies: []))
+            case .reply:
+                if !turns.isEmpty { turns[turns.count - 1].replies.append(entry) }
+            case .tool, .toolResult:
+                continue
+            }
+        }
+        let recent = max(0, turns.count - prompts)
+        return turns.enumerated().filter { $0.offset >= recent || !$0.element.answered }.map(\.element)
+    }
+
+    /// The turns as a file for the new lead, at most about `limit` characters: the oldest answered turns go first,
+    /// then long texts are cut; an unanswered prompt always stays. Nil when the user said nothing.
+    public static func text(_ turns: [Turn], tty: String, limit: Int = limit) -> String? {
+        guard !turns.isEmpty else { return nil }
+        let header = "# The replaced lead's last turns\n\nThe lead on \(tty) held this project's role before you; its last turns "
+            + "with the user, oldest first (tool calls left out). It had no tools: what it said it would do didn't happen, and "
+            + "nothing it was told reached the board unless you put it there.\n"
+        func render(_ turn: Turn, cut: Int?) -> String {
+            func bounded(_ text: String) -> String {
+                guard let cut, text.count > cut else { return text }
+                return String(text.prefix(cut)) + " …(cut)"
+            }
+            var out = "\n## The user\(turn.prompt.at.map { ", \(LeadBoard.clock($0))" } ?? "")\n\n\(bounded(turn.prompt.text))\n"
+            if turn.replies.isEmpty {
+                out += "\n(No reply: act on this.)\n"
+            } else {
+                out += "\n## The replaced lead answered\n\n" + bounded(turn.replies.map(\.text).joined(separator: "\n\n")) + "\n"
+            }
+            return out
+        }
+        var kept = turns
+        var cut: Int?
+        while true {
+            let body = kept.map { render($0, cut: cut) }.joined()
+            if header.count + body.count <= limit { return header + body }
+            if let oldest = kept.firstIndex(where: \.answered), kept.count > 1 {
+                kept.remove(at: oldest)
+                continue
+            }
+            // What's left is still too long: each text shorter, down to a floor.
+            let next = (cut ?? 4000) / 2
+            guard next >= 250 else { return header + body }
+            cut = next
+        }
+    }
+
+    /// The last turns in a session's transcript (a Claude Code or Codex one, checked as `TranscriptReader.checkedURL`
+    /// checks it), read from its end.
+    public static func read(transcript path: String, tty: String, home: String = NSHomeDirectory(), prompts: Int = prompts,
+                            limit: Int = limit) -> String? {
+        guard let (url, format) = TranscriptReader.checkedURL(path, home: home),
+              let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd() else { return nil }
+        let start = size > UInt64(tailBytes) ? size - UInt64(tailBytes) : 0
+        guard (try? handle.seek(toOffset: start)) != nil, var data = try? handle.readToEnd() else { return nil }
+        if start > 0 { data = data.dropFirst(TranscriptReader.tailStart(data)) }
+        if data.last != 0x0A { data.append(0x0A) }
+        let entries = TranscriptReader.read(data, format: format).entries
+        return text(turns(entries, prompts: prompts), tty: tty, limit: limit)
+    }
+}
