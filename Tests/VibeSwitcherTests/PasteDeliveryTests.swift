@@ -39,17 +39,22 @@ struct PasteDeliveryTests {
             try? FileManager.default.removeItem(at: folder)
         }
 
-        /// A program that reads nothing until `go` exists, then copies its input, as is, to `out`.
+        /// A program that reads nothing until `go` exists, then copies its input, as is, to `out`. Returned once its
+        /// terminal is raw: before that the line discipline keeps 1,024 bytes of a line and drops the rest unread (on a
+        /// busy Mac the first piece of a paste got there first, and the program never saw 255 KB of it).
         @MainActor
         func spawnReader() async throws -> (session: HostSession, out: String, go: String) {
             host.connectIfRunning()
             #expect(await until { self.host.state == .connected })
             let out = folder.appendingPathComponent("out").path, go = folder.appendingPathComponent("go").path
+            let raw = folder.appendingPathComponent("raw").path
             var result: Result<HostSession, HostClientError>?
-            host.spawn(SpawnRequest(cwd: "/tmp", command: "stty raw -echo; while [ ! -e \(go) ]; do sleep 0.05; done; exec cat > \(out)",
+            host.spawn(SpawnRequest(cwd: "/tmp", command: "stty raw -echo && : > \(raw); while [ ! -e \(go) ]; do sleep 0.05; done; exec cat > \(out)",
                                     env: [:], cols: 80, rows: 24, keepShell: false, label: "Paste", agent: nil)) { result = $0 }
             #expect(await until { result != nil })
-            return (try #require(result).get(), out, go)
+            let session = try #require(result).get()
+            #expect(await until { FileManager.default.fileExists(atPath: raw) })
+            return (session, out, go)
         }
     }
 
@@ -60,9 +65,22 @@ struct PasteDeliveryTests {
 
     static func contents(_ path: String) -> Data { (try? Data(contentsOf: URL(fileURLWithPath: path))) ?? Data() }
 
+    /// What the program got, once it got all of `expected` or something else (a byte missing, misplaced or extra):
+    /// the wait ends on what the test checks, however slowly the machine copies it.
+    static func received(_ path: String, _ expected: Data) async -> Data {
+        var got = Data()
+        _ = await until {
+            got = contents(path)
+            return got.count >= expected.count || !expected.starts(with: got)
+        }
+        return got
+    }
+
     @Test func aPasteBeyondTheBufferGoesInWholeOnceTheProgramReads() async throws {
         let scratch = try Scratch()
         let (session, out, go) = try await scratch.spawnReader()
+        // Nothing here is cut: the 30 s a busy Mac can spend between pieces isn't the program stopping.
+        scratch.host.inputStallLimit = hangGuard
         var cuts: [(Int, Int, String)] = []
         scratch.host.onInputCut = { _, went, total, reason in cuts.append((went, total, reason)) }
         var done: Bool?
@@ -73,8 +91,7 @@ struct PasteDeliveryTests {
         #expect(FileManager.default.createFile(atPath: go, contents: nil))
         #expect(await until { done != nil })
         #expect(done == true)
-        #expect(await until { Self.contents(out).count >= Self.paste.count })
-        #expect(Self.contents(out) == Self.paste)
+        #expect(await Self.received(out, Self.paste) == Self.paste)
         #expect(cuts.isEmpty)
     }
 
@@ -93,7 +110,7 @@ struct PasteDeliveryTests {
         #expect(cut.reason.contains("stopped reading"), "\(cut.reason)")
         // What it said went in is exactly what the program gets: the start of the paste, nothing after.
         #expect(FileManager.default.createFile(atPath: go, contents: nil))
-        #expect(await until { Self.contents(out).count >= cut.went })
+        #expect(await Self.received(out, Self.paste.prefix(cut.went)) == Self.paste.prefix(cut.went))
         try await Task.sleep(nanoseconds: 500_000_000)
         #expect(Self.contents(out) == Self.paste.prefix(cut.went))
         #expect(cuts.count == 1)
@@ -113,6 +130,7 @@ struct PasteDeliveryTests {
         // The composer keeps the message (its outbox): the client doesn't tell the user a second time.
         #expect(cuts == 0)
         #expect(FileManager.default.createFile(atPath: go, contents: nil))
+        #expect(await until { !Self.contents(out).isEmpty })
         try await Task.sleep(nanoseconds: 1_000_000_000)
         let got = Self.contents(out)
         #expect(!got.isEmpty && got.count < Self.paste.count)
@@ -124,6 +142,7 @@ struct PasteDeliveryTests {
         let scratch = try Scratch()
         let (session, out, go) = try await scratch.spawnReader()
         #expect(FileManager.default.createFile(atPath: go, contents: nil))
+        scratch.host.inputStallLimit = hangGuard
         var cuts = 0
         scratch.host.onInputCut = { _, _, _, _ in cuts += 1 }
         // A big paste, then keys typed while it goes in: they follow it, not cut into it.
@@ -133,8 +152,8 @@ struct PasteDeliveryTests {
         scratch.host.send(session.id, writes: [HostInput.Write(bytes: Array("!".utf8), delay: 0)]) { confirmed = $0 }
         #expect(await until { confirmed != nil })
         #expect(confirmed == true)
-        #expect(await until { Self.contents(out).count >= Self.paste.count + 3 })
-        #expect(Self.contents(out) == Self.paste + Data("zz!".utf8))
+        let expected = Self.paste + Data("zz!".utf8)
+        #expect(await Self.received(out, expected) == expected)
         #expect(cuts == 0)
     }
 }
