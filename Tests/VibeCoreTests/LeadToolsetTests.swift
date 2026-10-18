@@ -235,6 +235,63 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(try runtime.sessions().isEmpty)
     }
 
+    /// A worktree left partway through a rebase (a refused `rebase --continue`) isn't a dead end: start_worker says
+    /// what it's in, and with recover aborts it, back on the branch with its commits, and starts the worker.
+    @Test func startWorkerRecoversAWorktreeStuckMidRebase() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = call(lead, "add_task", ["title": "Fix", "goal": "g", "acceptance": ["a"], "boundaries": ["b"]])
+        let worktree = try Worktrees.create(root: root, slug: "fix")
+        for (file, text) in [("a.txt", "worker\n"), ("f.txt", "f\n")] {
+            try text.write(toFile: worktree + "/" + file, atomically: true, encoding: .utf8)
+            Git.run(["add", file], in: worktree)
+            Git.run(["commit", "-q", "-m", file], in: worktree)
+        }
+        try "main\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
+        Git.run(["commit", "-q", "-am", "main"], in: root)
+        let rebase = Shell.run(executable: "/usr/bin/git", args: ["rebase", "-i", "main"], in: worktree,
+                               env: ["GIT_TERMINAL_PROMPT": "0", "GIT_SEQUENCE_EDITOR": "true", "GIT_EDITOR": "true"])
+        #expect(!rebase.ok)
+        try "both\n".write(toFile: worktree + "/a.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "a.txt"], in: worktree)
+        let head = Git.run(["rev-parse", "refs/heads/agent/fix"], in: root).output
+
+        let refused = call(lead, "start_worker", ["task": "fix"])
+        #expect(refused.isError)
+        #expect(refused.text.contains("rebasing agent/fix onto") && refused.text.contains("pick 1 of 2") && refused.text.contains("Staged: a.txt"))
+        #expect(refused.text.contains("recover: true"))
+        #expect(!refused.text.contains("isn't the worktree"))
+        #expect(runtime.spawned.isEmpty)
+        #expect(Git.run(["rev-parse", "refs/heads/agent/fix"], in: root).output == head)
+
+        let started = call(lead, "start_worker", ["task": "fix", "recover": true])
+        #expect(!started.isError, "\(started.text)")
+        #expect(started.text.contains("Aborted the rebase"))
+        #expect(runtime.spawned.first?.cwd == worktree)
+        #expect(Git.run(["rev-parse", "refs/heads/agent/fix"], in: root).output == head)
+        #expect(Git.run(["rev-parse", "--abbrev-ref", "HEAD"], in: worktree).output == "agent/fix")
+        #expect(Git.run(["rev-parse", "HEAD"], in: worktree).output == head)
+        #expect(BoardStore(root: root).load().task("fix")?.status == .running)
+    }
+
+    /// A folder that's another repository is still refused, recover or not, and left as it is.
+    @Test func startWorkerStillRefusesAFolderThatIsntTheTasks() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = call(lead, "add_task", ["title": "Fix", "goal": "g", "acceptance": ["a"], "boundaries": ["b"]])
+        let other = Worktrees.path(root: root, slug: "fix")
+        try FileManager.default.createDirectory(atPath: other, withIntermediateDirectories: true)
+        try "mine\n".write(toFile: other + "/notes.txt", atomically: true, encoding: .utf8)
+        for recover in [false, true] {
+            let refused = call(lead, "start_worker", ["task": "fix", "recover": recover])
+            #expect(refused.isError && refused.text.contains("isn't the worktree of agent/fix"))
+        }
+        #expect(runtime.spawned.isEmpty)
+        #expect(FileManager.default.fileExists(atPath: other + "/notes.txt"))
+    }
+
     @Test func workersAreLimitedAndQuestionsDontBlock() throws {
         let root = try repo()
         let runtime = FakeRuntime()

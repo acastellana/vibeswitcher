@@ -246,8 +246,10 @@ public final class LeadToolset: MCPToolset {
                                          "status": P(type: "string", description: "New state", options: Self.settableStates.map(\.rawValue)),
                                          "reason": P(type: "string", description: "With status kept: what holds it back (a decision, the user's word); merge names it when it refuses")],
                             required: ["task"]),
-                MCPToolInfo(name: "start_worker", description: "Start a worker on a task: a fresh Claude session in its own worktree on branch agent/<slug>, given the contract.",
-                            properties: ["task": task], required: ["task"]),
+                MCPToolInfo(name: "start_worker", description: "Start a worker on a task: a fresh Claude session in its own worktree on branch agent/<slug>, given the contract. A worktree stopped partway through a rebase or merge is described, not started; recover aborts it first.",
+                            properties: ["task": task,
+                                         "recover": P(type: "boolean", description: "When its worktree stopped partway through a rebase or merge: abort it (back on agent/<slug> at the same commit, the branch's commits kept; what's staged in the middle of it is dropped), then start")],
+                            required: ["task"]),
                 MCPToolInfo(name: "stop_worker", description: "End a task's worker (the worktree stays).", properties: ["task": task], required: ["task"]),
                 MCPToolInfo(name: "message", description: "Tell a task's worker something: while it works (or waits on a prompt) it gets it at its next step without stopping; between turns it's typed in as its next prompt.",
                             properties: ["task": task, "text": P(type: "string", description: "The message"),
@@ -313,7 +315,7 @@ public final class LeadToolset: MCPToolset {
             case "board": return try MCPToolResult(text: boardText(task: arguments["task"] as? String))
             case "add_task": return try addTask(arguments)
             case "update_task": return try updateTask(arguments)
-            case "start_worker": return try startWorker(try taskSlug(arguments))
+            case "start_worker": return try startWorker(try taskSlug(arguments), recover: arguments["recover"] as? Bool ?? false)
             case "stop_worker": return try stopWorker(try taskSlug(arguments))
             case "message": return try message(try taskSlug(arguments), arguments)
             case "read_session": return try readSession(try taskSlug(arguments), who: arguments["who"] as? String ?? "worker")
@@ -453,7 +455,7 @@ public final class LeadToolset: MCPToolset {
         return MCPToolResult(text: changed.isEmpty ? "Nothing to change on \(slug)." : "Updated \(slug): \(changed.joined(separator: ", ")).")
     }
 
-    private func startWorker(_ slug: String) throws -> MCPToolResult {
+    private func startWorker(_ slug: String, recover: Bool = false) throws -> MCPToolResult {
         let board = try store.read()
         guard let task = board.task(slug) else { throw Problem(text: "No task \(slug).") }
         // One worker per worktree: two sessions editing the same files would undo each other.
@@ -475,7 +477,17 @@ public final class LeadToolset: MCPToolset {
         if let free = freeSpace(worktreesFolder), free < workflow.diskFloor {
             throw Problem(text: "Not started: only \(DiskSpace.text(free)) free on the volume holding the worktrees, under disk_floor_gb (\(Self.gb(workflow.diskFloorGB)) GB in workflow.md). A worker started now would fail once the disk fills. Free space first: cleanup finished tasks (status lists the biggest task folders), or tell the user.")
         }
-        let worktree = try Worktrees.open(root: root, slug: slug, base: base)
+        // A worktree left partway through a rebase or merge (a refused --continue): said what it's in, and undone
+        // only when asked, back to the branch's head.
+        let stuck = Worktrees.interrupted(root: root, slug: slug)
+        let worktree: String
+        do {
+            worktree = try Worktrees.open(root: root, slug: slug, base: base, recover: recover)
+        } catch let stuck as Worktrees.Interrupted {
+            let way = stuck.unsafe.map { "It can't be undone safely: \($0). Tell the user." }
+                ?? "start_worker with recover: true runs `git \(stuck.kind.rawValue) --abort` there: the worktree goes back on \(stuck.branch) at \(stuck.head.prefix(8)) with all its commits (what's staged in the middle of the \(stuck.kind.rawValue) is dropped), then the worker starts."
+            throw Problem(text: "Not started: \(stuck) \(way)")
+        }
         let session = try launch(.worker, task: slug, name: "worker-\(slug)", in: worktree, label: "Worker: \(task.title)", trust: true,
                                  prompt: LeadPrompts.worker(task: task, root: root, workflow: workflow),
                                  start: "Start on your task (it's in your instructions). Call progress at each milestone. When done, call report.", branch: base)
@@ -495,7 +507,8 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].evidence = nil
         }
         try? store.appendProgress("Started a worker on \(slug)")
-        return MCPToolResult(text: "Worker started on \(slug) in \(worktree) (branch agent/\(slug)). You'll get a message when it reports, needs input or stalls.")
+        let recovered = stuck.map { "Aborted the \($0.kind.rawValue) its worktree was stuck in; it's back on \($0.branch) at \($0.head.prefix(8)). " } ?? ""
+        return MCPToolResult(text: recovered + "Worker started on \(slug) in \(worktree) (branch agent/\(slug)). You'll get a message when it reports, needs input or stalls.")
     }
 
     private func stopWorker(_ slug: String) throws -> MCPToolResult {
