@@ -7,6 +7,8 @@ import VibeHost
 
 // First: as the launcher of a session's program (posix_spawned by the host itself), nothing else runs.
 PTYSpawn.execIfLaunched(CommandLine.arguments)
+// As the probe of a handover (see `HostHandover`): only whether this build can take over.
+HostHandover.probeIfAsked(CommandLine.arguments)
 
 signal(SIGPIPE, SIG_IGN)
 signal(SIGHUP, SIG_IGN)
@@ -47,16 +49,50 @@ var config = HostServer.Config(
     baseEnvironment: environment.filter { inherited.contains($0.key) },
     hostBuild: build)
 config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600
+// What a build this one hands over to is started with: the same, without this start's handover.
+let handoverFlags: [String: Bool] = ["--handover": true, "--handover-fallback": true, "--handover-fail-restore": false]
+config.arguments = arguments.dropFirst().enumerated().reduce(into: (kept: [String](), skip: false)) { result, item in
+    if result.skip { result.skip = false; return }
+    if let takesValue = handoverFlags[item.element] { result.skip = takesValue; return }
+    result.kept.append(item.element)
+}.kept
+// This build's own copy, there for as long as it runs: if a build it hands over to can't restore, it comes back to it.
+config.fallback = config.launcher == executable ? nil : config.launcher
+
+func log(_ text: String) { FileHandle.standardError.write(Data("vibeswitcher-host: \(text)\n".utf8)) }
 
 let server = HostServer(config: config)
 server.onExit = { exit(0) }
-do {
-    try server.start()
-} catch HostServer.Failure.alreadyRunning {
-    exit(0)
-} catch {
-    FileHandle.standardError.write(Data("vibeswitcher-host: \(error)\n".utf8))
-    exit(1)
+if let statePath = value(after: "--handover") {
+    // The build before handed its sessions over, by executing this one in its place (same process).
+    do {
+        // A test of the fallback: as if this build couldn't read the state.
+        if arguments.contains("--handover-fail-restore") { throw HostHandover.Failure.unreadable("--handover-fail-restore") }
+        let state = try HostHandover.read(from: statePath)
+        _ = try server.start(restoring: state)
+        unlink(statePath)
+        log("took over \(state.sessions.count) sessions from build \(state.fromBuild) \(Date())")
+    } catch {
+        log("couldn't take over: \(error)")
+        // Back to the build that handed over: it reads its own state (keeping every descriptor this image inherited).
+        if let fallback = value(after: "--handover-fallback") {
+            log("going back to \(fallback)")
+            let failure = HostHandover.exec(fallback, arguments: config.arguments + ["--handover", statePath], inherit: nil)
+            log("\(failure)")
+        }
+        // Nobody can carry the sessions: quitting hangs up their terminals, rather than leaving them running unreachable.
+        unlink(statePath)
+        exit(1)
+    }
+} else {
+    do {
+        try server.start()
+    } catch HostServer.Failure.alreadyRunning {
+        exit(0)
+    } catch {
+        log("\(error)")
+        exit(1)
+    }
 }
 // Holding the user's lock now: no other host runs, so other builds' launchers can go (not for a scratch host on
 // its own lock, which runs beside the real one).

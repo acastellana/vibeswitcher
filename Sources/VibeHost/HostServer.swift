@@ -18,6 +18,15 @@ public final class HostServer {
         /// Ended sessions are forgotten after this long.
         public var keepEnded: TimeInterval = 24 * 3600
         public var housekeepingInterval: TimeInterval = 30
+        /// What this host was started with after its executable (socket, lock, idle exit): a build it hands over to is
+        /// started with the same.
+        public var arguments: [String] = []
+        /// The old build's own copy (see `HostHandover`): where a build this host hands over to goes back to if it
+        /// can't restore. Nil: `launcher`.
+        public var fallback: String?
+
+        /// Where a handover leaves the sessions for the next build: beside the lock, so a scratch host's stays its own.
+        public var handoverPath: String { lockPath + ".handover" }
 
         public init(socketPath: String, lockPath: String, shell: String, launcher: String, baseEnvironment: [String: String],
                     hostBuild: Int) {
@@ -38,6 +47,9 @@ public final class HostServer {
     public let queue = DispatchQueue(label: "vibeswitcher.host")
     /// Called (on `queue`) after an idle exit or an accepted `shutdown`, once everything is closed.
     public var onExit: (() -> Void)?
+    /// What this host keeps in memory that the next build must have too, never written to disk (see
+    /// `HostHandover.SecretChannel`). Called on `queue` just before a handover.
+    public var secretsForHandover: (() -> Data)?
 
     private let config: Config
     private var sessions: [UUID: HostedSession] = [:]
@@ -53,8 +65,10 @@ public final class HostServer {
     private var stopped = false
     /// A `shutdown` was accepted: the host stops in a moment and starts nothing more.
     private var shuttingDown = false
-    private let startedAt = Date()
-    static let capabilities = [HostProtocol.Capability.styledScreen, HostProtocol.Capability.inputRefusals]
+    /// When this host started: a build it hands over to is the same host, started then.
+    private var startedAt = Date()
+    static let capabilities = [HostProtocol.Capability.styledScreen, HostProtocol.Capability.inputRefusals, HostProtocol.Capability.handover]
+    private var handingOver = false
 
     public init(config: Config) {
         self.config = config
@@ -71,6 +85,29 @@ public final class HostServer {
         }
         // Holding the lock: any socket file left behind is stale.
         listenFD = try UnixSocket.listen(path: config.socketPath)
+        serve()
+    }
+
+    /// Carries on from the build that handed over (see `HostHandover`): its lock, socket and sessions, inherited.
+    /// Returns its secrets. Throws, having changed nothing, when its lock or socket didn't survive the exec.
+    public func start(restoring state: HostHandover.State) throws -> Data? {
+        queue.setSpecific(key: Self.queueKey, value: true)
+        for fd in [state.lockFD, state.listenFD] where !HostHandover.isOpen(fd) { throw HostHandover.Failure.badDescriptor(fd) }
+        lockFD = state.lockFD
+        startedAt = state.startedAt
+        listenFD = state.listenFD
+        for fd in [lockFD, listenFD] { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
+        let secrets = state.secretFD.flatMap { HostHandover.isOpen($0) ? HostHandover.SecretChannel.take($0) : nil }
+        queue.sync {
+            for saved in state.sessions {
+                register(HostedSession.restore(saved, ringCapacity: config.ringCapacity, queue: queue))
+            }
+        }
+        serve()
+        return secrets
+    }
+
+    private func serve() {
         let source = DispatchSource.makeReadSource(fileDescriptor: listenFD, queue: queue)
         source.setEventHandler { [weak self] in self?.acceptAll() }
         source.resume()
@@ -209,6 +246,8 @@ public final class HostServer {
             guard !session.info.isLive else { return reply(.error("The session is still running.")) }
             forget(id)
             reply(.ok)
+        case .handover(let executable):
+            handOver(to: executable, reply: reply)
         case .shutdown:
             guard !sessions.values.contains(where: { $0.info.isLive }) else { return reply(.error("Sessions are running.")) }
             shuttingDown = true
@@ -218,6 +257,66 @@ public final class HostServer {
                 self?.onExit?()
             }
         }
+    }
+
+    /// Re-executes as `executable`, keeping every session (see `HostHandover`). The new build is probed first (off the
+    /// queue, so the sessions carry on meanwhile); then, on the queue, the sessions are saved as they are at that moment
+    /// and the process becomes the new build. Anything failing before the exec leaves this host as it was.
+    private func handOver(to executable: String, reply: @escaping (HostEvent) -> Void) {
+        guard !handingOver else { return reply(.error("A handover is under way.")) }
+        guard !shuttingDown else { return reply(.error(HostProtocol.shuttingDown)) }
+        guard FileManager.default.isExecutableFile(atPath: executable) else {
+            return reply(.error("Couldn't hand over: \(HostHandover.Failure.notExecutable(executable))."))
+        }
+        handingOver = true
+        let path = config.handoverPath
+        let fail: (Error) -> Void = { [weak self] error in
+            unlink(path)
+            self?.handingOver = false
+            self?.log("handover to \(executable) failed: \(error)")
+            reply(.error("Couldn't hand over: \(error)."))
+        }
+        do {
+            try HostHandover.write(handoverState(secretFD: nil), to: path)
+        } catch {
+            return fail(error)
+        }
+        log("handing over to \(executable)")
+        DispatchQueue.global().async { [weak self] in
+            do {
+                try HostHandover.probe(executable, statePath: path)
+            } catch {
+                self?.queue.async { fail(error) }
+                return
+            }
+            self?.queue.async {
+                guard let self else { return }
+                var secretFD: Int32?
+                do {
+                    if let secrets = self.secretsForHandover?() { secretFD = try HostHandover.SecretChannel.make(secrets) }
+                    let state = self.handoverState(secretFD: secretFD)
+                    if let bad = state.descriptors.first(where: { !HostHandover.isOpen($0) }) { throw HostHandover.Failure.badDescriptor(bad) }
+                    try HostHandover.write(state, to: path)
+                    reply(.ok)
+                    // The rest is the new build's: clients reconnect to the same socket.
+                    let arguments = self.config.arguments + ["--handover", path, "--handover-fallback", self.config.fallback ?? self.config.launcher]
+                    throw HostHandover.exec(executable, arguments: arguments, inherit: state.descriptors)
+                } catch {
+                    if let secretFD { Darwin.close(secretFD) }
+                    // Answered ok already when the exec itself failed: the client sees the connection carry on.
+                    fail(error)
+                }
+            }
+        }
+    }
+
+    private func handoverState(secretFD: Int32?) -> HostHandover.State {
+        HostHandover.State(fromBuild: config.hostBuild, startedAt: startedAt, lockFD: lockFD, listenFD: listenFD, secretFD: secretFD,
+                           sessions: order.compactMap { sessions[$0]?.saved() })
+    }
+
+    private func log(_ text: String) {
+        FileHandle.standardError.write(Data("vibeswitcher-host: \(text)\n".utf8))
     }
 
     /// The newest part of `history` that fits in one frame next to the screen (wide lines of box drawing

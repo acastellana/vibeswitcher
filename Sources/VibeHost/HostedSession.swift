@@ -97,6 +97,47 @@ public final class HostedSession {
         return session
     }
 
+    /// What a new host build needs to carry this session on (see `HostHandover`): the PTY's descriptor survives the
+    /// exec, the rest is copied.
+    func saved() -> HostHandover.Session {
+        HostHandover.Session(info: info, masterFD: closed ? nil : masterFD, output: ring?.replay() ?? Data(), pendingInput: pendingInput,
+                             ended: ended.map { .init(screen: $0.screen, runs: $0.runs, history: $0.history) })
+    }
+
+    /// The session as the host build before this one left it. The screen and scrollback are rebuilt from the replay
+    /// (fed before the terminal's answers are wired up: queries in old output were answered back then). A PTY that
+    /// didn't survive the exec means the session's terminal hung up: it's restored as ended.
+    static func restore(_ saved: HostHandover.Session, ringCapacity: Int, queue: DispatchQueue) -> HostedSession {
+        var info = saved.info
+        let fd = saved.masterFD.flatMap { HostHandover.isOpen($0) ? $0 : nil }
+        if fd == nil, saved.masterFD != nil, info.isLive { info.exit = .init(status: -1, at: Date()) }
+        let session = HostedSession(info: info, masterFD: fd ?? -1, queue: queue, ringCapacity: ringCapacity)
+        if let ended = saved.ended {
+            // Released already: only its last screen.
+            session.ended = (ended.screen, ended.runs, ended.history)
+            session.ring = nil
+            session.terminal = nil
+        } else {
+            session.ring?.append(saved.output)
+            session.terminal?.feed(buffer: [UInt8](saved.output)[...])
+        }
+        guard let fd else {
+            session.closed = true
+            // Ended with its terminal gone: what it keeps of an ended session, from the rebuilt screen.
+            if saved.ended == nil { session.release() }
+            return session
+        }
+        _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
+        _ = fcntl(fd, F_SETFL, fcntl(fd, F_GETFL) | O_NONBLOCK)
+        session.start()
+        // A redraw the build before was halfway through (one row smaller) is put right; full-screen programs then
+        // repaint the rebuilt screen.
+        session.setWindowSize(cols: info.cols, rows: info.rows)
+        session.nudgeRedraw()
+        session.write(saved.pendingInput)
+        return session
+    }
+
     private func start() {
         headless.onReply = { [weak self] data in
             guard let self, !self.clientsAttached else { return }
@@ -114,6 +155,8 @@ public final class HostedSession {
         read.resume()
         readSource = read
 
+        // Ended (and reaped) already: its pid may belong to someone else now.
+        guard info.isLive else { return }
         let exit = DispatchSource.makeProcessSource(identifier: info.childPID, eventMask: .exit, queue: queue)
         exit.setEventHandler { [weak self] in self?.reap() }
         exit.resume()

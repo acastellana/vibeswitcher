@@ -92,7 +92,11 @@ struct SessionHeaderView: View {
             Text(reason).font(.caption).foregroundStyle(.red).lineLimit(1)
         case .outdated(_, let compatible):
             let live = host.sessions.filter(\.isLive).count
-            if compatible {
+            if host.canHandOver {
+                // The automatic handover didn't happen (it failed): try again.
+                Button("Restart Session Host (keeps sessions)") { host.restartHost() }
+                    .help("Updates the session host to this app's version; the sessions keep running.")
+            } else if compatible {
                 if live > 0 {
                     Image(systemName: "arrow.triangle.2.circlepath").font(.system(size: 11)).foregroundStyle(.tertiary)
                         .help(live == 1 ? "An older session host runs this window's session; it's replaced once that session ends."

@@ -12,6 +12,8 @@ public enum HostProtocol {
         /// Answers input it can't take (the program isn't reading and its buffer is full) with an error, replying to
         /// that input's `seq`; older hosts dropped it silently.
         public static let inputRefusals = "inputRefusals"
+        /// Takes `HostRequest.handover`: it's updated without ending its sessions.
+        public static let handover = "handover"
     }
 
     /// The error a spawn gets once the host agreed to shut down.
@@ -203,6 +205,10 @@ public enum HostRequest: Codable, Equatable, Sendable {
     case remove(id: UUID)
     /// Honoured only when no session is live.
     case shutdown
+    /// Re-execute as the host binary at `executable`, keeping every session (see `HostProtocol.Capability.handover`). Answered
+    /// with `ok` just before, then the connection closes; connect again for the new build's welcome. An error: the
+    /// running host carries on as it was.
+    case handover(executable: String)
 }
 
 public enum HostEvent: Codable, Equatable, Sendable {

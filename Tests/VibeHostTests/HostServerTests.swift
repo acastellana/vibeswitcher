@@ -47,6 +47,8 @@ final class TestClient {
     }
 
     func with(_ body: (TestClient) -> Void) { lock.lock(); body(self); lock.unlock() }
+    /// Every event so far; read inside `with`.
+    var allEvents: [HostEvent] { events.map(\.event) }
     @discardableResult func send(_ request: HostRequest) -> Int { queue.sync { connection.send(request) } }
     func text(_ id: UUID) -> String { lock.lock(); defer { lock.unlock() }; return String(decoding: output[id] ?? Data(), as: UTF8.self) }
     func reply(to seq: Int) -> HostEvent? {
@@ -60,7 +62,7 @@ final class TestClient {
     func close() { queue.sync { connection.close() } }
 
     /// Spawns a scratch program and waits for the reply.
-    func spawn(_ command: String, cwd: String = "/tmp") throws -> HostSession {
+    func spawn(_ command: String?, cwd: String = "/tmp") throws -> HostSession {
         let seq = send(.spawn(SpawnRequest(cwd: cwd, command: command, env: [:], cols: 80, rows: 24, keepShell: false,
                                            label: "Test", agent: nil)))
         #expect(eventually { reply(to: seq) != nil })

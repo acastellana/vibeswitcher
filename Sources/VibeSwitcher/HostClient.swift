@@ -31,6 +31,8 @@ final class HostClient: ObservableObject {
 
     @Published private(set) var sessions: [HostSession] = []
     @Published private(set) var state: State = .notRunning
+    /// The running host can be updated without ending its sessions (`HostProtocol.Capability.handover`).
+    @Published private(set) var canHandOver = false
     var onBell: ((UUID) -> Void)?
     /// Each live session's screen text by tty, refreshed by `refreshScreens` (the store reads Claude's footer from it).
     private(set) var screens: [String: String] = [:]
@@ -40,6 +42,11 @@ final class HostClient: ObservableObject {
     private var sinks: [UUID: (sink: Sink, cols: Int, rows: Int)] = [:]
     private var whenReady: [(String?) -> Void] = []
     private var replacing = false
+    /// A handover was asked of the running host; the bundled build's welcome follows.
+    private var handingOver = false
+    /// The bundled build a handover was last asked for: asked once per build, so a failing one isn't asked again
+    /// and again (the window's restart asks once more).
+    private var handedOverTo: Int?
     private var restartWhenEnded = false
     /// Hosts this app started, by pid, reaped when they exit (a replaced host can still be running when the new
     /// one starts).
@@ -217,18 +224,28 @@ final class HostClient: ObservableObject {
             hostCapabilities = Set(capabilities ?? [])
             reconnectAttempt = 0
             restartedForWaiting = false
+            handingOver = false
             sessions = list
+            canHandOver = hostCapabilities.contains(HostProtocol.Capability.handover)
             let live = list.filter(\.isLive).count
             let bundled = HostBuild.id(ofExecutableAt: Self.hostExecutable.path)
-            if version == HostProtocol.version, build == bundled || bundled == 0 {
+            switch Self.plan(version: version, build: build, bundled: bundled, sessions: list.count,
+                             canHandOver: canHandOver, handedOverTo: handedOverTo) {
+            case .use:
                 state = .connected
-            } else if list.isEmpty {
+            case .replace:
                 // Only an empty host is replaced: ended sessions stay listed (and resumable) for their day.
                 return replaceHost()
-            } else {
+            case .handOver:
+                state = .outdated(live: live, compatible: version == HostProtocol.version)
+                handOver()
+            case .keepOutdated:
                 state = .outdated(live: live, compatible: version == HostProtocol.version)
             }
-            finishWaiting(isUsable ? nil : "The session host is out of date. Restart it from the window.")
+            // A host that can't serve us but is becoming the bundled build: its welcome answers whoever waits.
+            if !(handingOver && !isUsable) {
+                finishWaiting(isUsable ? nil : "The session host is out of date. Restart it from the window.")
+            }
             // Back after losing the connection: the views still show what they had; start them over from the
             // host's replay (views of sessions it no longer has are dropped with them).
             for (id, entry) in sinks {
@@ -266,6 +283,41 @@ final class HostClient: ObservableObject {
         else if restartWhenEnded, !sessions.contains(where: \.isLive) { restartWhenEnded = false; replaceHost() }
     }
 
+    enum Plan: Equatable {
+        /// The host is the bundled build (or there's no bundled one to compare with).
+        case use
+        /// An outdated host with no sessions: quit it and start the bundled build.
+        case replace
+        /// An outdated host that can become the bundled build, keeping its sessions.
+        case handOver
+        /// An outdated host that can't: it serves its sessions (if it speaks our protocol) until they're gone.
+        case keepOutdated
+    }
+
+    /// What to do with the host that sent this welcome.
+    static func plan(version: Int, build: Int, bundled: Int, sessions: Int, canHandOver: Bool, handedOverTo: Int?) -> Plan {
+        if version == HostProtocol.version, build == bundled || bundled == 0 { return .use }
+        if sessions == 0 { return .replace }
+        // Even across a protocol change: the request is understood by every host that lists the capability.
+        return canHandOver && handedOverTo != bundled ? .handOver : .keepOutdated
+    }
+
+    /// Asks the running host to become the bundled build, keeping every session: it answers ok, the connection drops
+    /// and the new build's welcome comes on the next one (`connectionLost` reconnects).
+    private func handOver() {
+        guard !handingOver else { return }
+        Breadcrumbs.shared.note("host: handing over to the bundled build")
+        handingOver = true
+        handedOverTo = HostBuild.id(ofExecutableAt: Self.hostExecutable.path)
+        request(.handover(executable: Self.hostExecutable.path)) { [weak self] event in
+            guard let self, case .error(let message) = event, self.handingOver else { return }
+            Breadcrumbs.shared.note("host: handover failed: \(message)")
+            self.handingOver = false
+            // Carry on with the old build, as without a handover.
+            if !self.isUsable { self.finishWaiting("The session host is out of date. Restart it from the window.") }
+        }
+    }
+
     /// Asks an idle host to quit; `connectionLost` then starts the bundled one.
     private func replaceHost() {
         guard !replacing else { return }
@@ -276,8 +328,13 @@ final class HostClient: ObservableObject {
         }
     }
 
-    /// Ends every window session, then replaces the host (for an incompatible, outdated host).
+    /// Updates an outdated host: a host that can hand over becomes the bundled build with every session kept; any
+    /// other has every window session ended, then is replaced.
     func restartHost() {
+        if canHandOver {
+            handedOverTo = nil
+            return handOver()
+        }
         restartWhenEnded = true
         sessions.filter(\.isLive).forEach { kill($0.id) }
         if !sessions.contains(where: \.isLive) { restartWhenEnded = false; replaceHost() }
