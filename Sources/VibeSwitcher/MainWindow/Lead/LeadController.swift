@@ -181,7 +181,7 @@ final class LeadController: ObservableObject {
 
     private func startLead(root: String, goal: String?, show: Bool, askAboutMovedHead: Bool) {
         if let running = leadSessions[root] {
-            if let goal { deliver("New goal: \(goal)", from: Self.commandLine, to: BoardStore(root: root).load(), root: root) }
+            if let goal { deliver("New goal: \(goal)", from: Self.commandLine, root: root) }
             if show { select(running.id) }
             return
         }
@@ -198,6 +198,7 @@ final class LeadController: ObservableObject {
         let vault = LeadVault.standard
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             var issued: String?
+            var waiting: [SteerMessage] = []
             let prepared = Result<(grant: String, launch: LeadLaunch.Prepared), Error> {
                 let workflowPath = try boardStore.prepare()
                 var workflow = LeadWorkflow.load(from: workflowPath)
@@ -213,6 +214,13 @@ final class LeadController: ObservableObject {
                 }
                 let grant = try vault.startLead(root: root, branch: branch, takeHead: takeHead)
                 issued = grant
+                // The role is the new session's from now on: the lead it replaces gets nothing more, and what waited
+                // for it goes to the new one (see `LeadHandover`).
+                let handover = try LeadHandover.begin(boardStore)
+                waiting = handover.waiting
+                if let replaced = handover.replaced {
+                    Breadcrumbs.shared.note("lead: replacing the lead on \(replaced.tty); \(waiting.count) message(s) for it go to the new one")
+                }
                 let name = "lead-\(Slug.make(project, taken: []))"
                 let launch = try LeadLaunch.prepare(
                     role: .lead, root: root, task: nil, base: base,
@@ -225,6 +233,7 @@ final class LeadController: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.startingLeads.remove(root)
+                if !waiting.isEmpty { self.held[root, default: []] += waiting.map { (text: $0.text, sender: $0.from) } }
                 switch prepared {
                 case .failure(let error): self.alert("The lead didn't start.", "\(error)")
                 case .success(let (grant, launch)): self.spawnLead(root: root, project: project, grant: grant, launch: launch, show: show)
@@ -246,7 +255,7 @@ final class LeadController: ObservableObject {
                         Breadcrumbs.shared.note("lead: its role wasn't bound to its session: \(error)")
                     }
                 }
-                try? boardStore.update { board in board.leadSession = session.id.uuidString }
+                try? boardStore.update { board in LeadHandover.started(session.id.uuidString, on: &board) }
                 // You chose to start the lead here: answer Claude's trust question for this folder.
                 self?.answerTrust(session.id, folder: root)
                 if show { self?.select(session.id) }
@@ -278,7 +287,7 @@ final class LeadController: ObservableObject {
         case .missing:
             answerNotices[question.id] = "That question is no longer on the board. Your answer wasn't sent."
         }
-        if let message = outcome.message(given: text) { deliver(message, from: .user, to: store.load(), root: root) }
+        if let message = outcome.message(given: text) { deliver(message, from: .user, root: root) }
         refresh()
     }
 
@@ -291,7 +300,7 @@ final class LeadController: ObservableObject {
             let held = try store.update { board in try board.hold(question.id) }
             answerNotices[question.id] = nil
             deliver("The user is holding your question \(held.short) “\(held.text)”: its timer is off, so don't go ahead with ‘\(held.proposal ?? "")’; "
-                    + "wait for their answer.", from: .user, to: store.load(), root: root)
+                    + "wait for their answer.", from: .user, root: root)
         } catch {
             answerNotices[question.id] = "\(error)"
         }
@@ -304,10 +313,9 @@ final class LeadController: ObservableObject {
         for root in roots {
             let store = BoardStore(root: root)
             guard let fired = try? store.runTimers(), !fired.isEmpty else { continue }
-            let board = store.load()
             let project = (root as NSString).lastPathComponent
             for (question, message) in fired {
-                deliver(message, from: .system("timer"), to: board, root: root)
+                deliver(message, from: .system("timer"), root: root)
                 notify("The lead of \(project) went ahead with ‘\(question.proposal ?? "")’", question.text)
             }
         }
@@ -315,31 +323,31 @@ final class LeadController: ObservableObject {
 
     /// Steered in while the lead works; while it's idle the message waits in its inbox and `flush` types it as soon
     /// as its input box is empty (never into your draft; a draft you send takes it along).
-    private func deliver(_ text: String, from sender: SteerMessage.Sender, to board: LeadBoard, root: String? = nil) {
-        // The board names the lead that last started; if that one is gone (a restart under way), the message
-        // would be dropped by the next lead's hook: keep it until a lead runs again.
-        guard let pid = board.leadPid, let tty = board.leadTTY,
-              ProcessTable.info(pid: pid).map({ $0.tty == tty && $0.agent != nil }) == true else {
-            if let root {
-                held[root, default: []].append((text, sender))
-                Breadcrumbs.shared.note("lead: holding a message for \((root as NSString).lastPathComponent) (no lead running)")
-            }
+    private func deliver(_ text: String, from sender: SteerMessage.Sender, root: String) {
+        // The board as it is now names the lead that holds the role (none while a new one starts, see
+        // `LeadHandover`); if that one is gone (a restart under way), the message would be dropped by the next lead's
+        // hook: keep it until a lead runs again.
+        guard let agent = LeadHandover.named(reads.board(root)),
+              ProcessTable.info(pid: agent.pid).map({ $0.tty == agent.tty && $0.agent != nil }) == true else {
+            held[root, default: []].append((text, sender))
+            Breadcrumbs.shared.note("lead: holding a message for \((root as NSString).lastPathComponent) (no lead running)")
             return
         }
-        let agent = LeadAgent(pid: pid, tty: tty, session: board.leadSession)
         try? LeadDelivery.deliver(text, from: sender, to: agent, inputIsEmpty: nil, typeInto: nil)
-        wake(agent)
+        wake(root: root)
     }
 
     /// Wakes an idle lead that reports wait for (see `LeadWake`): one short prompt for all of them, typed into its
     /// empty box between turns, and none again until it has taken a turn. Your own words waiting for it (an
-    /// answer) are typed as they are instead, and the reports go along with them.
-    private func wake(_ lead: LeadAgent) {
+    /// answer) are typed as they are instead, and the reports go along with them. Always the lead the board names
+    /// at that moment, looked up again before anything is typed: a lead replaced meanwhile gets nothing.
+    private func wake(root: String) {
+        guard let lead = LeadHandover.named(reads.board(root)) else { return }
         let pending = SteerInbox.pending(tty: lead.tty).filter { $0.agentPid == lead.pid }
         let reports = LeadWake.reports(pending, agentPid: lead.pid)
         let now = Date().timeIntervalSince1970
         ReportsWaiting.shared.set(LeadWake.waiting(reports, now: now), tty: lead.tty)
-        if pending.first?.from == .user { return flush(lead) }
+        if pending.first?.from == .user { return flush(lead, lead: root) }
         let key = "\(lead.tty)#\(lead.pid)"
         guard let id = lead.session.flatMap(UUID.init(uuidString:)), let hosted = host.sessions.first(where: { $0.id == id }) else { return }
         var state = wakes[key] ?? LeadWake()
@@ -352,7 +360,7 @@ final class LeadController: ObservableObject {
             guard wakeLater.insert(key).inserted else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + max(0, due - now) + 0.2) { [weak self] in
                 self?.wakeLater.remove(key)
-                self?.wake(lead)
+                self?.wake(root: root)
             }
         case .ready:
             // A prompt typed a moment ago (its hooks haven't said it's working yet) is one in flight too.
@@ -361,6 +369,7 @@ final class LeadController: ObservableObject {
             host.styledScreen(id) { [weak self] screen in
                 guard let self else { return }
                 self.flushing.remove(lead.tty)
+                guard LeadHandover.named(self.reads.board(root)) == lead else { return }
                 // What waits now (its hook may have taken some meanwhile), typed only into an empty box: Claude's
                 // dim suggestion counts as empty, a draft or a dialog waits for the next try.
                 let reports = LeadWake.reports(SteerInbox.pending(tty: lead.tty), agentPid: lead.pid)
@@ -377,8 +386,9 @@ final class LeadController: ObservableObject {
     }
 
     /// Types what waits for an idle agent in a window session, once its input box is empty. Only between turns: a
-    /// missing or stale state file isn't an idle agent (its transcript says whether it's mid-turn).
-    private func flush(_ agent: LeadAgent) {
+    /// missing or stale state file isn't an idle agent (its transcript says whether it's mid-turn). A lead's (`lead`:
+    /// its root) only while the board still names it.
+    private func flush(_ agent: LeadAgent, lead root: String? = nil) {
         guard let id = agent.session.flatMap(UUID.init(uuidString:)),
               SteerInbox.pending(tty: agent.tty).contains(where: { $0.agentPid == agent.pid }),
               let hosted = host.sessions.first(where: { $0.id == id }),
@@ -388,6 +398,7 @@ final class LeadController: ObservableObject {
         host.styledScreen(id) { [weak self] screen in
             guard let self else { return }
             self.flushing.remove(agent.tty)
+            if let root, LeadHandover.named(self.reads.board(root)) != agent { return }
             // Claude's dim suggested prompt isn't a draft: typing replaces it.
             guard let screen, LeadDelivery.box(in: screen) == .empty else { return }
             LeadDelivery.flush(agent, betweenTurns: true, inputIsEmpty: { true }, typeInto: { text in
@@ -504,7 +515,7 @@ final class LeadController: ObservableObject {
         // Sessions that ended together (a stray kill, the app relaunched over them) are told in one message.
         for message in LeadWitness.messages(board: board, seen: seen, now: now, told: { told.contains("\(root)|\($0)") }) {
             message.keys.forEach { told.insert("\(root)|\($0)") }
-            deliver(message.text, from: .system("witness"), to: board, root: root)
+            deliver(message.text, from: .system("witness"), root: root)
         }
         // Low disk space, once per episode; what takes it is sized off the main thread.
         var disk = disks[root] ?? LeadWitness.Disk()
@@ -513,7 +524,7 @@ final class LeadController: ObservableObject {
             let sizing = disk
             DispatchQueue.global(qos: .utility).async { [weak self] in
                 let text = sizing.text(free: free, root: root, board: board, workflow: workflow)
-                DispatchQueue.main.async { self?.deliver(text, from: .system("witness"), to: board, root: root) }
+                DispatchQueue.main.async { self?.deliver(text, from: .system("witness"), root: root) }
             }
         }
         disks[root] = disk
@@ -523,9 +534,9 @@ final class LeadController: ObservableObject {
         if noted.noteStalls(stalls) { try? BoardStore(root: root).update { $0.noteStalls(stalls) } }
         // A lead runs again: what was held for it goes now.
         if let waiting = held.removeValue(forKey: root) {
-            for message in waiting { deliver(message.text, from: message.sender, to: board, root: root) }
+            for message in waiting { deliver(message.text, from: message.sender, root: root) }
         }
-        if let pid = board.leadPid, let tty = board.leadTTY { wake(LeadAgent(pid: pid, tty: tty, session: board.leadSession)) }
+        wake(root: root)
     }
 
     /// Who a waiting message is from, in words.

@@ -983,10 +983,9 @@ public final class LeadToolset: MCPToolset {
         try store.update { board in
             board.reports = ((board.reports ?? []) + [LeadReport(about: about, text: text)]).suffix(LeadBoard.keptReports)
         }
-        let board = store.load()
-        guard let pid = board.leadPid, let tty = board.leadTTY else { return false }
-        let lead = LeadAgent(pid: pid, tty: tty, session: board.leadSession)
-        guard runtime.isRunning(lead) else { return false }
+        // Only the session holding the lead's role now: a replaced lead runs on, without it (see `LeadHandover`).
+        let holder = vault.current(.lead, root: root, task: nil)?.session
+        guard let lead = LeadHandover.current(store.load(), holder: holder, isRunning: runtime.isRunning) else { return false }
         _ = try runtime.steer(.agent(lead), from: .system(about), text: text, clearDraft: false)
         return true
     }
