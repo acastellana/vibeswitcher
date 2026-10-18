@@ -35,6 +35,8 @@ public final class HostServer {
         /// The old build's own copy (see `HostHandover`): where a build this host hands over to goes back to if it
         /// can't restore. Nil: `launcher`.
         public var fallback: String?
+        /// Each session's output is parsed in a process of its own (see `SessionParser`), watched for stalls.
+        public var parser = ParserOptions()
 
         /// Where a handover leaves the sessions for the next build: beside the lock, so a scratch host's stays its own.
         public var handoverPath: String { lockPath + ".handover" }
@@ -119,7 +121,8 @@ public final class HostServer {
         let secrets = HostHandover.takeSecrets(from: &state)
         queue.sync {
             for saved in state.sessions {
-                register(HostedSession.restore(saved, ringCapacity: config.ringCapacity, queue: queue))
+                register(HostedSession.restore(saved, launcher: config.launcher, parser: config.parser, ringCapacity: config.ringCapacity,
+                                               queue: queue))
                 startedBy[saved.info.id] = saved.startedBy
             }
         }
@@ -286,7 +289,7 @@ public final class HostServer {
             guard !shuttingDown else { return reply(.error(HostProtocol.shuttingDown)) }
             do {
                 let session = try HostedSession.spawn(request, shell: config.shell, launcher: config.launcher, baseEnvironment: config.baseEnvironment,
-                                                      ringCapacity: config.ringCapacity, queue: queue)
+                                                      ringCapacity: config.ringCapacity, queue: queue, parser: config.parser)
                 register(session)
                 if case .session(let from) = caller(of: client) { startedBy[session.id] = UUID(uuidString: from) }
                 let info = session.info
@@ -336,15 +339,18 @@ public final class HostServer {
         case .resize(let id, let cols, let rows):
             guard let session = sessions[id], primary[id] == nil || primary[id] == key else { return }
             session.resize(cols: cols, rows: rows)
+        // Answered once the session's parser got there (see `HostedSession.view`): the queue never waits on it.
         case .screen(let id):
-            reply(sessions[id].map { .screenText(id: id, text: $0.screenText()) } ?? missing)
+            guard let session = sessions[id] else { return reply(missing) }
+            session.view(historyLines: nil) { reply(.screenText(id: id, text: $0.screen)) }
         case .styledScreen(let id):
-            guard let screen = sessions[id]?.styledScreen() else { return reply(missing) }
-            reply(.styledScreenText(id: id, text: screen.text, runs: screen.runs))
+            guard let session = sessions[id] else { return reply(missing) }
+            session.view(historyLines: nil) { reply(.styledScreenText(id: id, text: $0.screen, runs: $0.runs)) }
         case .history(let id, let lines):
             guard let session = sessions[id] else { return reply(missing) }
-            let text = session.historyText(lines: max(1, min(lines, 5_000)))
-            reply(.historyText(id: id, history: Self.fitting(text.history, besides: text.screen), screen: text.screen))
+            session.view(historyLines: max(1, min(lines, 5_000))) { view in
+                reply(.historyText(id: id, history: Self.fitting(view.history ?? "", besides: view.screen), screen: view.screen))
+            }
         case .kill(let id):
             guard mayKill(id, from: caller(of: client)) else {
                 log.note("kill \(Self.short(id)) refused: not the app, the session itself or its lead, \(HostLog.peer(client.peerPID))")
@@ -464,16 +470,23 @@ public final class HostServer {
             self?.queue.async {
                 guard let self else { return }
                 var secretFD: Int32?
+                var parsersStopped = false
                 do {
                     if let secrets = self.secretsForHandover?() { secretFD = try HostHandover.SecretChannel.make(secrets) }
+                    // A session that just ended is saved as ended, with the screen its parser showed last.
+                    self.sessions.values.forEach { $0.finishNow() }
                     let state = self.handoverState(secretFD: secretFD)
                     if let bad = state.descriptors.first(where: { !HostHandover.isOpen($0) }) { throw HostHandover.Failure.badDescriptor(bad) }
                     try HostHandover.write(state, to: path)
                     reply(.ok)
+                    // The new build starts its own parsers, from the replays; none of these is left running.
+                    self.sessions.values.forEach { $0.suspendParser() }
+                    parsersStopped = true
                     // The rest is the new build's: clients reconnect to the same socket.
                     let arguments = self.config.arguments + ["--handover", path, "--handover-fallback", self.config.fallback ?? self.config.launcher]
                     throw HostHandover.exec(executable, arguments: arguments, inherit: state.descriptors)
                 } catch {
+                    if parsersStopped { self.sessions.values.forEach { $0.resumeParser() } }
                     if let secretFD { Darwin.close(secretFD) }
                     fail(error)
                     // Answered ok already when the exec itself failed: clients waiting for the new build come back to
@@ -520,6 +533,10 @@ public final class HostServer {
         session.onOutput = { [weak self] data in self?.deliver(data, of: id) }
         session.onChange = { [weak self] info in self?.broadcast(.sessionChanged(info)) }
         session.onBell = { [weak self] in self?.broadcast(.bell(id: id)) }
+        session.onParserTrouble = { [weak self] text in
+            self?.log.note("watchdog: session \(Self.short(id))'s \(text)")
+            self?.log("session \(id.uuidString)'s \(text)")
+        }
         session.onEnd = { [weak self, weak session] status in
             guard let self, let info = session?.info else { return }
             let asked = info.exit?.killedBy.map { ", after a kill from peer pid \($0)" } ?? ""

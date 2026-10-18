@@ -2,9 +2,9 @@ import Foundation
 import SwiftTerm
 import VibeCore
 
-/// One window session: its pseudo-terminal and child process, everything it printed (replay buffer and a
-/// headless terminal for title, screen and scrollback text), and input/resize/kill.
-/// Not thread-safe: every member is used on `queue`.
+/// One window session: its pseudo-terminal and child process, everything it printed (replay buffer, and a headless
+/// terminal for title, screen and scrollback text, parsed in a process of its own: see `SessionParser`), and
+/// input/resize/kill. Not thread-safe: every member is used on `queue`.
 public final class HostedSession {
     public enum Failure: Error, Equatable {
         case noSuchFolder(String)
@@ -22,16 +22,33 @@ public final class HostedSession {
     public var onEnd: ((Int32) -> Void)?
     /// While a view is attached it answers terminal queries; the headless terminal's answers are dropped.
     public var clientsAttached = false
+    /// The session's parser stalled or ended, and what was done about it: a line for the host's log.
+    public var onParserTrouble: ((String) -> Void)?
 
     private let masterFD: Int32
     private let queue: DispatchQueue
     /// Both let go once the session ended (see `release`).
     private var ring: OutputRing?
-    private var terminal: Terminal?
+    /// The headless terminal, in its own process. Nil once the session ended, or after it failed too often.
+    private var parser: ParserLink?
+    /// Starts the parser (the host's executable, like `PTYSpawn`'s launcher).
+    private let launcher: String
+    private let parserOptions: ParserOptions
+    /// What the parser showed last: what a view falls back on when there's no parser to ask.
+    private var lastView = ParserView.empty
+    /// When its parser failed lately (see `replaceParser`).
+    private var parserFailures: [Date] = []
+    static let maxParserFailures = 5
+    /// Ends a stalled parser (see `checkParser`).
+    private var watchdog: DispatchSourceTimer?
+    /// Reading the PTY waits while the parser is this far behind, as the program used to wait on the parse.
+    static let maxUnparsed = 4 << 20
+    private var readingPaused = false
+    /// It ended, and its last screen is on its way from the parser: what's left to do then (see `finish`).
+    private var finishing: (() -> Void)?
     /// What an ended session keeps: its last screen, how it was drawn, and the last lines above it.
     private var ended: (screen: String, runs: [ScreenRun], history: String)?
     static let endedHistoryLines = 500
-    private let headless = HeadlessDelegate()
     private var readSource: DispatchSourceRead?
     private var writeSource: DispatchSourceWrite?
     private var exitSource: DispatchSourceProcess?
@@ -46,12 +63,13 @@ public final class HostedSession {
     private var closed = false
     static let maxPendingInput = 1 << 20
 
-    private init(info: HostSession, masterFD: Int32, queue: DispatchQueue, ringCapacity: Int) {
+    private init(info: HostSession, masterFD: Int32, queue: DispatchQueue, ringCapacity: Int, launcher: String, parser: ParserOptions) {
         self.info = info
         self.masterFD = masterFD
         self.queue = queue
+        self.launcher = launcher
+        parserOptions = parser
         ring = OutputRing(capacity: ringCapacity)
-        terminal = Terminal(delegate: headless, options: TerminalOptions(cols: info.cols, rows: info.rows, scrollback: 5_000))
     }
 
     /// `$SHELL -l -i [-c command]`: an interactive login shell reads both `.zprofile` and `.zshrc`, so the
@@ -73,9 +91,10 @@ public final class HostedSession {
         return env.map { "\($0.key)=\($0.value)" }.sorted()
     }
 
-    /// `launcher`: an executable that handles `--pty-exec` (see `PTYSpawn`), normally the host itself.
+    /// `launcher`: an executable that handles `--pty-exec` (see `PTYSpawn`) and `--parse-session` (see `SessionParser`),
+    /// normally the host itself.
     public static func spawn(_ request: SpawnRequest, shell: String, launcher: String, baseEnvironment: [String: String],
-                             ringCapacity: Int, queue: DispatchQueue) throws -> HostedSession {
+                             ringCapacity: Int, queue: DispatchQueue, parser: ParserOptions = ParserOptions()) throws -> HostedSession {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: request.cwd, isDirectory: &isDirectory), isDirectory.boolValue else {
             throw Failure.noSuchFolder(request.cwd)
@@ -96,7 +115,9 @@ public final class HostedSession {
         let info = HostSession(id: id, tty: tty, childPID: child.pid, cwd: request.cwd, command: request.command,
                                label: request.label, agent: request.agent, title: "", startedAt: Date(),
                                cols: cols, rows: rows, exit: nil)
-        let session = HostedSession(info: info, masterFD: child.masterFD, queue: queue, ringCapacity: ringCapacity)
+        let session = HostedSession(info: info, masterFD: child.masterFD, queue: queue, ringCapacity: ringCapacity, launcher: launcher,
+                                    parser: parser)
+        session.startParser(replay: Data())
         session.start()
         return session
     }
@@ -109,26 +130,26 @@ public final class HostedSession {
     }
 
     /// The session as the host build before this one left it. The screen and scrollback are rebuilt from the replay
-    /// (fed before the terminal's answers are wired up: queries in old output were answered back then). A PTY that
-    /// didn't survive the exec means the session's terminal hung up: it's restored as ended.
-    static func restore(_ saved: HostHandover.Session, ringCapacity: Int, queue: DispatchQueue) -> HostedSession {
+    /// (fed quietly: queries in old output were answered back then). A PTY that didn't survive the exec means the
+    /// session's terminal hung up: it's restored as ended.
+    static func restore(_ saved: HostHandover.Session, launcher: String, parser: ParserOptions, ringCapacity: Int,
+                        queue: DispatchQueue) -> HostedSession {
         var info = saved.info
         let fd = saved.masterFD.flatMap { HostHandover.isOpen($0) ? $0 : nil }
         if fd == nil, saved.masterFD != nil, info.isLive { info.exit = .init(status: -1, at: Date()) }
-        let session = HostedSession(info: info, masterFD: fd ?? -1, queue: queue, ringCapacity: ringCapacity)
+        let session = HostedSession(info: info, masterFD: fd ?? -1, queue: queue, ringCapacity: ringCapacity, launcher: launcher, parser: parser)
         if let ended = saved.ended {
             // Released already: only its last screen.
             session.ended = (ended.screen, ended.runs, ended.history)
             session.ring = nil
-            session.terminal = nil
         } else {
             session.ring?.append(saved.output)
-            session.terminal?.feed(buffer: [UInt8](saved.output)[...])
+            session.startParser(replay: saved.output)
         }
         guard let fd else {
             session.closed = true
             // Ended with its terminal gone: what it keeps of an ended session, from the rebuilt screen.
-            if saved.ended == nil { session.release() }
+            if saved.ended == nil { session.finish {} }
             return session
         }
         _ = fcntl(fd, F_SETFD, FD_CLOEXEC)
@@ -142,20 +163,97 @@ public final class HostedSession {
         return session
     }
 
-    private func start() {
-        headless.onReply = { [weak self] data in
+    /// A parser for this session, rebuilt from `replay` (fed quietly), and the watchdog over it.
+    private func startParser(replay: Data) {
+        guard let link = ParserLink.start(launcher: launcher, cols: info.cols, rows: info.rows, options: parserOptions, queue: queue) else {
+            onParserTrouble?("couldn't start a parser: its screen is the last one shown")
+            return
+        }
+        link.onReply = { [weak self] data in
             guard let self, !self.clientsAttached else { return }
             self.write(data)
         }
-        headless.onTitle = { [weak self] title in
+        link.onTitle = { [weak self] title in
             guard let self, self.info.title != title else { return }
             self.info.title = title
             self.onChange?(self.info)
         }
-        headless.onBell = { [weak self] in self?.onBell?() }
-        headless.onProgramStatus = { [weak self] report in self?.programStatus(report) }
-        if let terminal { headless.listen(to: terminal) }
+        link.onBell = { [weak self] in self?.onBell?() }
+        link.onProgramStatus = { [weak self] payload in
+            guard let report = ProgramStatus.parse(payload, at: Date()) else { return }
+            self?.programStatus(report)
+        }
+        link.onParsed = { [weak self] in self?.resumeReadingIfCaughtUp() }
+        link.onGone = { [weak self, weak link] status in
+            guard let self, let link, self.parser === link else { return }
+            self.replaceParser(link, because: "ended (\(HostLog.waitStatus(status)))")
+        }
+        link.feed(replay, quietly: true)
+        parser = link
+        startWatchdog()
+    }
 
+    /// A parser that stalled or ended is replaced by a new one, rebuilt from the replay without the bytes it hadn't
+    /// parsed yet: they may be what it can't parse (the program redraws its screen anyway, see `nudgeRedraw`). One
+    /// that keeps failing (more than `maxParserFailures` times in a minute) isn't: the session runs on without one,
+    /// its screen the last one shown.
+    private func replaceParser(_ link: ParserLink, because reason: String) {
+        let unparsed = link.unparsed
+        link.stop()
+        parser = nil
+        defer { resumeReading() }
+        let now = Date()
+        parserFailures = parserFailures.filter { now.timeIntervalSince($0) < 60 } + [now]
+        let what = "parser (pid \(link.pid)) \(reason) with \(unparsed) bytes unparsed"
+        guard parserFailures.count <= Self.maxParserFailures, let ring else {
+            let count = parserFailures.count
+            onParserTrouble?("\(what); \(ring == nil ? "it ended" : "failed \(count) times in a minute"): no parser now, its screen stays the last one shown")
+            return
+        }
+        let replay = ring.replay()
+        startParser(replay: replay.count > unparsed ? Data(replay.dropLast(unparsed)) : Data())
+        onParserTrouble?("\(what): started another (pid \(parser?.pid ?? 0)) without those bytes")
+        nudgeRedraw()
+    }
+
+    private func startWatchdog() {
+        guard watchdog == nil else { return }
+        let interval = max(0.05, min(1, parserOptions.stallLimit / 4))
+        let timer = DispatchSource.makeTimerSource(queue: queue)
+        timer.schedule(deadline: .now() + interval, repeating: interval, leeway: .milliseconds(Int(interval * 250)))
+        timer.setEventHandler { [weak self] in self?.checkParser() }
+        timer.resume()
+        watchdog = timer
+    }
+
+    /// Output or a request waiting on the parser for longer than `ParserOptions.stallLimit`, with no progress: it's
+    /// stalled.
+    private func checkParser() {
+        guard let parser else { return }
+        let (busy, since) = parser.busy
+        let waited = Date().timeIntervalSince(since)
+        guard busy, waited > parserOptions.stallLimit else { return }
+        replaceParser(parser, because: "stalled for \(String(format: "%.1f", waited)) s")
+    }
+
+    private func pauseReading() {
+        guard !readingPaused, let readSource else { return }
+        readSource.suspend()
+        readingPaused = true
+    }
+
+    private func resumeReadingIfCaughtUp() {
+        guard readingPaused, (parser?.unparsed ?? 0) < Self.maxUnparsed / 4 else { return }
+        resumeReading()
+    }
+
+    private func resumeReading() {
+        guard readingPaused else { return }
+        readingPaused = false
+        readSource?.resume()
+    }
+
+    private func start() {
         let read = DispatchSource.makeReadSource(fileDescriptor: masterFD, queue: queue)
         read.setEventHandler { [weak self] in self?.drain() }
         read.resume()
@@ -176,16 +274,17 @@ public final class HostedSession {
     }
 
     /// Reads what's available, up to `reads` × 64 KB; never blocks (the PTY is nonblocking), so the program never
-    /// waits on us.
-    private func drain(reads: Int = 16) {
+    /// waits on us, only on its parser once that's `maxUnparsed` behind (unless `pausing` is false).
+    private func drain(reads: Int = 16, pausing: Bool = true) {
         var buffer = [UInt8](repeating: 0, count: 65_536)
         for _ in 0..<reads {
             let count = Darwin.read(masterFD, &buffer, buffer.count)
             if count > 0 {
                 let chunk = Data(buffer[0..<count])
                 ring?.append(chunk)
-                terminal?.feed(buffer: buffer[0..<count])
+                parser?.feed(chunk)
                 onOutput?(chunk)
+                if pausing, let parser, parser.unparsed > Self.maxUnparsed { return pauseReading() }
                 continue
             }
             if count < 0, errno == EAGAIN || errno == EINTR { return }
@@ -233,28 +332,70 @@ public final class HostedSession {
         // A program that died without `state=clear` isn't still working.
         info.programStatus = nil
         // What it printed last is still in the PTY.
-        if readSource != nil { drain(reads: 256) }
-        release()
-        onEnd?(status)
-        onChange?(info)
+        if readSource != nil { drain(reads: 256, pausing: false) }
+        finish { [weak self] in
+            guard let self else { return }
+            self.onEnd?(status)
+            self.onChange?(self.info)
+        }
+    }
+
+    /// Once the parser got through everything the session printed, its last screen is kept and the rest let go
+    /// (see `release`); then `done`.
+    private func finish(then done: @escaping () -> Void) {
+        guard ended == nil, finishing == nil else { return done() }
+        finishing = done
+        view(historyLines: Self.endedHistoryLines) { [weak self] view in
+            guard let self, let done = self.finishing else { return }
+            self.finishing = nil
+            self.release(with: view)
+            done()
+        }
+    }
+
+    /// A session ending now gets there without waiting for its parser (the screen it showed last): a handover is
+    /// about to replace this process.
+    func finishNow() {
+        guard let done = finishing else { return }
+        finishing = nil
+        release(with: lastView)
+        done()
     }
 
     /// Lets go of what only a running session needs: the PTY (from the system's pool, shared with Terminal), the
-    /// replay buffer and the terminal with its 5,000 lines. Kept: the last screen and the lines just above it.
+    /// replay buffer and the parser with its 5,000 lines. Kept: the last screen and the lines just above it.
     /// Whatever the program left running on the terminal loses it, as when a Terminal tab closes.
-    private func release() {
-        guard let terminal else { return }
-        let history = historyText(lines: Self.endedHistoryLines).history
-        let screen = Self.styledScreen(of: terminal)
-        ended = (screen.text, screen.runs, history)
-        self.terminal = nil
+    private func release(with view: ParserView) {
+        guard ended == nil else { return }
+        ended = (view.screen, view.runs, view.history ?? "")
+        stopParser()
         ring = nil
         pendingInput = Data()
         close()
     }
 
-    /// Whether it still holds a running session's PTY, replay buffer or terminal.
-    var holdsLiveResources: Bool { !closed || terminal != nil || ring != nil }
+    /// Ends the parser and its watchdog.
+    private func stopParser() {
+        parser?.stop()
+        parser = nil
+        watchdog?.cancel()
+        watchdog = nil
+    }
+
+    /// The parser goes before a handover's exec (the new build starts its own): no parser process is left behind
+    /// for it. `resumeParser` brings it back if the exec fails.
+    func suspendParser() { stopParser() }
+
+    func resumeParser() {
+        guard parser == nil, !closed, ended == nil, let ring else { return }
+        startParser(replay: ring.replay())
+    }
+
+    /// Whether it still holds a running session's PTY, replay buffer or parser.
+    var holdsLiveResources: Bool { !closed || parser != nil || ring != nil }
+
+    /// The parser's process id, nil when it has none.
+    var parserPID: pid_t? { parser?.pid }
 
     /// Replays at most 1 MB: the program redraws its screen on attach anyway (see `OutputRing.replay`). An ended
     /// session's replay draws its last screen (see `drawing`).
@@ -335,9 +476,9 @@ public final class HostedSession {
 
     public func resize(cols: Int, rows: Int) {
         let cols = max(2, min(cols, 1000)), rows = max(2, min(rows, 500))
-        guard let terminal, cols != info.cols || rows != info.rows else { return }
+        guard ended == nil, cols != info.cols || rows != info.rows else { return }
         setWindowSize(cols: cols, rows: rows)
-        terminal.resize(cols: cols, rows: rows)
+        parser?.resize(cols: cols, rows: rows)
         info.cols = cols
         info.rows = rows
         onChange?(info)
@@ -360,16 +501,50 @@ public final class HostedSession {
         _ = PseudoTerminalHelpers.setWinSize(masterPtyDescriptor: masterFD, windowSize: &size)
     }
 
-    public func screenText() -> String {
-        guard let terminal else { return ended?.screen ?? "" }
-        return (0..<terminal.rows).compactMap { terminal.getLine(row: $0)?.translateToString(trimRight: true) }
-            .joined(separator: "\n")
+    /// The screen, the lines above it when `historyLines` isn't nil (at most `endedHistoryLines` once the session
+    /// ended) and how the screen is drawn, once the parser got through everything printed before. Without a parser to
+    /// ask (or once it failed), what it showed last.
+    public func view(historyLines: Int?, _ completion: @escaping (ParserView) -> Void) {
+        if let ended = endedView(historyLines: historyLines) { return completion(ended) }
+        guard let asked = parser else { return completion(fallbackView(historyLines: historyLines)) }
+        asked.view(historyLines: historyLines) { [weak self] view in
+            guard let self else { return }
+            guard let view else {
+                // Replaced meanwhile: the new one is asked.
+                if let parser = self.parser, parser !== asked { return self.view(historyLines: historyLines, completion) }
+                return completion(self.endedView(historyLines: historyLines) ?? self.fallbackView(historyLines: historyLines))
+            }
+            self.lastView = ParserView(screen: view.screen, runs: view.runs, history: nil)
+            completion(view)
+        }
     }
 
-    /// `screenText`, and how its characters are drawn (see `ScreenRun`).
+    /// `view`, waited for (up to 2 s, then what the parser showed last). Never on a host's queue, which `view` keeps
+    /// free: for tests.
+    func viewNow(historyLines: Int?) -> ParserView {
+        if let ended = endedView(historyLines: historyLines) { return ended }
+        guard let view = parser?.viewNow(historyLines: historyLines, timeout: 2) else { return fallbackView(historyLines: historyLines) }
+        lastView = ParserView(screen: view.screen, runs: view.runs, history: nil)
+        return view
+    }
+
+    private func endedView(historyLines: Int?) -> ParserView? {
+        guard let ended else { return nil }
+        let history = historyLines.map { ended.history.split(separator: "\n", omittingEmptySubsequences: false).suffix($0).joined(separator: "\n") }
+        return ParserView(screen: ended.screen, runs: ended.runs, history: history)
+    }
+
+    private func fallbackView(historyLines: Int?) -> ParserView {
+        ParserView(screen: lastView.screen, runs: lastView.runs, history: historyLines.map { _ in "" })
+    }
+
+    /// See `viewNow`: for tests.
+    public func screenText() -> String { viewNow(historyLines: nil).screen }
+
+    /// `screenText`, and how its characters are drawn (see `ScreenRun`). See `viewNow`: for tests.
     public func styledScreen() -> (text: String, runs: [ScreenRun]) {
-        guard let terminal else { return (ended?.screen ?? "", ended?.runs ?? []) }
-        return Self.styledScreen(of: terminal)
+        let view = viewNow(historyLines: nil)
+        return (view.screen, view.runs)
     }
 
     /// The text matches `screenText`'s (one character per cell, trimmed on the right); runs cover what isn't plain.
@@ -411,17 +586,10 @@ public final class HostedSession {
     }
 
     /// The last `lines` lines above the screen (normal buffer), and the screen itself. At most
-    /// `endedHistoryLines` once the session ended.
+    /// `endedHistoryLines` once the session ended. See `viewNow`: for tests.
     public func historyText(lines: Int) -> (history: String, screen: String) {
-        guard let terminal else {
-            let history = ended?.history.split(separator: "\n", omittingEmptySubsequences: false).suffix(lines) ?? []
-            return (history.joined(separator: "\n"), screenText())
-        }
-        let all = String(decoding: terminal.getBufferAsData(kind: .normal), as: UTF8.self)
-            .components(separatedBy: "\n")
-        let screenRows = terminal.rows
-        let above = all.count > screenRows ? Array(all[0..<(all.count - screenRows - 1)]) : []
-        return (above.suffix(lines).joined(separator: "\n"), screenText())
+        let view = viewNow(historyLines: lines)
+        return (view.history ?? "", view.screen)
     }
 
     /// Like closing a Terminal tab: SIGHUP to the shell's process group and to the job in the foreground
@@ -440,8 +608,11 @@ public final class HostedSession {
 
     /// Releases the PTY. Call after the session ended (or when the host quits).
     public func close() {
+        stopParser()
         guard !closed else { return }
         closed = true
+        // A suspended watcher can't be cancelled.
+        resumeReading()
         // The PTY closes once its watchers are done with it (closing first could hand its number to a new
         // session's PTY while an old watcher still looks at it).
         let done = DispatchGroup()
@@ -457,19 +628,17 @@ public final class HostedSession {
     }
 }
 
-/// The headless terminal's delegate: replies to queries, title, bell, program status (OSC 7501).
+/// The headless terminal's delegate (in the parser, see `SessionParser`): replies to queries, title, bell, program
+/// status (OSC 7501, its payload).
 final class HeadlessDelegate: TerminalDelegate {
     var onReply: ((Data) -> Void)?
     var onTitle: ((String) -> Void)?
     var onBell: (() -> Void)?
-    var onProgramStatus: ((ProgramStatus.Report) -> Void)?
+    var onProgramStatus: ((Data) -> Void)?
 
     /// SwiftTerm leaves OSC 7501 alone otherwise.
     func listen(to terminal: Terminal) {
-        terminal.registerOscHandler(code: ProgramStatus.code) { [weak self] payload in
-            guard let report = ProgramStatus.parse(String(decoding: payload, as: UTF8.self), at: Date()) else { return }
-            self?.onProgramStatus?(report)
-        }
+        terminal.registerOscHandler(code: ProgramStatus.code) { [weak self] payload in self?.onProgramStatus?(Data(payload)) }
     }
 
     func send(source: Terminal, data: ArraySlice<UInt8>) { onReply?(Data(data)) }

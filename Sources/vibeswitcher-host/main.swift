@@ -7,6 +7,8 @@ import VibeHost
 
 // First: as the launcher of a session's program (posix_spawned by the host itself), nothing else runs.
 PTYSpawn.execIfLaunched(CommandLine.arguments)
+// As a session's parser (see `SessionParser`): its headless terminal, fed by the host.
+SessionParser.runIfAsked(CommandLine.arguments)
 // As the probe of a handover (see `HostHandover`): only whether this build can take over.
 HostHandover.probeIfAsked(CommandLine.arguments)
 
@@ -52,6 +54,9 @@ var config = HostServer.Config(
     baseEnvironment: environment.filter { inherited.contains($0.key) },
     hostBuild: build)
 config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600
+// A scratch host's parsers can be told to stall or trap (tests), and watched more closely.
+config.parser.testHooks = !ownsLaunchers && arguments.contains("--parser-test-hooks")
+if let limit = value(after: "--parser-stall-limit").flatMap(TimeInterval.init), limit > 0 { config.parser.stallLimit = limit }
 // The user's host logs its sessions (see `HostLog`); a scratch host only where it's told to.
 config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.appendingPathComponent("debug/host.log").path : nil)
 // What a build this one hands over to is started with: the same, without this start's handover.
