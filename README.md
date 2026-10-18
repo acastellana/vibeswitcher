@@ -74,7 +74,11 @@ the contract with real commands (and tries to break it); only work the verifier 
 tested (the workflow's `test_command`) and fast-forwarded into it, never with a merge commit or a force. The lead's
 branch is the one checked out when it first starts in the repository (`base_branch:` in `workflow.md` changes it);
 workers start from it. Then the lead
-removes the worktree and branch, and tells you what landed in a few lines. The grunt work stays out of your way:
+removes the worktree and branch, and tells you what landed in a few lines. Before merging it checks that nothing
+holds the task back (a recorded decision, the task's notes, your word, e.g. "prototype: never merge until I've
+looked"): such a task it sets to **kept** with the reason, which keeps its branch and worktree, and `merge` refuses a
+kept task, naming why, until the lead sets it back. A new lead reads `decisions.md` and `progress.md`, not just the
+board, before it acts. The grunt work stays out of your way:
 workers and verifiers fold under their lead in the list, and the lead's chat shows a strip with the team's state.
 It only asks you what's really yours to decide; its questions show as cards you answer without stopping it (the
 answer reaches it at its next step), and you can message it any time the same way. VibeSwitcher is its witness:
@@ -95,7 +99,8 @@ out over the next minute and folds into "Earlier decisions (n)" (with Reduce Mot
 whole decision and why. Then each task in one line, a status mark with its own color and shape, the title and its
 state with how long it's been there ("Working 12m", "Rework 1 · 22m", "In review 3m", "Needs you", "Queued"), counted
 from when that stage began; ordered by what needs you, then work under way, review, the queue in planned order, and
-the merged ones folded into "Merged (n)". Under each task at work, one dim line says in plain words what its agent is
+the merged and kept ones folded into "Merged (n) · Kept (k)". A task whose worker or verifier session is gone (a
+replaced session host takes its sessions with it) or ended without a word reads "Worker ended", not working. Under each task at work, one dim line says in plain words what its agent is
 doing, written by a small model through headless Claude Code (`claude -p` with haiku and no tools) from the task's
 title, its checkpoints (workers note milestones with a `progress` tool) and its agent's last steps, at most every three
 minutes per task and only when its transcript changed, while the tab is open; long decisions get a plain one-line
@@ -137,11 +142,14 @@ moved by anything but its own merges since the lead last left it (starting the l
 is), rebases exactly the audited commit in a worktree no agent works in (squashing it into one commit when the
 worker merged the base in, so the lead's history stays a line), runs the test command there and
 fast-forwards to exactly what was tested. Verifiers start without the branch's project settings, hooks and MCP servers, and
-VibeSwitcher doesn't answer Claude's trust question for a branch that changes them. Messages reach the lead quoted
+VibeSwitcher doesn't answer Claude's trust question for a branch that changes them (a git-ignored file counts only
+when Claude reads it, like `settings.local.json`, not its own `.claude/scheduled_tasks.lock`). Messages reach the lead quoted
 under a line naming their sender, so a worker's report can't pass for the user's words, and only the app sends as
 the user. They reach the lead's own conversation, never a subagent it started (a subagent's tool calls fire the same
 hooks; the message waits for the lead's next step), and count as delivered only once they're in it; `status` also
-lists every report that came in since the lead last asked. Claude Code permission rules add a second layer: the lead and verifiers are denied file edits, shell
+lists every report that came in since the lead last asked, one line each (who, and its first 200 characters; those
+about merged or abandoned tasks as a count), and stays a few KB on a board of dozens of tasks: `board` lists each
+task in one line, and `board(task)` gives one task in full with its reports. Claude Code permission rules add a second layer: the lead and verifiers are denied file edits, shell
 file writes and git writes; workers are denied pushing, moving refs, checking out, switching to or resetting hard onto
 the lead's branch or another `agent/` branch, and rebasing any branch but their own. A worker brings its own branch
 up to date by merging: `git merge <base>`, resolve, `git add`, then `git commit` (`git merge --abort` starts over), each
@@ -149,7 +157,16 @@ typed on its own with no pipes or `&&`, the one form Claude Code's auto mode doe
 a rebase and an amend). Its session runs with `GIT_EDITOR=true`, so those bare commands never wait on an editor and
 need nothing in front. When `merge` finds a branch conflicting it asks the lead to have that worker merge the base in. Every session reads git (log, diff,
 status, show) without asking, after a denied command too.
-Their tools come from `vibeswitcher-mcp`, a tool server bundled with the app.
+Their tools come from `vibeswitcher-mcp`, a tool server bundled with the app. A text given under a name workers often
+use instead (`progress`/`report`/`message` with `message`, `text` or `summary`; several lines are joined) is taken; a
+call with none is refused naming the parameter it wants. `update_task` refuses a name or state it doesn't take rather
+than drop it, and `append_context` adds to a task's context where `context` replaces it. `merge` on a merged task says
+when it was merged. When the session host can't be read, `start_worker`, `stop_worker` and `cleanup` refuse with its
+error (never "no sessions", which would start a second worker in a live worktree), and `cleanup` only ends sessions
+that are still running. `message` with `clear_draft` sends one ^C and types the message once the box reads empty; on a
+host too old to say what's dim, Claude's suggestion drawn again unchanged after the ^C is typed over too. If the box
+still holds something, the reply says what it saw and doesn't ask the lead to try `clear_draft` again. The window
+drops, and logs once, unsent messages to a session the host no longer has.
 
 New sessions (⊕, ⌘N) start **in the window** by default: VibeSwitcher runs them itself, in a small background
 process (`vibeswitcher-host`) that keeps them going when VibeSwitcher quits, crashes or updates; reopening the
