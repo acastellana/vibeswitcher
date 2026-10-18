@@ -41,13 +41,30 @@ public final class HostConnection {
 
     deinit { readSource?.cancel() }
 
-    /// Sends a request; replies carry the returned number as `replyTo`.
+    /// Why a request didn't go out: none of it was sent.
+    public enum SendFailure: Error, Equatable, CustomStringConvertible {
+        case closed
+        /// Its message would be this many bytes, over `HostFrame.maxPayload` (or it couldn't be encoded: 0).
+        case tooLarge(Int)
+
+        public var description: String {
+            switch self {
+            case .closed: return "The connection to the session host is closed."
+            case .tooLarge(let count):
+                return "The request is too large for the session host (\(count > 0 ? "\(count) bytes, " : "")at most \(HostFrame.maxPayload) a message): none of it was sent."
+            }
+        }
+    }
+
+    /// Sends a request; replies carry the returned number as `replyTo`. Throws when it can't go out (closed, too
+    /// large for a frame): nothing of it was sent, and nothing will answer it.
     @discardableResult
-    public func send(_ request: HostRequest) -> Int {
+    public func send(_ request: HostRequest) throws -> Int {
+        guard !closed else { throw SendFailure.closed }
         let seq = nextSeq
         nextSeq += 1
-        guard !closed, let payload = try? HostCoding.encode(HostRequestEnvelope(seq: seq, request: request)),
-              payload.count <= HostFrame.maxPayload else { return seq }
+        guard let payload = try? HostCoding.encode(HostRequestEnvelope(seq: seq, request: request)) else { throw SendFailure.tooLarge(0) }
+        guard payload.count <= HostFrame.maxPayload else { throw SendFailure.tooLarge(payload.count) }
         // The hello goes at once: an older host sends no challenge, only its welcome.
         if held != nil, !Self.isHello(request) {
             held?.append(HostFrame.encode(.control, payload))

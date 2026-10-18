@@ -105,6 +105,7 @@ public enum HostCall {
         var requestSeq: Int?
         var waitingFor: Int?
         var closed = false
+        var unsent: Error?
         connection.onClose = {
             closed = true
             done.signal()
@@ -113,10 +114,17 @@ public enum HostCall {
             if case .welcome(_, _, let list, _, _, _) = envelope.event, sessions == nil {
                 sessions = list
                 if let request {
-                    waitingFor = connection.send(request)
+                    // It didn't go out (too large for a frame): nothing that follows may be taken as its receipt.
+                    do {
+                        waitingFor = try connection.send(request)
+                    } catch {
+                        unsent = error
+                        done.signal()
+                        return
+                    }
                     requestSeq = waitingFor
                     // Its answer is the follow-up's: it comes once the host has read both.
-                    if let follow { waitingFor = connection.send(follow) }
+                    if let follow { waitingFor = try? connection.send(follow) }
                     // Nothing comes back for it: give the write a moment to leave, then we're done.
                     else if !expectsReply { queue.asyncAfter(deadline: .now() + 0.05) { done.signal() } }
                 } else {
@@ -129,8 +137,9 @@ public enum HostCall {
                 done.signal()
             }
         }
-        queue.sync { _ = connection.send(.hello(protocolVersion: HostProtocol.version, app: "vibeswitcher-mcp")) }
+        try queue.sync { _ = try connection.send(.hello(protocolVersion: HostProtocol.version, app: "vibeswitcher-mcp")) }
         guard done.wait(timeout: .now() + timeout) == .success else { throw Failure(description: "The session host didn't answer in time.") }
+        if let unsent = queue.sync(execute: { unsent }) { throw Failure(description: "\(unsent)") }
         return queue.sync {
             if closed && sessions == nil { return ([], nil, nil) }
             return (sessions ?? [], reply, refusal)

@@ -67,7 +67,7 @@ final class TestClient {
     func with(_ body: (TestClient) -> Void) { lock.lock(); body(self); lock.unlock() }
     /// Every event so far; read inside `with`.
     var allEvents: [HostEvent] { events.map(\.event) }
-    @discardableResult func send(_ request: HostRequest) -> Int { queue.sync { connection.send(request) } }
+    @discardableResult func send(_ request: HostRequest) -> Int { queue.sync { (try? connection.send(request)) ?? -1 } }
     func text(_ id: UUID) -> String { lock.lock(); defer { lock.unlock() }; return String(decoding: output[id] ?? Data(), as: UTF8.self) }
     func reply(to seq: Int) -> HostEvent? {
         lock.lock(); defer { lock.unlock() }
@@ -412,6 +412,37 @@ struct HostCallTests {
             }
         }
         #expect(refusal?.contains("Input refused") == true, "\(String(describing: refusal))")
+    }
+
+    /// E-29: input too large for one frame (base64 takes ~786 KB past 1 MiB) used to be skipped without a word, and
+    /// the screen read sent after it was then taken as the host's receipt: the call said it went in.
+    @Test func inputTooLargeForOneFrameIsAnErrorNotAReceipt() throws {
+        let host = try TestHost()
+        let client = try TestClient(host)
+        let session = try client.spawn("cat")
+        client.attach(session.id)
+        let huge = Data(repeating: 0x61, count: 900 << 10)
+        #expect(throws: HostCall.Failure.self) {
+            try HostCall.send(.input(id: session.id, bytes: huge, reply: false), socket: host.socket, timeout: hangGuard)
+        }
+        do {
+            try HostCall.send(.input(id: session.id, bytes: huge, reply: false), socket: host.socket, timeout: hangGuard)
+        } catch {
+            #expect("\(error)".contains("too large"), "\(error)")
+        }
+        // Nothing of it went in, and the connection still works for what fits.
+        try HostCall.send(.input(id: session.id, bytes: Data("after\n".utf8), reply: false), socket: host.socket, timeout: hangGuard)
+        #expect(eventually { client.text(session.id).contains("after") })
+        #expect(!client.text(session.id).contains("aaaa"))
+    }
+
+    @Test func aConnectionRefusesToSendWhatNoFrameHolds() throws {
+        let host = try TestHost()
+        let client = try TestClient(host)
+        let huge = HostRequest.input(id: UUID(), bytes: Data(repeating: 0x61, count: 900 << 10), reply: false)
+        #expect(throws: HostConnection.SendFailure.self) { try client.queue.sync { try client.connection.send(huge) } }
+        client.close()
+        #expect(throws: HostConnection.SendFailure.closed) { try client.queue.sync { try client.connection.send(.screen(id: UUID())) } }
     }
 
     @Test func aOneShotSenderDoesntTakeTheSessionFromTheApp() throws {

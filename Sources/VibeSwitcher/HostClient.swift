@@ -64,8 +64,6 @@ final class HostClient: ObservableObject {
     /// Typed input sent, by seq, that the host could still refuse (it answers only input it refuses, and handles
     /// requests in order: a reply to a later request means these went in).
     private var sentInput: [Int: (id: UUID, count: Int)] = [:]
-    /// Pieces of input the host refused, per session (the program wasn't reading and its buffer was full).
-    private var refusedInput: [UUID: Int] = [:]
 
     /// The key the app proves itself with to the host (see `AppProof`), from the login Keychain; every connection
     /// the app makes answers its challenge with it (the lead's vault calls too).
@@ -139,7 +137,7 @@ final class HostClient: ObservableObject {
         connection.onOutput = { [weak self] id, bytes in self?.sinks[id]?.sink.output(bytes) }
         connection.onClose = { [weak self] in self?.connectionLost() }
         connection.onProofRefused = { [weak self] reason in self?.proofRefused(reason) }
-        connection.send(.hello(protocolVersion: HostProtocol.version, app: "VibeSwitcher"))
+        _ = try? connection.send(.hello(protocolVersion: HostProtocol.version, app: "VibeSwitcher"))
         return true
     }
 
@@ -269,7 +267,7 @@ final class HostClient: ObservableObject {
         if let seq = envelope.replyTo, !sentInput.isEmpty {
             if case .error(let message) = envelope.event, let input = sentInput[seq] {
                 Breadcrumbs.shared.note("host: \(input.count) bytes of input refused: \(message)")
-                refusedInput[input.id, default: 0] += 1
+                inputCut(input.id, 0, input.count, message)
             }
             sentInput = sentInput.filter { $0.key > seq }
         }
@@ -422,7 +420,14 @@ final class HostClient: ObservableObject {
             reply?(.error("Not connected to the session host."))
             return
         }
-        let seq = connection.send(request)
+        let seq: Int
+        do {
+            seq = try connection.send(request)
+        } catch {
+            Breadcrumbs.shared.note("host: not sent: \(error)")
+            reply?(.error("\(error)"))
+            return
+        }
         guard let reply else { return }
         replies[seq] = reply
         // A reply that never comes must not leave its caller (e.g. a phone request) waiting forever.
@@ -471,37 +476,172 @@ final class HostClient: ObservableObject {
         request(.detach(id: id))
     }
 
-    func send(_ id: UUID, bytes: Data, reply: Bool) {
-        // A message has a size limit (a big paste is larger): send it in pieces, in order.
-        let piece = 256 * 1024
-        var start = bytes.startIndex
-        repeat {
-            let end = bytes.index(start, offsetBy: piece, limitedBy: bytes.endIndex) ?? bytes.endIndex
-            if let seq = connection?.send(.input(id: id, bytes: bytes.subdata(in: start..<end), reply: reply)),
-               !reply, hostCapabilities.contains(HostProtocol.Capability.inputRefusals) {
-                sentInput[seq] = (id, end - start)
+    /// Writes to the session's program. Keys and small writes go at once. A paste larger than a piece, input with
+    /// `done`, and whatever follows either while one is going in, go in order through `pacedInput`: one piece at a
+    /// time, each confirmed by the host before the next (its buffer for a program holds 1 MB, and refuses what
+    /// doesn't fit: sent back to back, a big paste lost its end, or a piece from its middle). `done` says whether all
+    /// of it went in; without one, what didn't is told (`inputCut`).
+    func send(_ id: UUID, bytes: Data, reply: Bool, done: ((Bool) -> Void)? = nil) {
+        guard !bytes.isEmpty else { done?(true); return }
+        if reply {
+            // The terminal's own answers to the program (cursor reports): small, and never paced.
+            _ = try? connection?.send(.input(id: id, bytes: bytes, reply: true))
+            return
+        }
+        if done == nil, pacedInput[id] == nil, bytes.count <= Self.inputPiece {
+            guard let connection else {
+                inputCut(id, 0, bytes.count, "VibeSwitcher isn't connected to the session host.")
+                return
             }
-            start = end
-        } while start < bytes.endIndex
+            do {
+                let seq = try connection.send(.input(id: id, bytes: bytes, reply: false))
+                if hostCapabilities.contains(HostProtocol.Capability.inputRefusals) { sentInput[seq] = (id, bytes.count) }
+            } catch {
+                inputCut(id, 0, bytes.count, "\(error)")
+            }
+            return
+        }
+        pacedInput[id, default: PacedInput()].queue.append(PacedInput.Item(left: bytes, total: bytes.count, done: done))
+        pumpInput(id)
     }
 
-    /// Writes these into the session, each after its delay, then tells `confirmed` whether the host took them. The
-    /// host handles a connection's requests in order and answers only input it refuses, so the answer to a screen
-    /// read sent after the last write is the receipt; no answer (not connected, gone, too slow) or a refusal is false.
+    /// Largest piece of input sent in one message (a frame holds ~768 KB of input once encoded).
+    static let inputPiece = 256 * 1024
+    /// Input going in piece by piece is given up when none of it went in for this long (the program stopped
+    /// reading): what went in is told. Tests shorten it.
+    var inputStallLimit: TimeInterval = 30
+    /// What didn't go in, for input sent without `done`: session, bytes that went in, of how many, and why.
+    var onInputCut: ((UUID, Int, Int, String) -> Void)?
+    /// Cuts not shown yet: an alert is up, they follow it as one.
+    private var unshownCuts: [(id: UUID, went: Int, total: Int, reason: String)] = []
+    private var showingCut = false
+
+    /// Input that didn't all go in: to `onInputCut` when set (tests), else the user is told how much did.
+    private func inputCut(_ id: UUID, _ went: Int, _ total: Int, _ reason: String) {
+        Breadcrumbs.shared.note("host: input to \(id.uuidString.prefix(8)) cut: \(went) of \(total) bytes went in: \(reason)")
+        if let onInputCut { return onInputCut(id, went, total, reason) }
+        unshownCuts.append((id, went, total, reason))
+        guard !showingCut else { return }
+        // Not from inside the call that found it: the alert runs its own loop.
+        DispatchQueue.main.async { [weak self] in self?.showCuts() }
+    }
+
+    private func showCuts() {
+        guard !showingCut, !unshownCuts.isEmpty else { return }
+        let cuts = unshownCuts
+        unshownCuts = []
+        showingCut = true
+        defer {
+            showingCut = false
+            showCuts()
+        }
+        let size = { (bytes: Int) in ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file) }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = cuts.allSatisfy({ $0.went == 0 }) ? "What you sent didn't go in." : "Not all of what you sent went in."
+        alert.informativeText = cuts.map { cut in
+            let name = sessions.first { $0.id == cut.id }?.label ?? "the session"
+            let amount = cut.went == 0 ? "None of \(size(cut.total))" : "Only \(size(cut.went)) of \(size(cut.total))"
+            return "\(amount) went into \(name): \(cut.reason)"
+        }.joined(separator: "\n") + "\n\nThe rest was dropped, not sent later: send it again once the program is reading."
+        alert.addButton(withTitle: "OK")
+        NSApp.activate()
+        alert.runModal()
+    }
+
+    struct PacedInput {
+        struct Item {
+            var left: Data
+            let total: Int
+            let done: ((Bool) -> Void)?
+        }
+        var queue: [Item] = []
+        var inFlight = false
+        var lastProgress = Date()
+    }
+
+    /// Input going in piece by piece, per session (see `send(_:bytes:reply:done:)`).
+    private var pacedInput: [UUID: PacedInput] = [:]
+
+    /// Sends the next piece, then a screen read: the host handles a connection's requests in order and answers only
+    /// input it refuses, so the read's answer is the piece's receipt. A refused piece is sent again once the host
+    /// has room (it refuses everything until its buffer drained, so nothing later slips in ahead of it).
+    private func pumpInput(_ id: UUID) {
+        guard var paced = pacedInput[id], !paced.inFlight else { return }
+        guard let item = paced.queue.first else {
+            pacedInput[id] = nil
+            return
+        }
+        guard let connection else { return giveUpInput(id, "VibeSwitcher isn't connected to the session host.") }
+        let piece = item.left.prefix(Self.inputPiece)
+        let seq: Int
+        do {
+            seq = try connection.send(.input(id: id, bytes: Data(piece), reply: false))
+        } catch {
+            return giveUpInput(id, "\(error)")
+        }
+        var refusal: String?
+        replies[seq] = { event in if case .error(let message) = event { refusal = message } }
+        paced.inFlight = true
+        pacedInput[id] = paced
+        request(.screen(id: id)) { [weak self] event in
+            guard let self, var paced = self.pacedInput[id] else { return }
+            if refusal == nil { self.replies[seq] = nil }
+            paced.inFlight = false
+            self.pacedInput[id] = paced
+            guard case .screenText = event else {
+                let why: String
+                if case .error(let message) = event { why = message } else { why = "The session host didn't answer." }
+                return self.giveUpInput(id, why)
+            }
+            if let refusal {
+                guard Date().timeIntervalSince(paced.lastProgress) < self.inputStallLimit else {
+                    return self.giveUpInput(id, "The program stopped reading its input (\(refusal))")
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in self?.pumpInput(id) }
+                return
+            }
+            paced.lastProgress = Date()
+            paced.queue[0].left = Data(paced.queue[0].left.dropFirst(piece.count))
+            var finished: PacedInput.Item?
+            if paced.queue[0].left.isEmpty { finished = paced.queue.removeFirst() }
+            self.pacedInput[id] = paced
+            finished?.done?(true)
+            self.pumpInput(id)
+        }
+    }
+
+    /// Drops what waits for the session: each with a `done` is told it didn't go in; how much of the rest did is told
+    /// (`inputCut`).
+    private func giveUpInput(_ id: UUID, _ reason: String) {
+        guard let paced = pacedInput.removeValue(forKey: id) else { return }
+        Breadcrumbs.shared.note("host: input to \(id.uuidString.prefix(8)) given up: \(reason)")
+        let untold = paced.queue.filter { $0.done == nil }
+        if !untold.isEmpty {
+            let went = untold.reduce(0) { $0 + $1.total - $1.left.count }
+            inputCut(id, went, untold.reduce(0) { $0 + $1.total }, reason)
+        }
+        paced.queue.forEach { $0.done?(false) }
+    }
+
+    /// Writes these into the session, each after its delay, then tells `confirmed` whether all of them went in (see
+    /// `send(_:bytes:reply:done:)`). Once one didn't, the rest aren't sent: an Enter after a paste cut short would
+    /// submit what did go in.
     func send(_ id: UUID, writes: [HostInput.Write], confirmed: @escaping (Bool) -> Void) {
-        let refusedBefore = refusedInput[id, default: 0]
+        guard !writes.isEmpty else { return confirmed(true) }
+        var ok = true
+        var left = writes.count
+        let settled = { (went: Bool) in
+            ok = ok && went
+            left -= 1
+            if left == 0 { confirmed(ok) }
+        }
         var at: TimeInterval = 0
         for write in writes {
             at += write.delay
             DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
-                self?.send(id, bytes: Data(write.bytes), reply: false)
-            }
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
-            guard let self else { return confirmed(false) }
-            self.request(.screen(id: id)) { [weak self] event in
-                guard case .screenText = event else { return confirmed(false) }
-                confirmed(self?.refusedInput[id, default: 0] == refusedBefore)
+                guard let self, ok else { return settled(false) }
+                self.send(id, bytes: Data(write.bytes), reply: false, done: settled)
             }
         }
     }
