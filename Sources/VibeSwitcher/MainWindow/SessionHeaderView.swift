@@ -61,6 +61,7 @@ struct SessionHeaderView: View {
         if let branch { parts.append("⎇ \(branch)") }
         if row.session?.inTerminalApp == true { parts.append("in Terminal") }
         if let activity = row.session?.activity { parts.append(activity) }
+        if let program = row.hosted?.liveProgramStatus, let said = StatusRules.detail(for: program) { parts.append(said) }
         return Text(parts.joined(separator: "  ·  "))
     }
 
@@ -111,7 +112,7 @@ struct StatusPill: View {
         let state = row.state(now: now)
         let color = row.statusColor
         HStack(spacing: 4) {
-            Text(label(state))
+            Text(row.pillLabel(state))
             if let since = state.since {
                 Text("· \(Durations.compact(now.timeIntervalSince(since)))").monospacedDigit()
             }
@@ -122,11 +123,15 @@ struct StatusPill: View {
         .background(Capsule().fill(color.opacity(0.15)))
         .fixedSize()
     }
+}
 
-    private func label(_ state: RowState) -> String {
-        switch row.content {
+extension WindowRow {
+    /// The header's word for the row's state: "Needs input", "Working", "Shell", "Ended"…
+    func pillLabel(_ state: RowState) -> String {
+        switch content {
         case .hosted(let info):
             if !info.isLive { return "Ended" }
+            if let program = info.liveProgramStatus { return StatusRules.status(for: program).label }
             return state.group == .working ? "Starting" : "Shell"
         case .agent(let session):
             return session.isPaused ? "Paused" : session.status.label

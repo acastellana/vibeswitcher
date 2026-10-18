@@ -72,10 +72,11 @@ final class SessionStore: ObservableObject {
     }
 
     /// Titles change many times a second while an agent works (its spinner); the regular scan picks them up,
-    /// so only a session starting or ending triggers a scan here.
+    /// so only a session starting or ending, or its program reporting a new status (OSC 7501), triggers a scan here.
     func updateHosted(_ sessions: [HostSession]) {
         let fresh = Dictionary(sessions.filter(\.isLive).map { ($0.tty, $0) }, uniquingKeysWith: { $1 })
         let changed = Set(fresh.keys) != Set(hosted.keys)
+            || fresh.contains { tty, session in session.programStatus != hosted[tty]?.programStatus }
         hosted = fresh
         if changed { refresh() }
     }
@@ -242,15 +243,17 @@ final class SessionStore: ObservableObject {
             let activity: TitleActivity = item.agent == .claude ? (parsed?.activity ?? .none)
                 : (parsed?.activity == .busy ? .busy : .none)
             let seenBusy = turns.observe(tty: item.tty, pid: item.pid, title: activity)
-            let resolved = StatusRules.resolve(hook: item.hook, title: activity, now: now.timeIntervalSince1970,
-                                               seenBusy: seenBusy)
+            // Hooks, else what the program reports over OSC 7501, else the title (`StatusRules.resolve`).
+            let program = item.hook == nil ? window?.liveProgramStatus : nil
+            let resolved = StatusRules.resolve(hook: item.hook, program: program, title: activity,
+                                               now: now.timeIntervalSince1970, seenBusy: seenBusy)
 
             let since: Date
             if let previous = observed[item.tty], previous.status == resolved {
                 since = previous.since
             } else if observed[item.tty] == nil {
                 // First sighting: sessions that were already finished when we launched count as seen.
-                since = item.hook.map { Date(timeIntervalSince1970: $0.lastEventAt) } ?? .distantPast
+                since = item.hook.map { Date(timeIntervalSince1970: $0.lastEventAt) } ?? program?.since ?? .distantPast
             } else {
                 since = now
             }
@@ -278,7 +281,8 @@ final class SessionStore: ObservableObject {
                 project: item.project,
                 task: SessionNaming.task(fromTitle: parsed?.text, project: item.project, firstPrompt: item.hook?.firstPrompt),
                 status: status, statusSince: since,
-                detail: waitingOn.map { "Waiting on \($0)" } ?? detail(for: status, hook: item.hook, agent: item.agent),
+                detail: waitingOn.map { "Waiting on \($0)" } ?? program.flatMap(StatusRules.detail(for:))
+                    ?? detail(for: status, hook: item.hook, agent: item.agent),
                 hasHooks: item.hook != nil, inTerminalApp: tab != nil)
             session.isCurrent = viewing
             session.screenPosition = tab?.position

@@ -45,17 +45,38 @@ public enum StatusRules {
         }
     }
 
-    /// Combines hook facts with the terminal title glyph.
+    /// What a session needs said beside a program's status: what it's blocked on, working on, or ended with.
+    public static func detail(for program: ProgramStatus) -> String? {
+        switch program.state {
+        case .blocked:
+            switch program.kind {
+            case "permission": return program.message.map { "Asks permission: \($0)" } ?? "Asks permission"
+            case "question": return program.message ?? "Asking you a question"
+            case "auth": return program.message.map { "Needs you to sign in: \($0)" } ?? "Needs you to sign in"
+            default: return program.message ?? "Waiting for you"
+            }
+        case .working: return program.title ?? program.message
+        case .error: return program.message.map { "Ended on an error: \($0)" } ?? "Ended on an error"
+        case .done, .idle: return program.message
+        }
+    }
+
+    /// Combines hook facts, the program's own report (OSC 7501) and the terminal title glyph.
     ///
     /// Hooks are authoritative, but they miss some transitions: Claude fires no Stop hook when you
     /// press Esc, and resumes on its own after background tasks. The title glyph catches both, but
     /// only once the hook data is a few seconds old, so a fresh hook event always wins.
     ///
-    /// Without hooks the title is all there is, and ✳ alone can't tell a finished turn from a session that never
+    /// The rule: hooks, then the program's status, then the title. A session with hooks reads as it always has, its
+    /// program's status ignored (hooks say what it's asking and which tool runs; the two would only disagree on
+    /// timing). Without hooks, a program that reports its status says it outright, title or not.
+    ///
+    /// Without either the title is all there is, and ✳ alone can't tell a finished turn from a session that never
     /// ran one (sitting at the trust prompt or an empty input): `seenBusy` says a spinner was seen first (see
     /// `TurnWitness`). Only then is it "done"; otherwise it's idle.
-    public static func resolve(hook: HookState?, title: TitleActivity, now: Double,
+    public static func resolve(hook: HookState?, program: ProgramStatus? = nil, title: TitleActivity, now: Double,
                                graceSeconds: Double = 4, seenBusy: Bool = false) -> SessionStatus {
+        if hook == nil, let program { return status(for: program) }
         guard let hook else {
             switch title {
             case .busy: return .working
@@ -83,6 +104,11 @@ public enum StatusRules {
         if (busyGlyphs.contains(first) || isBraille), trimmed.dropFirst().first == " " { return (.busy, rest) }
         return (.none, trimmed)
     }
+}
+
+extension HostSession {
+    /// The program's status while it runs: an ended session says nothing of what its program last reported.
+    public var liveProgramStatus: ProgramStatus? { isLive ? programStatus : nil }
 }
 
 /// Which sessions have been seen mid-turn (a spinner in the title) since this process started on its terminal,

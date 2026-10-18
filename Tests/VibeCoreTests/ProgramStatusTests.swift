@@ -90,6 +90,87 @@ struct ProgramStatusTests {
     }
 }
 
+/// What the app makes of a program's status: hooks, then the program, then the title; rows and their details.
+struct ProgramStatusInAppTests {
+    let now = Date(timeIntervalSince1970: 1_000)
+
+    private func program(_ state: ProgramStatus.State, kind: String? = nil, title: String? = nil,
+                         message: String? = nil) -> ProgramStatus {
+        ProgramStatus(state: state, kind: kind, app: "fake", title: title, message: message, since: now)
+    }
+
+    private func hosted(_ status: ProgramStatus?, agent: String? = nil, ended: Bool = false) -> HostSession {
+        HostSession(id: UUID(), tty: "ttys080", childPID: 80, cwd: "/tmp/p", command: "fake", label: "Fake", agent: agent,
+                    title: "fake", startedAt: now.addingTimeInterval(-600), cols: 80, rows: 24,
+                    exit: ended ? HostSession.Exit(status: 0, at: now.addingTimeInterval(5)) : nil, programStatus: status)
+    }
+
+    /// Without hooks the program's word decides, whatever the title shows (or doesn't).
+    @Test func withoutHooksTheProgramDecides() {
+        let at = now.timeIntervalSince1970
+        #expect(StatusRules.resolve(hook: nil, program: program(.working), title: .none, now: at) == .working)
+        #expect(StatusRules.resolve(hook: nil, program: program(.blocked, kind: "permission"), title: .busy, now: at) == .needsInput)
+        #expect(StatusRules.resolve(hook: nil, program: program(.done), title: .busy, now: at) == .done)
+        #expect(StatusRules.resolve(hook: nil, program: program(.idle), title: .idle, now: at, seenBusy: true) == .idle)
+        #expect(StatusRules.resolve(hook: nil, program: program(.error), title: .none, now: at) == .done)
+        // No report: the title, as before.
+        #expect(StatusRules.resolve(hook: nil, program: nil, title: .none, now: at) == .unknown)
+    }
+
+    /// Hooks win when both exist: the program's status changes nothing a hook (with the title) decides.
+    @Test func hooksWinOverTheProgram() {
+        let at = now.timeIntervalSince1970
+        let asking = HookState(agent: .claude, tty: "ttys080", lastEvent: "PermissionRequest", lastEventAt: at - 1)
+        #expect(StatusRules.resolve(hook: asking, program: program(.working), title: .busy, now: at) == .needsInput)
+        let working = HookState(agent: .claude, tty: "ttys080", lastEvent: "UserPromptSubmit", lastEventAt: at - 1)
+        #expect(StatusRules.resolve(hook: working, program: program(.blocked), title: .busy, now: at) == .working)
+        // A settled hook is still corrected by the title, not the program.
+        #expect(StatusRules.resolve(hook: working, program: program(.working), title: .idle, now: at + 60) == .done)
+    }
+
+    @Test func detailsSayWhatTheProgramWaitsOnOrDoes() {
+        #expect(StatusRules.detail(for: program(.blocked, kind: "permission", message: "Bash")) == "Asks permission: Bash")
+        #expect(StatusRules.detail(for: program(.blocked, kind: "permission")) == "Asks permission")
+        #expect(StatusRules.detail(for: program(.blocked, kind: "question", message: "Which one?")) == "Which one?")
+        #expect(StatusRules.detail(for: program(.blocked, kind: "auth")) == "Needs you to sign in")
+        #expect(StatusRules.detail(for: program(.blocked)) == "Waiting for you")
+        #expect(StatusRules.detail(for: program(.working, title: "Build", message: "step 2")) == "Build")
+        #expect(StatusRules.detail(for: program(.working, message: "step 2")) == "step 2")
+        #expect(StatusRules.detail(for: program(.error, message: "rate limited")) == "Ended on an error: rate limited")
+        #expect(StatusRules.detail(for: program(.idle)) == nil)
+    }
+
+    /// A window session the scan finds no agent in shows what its program reports, since it reported it.
+    @Test func hostedRowsShowTheProgramsStatus() {
+        func state(_ status: ProgramStatus?, agent: String? = nil) -> RowState {
+            WindowRow(content: .hosted(hosted(status, agent: agent)), project: "p").state(now: now.addingTimeInterval(30))
+        }
+        #expect(state(program(.working)) == RowState(text: "working", since: now, group: .working))
+        #expect(state(program(.working, title: "Indexing")) == RowState(text: "Indexing", since: now, group: .working))
+        #expect(state(program(.blocked, kind: "permission")) == RowState(text: "waiting", since: now, group: .needsYou))
+        #expect(state(program(.done)) == RowState(text: "done", since: now, group: .ready))
+        #expect(state(program(.error)) == RowState(text: "error", since: now, group: .ready))
+        #expect(state(program(.idle)) == RowState(text: "idle", since: now, group: .idle))
+        // Over its preset's "starting" or "agent ended" (an agent the scan hasn't found, or that quit).
+        #expect(state(program(.blocked), agent: "claude").group == .needsYou)
+        // No report: a shell, as before.
+        #expect(state(nil).text == "shell")
+        let row = WindowRow(content: .hosted(hosted(program(.blocked))), project: "p")
+        #expect(row.statusSince == now)
+        #expect(WindowGroups.attention([WindowSection(project: "p", rows: [row])]).map(\.project) == ["Needs you"])
+    }
+
+    /// An ended session says nothing of its program's last report, even if one was left on it.
+    @Test func endedSessionsShowNoProgramStatus() {
+        let ended = hosted(program(.working), ended: true)
+        #expect(ended.liveProgramStatus == nil)
+        #expect(hosted(program(.working)).liveProgramStatus?.state == .working)
+        let state = WindowRow(content: .hosted(ended), project: "p").state(now: now.addingTimeInterval(30))
+        #expect(state.text == "ended · exit 0" && state.group == .idle)
+        #expect(WindowRow(content: .hosted(ended), project: "p").statusSince == ended.startedAt)
+    }
+}
+
 /// `HostSession` as apps before OSC 7501 decode it.
 private struct HostSessionBeforeProgramStatus: Decodable {
     var id: UUID

@@ -74,6 +74,7 @@ extension WindowRow {
         switch content {
         case .hosted(let info):
             if !info.isLive { return .gray.opacity(0.5) }
+            if let program = info.liveProgramStatus { return StatusRules.status(for: program).color }
             return state(now: Date()).group == .working ? .orange.opacity(0.6) : .gray.opacity(0.6)
         case .agent(let session):
             return session.dotColor

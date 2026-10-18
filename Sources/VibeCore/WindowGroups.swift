@@ -42,6 +42,8 @@ extension WindowRow {
         switch content {
         case .hosted(let info):
             if let exit = info.exit { return RowState(text: "ended · exit \(exit.status)", since: exit.at, group: .idle) }
+            // No agent the scan knows, but a program that says what it's doing (OSC 7501): that, over its preset.
+            if let program = info.liveProgramStatus { return Self.state(of: program) }
             if info.agent != nil {
                 if info.agentQuit(now: now) { return RowState(text: "agent ended · shell", since: nil, group: .idle) }
                 return RowState(text: "starting", since: info.startedAt, group: .working)
@@ -64,6 +66,17 @@ extension WindowRow {
         }
     }
 
+    /// A window session's row as its program reports it, since that report.
+    static func state(of program: ProgramStatus) -> RowState {
+        let since = program.since
+        switch StatusRules.status(for: program) {
+        case .needsInput: return RowState(text: "waiting", since: since, group: .needsYou)
+        case .working, .background: return RowState(text: program.title ?? "working", since: since, group: .working)
+        case .done: return RowState(text: program.state == .error ? "error" : "done", since: since, group: .ready)
+        case .idle, .unknown: return RowState(text: "idle", since: since, group: .idle)
+        }
+    }
+
     /// When this row's session started (window sessions: when the host started it).
     var startedAt: Date {
         switch content {
@@ -74,8 +87,10 @@ extension WindowRow {
 
     /// When its current status began; the start time for rows that have no status.
     var statusSince: Date {
-        if case .agent(let session) = content { return session.statusSince }
-        return startedAt
+        switch content {
+        case .agent(let session): return session.statusSince
+        case .hosted(let info): return info.liveProgramStatus?.since ?? startedAt
+        }
     }
 
     var searchText: String {
