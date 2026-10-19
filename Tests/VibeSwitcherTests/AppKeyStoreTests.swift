@@ -50,7 +50,7 @@ struct AppKeyStoreTests {
     /// A client keyed from its store proves itself to a host that holds no key: the host takes it as the app's first
     /// key, and the connection is the app's.
     @Test func aHostWithNoKeyTakesTheStoresKeyAndTheClientProvesItself() async throws {
-        let socket = "/tmp/vsh-ak-\(UUID().uuidString.prefix(8)).sock"
+        let socket = try temp.shortFolder("vsh-ak") + "/h.sock"
         let book = LeadVault.Book()
         var config = HostServer.Config(socketPath: socket, lockPath: socket + ".lock", shell: "/bin/sh", launcher: "/usr/bin/true",
                                        baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": temp.url("home").path],

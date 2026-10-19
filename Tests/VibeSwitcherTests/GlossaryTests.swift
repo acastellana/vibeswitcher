@@ -271,6 +271,7 @@ struct GlossaryTests {
 /// --filter GlossarySnapshots` (the popover's and the sidebar's session rows: `StatusSnapshots`).
 @MainActor
 struct GlossarySnapshots {
+    let temp = Scratch()
     static let folder = ProcessInfo.processInfo.environment["GLOSSARY_SNAPSHOT_DIR"]
 
     @Test(.enabled(if: folder != nil)) func drawTheWindowsWords() throws {
@@ -295,7 +296,8 @@ struct GlossarySnapshots {
         model.grouping = .attention
         model.update(sessions: sessions, hosted: ended, table: TableRead(at: now))
         model.endedOpen = true
-        let scratch = FileManager.default.temporaryDirectory
+        let scratch = temp.url("glossary-snapshots")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         let host = HostClient(socketPath: scratch.appendingPathComponent("no-host.sock").path)
         let store = SessionStore(scanner: SessionScanner(processes: { [:] }, stateDir: { scratch }, cwd: { _ in nil }, arguments: { _ in [] }))
         let leads = LeadController(host: host, store: store, vault: LeadVault(folder: scratch.appendingPathComponent("vault"), ask: { _ in throw LeadVault.Refused("none") }),

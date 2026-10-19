@@ -29,7 +29,9 @@ struct HostClientHandoverTests {
 
     /// A host on its own socket: welcomes every hello with one live session and the handover capability.
     final class FakeHost: @unchecked Sendable {
-        let path = "/tmp/vsh-ho-\(UUID().uuidString.prefix(8)).sock"
+        /// The short folder its socket is in, removed with it.
+        private let temp = Scratch()
+        let path: String
         private let queue = DispatchQueue(label: "fake-host")
         private let onHandover: OnHandover
         private var pid: Int32
@@ -43,6 +45,7 @@ struct HostClientHandoverTests {
             self.pid = pid
             self.build = build
             self.onHandover = onHandover
+            path = try temp.shortFolder("vsh-ho") + "/h.sock"
             let fd = try UnixSocket.listen(path: path)
             let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
             source.setEventHandler { [weak self] in self?.accept(fd) }
@@ -58,6 +61,7 @@ struct HostClientHandoverTests {
                 listener = nil
             }
             unlink(path)
+            rmdir((path as NSString).deletingLastPathComponent)
         }
 
         private func accept(_ listening: Int32) {

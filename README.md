@@ -592,6 +592,7 @@ seconds) shows the cleanup after Ctrl-C, a failing command, a dead owner and SIG
 It also fails when a run leaves anything in its TMPDIR. Tests put scratch files under `scratchRoot`
 (`$TMPDIR`, which Foundation's `temporaryDirectory` ignores) and remove them: a suite keeps a `Scratch`
 (`let temp = Scratch()`, then `temp.url("name")`), which removes what its test made when the test ends.
+A test using the system temporary folder itself (`temporaryDirectory`, `NSTemporaryDirectory()`, a `/tmp` path; a socket goes in `temp.shortFolder("name")`) fails `TemporaryFolderLintTests` in every run and stops the harness before it starts: one rule, `scripts/temporary-folder-lint.txt`, with each allowed use and its reason.
 
 When a change touches what the app does at rest, run `scripts/ui-bench.sh -B project-lead 2`: the window on
 a scratch home (clicks, busy leads, 2 minutes idle) for project-lead's build and this one, alternately. Its

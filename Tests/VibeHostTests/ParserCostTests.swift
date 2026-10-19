@@ -64,7 +64,7 @@ struct ParserCostTests {
 
     @Test(.enabled(if: binary != nil)) func measure() throws {
         let binary = try #require(Self.binary)
-        let dir = "/tmp/vshm-\(UUID().uuidString.prefix(8))", home = dir + "/home", socket = dir + "/h.sock"
+        let dir = "\(shortScratchRoot)/vshm-\(UUID().uuidString.prefix(8))", home = dir + "/home", socket = dir + "/h.sock"
         try FileManager.default.createDirectory(atPath: home, withIntermediateDirectories: true)
         let host = Process()
         host.executableURL = URL(fileURLWithPath: binary)

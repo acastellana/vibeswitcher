@@ -61,7 +61,7 @@ struct LeadRelaunchTests {
         Git.run(["commit", "-q", "-m", "first"], in: root)
 
         let launcher = Bundle(for: RelaunchAnchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host").path
-        let socket = "/tmp/vsh-lr-\(UUID().uuidString.prefix(8)).sock"
+        let socket = try temp.shortFolder("vsh-lr") + "/h.sock"
         let key = SymmetricKey(size: .bits256)
         var config = HostServer.Config(socketPath: socket, lockPath: socket + ".lock", shell: "/bin/sh", launcher: launcher,
                                        baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": temp.url("home").path],

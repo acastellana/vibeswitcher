@@ -130,6 +130,7 @@ struct EndedFoldTests {
 /// `ENDED_SNAPSHOT_DIR=/some/folder scripts/test.sh --filter EndedSnapshots`.
 @MainActor
 struct EndedSnapshots {
+    let temp = Scratch()
     static let folder = ProcessInfo.processInfo.environment["ENDED_SNAPSHOT_DIR"]
 
     static let actions = WindowActions(
@@ -171,7 +172,8 @@ struct EndedSnapshots {
             UserDefaults.standard.removeObject(forKey: WindowModel.homeEndedOpenKey)
         }
         // A client and store that reach nothing: the list only asks them for leads' boards (none here).
-        let scratch = FileManager.default.temporaryDirectory
+        let scratch = temp.url("ended-snapshots")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         let host = HostClient(socketPath: scratch.appendingPathComponent("no-host.sock").path)
         let store = SessionStore(scanner: SessionScanner(processes: { [:] }, stateDir: { scratch }, cwd: { _ in nil }, arguments: { _ in [] }))
         let leads = LeadController(host: host, store: store, vault: LeadVault(folder: scratch.appendingPathComponent("vault"), ask: { _ in throw LeadVault.Refused("none") }),

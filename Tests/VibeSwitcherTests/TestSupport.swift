@@ -64,3 +64,17 @@ final class Scratch: @unchecked Sendable {
         for url in paths { try? FileManager.default.removeItem(at: url) }
     }
 }
+
+/// Where scratch sockets and the folders holding them go: `scratchRoot` when its path is short (scripts/test.sh's
+/// is), else /tmp, since a Unix socket's path is limited to 104 bytes. The one place a test writes under /tmp itself
+/// (scripts/temporary-folder-lint.txt allows it here alone), always in a `Scratch.shortFolder` removed with its Scratch.
+let shortScratchRoot: String = scratchRoot.path.utf8.count <= 32 ? scratchRoot.path : "/tmp"
+
+extension Scratch {
+    /// A new folder `shortScratchRoot/<prefix>-<8 hex>` for a socket, made now and removed with this, socket and all.
+    func shortFolder(_ prefix: String) throws -> String {
+        let folder = adopt(URL(fileURLWithPath: "\(shortScratchRoot)/\(prefix)-\(UUID().uuidString.prefix(8))"))
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.path
+    }
+}

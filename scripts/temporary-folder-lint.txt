@@ -1,0 +1,98 @@
+# What a test under Tests/ may not use: the system temporary folder, shared by every run on this Mac (the merge
+# runner's, the load harness's, each session's), where nothing checks what a test leaves. Tests use scratchRoot (a
+# Scratch), and a socket a Scratch.shortFolder. Read by scripts/temporary-folder-lint.sh (scripts/test-under-load.sh
+# runs it before it starts) and by TemporaryFolderLintTests (the normal suite), so both flag the same lines.
+# 2026-10-19: the harness refused every run on project-lead for KeepAwakeTests.swift:246, BriefingSnapshots.swift:42
+# and PhoneBriefingTests.swift:245, all added that day and green in the normal suite, which didn't check this.
+#
+# pattern: an extended regular expression (grep -E and Swift's Regex both read it), matched on each line of code;
+# lines that are only a comment are skipped.
+pattern: \.temporaryDirectory
+pattern: NSTemporaryDirectory\(
+pattern: (^|["'= (])(/private)?/tmp([/"' )]|$)
+#
+# allow: FILE | TEXT | REASON. A use in FILE on a line containing TEXT is allowed, for REASON (required). Most are a
+# made-up path in a string that nothing opens. An entry nothing matches any more fails TemporaryFolderLintTests.
+#
+# scratchRoot and the short root for sockets themselves.
+allow: Tests/VibeCoreTests/TestSupport.swift | return FileManager.default.temporaryDirectory | scratchRoot's fallback when TMPDIR is unset (scripts/test.sh and the harness always set it)
+allow: Tests/VibeHostTests/TestSupport.swift | return FileManager.default.temporaryDirectory | scratchRoot's fallback when TMPDIR is unset (scripts/test.sh and the harness always set it)
+allow: Tests/VibeSwitcherTests/TestSupport.swift | return FileManager.default.temporaryDirectory | scratchRoot's fallback when TMPDIR is unset (scripts/test.sh and the harness always set it)
+allow: Tests/VibeHostTests/TestSupport.swift | let shortScratchRoot: String = | a socket's path is limited to 104 bytes: under a long TMPDIR its folder goes in /tmp, and the test removes it
+allow: Tests/VibeSwitcherTests/TestSupport.swift | let shortScratchRoot: String = | a socket's path is limited to 104 bytes: under a long TMPDIR its folder (Scratch.shortFolder) goes in /tmp, removed with its Scratch
+#
+# Read, never written: where the temporary folder is, to tell it apart.
+allow: Tests/VibeCoreTests/TeamSummariesTests.swift | real(NSTemporaryDirectory()) | checks the headless run's folder isn't the temporary folder; reads its path only
+allow: Tests/VibeCoreTests/DebugOutputTests.swift | DebugOutput.allowed( | paths DebugOutput.allowed is asked about (the temporary folder is one it allows); nothing is written
+allow: Tests/VibeCoreTests/SteerTests.swift | "/private/tmp/vs-steer- | on purpose: Foundation spells /private/tmp as /tmp, the bug this test pins; adopted by its Scratch and removed with it
+allow: Tests/VibeSwitcherTests/ChatSyncTests.swift | @Test(arguments: [nil, "/private/tmp"] | on purpose: a TMPDIR spelled /private/tmp (a verifier's is); the harness's files go in a Scratch folder there, removed with it
+#
+# A socket nothing listens on: the client fails to connect and makes no file.
+allow: Tests/VibeSwitcherTests/TerminalAnswerTests.swift | HostClient(socketPath: "/tmp/vsh-ta- | a socket nothing listens on; the client never makes it
+allow: Tests/VibeSwitcherTests/LeadApprovalAnswerTests.swift | HostClient(socketPath: "/tmp/vsh-ap- | a socket nothing listens on; the client never makes it
+#
+# The working folder of a program a test starts, which writes nothing there (its files are scratch paths).
+allow: Tests/VibeHostTests/EndedSessionTests.swift | SpawnRequest(cwd: "/tmp" | printf's working folder; it writes nothing
+allow: Tests/VibeHostTests/FastExitTests.swift | SpawnRequest(cwd: "/tmp" | echo's working folder; it writes nothing
+allow: Tests/VibeHostTests/HostedSessionTests.swift | cwd: String = "/tmp" | the test shells' working folder; their commands write only to scratch paths
+allow: Tests/VibeHostTests/HostServerTests.swift | cwd: String = "/tmp" | the test shells' working folder; their commands write only to scratch paths
+allow: Tests/VibeHostTests/HostServerTests.swift | SpawnRequest(cwd: "/tmp" | the working folder of perl and a sleep loop; they write nothing
+allow: Tests/VibeSwitcherTests/ChatSyncTests.swift | SpawnRequest(cwd: "/tmp" | the fake Claude's working folder; it writes only to the harness's scratch files
+allow: Tests/VibeSwitcherTests/HostClientSlowProbeTests.swift | SpawnRequest(cwd: "/tmp" | sleep's working folder; it writes nothing
+allow: Tests/VibeSwitcherTests/PasteDeliveryTests.swift | SpawnRequest(cwd: "/tmp" | the reader's working folder; it writes only to the test's scratch files
+allow: Tests/VibeSwitcherTests/ProgramStatusShownTests.swift | SpawnRequest(cwd: "/tmp" | the fake program's working folder; it writes nothing
+allow: Tests/VibeCoreTests/DebugLogTests.swift | in: "/tmp" | sleep's working folder; it writes nothing
+allow: Tests/VibeCoreTests/LeadBaseMovesTests.swift | in: "/tmp", as: yours | the working folder of a `git -C <scratch repo>` run; it writes only in that repo
+#
+# A made-up folder in a record, a session or a vault grant: nothing makes or opens it.
+allow: Tests/VibeCoreTests/HostProtocolTests.swift | cwd: "/tmp" | a session's folder in an encoded record, never opened
+allow: Tests/VibeCoreTests/ProgramStatusTests.swift | cwd: "/tmp | a made-up session's folder, never opened
+allow: Tests/VibeHostTests/HostHandoverTests.swift | cwd: "/tmp" | a made-up session's folder in a handover record, never opened
+allow: Tests/VibeHostTests/HostLogTests.swift | cwd '/tmp' | the host log's text for a session started in /tmp
+allow: Tests/VibeSwitcherTests/HostClientHandoverTests.swift | cwd: "/tmp/fake" | the fake host's session's folder, never opened
+allow: Tests/VibeSwitcherTests/SessionStoreTests.swift | "/tmp/store-tests" | a made-up session's folder, never opened
+allow: Tests/VibeSwitcherTests/ProgramStatusShownTests.swift | "/tmp/program-status" | a made-up session's folder, never opened
+allow: Tests/VibeSwitcherTests/StatusSnapshots.swift | cwd: "/tmp/\(row.0)" | a made-up session's folder in a snapshot, never opened
+allow: Tests/VibeSwitcherTests/TerminalNeedsYouSnapshots.swift | cwd: "/tmp/acme-site" | a made-up session's folder in a snapshot, never opened
+allow: Tests/VibeCoreTests/SessionDetectionTests.swift | "/tmp/project" | a made-up session's folder, never opened
+allow: Tests/VibeCoreTests/VibeCoreTests.swift | "/tmp/project" | a hook event's folder, never opened
+allow: Tests/VibeCoreTests/HistoryTests.swift | "cwd": "/tmp" | a history record's folder, never opened
+allow: Tests/VibeCoreTests/HomeIsolationTests.swift | "cwd":"/tmp" | a hook event's folder, never opened
+allow: Tests/VibeCoreTests/SteerSubagentTests.swift | "/tmp/rec | hook events' transcript paths and folder, never opened
+allow: Tests/VibeCoreTests/LeadActivityTests.swift | root: "/tmp/r" | a made-up project root for a lead's launch line, never opened
+allow: Tests/VibeCoreTests/SteerTests.swift | root: String = "/tmp/steer-team" | a made-up project root for vault grants, never opened
+allow: Tests/VibeCoreTests/EndedSessionsTests.swift | "/tmp/replaced-members-repo" | a made-up project root for vault grants, never opened
+allow: Tests/VibeHostTests/LeadEndsTeamTests.swift | "/tmp/lead-ends-team-repo" | a made-up project root for vault grants, never opened
+allow: Tests/VibeHostTests/LeadVaultHostTests.swift | "/tmp/vault-host-repo" | a made-up project root for vault grants, never opened
+allow: Tests/VibeHostTests/VaultHandoverTests.swift | "/tmp/vault-handover-repo" | a made-up project root for vault grants, never opened
+allow: Tests/VibeCoreTests/PrivateFilesTests.swift | vault.runFolder(root: "/tmp/some-project" | a made-up project root a vault run folder is named after, never opened
+allow: Tests/VibeSwitcherTests/TerminalBridgeTests.swift | cwd: { _ in "/tmp/terminal-reads" } | a made-up session's folder, never opened
+allow: Tests/VibeSwitcherTests/KeepAwakeTests.swift | "/tmp/keep-awake-test- | a project's name for a power assertion; nothing is made there
+#
+# A path as text: a prompt, a screen, a setting, compiler output, a value under test. Nothing is written there.
+allow: Tests/VibeCoreTests/ComposerOutboxTests.swift | "/tmp/a.png" | an attachment's path in a queued message, never opened
+allow: Tests/VibeSwitcherTests/SteerOffMainTests.swift | /tmp/shot.png | an attachment's path in a draft, never opened
+allow: Tests/VibeCoreTests/ScreenMenuTests.swift | touch /tmp/x | a permission prompt's text on a screen
+allow: Tests/VibeCoreTests/ScreenMenuTests.swift | commands in /tmp | a permission prompt's text on a screen
+allow: Tests/VibeSwitcherTests/TerminalAnswerTests.swift | touch /tmp/x | a permission prompt's text on a screen
+allow: Tests/VibeSwitcherTests/TerminalAnswerTests.swift | commands in /tmp | a permission prompt's text on a screen
+allow: Tests/VibeSwitcherTests/ChatSyncTests.swift | "touch /tmp/x" | a permission request's text from the fake Claude
+allow: Tests/VibeSwitcherTests/ChatSyncSnapshots.swift | "touch /tmp/x" | a permission request's text from the fake Claude
+allow: Tests/VibeCoreTests/LeadWorkflowGuardedTests.swift | touch /tmp/x | a test command's text, hashed or refused, never run
+allow: Tests/VibeCoreTests/LeadWorkflowGuardedTests.swift | /tmp/elsewhere | a records_dir value the guard refuses
+allow: Tests/VibeCoreTests/TrustPromptTests.swift | /tmp/vs-scratch/lead-demo | a folder named on Claude's trust screen
+allow: Tests/VibeCoreTests/TrustPromptTests.swift | "/tmp/elsewhere" | a folder the trust screen doesn't name
+allow: Tests/VibeCoreTests/TrustPromptTests.swift | /tmp/x | a folder named on a trust screen the test answers; never opened
+allow: Tests/VibeCoreTests/StaleBranchTests.swift | /tmp/m/ | file names in compiler output
+allow: Tests/VibeCoreTests/LaunchPresetsTests.swift | /tmp/my dir | a folder in a Terminal command line, quoted, never run
+allow: Tests/VibeCoreTests/HomeIsolationTests.swift | "/tmp/vs | VIBESWITCHER_HOME values VibePaths works paths out from; nothing is made there
+allow: Tests/VibeCoreTests/ProjectCreationTests.swift | "/tmp/x" | a path ProjectCreation.expand leaves as it is
+allow: Tests/VibeCoreTests/DiskSpaceTests.swift | ClaudeScratch.name(for: "/tmp/ | long paths ClaudeScratch names a folder after; nothing is made
+allow: Tests/VibeCoreTests/RedactionLeakTests.swift | "OLDPWD=/tmp" | text the redactor must leave alone
+allow: Tests/VibeCoreTests/RedactionAgreementTests.swift | "OLDPWD=/tmp" | text the redactor must leave alone
+allow: Tests/VibeCoreTests/LeadStallTests.swift | /private/tmp/claude-501/ | a recorded transcript's text
+allow: Tests/VibeCoreTests/VibeCoreTests.swift | /tmp/cwd | a recorded command's text
+allow: Tests/VibeCoreTests/WorktreesTests.swift | home.path + "/tmp/" | a tmp folder under the scratch home, not /tmp
+#
+# The lint's own examples, which its test writes to a scratch file of another name.
+allow: Tests/VibeCoreTests/TemporaryFolderLintTests.swift | // the lint's example | examples written to a scratch test file the lint must flag

@@ -43,7 +43,7 @@ struct ReplacedLeadRoutingTests {
         Git.run(["commit", "-q", "-m", "first"], in: root)
 
         let launcher = Bundle(for: ReplacedAnchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host").path
-        let socket = "/tmp/vsh-rl-\(UUID().uuidString.prefix(8)).sock"
+        let socket = try temp.shortFolder("vsh-rl") + "/h.sock"
         let key = SymmetricKey(size: .bits256)
         let home = temp.url("home").resolvingSymlinksInPath()
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)

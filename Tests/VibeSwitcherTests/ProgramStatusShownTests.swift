@@ -12,6 +12,8 @@ import VibeCore
 /// and the window's list, wired as the app delegate wires them, show the statuses in the sidebar and the header.
 @MainActor
 struct ProgramStatusShownTests {
+    let temp = Scratch()
+
     /// Reads a line, reports the status it names, until `q`. Base64: "Indexing", "Bash".
     static let fakeProgram = #"stty -echo; while read cmd; do case "$cmd" in "#
         + #"w) printf '\033]7501;state=working:app=fake:title=SW5kZXhpbmc\007';; "#
@@ -41,7 +43,7 @@ struct ProgramStatusShownTests {
         AppStatus.enabled = false
         let launcher = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host").path
         #expect(FileManager.default.isExecutableFile(atPath: launcher))
-        let socket = "/tmp/vsh-ps-\(UUID().uuidString.prefix(8)).sock"
+        let socket = try temp.shortFolder("vsh-ps") + "/h.sock"
         let key = SymmetricKey(size: .bits256)
         var config = HostServer.Config(socketPath: socket, lockPath: socket + ".lock", shell: "/bin/sh", launcher: launcher,
                                        baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()],

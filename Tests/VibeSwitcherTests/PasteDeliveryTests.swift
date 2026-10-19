@@ -12,7 +12,9 @@ import VibeCore
 @Suite(.serialized)
 struct PasteDeliveryTests {
     final class Scratch {
-        let socket = "/tmp/vsh-paste-\(UUID().uuidString.prefix(8)).sock"
+        /// The test bundle's own `Scratch` (this one's name hides it): holds the short folder the socket is in.
+        let temp = VibeSwitcherTests.Scratch()
+        let socket: String
         let server: HostServer
         let host: HostClient
         let folder = scratchRoot.appendingPathComponent("paste-\(UUID().uuidString.prefix(8))")
@@ -20,6 +22,7 @@ struct PasteDeliveryTests {
         @MainActor
         init() throws {
             let launcher = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host").path
+            socket = try temp.shortFolder("vsh-paste") + "/h.sock"
             let key = SymmetricKey(size: .bits256)
             var config = HostServer.Config(socketPath: socket, lockPath: socket + ".lock", shell: "/bin/sh", launcher: launcher,
                                            baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()],

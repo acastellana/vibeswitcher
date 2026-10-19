@@ -638,7 +638,7 @@ final class Harness {
 
     private init(_ temp: Scratch, in folder: URL?) throws {
         let launcher = Bundle(for: HarnessAnchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host").path
-        socket = "/tmp/vsh-sync-\(UUID().uuidString.prefix(8)).sock"
+        socket = try temp.shortFolder("vsh-sync") + "/h.sock"
         let key = SymmetricKey(size: .bits256)
         scratch = folder ?? scratchRoot
         let home = (folder.map { temp.adopt($0.appendingPathComponent("sync-home-\(UUID().uuidString)")) } ?? temp.url("sync-home"))
@@ -704,7 +704,7 @@ final class Harness {
     var places: [String] { files + [socket] }
     private var files: [String] { [steerRoot.path, chat.steerRoot.path, chat.home, transcript.path, state.path, control.path] }
 
-    /// Each place is the test's own: the files in its scratch folder, the socket a short `/tmp` one (a socket's
+    /// Each place is the test's own: the files in its scratch folder, the socket in a short scratch one (a socket's
     /// path can't be as long as a scratch folder's), and none in the real home's or this HOME's `.vibeswitcher` or `.claude`.
     var placesAreScratch: Bool {
         // `/tmp/x` and `/private/tmp/x` are one place (Foundation spells it either way).
@@ -715,7 +715,7 @@ final class Harness {
         func inside(_ path: String, _ folder: String) -> Bool { spelled(path) == spelled(folder) || spelled(path).hasPrefix(spelled(folder) + "/") }
         let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
         let theirs = [realHome, NSHomeDirectory()].flatMap { [$0 + "/.vibeswitcher", $0 + "/.claude"] }
-        return files.allSatisfy { inside($0, scratch.path) } && spelled(socket).hasPrefix("/tmp/vsh-sync-")
+        return files.allSatisfy { inside($0, scratch.path) } && spelled(socket).hasPrefix(spelled(shortScratchRoot) + "/vsh-sync-")
             && !places.contains { place in theirs.contains { inside(place, $0) } }
     }
 

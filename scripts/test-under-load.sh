@@ -194,9 +194,11 @@ trap cleanup EXIT
 trap stopped INT TERM
 
 if [[ ${#command[@]} -eq 0 ]]; then
-    # A test that writes to the user's temporary folder itself would escape the check below.
-    if bypass=$(grep -rnE "\.temporaryDirectory|NSTemporaryDirectory\(\) *\)?\.append" Tests --include='*.swift' | grep -v "/TestSupport.swift:"); then
-        echo "These tests write to the user's temporary folder; use scratchRoot (or a Scratch) instead:"
+    # A test that writes to the user's temporary folder itself would escape the check below. The rule is
+    # scripts/temporary-folder-lint.txt, which TemporaryFolderLintTests applies in the normal suite too.
+    if ! bypass=$(scripts/temporary-folder-lint.sh); then
+        echo "These tests use the system temporary folder; use scratchRoot (or a Scratch) instead, or allow them in" \
+            "scripts/temporary-folder-lint.txt with a reason:"
         echo "$bypass"
         exit 1
     fi

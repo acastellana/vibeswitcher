@@ -24,8 +24,7 @@ struct HostClientSlowProbeTests {
 
         init() throws {
             // Short: a socket's path has a 104-byte limit.
-            let root = scratchRoot.path.utf8.count <= 32 ? scratchRoot.path : "/tmp"
-            dir = "\(root)/vshp-\(UUID().uuidString.prefix(8))"
+            dir = "\(shortScratchRoot)/vshp-\(UUID().uuidString.prefix(8))"
             socket = dir + "/h.sock"
             let oldBinary = dir + "/old/vibeswitcher-host"
             newBinary = dir + "/new/vibeswitcher-host"
