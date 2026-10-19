@@ -29,11 +29,14 @@ struct PopoverView: View {
     var onSettings: () -> Void = {}
     /// The "Notifications are off" banner's button: macOS's prompt if it never asked, else System Settings.
     var onAllowNotifications: () -> Void = { Notifier.openSettings() }
+    /// Brief me, in the header, and its panel under it (none in the sidebar and the snapshots).
+    var briefing: BriefingModel? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
             Divider()
+            if let briefing { BriefingStrip(model: briefing) }
             if store.sessions.isEmpty {
                 Text("No Claude Code or Codex sessions running in a terminal.")
                     .font(.callout).foregroundStyle(.secondary)
@@ -101,6 +104,7 @@ struct PopoverView: View {
         HStack(spacing: 12) {
             Text(isSidebar ? "Sessions" : "VibeSwitcher").font(.headline).lineLimit(1).fixedSize()
             newSessionMenu
+            if let briefing { BriefMeButton(model: briefing) }
             Button { onOpenWindow() } label: { Image(systemName: "macwindow").accessibilityLabel("Open VibeSwitcher window") }
                 .buttonStyle(.borderless)
                 .help("Open the VibeSwitcher window (⌘-click the menu bar icon)")
@@ -497,4 +501,16 @@ struct AgentBadge: View {
 /// focuses the popover instead of opening the session.
 final class FirstMouseHostingView<Content: View>: NSHostingView<Content> {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
+/// The menu bar's briefing panel, under the header: while one is written or after, until closed.
+private struct BriefingStrip: View {
+    @ObservedObject var model: BriefingModel
+
+    var body: some View {
+        if !model.panelHidden, model.phase == .writing || model.briefing != nil {
+            BriefingPanel(model: model) { model.panelHidden = true }
+            Divider()
+        }
+    }
 }

@@ -35,6 +35,8 @@ struct KeychainLintTests {
     /// its own key or none. The host's vault key is read only by the user's own host (`ownsLaunchers`).
     @Test func onlyTheAppMakesItsKeychainStore() throws {
         #expect(Self.files(in: "Sources", matching: #"KeychainStore\("#) == ["Sources/VibeSwitcher/AppDelegate.swift"])
+        // The ElevenLabs key's store too: the app makes it, once; every test has a memory one.
+        #expect(Self.files(in: "Sources", matching: #"KeychainSecret\("#) == ["Sources/VibeSwitcher/AppDelegate.swift"])
         let host = try #require(Self.code(in: "Sources").first { $0.path == "Sources/VibeSwitcher/HostClient.swift" })
         #expect(host.lines.contains { $0.contains("appKey: @escaping () -> SymmetricKey? = { nil }") })
         #expect(Self.files(in: "Sources", matching: #"VaultStorage\.keychainKey\("#) == ["Sources/vibeswitcher-host/main.swift"])
@@ -44,7 +46,7 @@ struct KeychainLintTests {
 
     /// In the tests, only the live test touches the Keychain or the app's store, and it runs only when asked for.
     @Test func onlyTheGatedLiveTestReachesTheKeychain() throws {
-        let reaching = Self.files(in: "Tests", matching: #"\bSec(Item|Keychain)\w*\(|KeychainStore\(|VaultStorage\.keychainKey\(|removeKeychainKey\(|AppDelegate\("#)
+        let reaching = Self.files(in: "Tests", matching: #"\bSec(Item|Keychain)\w*\(|KeychainStore\(|KeychainSecret\(|VaultStorage\.keychainKey\(|removeKeychainKey\(|AppDelegate\("#)
         #expect(reaching.filter { !$0.hasSuffix("/KeychainLintTests.swift") } == ["Tests/VibeCoreTests/KeychainLiveTests.swift"])
         let live = try #require(Self.code(in: "Tests").first { $0.path.hasSuffix("/KeychainLiveTests.swift") }).lines
         let gate = try #require(live.firstIndex { $0.hasPrefix("@Suite(.enabled(if: ProcessInfo.processInfo.environment[\"VIBESWITCHER_KEYCHAIN_LIVE\"] == \"1\"))") })

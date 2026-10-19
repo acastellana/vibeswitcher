@@ -76,6 +76,73 @@ public enum AppProof {
         }
     }
 
+    /// Where the ElevenLabs API key for the spoken briefing is kept (Settings › General › Briefing).
+    public static let elevenLabsAccount = "elevenlabs-api-key"
+
+    /// A secret you typed in Settings (the ElevenLabs API key), in the login Keychain beside the app's key, with the
+    /// same access: this program only (`appOnlyAccess`). Read only when it's used (the Brief me button, Test voice,
+    /// Settings showing whether one is saved); never written anywhere else. Only the app makes one (AppDelegate);
+    /// tests use `MemorySecret`.
+    public struct KeychainSecret: SecretStore {
+        public let service: String
+        public let account: String
+
+        public init(service: String = keychainService, account: String) {
+            self.service = service
+            self.account = account
+        }
+
+        private var item: [String: Any] {
+            [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+        }
+
+        public func read() -> String? {
+            var query = item
+            query[kSecReturnData as String] = true
+            query[kSecMatchLimit as String] = kSecMatchLimitOne
+            var found: CFTypeRef?
+            guard SecItemCopyMatching(query as CFDictionary, &found) == errSecSuccess, let data = found as? Data,
+                  let text = String(data: data, encoding: .utf8), !text.isEmpty else { return nil }
+            return text
+        }
+
+        @discardableResult
+        public func write(_ value: String?) -> Bool {
+            let status = SecItemDelete(item as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else { return false }
+            guard let value, !value.isEmpty else { return true }
+            guard let access = appOnlyAccess() else { return false }
+            var add = item
+            add[kSecValueData as String] = Data(value.utf8)
+            add[kSecAttrLabel as String] = "VibeSwitcher ElevenLabs API key"
+            add[kSecAttrAccess as String] = access
+            return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
+        }
+    }
+
+    /// A secret in memory: the store every test uses in place of `KeychainSecret`.
+    public final class MemorySecret: SecretStore, @unchecked Sendable {
+        private let lock = NSLock()
+        private var held: String?
+        /// How many times it was read (for tests: the key is read only when it's used).
+        public private(set) var reads = 0
+
+        public init(_ value: String? = nil) { held = value }
+
+        public func read() -> String? {
+            lock.withLock {
+                reads += 1
+                return held
+            }
+        }
+
+        @discardableResult
+        public func write(_ value: String?) -> Bool {
+            lock.withLock { held = value?.isEmpty == false ? value : nil }
+            return true
+        }
+    }
+
     /// Who reads the item without macOS asking you: this program only (never "any application"); anything else that
     /// asks (`security find-generic-password -w` in a worker's shell) gets a prompt naming it. The access list holds
     /// this program's designated requirement: for a build signed with the local identity, its identifier and
@@ -97,6 +164,15 @@ public enum AppProof {
 /// one with a "Keychain Not Found" dialog in your face, not an error.
 public protocol AppKeyStore: Sendable {
     func key() -> SymmetricKey?
+}
+
+/// Where the app keeps a secret you gave it (the ElevenLabs API key): the login Keychain in the app
+/// (`AppProof.KeychainSecret`), memory in tests (`AppProof.MemorySecret`), for the same reason as `AppKeyStore`.
+public protocol SecretStore: Sendable {
+    /// The secret, or nil when none is saved.
+    func read() -> String?
+    /// Saves it (nil or empty: removes it); false when the Keychain refused.
+    @discardableResult func write(_ value: String?) -> Bool
 }
 
 extension SymmetricKey {

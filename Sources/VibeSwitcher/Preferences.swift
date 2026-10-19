@@ -49,6 +49,9 @@ final class Preferences: ObservableObject {
     @Published var aiSummaries: Bool { didSet { defaults.set(aiSummaries, forKey: "aiSummaries") } }
     /// Keep the Mac from idle sleep while a lead's team works (see `KeepAwake`).
     @Published var keepAwake: KeepAwakeMode { didSet { defaults.set(keepAwake.rawValue, forKey: "keepAwake") } }
+    /// The language the spoken briefing is written and read in (an ElevenLabs language code, see `BriefingLanguage`);
+    /// the Mac's first preferred language until you pick one.
+    @Published var briefingLanguage: String { didSet { defaults.set(briefingLanguage, forKey: "briefingLanguage") } }
 
     /// `defaults` and `presetsFile` are for tests and offscreen renders; the app uses the standard ones.
     init(defaults: UserDefaults = .standard, presetsFile: URL = VibePaths.presetsFile) {
@@ -80,6 +83,7 @@ final class Preferences: ObservableObject {
         openWindowAtLaunch = defaults.bool(forKey: "openWindowAtLaunch")
         aiSummaries = defaults.bool(forKey: "aiSummaries")
         keepAwake = KeepAwakeMode(rawValue: defaults.string(forKey: "keepAwake") ?? "") ?? .onPower
+        briefingLanguage = defaults.string(forKey: "briefingLanguage").flatMap(BriefingLanguage.named)?.code ?? BriefingLanguage.preferred().code
     }
 
     func command(for agent: Agent) -> String {

@@ -64,6 +64,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         controller.keepAwake.mode = { [weak self] in self?.preferences.keepAwake ?? .never }
         return controller
     }()
+    /// Brief me: the spoken briefing of what happened lately across the led projects. The ElevenLabs key is in the
+    /// login Keychain, read only when it's used.
+    private lazy var briefing = BriefingModel(
+        snapshot: { [weak self] in BriefingModel.Snapshot(boards: self?.leadController.boards ?? [:], sessions: self?.store.sessions ?? []) },
+        language: { [weak self] in BriefingLanguage.named(self?.preferences.briefingLanguage ?? "") ?? .preferred() },
+        keyStore: AppProof.KeychainSecret(account: AppProof.elevenLabsAccount))
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var hotKey: HotKey?
@@ -169,7 +175,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                                },
                                onSettings: { [weak self] in self?.showSettings(tab: .general) },
                                onAllowNotifications: { [weak self] in self?.setup.allowNotifications() })
-        makePopoverContent = { AnyView(view) }
+        var menuView = view
+        menuView.briefing = briefing
+        makePopoverContent = { AnyView(menuView) }
         var sidebarView = view
         sidebarView.isSidebar = true
         sidebar = SidebarController(content: AnyView(PopoverView(
@@ -491,7 +499,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             settingsWindow = SettingsWindowController(
                 preferences: preferences, setup: setup, phoneAccess: phoneAccess,
                 recentProjects: { [weak self] in self?.popoverState.recentProjects.map(\.path) ?? [] },
-                showWelcome: { [weak self] in self?.showWelcome(firstRun: false) }, host: hostClient)
+                showWelcome: { [weak self] in self?.showWelcome(firstRun: false) }, host: hostClient, briefing: briefing)
         }
         loadRecentProjects()
         settingsWindow?.show(tab: tab)
@@ -544,7 +552,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     func showMainWindow(select hostID: UUID? = nil) {
         if mainWindow == nil {
             let controller = MainWindowController(store: store, host: hostClient, model: windowModel, actions: windowActions,
-                                                  leads: leadController)
+                                                  leads: leadController, briefing: briefing)
             controller.onFontSize = { [weak self] step in self?.changeFontSize(step) }
             controller.pane.configure = { [weak self] view in
                 guard let self else { return }

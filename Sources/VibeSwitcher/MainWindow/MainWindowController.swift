@@ -72,9 +72,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private var chatTimer: Heartbeat.Subscription?
 
     let leads: LeadController
+    /// The toolbar's Brief me (none in the benches).
+    private let briefing: BriefingModel?
 
-    init(store: SessionStore, host: HostClient, model: WindowModel, actions: WindowActions, leads: LeadController) {
+    init(store: SessionStore, host: HostClient, model: WindowModel, actions: WindowActions, leads: LeadController,
+         briefing: BriefingModel? = nil) {
         self.leads = leads
+        self.briefing = briefing
         self.store = store
         self.host = host
         self.model = model
@@ -465,10 +469,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     private static let newItem = NSToolbarItem.Identifier("newSession")
     private static let homeItem = NSToolbarItem.Identifier("startPage")
+    private static let briefItem = NSToolbarItem.Identifier("briefMe")
 
     func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
         [.toggleSidebar, .sidebarTrackingSeparator, Self.homeItem, .flexibleSpace, Self.newItem, .inspectorTrackingSeparator,
-         .flexibleSpace, .toggleInspector]
+         .flexibleSpace] + (briefing == nil ? [] : [Self.briefItem]) + [.toggleInspector]
     }
 
     func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
@@ -484,6 +489,13 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             item.image = NSImage(systemSymbolName: "house", accessibilityDescription: "Start Page")
             item.target = self
             item.action = #selector(showHomeAction(_:))
+            return item
+        }
+        if identifier == Self.briefItem, let briefing {
+            let item = NSToolbarItem(itemIdentifier: identifier)
+            item.label = "Brief Me"
+            item.toolTip = "Brief me: 30 seconds, spoken, on what happened lately across your projects"
+            item.view = NSHostingView(rootView: BriefMeToolbarItem(model: briefing))
             return item
         }
         guard identifier == Self.newItem else { return nil }

@@ -17,7 +17,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     private var watching = false
 
     init(preferences: Preferences, setup: SetupModel, phoneAccess: PhoneAccess,
-         recentProjects: @escaping () -> [String], showWelcome: @escaping () -> Void, host: HostClient? = nil) {
+         recentProjects: @escaping () -> [String], showWelcome: @escaping () -> Void, host: HostClient? = nil,
+         briefing: BriefingModel? = nil) {
         self.setup = setup
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.size),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
@@ -27,7 +28,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
         window.contentView = NSHostingView(rootView: SettingsView(preferences: preferences, setup: setup, phoneAccess: phoneAccess,
                                                                   selection: selection, recentProjects: recentProjects,
-                                                                  showWelcome: showWelcome, host: host))
+                                                                  showWelcome: showWelcome, host: host, briefing: briefing))
         window.center()
     }
 
@@ -56,10 +57,11 @@ struct SettingsView: View {
     let recentProjects: () -> [String]
     let showWelcome: () -> Void
     var host: HostClient? = nil
+    var briefing: BriefingModel? = nil
 
     var body: some View {
         TabView(selection: $selection.tab) {
-            GeneralSettings(preferences: preferences, setup: setup, showWelcome: showWelcome, host: host)
+            GeneralSettings(preferences: preferences, setup: setup, showWelcome: showWelcome, host: host, briefing: briefing)
                 .tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsTab.general)
             AgentsSettings(setup: setup)
                 .tabItem { Label("Agents", systemImage: "waveform.path.ecg") }.tag(SettingsTab.agents)
@@ -80,6 +82,7 @@ struct GeneralSettings: View {
     @ObservedObject var setup: SetupModel
     let showWelcome: () -> Void
     var host: HostClient? = nil
+    var briefing: BriefingModel? = nil
 
     var body: some View {
         Form {
@@ -116,6 +119,7 @@ struct GeneralSettings: View {
             } footer: {
                 SettingsFooter("The Team tab says in plain words what each task's agent is doing and what long decisions mean, written by a small Claude model (claude -p with haiku, no tools) from the task's title, checkpoints and last steps: at most every 3 minutes per task, while the tab is open. Off, it shows the latest checkpoint or activity. While a worker, verifier or merge runs, the Mac doesn't go to sleep on its own (the display still does); on battery only if set to Always.")
             }
+            if let briefing { BriefingSettings(preferences: preferences, briefing: briefing) }
             Section("Notifications") {
                 LabeledContent("Permission") {
                     HStack {
@@ -434,5 +438,50 @@ struct ColorRow: View {
                 guard let c = NSColor(color).usingColorSpace(.sRGB) else { return }
                 hex = RGB(red: c.redComponent, green: c.greenComponent, blue: c.blueComponent).hex
             }), supportsOpacity: false)
+    }
+}
+
+/// Settings › General › Briefing: the language the Brief me briefing is written and read in, and the ElevenLabs API
+/// key, kept in the login Keychain only (never in the defaults, a log or the phone).
+struct BriefingSettings: View {
+    @ObservedObject var preferences: Preferences
+    @ObservedObject var briefing: BriefingModel
+    /// What's typed into the key field, until Save: then it goes to the Keychain and the field empties.
+    @State private var key = ""
+
+    var body: some View {
+        Section {
+            Picker("Language", selection: $preferences.briefingLanguage) {
+                ForEach(BriefingLanguage.all) { Text($0.name).tag($0.code) }
+            }
+            LabeledContent("ElevenLabs API key") {
+                HStack {
+                    SecureField(briefing.keySaved == true ? "Saved in your Keychain" : "Not set", text: $key)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 220)
+                        .onSubmit(save)
+                    Button("Save", action: save).disabled(key.trimmingCharacters(in: .whitespaces).isEmpty)
+                    if briefing.keySaved == true {
+                        Button("Remove") { briefing.saveKey(nil) }
+                    }
+                }
+            }
+            LabeledContent("Voice") {
+                Button("Test voice") { briefing.testVoice() }
+            }
+            if let notice = briefing.keyNotice { Text(notice).font(.caption).foregroundStyle(.red) }
+        } header: {
+            Text("Briefing")
+        } footer: {
+            SettingsFooter("Brief me (in the window's toolbar and the menu bar) writes 30 seconds on what happened lately across the projects VibeSwitcher leads, with headless Claude, and reads it aloud. With a key, the text goes to ElevenLabs to be read, only when you press the button; without one, the Mac's own voice reads it. The key is kept in your login Keychain, nowhere else.")
+        }
+        .onAppear { briefing.checkKey() }
+    }
+
+    private func save() {
+        let value = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return }
+        briefing.saveKey(value)
+        key = ""
     }
 }
