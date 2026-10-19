@@ -166,7 +166,9 @@ stdin, and neither ever logs it or an answer. So whatever the kernel names as th
 reads it, a connection the app didn't make isn't the app's. So a worker's Bash,
 whether it runs the tool server as the verifier or the lead or writes to the socket itself, is the worker (or,
 once it leaves its session's process tree, no one, even when it execs the app's binary), and it
-can't give a verdict, take the lead's tools, record the lead's branch, seal a message as yours, type into the
+can't give a verdict, take the lead's tools, record the lead's branch, seal a message as yours, as the lead's or as
+VibeSwitcher's (it seals only its own report about its own task; a line it appends to an inbox unsealed reaches the
+agent as from an "unverified sender", never as yours, the lead's or VibeSwitcher's), type into the
 lead's terminal (a session in a team takes keys only from the app, itself or its lead), hand the host over to a
 program of its choosing (only the app may ask for a handover; anyone else's is refused before the host runs
 anything), or end another session through the host (only the app, the session itself or one started from it, and
@@ -187,8 +189,9 @@ that changes what the sessions run (the hook binary in `~/.vibeswitcher/bin`, Cl
 another program you run yourself with your full rights; you approving a Keychain prompt for anything but
 VibeSwitcher; the app's window itself when a worker drives it through Accessibility; signals (any process running
 as you can end any other, a session's program or the host itself, without asking the host); ordinary (non-team)
-sessions, which still take keys from anyone running as you; messages labelled as the lead's or VibeSwitcher's,
-which aren't sealed; a window capture (`--capture-window`, which any process can ask for), whose picture shows what
+sessions, which still take keys from anyone running as you (though once anything but the app or the session
+itself types into one of yours, the host records it, and what that session commits to the lead's base is no longer
+taken as yours: the next merge asks you about it); a window capture (`--capture-window`, which any process can ask for), whose picture shows what
 the window shows, a chat's text included; the code a merge's tests run from the audited branch itself (the
 verifier read it; nothing else checks it); `workflow.md`'s guard rails in a project where none are recorded yet (a
 lead that never set them, a vault that began empty): those in the file when the lead first configures, starts a

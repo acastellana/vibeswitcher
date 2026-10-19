@@ -76,9 +76,18 @@ public final class HostServer {
     /// The sessions the app asked for: the user's own (the lead's among them, which its team tells apart). The git
     /// commands their hooks record count as the user's (see `LeadVault.judge`); a session's own sessions' don't.
     private var openedByApp: Set<UUID> = []
-    /// Sessions something other than the app or the session itself typed into: what their agents run may be someone
-    /// else's say (a worker's Bash can type into any session outside a team), so it doesn't count as the user's.
-    private var typedByOthers: Set<UUID> = []
+    /// Where input to a session came from: the app (your keys, the phone, the composer, its replies to the terminal's
+    /// queries), the session itself (a process on its own terminal), or another process (a session's, or one
+    /// outside them all: a worker's Bash can type into any session outside a team).
+    enum InputSource: Equatable {
+        case app, itself
+        case another(LeadVault.Caller)
+    }
+    /// Per session, where its last input came from: what its agent runs counts as the user's only while that's the
+    /// app or itself (see `isYours`). Once another process typed into it, that stays, whatever comes after: the
+    /// session typing into itself may be running what it was sent (a shell runs it), and your keys may follow theirs
+    /// while its agent still works on what they typed.
+    private var lastInput: [UUID: InputSource] = [:]
     /// Per session, the client whose terminal answers queries and sets the size: the last to attach or type.
     private var primary: [UUID: ObjectIdentifier] = [:]
     private var lockFD: Int32 = -1
@@ -339,8 +348,15 @@ public final class HostServer {
                 return log("refused input to \(id.uuidString.prefix(8)) from pid \(client.peer?.pid ?? 0)")
             }
             let from = caller(of: client)
-            if from != .app, from != .session(id.uuidString), typedByOthers.insert(id).inserted, openedByApp.contains(id) {
-                log.note("input to \(Self.short(id)) not from the app: its git commands no longer count as the user's, \(HostLog.peer(client.peerPID))")
+            let source: InputSource = from == .app ? .app : from == .session(id.uuidString) ? .itself : .another(from)
+            switch (lastInput[id], source) {
+            case (.another?, .app), (.another?, .itself): break
+            default:
+                if case .another(let typist) = source, isYours(id) {
+                    let who = if case .session(let other) = typist { "session \(other.prefix(8))" } else { "a process outside the sessions" }
+                    log.note("input to \(Self.short(id)) from \(who), not the app: its git commands no longer count as the user's, \(HostLog.peer(client.peerPID))")
+                }
+                lastInput[id] = source
             }
             if isReply {
                 guard primary[id] == key else { return }
@@ -388,7 +404,7 @@ public final class HostServer {
             let from = caller(of: client)
             let opened: Bool = {
                 guard case .session(let id) = from, let id = UUID(uuidString: id) else { return false }
-                return openedByApp.contains(id) && startedBy[id] == nil && !typedByOthers.contains(id)
+                return isYours(id)
             }()
             var answer = vault.answer(request, from: from, userOpened: opened)
             if case .move(var move) = answer, move.from != move.to {
@@ -425,6 +441,17 @@ public final class HostServer {
                 self?.onExit?()
             }
         }
+    }
+
+    /// Whether what `id`'s agent runs is the user's say: a session the app opened, that no session started, whose
+    /// last input came from the app or itself (or that nothing typed into yet).
+    private func isYours(_ id: UUID) -> Bool {
+        openedByApp.contains(id) && startedBy[id] == nil && !Self.another(lastInput[id])
+    }
+
+    private static func another(_ source: InputSource?) -> Bool {
+        if case .another? = source { return true }
+        return false
     }
 
     /// Who the process on `client` is to the lead's vault (see `identify`).
@@ -530,7 +557,7 @@ public final class HostServer {
                                sessions[id].map { session in
                                    var saved = session.saved()
                                    saved.startedBy = startedBy[id]
-                                   saved.openedByApp = openedByApp.contains(id) && !typedByOthers.contains(id)
+                                   saved.openedByApp = openedByApp.contains(id) && !Self.another(lastInput[id])
                                    return saved
                                }
                            })
@@ -606,7 +633,7 @@ public final class HostServer {
         sessions.removeValue(forKey: id)?.close()
         startedBy[id] = nil
         openedByApp.remove(id)
-        typedByOthers.remove(id)
+        lastInput[id] = nil
         order.removeAll { $0 == id }
         primary[id] = nil
         for client in clients.values { client.attached.remove(id) }
