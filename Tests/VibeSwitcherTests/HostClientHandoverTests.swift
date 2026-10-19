@@ -23,6 +23,9 @@ struct HostClientHandoverTests {
         case refuse(String)
         /// The new build's probe takes this long (a loaded Mac's first exec), then the rest as `then`.
         case after(TimeInterval, then: OnHandover)
+        /// The probe ends when the test says so (`FakeHost.cue()`), then the rest as `then`: an answer ordered after
+        /// something the client logged, not by a timer racing the client's own on a loaded Mac.
+        case onCue(then: OnHandover)
         /// The probe goes on for as long as the test does.
         case hold
     }
@@ -37,6 +40,8 @@ struct HostClientHandoverTests {
         private var pid: Int32
         private var build: Int
         private var listener: DispatchSourceRead?
+        /// The answer an `.onCue` handover holds back until `cue()`.
+        private var cued: (() -> Void)?
         private var clients: [Int32: (source: DispatchSourceRead, decoder: HostFrameDecoder)] = [:]
         private let session = HostSession(id: UUID(), tty: "ttys999", childPID: 1, cwd: "/tmp/fake", command: nil, label: "Shell",
                                           agent: nil, title: "", startedAt: Date(), cols: 80, rows: 24, exit: nil)
@@ -62,6 +67,17 @@ struct HostClientHandoverTests {
             }
             unlink(path)
             rmdir((path as NSString).deletingLastPathComponent)
+        }
+
+        /// Ends an `.onCue` handover's probe: the held answer goes now. False if no handover was asked yet.
+        @discardableResult
+        func cue() -> Bool {
+            queue.sync {
+                guard let answer = cued else { return false }
+                cued = nil
+                answer()
+                return true
+            }
         }
 
         private func accept(_ listening: Int32) {
@@ -121,6 +137,8 @@ struct HostClientHandoverTests {
                 send(.error(message), replyTo: seq, on: fd)
             case .after(let delay, let then):
                 queue.asyncAfter(deadline: .now() + delay) { [weak self] in self?.handOver(then, replyTo: seq, on: fd) }
+            case .onCue(let then):
+                cued = { [weak self] in self?.handOver(then, replyTo: seq, on: fd) }
             case .hold:
                 break
             }
@@ -241,12 +259,16 @@ struct HostClientHandoverTests {
     }
 
     /// The handover's wait runs out and the host hands over after it: the connection was kept, and the new build's
-    /// welcome is the handover's success.
+    /// welcome is the handover's success. The host answers once the app has logged its wait out, so that's the order
+    /// however loaded the Mac.
     @Test func aHandoverAfterTheWaitIsLoggedAsHandedOver() async throws {
-        let host = try FakeHost(pid: 31589, build: 8, onHandover: .after(8, then: .reExec(build: 9)))
+        let host = try FakeHost(pid: 31589, build: 8, onHandover: .onCue(then: .reExec(build: 9)))
         defer { host.stop() }
         let log = Log()
         let client = client(of: host, log: log, wait: (handover: 2, breadcrumb: 1))
+        #expect(await until { log.lines.contains { $0.hasPrefix("host: handover: no answer in") } }, "\(log.lines)")
+        #expect(log.handover.isEmpty, "\(log.lines)")
+        #expect(await until { host.cue() })
         #expect(await until { client.state == .connected })
         #expect(log.handover == ["host: handed over after the wait (pid 31589, build 9)"], "\(log.lines)")
         let waiting = log.lines.filter { $0.hasPrefix("host: handover: ") }
@@ -256,10 +278,13 @@ struct HostClientHandoverTests {
 
     /// The host refuses after the app stopped waiting: that's the handover failing, and the old build carries on.
     @Test func aRefusalAfterTheWaitIsLoggedAsAFailure() async throws {
-        let host = try FakeHost(pid: 31589, build: 8, onHandover: .after(6, then: .refuse("Couldn't hand over: probe failed.")))
+        let host = try FakeHost(pid: 31589, build: 8, onHandover: .onCue(then: .refuse("Couldn't hand over: probe failed.")))
         defer { host.stop() }
         let log = Log()
         let client = client(of: host, log: log, wait: (handover: 1, breadcrumb: 1))
+        #expect(await until { log.lines.contains { $0.hasPrefix("host: handover: no answer in") } }, "\(log.lines)")
+        #expect(log.handover.isEmpty, "\(log.lines)")
+        #expect(await until { host.cue() })
         #expect(await until { !log.handover.isEmpty })
         #expect(log.handover == ["host: handover failed: Couldn't hand over: probe failed."], "\(log.lines)")
         #expect(log.lines.contains { $0.hasPrefix("host: handover: no answer in 1 s") }, "\(log.lines)")
