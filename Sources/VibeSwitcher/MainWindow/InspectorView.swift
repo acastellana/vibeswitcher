@@ -201,7 +201,8 @@ struct ActivityRow: View {
                     trailing
                 }
                 if let detail = lines.detail {
-                    Text(detail).font(detailFont).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
+                    // A turn's tokens and cost wrap rather than lose a number; a path or command keeps its ends.
+                    Text(detail).font(detailFont).foregroundStyle(.secondary).lineLimit(isTurn ? 2 : 1).truncationMode(isTurn ? .tail : .middle)
                 }
             }
         }
@@ -289,29 +290,34 @@ struct ActivityRow: View {
                 trailing.append(command.failed ? "failed" : "no exit code")
                 spoken.append(command.failed ? "failed, exit code not reported" : "exit code not reported")
             }
-            if let duration = command.duration {
+            // A background command's result comes as it starts: its time says nothing.
+            if let duration = command.duration, !command.background {
                 let text = duration < 1 ? "<1s" : Durations.short(duration)
                 trailing.append(text)
                 spoken.append(duration < 1 ? "under a second" : "took \(text)")
             }
-            let ran = command.title.map { "\($0): \(line)" } ?? line
+            let ran = command.title.map { "\($0), ran \(line)" } ?? "Ran \(line)"
             return Lines(title: command.title ?? line, detail: command.title == nil ? nil : line, trailing: trailing,
-                         spoken: "Ran \(ran), " + spoken.joined(separator: ", "))
+                         spoken: ([ran] + spoken).joined(separator: ", "))
         case .turn(let turn):
-            let title = turn.partial ? "Turn total (the part read)" : "Turn total"
+            var counts: [String] = []
+            if turn.files > 0 { counts.append("\(turn.files) file\(turn.files == 1 ? "" : "s")") }
+            if turn.commands > 0 { counts.append("\(turn.commands) command\(turn.commands == 1 ? "" : "s")") }
+            let name = turn.partial ? "Turn total (the part read)" : "Turn total"
+            let title = ([name] + counts).joined(separator: " · ")
             var parts: [String] = []
-            if turn.files > 0 { parts.append("\(turn.files) file\(turn.files == 1 ? "" : "s")") }
-            if turn.commands > 0 { parts.append("\(turn.commands) command\(turn.commands == 1 ? "" : "s")") }
             if let tokens = turn.tokens {
                 let cached = tokens.cached > 0 ? " (\(TokenCount.short(tokens.cached)) cached)" : ""
-                parts.append("\(TokenCount.short(tokens.input)) in\(cached) · \(TokenCount.short(tokens.output)) out")
+                parts.append("\(TokenCount.short(tokens.input)) in\(cached)")
+                parts.append("\(TokenCount.short(tokens.output)) out")
             } else {
                 parts.append("tokens not reported")
             }
             parts.append(turn.cost.map { String(format: "$%.2f", $0) } ?? "cost not reported")
             let detail = parts.joined(separator: " · ")
             let time = turn.at.map { ", started \($0.formatted(date: .omitted, time: .shortened))" } ?? ""
-            return Lines(title: title, detail: detail, trailing: [], spoken: "\(title)\(time): \(detail.replacingOccurrences(of: " · ", with: ", "))")
+            return Lines(title: title, detail: detail, trailing: [],
+                         spoken: "\(name)\(time): " + (counts + parts).joined(separator: ", "))
         }
     }
 }
