@@ -126,6 +126,8 @@ struct GeneralSettings: View {
                 Toggle("Sidebar mode", isOn: $preferences.sidebarMode)
                 Toggle("Auto-hide the sidebar (show it at the right edge)", isOn: $preferences.sidebarAutoHide)
                     .disabled(!preferences.sidebarMode)
+                Toggle("Show briefly after switching desktops", isOn: $preferences.sidebarFlashOnSwitch)
+                    .disabled(!preferences.sidebarMode || !preferences.sidebarAutoHide)
                 Toggle("Minimize a session's window when pausing it", isOn: $preferences.minimizeOnPause)
             }
             Section {

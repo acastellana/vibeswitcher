@@ -325,6 +325,8 @@ struct SessionRow: View {
     let isSelected: Bool
     /// Narrow sidebar layout: name gets the whole first line; badge moves next to the task.
     var compact = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -368,7 +370,7 @@ struct SessionRow: View {
                             .foregroundStyle(session.isPaused ? Color.secondary : session.status.color)
                             .lineLimit(1).fixedSize()
                         if session.statusSince > Date.distantPast.addingTimeInterval(1) {
-                            TimelineView(.ticking(every: 1)) { context in
+                            TimelineView(.elapsed(since: session.statusSince, reduceMotion: reduceMotion, voiceOver: voiceOver)) { context in
                                 Text(Durations.short(context.date.timeIntervalSince(session.statusSince)))
                                     .foregroundStyle(.secondary)
                             }
@@ -387,7 +389,7 @@ struct SessionRow: View {
                 }
                 if let activity = session.activity, let since = session.activitySince {
                     // Live: what it's running and for how long; long calls turn orange so a hung one stands out.
-                    TimelineView(.ticking(every: 1)) { context in
+                    TimelineView(.elapsed(since: since, reduceMotion: reduceMotion, voiceOver: voiceOver)) { context in
                         let seconds = context.date.timeIntervalSince(since)
                         HStack(spacing: 4) {
                             Image(systemName: "gearshape.2").imageScale(.small).accessibilityHidden(true)
@@ -486,6 +488,64 @@ struct AgentBadge: View {
             .padding(.horizontal, 4).padding(.vertical, 1)
             .foregroundStyle(agent == .claude ? Self.claude : .primary)
             .overlay(RoundedRectangle(cornerRadius: 3).stroke(.secondary.opacity(0.4)))
+    }
+}
+
+/// A time on screen drawn again when `ElapsedTicks` says: every second only in the first minute since `start` (or the
+/// last before a deadline) with neither Reduce Motion nor VoiceOver on, else on the minute. Made of fixed values, so
+/// a redraw of the view holding it is the same schedule, not a new one (see `ticking(every:)`).
+struct ElapsedSchedule: TimelineSchedule {
+    enum Anchor: Equatable {
+        case since(Date)
+        case until(Date)
+        /// Every `every` seconds on the clock, and every second while something fades (from, until).
+        case fading(Date?, Date?, every: TimeInterval)
+    }
+    let anchor: Anchor
+    let reduceMotion: Bool
+    let voiceOver: Bool
+
+    func entries(from startDate: Date, mode: TimelineScheduleMode) -> Entries {
+        Entries(schedule: self, upcoming: startDate)
+    }
+
+    func tick(after date: Date) -> Date {
+        switch anchor {
+        case .since(let start):
+            return ElapsedTicks.next(after: date, since: start, reduceMotion: reduceMotion, voiceOverRunning: voiceOver)
+        case .until(let deadline):
+            return ElapsedTicks.next(after: date, until: deadline, reduceMotion: reduceMotion, voiceOverRunning: voiceOver)
+        case .fading(let start, let end, let base):
+            return ElapsedTicks.next(after: date, every: base, fadingFrom: start, until: end, reduceMotion: reduceMotion)
+        }
+    }
+
+    struct Entries: Sequence, IteratorProtocol {
+        let schedule: ElapsedSchedule
+        var upcoming: Date
+
+        mutating func next() -> Date? {
+            defer { upcoming = schedule.tick(after: upcoming) }
+            return upcoming
+        }
+    }
+}
+
+extension TimelineSchedule where Self == ElapsedSchedule {
+    /// A time counted from `start` ("Working · 12m").
+    static func elapsed(since start: Date, reduceMotion: Bool, voiceOver: Bool) -> ElapsedSchedule {
+        ElapsedSchedule(anchor: .since(start), reduceMotion: reduceMotion, voiceOver: voiceOver)
+    }
+
+    /// A countdown to `deadline` ("Going with A in 8 min").
+    static func countdown(to deadline: Date, reduceMotion: Bool, voiceOver: Bool) -> ElapsedSchedule {
+        ElapsedSchedule(anchor: .until(deadline), reduceMotion: reduceMotion, voiceOver: voiceOver)
+    }
+
+    /// Every `base` seconds, and every second while something fades out between `start` and `end` (not with Reduce
+    /// Motion: nothing fades then).
+    static func fading(from start: Date?, until end: Date?, every base: TimeInterval, reduceMotion: Bool) -> ElapsedSchedule {
+        ElapsedSchedule(anchor: .fading(start, end, every: base), reduceMotion: reduceMotion, voiceOver: false)
     }
 }
 

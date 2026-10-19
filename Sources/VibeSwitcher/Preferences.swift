@@ -20,6 +20,10 @@ final class Preferences: ObservableObject {
     @Published var sidebarMode: Bool { didSet { defaults.set(sidebarMode, forKey: "sidebarMode") } }
     /// Sidebar slides in at the right screen edge instead of staying docked.
     @Published var sidebarAutoHide: Bool { didSet { defaults.set(sidebarAutoHide, forKey: "sidebarAutoHide") } }
+    /// The auto-hiding sidebar shows for a moment after you switch desktops. Off at first launch with Reduce Motion on.
+    @Published var sidebarFlashOnSwitch: Bool {
+        didSet { defaults.set(sidebarFlashOnSwitch, forKey: "sidebarFlashOnSwitch") }
+    }
     @Published var sessionOrder: SessionOrder {
         didSet { defaults.set(sessionOrder.rawValue, forKey: "sessionOrder") }
     }
@@ -60,10 +64,14 @@ final class Preferences: ObservableObject {
     /// the Mac's first preferred language until you pick one.
     @Published var briefingLanguage: String { didSet { defaults.set(briefingLanguage, forKey: "briefingLanguage") } }
 
-    /// `defaults` and `presetsFile` are for tests and offscreen renders; the app uses the standard ones.
-    init(defaults: UserDefaults = .standard, presetsFile: URL = VibePaths.presetsFile) {
+    /// `defaults`, `presetsFile` and `reduceMotion` are for tests and offscreen renders; the app uses the standard ones.
+    init(defaults: UserDefaults = .standard, presetsFile: URL = VibePaths.presetsFile, reduceMotion: Bool = Motion.isReduced) {
         self.defaults = defaults
         self.presetsFile = presetsFile
+        // Decided once, at first launch, and kept: turning Reduce Motion on later doesn't flip it behind your back.
+        if defaults.object(forKey: "sidebarFlashOnSwitch") == nil {
+            defaults.set(Self.flashOnSwitchByDefault(reduceMotion: reduceMotion), forKey: "sidebarFlashOnSwitch")
+        }
         defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true, "playSound": true, "notifyReminders": true, "minimizeOnPause": true, "sidebarAutoHide": true, "aiSummaries": true,
                                      "claudeCommand": "claude", "codexCommand": "codex",
                                      "projectsFolder": ProjectCreation.defaultLocation])
@@ -75,6 +83,7 @@ final class Preferences: ObservableObject {
         claudeCommand = defaults.string(forKey: "claudeCommand") ?? "claude"
         sidebarMode = defaults.bool(forKey: "sidebarMode")
         sidebarAutoHide = defaults.bool(forKey: "sidebarAutoHide")
+        sidebarFlashOnSwitch = defaults.bool(forKey: "sidebarFlashOnSwitch")
         sessionOrder = SessionOrder(rawValue: defaults.string(forKey: "sessionOrder") ?? "") ?? .screen
         codexCommand = defaults.string(forKey: "codexCommand") ?? "codex"
         launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -94,6 +103,9 @@ final class Preferences: ObservableObject {
         briefingLanguage = defaults.string(forKey: "briefingLanguage").flatMap(BriefingLanguage.named)?.code ?? BriefingLanguage.preferred().code
         projectsFolder = defaults.string(forKey: "projectsFolder") ?? ProjectCreation.defaultLocation
     }
+
+    /// Showing the sidebar after a desktop switch slides it in at the screen's edge: not by default with Reduce Motion.
+    static func flashOnSwitchByDefault(reduceMotion: Bool) -> Bool { !reduceMotion }
 
     /// The projects folder as a full path ("~/dev" expanded); the default when the setting is blank.
     var projectsFolderPath: String {

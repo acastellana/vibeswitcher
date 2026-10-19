@@ -436,56 +436,64 @@ private struct LiveStateView: View {
     /// Why an answer from the card wasn't typed (its question went away meanwhile).
     var notice: String?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+
     var body: some View {
         if let session = row.session, !session.isPaused {
-            // From a fixed date: one from `.now` is a new schedule on every redraw of the chat, and the window then
-            // laid out about 20 times a second for as long as the line was there.
-            TimelineView(.periodic(from: session.statusSince, by: 1)) { context in
-                switch session.status {
-                case .working:
+            switch session.status {
+            case .working:
+                // From a fixed date: one from `.now` is a new schedule on every redraw of the chat, and the window then
+                // laid out about 20 times a second for as long as the line was there. Per second in the first minute only.
+                TimelineView(.elapsed(since: workingSince(session), reduceMotion: reduceMotion, voiceOver: voiceOver)) { context in
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
                         Text(workingText(session, now: context.date)).font(.system(size: 12)).foregroundStyle(.secondary)
                     }
                     .padding(.leading, 30)
-                case .background:
-                    // The turn is over; something it started keeps running. It's waiting for you.
-                    Label("Turn done · \(session.detail.map { "still running: \($0)" } ?? "background work still running")",
-                          systemImage: "checkmark.circle")
-                        .font(.system(size: 12)).foregroundStyle(.secondary)
-                        .padding(.leading, 30)
-                case .needsInput:
-                    HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(.red).font(.system(size: 16))
-                            .accessibilityHidden(true)
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("\(session.agent.displayName) is asking in \(openInTerminal == nil ? "the terminal" : "Terminal")")
-                                .font(.system(size: 13, weight: .semibold))
-                            if let detail = session.detail, !detail.isEmpty {
-                                Text(detail).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(4)
-                            }
-                            if let notice {
-                                Label(notice, systemImage: "exclamationmark.triangle").font(.system(size: 11.5)).foregroundStyle(.orange)
-                            }
+                }
+            case .background:
+                // The turn is over; something it started keeps running. It's waiting for you.
+                Label("Turn done · \(session.detail.map { "still running: \($0)" } ?? "background work still running")",
+                      systemImage: "checkmark.circle")
+                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                    .padding(.leading, 30)
+            case .needsInput:
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(.red).font(.system(size: 16))
+                        .accessibilityHidden(true)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("\(session.agent.displayName) is asking in \(openInTerminal == nil ? "the terminal" : "Terminal")")
+                            .font(.system(size: 13, weight: .semibold))
+                        if let detail = session.detail, !detail.isEmpty {
+                            Text(detail).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(4)
                         }
-                        Spacer()
-                        if let openInTerminal {
-                            // Its own screen here is a read-only copy: Terminal is where it takes keys.
-                            Button("Show Terminal", action: showTerminal).help("Its screen, read-only")
-                            Button(action: openInTerminal) { Label("Open in Terminal", systemImage: "arrow.up.forward.app") }
-                                .buttonStyle(.borderedProminent).help("Open in Terminal (⌘O)")
-                        } else {
-                            Button("Show Terminal", action: showTerminal).buttonStyle(.borderedProminent)
+                        if let notice {
+                            Label(notice, systemImage: "exclamationmark.triangle").font(.system(size: 11.5)).foregroundStyle(.orange)
                         }
                     }
-                    .padding(12)
-                    .background(RoundedRectangle(cornerRadius: 10).fill(Color.red.opacity(0.08)))
-                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.red.opacity(0.3)))
-                default:
-                    EmptyView()
+                    Spacer()
+                    if let openInTerminal {
+                        // Its own screen here is a read-only copy: Terminal is where it takes keys.
+                        Button("Show Terminal", action: showTerminal).help("Its screen, read-only")
+                        Button(action: openInTerminal) { Label("Open in Terminal", systemImage: "arrow.up.forward.app") }
+                            .buttonStyle(.borderedProminent).help("Open in Terminal (⌘O)")
+                    } else {
+                        Button("Show Terminal", action: showTerminal).buttonStyle(.borderedProminent)
+                    }
                 }
+                .padding(12)
+                .background(RoundedRectangle(cornerRadius: 10).fill(Color.red.opacity(0.08)))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color.red.opacity(0.3)))
+            default:
+                EmptyView()
             }
         }
+    }
+
+    /// What the working line counts from: its tool call's start, else the turn's.
+    private func workingSince(_ session: Session) -> Date {
+        session.activity != nil ? session.activitySince ?? session.statusSince : session.statusSince
     }
 
     private func workingText(_ session: Session, now: Date) -> String {

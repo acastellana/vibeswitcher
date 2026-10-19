@@ -207,8 +207,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                                                           object: nil, queue: .main) { [weak self] _ in
             guard let self else { return }
             self.store.refresh(forceTerminal: true)
-            // Not with Reduce Motion: a slide at the screen edge on every desktop switch.
-            if self.preferences.sidebarMode, !Motion.isReduced { self.sidebar.flash() }
+            // Settings › Sidebar › Show briefly after switching desktops (off by default with Reduce Motion).
+            if self.preferences.sidebarMode, self.preferences.sidebarFlashOnSwitch { self.sidebar.flash() }
         }
         preferences.$minimizeOnPause
             .sink { [weak self] enabled in self?.store.minimizeOnPause = enabled }

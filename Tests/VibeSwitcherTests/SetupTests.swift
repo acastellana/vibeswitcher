@@ -74,6 +74,26 @@ struct SetupTests {
         }
     }
 
+    /// AX-5: Settings › Sidebar › Show briefly after switching desktops is on at first launch, off with Reduce Motion on
+    /// then; that first value is kept (Reduce Motion turned on or off later doesn't change it), and the toggle is stored.
+    @Test func theDesktopSwitchFlashIsOffByDefaultUnderReduceMotion() throws {
+        #expect(Preferences.flashOnSwitchByDefault(reduceMotion: false) == true)
+        #expect(Preferences.flashOnSwitchByDefault(reduceMotion: true) == false)
+        try withSuite { defaults, presets in
+            #expect(Preferences(defaults: defaults, presetsFile: presets, reduceMotion: false).sidebarFlashOnSwitch == true)
+            #expect(Preferences(defaults: defaults, presetsFile: presets, reduceMotion: true).sidebarFlashOnSwitch == true)
+        }
+        try withSuite { defaults, presets in
+            let preferences = Preferences(defaults: defaults, presetsFile: presets, reduceMotion: true)
+            #expect(preferences.sidebarFlashOnSwitch == false)
+            #expect(defaults.object(forKey: "sidebarFlashOnSwitch") as? Bool == false)
+            #expect(Preferences(defaults: defaults, presetsFile: presets, reduceMotion: false).sidebarFlashOnSwitch == false)
+            preferences.sidebarFlashOnSwitch = true
+            #expect(defaults.object(forKey: "sidebarFlashOnSwitch") as? Bool == true)
+            #expect(Preferences(defaults: defaults, presetsFile: presets, reduceMotion: true).sidebarFlashOnSwitch == true)
+        }
+    }
+
     /// E-01: an edit after a partly unreadable presets.json saves what was read, and the original stays aside.
     @Test func editingAfterAnUnreadablePresetKeepsTheOriginal() throws {
         try withSuite { defaults, presets in

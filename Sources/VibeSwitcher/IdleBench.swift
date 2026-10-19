@@ -10,7 +10,7 @@ import VibeCore
 /// shells, the hang watchdog and the lead controller's timer, and the main window off screen. Each phase settles,
 /// then runs SECONDS (default 20) and prints its CPU, wakeups, how often the session list was published, and memory:
 /// the window on the chat (with `--transcript`, copied into the scratch home), on a terminal, then closed, then
-/// closed with the sidebar on (`--sidebar`).
+/// closed with the sidebar docked on screen, drawing the popover's rows (`--sidebar`).
 enum IdleBench {
     static func run(arguments: [String]) -> Never {
         let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? ""
@@ -205,7 +205,7 @@ enum IdleBench {
             }))
             steps.append(("window closed", { controller.window?.close() }))
             if sidebarPhase {
-                steps.append(("window closed, sidebar on", { [weak self] in
+                steps.append(("sidebar (popover drawn)", { [weak self] in
                     guard let self else { return }
                     let content = AnyView(PopoverView(
                         store: self.store, state: PopoverState(), preferences: Preferences(), onOpen: { _ in }, onInstallHooks: {},
@@ -213,6 +213,7 @@ enum IdleBench {
                         onEditCommands: {}, onPause: { _, _ in }, onResume: { _ in }, isSidebar: true, onOpenWindow: {},
                         onSettings: {}, onAllowNotifications: {}))
                     let sidebar = SidebarController(content: content)
+                    sidebar.autoHide = false   // docked, so its PopoverView (the popover's rows and their clocks) is drawn
                     sidebar.setEnabled(true)
                     self.sidebar = sidebar
                 }))

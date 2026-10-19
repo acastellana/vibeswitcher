@@ -187,6 +187,8 @@ private struct LeadQuestionCard: View {
     /// The answer being written: kept through a revision, and through a withdrawal (to send anyway or discard).
     @State var text: String
     @Environment(\.holdLeadQuestion) private var hold
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
 
     var body: some View {
         switch question.state {
@@ -267,11 +269,16 @@ private struct LeadQuestionCard: View {
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder((question.rank == .blocking ? Color.red : Color.accentColor).opacity(0.45)))
     }
 
-    /// "Going with <proposal> in 8 min", a ring that empties as the time runs out, and Hold.
+    /// "Going with <proposal> in 8 min", a ring that empties as the time runs out, and Hold. Drawn again on the
+    /// deadline's minutes, and on its seconds only in the last minute (never with Reduce Motion or VoiceOver on).
     private func countdown(proposal: String, deadline: Double) -> some View {
         let length = Double(question.decideIn ?? LeadQuestion.defaultDecideIn) * 60
-        return TimelineView(.periodic(from: .now, by: 1)) { context in
+        let end = Date(timeIntervalSince1970: deadline)
+        return TimelineView(.countdown(to: end, reduceMotion: reduceMotion, voiceOver: voiceOver)) { context in
             let left = max(0, deadline - context.date.timeIntervalSince1970)
+            // The seconds are shown only while they're drawn every second; once a minute, they'd be up to a minute out.
+            let perSecond = ElapsedTicks.interval(remaining: left, reduceMotion: reduceMotion, voiceOverRunning: voiceOver) == 1
+            let inText = perSecond || left >= 60 ? " in \(timeLeft(left))" : " in under a minute"
             HStack(spacing: 8) {
                 ZStack {
                     Circle().stroke(Color.accentColor.opacity(0.2), lineWidth: 2.5)
@@ -280,14 +287,16 @@ private struct LeadQuestionCard: View {
                         .rotationEffect(.degrees(-90))
                 }
                 .frame(width: 15, height: 15)
-                let going = (Text("Going with ") + Text(proposal).fontWeight(.semibold) + Text(left > 0 ? " in \(timeLeft(left))" : " now"))
+                let going = (Text("Going with ") + Text(proposal).fontWeight(.semibold) + Text(left > 0 ? inText : " now"))
                     .font(.system(size: 12.5))
                 // The seconds only where they fit on the line (not in the inspector's narrow column).
                 ViewThatFits(in: .horizontal) {
                     HStack(spacing: 8) {
                         going.fixedSize()
-                        Text(String(format: "%d:%02d", Int(left) / 60, Int(left) % 60)).font(.system(size: 10.5).monospacedDigit())
-                            .foregroundStyle(.tertiary).fixedSize()
+                        if perSecond {
+                            Text(String(format: "%d:%02d", Int(left) / 60, Int(left) % 60)).font(.system(size: 10.5).monospacedDigit())
+                                .foregroundStyle(.tertiary).fixedSize()
+                        }
                     }
                     going.lineLimit(2)
                 }
@@ -489,12 +498,19 @@ struct LeadTeamView: View {
     /// The Mac-wide line (every project's team and the load); nil: not shown.
     var mac: MacLine?
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
-        let fading = !DecisionFeed.split(decisions, now: (clock ?? Date()).timeIntervalSince1970, reduceMotion: false).recent.isEmpty
+        // The decisions still to fade: from the first one's fade to the last one's end (DecisionFeed's times).
+        let now = (clock ?? Date()).timeIntervalSince1970
+        let fades = decisions.map { $0.at + DecisionFeed.shown }.filter { $0 + DecisionFeed.fade > now }
+        let fadeStart = fades.min().map { Date(timeIntervalSince1970: $0) }
+        let fadeEnd = fades.max().map { Date(timeIntervalSince1970: $0 + DecisionFeed.fade) }
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                // Only what tells time is drawn again as the clock ticks (every second while a decision fades).
-                TimelineView(.ticking(every: fading ? 1 : 10)) { context in
+                // Only what tells time is drawn again as the clock ticks: every 10 s, every second while a decision
+                // fades (never with Reduce Motion: it folds instead).
+                TimelineView(.fading(from: fadeStart, until: fadeEnd, every: 10, reduceMotion: reduceMotion)) { context in
                     glance(now: clock ?? context.date)
                 }
                 rest
