@@ -358,6 +358,14 @@ public struct LeadWorkflow: Equatable, Sendable {
 public enum LeadPrompts {
     public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, record_decision, merge, cleanup, configure"
 
+    /// What workers and verifiers are told about putting load on the Mac: a verifier once ran four times its
+    /// contract's load on a Mac other sessions and the user were using, and a turn that ended left its burners running.
+    public static let loadTests = "Load tests (a test run beside busy loops, to see what fails only on a loaded Mac): "
+        + "only through scripts/test-under-load.sh (`--load N -- COMMAND`; a project without it gets no load: ask the lead), "
+        + "never more than 2×ncpu load processes, and never when the Mac is already loaded (the script refuses then and "
+        + "says what to wait for: wait, don't work around it). No `yes` loops, fork storms or burners of your own: "
+        + "other sessions and the user share this Mac."
+
     /// How every lead's start prompt opens (a replaced lead's last turns leave it out: it isn't the user's).
     public static let startOpening = "You're starting as the project lead."
 
@@ -486,6 +494,7 @@ public enum LeadPrompts {
         scratch files once you're done with them (a full disk stops every session).
         Processes: stop one you started by its pid (`kill <pid>`; `$!` or `pgrep -f <your worktree path>` finds it). \
         pkill and killall are refused: their patterns match the other sessions on this Mac too.
+        \(loadTests)
         Out of date: when the lead says your branch conflicts with \(workflow.base), bring it up to date here by \
         merging: run `git merge \(workflow.base)`, resolve each conflict, `git add` the files, then `git commit` \
         (`git merge --abort` starts over). Then run the checks again, commit and report. The lead's merge puts your \
@@ -511,6 +520,7 @@ public enum LeadPrompts {
         Check: run every acceptance check\(workflow.testCommand.map { " and `\($0)`" } ?? ""); read the whole change \
         (`git diff \(workflow.base)...HEAD`, `git log \(workflow.base)..HEAD`); look for edits outside the boundaries, weakened or deleted \
         tests, hard-coded results, leftovers and anything that only looks done.
+        \(loadTests) Reproduce at the contract's load and stop there.
         Then call submit_audit with: completion complete / incomplete / blocked; integrity clean, suspect (you're not \
         sure) or violation (edits outside the boundaries, tests weakened, results faked, files you changed); and a \
         summary with the evidence (commands run and their results).

@@ -430,6 +430,16 @@ test waits for what it waits for (`eventually`, with `hangGuard` only as a hang 
 against a measure taken in the same run, never a fixed sleep or time. It won't start with under 15 GB
 free, stops its runs if the disk falls under 5 GB, and reports the lowest free space it saw.
 
+Every load test goes through this script, never `yes` loops or burners of your own: `scripts/test-under-load.sh
+--load N -- COMMAND` runs one command (a `swift test --filter` reproducing a failure) beside N busy loops.
+The Mac is shared with other sessions and the user, so it starts at most 2 × ncpu load processes
+(`--load` over that is refused), and none while `uptime`'s 1-minute load is already over 2 × ncpu or
+under 25 % of memory is free (`--memory-floor`): it says what to wait for. It records the busy loops'
+pids and kills them by pid on any exit, Ctrl-C too, and each loop also stops itself when the script, its
+parent or the session's claude process is gone, or after `--max-time` (30 min); under a Claude Code
+session with no live claude it doesn't start. `scripts/test-under-load-selfcheck.sh` (2 loops, a few
+seconds) shows the cleanup after Ctrl-C, a failing command, a dead owner and SIGKILL.
+
 It also fails when a run leaves anything in its TMPDIR. Tests put scratch files under `scratchRoot`
 (`$TMPDIR`, which Foundation's `temporaryDirectory` ignores) and remove them: a suite keeps a `Scratch`
 (`let temp = Scratch()`, then `temp.url("name")`), which removes what its test made when the test ends.
