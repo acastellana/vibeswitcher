@@ -94,7 +94,7 @@ struct TeamRow: Identifiable, Equatable {
     /// The dim line under the title: for a task at work, what its agent is doing (the plain-language summary, else
     /// the latest checkpoint, else the live activity); for a red one, what it asks or why.
     func line(summary: String?) -> String? {
-        if mark.isRed || mark == .blocked || mark == .kept { return problem }
+        if mark.isRed || [.blocked, .kept, .abandoned].contains(mark) { return problem }
         if let foldedText { return foldedText }
         guard isLive else { return nil }
         return summary ?? checkpoint?.text ?? activity
@@ -200,7 +200,7 @@ enum TeamRows {
         }
 
         // A session waiting on an answer needs you, whatever the board says (a finished task's is history).
-        if ![.done, .folded].contains(task.status), let worker, worker.needsYou {
+        if ![.done, .folded, .abandoned].contains(task.status), let worker, worker.needsYou {
             red(.needsYou, StateWord.needsYou.label, worker.detail.flatMap { $0.isEmpty ? nil : $0 } ?? "The worker is waiting for an answer.", since: nil)
             row.agent = task.worker
             return row
@@ -229,6 +229,12 @@ enum TeamRows {
             row.mark = .folded
             row.state = "Folded"
             row.foldedInto = task.foldedInto.flatMap { board?.task($0) }
+        case .abandoned:
+            // Given up by the lead: finished, apart from the merged ones, never failed.
+            row.group = .finished
+            row.mark = .abandoned
+            row.state = "Abandoned"
+            row.problem = task.abandonedBecause
         case .failed where task.worktree == nil && task.worker != nil:
             // Cleaned up without merging.
             row.group = .finished
@@ -301,7 +307,7 @@ enum TeamRows {
         return row
     }
 
-    /// An ended worker or verifier of a merged or abandoned task: the lead's history, not the list's. The host is
+    /// An ended worker or verifier of a finished task (merged, folded, abandoned): the lead's history, not the list's. The host is
     /// told to forget these (see `LeadController`); until it has, the team folding leaves them out.
     static func isHistory(_ row: WindowRow, boards: [String: LeadBoard], now: Date) -> Bool {
         guard let cwd = row.cwd, !LeadTeams.isLive(row), let root = LeadTeams.root(ofWorktree: cwd),

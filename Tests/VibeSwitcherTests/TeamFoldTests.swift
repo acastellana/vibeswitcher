@@ -48,6 +48,32 @@ struct TeamFoldTests {
                 == "Merged (3, 1 folded) · Kept (1) · Abandoned (1)")
     }
 
+    /// The board with two abandoned tasks: one the lead gave up, one cleaned up after failing (an older board).
+    static func withAbandoned() -> LeadBoard {
+        var board = board()
+        var dropped = TeamRowsTests.task("dark-mode-v1", .abandoned, title: "Dark mode, first try")
+        dropped.worktree = nil
+        dropped.abandonedBecause = "The user dropped it: the system appearance is enough"
+        var old = TeamRowsTests.task("old-menu", .failed, title: "Old menu rework")
+        old.worktree = nil
+        board.tasks += [dropped, old]
+        return board
+    }
+
+    @Test func anAbandonedTaskReadsAbandonedUnderItsOwnFold() throws {
+        let rows = TeamRows.rows(Self.withAbandoned(), seen: [:])
+        let dropped = try #require(rows.first { $0.task.slug == "dark-mode-v1" })
+        #expect(dropped.group == .finished && dropped.mark == .abandoned && dropped.state == "Abandoned" && !dropped.mark.isRed)
+        #expect(dropped.line(summary: nil) == "The user dropped it: the system appearance is enough")
+        let old = try #require(rows.first { $0.task.slug == "old-menu" })
+        #expect(old.group == .finished && old.mark == .abandoned)
+        #expect(TeamRows.finishedTitle(rows.filter { $0.group == .finished }) == "Merged (3, 1 folded) · Abandoned (2)")
+        #expect(!rows.contains { $0.group == .needsYou })
+        // The chat's strip shows them abandoned, never failed.
+        #expect(dropped.task.shownStatus == .abandoned && old.task.shownStatus == .abandoned)
+        #expect(LeadTask.Status.abandoned.label == "Abandoned")
+    }
+
     func list(_ board: LeadBoard) -> some View {
         TeamTaskList(rows: TeamRows.rows(board, seen: [:]), now: TeamRowsTests.now, summary: { _ in nil }, canOpen: { _ in false },
                      open: { _ in }, showFinished: true)
@@ -93,5 +119,33 @@ struct TeamFoldTests {
                 try data.write(to: URL(fileURLWithPath: folder).appendingPathComponent("team-folded-\(dark ? "dark" : "light").png"))
             }
         }
+    }
+
+    @Test func theRenderShowsTheAbandonedRowsWithTheirReason() throws {
+        let with = try render(list(Self.withAbandoned()))
+        let without = try render(list(Self.board()))
+        // Two more rows, one of them with its reason under it.
+        #expect(with.pixelsHigh > without.pixelsHigh + 2 * 40, "\(with.pixelsHigh) vs \(without.pixelsHigh)")
+        // Nothing red: neither reads failed.
+        #expect(redPixels(with) == 0)
+        if let folder = TeamSnapshots.folder {
+            try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            for dark in [false, true] {
+                let data = try #require(try render(list(Self.withAbandoned()), dark: dark).representation(using: .png, properties: [:]))
+                try data.write(to: URL(fileURLWithPath: folder).appendingPathComponent("team-abandoned-\(dark ? "dark" : "light").png"))
+            }
+        }
+    }
+
+    /// Pixels drawn in red (a failed mark or its text).
+    func redPixels(_ bitmap: NSBitmapImageRep) -> Int {
+        var count = 0
+        for x in 0..<bitmap.pixelsWide {
+            for y in 0..<bitmap.pixelsHigh {
+                guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { continue }
+                if color.redComponent > 0.75, color.greenComponent < 0.35, color.blueComponent < 0.35 { count += 1 }
+            }
+        }
+        return count
     }
 }

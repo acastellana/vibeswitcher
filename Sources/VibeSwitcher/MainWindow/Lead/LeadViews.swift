@@ -13,6 +13,7 @@ extension LeadTask.Status {
         case .blocked: return .purple
         case .kept: return .teal
         case .folded: return .green
+        case .abandoned: return .secondary
         }
     }
 
@@ -26,8 +27,14 @@ extension LeadTask.Status {
         case .blocked: return "Blocked"
         case .kept: return "Kept"
         case .folded: return "Folded"
+        case .abandoned: return "Abandoned"
         }
     }
+}
+
+extension LeadTask {
+    /// The state it's shown in: abandoned once cleaned up after failing (older boards, cleanup with force), never failed.
+    var shownStatus: Status { isAbandoned ? .abandoned : status }
 }
 
 /// Over the lead's chat: the board at a glance, one chip per task (click: open its worker).
@@ -43,10 +50,11 @@ struct TeamStrip: View {
             HStack(spacing: 10) {
                 Image(systemName: "person.3.fill").foregroundStyle(Color.accentColor).accessibilityHidden(true)
                 Text("Team").font(.system(size: 12, weight: .semibold))
-                // Folded tasks count with the done ones ("12 done (3 folded)"), never apart.
+                // Folded tasks count with the done ones ("12 done (3 folded)"), never apart; those cleaned up after
+                // failing as abandoned, never failed.
                 let folded = board.tasks.filter { $0.status == .folded }.count
                 ForEach(order.filter { $0 != .folded }, id: \.self) { status in
-                    let count = board.tasks.filter { $0.status == status }.count + (status == .done ? folded : 0)
+                    let count = board.tasks.filter { $0.shownStatus == status }.count + (status == .done ? folded : 0)
                     if count > 0 {
                         Label("\(count) \(status.label.lowercased())" + (status == .done && folded > 0 ? " (\(folded) folded)" : ""), systemImage: "circle.fill")
                             .labelStyle(StatusDotLabelStyle(color: status.color))
@@ -69,10 +77,10 @@ struct TeamStrip: View {
             if !board.tasks.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
-                        ForEach(board.tasks.sorted { $0.status.attentionRank < $1.status.attentionRank }) { task in
+                        ForEach(board.tasks.sorted { $0.shownStatus.attentionRank < $1.shownStatus.attentionRank }) { task in
                             Button { open(task) } label: {
                                 HStack(spacing: 5) {
-                                    Circle().fill(task.status.color).frame(width: 7, height: 7)
+                                    Circle().fill(task.shownStatus.color).frame(width: 7, height: 7)
                                     Text(task.title).font(.system(size: 11.5)).lineLimit(1)
                                     if let evidence = task.evidence {
                                         Image(systemName: evidence.passes ? "checkmark.seal.fill" : "xmark.seal.fill")
@@ -81,10 +89,10 @@ struct TeamStrip: View {
                                     }
                                 }
                                 .padding(.horizontal, 9).padding(.vertical, 4)
-                                .background(Capsule().fill(task.status.color.opacity(0.12)))
+                                .background(Capsule().fill(task.shownStatus.color.opacity(0.12)))
                             }
                             .buttonStyle(.plain)
-                            .help("\(task.status.label): \(task.contract.goal)")
+                            .help("\(task.shownStatus.label): \(task.contract.goal)")
                         }
                     }
                 }

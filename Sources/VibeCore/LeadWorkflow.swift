@@ -517,12 +517,16 @@ public enum LeadPrompts {
         Otherwise merge(task) as the merge policy below says, then post_update with what changed, how it was checked \
         (screenshots when there's UI), the risk and how to revert it, then cleanup(task). If the audit didn't pass: \
         tell the worker exactly what failed (message) or start a fresh worker with a sharper contract.
-        A task that won't merge by itself is never marked failed for it. Overtaken or batched (another task carries \
-        its work, or you merged several into one): update_task(task, status: folded, into: the task that carries it) \
-        (stop_worker first if its worker runs), then cleanup(task); it counts with the merged ones, reads "folded \
-        into" that task, and start_worker, audit and merge refuse it. Abandoned (nothing will carry it: dropped, no \
-        longer wanted): cleanup(task, force: true), which discards its work. failed is for work that was tried and \
-        didn't pass, blocked for work that waits on something.
+        A task that won't merge by itself is never marked failed for it: failed is for work that was tried and didn't \
+        pass, blocked for work that waits on something. Folded when another task carries its work (overtaken, or \
+        batched with others into one): update_task(task, status: folded, into: the task that carries it); it counts \
+        with the merged ones and reads "folded into" that task. Abandoned when nothing will carry it (dropped, no \
+        longer wanted): update_task(task, status: abandoned, reason: why); it counts under Abandoned. For either, \
+        stop_worker first if its worker runs, then cleanup(task), which removes its worktree and branch (an abandoned \
+        task's work with them); start_worker, audit and merge refuse it until you set it back to planned. Removed \
+        only for a record made by mistake that never ran (no worker ever started, no branch, no merge): \
+        update_task(task, status: removed) takes it off the board, kept in board.json for the record; anything that \
+        ran is refused, and is folded or abandoned instead.
         Audits come with findings, each Important, Nit or Pre-existing at a file:line with its evidence, named \
         <task>:<id> (status and board(task) list them by severity). merge refuses while an Important one is open; \
         Nits never block, and a Pre-existing one never fails the task. Resolve each Important one: message the worker \

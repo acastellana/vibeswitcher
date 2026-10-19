@@ -443,9 +443,12 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
         /// Folded into another task (`foldedInto`), which carries its work: finished like a merged task, counted with
         /// the merged ones, never as failed or blocked; nothing more starts, audits or merges on it.
         case folded
+        /// Given up by the lead (`abandonedBecause`): nothing will carry its work. Finished, counted apart from the
+        /// merged ones and never as failed or blocked; nothing more starts, audits or merges on it.
+        case abandoned
 
         /// The order the board lists the states in: what needs the lead first. Holds every case (a test checks).
-        public static let attentionOrder: [Status] = [.running, .review, .blocked, .failed, .kept, .planned, .done, .folded]
+        public static let attentionOrder: [Status] = [.running, .review, .blocked, .failed, .kept, .planned, .done, .folded, .abandoned]
         /// Where the state sits in `attentionOrder`.
         public var attentionRank: Int { Self.attentionOrder.firstIndex(of: self) ?? Self.attentionOrder.count }
     }
@@ -494,6 +497,11 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var keptBecause: String?
     /// The slug of the task it's folded into (status folded).
     public var foldedInto: String?
+    /// Why the lead gave it up (status abandoned).
+    public var abandonedBecause: String?
+    /// When the lead removed it from the board (a record made by mistake that never ran: `LeadBoard.removed`), and why.
+    public var removedAt: Double?
+    public var removedBecause: String?
     /// Its audits' findings and rounds, as the vault last had them (for showing; merge goes by the vault's).
     public var audits: LeadAuditLedger?
     /// The finders its audit runs, while it runs more than one (for showing; the vault holds their reports).
@@ -524,6 +532,20 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// Adds the lead's note, keeping the newest `keptNotes`.
     public mutating func keep(_ note: LeadNote) {
         notes = Array(((notes ?? []) + [note]).suffix(Self.keptNotes))
+    }
+
+    /// Abandoned: set so by the lead, or (older boards, and cleanup with force) cleaned up after failing without
+    /// merging.
+    public var isAbandoned: Bool { status == .abandoned || (status == .failed && worktree == nil && worker != nil) }
+
+    /// It ran, or something of it is left: a worker was started on it, it has a branch or worktree on the board, or
+    /// a merge. Why not, in words; nil when it never ran.
+    public var ranBecause: String? {
+        if merged != nil { return "it merged" }
+        if worker != nil || startedAt != nil || (attempts ?? 0) > 0 { return "a worker was started on it" }
+        if verifier != nil { return "a verifier was started on it" }
+        if branch != nil || worktree != nil { return "it has a branch" }
+        return nil
     }
 
     /// Rework rounds so far (0 on the first attempt).
@@ -795,6 +817,9 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     /// have neither.
     public var reports: [LeadReport]?
     public var reportsSeenAt: Double?
+    /// Records the lead removed (made by mistake, never ran), oldest first: kept for the record, shown and counted
+    /// nowhere. Optional: older boards have none.
+    public var removed: [LeadTask]?
 
     public static let keptReports = 50
 
