@@ -19,6 +19,8 @@
 #   Logs: .build/ui-bench/{base,branch}-N.log (UI_BENCH_LOGS: another folder).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
+unset VIBESWITCHER_HOME
 
 binary=.build/debug/VibeSwitcher base="" rounds=2 tolerance=20
 while getopts "b:B:r:t:" option; do

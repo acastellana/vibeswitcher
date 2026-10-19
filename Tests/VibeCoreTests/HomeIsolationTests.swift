@@ -10,8 +10,8 @@ struct HomeIsolationTests {
     static let real = "/Users/jane"
     static let scratch = "/Users/jane/dev/app/.build/scratchhome"
 
-    /// The doc's four environments. `fallbackHome` is what `NSHomeDirectory()` gives in each: the real home unless
-    /// CFFIXED_USER_HOME moves it.
+    /// The doc's four environments, then the others. `fallbackHome` is what `NSHomeDirectory()` gives in each: the real
+    /// home unless CFFIXED_USER_HOME moves it.
     @Test func theRootFollowsVibeswitcherHomeThenHomeThenTheHomeFolder() {
         func root(_ environment: [String: String], fallbackHome: String = HomeIsolationTests.real) -> String {
             VibePaths.root(environment: environment, fallbackHome: fallbackHome).path
@@ -21,8 +21,13 @@ struct HomeIsolationTests {
         #expect(root(["HOME": Self.scratch, "CFFIXED_USER_HOME": Self.scratch], fallbackHome: Self.scratch)
                 == Self.scratch + "/.vibeswitcher")
         #expect(root(["HOME": Self.real, "VIBESWITCHER_HOME": Self.scratch + "/vs"]) == Self.scratch + "/vs")
-        // VIBESWITCHER_HOME is the folder itself, and comes before HOME.
-        #expect(root(["HOME": "/elsewhere", "VIBESWITCHER_HOME": "/tmp/vs"]) == "/tmp/vs")
+        // CFFIXED_USER_HOME alone (the debug modes', the chat benches') moves it too: it's what moved NSHomeDirectory().
+        #expect(root(["HOME": Self.real, "CFFIXED_USER_HOME": Self.scratch], fallbackHome: Self.scratch)
+                == Self.scratch + "/.vibeswitcher")
+        #expect(root(["HOME": "/elsewhere", "CFFIXED_USER_HOME": Self.scratch], fallbackHome: Self.scratch)
+                == Self.scratch + "/.vibeswitcher")
+        // VIBESWITCHER_HOME is the folder itself, and comes before HOME and CFFIXED_USER_HOME.
+        #expect(root(["HOME": "/elsewhere", "CFFIXED_USER_HOME": "/elsewhere", "VIBESWITCHER_HOME": "/tmp/vs"]) == "/tmp/vs")
         // Only an absolute path counts: an empty or relative one falls through to the next.
         #expect(root(["HOME": Self.scratch, "VIBESWITCHER_HOME": ""]) == Self.scratch + "/.vibeswitcher")
         #expect(root(["HOME": Self.scratch, "VIBESWITCHER_HOME": "vs"]) == Self.scratch + "/.vibeswitcher")

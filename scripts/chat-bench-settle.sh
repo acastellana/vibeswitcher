@@ -11,6 +11,8 @@
 #   -q: only the window's once-a-second timer, not the busy model (VIBESWITCHER_BENCH_UPDATES).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
+unset VIBESWITCHER_HOME
 
 runs=10 jobs=6 binary=.build/debug/VibeSwitcher board="" updates=1
 widths="700 900 1200 1728" scenarios="switch top middle bottom" variants="plain LIVE STACK WINDOW"

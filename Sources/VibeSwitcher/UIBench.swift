@@ -23,8 +23,9 @@ import VibeCore
 enum UIBench {
     static func run(arguments: [String]) -> Never {
         let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? ""
-        guard NSHomeDirectory() != realHome else {
-            print("--ui-bench runs on a scratch home only: set CFFIXED_USER_HOME to an empty folder.")
+        guard NSHomeDirectory() != realHome, !VibePaths.isAccountRoot(VibePaths.root, accountHome: realHome) else {
+            print("--ui-bench runs on a scratch home only: set CFFIXED_USER_HOME to an empty folder (and VIBESWITCHER_HOME, if set, "
+                  + "to one other than your ~/.vibeswitcher).")
             exit(1)
         }
         let minutes = arguments.first.flatMap(Double.init) ?? 5

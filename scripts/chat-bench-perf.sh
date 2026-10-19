@@ -9,6 +9,8 @@
 #   e.g. scripts/chat-bench-perf.sh base=/tmp/base/.build/debug/VibeSwitcher head=.build/debug/VibeSwitcher -- t1.jsonl t2.jsonl
 set -euo pipefail
 cd "$(dirname "$0")/.."
+# Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
+unset VIBESWITCHER_HOME
 
 runs=3 limit=12 variants="plain LIVE STACK"
 while getopts "n:l:v:" option; do

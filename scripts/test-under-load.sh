@@ -29,6 +29,8 @@
 #   -r RUNS: suites at once (3).  -f FILTER: only the tests matching FILTER (as `swift test --filter`), for a quick look.
 set -uo pipefail
 cd "$(dirname "$0")/.."
+# Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
+unset VIBESWITCHER_HOME
 
 cores=$(sysctl -n hw.ncpu)
 cap=$((2 * cores))

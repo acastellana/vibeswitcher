@@ -170,6 +170,7 @@ struct HookBoundsTests {
         var environment = ProcessInfo.processInfo.environment
         environment["HOME"] = home.path
         environment["CFFIXED_USER_HOME"] = home.path
+        environment["VIBESWITCHER_HOME"] = nil  // the run's own (scripts/test.sh) would come before this home
         process.environment = environment
         process.standardInput = input
         process.standardOutput = try FileHandle(forWritingTo: output)

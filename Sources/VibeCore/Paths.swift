@@ -8,23 +8,26 @@ public enum VibePaths {
         root(environment: ProcessInfo.processInfo.environment, fallbackHome: NSHomeDirectory())
     }
 
-    /// Where VibeSwitcher keeps its files, first of: `VIBESWITCHER_HOME` (the folder itself), `$HOME/.vibeswitcher`,
-    /// `.vibeswitcher` in `fallbackHome`. A variable counts only when it's an absolute path. `NSHomeDirectory()`, the
-    /// fallback, follows CFFIXED_USER_HOME and not HOME, so HOME alone used to leave this on the user's own folder
+    /// Where VibeSwitcher keeps its files, first of: `VIBESWITCHER_HOME` (the folder itself), `.vibeswitcher` in the
+    /// home (`home(environment:fallbackHome:)`). A variable counts only when it's an absolute path. `NSHomeDirectory()`
+    /// follows CFFIXED_USER_HOME and not HOME, so HOME alone used to leave this on the user's own folder
     /// (docs/eval/open-2026-10-19.md, E-30 + R10). Under a normal login HOME is the user's home: the same folder as ever.
     public static func root(environment: [String: String], fallbackHome: String) -> URL {
         if let own = absolute(environment["VIBESWITCHER_HOME"]) { return URL(fileURLWithPath: own, isDirectory: true) }
         return URL(fileURLWithPath: home(environment: environment, fallbackHome: fallbackHome)).appendingPathComponent(".vibeswitcher")
     }
 
-    /// The home folder this process was given: `$HOME` when it's an absolute path, else `NSHomeDirectory()`. Where the
-    /// agents' own files are looked for (`~/.claude`, `~/.codex`): Claude Code and Codex follow HOME too.
+    /// The home folder this process was given: where the agents' own files are looked for (`~/.claude`, `~/.codex`),
+    /// Claude Code and Codex following HOME too.
     public static var home: String {
         home(environment: ProcessInfo.processInfo.environment, fallbackHome: NSHomeDirectory())
     }
 
+    /// First of: CFFIXED_USER_HOME, `$HOME`, `fallbackHome` (`NSHomeDirectory()`). CFFIXED_USER_HOME is the one way to
+    /// move `NSHomeDirectory()`, so when it's set it was set on purpose, and comes before HOME: the debug modes and the
+    /// chat benches run on a scratch home given by CFFIXED_USER_HOME alone, with HOME still the user's.
     public static func home(environment: [String: String], fallbackHome: String) -> String {
-        absolute(environment["HOME"]) ?? fallbackHome
+        absolute(environment["CFFIXED_USER_HOME"]) ?? absolute(environment["HOME"]) ?? fallbackHome
     }
 
     private static func absolute(_ path: String?) -> String? {

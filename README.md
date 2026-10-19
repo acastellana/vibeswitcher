@@ -526,8 +526,9 @@ loads, that VibeSwitcher's folder isn't your own `~/.vibeswitcher`. To run `swif
 follows CFFIXED_USER_HOME, not HOME) to a scratch folder; one anywhere but your own `~/.vibeswitcher` will do, a
 worktree's `.build/scratchhome` included.
 
-VibeSwitcher's folder is `$VIBESWITCHER_HOME` when that's an absolute path, else `$HOME/.vibeswitcher`, else
-`~/.vibeswitcher` (`NSHomeDirectory()`), for the app, the hook and the host alike. Under a normal login that's your
+VibeSwitcher's folder is `$VIBESWITCHER_HOME` when that's an absolute path, else `.vibeswitcher` in
+CFFIXED_USER_HOME, else in `$HOME`, else `~/.vibeswitcher` (`NSHomeDirectory()`), for the app, the hook and the host
+alike. Under a normal login that's your
 `~/.vibeswitcher` as ever; with a scratch HOME (a debug run of Claude Code, a debug mode) the hook and the app write
 there instead.
 
