@@ -23,9 +23,37 @@ final class ChatSync {
         var working = false
     }
 
+    /// A session in a Terminal.app tab the chat shows (not one in the window). While the hooks say it needs you, its
+    /// tab is read (plain text, no highlights) for the answer card; an answer you confirm is typed in through
+    /// `RemoteInput`, the phone's guarded path.
+    struct TerminalTarget: Equatable {
+        var tty: String
+        var pid: Int32
+        var startedAt: Date
+        var needsInput: Bool
+    }
+
+    /// One `RemoteInput.send` into a Terminal tab: text (never submitted) or a key.
+    struct TerminalStep: Equatable {
+        var text: String?
+        var key: RemoteInput.Key?
+    }
+
     let chat: ChatModel
     let host: HostClient
     var target: () -> Target? = { nil }
+    /// Asked when there's no window session (`target`).
+    var terminalTarget: () -> TerminalTarget? = { nil }
+    /// Its tab's text; nil when it couldn't be read. Called off the main thread.
+    var terminalScreen: (String) -> String? = { tty in TerminalBridge.screens(for: [tty])[tty] }
+    /// One step typed into its tab (`RemoteInput.send`), off the main thread; `stillAllowed` as there.
+    var terminalSend: (TerminalTarget, TerminalStep, _ stillAllowed: () -> Bool) -> RemoteInput.Failure? = { target, step, stillAllowed in
+        RemoteInput.send(tty: target.tty, agent: (target.pid, target.startedAt), text: step.text, submit: false, key: step.key,
+                         stillAllowed: stillAllowed)
+    }
+    /// Where Terminal is read and typed into, and how what came of it gets back to the main thread.
+    var background: (@escaping () -> Void) -> Void = { DispatchQueue.global(qos: .userInitiated).async(execute: $0) }
+    var onMain: (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) }
     /// The session's screen (see `TerminalPaneController.screenText`).
     var screen: (UUID) -> ScreenRead = { _ in ScreenRead() }
     /// Whether the program in that session asked for bracketed paste.
@@ -42,6 +70,10 @@ final class ChatSync {
     /// How long the screen must show no menu before held messages are typed in (a redraw between two questions
     /// isn't the end of them).
     static let releaseAfter: TimeInterval = 1
+    /// How often a Terminal tab is read while it needs you (each read is an AppleScript call to Terminal).
+    static let terminalReadEvery: TimeInterval = 2
+    private var terminalReading = false
+    private var terminalReadAt: Date?
 
     init(chat: ChatModel, host: HostClient) {
         self.chat = chat
@@ -52,19 +84,15 @@ final class ChatSync {
     /// shown for a while, the messages held for it go in.
     func readScreen() {
         guard let target = target() else {
-            if chat.menu != nil { chat.menu = nil }
             if chat.mode != nil { chat.mode = nil }
+            if let terminal = terminalTarget() { return readTerminal(terminal) }
+            if chat.menu != nil { chat.menu = nil }
             setAnswering(nil)
             return
         }
         let read = screen(target.id)
         let menu = Self.menu(on: read, needsInput: target.needsInput)
-        if let answering {
-            // The keys haven't shown yet: the card stays as it was, waiting.
-            if menu == answering.menu, now() < answering.until { return }
-            setAnswering(nil)
-        }
-        if chat.menu != menu { chat.menu = menu }
+        guard show(menu) else { return }
         let mode = target.agent == .codex ? nil : AgentMode.parse(Array(read.lines.suffix(6)))
         if chat.mode != mode { chat.mode = mode }
         if menu == nil {
@@ -87,6 +115,142 @@ final class ChatSync {
         return (asking ? ScreenMenu.parse(bottom, highlights: marks) : nil) ?? ScreenMenu.parseCommands(bottom)
     }
 
+    /// `menu` on the card, unless an answer's keys haven't shown yet (false: the card stays as it was, waiting).
+    private func show(_ menu: ScreenMenu?) -> Bool {
+        if let answering {
+            if menu == answering.menu, now() < answering.until { return false }
+            setAnswering(nil)
+        }
+        if chat.menu != menu { chat.menu = menu }
+        return true
+    }
+
+    /// The menu on a Terminal tab's text (`TerminalBridge.screens`): read as a window session's screen is, without
+    /// highlights. Not the slash-command menu: nothing typed from here could be in its box.
+    static func terminalMenu(_ text: String?) -> ScreenMenu? {
+        guard let text else { return nil }
+        var lines = text.components(separatedBy: "\n")
+        while let last = lines.last, last.allSatisfy(\.isWhitespace) { lines.removeLast() }
+        guard let menu = menu(on: ScreenRead(lines: lines), needsInput: true), !menu.commands else { return nil }
+        return menu
+    }
+
+    /// The Terminal tab's menu on the card, read off the main thread every few seconds while the hooks say it needs
+    /// you (one read at a time).
+    private func readTerminal(_ target: TerminalTarget) {
+        guard target.needsInput else {
+            if chat.menu != nil { chat.menu = nil }
+            // Answered (or gone) in Terminal: what went wrong with the last answer from here is over.
+            if chat.answerNotice != nil { chat.answerNotice = nil }
+            setAnswering(nil)
+            return
+        }
+        guard !terminalReading, terminalReadAt.map({ now().timeIntervalSince($0) >= Self.terminalReadEvery }) ?? true else { return }
+        terminalReading = true
+        terminalReadAt = now()
+        let read = terminalScreen, main = onMain
+        background {
+            let menu = Self.terminalMenu(read(target.tty))
+            main { [weak self] in
+                guard let self else { return }
+                self.terminalReading = false
+                // Another session was selected meanwhile: its own read follows.
+                guard self.target() == nil, self.terminalTarget()?.tty == target.tty else { return }
+                _ = self.show(menu)
+            }
+        }
+    }
+
+    /// Why an answer wasn't typed: the question on screen now (`now`) isn't the one the card drew.
+    static func refusal(_ now: ScreenMenu?) -> String {
+        now == nil ? "That question is gone." : "That question changed; here it is now."
+    }
+
+    /// The one line asking before an answer is typed into a Terminal tab (which comes to the front for it).
+    static func confirmation(_ menu: ScreenMenu, index: Int, typing: String?) -> String {
+        let what: String
+        if let typing {
+            what = "Answer “\(typing)”"
+        } else if index == menu.options.count, let submit = menu.submit {
+            what = "Press \(submit)"
+        } else if let ticked = menu.checked, ticked.indices.contains(index) {
+            what = "\(ticked[index] ? "Untick" : "Tick") “\(menu.options[index])”"
+        } else {
+            what = "Answer “\(menu.options.indices.contains(index) ? menu.options[index] : "?")”"
+        }
+        return "\(what)? Terminal comes to the front to take the keys."
+    }
+
+    /// What's typed into a Terminal tab to answer `menu`, as the window's keys do (`ScreenMenu.keys`): arrows from
+    /// the cursor to `index`, then Enter; for free text, erase what the field holds, the text, then Enter (not in a
+    /// multi-select, where Enter would untick it).
+    static func terminalSteps(_ menu: ScreenMenu, choose index: Int, typing: String?) -> [TerminalStep] {
+        let moves = index - menu.selected
+        var steps = Array(repeating: TerminalStep(key: moves > 0 ? .down : .up), count: abs(moves))
+        if let typing {
+            steps += Array(repeating: TerminalStep(key: .backspace), count: typedIn(menu, index))
+            steps.append(TerminalStep(text: typing))
+            if !menu.multiSelect { steps.append(TerminalStep(key: .enter)) }
+        } else {
+            steps.append(TerminalStep(key: .enter))
+        }
+        return steps
+    }
+
+    /// How many characters are in option `index`'s free-text field (typed in the terminal): none while it shows
+    /// its placeholder.
+    private static func typedIn(_ menu: ScreenMenu, _ index: Int) -> Int {
+        let field = menu.options.indices.contains(index) ? menu.options[index] : ""
+        return field.lowercased().hasPrefix("type something") ? 0 : field.count
+    }
+
+    /// Types the answer (confirmed on the card) into the Terminal tab: read again first, and refused when the
+    /// question there isn't the one the card drew; every key through `RemoteInput.send`, each only while the tab
+    /// still shows that question.
+    private func chooseInTerminal(_ target: TerminalTarget, index: Int, typing: String?, drawn: ScreenMenu) {
+        guard answering == nil else { return }
+        // The card waits while the keys go in.
+        setAnswering((drawn, .distantFuture))
+        let read = terminalScreen, send = terminalSend, main = onMain
+        background {
+            let menu = Self.terminalMenu(read(target.tty))
+            var failure: RemoteInput.Failure?
+            var moved: ScreenMenu??
+            if let menu, menu.sameQuestion(as: drawn) {
+                for step in Self.terminalSteps(menu, choose: index, typing: typing) {
+                    failure = send(target, step) {
+                        let now = Self.terminalMenu(read(target.tty))
+                        if now?.sameQuestion(as: drawn) == true { return true }
+                        moved = .some(now)
+                        return false
+                    }
+                    if failure != nil { break }
+                }
+            } else {
+                moved = .some(menu)
+            }
+            let refused = moved, stopped = failure
+            main { [weak self] in
+                guard let self else { return }
+                self.setAnswering(nil)
+                self.terminalReadAt = nil
+                if let refused {
+                    Breadcrumbs.shared.note("chat: a Terminal answer refused, the question changed")
+                    self.chat.menu = refused
+                    self.chat.answerNotice = Self.refusal(refused)
+                } else if let stopped {
+                    Breadcrumbs.shared.note("chat: a Terminal answer stopped: \(stopped)")
+                    self.chat.answerNotice = stopped.description
+                } else if let menu {
+                    Breadcrumbs.shared.note("chat: answered a Terminal session's question")
+                    self.chat.answerNotice = nil
+                    self.setAnswering((menu, self.now().addingTimeInterval(Self.answerWait)))
+                    self.chat.scrollToBottom()
+                }
+            }
+        }
+    }
+
     private func setAnswering(_ value: (menu: ScreenMenu, until: Date)?) {
         answering = value
         if chat.answering != (value != nil) { chat.answering = value != nil }
@@ -94,21 +258,24 @@ final class ChatSync {
 
     /// Answers the menu the card drew (`drawn`; else the one it shows): arrows from where the screen's cursor is now,
     /// then Enter. Not when the screen has moved on to another question, or is still taking the last answer.
+    /// A Terminal tab's (`terminalTarget`) is answered through `RemoteInput`, off the main thread.
     func choose(_ index: Int, typing: String? = nil, drawn: ScreenMenu? = nil) {
-        guard let target = target(), let drawn = drawn ?? chat.menu else { return }
+        guard let drawn = drawn ?? chat.menu else { return }
+        guard let target = target() else {
+            if let terminal = terminalTarget() { chooseInTerminal(terminal, index: index, typing: typing, drawn: drawn) }
+            return
+        }
         guard answering == nil else { return }
         // Read again right before: the question may have changed or gone, and an answer must not land on another one.
         readScreen()
         guard let menu = chat.menu, menu.sameQuestion(as: drawn) else {
-            chat.answerNotice = chat.menu == nil ? "That question is gone." : "That question changed; here it is now."
+            chat.answerNotice = Self.refusal(chat.menu)
             return
         }
         let writes: [HostInput.Write]
         if let typing {
             // What's in the field already (typed in the terminal) is replaced.
-            let field = menu.options.indices.contains(index) ? menu.options[index] : ""
-            let placeholder = field.lowercased().hasPrefix("type something")
-            writes = menu.keys(toChoose: index, typing: typing, replacing: placeholder ? 0 : field.count)
+            writes = menu.keys(toChoose: index, typing: typing, replacing: Self.typedIn(menu, index))
         } else {
             writes = menu.keys(toChoose: index)
         }

@@ -348,6 +348,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return ChatSync.Target(id: id, key: row.draftKey, agent: row.session?.agent, needsInput: row.session?.status == .needsInput,
                                    working: row.session?.status == .working)
         }
+        // A session in a Terminal tab: its question is read from the tab and answered through RemoteInput.
+        sync.terminalTarget = { [weak self] in
+            guard let self, let row = self.model.selectedRow, row.hostID == nil, let session = row.session, session.inTerminalApp else { return nil }
+            return ChatSync.TerminalTarget(tty: session.tty, pid: session.pid, startedAt: session.startedAt,
+                                           needsInput: session.status == .needsInput && !session.isPaused)
+        }
         sync.screen = { [weak self] id in self?.pane.screenText(id) ?? ScreenRead() }
         sync.bracketedPaste = { [weak self] id in self?.pane.bracketedPaste(id) ?? false }
         return sync

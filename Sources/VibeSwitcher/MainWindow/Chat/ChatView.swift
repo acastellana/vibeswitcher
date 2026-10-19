@@ -30,7 +30,10 @@ struct ChatContainer: View {
             } else if let todos = chat.log.todos, todos.contains(where: { $0.status != .done }) {
                 TodoPanel(todos: todos)
             }
+            // A session in a Terminal tab: its question is answered there, through the phone's guarded typing.
+            let terminal = model.selectedRow.flatMap { $0.hostID == nil ? $0.session : nil }.flatMap { $0.inTerminalApp ? $0 : nil }
             ChatView(chat: chat, row: model.selectedRow, live: model.selectedRow.map(actions.isLive) == true && model.selectedRow?.hostID != nil,
+                     inTerminal: terminal.map { session in { actions.openInTerminal(session) } },
                      leadQuestions: lead?.board.questionStack() ?? [], leadNotices: leads.answerNotices,
                      answerLead: { question, text in if let lead { leads.answer(question, root: lead.root, with: text) } },
                      showTerminal: showTerminal, choose: choose, moveTab: moveTab, resend: { _ = composer.send($0) }, dismissMenu: dismissMenu)
@@ -57,7 +60,8 @@ struct ChatContainer: View {
                                  actions: ComposerActions(send: { _ in false }, steer: composer.steer, stop: {}, cycleMode: {}))
                         .id(row.id)
                 } else if let session = row.session, session.inTerminalApp {
-                    TerminalReplyHint(canMove: MoveToWindow.canMove(session)) { actions.moveToWindow(session) }
+                    TerminalReplyHint(canMove: MoveToWindow.canMove(session), asking: chat.menu != nil,
+                                      open: { actions.openInTerminal(session) }, move: { actions.moveToWindow(session) })
                 } else {
                     Text("This session has ended.").font(.system(size: 12)).foregroundStyle(.secondary)
                         .frame(maxWidth: .infinity).padding(12)
@@ -74,6 +78,8 @@ struct ChatView: View {
     let row: WindowRow?
     /// A window session you can type into (answer cards, Send Again).
     let live: Bool
+    /// A session in a Terminal tab: opens it there (⌘O). Its answer card asks before typing into the tab.
+    var inTerminal: (() -> Void)?
     /// The lead's questions stack (open ones, then lately withdrawn ones), when this is a project lead.
     var leadQuestions: [LeadQuestion] = []
     var leadNotices: [String: String] = [:]
@@ -186,12 +192,12 @@ struct ChatView: View {
                             .padding(.leading, 60).padding(.bottom, 6)
                         }
                         LeadQuestionStack(questions: leadQuestions, notices: leadNotices, answer: answerLead)
-                        if live, let menu = chat.menu {
+                        if live || inTerminal != nil, let menu = chat.menu {
                             AnswerCard(menu: menu, pending: chat.log.pendingQuestions, agent: row?.session?.agent.displayName ?? "The agent",
                                        notice: chat.answerNotice, answering: chat.answering, choose: { choose(menu, $0, $1) },
-                                       moveTab: moveTab, showTerminal: showTerminal, dismiss: dismissMenu)
+                                       moveTab: moveTab, showTerminal: showTerminal, dismiss: dismissMenu, openInTerminal: inTerminal)
                         } else if let row {
-                            LiveStateView(row: row, showTerminal: showTerminal)
+                            LiveStateView(row: row, showTerminal: showTerminal, openInTerminal: inTerminal, notice: inTerminal == nil ? nil : chat.answerNotice)
                         }
                     }
                     Color.clear.frame(height: 1).id("bottom")
@@ -416,6 +422,10 @@ private struct ChatItemView: View, Equatable {
 private struct LiveStateView: View {
     let row: WindowRow
     let showTerminal: () -> Void
+    /// A session in a Terminal tab: going there is how you answer (the mirror is read-only).
+    var openInTerminal: (() -> Void)?
+    /// Why an answer from the card wasn't typed (its question went away meanwhile).
+    var notice: String?
 
     var body: some View {
         if let session = row.session, !session.isPaused {
@@ -440,13 +450,24 @@ private struct LiveStateView: View {
                         Image(systemName: "exclamationmark.bubble.fill").foregroundStyle(.red).font(.system(size: 16))
                             .accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("\(session.agent.displayName) is asking in the terminal").font(.system(size: 13, weight: .semibold))
+                            Text("\(session.agent.displayName) is asking in \(openInTerminal == nil ? "the terminal" : "Terminal")")
+                                .font(.system(size: 13, weight: .semibold))
                             if let detail = session.detail, !detail.isEmpty {
                                 Text(detail).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(4)
                             }
+                            if let notice {
+                                Label(notice, systemImage: "exclamationmark.triangle").font(.system(size: 11.5)).foregroundStyle(.orange)
+                            }
                         }
                         Spacer()
-                        Button("Show Terminal", action: showTerminal).buttonStyle(.borderedProminent)
+                        if let openInTerminal {
+                            // Its own screen here is a read-only copy: Terminal is where it takes keys.
+                            Button("Show Terminal", action: showTerminal).help("Its screen, read-only")
+                            Button(action: openInTerminal) { Label("Open in Terminal", systemImage: "arrow.up.forward.app") }
+                                .buttonStyle(.borderedProminent).help("Open in Terminal (⌘O)")
+                        } else {
+                            Button("Show Terminal", action: showTerminal).buttonStyle(.borderedProminent)
+                        }
                     }
                     .padding(12)
                     .background(RoundedRectangle(cornerRadius: 10).fill(Color.red.opacity(0.08)))
@@ -511,20 +532,31 @@ private struct ChatSearchBar: View {
 }
 
 /// In place of the composer for a session that runs in Terminal.app.
-private struct TerminalReplyHint: View {
+struct TerminalReplyHint: View {
     let canMove: Bool
+    /// Its question is on the answer card above.
+    var asking = false
+    let open: () -> Void
     let move: () -> Void
+
+    static func text(canMove: Bool, asking: Bool) -> String {
+        if canMove { return "Runs in Terminal. Move it here to reply from this window." }
+        return asking ? "Runs in Terminal. Answer its question above, or open it to type (⌘O)."
+                      : "Runs in Terminal. Open it to type (⌘O); Move to Window is offered between turns."
+    }
 
     var body: some View {
         HStack(spacing: 10) {
             Image(systemName: "macwindow").foregroundStyle(.secondary).accessibilityHidden(true)
-            Text(canMove ? "Runs in Terminal. Move it here to reply from this window."
-                         : "Runs in Terminal. Reply there (Move to Window is offered between turns).")
+            Text(Self.text(canMove: canMove, asking: asking))
                 .font(.system(size: 12)).foregroundStyle(.secondary)
             Spacer()
             if canMove {
                 Button(action: move) { Label("Move to Window", systemImage: "arrow.down.right.and.arrow.up.left") }
                     .buttonStyle(.borderedProminent).controlSize(.small)
+            } else {
+                Button(action: open) { Label("Open in Terminal", systemImage: "arrow.up.forward.app") }
+                    .controlSize(.small).help("Open in Terminal (⌘O)")
             }
         }
         .padding(.horizontal, 16).padding(.vertical, 10)
@@ -547,8 +579,39 @@ private struct AnswerCard: View {
     let moveTab: (_ tab: Int) -> Void
     let showTerminal: () -> Void
     let dismiss: () -> Void
+    /// A session in a Terminal tab: opens it there. An answer is asked about first, in one line: it brings
+    /// Terminal to the front to type.
+    var openInTerminal: (() -> Void)?
     @State private var otherText = ""
     @State private var typingOther = false
+    /// The answer waiting for your go-ahead (Terminal sessions): option index, the free text typed for it.
+    @State private var confirming: Choice?
+
+    struct Choice: Equatable {
+        var index: Int
+        var typing: String?
+    }
+
+    init(menu: ScreenMenu, pending: [ChatQuestion]?, agent: String, notice: String?, answering: Bool,
+         choose: @escaping (Int, String?) -> Void, moveTab: @escaping (Int) -> Void, showTerminal: @escaping () -> Void,
+         dismiss: @escaping () -> Void, openInTerminal: (() -> Void)? = nil, confirming: Choice? = nil) {
+        self.menu = menu
+        self.pending = pending
+        self.agent = agent
+        self.notice = notice
+        self.answering = answering
+        self.choose = choose
+        self.moveTab = moveTab
+        self.showTerminal = showTerminal
+        self.dismiss = dismiss
+        self.openInTerminal = openInTerminal
+        _confirming = State(initialValue: confirming)
+    }
+
+    /// A click on the card: answered now in a window session; in a Terminal one, once you confirm.
+    private func pick(_ index: Int, _ typing: String?) {
+        if openInTerminal == nil { choose(index, typing) } else { confirming = Choice(index: index, typing: typing) }
+    }
 
     var body: some View {
         let content = AnswerCardContent(menu: menu, pending: pending)
@@ -564,7 +627,12 @@ private struct AnswerCard: View {
                 if content.commands {
                     Button("Close (Esc)", action: dismiss).buttonStyle(.borderless).font(.system(size: 11.5))
                 }
-                Button("Answer in Terminal", action: showTerminal).buttonStyle(.borderless).font(.system(size: 11.5))
+                if let openInTerminal {
+                    Button(action: openInTerminal) { Label("Open in Terminal", systemImage: "arrow.up.forward.app") }
+                        .buttonStyle(.borderless).font(.system(size: 11.5)).help("Open in Terminal (⌘O)")
+                } else {
+                    Button("Answer in Terminal", action: showTerminal).buttonStyle(.borderless).font(.system(size: 11.5))
+                }
             }
             if content.tabs.count > 1 {
                 HStack(spacing: 6) {
@@ -575,6 +643,8 @@ private struct AnswerCard: View {
                         }
                         .buttonStyle(.borderless)
                         .foregroundStyle(index == content.currentTab ? Color.accentColor : .secondary)
+                        // A Terminal tab is answered one question at a time, from the one it shows.
+                        .disabled(openInTerminal != nil)
                     }
                 }
             }
@@ -594,7 +664,7 @@ private struct AnswerCard: View {
                     case .other:
                         otherRow(option, typed: content.otherText)
                     case .chat:
-                        Button { choose(option.index, nil) } label: {
+                        Button { pick(option.index, nil) } label: {
                             Label("Discuss it instead of answering", systemImage: "bubble.left.and.bubble.right").font(.system(size: 12))
                         }
                         .buttonStyle(.borderless).padding(.top, 2)
@@ -603,15 +673,29 @@ private struct AnswerCard: View {
                     }
                 }
                 if let submit = content.submit {
-                    Button { choose(content.options.count, nil) } label: {
+                    Button { pick(content.options.count, nil) } label: {
                         Text(submit).font(.system(size: 12.5, weight: .semibold)).frame(minWidth: 70)
                     }
                     .buttonStyle(.borderedProminent).controlSize(.small).padding(.top, 2)
                     .help(submit == "Next" ? "On to the next question" : "Send these answers")
                 }
             }
-            .disabled(answering)
-            .opacity(answering ? 0.55 : 1)
+            .disabled(answering || confirming != nil)
+            .opacity(answering || confirming != nil ? 0.55 : 1)
+            if let confirming {
+                HStack(spacing: 8) {
+                    Text(ChatSync.confirmation(menu, index: confirming.index, typing: confirming.typing))
+                        .font(.system(size: 12)).lineLimit(1).truncationMode(.middle)
+                    Spacer(minLength: 4)
+                    Button("Cancel") { self.confirming = nil }.controlSize(.small).keyboardShortcut(.cancelAction)
+                    Button("Answer") {
+                        self.confirming = nil
+                        choose(confirming.index, confirming.typing)
+                    }
+                    // No Return shortcut: a stray one mustn't type into Terminal.
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+                }
+            }
             if let notice {
                 Label(notice, systemImage: "exclamationmark.triangle").font(.system(size: 11.5)).foregroundStyle(.orange)
             }
@@ -619,10 +703,12 @@ private struct AnswerCard: View {
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor.opacity(0.45)))
+        // Asked about one question, never answered on the next one: its index means another option there.
+        .onChange(of: menu) { old, new in if !new.sameQuestion(as: old) { confirming = nil } }
     }
 
     private func optionButton(_ option: AnswerCardContent.Option, selected: Bool) -> some View {
-        Button { choose(option.index, nil) } label: {
+        Button { pick(option.index, nil) } label: {
             HStack(alignment: .top, spacing: 10) {
                 if let checked = option.checked {
                     Image(systemName: checked ? "checkmark.square.fill" : "square").font(.system(size: 15))
@@ -684,7 +770,7 @@ private struct AnswerCard: View {
     private func sendOther(_ index: Int) {
         let text = otherText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        choose(index, text)
+        pick(index, text)
         otherText = ""
         typingOther = false
     }
