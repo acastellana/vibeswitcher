@@ -46,44 +46,120 @@ public enum ProcessTable {
 
     public static func snapshot() -> [Int32: ProcInfo] { trySnapshot() ?? [:] }
 
-    /// Every process; nil when the table couldn't be read (not "no processes": callers mustn't act on that as if
-    /// every session had ended).
-    public static func trySnapshot() -> [Int32: ProcInfo]? {
-        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0]
-        let stride = MemoryLayout<kinfo_proc>.stride
-        var buffer: [kinfo_proc] = []
-        var size = 0
-        var read = false
-        // The table can grow between asking its size and reading it (a build forking hard): ask again, with more room.
-        for attempt in 0..<5 where !read {
-            var needed = 0
-            guard sysctl(&mib, 4, nil, &needed, nil, 0) == 0 else { return nil }
-            buffer = [kinfo_proc](repeating: kinfo_proc(), count: needed / stride + 64 << attempt)
-            size = buffer.count * stride
-            if sysctl(&mib, 4, &buffer, &size, nil, 0) == 0 { read = true } else if errno != ENOMEM { return nil }
-        }
-        guard read, size > 0 else { return nil }
-        var result: [Int32: ProcInfo] = [:]
-        for index in 0..<(size / stride) {
-            let info = makeInfo(buffer[index])
-            result[info.pid] = info
-        }
-        argumentCache.prune { result[$0] != nil }
-        return result
+    /// How long a snapshot may take. It takes about 10 ms for 1,500 processes on a Mac running several test suites
+    /// (load 100+), where reading the whole table at once (sysctl KERN_PROC_ALL) stalled for 10 to 80 s.
+    public static let snapshotLimit: TimeInterval = 2
+
+    /// Every process, read whole within `limit`; nil when it couldn't be, not "no processes" and never part of the
+    /// table: a process missing from a snapshot has ended (callers act on that, as a session's agent that quit).
+    ///
+    /// One process at a time (`proc_listallpids`, then each one's record), not KERN_PROC_ALL. A caller waits `limit`
+    /// at most, whatever the kernel does: the read runs on another thread and is dropped when it's late; while a late
+    /// one is still stuck in the kernel, the next callers are told at once.
+    public static func trySnapshot(within limit: TimeInterval = snapshotLimit) -> [Int32: ProcInfo]? {
+        reads.read(within: limit) { readTable(until: $0) }
     }
 
-    /// Every process's name (the kernel's `comm`) by pid, and nothing else; nil when the list couldn't be read. Not
-    /// from KERN_PROC_ALL, as `trySnapshot` is: on a Mac running several test suites (load 100) that sysctl stalled
-    /// for 10 to 80 s at a time, and then failed, while this list took at most 10 ms.
-    public static func names() -> [Int32: String]? {
+    static let reads = BoundedReads()
+
+    /// The whole table, or nil: past `deadline`, or a process there that couldn't be read.
+
+    /// The whole table, or nil: past `deadline`, or a process there that couldn't be read.
+    static func readTable(until deadline: Date, arguments: ArgumentCache = argumentCache) -> [Int32: ProcInfo]? {
+        guard let pids = allPids() else { return nil }
+        var table: [Int32: ProcInfo] = [:]
+        table.reserveCapacity(pids.count)
+        for pid in pids {
+            guard Date() < deadline else { return nil }
+            switch record(pid, arguments: arguments) {
+            case .gone: continue
+            case .unreadable: return nil
+            case .found(let info): table[pid] = info
+            }
+        }
+        arguments.prune { table[$0] != nil }
+        return table
+    }
+
+    /// Every pid but the kernel's; nil when the list couldn't be read.
+    static func allPids() -> [pid_t]? {
         let count = proc_listallpids(nil, 0)
         guard count > 0 else { return nil }
         // Room for processes started meanwhile.
         var pids = [pid_t](repeating: 0, count: Int(count) + 64)
         let listed = pids.withUnsafeMutableBytes { proc_listallpids($0.baseAddress, Int32($0.count)) }
         guard listed > 0 else { return nil }
+        return pids.prefix(Int(listed)).filter { $0 > 0 }
+    }
+
+    enum Record { case found(ProcInfo), gone, unreadable }
+
+    /// A process's record: its parent, owner and state from its short record (any user's); name, terminal and start
+    /// time from its full one (only the user's own processes give it), or else the kernel's record of that one process
+    /// (sysctl KERN_PROC_PID); which agent it is from its name or argv. A zombie is gone: it has ended.
+    static func record(_ pid: pid_t, arguments: ArgumentCache) -> Record {
+        var short = proc_bsdshortinfo()
+        let shortSize = Int32(MemoryLayout<proc_bsdshortinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, shortSize) == shortSize else { return failure() }
+        if short.pbsi_status == SZOMB { return .gone }
+        let comm: String
+        let device: dev_t
+        let start: timeval
+        var full = proc_bsdinfo()
+        let fullSize = Int32(MemoryLayout<proc_bsdinfo>.size)
+        if proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &full, fullSize) == fullSize {
+            // Its records' `comm` are cut at 15 characters; the kernel's is its name (`p_name`, cut at 31) cut at 16.
+            let name = text(full.pbi_name)
+            comm = name.isEmpty ? String(decoding: text(full.pbi_comm), as: UTF8.self) : String(decoding: name.prefix(Int(MAXCOMLEN)), as: UTF8.self)
+            device = dev_t(bitPattern: full.e_tdev)
+            start = timeval(tv_sec: Int(full.pbi_start_tvsec), tv_usec: Int32(full.pbi_start_tvusec))
+        } else if errno == ESRCH {
+            return .gone
+        } else {
+            var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+            var kinfo = kinfo_proc()
+            var size = MemoryLayout<kinfo_proc>.stride
+            guard sysctl(&mib, 4, &kinfo, &size, nil, 0) == 0 else { return failure() }
+            guard size > 0 else { return .gone }
+            comm = String(decoding: text(kinfo.kp_proc.p_comm), as: UTF8.self)
+            device = kinfo.kp_eproc.e_tdev
+            start = kinfo.kp_proc.p_un.__p_starttime
+        }
+        let tty = ttyName(device)
+        // Only the user's own processes' argv can be read (another user's isn't an agent of theirs unless named one).
+        let readable = short.pbsi_uid == geteuid() ? arguments : nil
+        var identity = Identity.unknown
+        // A process being set up or exiting has no argv to read for a moment: once more, then it's that, or gone.
+        for _ in 0..<2 where identity == .unknown {
+            identity = identify(pid: pid, start: start.tv_sec, comm: comm, tty: tty, arguments: readable)
+        }
+        let agent: Agent?
+        switch identity {
+        case .agent(let found): agent = found
+        case .none: agent = nil
+        case .unknown: return proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, shortSize) == shortSize ? .unreadable : failure()
+        }
+        return .found(ProcInfo(pid: pid, ppid: Int32(short.pbsi_ppid), tty: tty, comm: comm, startTime: date(start), agent: agent))
+    }
+
+    /// A fixed-size C string field's bytes, up to its NUL or its end.
+    private static func text<Field>(_ field: Field) -> [UInt8] {
+        withUnsafeBytes(of: field) { bytes in Array(bytes.prefix { $0 != 0 }) }
+    }
+
+    /// What a failed read of a process means: it has ended, or it couldn't be read.
+    private static func failure() -> Record { errno == ESRCH ? .gone : .unreadable }
+
+    private static func date(_ start: timeval) -> Date {
+        Date(timeIntervalSince1970: Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000)
+    }
+
+    /// Every process's name (the kernel's `comm`, cut at 15 characters) by pid, and nothing else; nil when the list
+    /// couldn't be read.
+    public static func names() -> [Int32: String]? {
+        guard let pids = allPids() else { return nil }
         var names: [Int32: String] = [:]
-        for pid in pids.prefix(Int(listed)) where pid > 0 {
+        for pid in pids {
             var info = proc_bsdshortinfo()
             let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
             // Gone meanwhile.
@@ -154,16 +230,31 @@ public enum ProcessTable {
 
     /// Which agent a process is. Claude Code runs as a versioned binary (`~/.local/share/claude/versions/2.1.282`),
     /// so the kernel's `comm` is "2.1.282", not "claude"; argv[0] tells them apart.
+    /// An argv that couldn't be read leaves it as its name says.
     static func agent(pid: Int32, start: Int, comm: String, tty: String?, arguments: ArgumentCache) -> Agent? {
-        // Only terminal-attached processes can be sessions; skipping the rest keeps snapshots cheap.
-        guard tty != nil else { return nil }
-        if let agent = Agent(comm: comm) {
-            // Codex's app server (its background daemon, the daemon's pid-update-loop, a stdio server someone
-            // started by hand) is the same `codex` binary but runs threads for sessions elsewhere: never one itself.
-            return agent == .codex && isCodexAppServer(arguments.arguments(pid: pid, start: start, comm: comm)) ? nil : agent
+        switch identify(pid: pid, start: start, comm: comm, tty: tty, arguments: arguments) {
+        case .agent(let agent): agent
+        case .none: nil
+        case .unknown: Agent(comm: comm)
         }
-        return arguments.arguments(pid: pid, start: start, comm: comm).first
-            .map { ($0 as NSString).lastPathComponent }.flatMap(Agent.init(comm:))
+    }
+
+    enum Identity: Equatable { case agent(Agent), none, unknown }
+
+    /// Which agent a process is, as `agent` says; `unknown` when that takes its argv and it couldn't be read.
+    /// `arguments` nil: its argv can't be read (another user's process), so it's an agent only by name.
+    static func identify(pid: Int32, start: Int, comm: String, tty: String?, arguments: ArgumentCache?) -> Identity {
+        // Only terminal-attached processes can be sessions; skipping the rest keeps snapshots cheap.
+        guard tty != nil else { return .none }
+        let named = Agent(comm: comm)
+        guard let arguments else { return named.map(Identity.agent) ?? .none }
+        if named == .claude { return .agent(.claude) }
+        let argv = arguments.arguments(pid: pid, start: start, comm: comm)
+        if argv.isEmpty { return .unknown }
+        // Codex's app server (its background daemon, the daemon's pid-update-loop, a stdio server someone
+        // started by hand) is the same `codex` binary but runs threads for sessions elsewhere: never one itself.
+        if named == .codex { return isCodexAppServer(argv) ? .none : .agent(.codex) }
+        return argv.first.map { ($0 as NSString).lastPathComponent }.flatMap(Agent.init(comm:)).map(Identity.agent) ?? .none
     }
 
     /// `codex [options] app-server …`: `--listen unix:// --managed-daemon`, `daemon pid-update-loop`, plain stdio.
@@ -231,5 +322,44 @@ final class ArgumentCache: @unchecked Sendable {
     func prune(keeping isLive: (Int32) -> Bool) {
         lock.lock(); defer { lock.unlock() }
         entries = entries.filter { isLive($0.key) }
+    }
+}
+
+/// Reads given a time limit, each on another thread, so a caller waits the limit at most whatever the kernel does: past
+/// it, it's told nil and the read is dropped. While a dropped read still runs (stuck in the kernel), the next callers
+/// are told nil at once instead of starting more reads behind it.
+final class BoundedReads: @unchecked Sendable {
+    private let lock = NSLock()
+    /// Reads whose callers stopped waiting for them, still running.
+    private var late = 0
+
+    /// `read` is given its deadline, to stop at itself.
+    func read<Value: Sendable>(within limit: TimeInterval, _ read: @escaping @Sendable (Date) -> Value?) -> Value? {
+        let deadline = Date().addingTimeInterval(limit)
+        lock.lock()
+        let blocked = late > 0
+        lock.unlock()
+        guard !blocked else { return nil }
+        let run = Run<Value>()
+        DispatchQueue.global(qos: .userInitiated).async { [self] in
+            let value = read(deadline)
+            lock.lock(); defer { lock.unlock() }
+            if run.abandoned { late -= 1 } else { run.value = value }
+            run.done.signal()
+        }
+        _ = run.done.wait(timeout: .now() + max(0, deadline.timeIntervalSinceNow))
+        lock.lock(); defer { lock.unlock() }
+        guard let value = run.value else {
+            if !run.finished { run.abandoned = true; late += 1 }
+            return nil
+        }
+        return value
+    }
+
+    private final class Run<Value>: @unchecked Sendable {
+        let done = DispatchSemaphore(value: 0)
+        var value: Value??
+        var abandoned = false
+        var finished: Bool { value != nil }
     }
 }

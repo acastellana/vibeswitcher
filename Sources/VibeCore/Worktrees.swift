@@ -168,7 +168,8 @@ extension Shell {
     /// hit). Returns who it signalled.
     @discardableResult
     static func signalFamily(of root: Int32, _ signal: Int32, also earlier: [ProcInfo] = []) -> [ProcInfo] {
-        let table = ProcessTable.snapshot()
+        // The table unread in time: the root at least.
+        let table = ProcessTable.trySnapshot() ?? ProcessTable.info(pid: root).map { [root: $0] } ?? [:]
         var family = table[root].map { [$0] } ?? []
         family += earlier.filter { member in !family.contains { $0.pid == member.pid } }
         var index = 0

@@ -11,7 +11,8 @@ struct SessionStoreTests {
     private let stateDir = scratchRoot.appendingPathComponent("store-tests-\(UUID().uuidString)")
 
     /// A working agent and one whose turn is over with a background shell still running (its age is in the detail).
-    private func store(started: Date) throws -> SessionStore {
+    /// `readable`: whether the process table can be read at the time.
+    private func store(started: Date, readable: @escaping () -> Bool = { true }) throws -> SessionStore {
         try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
         let now = Date().timeIntervalSince1970
         var working = HookState(agent: .claude, tty: "ttys970", lastEvent: "PreToolUse", lastEventAt: now - 30)
@@ -33,7 +34,7 @@ struct SessionStoreTests {
         let table = Dictionary(uniqueKeysWithValues: procs.map { ($0.pid, $0) })
         let dir = stateDir
         return SessionStore(scanner: SessionScanner(
-            processes: { table }, stateDir: { dir }, cwd: { _ in "/tmp/store-tests" },
+            processes: { readable() ? table : nil }, stateDir: { dir }, cwd: { _ in "/tmp/store-tests" },
             arguments: { $0.pid == 972 ? ["/bin/zsh", "-c", "source /h/.claude/shell-snapshots/a.sh && eval 'npm run dev' < /dev/null"] : [] }))
     }
 
@@ -82,5 +83,37 @@ struct SessionStoreTests {
         try await refreshAndSettle(store)
         #expect(store.sessions.first { $0.tty == "ttys971" }?.backgroundJobs.map(\.command) == ["npm run dev"])
         #expect(store.sessions.first { $0.tty == "ttys970" }?.backgroundJobs == [])
+    }
+
+    /// A scan whose process table couldn't be read (in time, on a loaded Mac) keeps the sessions found before, and the
+    /// time that table was read: the witness tells a session's agent as quit only from a table read since.
+    @Test func anUnreadTableKeepsTheTimeOfTheLastOneRead() async throws {
+        AppStatus.enabled = false
+        defer { try? FileManager.default.removeItem(at: stateDir) }
+        let clock = Clock()
+        let read = clock.now
+        let readable = Readable()
+        let store = try store(started: read, readable: { readable.value })
+        store.clock = { clock.now }
+        #expect(store.tableReadAt == nil)
+        try await refreshAndSettle(store)
+        #expect(store.tableReadAt == read)
+        readable.value = false
+        clock.advance(120)
+        try await refreshAndSettle(store)
+        #expect(store.tableReadAt == read)
+        #expect(Set(store.sessions.map(\.tty)) == ["ttys970", "ttys971"])
+        readable.value = true
+        try await refreshAndSettle(store)
+        #expect(store.tableReadAt == read + 120)
+    }
+
+    private final class Readable: @unchecked Sendable {
+        private let lock = NSLock()
+        private var readable = true
+        var value: Bool {
+            get { lock.lock(); defer { lock.unlock() }; return readable }
+            set { lock.lock(); readable = newValue; lock.unlock() }
+        }
     }
 }

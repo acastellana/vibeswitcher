@@ -868,10 +868,13 @@ final class LeadController: ObservableObject {
                     held = team.held[id]
                 }
             }
-            // No agent in the scan a minute on: "agent ended · shell", as good as ended.
+            // No agent in the scan a minute on: "agent ended · shell", as good as ended. A minute on as of when the scan's
+            // process table was read: while it can't be (a loaded Mac), its sessions are that table's, and one started
+            // since is unknown, not ended.
+            let quit = session == nil && store.tableReadAt.map { info.agentQuit(now: $0) } == true
             seen[id] = LeadWitness.Seen(live: info.isLive, exit: info.exit?.status, cause: info.exit?.cause, status: session?.status,
                                         since: session?.statusSince, detail: session?.detail,
-                                        agentQuit: session == nil && info.agentQuit(now: now), apiError: apiError?.text,
+                                        agentQuit: quit, apiError: apiError?.text,
                                         apiErrorAt: apiError?.at, activity: watched?.activity,
                                         lastActivity: watched?.progress?.lastWritten, compactedAt: watched?.progress?.compactedAt,
                                         shellRunning: shellRunning, shells: shells, heldSince: held?.at, heldFrom: held.map { Self.sender($0.from) },

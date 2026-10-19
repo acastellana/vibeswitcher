@@ -209,9 +209,10 @@ final class HostRuntime: LeadRuntime {
         ProcessTable.info(pid: agent.pid).map { $0.tty == agent.tty && $0.agent != nil } ?? false
     }
 
-    /// The oldest agent process on a terminal (the session's own, not a tool it runs).
+    /// The oldest agent process on a terminal (the session's own, not a tool it runs); nil when there's none, or the
+    /// process table couldn't be read in time.
     static func agentPid(on tty: String) -> Int32? {
-        ProcessTable.snapshot().values.filter { $0.tty == tty && $0.agent != nil }.min { $0.startTime < $1.startTime }?.pid
+        ProcessTable.trySnapshot()?.values.filter { $0.tty == tty && $0.agent != nil }.min { $0.startTime < $1.startTime }?.pid
     }
 }
 

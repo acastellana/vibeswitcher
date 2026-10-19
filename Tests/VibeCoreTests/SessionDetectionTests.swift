@@ -378,11 +378,52 @@ final class SessionScannerTests {
         #expect(session?.agent == .claude)
     }
 
+    /// Kept with the time its table was read: a session missing from it had no agent then, not now (the lead's
+    /// witness tells an agent that quit only from a table read a minute after the session started).
     @Test func anUnreadableProcessTableKeepsTheLastScan() {
         var readable = true
         let scanner = scanner { readable ? self.table : nil }
-        #expect(scanner.scan().count == 3)
+        #expect(scanner.readAt == nil)
+        #expect(scanner.scan(now: Date(timeIntervalSince1970: 2000)).count == 3)
+        #expect(scanner.readAt == Date(timeIntervalSince1970: 2000))
         readable = false
-        #expect(scanner.scan().count == 3)
+        #expect(scanner.scan(now: Date(timeIntervalSince1970: 2090)).count == 3)
+        #expect(scanner.readAt == Date(timeIntervalSince1970: 2000))
+    }
+
+    /// 30 sessions, each with two background shells, among 1,500 processes (a loaded Mac's table): every session is
+    /// found, with its own shells and no one else's.
+    @Test func aFullTableHasEverySessionAndItsShells() {
+        var procs: [Int32: ProcInfo] = [4086: proc(4086, 1, "vibeswitcher-hos")]
+        var shells: [Int32: String] = [:]
+        for index in 0..<30 {
+            let agent = Int32(10_000 + index * 10), tty = "ttys\(100 + index)"
+            procs[agent] = proc(agent, 4086, "2.1.302", tty: tty, agent: .claude, start: 1000 + Double(index))
+            for job in 1...2 {
+                let pid = agent + Int32(job)
+                procs[pid] = proc(pid, agent, "zsh", tty: tty, start: 1500 + Double(job))
+                shells[pid] = "npm run job\(index)-\(job)"
+            }
+            // A tool it runs, on its terminal too: not a session of its own.
+            procs[agent + 5] = proc(agent + 5, agent, "git", tty: tty, start: 1600)
+        }
+        var filler = Int32(20_000)
+        while procs.count < 1500 {
+            // Shells under other programs: nobody's background jobs.
+            procs[filler] = proc(filler, filler % 3 == 0 ? 4086 : 1, filler % 2 == 0 ? "zsh" : "mdworker_shared", start: 900)
+            filler += 1
+        }
+        let scanner = SessionScanner(processes: { procs }, stateDir: { [stateDir] in stateDir }, cwd: { _ in "/tmp/project" },
+                                     arguments: { process in
+                                         shells[process.pid].map { ["/bin/zsh", "-c", "source /h/.claude/shell-snapshots/s.sh && eval '\($0)' < /dev/null"] }
+                                             ?? (process.comm == "zsh" ? ["/bin/zsh", "-c", "source /h/.claude/shell-snapshots/s.sh && eval 'other' < /dev/null"] : [])
+                                     })
+        let sessions = scanner.scan(now: Date(timeIntervalSince1970: 2000))
+        #expect(sessions.count == 30)
+        for index in 0..<30 {
+            let session = sessions.first { $0.tty == "ttys\(100 + index)" }
+            #expect(session?.pid == Int32(10_000 + index * 10))
+            #expect(session?.backgroundJobs.map(\.command) == ["npm run job\(index)-1", "npm run job\(index)-2"])
+        }
     }
 }

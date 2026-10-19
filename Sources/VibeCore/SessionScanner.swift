@@ -28,6 +28,10 @@ public final class SessionScanner {
 
     /// The last scan, for when the process table can't be read.
     private var last: [RawSession] = []
+    /// When the process table the last scan found its sessions in was read (that scan's time); nil until one was.
+    /// A scan whose table couldn't be read hands on the sessions found then, so a session missing from them had no
+    /// agent at this time, not now.
+    public private(set) var readAt: Date?
 
     private let processes: () -> [Int32: ProcInfo]?
     private let stateDir: () -> URL
@@ -35,7 +39,7 @@ public final class SessionScanner {
     private let arguments: (ProcInfo) -> [String]
 
     /// The defaults read this Mac; tests pass a fake process table and their own state folder.
-    public init(processes: @escaping () -> [Int32: ProcInfo]? = ProcessTable.trySnapshot,
+    public init(processes: @escaping () -> [Int32: ProcInfo]? = { ProcessTable.trySnapshot() },
                 stateDir: @escaping () -> URL = { VibePaths.stateDir },
                 cwd: @escaping (Int32) -> String? = ProcessTable.cwd(pid:),
                 arguments: @escaping (ProcInfo) -> [String] = {
@@ -81,6 +85,7 @@ public final class SessionScanner {
         cwdCache = cwdCache.filter { live($0.key) }
         projectCache = projectCache.filter { live($0.key) }
         last = sessions
+        readAt = now
         return sessions
     }
 
