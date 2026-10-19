@@ -85,7 +85,9 @@ import Testing
     /// it says where that was in the file TEST_UNDER_LOAD_HOME_REPORT names, for scripts/test-under-load-selfcheck.sh.
     @Test func aRunsHomeIsTheOneItsEnvironmentNames() throws {
         let environment = ProcessInfo.processInfo.environment
-        if let fixed = environment["CFFIXED_USER_HOME"] { #expect(NSHomeDirectory() == fixed) }
+        // Resolved: Foundation says /tmp/… for a home given as /private/tmp/….
+        let resolved = { (path: String) in URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
+        if let fixed = environment["CFFIXED_USER_HOME"] { #expect(resolved(NSHomeDirectory()) == resolved(fixed)) }
         if let report = environment["TEST_UNDER_LOAD_HOME_REPORT"] {
             let text = "home=\(NSHomeDirectory()) HOME=\(environment["HOME"] ?? "") CFFIXED_USER_HOME=\(environment["CFFIXED_USER_HOME"] ?? "")"
             try text.write(toFile: report, atomically: true, encoding: .utf8)
