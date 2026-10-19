@@ -475,6 +475,9 @@ way, to the host's identifier and the identity. So the identity is kept from eve
   one asks again.
 - An identity made by an earlier `setup-signing.sh` (its password saved in `~/.vibeswitcher/signing/password`,
   its key exportable) is refused by `build-app.sh`; run `./scripts/setup-signing.sh` in Terminal to replace it.
+  The old keychain's password isn't needed: the password file is read by nobody and deleted once the new keychain
+  is made, so a replacement that stopped half way (the old keychain removed, the new one not made) is refused by
+  `build-app.sh` too until you run the script again.
   macOS asks for VibeSwitcher's permissions and Keychain items once more. It still holds the permissions you gave
   the old identity until you reset them (the script prints the `tccutil` commands), and the app's Keychain items
   still trust it (Keychain Access › the item › Access Control), so a copy of the old key, if one was taken, signs
@@ -609,8 +612,12 @@ the lead's worker and verifier prompts never set that variable.
 
 Run `./scripts/setup-signing.sh` once, in Terminal: it creates a self-signed signing identity in its own
 keychain file (`~/.vibeswitcher/signing`, your login keychain is untouched) so every rebuild keeps the same code
-identity, and trusts that certificate for code signing (your user only; macOS asks for your password). You choose
-the signing keychain's password there. The first `build-app.sh` run after you log in or wake the Mac then asks
+identity, and trusts that certificate for code signing (your user only). Before each step that asks for something
+it says which password: macOS's certificate-trust dialog wants your Mac login password (the one you log in with;
+Cancel is safe, the certificate just stays untrusted), and the signing keychain wants a new password of your
+choice, typed twice at `password for new keychain:`. If you cancel a step or press Ctrl-C, it lists what was done
+(old identity untrusted, old keychain removed, new keychain created, certificate trusted); running it again is
+safe and continues from there. The first `build-app.sh` run after you log in or wake the Mac then asks
 for it in a dialog as it signs, and later runs don't until the Mac sleeps or you log out (see
 [Security: the signing identity](#security-the-signing-identity)). `scripts/test-signing.sh` checks the scripts.
 macOS only keeps a permission across rebuilds for a trusted signature: otherwise, ad-hoc or not, it pins

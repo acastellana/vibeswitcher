@@ -1,11 +1,14 @@
 #!/bin/bash
 # Checks that the signing scripts keep VibeSwitcher's signing identity yours (security F-F2): no keychain password on
 # a command line anywhere in scripts/ (`create-keychain -p`, `unlock-keychain -p`, `set-keychain-password -o/-p`,
-# `set-key-partition-list -k`, `import -P`), where any process can read it with ps; and build-app.sh refusing a
-# signing folder that still holds the password file an earlier setup-signing.sh saved.
+# `set-key-partition-list -k`, `import -P`), where any process can read it with ps; build-app.sh refusing a
+# signing folder that still holds the password file an earlier setup-signing.sh saved, and saying so when the
+# replacement stopped half way; and setup-signing.sh naming the password macOS's trust dialog wants just before it.
 #
 # With --build it also runs setup-signing.sh and build-app.sh (to build/, never --install) on a scratch HOME, as the
-# user would but with the password on stdin: an earlier setup's keychain and password file are replaced; the new key
+# user would but with the password on stdin: a Ctrl-C at the new keychain's password prompt says what was done, and
+# leaves build-app.sh refusing; run again, setup says what it asks for in order, before each step, and finishes
+# replacing the earlier setup's keychain and password file; the new key
 # can't be exported and only codesign may use it; no password file is left; the keychain is locked after setup and
 # locks on sleep, with no inactivity timeout; and the app and its helpers are signed with the identity. macOS's
 # password dialog is stood in for by a codesign on build-app.sh's PATH that counts a prompt when the key is used with
