@@ -354,6 +354,136 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(FileManager.default.fileExists(atPath: other + "/notes.txt"))
     }
 
+    /// What progress.md says.
+    func progress(_ root: String) -> String {
+        (try? String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)) ?? ""
+    }
+
+    /// A worker on fix that committed, its worktree then left on `leave` (a branch made there, or detached when nil).
+    func leftItsBranch(_ lead: LeadToolset, root: String, leave: String?) throws -> (worktree: String, head: String) {
+        _ = call(lead, "add_task", ["title": "Fix", "goal": "g", "acceptance": ["a"]])
+        _ = call(lead, "start_worker", ["task": "fix"])
+        let worktree = Worktrees.path(root: root, slug: "fix")
+        try "bee\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "b.txt"], in: worktree)
+        Git.run(["commit", "-q", "-m", "add b"], in: worktree)
+        Git.run(["switch", "-q"] + (leave.map { ["-c", $0] } ?? ["--detach"]), in: worktree)
+        return (worktree, Git.run(["rev-parse", "HEAD"], in: worktree).output)
+    }
+
+    /// 2026-10-19: a lead asked the user to `git switch` a worktree back to its task branch (both the worker's shell
+    /// and the lead's are denied it), and waited seven hours. A clean one is put back by audit itself, and audited.
+    @Test func auditPutsBackACleanWorktreeThatLeftItsBranch() throws {
+        for leave in ["review-fix", nil] {
+            let root = try repo()
+            let runtime = FakeRuntime()
+            let lead = try lead(root, runtime)
+            let (worktree, head) = try leftItsBranch(lead, root: root, leave: leave)
+            let audited = call(lead, "audit", ["task": "fix"])
+            #expect(!audited.isError, "\(audited.text)")
+            let was = leave.map { "branch \($0)" } ?? "a detached HEAD"
+            #expect(audited.text.contains("worktree was on \(was) at \(head.prefix(8)), not on agent/fix; it's back on agent/fix"))
+            #expect(audited.text.contains("Verifier started on fix (checking \(head.prefix(8)))"))
+            #expect(Git.run(["rev-parse", "--abbrev-ref", "HEAD"], in: worktree).output == "agent/fix")
+            #expect(runtime.spawned.last?.cwd == worktree && runtime.spawned.last?.label.hasPrefix("Verifier") == true)
+            #expect(progress(root).contains("Put fix's worktree back on agent/fix for its audit (it was on \(was) at \(head.prefix(8)))"))
+            if let leave { #expect(Git.run(["rev-parse", "refs/heads/\(leave)"], in: root).output == head) }
+            #expect(BoardStore(root: root).load().questions.isEmpty)
+        }
+    }
+
+    /// Uncommitted files there: not switched over them, not audited; the lead and the worker are told the branch, the
+    /// files and what to run, and the user isn't asked.
+    @Test func auditRefusesAWorktreeOffItsBranchWithUncommittedFilesAndTellsTheWorker() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let (worktree, head) = try leftItsBranch(lead, root: root, leave: "review-fix")
+        try "more\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
+        try "new\n".write(toFile: worktree + "/c.txt", atomically: true, encoding: .utf8)
+        let spawned = runtime.spawned.count
+        let refused = call(lead, "audit", ["task": "fix"])
+        #expect(refused.isError)
+        #expect(refused.text.contains("Not audited, no verifier started: fix's worktree is on branch review-fix at \(head.prefix(8)), not on agent/fix"))
+        #expect(refused.text.contains("b.txt (modified), c.txt (untracked)"))
+        #expect(refused.text.contains("`git add c.txt`, then `git commit -am \"<what they are>\"`"))
+        #expect(refused.text.contains("Its worker was sent this."))
+        #expect(runtime.spawned.count == spawned)
+        let told = try #require(runtime.steered.last)
+        #expect(told.target == runtime.spawned.first?.id)
+        #expect(told.text.contains("on branch review-fix") && told.text.contains("b.txt (modified), c.txt (untracked)") && told.text.contains("`git add c.txt`"))
+        // Nothing moved, nothing lost.
+        #expect(Git.run(["symbolic-ref", "HEAD"], in: worktree).output == "refs/heads/review-fix")
+        #expect(try String(contentsOfFile: worktree + "/b.txt", encoding: .utf8) == "more\n")
+        #expect(BoardStore(root: root).load().questions.isEmpty)
+    }
+
+    /// Commits there that agent/<slug> lacks: put back, but not audited without them; the worker is told to merge them.
+    @Test func auditPutsBackButDoesntAuditWithoutTheCommitsMadeOffTheBranch() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let (worktree, head) = try leftItsBranch(lead, root: root, leave: "review-fix")
+        try "review\n".write(toFile: worktree + "/r.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "r.txt"], in: worktree)
+        Git.run(["commit", "-q", "-m", "review fix"], in: worktree)
+        let spawned = runtime.spawned.count
+        let refused = call(lead, "audit", ["task": "fix"])
+        #expect(refused.isError)
+        #expect(refused.text.contains("Put fix's worktree back on agent/fix") && refused.text.contains("1 commit there isn't on agent/fix"))
+        #expect(refused.text.contains("review fix") && refused.text.contains("`git merge review-fix`"))
+        #expect(runtime.spawned.count == spawned)
+        #expect(runtime.steered.last?.text.contains("`git merge review-fix`") == true)
+        #expect(Git.run(["rev-parse", "HEAD"], in: worktree).output == head)
+        #expect(Git.run(["rev-parse", "--abbrev-ref", "HEAD"], in: worktree).output == "agent/fix")
+        // Once merged, the next audit goes on.
+        #expect(Git.run(["merge", "-q", "review-fix"], in: worktree).ok)
+        #expect(!call(lead, "audit", ["task": "fix"]).isError)
+    }
+
+    /// start_worker puts a worktree that left its branch back before the worker starts, its uncommitted files along,
+    /// and says so in the worker's first prompt.
+    @Test func startWorkerPutsBackAWorktreeThatLeftItsBranch() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let (worktree, head) = try leftItsBranch(lead, root: root, leave: nil)
+        try "more\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
+        runtime.killed.append(try #require(runtime.spawned.first).id)
+        let started = call(lead, "start_worker", ["task": "fix"])
+        #expect(!started.isError, "\(started.text)")
+        #expect(started.text.contains("Put its worktree back on agent/fix (it was on a detached HEAD at \(head.prefix(8)); its uncommitted files came along: b.txt)"))
+        let worker = try #require(runtime.spawned.last)
+        #expect(worker.cwd == worktree && runtime.spawned.count == 2)
+        // (Its apostrophes are quoted for the shell.)
+        #expect(worker.command.contains("Your worktree was on a detached HEAD at \(head.prefix(8)), not on your task"))
+        #expect(worker.command.contains("tools put it back on agent/fix."))
+        #expect(worker.command.contains("came along as they were: b.txt"))
+        #expect(Git.run(["rev-parse", "--abbrev-ref", "HEAD"], in: worktree).output == "agent/fix")
+        #expect(try String(contentsOfFile: worktree + "/b.txt", encoding: .utf8) == "more\n")
+        #expect(progress(root).contains("Put fix's worktree back on agent/fix for its worker (it was on a detached HEAD at \(head.prefix(8)))"))
+    }
+
+    /// When switching back would overwrite uncommitted files, the worker starts where it is, told to commit them.
+    @Test func startWorkerStartsInPlaceWhenSwitchingBackWouldOverwrite() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let (worktree, _) = try leftItsBranch(lead, root: root, leave: nil)
+        // Detached at main, where b.txt isn't: the branch's b.txt would overwrite this one.
+        Git.run(["switch", "-q", "--detach", "main"], in: worktree)
+        try "mine\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
+        runtime.killed.append(try #require(runtime.spawned.first).id)
+        let started = call(lead, "start_worker", ["task": "fix"])
+        #expect(!started.isError, "\(started.text)")
+        #expect(started.text.contains("wasn't switched"))
+        let worker = try #require(runtime.spawned.last)
+        #expect(worker.cwd == worktree && runtime.spawned.count == 2)
+        #expect(worker.command.contains("would overwrite uncommitted files (b.txt)") && worker.command.contains("`git add b.txt`"))
+        #expect(try String(contentsOfFile: worktree + "/b.txt", encoding: .utf8) == "mine\n")
+        #expect(Git.run(["symbolic-ref", "-q", "HEAD"], in: worktree).output.isEmpty)
+    }
+
     @Test func workersAreLimitedAndQuestionsDontBlock() throws {
         let root = try repo()
         let runtime = FakeRuntime()

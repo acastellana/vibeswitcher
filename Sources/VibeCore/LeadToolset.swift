@@ -289,7 +289,7 @@ public final class LeadToolset: MCPToolset {
                                          "status": P(type: "string", description: "New state", options: Self.settableStates.map(\.rawValue)),
                                          "reason": P(type: "string", description: "With status kept: what holds it back (a decision, the user's word); merge names it when it refuses")],
                             required: ["task"]),
-                MCPToolInfo(name: "start_worker", description: "Start a worker on a task: a fresh Claude session in its own worktree on branch agent/<slug>, given the contract. A worktree stopped partway through a rebase or merge is described, not started; recover aborts it first.",
+                MCPToolInfo(name: "start_worker", description: "Start a worker on a task: a fresh Claude session in its own worktree on branch agent/<slug>, given the contract. A worktree stopped partway through a rebase or merge is described, not started; recover aborts it first. One left on another branch or a detached HEAD is put back on agent/<slug>, its uncommitted files carried along.",
                             properties: ["task": task,
                                          "recover": P(type: "boolean", description: "When its worktree stopped partway through a rebase or merge: abort it (back on agent/<slug> at the same commit, the branch's commits kept; what's staged in the middle of it is dropped), then start")],
                             required: ["task"]),
@@ -301,7 +301,7 @@ public final class LeadToolset: MCPToolset {
                 MCPToolInfo(name: "read_session", description: "A worker's or verifier's conversation, condensed (prompts, replies, tool runs, failures).",
                             properties: ["task": task, "who": P(type: "string", description: "worker (default) or verifier", options: ["worker", "verifier"])],
                             required: ["task"]),
-                MCPToolInfo(name: "audit", description: "Start the read-only verifier on a task's branch. Its report, not the worker's, decides.",
+                MCPToolInfo(name: "audit", description: "Start the read-only verifier on a task's branch. Its report, not the worker's, decides. A worktree left on another branch or a detached HEAD is put back on agent/<slug> first (refused, and its worker told what to run, when it holds uncommitted files or commits the branch lacks).",
                             properties: ["task": task], required: ["task"]),
                 MCPToolInfo(name: "merge", description: "Merge a task whose audit passed: rebase onto the lead's branch (squashed when the worker merged it in), run the test command, fast-forward that branch.",
                             properties: ["task": task], required: ["task"]),
@@ -558,9 +558,32 @@ public final class LeadToolset: MCPToolset {
         // A worktree left partway through a rebase or merge (a refused --continue): said what it's in, and undone
         // only when asked, back to the branch's head.
         let stuck = Worktrees.interrupted(root: root, slug: slug)
+        // One on another branch or a detached HEAD (one its worker made for a review, a review flow's leftover) goes
+        // back on agent/<slug> here (the worker's shell is denied `git switch`), its uncommitted files along as git
+        // carries them; when git won't without overwriting some, the worker starts where it is, told to commit them.
+        var offBranch = "", offSaid = "", stayed = false
+        if let off = Worktrees.offBranch(root: root, slug: slug) {
+            let was = "\(off.place) at \(off.commit.prefix(8))"
+            do {
+                try Worktrees.putBack(root: root, slug: slug, carry: true)
+                try? store.appendProgress("Put \(slug)'s worktree back on \(off.branch) for its worker (it was on \(was))")
+                let files = off.uncommitted.map(\.path).joined(separator: ", ")
+                let commits = off.ahead.prefix(5).joined(separator: "; ") + (off.ahead.count > 5 ? "; …" : "")
+                let ahead = off.ahead.isEmpty ? "" : " \(off.ahead.count) commit\(off.ahead.count == 1 ? "" : "s") there \(off.ahead.count == 1 ? "isn't" : "aren't") on \(off.branch): \(commits)."
+                offSaid = "Put its worktree back on \(off.branch) (it was on \(was)\(files.isEmpty ? "" : "; its uncommitted files came along: \(files)")).\(ahead) "
+                offBranch = " Your worktree was on \(was), not on your task's branch \(off.branch); the lead's tools put it back on \(off.branch)."
+                    + (files.isEmpty ? "" : " Its uncommitted files came along as they were: \(files).")
+                    + (off.ahead.isEmpty ? "" : "\(ahead) If they're your task's, bring them over first: `\(off.mergeCommand)`, on its own.")
+            } catch {
+                stayed = true
+                offSaid = "Its worktree is on \(was), not on \(off.branch), and wasn't switched (\(error)); the worker was told to commit its files there. "
+                offBranch = " Your worktree is on \(was), not on your task's branch \(off.branch), and switching it back would overwrite uncommitted files (\(off.uncommitted.map(\.path).joined(separator: ", "))). "
+                    + "Commit them where you are: \(off.commitCommand), each command on its own; then report. Don't switch branches (you can't): the lead's next audit puts the worktree back on \(off.branch) and tells you how to bring the commit over."
+            }
+        }
         let worktree: String
         do {
-            worktree = try Worktrees.open(root: root, slug: slug, base: base, recover: recover)
+            worktree = stayed ? Worktrees.path(root: root, slug: slug) : try Worktrees.open(root: root, slug: slug, base: base, recover: recover)
         } catch let stuck as Worktrees.Interrupted {
             let way = stuck.unsafe.map { "It can't be undone safely: \($0). Tell the user." }
                 ?? "start_worker with recover: true runs `git \(stuck.kind.rawValue) --abort` there: the worktree goes back on \(stuck.branch) at \(stuck.head.prefix(8)) with all its commits (what's staged in the middle of the \(stuck.kind.rawValue) is dropped), then the worker starts."
@@ -568,7 +591,7 @@ public final class LeadToolset: MCPToolset {
         }
         // A merge into the branch that its last worker left unfinished: the new one finishes its resolution.
         let merging = recover ? nil : stuck.flatMap { $0.kind == .merge && !$0.detached ? $0 : nil }
-        var finish = merging.map { " Your worktree is in the middle of a merge: \($0) Finish it first: resolve what's unresolved, `git add` the files, then `git commit`, each command on its own; `git merge --abort` starts the merge over." } ?? ""
+        var finish = offBranch + (merging.map { " Your worktree is in the middle of a merge: \($0) Finish it first: resolve what's unresolved, `git add` the files, then `git commit`, each command on its own; `git merge --abort` starts the merge over." } ?? "")
         // A lock left in its worktree would stop the worker's first commit. A stale one goes (the folder is the
         // team's own); one a process holds stays, and is said.
         var locked = ""
@@ -604,7 +627,7 @@ public final class LeadToolset: MCPToolset {
         try? store.appendProgress("Started a worker on \(slug)")
         let recovered = merging.map { "Its worktree is in the middle of a merge, which the worker was told to finish (start_worker with recover: true aborts it instead): \($0) " }
             ?? stuck.map { "Aborted the \($0.kind.rawValue) its worktree was stuck in; it's back on \($0.branch) at \($0.head.prefix(8)). " } ?? ""
-        return MCPToolResult(text: recovered + locked + "Worker started on \(slug) in \(worktree) (branch agent/\(slug)). You'll get a message when it reports, needs input or stalls.")
+        return MCPToolResult(text: offSaid + recovered + locked + "Worker started on \(slug) in \(worktree) (branch agent/\(slug)). You'll get a message when it reports, needs input or stalls.")
     }
 
     private func stopWorker(_ slug: String) throws -> MCPToolResult {
@@ -707,6 +730,8 @@ public final class LeadToolset: MCPToolset {
     }
 
     private func audit(_ slug: String) throws -> MCPToolResult {
+        // A worktree that left its branch goes back on it first (see putBackForAudit).
+        let putBack = try store.load().task(slug).map { try putBackForAudit(slug, $0) } ?? ""
         // The task's own worktree (not whatever folder the board names) on the commit the branch is at now: that
         // commit is what this verifier's verdict covers.
         guard let task = store.load().task(slug), Worktrees.isWorktree(root: root, slug: slug), let head = branchHead(Worktrees.branch(slug)) else {
@@ -735,7 +760,49 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].evidence = nil
         }
         let flagged = config.isEmpty ? "" : " The branch changes Claude's settings or instructions (\(config.prefix(5).joined(separator: ", "))\(config.count > 5 ? ", …" : "")): the verifier runs with project settings off, and VibeSwitcher didn't answer its trust question; tell the user it waits for them to decide, and have the verifier look hard at those files."
-        return MCPToolResult(text: "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(flagged)")
+        return MCPToolResult(text: putBack + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(flagged)")
+    }
+
+    /// A task's worktree on another branch (one its worker made for a review, a review flow's leftover) or a detached
+    /// HEAD is put back on agent/<slug> from here, where git belongs: the worker's shell and the lead's are denied
+    /// `git switch` on purpose, and the user was once asked to run it (2026-10-19, seven hours later). Clean, it's
+    /// switched (recorded in progress.md) and the audit goes on, said in what this returns; with commits there the
+    /// branch lacks, or uncommitted files, nothing is audited and the worker is told the one thing to run.
+    private func putBackForAudit(_ slug: String, _ task: LeadTask) throws -> String {
+        guard let off = Worktrees.offBranch(root: root, slug: slug) else { return "" }
+        let branch = off.branch
+        if !off.uncommitted.isEmpty {
+            let files = off.uncommitted.map { "\($0.path) (\($0.state))" }.joined(separator: ", ")
+            let told = tellWorker(task, "Your worktree is on \(off.place) at \(off.commit.prefix(8)), not on your task's branch \(branch), with uncommitted files: \(files). Commit them where you are: \(off.commitCommand), each command on its own; then report again. Don't switch branches (you can't): the lead's next audit puts the worktree back on \(branch) and tells you how to bring the commit over.")
+            throw Problem(text: "Not audited, no verifier started: \(slug)'s worktree is on \(off.place) at \(off.commit.prefix(8)), not on \(branch), with uncommitted files: \(files). "
+                          + "It wasn't switched, so nothing of them is lost. The worker should commit them where they are: \(off.commitCommand); "
+                          + "the next audit puts the worktree back on \(branch) and has it bring that commit over. " + told)
+        }
+        do { try Worktrees.putBack(root: root, slug: slug) } catch {
+            throw Problem(text: "Not audited, no verifier started: \(off) Putting it back on \(branch) failed: \(error)")
+        }
+        let was = "\(off.place) at \(off.commit.prefix(8))"
+        try? store.appendProgress("Put \(slug)'s worktree back on \(branch) for its audit (it was on \(was))")
+        guard off.ahead.isEmpty else {
+            let commits = off.ahead.prefix(5).joined(separator: "; ") + (off.ahead.count > 5 ? "; …" : "")
+            let told = tellWorker(task, "Your worktree was on \(was), not on your task's branch \(branch); the lead's tools put it back on \(branch). \(off.ahead.count) commit\(off.ahead.count == 1 ? "" : "s") there \(off.ahead.count == 1 ? "isn't" : "aren't") on \(branch): \(commits). If they're your task's, bring them over: `\(off.mergeCommand)` (on its own), run the tests, then report again.")
+            throw Problem(text: "Put \(slug)'s worktree back on \(branch) (it was on \(was)). Not audited, no verifier started: \(off.ahead.count) commit\(off.ahead.count == 1 ? "" : "s") there \(off.ahead.count == 1 ? "isn't" : "aren't") on \(branch) "
+                          + "(\(commits)), and a verifier would check \(branch) without them. The worker should run `\(off.mergeCommand)` in its worktree, then report; audit again then. " + told)
+        }
+        return "\(slug)'s worktree was on \(was), not on \(branch); it's back on \(branch) (nothing there that \(branch) lacks). "
+    }
+
+    /// Sends `text` to the task's worker when it runs; what the lead's result says about it.
+    private func tellWorker(_ task: LeadTask, _ text: String) -> String {
+        guard let worker = task.worker, (try? listed())?.contains(where: { $0.id == worker && $0.live }) == true else {
+            return "Its worker isn't running: start_worker again, then message it this."
+        }
+        do {
+            _ = try runtime.steer(.session(worker), from: .lead("lead of \(project)"), text: text, clearDraft: false)
+            return "Its worker was sent this."
+        } catch {
+            return "Telling its worker failed (\(error)): message it this."
+        }
     }
 
     /// A branch that hasn't taken in what the base did since to files it changes too breaks or conflicts once it's
