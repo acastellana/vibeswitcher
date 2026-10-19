@@ -121,15 +121,17 @@ struct ProcessTableTests {
     /// (some process still has it as its own) has no name, and that isn't kept: the next one opened on its number is
     /// named.
     @Test func aTerminalIsNamedByItsNumber() throws {
+        let names = TerminalNames()
         let open = try openPty()
         defer { close(open.master) }
-        #expect(ProcessTable.ttyName(open.device) == open.name)
+        #expect(names.name(open.device) == open.name)
         #expect(devname(open.device, S_IFCHR).map { String(cString: $0) } == open.name)
         let (master, device, name) = try openPty()
         close(master)
         var node = stat()
         #expect(eventually { stat("/dev/" + name, &node) != 0 })
-        #expect(ProcessTable.ttyName(device) == nil)
+        // Unless another session opened one on its number meanwhile.
+        #expect(names.name(device) == nil || stat("/dev/" + name, &node) == 0)
         // Pseudo-terminals are numbered lowest free first: the next ones opened take its number again, unless another
         // session on this Mac took it meanwhile.
         var opened: [Int32] = []
@@ -137,7 +139,7 @@ struct ProcessTableTests {
         for _ in 0..<4 {
             let again = try openPty()
             opened.append(again.master)
-            #expect(ProcessTable.ttyName(again.device) == again.name)
+            #expect(names.name(again.device) == again.name)
             if again.device == device { return }
         }
         print("ProcessTableTests: no pseudo-terminal opened on \(name) again (another session took it)")

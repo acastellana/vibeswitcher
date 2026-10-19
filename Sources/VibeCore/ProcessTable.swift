@@ -34,38 +34,10 @@ public enum ProcessTable {
     // Both lookups below are slow enough to dominate a snapshot of ~1,500 processes if repeated every
     // poll: devname() scans /dev on every call, and argv needs a sysctl per process. Their answers
     // never change for a given device / process, so they're cached.
-    private static let cacheLock = NSLock()
-    private static var ttyNames: [dev_t: String?] = [:]
-    /// Pseudo-terminals' major device number, once one has been named.
-    private static var ptyMajor: Int32?
+    static let terminalNames = TerminalNames()
     static let argumentCache = ArgumentCache(read: readArguments)
 
-    /// A terminal's name by its device. A pseudo-terminal's is its number's (`ttys` and three digits, as the kernel
-    /// names them), checked with one stat: devname() scans /dev, 1 to 54 ms a device at load 176 where 116 devices
-    /// cost a read 0.1 to 0.5 s, mostly closed terminals some process still has as its own, which scan all of /dev for
-    /// nothing. A closed one has no name, and that isn't kept: its number is the next one opened's.
-    static func ttyName(_ device: dev_t) -> String? {
-        guard device != -1 else { return nil }
-        cacheLock.lock(); defer { cacheLock.unlock() }
-        if let cached = ttyNames[device] { return cached }
-        let major = Int32(truncatingIfNeeded: UInt32(bitPattern: device) >> 24 & 0xff)
-        let pty = String(format: "ttys%03d", device & 0xffffff)
-        var node = stat()
-        if stat("/dev/" + pty, &node) == 0, node.st_mode & S_IFMT == S_IFCHR, node.st_rdev == device {
-            ptyMajor = major
-            ttyNames[device] = pty
-            return pty
-        }
-        if major == ptyMajor { return nil }
-        var name: String?
-        if let raw = devname(device, S_IFCHR) {
-            let value = String(cString: raw)
-            if value != "??" { name = value }
-        }
-        // Not a pseudo-terminal (or none named yet): kept only when named, as a closed pseudo-terminal's isn't.
-        if name != nil { ttyNames[device] = name }
-        return name
-    }
+    static func ttyName(_ device: dev_t) -> String? { terminalNames.name(device) }
 
     public static func snapshot() -> [Int32: ProcInfo] { trySnapshot() ?? [:] }
 
@@ -382,6 +354,39 @@ public enum ProcessTable {
             index += 1
         }
         return arguments
+    }
+}
+
+/// Terminals' names by device. A pseudo-terminal's is its number's (`ttys` and three digits, as the kernel names them),
+/// checked with one stat: devname() scans /dev, 1 to 54 ms a device at load 176, where 116 devices cost a read 0.1 to
+/// 0.5 s, mostly closed terminals some process still has as its own, each a scan of all of /dev for nothing. A name
+/// found is kept (a device's never changes); a closed one's absence isn't: its number is the next one opened's.
+final class TerminalNames: @unchecked Sendable {
+    private let lock = NSLock()
+    private var names: [dev_t: String] = [:]
+    /// Pseudo-terminals' major device number, once one has been named.
+    private var ptyMajor: Int32?
+
+    func name(_ device: dev_t) -> String? {
+        guard device != -1 else { return nil }
+        lock.lock(); defer { lock.unlock() }
+        if let cached = names[device] { return cached }
+        let major = Int32(truncatingIfNeeded: UInt32(bitPattern: device) >> 24 & 0xff)
+        let pty = String(format: "ttys%03d", device & 0xffffff)
+        var node = stat()
+        if stat("/dev/" + pty, &node) == 0, node.st_mode & S_IFMT == S_IFCHR, node.st_rdev == device {
+            ptyMajor = major
+            names[device] = pty
+            return pty
+        }
+        // A closed pseudo-terminal.
+        if major == ptyMajor { return nil }
+        // Another device (or no pseudo-terminal named yet).
+        guard let raw = devname(device, S_IFCHR) else { return nil }
+        let name = String(cString: raw)
+        guard name != "??" else { return nil }
+        names[device] = name
+        return name
     }
 }
 
