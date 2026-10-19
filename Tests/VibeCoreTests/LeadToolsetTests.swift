@@ -418,12 +418,73 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
     }
 
-    @Test func aNewReportNeedsANewAudit() throws {
+    /// A report on a new commit needs a new audit, and the board says the one it had is for an older commit.
+    @Test func aReportOnANewCommitNeedsANewAudit() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let worktree = try audited(lead, runtime, root: root)
+        let audited = String(Git.run(["rev-parse", "agent/add-b"], in: root).output.prefix(8))
+        #expect(call(lead, "status").text.contains("audit clean at \(audited)"))
+        try "fix\n".write(toFile: worktree + "/c.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "c.txt"], in: worktree)
+        Git.run(["commit", "-q", "-m", "one more fix"], in: worktree)
+        let now = String(Git.run(["rev-parse", "agent/add-b"], in: root).output.prefix(8))
+        // Committed, not reported yet: the verdict is still on the board, for the older commit.
+        #expect(call(lead, "board").text.contains("audit clean at \(audited), branch now at \(now)"))
+        _ = call(try seat("worker-add-b", runtime), "report", ["status": "done", "summary": "one more fix"])
+        let task = BoardStore(root: root).load().task("add-b")
+        #expect(task?.evidence == nil)
+        #expect(task?.outdatedEvidence?.commit?.hasPrefix(audited) == true)
+        #expect(vault.verdict(root: root, task: "add-b") == nil)
+        let merged = call(lead, "merge", ["task": "add-b"])
+        #expect(merged.isError)
+        #expect(merged.text.contains("audit"))
+        for text in [call(lead, "status").text, call(lead, "board").text] {
+            #expect(text.contains("audit clean at \(audited), branch now at \(now)"), "\(text)")
+        }
+        // A new verdict replaces the older one.
+        _ = call(lead, "audit", ["task": "add-b"])
+        _ = call(try seat("verify-add-b", runtime), "submit_audit", ["completion": "complete", "integrity": "clean", "summary": "checked again"])
+        #expect(BoardStore(root: root).load().task("add-b")?.outdatedEvidence == nil)
+        #expect(call(lead, "board").text.contains("audit clean at \(now)"))
+        #expect(!call(lead, "board").text.contains("branch now at"))
+    }
+
+    /// 2026-10-18: the lead asked a worker whose branch had passed its audit to clear a lock and report; it reported
+    /// on the same commit, and the verdict was gone. A report on the commit the audit covers leaves it standing.
+    @Test func aReportOnTheAuditedCommitKeepsItsAudit() throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         _ = try audited(lead, runtime, root: root)
-        _ = call(try seat("worker-add-b", runtime), "report", ["status": "done", "summary": "one more fix"])
+        let head = Git.run(["rev-parse", "agent/add-b"], in: root).output
+        let before = try #require(BoardStore(root: root).load().task("add-b")?.evidence)
+        let worker = try seat("worker-add-b", runtime)
+        let reported = call(worker, "report", ["status": "done", "summary": "Removed the stale index.lock in the main checkout."])
+        #expect(!reported.isError)
+        #expect(reported.text.contains("stands"), "\(reported.text)")
+        #expect(runtime.steered.last?.text.contains("merge(add-b)") == true)
+        _ = call(worker, "report", ["status": "done", "summary": "done"])
+        let task = BoardStore(root: root).load().task("add-b")
+        #expect(task?.evidence == before)
+        #expect(task?.status == .review)
+        #expect(vault.verdict(root: root, task: "add-b")?.commit == head)
+        #expect(call(lead, "status").text.contains("audit clean at \(head.prefix(8))"))
+        #expect(!call(lead, "board").text.contains("branch now at"))
+        let merged = call(lead, "merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(FileManager.default.fileExists(atPath: root + "/b.txt"))
+    }
+
+    /// The lead's own audit is a re-audit: it needs a new verdict whatever the commit.
+    @Test func anAuditAgainOnTheSameCommitNeedsItsNewVerdict() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = try audited(lead, runtime, root: root)
+        _ = call(lead, "audit", ["task": "add-b"])
+        _ = call(try seat("worker-add-b", runtime), "report", ["status": "done", "summary": "still done"])
         #expect(BoardStore(root: root).load().task("add-b")?.evidence == nil)
         #expect(call(lead, "merge", ["task": "add-b"]).isError)
     }

@@ -120,6 +120,8 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var stopped: String?
     public var branch: String?
     public var worktree: String?
+    /// The verdict on the commit its branch is at, as long as it's there: a report on that commit keeps it; a new
+    /// commit's report moves it to `outdatedEvidence`.
     public var evidence: LeadEvidence?
     public var createdAt: Double
     // The fields below are optional: older boards have none of them.
@@ -138,6 +140,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var checkpoints: [LeadCheckpoint]?
     /// The worker's last "done" report.
     public var report: String?
+    /// The last verdict once the worker reported on a newer commit: shown as for an older commit, never merged on;
+    /// gone with the next verdict.
+    public var outdatedEvidence: LeadEvidence?
     public var merged: LeadMergeRecord?
     /// When its worker asked the lead something (ask_lead) that the lead hasn't answered with a message yet.
     public var leadQuestionAt: Double?

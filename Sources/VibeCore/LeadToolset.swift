@@ -1176,21 +1176,45 @@ public final class LeadToolset: MCPToolset {
         let slug = try taskSlug(arguments)
         let summary = try text(arguments, "summary", missing: "Say what changed and how you checked it, or what blocks you.")
         let done = (arguments["status"] as? String) != "blocked"
-        // A new report means new work: an earlier verdict doesn't cover it.
-        try vault.clearVerdict(root: root, task: slug)
+        // A report on the commit the last verdict covers (an answer, a note, a repeated "done") leaves that verdict
+        // standing: only a new commit, or the lead's own audit, needs a new one.
+        let head = branchHead(Worktrees.branch(slug))
+        let standing = vault.verdict(root: root, task: slug).flatMap { $0.commit == head ? $0 : nil }
+        if standing == nil { try vault.clearVerdict(root: root, task: slug) }
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
-            if board.tasks[index].status != .kept { board.tasks[index].status = done ? .review : .blocked }
-            board.tasks[index].evidence = nil
+            if board.tasks[index].status != .kept {
+                board.tasks[index].status = !done ? .blocked : standing.map { $0.passes ? .review : .failed } ?? .review
+            }
+            if let standing {
+                if board.tasks[index].evidence?.commit != standing.commit {
+                    board.tasks[index].evidence = LeadEvidence(completion: standing.completion, integrity: standing.integrity,
+                                                               summary: standing.summary, commit: standing.commit, at: standing.at)
+                }
+            } else {
+                // Kept to show what was audited, for an older commit; merge goes by the vault, which has none now.
+                if let earlier = board.tasks[index].evidence, earlier.commit != nil, earlier.commit != head {
+                    board.tasks[index].outdatedEvidence = earlier
+                }
+                board.tasks[index].evidence = nil
+            }
             if done { board.tasks[index].report = summary }
             board.tasks[index].blocker = done ? nil : (summary.isEmpty ? "The worker is blocked." : summary)
         }
+        let stands = standing.map { verdict in
+            "No new commit since its audit at \(verdict.commit.prefix(8)), which "
+                + (verdict.passes ? "passed: that verdict stands" : "didn't pass (\(verdict.completion.rawValue), \(verdict.integrity.rawValue)): that verdict stands")
+                + (!done ? "." : verdict.passes ? ". merge(\(slug)) when you're ready." : "; audit(\(slug)) to have it checked again.")
+        }
         let text = done
-            ? "The worker on \(slug) says it's done: \(summary)\nRun audit(\(slug)); only the verifier's report counts."
-            : "The worker on \(slug) is blocked: \(summary)"
+            ? "The worker on \(slug) says it's done: \(summary)\n" + (stands ?? "Run audit(\(slug)); only the verifier's report counts.")
+            : "The worker on \(slug) is blocked: \(summary)" + (stands.map { "\n\($0)" } ?? "")
         let told = try tellLead(text, about: "worker \(slug)")
-        return MCPToolResult(text: (done ? "Reported. A verifier will check your branch; stay available for fixes." : "Reported. The lead will get back to you.")
-                             + (told ? "" : Self.noLead))
+        let kept = standing.map { " Your branch is still at \($0.commit.prefix(8)), the commit its audit covers, so that verdict stands." } ?? ""
+        let reply = done
+            ? (standing == nil ? "Reported. A verifier will check your branch; stay available for fixes." : "Reported." + kept)
+            : "Reported. The lead will get back to you." + kept
+        return MCPToolResult(text: reply + (told ? "" : Self.noLead))
     }
 
     private func askLead(_ arguments: [String: Any]) throws -> MCPToolResult {
@@ -1241,6 +1265,7 @@ public final class LeadToolset: MCPToolset {
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].evidence = evidence
+            board.tasks[index].outdatedEvidence = nil
             if board.tasks[index].status != .kept { board.tasks[index].status = evidence.passes ? .review : .failed }
             if !evidence.passes {
                 board.tasks[index].setback = LeadSetback(stage: .review, reason: summary.isEmpty ? "The audit didn't pass (\(completion.rawValue), \(integrity.rawValue))." : summary,
@@ -1366,10 +1391,22 @@ public final class LeadToolset: MCPToolset {
         if let worker = task.worker, let info = sessions?[worker] {
             line += " — worker \(info.live ? (info.status ?? "running") : task.stopped == worker ? "stopped" : "ended")"
         }
-        if let evidence = task.evidence { line += " — audit \(evidence.completion.rawValue)/\(evidence.integrity.rawValue)" }
+        if let evidence = task.evidence ?? task.outdatedEvidence { line += " — " + auditText(evidence, of: task) }
         if task.rework > 0 { line += " — rework \(task.rework)" }
         if let checkpoint = task.checkpoints?.last { line += " — last progress: \(Self.clip(checkpoint.text, 70))" }
         return Self.clip(line, 200)
+    }
+
+    /// "audit clean at <commit>" while the branch is still there; ", branch now at <head>" once it moved on, so the
+    /// verdict no longer covers what would be merged.
+    private func auditText(_ evidence: LeadEvidence, of task: LeadTask) -> String {
+        var text = "audit " + (evidence.passes ? "clean" : "\(evidence.completion.rawValue)/\(evidence.integrity.rawValue)")
+        guard let commit = evidence.commit else { return text }
+        text += " at \(commit.prefix(8))"
+        // A merged task's branch has done its part (cleanup may have removed it).
+        guard task.status != .done else { return text }
+        guard let head = branchHead(Worktrees.branch(task.slug)) else { return text + ", branch gone" }
+        return head == commit ? text : text + ", branch now at \(head.prefix(8))"
     }
 
     /// Who of a running or reviewed task's team ended without a word, and what to do: its worker gone from the host
