@@ -92,16 +92,24 @@ final class ScratchHostProcess {
 }
 
 extension TestClient {
-    /// Connects and waits for the welcome.
+    /// Why a test got no welcome, as its failure says it.
+    struct NoWelcome: Error, CustomStringConvertible {
+        let description: String
+    }
+
+    /// Connects and waits for the welcome, each for as long as a loaded Mac takes (the hang guard).
     static func welcomed(_ socket: String, appKey: SymmetricKey? = nil) throws -> (TestClient, protocolVersion: Int, build: Int, sessions: [HostSession], capabilities: [String]?,
                                                      pid: Int32?, startedAt: Date?) {
         var connected: TestClient?
-        #expect(eventually { connected = try? TestClient(socket: socket, appKey: appKey); return connected != nil })
-        guard let client = connected else { throw CancellationError() }
+        guard eventually({ connected = try? TestClient(socket: socket, appKey: appKey); return connected != nil }), let client = connected else {
+            throw NoWelcome(description: "no connection to \(socket) in \(Int(hangGuard)) s")
+        }
         let seq = client.send(.hello(protocolVersion: HostProtocol.version, app: "test"))
-        #expect(eventually { client.reply(to: seq) != nil })
-        guard case .welcome(let version, let build, let sessions, let capabilities, let pid, let startedAt) = client.reply(to: seq) else {
-            throw CancellationError()
+        _ = eventually { client.reply(to: seq) != nil || client.closed }
+        guard case .welcome(let version, let build, let sessions, let capabilities, let pid, let startedAt)? = client.reply(to: seq) else {
+            let what = client.reply(to: seq).map { "it answered \($0)" }
+                ?? (client.closed ? "the connection closed first" : "no answer in \(Int(hangGuard)) s")
+            throw NoWelcome(description: "no welcome from \(socket): \(what)")
         }
         return (client, version, build, sessions, capabilities, pid, startedAt)
     }
