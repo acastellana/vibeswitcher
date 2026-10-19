@@ -201,10 +201,38 @@ public enum TerminalRead<Tab> {
     case notRunning
 }
 
+/// What says Terminal.app's tabs may have changed, known without asking Terminal: which agents run in it (the process
+/// table), what their hooks say, and whether Terminal is the active app and which of its windows is in front (a tab
+/// picked there is another window in front).
+public struct TerminalSignal: Equatable, Sendable {
+    private struct Mark: Equatable, Sendable {
+        let pid: Int32
+        let startedAt: Date
+        /// The status the hook gives (not its every event: a busy session writes several a second).
+        let status: SessionStatus?
+    }
+
+    private var sessions: [String: Mark] = [:]
+    private var terminalActive = false
+    private var frontWindow: Int?
+
+    public init() {}
+
+    /// `frontWindow`: the window in front while Terminal is active.
+    public init(sessions: [RawSession], terminalActive: Bool, frontWindow: Int?) {
+        for session in sessions where session.inTerminalApp {
+            self.sessions[session.tty] = Mark(pid: session.pid, startedAt: session.startedAt,
+                                              status: session.hook.map { StatusRules.status(for: $0) })
+        }
+        self.terminalActive = terminalActive
+        self.frontWindow = terminalActive ? frontWindow : nil
+    }
+}
+
 /// When the scan asks Terminal.app for its tabs and screens, and what it keeps when an answer doesn't come.
 ///
-/// Each read spawns `osascript` and makes Terminal answer Apple Events, so Terminal is only asked while a session
-/// runs in it (window sessions and other terminal apps don't need it).
+/// Each read makes Terminal answer Apple Events, so Terminal is only asked while a session runs in it (window sessions
+/// and other terminal apps don't need it), and then when the `TerminalSignal` changes, else every `fallback` seconds.
 ///
 /// One failed read must not wipe the tabs for a scan: every session would lose its title and position for a
 /// cycle, the list and ⌃1–9 would reorder, and title-only sessions would flip done → unknown → done and announce
@@ -220,8 +248,12 @@ public struct TerminalPoll<Tab> {
         }
     }
 
+    /// With nothing changed, the tabs are still read this often: a hook-less session's title, a tab moved or renamed.
+    public static var fallback: TimeInterval { 20 }
     /// Screen text is only needed for Claude's footer and is the most expensive read, so it's read less often.
-    public static var screensInterval: TimeInterval { 6 }
+    public static var screensInterval: TimeInterval { 60 }
+    /// A change this soon after a read waits for a scan past it: hooks of a busy session change several times a second.
+    public static var minimumGap: TimeInterval { 1.5 }
 
     /// Terminal's tabs by tty, as last read.
     public private(set) var tabs: [String: Tab] = [:]
@@ -229,37 +261,50 @@ public struct TerminalPoll<Tab> {
     public private(set) var backgroundWork: [String: String] = [:]
     private var lastTabsRead = Date.distantPast
     private var lastScreensRead = Date.distantPast
+    /// The signal at the last tabs read, and the quiet sessions at the last screens read.
+    private var lastSignal: TerminalSignal?
+    private var lastQuiet: Set<String>?
 
     public init() {}
 
-    /// Reads Terminal if `interval` has passed since the last read (or `force`). `terminalTTYs`: the sessions running
-    /// in Terminal.app (see `RawSession.inTerminalApp`); with none, nothing is read. `quiet`: Claude sessions whose
-    /// turn looks over, whose footers are read for background work. Returns the read, when one was made.
+    /// Reads Terminal if `signal` changed since the last read, `interval` has passed, or `force`. `terminalTTYs`: the
+    /// sessions running in Terminal.app (see `RawSession.inTerminalApp`); with none, nothing is read. `quiet`: Claude
+    /// sessions whose turn looks over, whose footers are read for background work (again whenever they change).
+    /// Returns the read, when one was made.
     @discardableResult
-    public mutating func poll(now: Date, interval: TimeInterval, terminalTTYs: Set<String>, quiet: Set<String>,
-                              force: Bool, bridge: Bridge) -> TerminalRead<Tab>? {
+    public mutating func poll(now: Date, interval: TimeInterval = fallback, terminalTTYs: Set<String>, quiet: Set<String>,
+                              signal: TerminalSignal = TerminalSignal(), force: Bool, bridge: Bridge) -> TerminalRead<Tab>? {
         guard !terminalTTYs.isEmpty else {
             tabs = [:]
             backgroundWork = [:]
+            lastSignal = nil
+            lastQuiet = nil
             return nil
         }
-        guard force || now.timeIntervalSince(lastTabsRead) >= interval - 0.05 else { return nil }
-        lastTabsRead = now
-        let read = bridge.tabs()
-        switch read {
-        case .tabs(let fresh): tabs = fresh
-        // A terminal can have changed hands since (closed tab, its tty reused by a window session).
-        case .failed: tabs = tabs.filter { terminalTTYs.contains($0.key) }
-        case .denied, .notRunning: tabs = [:]
+        let sinceTabs = now.timeIntervalSince(lastTabsRead)
+        let changed = signal != lastSignal && sinceTabs >= Self.minimumGap - 0.05
+        var read: TerminalRead<Tab>?
+        if force || changed || sinceTabs >= interval - 0.05 {
+            lastTabsRead = now
+            lastSignal = signal
+            let fresh = bridge.tabs()
+            switch fresh {
+            case .tabs(let fresh): tabs = fresh
+            // A terminal can have changed hands since (closed tab, its tty reused by a window session).
+            case .failed: tabs = tabs.filter { terminalTTYs.contains($0.key) }
+            case .denied, .notRunning: tabs = [:]
+            }
+            read = fresh
         }
         let quiet = quiet.intersection(terminalTTYs)
-        if force || now.timeIntervalSince(lastScreensRead) >= Self.screensInterval {
+        if force || changed || quiet != lastQuiet || now.timeIntervalSince(lastScreensRead) >= Self.screensInterval - 0.05 {
             if let screens = bridge.screens(quiet) {
                 backgroundWork = screens.compactMapValues { BackgroundWork.summary(fromScreen: $0) }
             } else {
                 backgroundWork = backgroundWork.filter { quiet.contains($0.key) }
             }
             lastScreensRead = now
+            lastQuiet = quiet
         }
         return read
     }

@@ -1,6 +1,7 @@
 import AppKit
 import CoreGraphics
 import Foundation
+import OSAKit
 import VibeCore
 
 struct TerminalTab: Equatable {
@@ -43,22 +44,25 @@ enum TerminalBridge {
         !NSRunningApplication.runningApplications(withBundleIdentifier: bundleID).isEmpty
     }
 
-    static func tabs() -> TerminalRead<TerminalTab> {
-        // `tell application "Terminal"` would launch Terminal, so check first.
-        guard isRunning else { return .notRunning }
-        // Five bulk Apple Events (one per property across all windows/tabs), then local list
-        // walking: much cheaper for Terminal than one event per property per tab.
-        let script = """
-        tell application "Terminal"
-            set wids to id of every window
-            set wbounds to bounds of every window
-            set ttys to tty of every tab of every window
-            set sels to selected of every tab of every window
-            set titles to custom title of every tab of every window
-            set wnames to name of every window
-        end tell
-        -- Eight strings per tab, returned as a quoted list (osascript -s s): a title can contain any
-        -- character, and inside quotes it can't pass for another tab's fields.
+    /// The reads made while sessions run in Terminal: compiled once, run in this process (no `osascript` per read).
+    /// Each handler's Apple Events wait at most `secs` seconds, so a busy Terminal doesn't hold the runner's queue for
+    /// AppleScript's default two minutes.
+    static let readScript = """
+    on readTabs(secs)
+        -- Five bulk Apple Events (one per property across all windows/tabs), then local list
+        -- walking: much cheaper for Terminal than one event per property per tab.
+        with timeout of secs seconds
+            tell application "Terminal"
+                set wids to id of every window
+                set wbounds to bounds of every window
+                set ttys to tty of every tab of every window
+                set sels to selected of every tab of every window
+                set titles to custom title of every tab of every window
+                set wnames to name of every window
+            end tell
+        end timeout
+        -- Eight strings per tab, returned as a list of strings: a title can contain any character, and as its own
+        -- item it can't pass for another tab's fields.
         set out to {}
         repeat with i from 1 to count of wids
             set tl to item i of ttys
@@ -78,12 +82,59 @@ enum TerminalBridge {
             end if
         end repeat
         return out
-        """
-        let result = runAppleScript(script, sourceForm: true)
-        if result.status != 0 { return result.error.contains("-1743") ? .denied : .failed }
-        guard let fields = AppleScriptStrings.parse(result.output), let records = TerminalTabRecords.parse(fields) else {
-            return .failed
+    end readTabs
+
+    on readScreens(wanted, secs)
+        set out to {}
+        with timeout of secs seconds
+            tell application "Terminal"
+                repeat with w in windows
+                    try
+                        -- Address tabs by index: `contents of t` on a loop variable is AppleScript's own
+                        -- dereference operator, not Terminal's screen-text property.
+                        repeat with ti from 1 to (count of tabs of w)
+                            set ttyName to (tty of tab ti of w) as text
+                            if wanted contains ttyName then
+                                set end of out to ttyName
+                                set end of out to ((contents of tab ti of w) as text)
+                            end if
+                        end repeat
+                    end try
+                end repeat
+            end tell
+        end timeout
+        return out
+    end readScreens
+
+    on readHistory(target, secs)
+        with timeout of secs seconds
+            tell application "Terminal"
+                repeat with w in windows
+                    try
+                        repeat with ti from 1 to (count of tabs of w)
+                            if ((tty of tab ti of w) as text) is target then
+                                return {((history of tab ti of w) as text), ((contents of tab ti of w) as text)}
+                            end if
+                        end repeat
+                    end try
+                end repeat
+            end tell
+        end timeout
+        return {}
+    end readHistory
+    """
+    static let reads = AppleScriptRunner(source: readScript)
+
+    static func tabs() -> TerminalRead<TerminalTab> {
+        // `tell application "Terminal"` would launch Terminal, so check first.
+        guard isRunning else { return .notRunning }
+        let fields: [String]
+        switch reads.run("readTabs", [.seconds(4)], timeout: 4) {
+        case .strings(let strings): fields = strings
+        case .failed(let code, _) where code == -1743: return .denied
+        default: return .failed
         }
+        guard let records = TerminalTabRecords.parse(fields) else { return .failed }
         var tabs: [String: TerminalTab] = [:]
         var windowNames: [Int: String] = [:]
         for record in records {
@@ -133,30 +184,10 @@ enum TerminalBridge {
     static func readScreens(for ttys: Set<String>) -> [String: String]? {
         let ttys = ttys.filter(isValidTTY)
         guard isRunning, !ttys.isEmpty else { return [:] }
-        let list = ttys.map { "\"/dev/\($0)\"" }.joined(separator: ", ")
-        let script = """
-        set wanted to {\(list)}
-        set out to {}
-        tell application "Terminal"
-            repeat with w in windows
-                try
-                    -- Address tabs by index: `contents of t` on a loop variable is AppleScript's own
-                    -- dereference operator, not Terminal's screen-text property.
-                    repeat with ti from 1 to (count of tabs of w)
-                        set ttyName to (tty of tab ti of w) as text
-                        if wanted contains ttyName then
-                            set end of out to ttyName
-                            set end of out to ((contents of tab ti of w) as text)
-                        end if
-                    end repeat
-                end try
-            end repeat
-        end tell
-        return out
-        """
-        // Quoted list of (tty, screen) pairs: screen text can't forge another tab's entry.
-        let result = runAppleScript(script, sourceForm: true)
-        guard result.status == 0, let fields = AppleScriptStrings.parse(result.output), fields.count % 2 == 0 else { return nil }
+        // (tty, screen) pairs, each its own string: screen text can't forge another tab's entry.
+        guard case .strings(let fields) = reads.run("readScreens", [.strings(ttys.map { "/dev/\($0)" }.sorted()), .seconds(4)],
+                                                   timeout: 4),
+              fields.count % 2 == 0 else { return nil }
         var screens: [String: String] = [:]
         for index in stride(from: 0, to: fields.count, by: 2) {
             let tty = fields[index].replacingOccurrences(of: "/dev/", with: "")
@@ -169,22 +200,8 @@ enum TerminalBridge {
     /// A tab's whole scrollback and its visible screen, in one read (for the phone's Terminal tab).
     static func history(tty: String) -> (history: String, screen: String)? {
         guard isRunning, isValidTTY(tty) else { return nil }
-        let result = runAppleScript("""
-        set target to "/dev/\(tty)"
-        tell application "Terminal"
-            repeat with w in windows
-                try
-                    repeat with ti from 1 to (count of tabs of w)
-                        if ((tty of tab ti of w) as text) is target then
-                            return {((history of tab ti of w) as text), ((contents of tab ti of w) as text)}
-                        end if
-                    end repeat
-                end try
-            end repeat
-        end tell
-        return {}
-        """, timeout: 8, sourceForm: true)
-        guard result.status == 0, let parts = AppleScriptStrings.parse(result.output), parts.count == 2 else { return nil }
+        guard case .strings(let parts) = reads.run("readHistory", [.string("/dev/\(tty)"), .seconds(8)], timeout: 8),
+              parts.count == 2 else { return nil }
         return (parts[0], parts[1])
     }
 
@@ -317,6 +334,18 @@ enum TerminalBridge {
         """)
     }
 
+    /// Whether Terminal is the active app, and then the number of its front window on screen (the window server's
+    /// list, without asking Terminal; a native tab picked is another window in front).
+    static func front() -> (active: Bool, window: Int?) {
+        guard let app = NSWorkspace.shared.frontmostApplication, app.bundleIdentifier == bundleID else { return (false, nil) }
+        let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+            as? [[String: Any]] ?? []
+        let window = windows.first {
+            $0[kCGWindowOwnerPID as String] as? Int32 == app.processIdentifier && $0[kCGWindowLayer as String] as? Int == 0
+        }
+        return (true, window?[kCGWindowNumber as String] as? Int)
+    }
+
     /// The tty of the tab in Terminal's front window, e.g. "ttys011".
     static func frontTTY() -> String? {
         let result = runAppleScript(#"tell application "Terminal" to return (tty of selected tab of front window) as text"#)
@@ -329,7 +358,7 @@ enum TerminalBridge {
         tty.range(of: #"^ttys[0-9]{1,4}$"#, options: .regularExpression) != nil
     }
 
-    /// Runs AppleScript through `osascript` so it is safe to call off the main thread.
+    /// Runs AppleScript through `osascript`, for the one-off actions (focus, minimize, …); the reads use `reads`.
     /// The Automation permission is still attributed to VibeSwitcher (the responsible process).
     /// `sourceForm`: print the result as AppleScript source (`-s s`), so strings come back quoted (see `AppleScriptStrings`).
     static func runAppleScript(_ source: String, timeout: TimeInterval = 4, sourceForm: Bool = false) -> (output: String, error: String, status: Int32) {
@@ -363,6 +392,197 @@ enum TerminalBridge {
         let output = String(data: outputData, encoding: .utf8) ?? ""
         let error = String(data: errorData, encoding: .utf8) ?? ""
         return (output, error, process.terminationStatus)
+    }
+}
+
+/// Runs the handlers of one AppleScript in this process, compiled once: a read costs no `osascript` process.
+///
+/// Runs go one at a time on one serial queue, shared by every runner: two scripts running in this process at once break
+/// each other (one waiting, say for Terminal's answer, stalls for a minute and the main thread's run loop with it), even
+/// in separate AppleScript instances. A run that reaches its deadline is cancelled from AppleScript's active proc, as
+/// ⌘. would, so a hung script holds up neither the caller nor the next read; a run still queued at its deadline isn't
+/// run at all.
+final class AppleScriptRunner: @unchecked Sendable {
+    enum Argument {
+        case string(String)
+        case strings([String])
+        case seconds(Int)
+
+        var descriptor: NSAppleEventDescriptor {
+            switch self {
+            case .string(let value): return NSAppleEventDescriptor(string: value)
+            case .seconds(let value): return NSAppleEventDescriptor(int32: Int32(value))
+            case .strings(let values):
+                let list = NSAppleEventDescriptor.list()
+                for (index, value) in values.enumerated() { list.insert(NSAppleEventDescriptor(string: value), at: index + 1) }
+                return list
+            }
+        }
+    }
+
+    enum Outcome: Equatable {
+        /// The handler returned a list of strings.
+        case strings([String])
+        /// It returned something else.
+        case unexpected
+        /// The script didn't compile, or the run raised an error (-1743: the Automation permission was refused).
+        case failed(code: Int, message: String)
+        /// Cancelled at its deadline, or never run before it.
+        case timedOut
+    }
+
+    /// Every runner's runs, one at a time.
+    private static let queue = DispatchQueue(label: "vibeswitcher.applescript", qos: .utility)
+    /// How long past its deadline a caller waits for a cancelled run to end: AppleScript asks the active proc between
+    /// steps, so a single long call (`do shell script`) ends only when it returns.
+    static let cancelGrace: TimeInterval = 1
+
+    private let source: String
+    private let lock = NSLock()
+    private var runCount = 0
+    private var compileCount = 0
+    // Queue only.
+    private var language: OSALanguageInstance?
+    /// Dropped after a failed run, so the next one compiles afresh (Terminal may have relaunched).
+    private var script: OSAScript?
+    private let gate = CancelGate()
+
+    init(source: String) {
+        self.source = source
+    }
+
+    /// Runs asked for, and compiles made, so far.
+    var runs: Int { lock.lock(); defer { lock.unlock() }; return runCount }
+    var compiles: Int { lock.lock(); defer { lock.unlock() }; return compileCount }
+
+    /// Calls `handler` with `arguments`, cancelled `timeout` seconds from now if it hasn't ended, and waits for its
+    /// result. Blocks the calling thread: call it off the main thread.
+    func run(_ handler: String, _ arguments: [Argument] = [], timeout: TimeInterval) -> Outcome {
+        lock.lock()
+        runCount += 1
+        lock.unlock()
+        let deadline = Date().addingTimeInterval(timeout)
+        let result = Result()
+        Self.queue.async { [self] in
+            guard Date() < deadline, result.wanted else { return result.finish(.timedOut) }
+            result.finish(execute(handler, arguments, until: deadline))
+        }
+        _ = result.done.wait(timeout: .now() + timeout + Self.cancelGrace)
+        return result.abandon() ?? .timedOut
+    }
+
+    /// On the queue.
+    private func execute(_ handler: String, _ arguments: [Argument], until deadline: Date) -> Outcome {
+        var error: NSDictionary?
+        if script == nil {
+            if language == nil {
+                guard let language = OSALanguage(forName: "AppleScript").map(OSALanguageInstance.init(language:)) else {
+                    return .failed(code: -1, message: "no AppleScript")
+                }
+                gate.install(on: language)
+                self.language = language
+            }
+            let script = OSAScript(source: source, from: nil, languageInstance: language, using: [])
+            lock.lock()
+            compileCount += 1
+            lock.unlock()
+            guard script.compileAndReturnError(&error) else { return Self.failure(error) }
+            self.script = script
+        }
+        let event = NSAppleEventDescriptor(eventClass: Self.code("ascr"), eventID: Self.code("psbr"), targetDescriptor: nil,
+                                           returnID: AEReturnID(kAutoGenerateReturnID), transactionID: AETransactionID(kAnyTransactionID))
+        // A handler is called by its name in lower case.
+        event.setDescriptor(NSAppleEventDescriptor(string: handler.lowercased()), forKeyword: Self.code("snam"))
+        let list = NSAppleEventDescriptor.list()
+        for (index, argument) in arguments.enumerated() { list.insert(argument.descriptor, at: index + 1) }
+        event.setDescriptor(list, forKeyword: Self.code("----"))
+        gate.deadline = deadline
+        defer { gate.deadline = .distantFuture }
+        guard let result = script?.executeAppleEvent(event, error: &error), error == nil else {
+            if gate.cancelled(by: deadline) { return .timedOut }
+            script = nil
+            return Self.failure(error)
+        }
+        guard result.descriptorType == Self.code("list") else { return .unexpected }
+        var strings: [String] = []
+        for index in stride(from: 1, through: result.numberOfItems, by: 1) {
+            guard let item = result.atIndex(index), Self.textTypes.contains(item.descriptorType),
+                  let string = item.stringValue else { return .unexpected }
+            strings.append(string)
+        }
+        return .strings(strings)
+    }
+
+    private static let textTypes: Set<DescType> = [code("utxt"), code("utf8"), code("TEXT")]
+
+    private static func failure(_ error: NSDictionary?) -> Outcome {
+        .failed(code: error?[OSAScriptErrorNumberKey] as? Int ?? -1, message: error?[OSAScriptErrorMessageKey] as? String ?? "")
+    }
+
+    /// An Apple Event four-character code.
+    private static func code(_ text: String) -> FourCharCode {
+        text.utf8.reduce(0) { $0 << 8 | FourCharCode($1) }
+    }
+
+    /// What a caller waits on; one that gave up isn't run.
+    private final class Result: @unchecked Sendable {
+        private let lock = NSLock()
+        private var outcome: Outcome?
+        private var abandoned = false
+        let done = DispatchSemaphore(value: 0)
+
+        /// False when the caller has given up.
+        var wanted: Bool { lock.lock(); defer { lock.unlock() }; return !abandoned }
+
+        func finish(_ outcome: Outcome) {
+            lock.lock()
+            self.outcome = outcome
+            lock.unlock()
+            done.signal()
+        }
+
+        /// Gives up, unless it finished in the meantime.
+        func abandon() -> Outcome? {
+            lock.lock()
+            defer { lock.unlock() }
+            abandoned = true
+            return outcome
+        }
+    }
+
+    /// AppleScript's active proc for one instance: AppleScript calls it between steps of a run and while it waits (for a
+    /// reply, a `delay`), and stops the run with "User canceled" (-128) when it says so, as it does past the deadline.
+    /// It replaces the instance's own proc, which waits for Carbon events (`WaitNextEvent`): on this queue's thread
+    /// there are none for it, and in some processes it never returns. (`OSASetActiveProc` is no longer in the SDK's
+    /// headers, but OpenScripting still has it; without it a run ends at its Apple Events' own timeout.)
+    private final class CancelGate {
+        typealias ActiveProc = @convention(c) (UnsafeMutableRawPointer?) -> Int16
+        private typealias SetActiveProc = @convention(c) (OpaquePointer, ActiveProc?, UnsafeMutableRawPointer?) -> Int32
+        private static let setActiveProc = dlsym(
+            dlopen("/System/Library/Frameworks/Carbon.framework/Frameworks/OpenScripting.framework/OpenScripting", RTLD_NOW),
+            "OSASetActiveProc").map { unsafeBitCast($0, to: SetActiveProc.self) }
+
+        // Queue only (the active proc is called on the thread running the script).
+        var deadline = Date.distantFuture
+        private var cancelledAt: Date?
+
+        func install(on language: OSALanguageInstance) {
+            let proc: ActiveProc = { context in
+                guard let context else { return 0 }
+                let gate = Unmanaged<CancelGate>.fromOpaque(context).takeUnretainedValue()
+                guard Date() >= gate.deadline else { return 0 }
+                gate.cancelledAt = gate.deadline
+                return -128
+            }
+            // The runner keeps the gate, and the instance, for as long as it lives.
+            _ = Self.setActiveProc?(OpaquePointer(language.componentInstance), proc, Unmanaged.passUnretained(self).toOpaque())
+        }
+
+        /// The run that had `deadline` was stopped by it.
+        func cancelled(by deadline: Date) -> Bool {
+            defer { cancelledAt = nil }
+            return cancelledAt == deadline
+        }
     }
 }
 

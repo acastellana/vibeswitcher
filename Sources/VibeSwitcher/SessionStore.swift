@@ -42,7 +42,9 @@ final class SessionStore: ObservableObject {
 
     // Scan-queue only.
     private var terminal = TerminalPoll<TerminalTab>()
-    private let bridge = TerminalPoll<TerminalTab>.Bridge(tabs: TerminalBridge.tabs, screens: TerminalBridge.readScreens)
+    private let bridge: TerminalPoll<TerminalTab>.Bridge
+    /// Whether Terminal is the active app, and its front window then (see `TerminalSignal`); read on the scan queue.
+    var terminalFront: @Sendable () -> (active: Bool, window: Int?) = { TerminalBridge.front() }
 
     // Main-thread only.
     private let launchedAt = Date()
@@ -77,9 +79,11 @@ final class SessionStore: ObservableObject {
     var requestHostScreens: (Set<String>) -> Void = { _ in }
     private var lastHostScreenRequest = Date.distantPast
 
-    /// `scanner`: the Mac's processes; `--idle-bench` passes made-up ones.
-    init(scanner: SessionScanner = SessionScanner()) {
+    /// `scanner`: the Mac's processes; `--idle-bench` passes made-up ones. `bridge`: Terminal.app; tests pass a stand-in.
+    init(scanner: SessionScanner = SessionScanner(),
+         bridge: TerminalPoll<TerminalTab>.Bridge = .init(tabs: TerminalBridge.tabs, screens: TerminalBridge.readScreens)) {
         self.scanner = scanner
+        self.bridge = bridge
     }
 
     /// Titles change many times a second while an agent works (its spinner); the regular scan picks them up,
@@ -98,10 +102,11 @@ final class SessionStore: ObservableObject {
         // Hook updates arrive through the state-directory watcher right away; the timer only has to
         // notice sessions starting/ending, title changes and the viewing ring.
         timer = Heartbeat.shared.every(2) { [weak self] in self?.refresh() }
-        // Switching apps changes which session you're viewing; don't wait for the next poll.
+        // Switching apps changes which session you're viewing; don't wait for the next poll. Terminal is read again
+        // only when it became or stopped being the active app (`TerminalSignal`), not on every switch.
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification,
                                                           object: nil, queue: .main) { [weak self] _ in
-            self?.refresh(forceTerminal: true)
+            self?.refresh()
         }
         watchStateDirectory()
     }
@@ -180,10 +185,8 @@ final class SessionStore: ObservableObject {
             requestHostScreens(hostQuiet)
         }
         let hostScreens = self.hostScreens()
-        // While you're in Terminal, check which tab you're on every second so the "viewing" ring keeps up.
-        let terminalInterval: TimeInterval =
-            NSWorkspace.shared.frontmostApplication?.bundleIdentifier == TerminalBridge.bundleID ? 1.5 : 4
         let clock = self.clock
+        let terminalFront = self.terminalFront
         queue.async { [weak self] in
             guard let self else { return }
             let now = clock()
@@ -191,9 +194,13 @@ final class SessionStore: ObservableObject {
             let readAt = self.scanner.readAt
             let undecided = self.scanner.undecided
             let transcripts = Self.transcripts(for: raw)
-            // AppleScript is the expensive part; query at most every `terminalInterval` unless forced.
+            // Terminal is asked when a session in it started or ended, its hooks say something new, or Terminal became
+            // or stopped being active or another of its windows came to the front (a tab picked: the "viewing" ring);
+            // else every `TerminalPoll.fallback` seconds. Forced on request.
             let inTerminal = Set(raw.filter(\.inTerminalApp).map(\.tty))
-            let access = self.terminal.poll(now: now, interval: terminalInterval, terminalTTYs: inTerminal, quiet: quiet,
+            let front = inTerminal.isEmpty ? (active: false, window: nil) : terminalFront()
+            let signal = TerminalSignal(sessions: raw, terminalActive: front.active, frontWindow: front.window)
+            let access = self.terminal.poll(now: now, terminalTTYs: inTerminal, quiet: quiet, signal: signal,
                                             force: forceTerminal, bridge: self.bridge)?.access
             let tabs = self.terminal.tabs
             var background = self.terminal.backgroundWork

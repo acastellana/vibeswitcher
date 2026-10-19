@@ -232,7 +232,8 @@ struct TerminalPollTests {
         var poll = TerminalPoll<FakeTerminal.Tab>()
         poll.poll(now: Date(timeIntervalSince1970: 0), interval: 4, terminalTTYs: inTerminal, quiet: ["ttys001"], force: false, bridge: terminal.bridge)
         #expect(poll.backgroundWork == ["ttys001": "1 shell"])
-        poll.poll(now: Date(timeIntervalSince1970: 8), interval: 4, terminalTTYs: inTerminal, quiet: ["ttys001"], force: false, bridge: terminal.bridge)
+        poll.poll(now: Date(timeIntervalSince1970: TerminalPoll<FakeTerminal.Tab>.screensInterval), interval: 4, terminalTTYs: inTerminal,
+                  quiet: ["ttys001"], force: false, bridge: terminal.bridge)
         #expect(terminal.screenCalls == 2)
         #expect(poll.backgroundWork == ["ttys001": "1 shell"])
     }
@@ -240,27 +241,64 @@ struct TerminalPollTests {
     @Test func readsAreSpacedOut() {
         let terminal = FakeTerminal()
         var poll = TerminalPoll<FakeTerminal.Tab>()
-        for tick in 0..<10 {   // 2 s scans for 20 s
-            poll.poll(now: Date(timeIntervalSince1970: Double(tick * 2)), interval: 4, terminalTTYs: inTerminal, quiet: ["ttys001"], force: false,
+        for tick in 0..<30 {   // 2 s scans for a minute, nothing changing
+            poll.poll(now: Date(timeIntervalSince1970: Double(tick * 2)), terminalTTYs: inTerminal, quiet: ["ttys001"], force: false,
                       bridge: terminal.bridge)
         }
-        #expect(terminal.tabCalls == 5)
-        #expect(terminal.screenCalls == 3)
+        #expect(terminal.tabCalls == 3)   // 0, 20, 40 s
+        #expect(terminal.screenCalls == 1)
+    }
+
+    @Test func theQuietSessionsChangingReadsTheirScreens() {
+        let terminal = FakeTerminal()
+        var poll = TerminalPoll<FakeTerminal.Tab>()
+        poll.poll(now: Date(timeIntervalSince1970: 0), terminalTTYs: inTerminal, quiet: [], force: false, bridge: terminal.bridge)
+        // ttys001's turn ended: its footer is read at the next scan, not a minute later.
+        poll.poll(now: Date(timeIntervalSince1970: 2), terminalTTYs: inTerminal, quiet: ["ttys001"], force: false, bridge: terminal.bridge)
+        #expect(terminal.screenCalls == 1)
+        #expect(terminal.tabCalls == 1)
     }
 }
 
 struct TerminalPollingCostTests {
+    private typealias Poll = TerminalPoll<FakeTerminal.Tab>
+
+    /// A Claude session in a Terminal.app tab (Terminal → login → zsh → claude), with what its hook last said.
+    private static func session(_ tty: String, pid: Int32 = 500, event: String? = "Stop", inTerminal: Bool = true) -> RawSession {
+        RawSession(tty: tty, agent: .claude, pid: pid, startedAt: Date(timeIntervalSince1970: 0), cwd: nil, project: "p",
+                   projectRoot: nil, hook: event.map { HookState(agent: .claude, tty: tty, lastEvent: $0, lastEventAt: 1) },
+                   backgroundJobs: [], inTerminalApp: inTerminal)
+    }
+
     /// `osascript` runs over two minutes of 2 s scans with three quiet Claude sessions.
-    private func spawns(terminalTTYs: Set<String>, interval: TimeInterval) -> Int {
+    private func spawns(terminalTTYs: Set<String>, interval: TimeInterval = Poll.fallback) -> Int {
         let terminal = FakeTerminal()
-        var poll = TerminalPoll<FakeTerminal.Tab>()
+        var poll = Poll()
+        let signal = TerminalSignal(sessions: terminalTTYs.map { Self.session($0) }, terminalActive: false, frontWindow: nil)
         for tick in 0..<60 {
             terminal.tabReads.append(.tabs([:]))
             terminal.screenReads.append([:])
             poll.poll(now: Date(timeIntervalSince1970: Double(tick * 2)), interval: interval, terminalTTYs: terminalTTYs,
-                      quiet: ["ttys010", "ttys011", "ttys012"], force: false, bridge: terminal.bridge)
+                      quiet: ["ttys010", "ttys011", "ttys012"], signal: signal, force: false, bridge: terminal.bridge)
         }
         return terminal.tabCalls + terminal.screenCalls
+    }
+
+    /// Reads (tabs and screens) made by 0.5 s scans until `end`, the signal given by `signal(t)`; the times they were made at.
+    private func reads(until end: Double, quiet: Set<String> = ["ttys010"], signal: (Double) -> TerminalSignal) -> [Double] {
+        let terminal = FakeTerminal()
+        var poll = Poll()
+        var times: [Double] = []
+        for tick in 0..<Int(end * 2) {
+            let t = Double(tick) / 2
+            let before = terminal.tabCalls + terminal.screenCalls
+            terminal.tabReads.append(.tabs([:]))
+            terminal.screenReads.append([:])
+            poll.poll(now: Date(timeIntervalSince1970: t), terminalTTYs: ["ttys010"], quiet: quiet, signal: signal(t), force: false,
+                      bridge: terminal.bridge)
+            if terminal.tabCalls + terminal.screenCalls > before { times.append(t) }
+        }
+        return times
     }
 
     @Test func onlyWindowSessionsNeverAskTerminal() {
@@ -272,13 +310,56 @@ struct TerminalPollingCostTests {
     @Test func switchingAppsDoesNotAskTerminalEither() {
         // Activating any app forces a read.
         let terminal = FakeTerminal()
-        var poll = TerminalPoll<FakeTerminal.Tab>()
+        var poll = Poll()
         poll.poll(now: Date(), interval: 4, terminalTTYs: [], quiet: ["ttys010"], force: true, bridge: terminal.bridge)
         #expect(terminal.tabCalls + terminal.screenCalls == 0)
     }
 
-    @Test func aTerminalSessionIsStillPolled() {
-        #expect(spawns(terminalTTYs: ["ttys010"], interval: 4) == 45)
+    @Test func aQuietTerminalSessionIsReadAtMostEightTimesInTwoMinutes() {
+        // Before (a read every 4 s, its screen every 8): 45, one osascript each.
+        #expect(Poll.fallback >= 15)
+        #expect(spawns(terminalTTYs: ["ttys010"]) <= 8)
+    }
+
+    @Test func aBusySessionsHookEventsAloneDontAskTerminal() {
+        // Tool after tool: the hook changes several times a second, its status (working) doesn't.
+        let events = ["PreToolUse", "PostToolUse", "UserPromptSubmit"]
+        let times = reads(until: 120) { t in
+            TerminalSignal(sessions: [Self.session("ttys010", event: events[Int(t * 2) % 3])], terminalActive: false, frontWindow: nil)
+        }
+        #expect(times.count <= 8)
+    }
+
+    @Test func aChangeIsReadWithinTwoSeconds() {
+        let quiet = TerminalSignal(sessions: [Self.session("ttys010", event: "PreToolUse")], terminalActive: false, frontWindow: nil)
+        let changes: [(String, TerminalSignal)] = [
+            ("its turn ended", TerminalSignal(sessions: [Self.session("ttys010", event: "Stop")], terminalActive: false, frontWindow: nil)),
+            ("another agent on it", TerminalSignal(sessions: [Self.session("ttys010", pid: 501, event: "PreToolUse")],
+                                                   terminalActive: false, frontWindow: nil)),
+            ("a new session in Terminal", TerminalSignal(sessions: [Self.session("ttys010", event: "PreToolUse"), Self.session("ttys011")],
+                                                         terminalActive: false, frontWindow: nil)),
+            ("Terminal activated", TerminalSignal(sessions: [Self.session("ttys010", event: "PreToolUse")], terminalActive: true, frontWindow: 7)),
+        ]
+        // A change long after the last read, and one just after a read (20 s: the fallback's).
+        for (what, changed) in changes {
+            for at in [31.0, 20.5] {
+                let times = reads(until: 40) { $0 >= at ? changed : quiet }
+                #expect(times.contains { $0 >= at && $0 <= at + 2 }, "\(what) at \(at) s: read at \(times)")
+            }
+        }
+        // While Terminal is active, a tab picked there (another window in front).
+        let front = { (window: Int) in
+            TerminalSignal(sessions: [Self.session("ttys010", event: "PreToolUse")], terminalActive: true, frontWindow: window)
+        }
+        let times = reads(until: 40) { front($0 >= 31 ? 8 : 7) }
+        #expect(times.contains { $0 >= 31 && $0 <= 33 }, "read at \(times)")
+        // A window session's hooks, or a Terminal window moving while Terminal isn't active, say nothing about its tabs.
+        let unrelated = reads(until: 40) { t in
+            TerminalSignal(sessions: [Self.session("ttys010", event: "PreToolUse"),
+                                      Self.session("ttys020", event: t >= 31 ? "Stop" : "PreToolUse", inTerminal: false)],
+                           terminalActive: false, frontWindow: t >= 31 ? 8 : 7)
+        }
+        #expect(unrelated == [0, 20])
     }
 
     @Test func screensAreOnlyReadForTerminalSessions() {
@@ -288,7 +369,7 @@ struct TerminalPollingCostTests {
             asked.append(ttys)
             return terminal.bridge.screens(ttys)
         })
-        var poll = TerminalPoll<FakeTerminal.Tab>()
+        var poll = Poll()
         poll.poll(now: Date(), interval: 4, terminalTTYs: ["ttys001"], quiet: ["ttys001", "ttys010"], force: true,
                   bridge: counting)
         #expect(asked == [["ttys001"]])
