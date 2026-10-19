@@ -7,8 +7,12 @@
 # With --build it also runs setup-signing.sh and build-app.sh (to build/, never --install) on a scratch HOME, as the
 # user would but with the password on stdin: an earlier setup's keychain and password file are replaced; the new key
 # can't be exported and only codesign may use it; no password file is left; the keychain is locked after setup and
-# after the build; and the app and its helpers are signed with the identity. Your own signing keychain, login
-# keychain and keychain search list are never touched (the search list is HOME's).
+# locks on sleep, with no inactivity timeout; and the app and its helpers are signed with the identity. macOS's
+# password dialog is stood in for by a codesign on build-app.sh's PATH that counts a prompt when the key is used with
+# the keychain locked, and unlocks it as you would: the first build after setup asks once, a second build in the same
+# session doesn't ask and the keychain stays unlocked, and after a lock (as on sleep) the next build asks again. The
+# 5-minute timeout an earlier setup set is dropped by the first build; a timeout you chose is kept. Your own signing
+# keychain, login keychain and keychain search list are never touched (the search list is HOME's).
 #
 # scripts/test-signing.sh [--build]
 # (pipefail: a check reads its pipe to the end, `grep >/dev/null` rather than `grep -q`, or the writer's SIGPIPE fails it.)
@@ -116,29 +120,68 @@ EOF
     check "the key's sign entry trusts codesign alone" \
         'grep -A6 "authorizations.*sign" <<<"$key" | grep "applications (1):" >/dev/null'
 
-    # The build: the keychain is unlocked here as the user would in macOS's dialog, then build-app.sh signs
-    # with it. Never while locked: codesign would put a dialog in front of you. The release build goes first, so
-    # the keychain doesn't lock itself (after 5 minutes) before the signing.
+    keychain_info() { run security show-keychain-info "$keychain" 2>&1; }
+    check "the keychain locks on sleep, with no inactivity timeout" '[[ $(keychain_info) == *"lock-on-sleep no-timeout" ]]'
+    # As an earlier setup-signing.sh left it, locking after 5 minutes too: the first build makes it lock on sleep only.
+    run security set-keychain-settings -l -u -t 300 "$keychain"
     run security lock-keychain "$keychain"
-    run swift build -c release >/dev/null 2>&1
-    unlock
-    if [[ $(lockstate) == unlocked ]]; then
-        run scripts/build-app.sh </dev/null > "$work/build.log" 2>&1
+
+    # macOS's dialog, stood in for. codesign makes macOS ask for the password when it uses the key while the keychain
+    # is locked; this codesign, first on build-app.sh's PATH, counts that prompt and answers it as you would (unlocks
+    # the keychain, the password on stdin), then runs the real one. If the keychain stays locked it stops there, so no
+    # dialog is ever put in front of you.
+    mkdir "$work/bin"
+    cat > "$work/bin/codesign" <<'EOF'
+#!/bin/bash
+if [[ $("$SIGNING_LOCKSTATE" "$SIGNING_KEYCHAIN") == locked ]]; then
+    echo prompt >> "$SIGNING_PROMPTS"
+    printf 'test-password\n' | python3 -I -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
+        security unlock-keychain "$SIGNING_KEYCHAIN" 2>/dev/null
+    [[ $("$SIGNING_LOCKSTATE" "$SIGNING_KEYCHAIN") == unlocked ]] || { echo "the scratch keychain didn't unlock" >&2; exit 1; }
+fi
+exec /usr/bin/codesign "$@"
+EOF
+    chmod +x "$work/bin/codesign"
+    app=build/VibeSwitcher.app
+    # build N: runs build-app.sh (which replaces build/VibeSwitcher.app), its output in $work/buildN.log; sets $status
+    # and $prompts, the passwords macOS would have asked for.
+    build() {
+        : > "$work/prompts"
+        run env PATH="$work/bin:$PATH" SIGNING_LOCKSTATE="$work/lockstate" SIGNING_KEYCHAIN="$keychain" \
+            SIGNING_PROMPTS="$work/prompts" scripts/build-app.sh </dev/null > "$work/build$1.log" 2>&1
         status=$?
-        app=build/VibeSwitcher.app
-        check "build-app.sh builds to build/" '[[ $status -eq 0 && -d $app ]]'
-        for code in "$app" "$app/Contents/MacOS/vibeswitcher-hook" "$app/Contents/MacOS/vibeswitcher-host" \
-                    "$app/Contents/MacOS/vibeswitcher-mcp"; do
-            check "${code#build/} signed by VibeSwitcher Local Signing" \
-                'codesign -dvv "$code" 2>&1 | grep -x "Authority=VibeSwitcher Local Signing" >/dev/null'
-        done
-        check "the app's signature is valid" 'codesign --verify --strict "$app"'
-        check "the keychain is locked after the build" '[[ $(lockstate) == locked ]]'
-        check "the search list is put back" '[[ $(run security list-keychains -d user) == "$search_list" ]]'
-        [[ $status -ne 0 ]] && tail -20 "$work/build.log"
-    else
-        check "the scratch keychain unlocks with its password from stdin" false
-    fi
+        prompts=$(wc -l < "$work/prompts" | tr -d ' ')
+        [[ $status -ne 0 ]] && tail -20 "$work/build$1.log"
+    }
+    signed() { codesign -dvv "$1" 2>&1 | grep -x "Authority=VibeSwitcher Local Signing" >/dev/null; }
+
+    # The first build after setup, as after login or wake: the keychain is locked.
+    build 1
+    check "build-app.sh builds to build/" '[[ $status -eq 0 && -d $app ]]'
+    check "the first build asks for the password, once" '[[ $prompts -eq 1 ]]'
+    for code in "$app" "$app/Contents/MacOS/vibeswitcher-hook" "$app/Contents/MacOS/vibeswitcher-host" \
+                "$app/Contents/MacOS/vibeswitcher-mcp"; do
+        check "${code#build/} signed by VibeSwitcher Local Signing" 'signed "$code"'
+    done
+    check "the app's signature is valid" 'codesign --verify --strict "$app"'
+    check "the keychain stays unlocked after the build" '[[ $(lockstate) == unlocked ]]'
+    check "the build drops an earlier setup's 5-minute timeout" '[[ $(keychain_info) == *"lock-on-sleep no-timeout" ]]'
+    check "the search list is put back" '[[ $(run security list-keychains -d user) == "$search_list" ]]'
+
+    # A second build in the same session, with no unlock step.
+    build 2
+    check "a second build signs without asking" \
+        '[[ $status -eq 0 && $prompts -eq 0 ]] && signed "$app" && codesign --verify --strict "$app"'
+    check "the keychain is still unlocked" '[[ $(lockstate) == unlocked ]]'
+
+    # A timeout you chose yourself is kept. Then the Mac sleeps: the keychain locks, and the next build asks again.
+    run security set-keychain-settings -l -u -t 3600 "$keychain"
+    run security lock-keychain "$keychain"
+    build 3
+    check "after a lock the next build asks again, once" \
+        '[[ $status -eq 0 && $prompts -eq 1 ]] && signed "$app" && codesign --verify --strict "$app"'
+    check "a timeout you chose is kept" '[[ $(keychain_info) == *"lock-on-sleep timeout=3600s" ]]'
+    check "the search list is still as it was" '[[ $(run security list-keychains -d user) == "$search_list" ]]'
 fi
 
 if [[ $failures -gt 0 ]]; then echo "$failures check(s) failed"; exit 1; fi

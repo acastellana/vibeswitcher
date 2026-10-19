@@ -33,17 +33,18 @@ if [[ -f "$SIGNING_DIR/vibeswitcher.keychain-db" ]]; then
     HASH="$(security find-identity -p codesigning "$KEYCHAIN" | awk '/VibeSwitcher Local Signing/ {print $2; exit}')"
     IDENTITY=(--sign "$HASH" --keychain "$KEYCHAIN")
     # codesign only finds the key while its keychain is in the search list: add it for the signing
-    # step and always put the user's list back. The keychain is locked again however the build ends.
+    # step and always put the user's list back.
     ORIGINAL_LIST=()
     while IFS= read -r line; do
         line="${line#"${line%%[![:space:]]*}"}"; line="${line%\"}"; line="${line#\"}"
         [[ -n "$line" ]] && ORIGINAL_LIST+=("$line")
     done < <(security list-keychains -d user)
-    trap 'security lock-keychain "$KEYCHAIN"; security list-keychains -d user -s ${ORIGINAL_LIST[@]+"${ORIGINAL_LIST[@]}"}' EXIT
+    trap 'security list-keychains -d user -s ${ORIGINAL_LIST[@]+"${ORIGINAL_LIST[@]}"}' EXIT
     security list-keychains -d user -s ${ORIGINAL_LIST[@]+"${ORIGINAL_LIST[@]}"} "$KEYCHAIN"
-    # The keychain is locked: codesign's first use of the key makes macOS ask you for its password (the
-    # one you chose in setup-signing.sh), so nothing signs as VibeSwitcher without you.
-    echo "Signing: macOS asks for the signing keychain's password."
+    # The keychain locks when the Mac sleeps and when you log out, and stays unlocked otherwise. While it's
+    # locked, codesign's first use of the key makes macOS ask you for its password (the one you chose in
+    # setup-signing.sh), so nothing signs as VibeSwitcher without you having unlocked it this session.
+    echo "Signing: at the first build since you logged in or woke the Mac, macOS asks for the signing keychain's password."
 else
     IDENTITY=(--sign -)
 fi
@@ -51,6 +52,12 @@ codesign --force "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-hook"
 codesign --force "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-host"
 codesign --force "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-mcp"
 codesign --force "${IDENTITY[@]}" "$APP"
+# A keychain made by setup-signing.sh before it kept the keychain unlocked between builds locks after 5
+# minutes: let it lock on sleep only. It's unlocked now (codesign just used it), so this asks nothing.
+if [[ -n "${KEYCHAIN:-}" ]] && security show-keychain-info "$KEYCHAIN" 2>&1 | grep -E 'timeout=300s$' >/dev/null; then
+    security set-keychain-settings -l "$KEYCHAIN"
+    echo "The signing keychain now stays unlocked until the Mac sleeps or you log out (it locked after 5 minutes)."
+fi
 echo "Built $APP"
 
 if [[ "${1:-}" == "--install" ]]; then

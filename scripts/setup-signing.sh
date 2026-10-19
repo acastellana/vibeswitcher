@@ -5,8 +5,10 @@
 # every build, which silently invalidates those grants.
 #
 # Nothing signs as VibeSwitcher without you: the key can't be exported, only /usr/bin/codesign may use
-# it, and its keychain stays locked except while build-app.sh signs. Its password is one you choose here
-# (`security` asks for it; it's never saved or passed on a command line) and type when a build asks.
+# it, and its keychain is locked until you unlock it. Its password is one you choose here (`security` asks
+# for it; it's never saved or passed on a command line) and type when macOS asks: at the first build after
+# you log in or wake the Mac. The keychain then stays unlocked, so later builds don't ask, until the Mac
+# sleeps or you log out.
 #
 # The certificate is then trusted for code signing (for your user only; macOS asks for your password):
 # without that trust, macOS pins each permission to the exact build anyway.
@@ -114,12 +116,14 @@ EOF
 openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -config "$WORK/cert.cnf" \
     -keyout "$WORK/key.pem" -out "$WORK/cert.pem" </dev/null 2>/dev/null
 
-echo "Choose a password for the signing keychain. Each build asks for it, in a dialog, before it signs."
+echo "Choose a password for the signing keychain. The first build after you log in or wake the Mac asks for it,"
+echo "in a dialog, before it signs; later builds don't, until the Mac sleeps or you log out."
 # No -p: security asks for it (on the terminal; read from stdin when there's none), so it never sits in
 # argv, where any process can read it with ps, or in a file.
 security create-keychain "$KEYCHAIN"
-# Lock on sleep and after 5 minutes, in case a build ends without locking it.
-security set-keychain-settings -l -u -t 300 "$KEYCHAIN"
+# Lock on sleep (and at logout), with no inactivity timeout: once you've unlocked it at a build, later
+# builds sign without asking until the Mac sleeps.
+security set-keychain-settings -l "$KEYCHAIN"
 # The new keychain is unlocked. -x: the key can never be exported; -T: only codesign uses it without
 # asking you (anything else that tries gets a prompt, even while the keychain is unlocked).
 security import "$WORK/key.pem" -k "$KEYCHAIN" -x -T /usr/bin/codesign >/dev/null
