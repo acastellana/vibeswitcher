@@ -28,6 +28,18 @@ final class HostTerminalView: TerminalView {
     override func send(source: Terminal, data: ArraySlice<UInt8>) {
         onReply?(Data(data))
     }
+
+    /// SwiftTerm asks for 8-bit RGBA on the view's layer, but a terminal that redraws often is drawn into a content
+    /// sublayer AppKit adds (drawn asynchronously, on the GPU) in a format AppKit picks: half-float, 8 bytes a pixel,
+    /// 16 MB for a 758x683-point pane. CoreAnimation's accelerated renderer keeps the last surface it drew into after the
+    /// terminal and the window are gone. The terminal's colours are 8-bit sRGB. AppKit makes that sublayer again
+    /// between draws, so this holds from the draw after it appears.
+    override func viewWillDraw() {
+        super.viewWillDraw()
+        for sublayer in layer?.sublayers ?? [] where !(sublayer.delegate is NSView) && sublayer.contentsFormat != .RGBA8Uint {
+            sublayer.contentsFormat = .RGBA8Uint
+        }
+    }
 }
 
 /// The middle pane: the selected window session's live terminal, or a placeholder. Views of the last few
