@@ -104,3 +104,56 @@ struct QuestionScreenTests {
         #expect(writes.map(\.bytes) == [[27, 91, 66], Array("Mango".utf8), [13]])
     }
 }
+
+/// Claude Code 2.1.303's AskUserQuestion as its code draws it: the open tab only on a coloured background, a
+/// multi-select's rows `N. [✔] label` with a Submit / Next row under them (`❯    Submit` with the cursor there).
+struct QuestionTabsAndTicksTests {
+    let bar = "←   ☒ Fruit  ☐ Toppings  ✔ Submit   →"
+    let toppings = ["←   ☒ Fruit  ☐ Toppings  ✔ Submit   →", "", "Which toppings?", "", "  1. [✔] Cream", "     Whipped.",
+                    "  2. [ ] Nuts", "     Roasted.", "  3. [ ] Type something", "❯    Submit", "",
+                    "Enter to select · Tab/Arrow keys to navigate · Esc to cancel"]
+
+    @Test func theOpenTabIsTheHighlightedOneEvenWhenAnswered() throws {
+        let fruit = [bar, "", "Which fruit?", "", "❯ 1. Apple", "  2. Pear", "  3. Type something.", "Enter to select · Tab/Arrow keys to navigate"]
+        let open = try #require(ScreenMenu.parse(fruit, highlights: [["☒ Fruit"]]))
+        #expect(open.currentTab == 0)
+        #expect(try #require(ScreenMenu.parse(fruit, highlights: [["✔ Submit"]])).currentTab == 2)
+        // Without colours: the first not answered, as before.
+        #expect(try #require(ScreenMenu.parse(fruit)).currentTab == 1)
+    }
+
+    @Test func aMultiSelectsTicksAndItsSubmitRow() throws {
+        let menu = try #require(ScreenMenu.parse(toppings))
+        #expect(menu.options == ["Cream", "Nuts", "Type something"])
+        #expect(menu.checked == [true, false, false])
+        #expect(menu.descriptions == ["Whipped.", "Roasted.", nil])
+        #expect(menu.submit == "Submit")
+        #expect(menu.selected == 3)
+        #expect(menu.multiSelect)
+        // Up from Submit to Cream, then Enter (ticks it).
+        #expect(menu.keys(toChoose: 0).map(\.bytes) == [[27, 91, 65], [27, 91, 65], [27, 91, 65], [13]])
+        var onNuts = toppings
+        onNuts[6] = "❯ 2. [ ] Nuts"
+        onNuts[9] = "     Next"
+        let next = try #require(ScreenMenu.parse(onNuts))
+        #expect(next.selected == 1 && next.submit == "Next")
+        #expect(next.sameQuestion(as: menu) == false)
+    }
+
+    @Test func freeTextReplacesWhatsThereAndAMultiSelectsIsntEntered() {
+        let single = ScreenMenu(question: "", options: ["Apple", "Kiwi"], selected: 0)
+        #expect(single.keys(toChoose: 1, typing: "Mango", replacing: 4).map(\.bytes)
+                == [[27, 91, 66], [127, 127, 127, 127], Array("Mango".utf8), [13]])
+        let multi = ScreenMenu(question: "", options: ["Cream", "Type something"], selected: 0, checked: [false, false], submit: "Submit")
+        #expect(multi.keys(toChoose: 1, typing: "Sprinkles").map(\.bytes) == [[27, 91, 66], Array("Sprinkles".utf8)])
+    }
+
+    @Test func theSameQuestionWhateverItsCursor() throws {
+        let a = ScreenMenu(question: "Which fruit?", options: ["Apple", "Pear"], selected: 0)
+        var b = a
+        b.selected = 1
+        #expect(a.sameQuestion(as: b))
+        b.question = "Which toppings?"
+        #expect(!a.sameQuestion(as: b))
+    }
+}

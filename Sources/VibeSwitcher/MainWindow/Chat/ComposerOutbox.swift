@@ -35,6 +35,19 @@ final class ComposerOutbox: ObservableObject {
         return id
     }
 
+    @discardableResult
+    func hold(key: String, message: String) -> UUID? {
+        var id: UUID?
+        change { id = $0.hold(key: key, message: message) }
+        return id
+    }
+
+    func release(_ id: UUID, expectsSoon: Bool) -> OutboxEntry? {
+        var entry: OutboxEntry?
+        change { entry = $0.release(id, expectsSoon: expectsSoon) }
+        return entry
+    }
+
     func handedOff(key: String, message: String) {
         change { $0.handedOff(key: key, message: message) }
     }
@@ -126,9 +139,11 @@ struct OutboxStrip: View {
         switch entry.state {
         case .sending where restored:
             return "Not sent: VibeSwitcher stopped while sending it."
+        case .held where restored:
+            return "Not sent: it was waiting for a question to be answered when VibeSwitcher stopped."
         case .typed where restored:
             return "Typed in before VibeSwitcher restarted, but not in the conversation. It may still arrive."
-        case .failed, .sending, .typed:
+        case .failed, .sending, .typed, .held:
             return "The session didn't confirm it got this. It may not have reached \(agent)."
         }
     }

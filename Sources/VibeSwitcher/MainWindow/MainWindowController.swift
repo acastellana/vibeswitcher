@@ -25,6 +25,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private var cancellables: Set<AnyCancellable> = []
     /// The selected session's conversation, shown over the terminal (which stays attached underneath).
     let chat = ChatModel()
+    /// The chat's side of the selected session's terminal: its answer card, and what's typed into it.
+    private lazy var sync = makeSync()
     private lazy var chatHost = NSHostingView(rootView: AnyView(EmptyView()))
     private lazy var endedHost = NSHostingView(rootView: AnyView(EmptyView()))
     private let sidebarHost = NSHostingController(rootView: AnyView(EmptyView()))
@@ -41,12 +43,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
                                   steer: { [weak self] text in self?.steerSelected(text) ?? false },
                                   stop: { [weak self] in self?.sendKeys([27]) },
                                   cycleMode: { [weak self] in self?.sendKeys(AgentMode.cycleKey) }),
-        choose: { [weak self] index, typing in self?.chooseMenuOption(index, typing: typing) },
-        moveTab: { [weak self] delta in
-            guard delta != 0 else { return }
-            self?.sendKeys(Array(repeating: delta > 0 ? [27, 91, 67] : [27, 91, 68], count: abs(delta)).flatMap { $0 })
-        },
-        showTerminal: { [weak self] in self?.model.showsChat = false })
+        choose: { [weak self] menu, index, typing in self?.sync.choose(index, typing: typing, drawn: menu) },
+        moveTab: { [weak self] tab in self?.sync.moveTab(to: tab) },
+        showTerminal: { [weak self] in self?.model.showsChat = false },
+        dismissMenu: { [weak self] in self?.sync.cancel() })
         .environment(\.holdLeadQuestion) { [weak leads] question in leads?.hold(question) })
     }
 
@@ -341,6 +341,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
 
+    private func makeSync() -> ChatSync {
+        let sync = ChatSync(chat: chat, host: host)
+        sync.target = { [weak self] in
+            guard let self, let row = self.model.selectedRow, let id = row.hostID, self.actions.isLive(row) else { return nil }
+            return ChatSync.Target(id: id, key: row.draftKey, agent: row.session?.agent, needsInput: row.session?.status == .needsInput,
+                                   working: row.session?.status == .working)
+        }
+        sync.screen = { [weak self] id in self?.pane.screenText(id) ?? ScreenRead() }
+        sync.bracketedPaste = { [weak self] id in self?.pane.bracketedPaste(id) ?? false }
+        return sync
+    }
+
     /// The menu and permission mode on the selected window session's screen, for the answer card and the mode chip.
     private func readScreen() {
         // Run on code blocks: for a Claude window session you can type into (`!` runs a command there).
@@ -354,20 +366,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         } else {
             chat.watchSteering(tty: nil, agentPid: nil, idle: false)
         }
-        guard let row = model.selectedRow, let id = row.hostID, actions.isLive(row) else {
-            if chat.menu != nil { chat.menu = nil }
-            if chat.mode != nil { chat.mode = nil }
-            return
-        }
-        let lines = pane.screenLines(id)
-        let bottom = Array(lines.suffix(40))
-        // Only a menu that's waiting on you: the hooks say so, or the screen says how to choose.
-        let asking = row.session?.status == .needsInput
-            || bottom.suffix(6).contains { $0.contains("Enter to select") || $0.contains("Esc to cancel") || $0.contains("to navigate") }
-        let menu = asking ? ScreenMenu.parse(bottom) : nil
-        if chat.menu != menu { chat.menu = menu }
-        let mode = row.session?.agent == .codex ? nil : AgentMode.parse(Array(lines.suffix(6)))
-        if chat.mode != mode { chat.mode = mode }
+        sync.readScreen()
     }
 
     /// The composer's message, typed into the selected window session (as a paste when its program asked for that).
@@ -384,12 +383,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return true
         }
         Breadcrumbs.shared.note("composer: send \(text.count) chars to \(row.id)")
-        // The composer's outbox keeps the message until the host confirms it (and the conversation shows it).
-        host.send(id, writes: ComposerText.writes(text, bracketed: pane.bracketedPaste(id))) { [weak self] ok in
-            if !ok { Breadcrumbs.shared.note("composer: the host didn't confirm \(text.count) chars for \(row.id)") }
-            self?.chat.confirmed(key: key, message: text, ok: ok)
-        }
-        return true
+        return sync.type(text)
     }
 
     /// Hands the message to the selected session's agent at its next step: through its hook for Claude (window or
@@ -408,48 +402,16 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             Breadcrumbs.shared.note("composer: steer to an idle agent on \(session.tty), typed instead")
             return row.hostID != nil ? sendToSelected(text) : false
         }
-        let message = SteerMessage(text: text, from: .user, agentPid: session.pid)
-        do {
-            try SteerInbox.post(message, tty: session.tty)
-            chat.handedOff(key: row.draftKey, message: text)
-            chat.steered(message, tty: session.tty)
-            chat.scrollToBottom()
-            return true
-        } catch {
+        guard sync.steer(text, key: row.draftKey, tty: session.tty, agentPid: session.pid) else {
             NSSound.beep()
             return false
         }
+        return true
     }
 
     /// Keys for the selected window session (Esc to stop, shift+tab for the mode).
     private func sendKeys(_ bytes: [UInt8]) {
-        guard let row = model.selectedRow, let id = row.hostID, actions.isLive(row) else { return NSSound.beep() }
-        write([HostInput.Write(bytes: bytes, delay: 0)], to: id)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.readScreen() }
-    }
-
-    /// Answers the menu on screen: arrows from where its cursor is, then Enter.
-    private func chooseMenuOption(_ index: Int, typing: String? = nil) {
-        guard let row = model.selectedRow, let id = row.hostID, let menu = chat.menu else { return }
-        // Read again right before: the question may have changed or gone, and an answer must not land on another one.
-        readScreen()
-        guard chat.menu == menu else {
-            chat.answerNotice = chat.menu == nil ? "That question is gone." : "That question changed; here it is now."
-            return
-        }
-        write(typing.map { menu.keys(toChoose: index, typing: $0) } ?? menu.keys(toChoose: index), to: id)
-        chat.menu = nil
-        chat.scrollToBottom()
-    }
-
-    private func write(_ writes: [HostInput.Write], to id: UUID) {
-        var at: TimeInterval = 0
-        for write in writes {
-            at += write.delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
-                self?.host.send(id, bytes: Data(write.bytes), reply: false)
-            }
-        }
+        if !sync.sendKeys(bytes) { NSSound.beep() }
     }
 
     /// The window's title names the selected session; the Dock badge counts sessions waiting on you, and leads'

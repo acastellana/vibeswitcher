@@ -100,7 +100,7 @@ struct ComposerView: View {
                 .help(working ? "Steer (↩): it gets this at its next step, without stopping. ⌥↩ queues it for after the turn." : "Send (↩)")
             }
             if !steerOnly {
-                ComposerChips(chat: chat, agent: agent, cycleMode: actions.cycleMode, notice: notice) { command in
+                ComposerChips(chat: chat, agent: agent, cycleMode: actions.cycleMode, notice: notice ?? chat.sendNotice) { command in
                     _ = actions.send(command)
                 }
             } else if let notice {
@@ -132,32 +132,19 @@ struct ComposerView: View {
         text.wrappedValue = ""
         composer.attachments[rowID] = []
         composer.save()
-        let accepted = steering ? actions.steer(message) : actions.send(message)
-        guard accepted else {
+        guard chat.deliver(entry, steering: steering, working: working, actions: actions) else {
             // Refused (not connected, too long to steer): it stays in the box, as it was.
-            chat.outbox.remove(entry.id)
             text.wrappedValue = draft
             composer.attachments[rowID] = attached
             composer.save()
             return
-        }
-        // Typed in (a steer handed to the agent's inbox left the outbox: the steer strip shows it): shown until
-        // the conversation has it (flagged if it doesn't arrive).
-        if chat.outbox.entry(entry.id) != nil {
-            chat.sent(message, expectsSoon: !working, id: entry.id, attachments: images, sentAt: entry.sentAt)
         }
         suggestions = Suggestions()
     }
 
     /// Send now, from the outbox strip: typed in again (queued if the agent works), never steered.
     private func sendAgain(_ entry: OutboxEntry) {
-        guard let again = chat.outbox.resend(entry.id) else { return }
-        guard actions.send(again.message) else {
-            chat.outbox.confirm(key: rowID, message: again.message, ok: false)
-            return
-        }
-        chat.sent(again.message, expectsSoon: !working, id: again.id, attachments: again.attachments, sentAt: again.sentAt)
-        chat.scrollToBottom()
+        chat.resend(entry, working: working, send: actions.send)
     }
 
     private func attach() {

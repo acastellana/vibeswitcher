@@ -150,6 +150,39 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         return lines
     }
 
+    /// `screenLines`, and on each of them the stretches drawn on a coloured background or inverted: what a program
+    /// marks only that way (Claude's open question tab). Read cell by cell.
+    func screenText(_ id: UUID) -> ScreenRead {
+        guard let terminal = views[id]?.getTerminal() else { return ScreenRead() }
+        var read = ScreenRead()
+        for row in 0..<terminal.rows {
+            guard let line = terminal.getLine(row: row) else { continue }
+            read.lines.append(line.translateToString(trimRight: false, skipNullCellsFollowingWide: true)
+                .replacingOccurrences(of: "\u{0}", with: " ").trimmingCharacters(in: .whitespaces))
+            var spans: [String] = []
+            var span = ""
+            for column in 0..<line.count {
+                let attribute = line[column].attribute
+                var marked = attribute.style.contains(.inverse)
+                if case .defaultColor = attribute.bg {} else { marked = true }
+                if marked {
+                    let character = line[column].getCharacter()
+                    if character != "\u{0}" { span.append(character) }
+                } else if !span.isEmpty {
+                    spans.append(span)
+                    span = ""
+                }
+            }
+            if !span.isEmpty { spans.append(span) }
+            read.highlights.append(spans.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        }
+        while read.lines.last?.isEmpty == true {
+            read.lines.removeLast()
+            read.highlights.removeLast()
+        }
+        return read
+    }
+
     /// Whether the program in that session asked for bracketed paste (needs its view attached).
     func bracketedPaste(_ id: UUID) -> Bool {
         views[id]?.getTerminal().bracketedPasteMode ?? false

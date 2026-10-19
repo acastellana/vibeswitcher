@@ -321,6 +321,18 @@ public enum ChatReader {
         if line["isSidechain"] as? Bool == true || line["isMeta"] as? Bool == true { return [] }
         let type = line["type"] as? String
         if type == "attachment", let attachment = line["attachment"] as? [String: Any] {
+            // A message typed while the agent worked, taken at its next step: Claude writes it here, not as a user line.
+            if attachment["type"] as? String == "queued_command", let text = attachment["prompt"] as? String,
+               (attachment["commandMode"] as? String ?? "prompt") == "prompt" {
+                let at = date(line["timestamp"]) ?? date(attachment["timestamp"])
+                // The id the queued message had (a user line written for it too is the same entry).
+                let uuid = attachment["source_uuid"] as? String ?? line["uuid"] as? String ?? lineID
+                if let other = TypedText.agentMessage(text) {
+                    return [.entry(ChatEntry(id: uuid, at: at, kind: .steered(text: other.body, fromLead: true), team: TeamMessage.typed(text)))]
+                }
+                guard let prompt = humanText(text) else { return [] }
+                return [.entry(ChatEntry(id: uuid, at: at, kind: .prompt(text: prompt, images: [])))]
+            }
             let contents = (attachment["content"] as? [String]) ?? (attachment["content"] as? String).map { [$0] } ?? []
             let at = date(line["timestamp"])
             let uuid = line["uuid"] as? String ?? lineID

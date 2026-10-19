@@ -166,3 +166,31 @@ struct ComposerOutboxTests {
         #expect(outbox.dropGone(known: [here]).isEmpty)
     }
 }
+
+/// A message sent while a question is open waits (held), then goes in as one being sent.
+struct OutboxHoldTests {
+    @Test func heldThenReleasedThenConfirmed() {
+        var outbox = Outbox()
+        let entry = OutboxEntry(key: "k", message: "after that", text: "after that", expectsSoon: true)
+        outbox.add(entry)
+        #expect(outbox.hold(key: "k", message: "after that") == entry.id)
+        #expect(outbox.entry(entry.id)?.state == .held)
+        #expect(outbox.onTheirWay(key: "k").map(\.id) == [entry.id])
+        #expect(outbox.needsYou(key: "k").isEmpty)
+        // Not confirmed while held: the host never got it.
+        #expect(outbox.confirm(key: "k", message: "after that", ok: true) == nil)
+        let later = Date().addingTimeInterval(30)
+        let released = outbox.release(entry.id, at: later, expectsSoon: false)
+        #expect(released?.state == .sending && released?.sentAt == later && released?.expectsSoon == false)
+        #expect(outbox.release(entry.id, expectsSoon: true) == nil)
+        #expect(outbox.confirm(key: "k", message: "after that", ok: true) == entry.id)
+        #expect(outbox.entry(entry.id)?.state == .typed)
+    }
+
+    @Test func aHeldOneLeftByAnEarlierLaunchIsOfferedNotReleased() {
+        let entry = OutboxEntry(key: "k", message: "m", text: "m", state: .held)
+        var outbox = Outbox(restoring: [entry])
+        #expect(outbox.needsYou(key: "k").map(\.id) == [entry.id])
+        #expect(outbox.release(entry.id, expectsSoon: true) == nil)
+    }
+}

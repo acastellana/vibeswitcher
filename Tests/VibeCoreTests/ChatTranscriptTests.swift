@@ -227,3 +227,26 @@ struct MessagesFromOtherAgentsTests {
         #expect(TranscriptReader.humanTextForTesting(handBack) == nil)
     }
 }
+
+/// What's typed while Claude works is taken at its next step and written as a `queued_command` attachment, not a
+/// user line (2.1.30x): the chat shows it as your prompt.
+struct QueuedPromptTests {
+    func read(_ lines: [String]) -> ChatLog {
+        var log = ChatLog()
+        log.append(ChatReader.read(Data((lines.joined(separator: "\n") + "\n").utf8), format: .claude).events)
+        return log
+    }
+
+    @Test func aQueuedMessageIsAPrompt() {
+        let log = read([
+            #"{"type":"attachment","uuid":"q1","timestamp":"2026-10-19T08:00:00.000Z","isSidechain":false,"attachment":{"type":"queued_command","prompt":"also update the docs","source_uuid":"s1","commandMode":"prompt","origin":{"kind":"human"}}}"#,
+            // A task notification queued the same way isn't yours.
+            #"{"type":"attachment","uuid":"q2","timestamp":"2026-10-19T08:00:01.000Z","attachment":{"type":"queued_command","prompt":"<task-notification>\n<task-id>b7</task-id>\n</task-notification>","commandMode":"task-notification"}}"#,
+            // A user line written for the same message is the same entry.
+            #"{"type":"user","uuid":"s1","timestamp":"2026-10-19T08:00:02.000Z","message":{"role":"user","content":"also update the docs"}}"#,
+        ])
+        #expect(log.entries.map(\.kind) == [.prompt(text: "also update the docs", images: [])])
+        #expect(log.entries.first?.id == "s1")
+        #expect(SentMatch.prompts(log.entries).map(\.text) == ["also update the docs"])
+    }
+}

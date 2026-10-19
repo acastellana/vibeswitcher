@@ -73,6 +73,9 @@ public struct OutboxEntry: Codable, Equatable, Sendable, Identifiable {
         case typed
         /// The host didn't take it (gone, or no answer): it may not have gone out.
         case failed
+        /// Not typed yet: a question, permission prompt or picker is open in the terminal, and the message would go
+        /// into it as keys. It goes in once that's answered.
+        case held
     }
 
     public var id: UUID
@@ -162,6 +165,25 @@ public struct Outbox: Equatable, Sendable {
             entries[index].state = ok ? .typed : .failed
         }
         return id
+    }
+
+    /// Not typed yet: a question is open in the terminal (see `OutboxEntry.State.held`). Returns the entry's id.
+    @discardableResult
+    public mutating func hold(key: String, message: String) -> UUID? {
+        guard let index = sending(key: key, message: message) else { return nil }
+        entries[index].state = .held
+        return entries[index].id
+    }
+
+    /// A held entry going in now: sending again from `now`; `expectsSoon` as for any message typed in then (an idle
+    /// agent shows it within seconds, a working one takes it after its turn).
+    @discardableResult
+    public mutating func release(_ id: UUID, at now: Date = Date(), expectsSoon: Bool) -> OutboxEntry? {
+        guard let index = entries.firstIndex(where: { $0.id == id && $0.state == .held }), !restored.contains(id) else { return nil }
+        entries[index].state = .sending
+        entries[index].sentAt = now
+        entries[index].expectsSoon = expectsSoon
+        return entries[index]
     }
 
     /// Handed to the agent's steer inbox instead of typed (which keeps it from there): no longer the outbox's.

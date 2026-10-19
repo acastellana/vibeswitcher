@@ -218,7 +218,7 @@ enum ChatBench {
                 VStack(spacing: 0) {
                     if let board { TeamStrip(board: board) { _ in } }
                     ChatView(chat: chat, row: row, live: true, leadQuestions: board?.questions.filter { $0.answer == nil } ?? [],
-                             showTerminal: {}, choose: { _, _ in }, moveTab: { _ in }, resend: { _ in })
+                             showTerminal: {}, choose: { _, _, _ in }, moveTab: { _ in }, resend: { _ in })
                         .id(chat.path ?? "")
                         .environment(\.chatFolder, folder)
                         .environment(\.chatRunner, chat.runner)
@@ -229,7 +229,7 @@ enum ChatBench {
                 }
                 .background(Color(nsColor: .textBackgroundColor))
             } else {
-                ChatView(chat: chat, row: row, live: false, showTerminal: {}, choose: { _, _ in }, moveTab: { _ in }, resend: { _ in })
+                ChatView(chat: chat, row: row, live: false, showTerminal: {}, choose: { _, _, _ in }, moveTab: { _ in }, resend: { _ in })
                     .id(chat.path ?? "")
             }
         }

@@ -73,7 +73,20 @@ final class ChatModel: ObservableObject {
     /// redraw the conversation.
     let composer = ComposerDrafts()
     /// What the composer sent that the conversation doesn't show yet, on disk (survives a crash or relaunch).
-    let outbox = ComposerOutbox()
+    let outbox: ComposerOutbox
+    /// Where transcripts are looked for (the user's home; a scratch one in tests).
+    let home: String
+
+    /// Where steered messages wait for the agent's hook (`SteerInbox`; a scratch folder in tests).
+    let steerRoot: URL
+    /// The clock a sent message is late by (moved on in tests).
+    var now: () -> Date = Date.init
+
+    init(outbox: ComposerOutbox = ComposerOutbox(), home: String = NSHomeDirectory(), steerRoot: URL = VibePaths.root) {
+        self.outbox = outbox
+        self.home = home
+        self.steerRoot = steerRoot
+    }
     /// The composer (row draft key) whose conversation this is: its outbox is matched against this transcript.
     private(set) var outboxKey: String?
     /// Run, on code blocks.
@@ -90,6 +103,10 @@ final class ChatModel: ObservableObject {
     }
     /// Shown on the answer card ("that question changed").
     @Published var answerNotice: String?
+    /// Shown under the composer about its last send ("waits until you answer the question").
+    @Published var sendNotice: String?
+    /// An answer is being typed into the question on screen: the card waits for the screen to show it.
+    @Published var answering = false
     @Published var mode: AgentMode?
     /// What `/` and `@` complete to, for the session's folder.
     @Published private(set) var commands: [SlashCommand] = []
@@ -107,7 +124,7 @@ final class ChatModel: ObservableObject {
     private var earliest = 0
     /// Bumped on every switch, so reads finishing for an earlier session are dropped.
     private var generation = 0
-    private var reading = false
+    private(set) var reading = false
     private let queue = DispatchQueue(label: "vibeswitcher.chat-reads", qos: .userInitiated)
 
     private func updateItems() {
@@ -171,7 +188,7 @@ final class ChatModel: ObservableObject {
         cursor = 0
         earliest = 0
         reading = false
-        guard let path, let (url, format) = TranscriptReader.checkedURL(path, home: NSHomeDirectory()) else {
+        guard let path, let (url, format) = TranscriptReader.checkedURL(path, home: home) else {
             url = nil
             markerAfter = nil
             state = path == nil ? .none : .failed("No conversation for this session yet.")
@@ -321,7 +338,7 @@ final class ChatModel: ObservableObject {
             return
         }
         steeringTTY = tty
-        let waiting = SteerInbox.pending(tty: tty).filter { $0.agentPid == agentPid && $0.from == .user }
+        let waiting = SteerInbox.pending(tty: tty, root: steerRoot).filter { $0.agentPid == agentPid && $0.from == .user }
         if waiting != steering { steering = waiting }
         let stranded = idle && !waiting.isEmpty
         if stranded != steeringStranded { steeringStranded = stranded }
@@ -329,7 +346,7 @@ final class ChatModel: ObservableObject {
 
     /// A waiting steered message, taken back from the inbox (to send it now, or to put it back in the box).
     func withdrawSteered(_ message: SteerMessage) -> SteerMessage? {
-        guard let tty = steeringTTY, let taken = SteerInbox.withdraw(id: message.id, tty: tty) else { return nil }
+        guard let tty = steeringTTY, let taken = SteerInbox.withdraw(id: message.id, tty: tty, root: steerRoot) else { return nil }
         steering.removeAll { $0.id == message.id }
         if steering.isEmpty { steeringStranded = false }
         return taken
@@ -338,8 +355,8 @@ final class ChatModel: ObservableObject {
     /// Drops steered messages the agent has taken (they show from the transcript then).
     func refreshSteering() {
         guard let tty = steeringTTY, !steering.isEmpty else { return }
-        let delivered = SteerInbox.delivered(tty: tty)
-        let pending = Set(SteerInbox.pending(tty: tty).map(\.id))
+        let delivered = SteerInbox.delivered(tty: tty, root: steerRoot)
+        let pending = Set(SteerInbox.pending(tty: tty, root: steerRoot).map(\.id))
         // Taken, or gone from the inbox (a new agent on that terminal dropped it).
         let left = steering.filter { !delivered.contains($0.id) && pending.contains($0.id) }
         if left != steering { steering = left }
@@ -354,12 +371,79 @@ final class ChatModel: ObservableObject {
         pending.append(message)
     }
 
+    /// The composer's message (already in the outbox, as `entry`) handed over: steered into the working agent, or typed
+    /// in. False when that was refused (it leaves the outbox; the composer keeps it in the box).
+    func deliver(_ entry: OutboxEntry, steering: Bool, working: Bool, actions: ComposerActions) -> Bool {
+        sendNotice = nil
+        let accepted = steering ? actions.steer(entry.message) : actions.send(entry.message)
+        guard accepted else {
+            outbox.remove(entry.id)
+            return false
+        }
+        // Typed in (a steer handed to the agent's inbox left the outbox: the steer strip shows it): shown until
+        // the conversation has it (flagged if it doesn't arrive).
+        if let kept = outbox.entry(entry.id) {
+            // Held (a question is open): not typed in yet, so not expected yet.
+            sent(entry.message, expectsSoon: !working && kept.state != .held, id: entry.id, attachments: entry.attachments, sentAt: entry.sentAt)
+        }
+        return true
+    }
+
+    /// Send now, from the outbox strip: typed in again (queued if the agent works), never steered.
+    func resend(_ entry: OutboxEntry, working: Bool, send: (String) -> Bool) {
+        guard let again = outbox.resend(entry.id) else { return }
+        guard send(again.message) else {
+            outbox.confirm(key: again.key, message: again.message, ok: false)
+            return
+        }
+        sent(again.message, expectsSoon: !working, id: again.id, attachments: again.attachments, sentAt: again.sentAt)
+        scrollToBottom()
+    }
+
     /// The session host's answer for a message typed from `key`'s composer. Not taken: off the list of messages on
     /// their way, and into the composer's outbox strip (to send again or discard).
     func confirmed(key: String, message: String, ok: Bool) {
         guard let id = outbox.confirm(key: key, message: message, ok: ok), !ok else { return }
         pending.removeAll { $0.id == id }
         updateLate()
+    }
+
+    /// A message from `key`'s composer waits for the question on screen to be answered: never late meanwhile (it
+    /// hasn't been typed in). False when it isn't the outbox's (a code block's Run, a command chip): nothing would
+    /// send it later.
+    func held(key: String, message: String) -> Bool {
+        guard let id = outbox.hold(key: key, message: message) else { return false }
+        if let index = pending.firstIndex(where: { $0.id == id }) { pending[index].expectsSoon = false }
+        updateLate()
+        return true
+    }
+
+    /// A held message going in now: from now on it's like one just typed (`expectsSoon`: into an idle agent).
+    func release(_ id: UUID, expectsSoon: Bool) -> OutboxEntry? {
+        guard let entry = outbox.release(id, expectsSoon: expectsSoon) else { return nil }
+        if let index = pending.firstIndex(where: { $0.id == id }) {
+            pending[index].expectsSoon = expectsSoon
+            pending[index].sentAt = entry.sentAt
+        }
+        updateLate()
+        return entry
+    }
+
+    /// What a message on its way says under it.
+    enum PendingNote: Equatable {
+        /// Should be in the conversation by now: it may not have reached the agent.
+        case late
+        /// Waits for the question on screen to be answered.
+        case held
+        case sending
+        /// Typed in during the agent's turn: it takes it after.
+        case queued
+    }
+
+    func note(for message: PendingMessage) -> PendingNote {
+        if late.contains(message.id) { return .late }
+        if outbox.entry(message.id)?.state == .held { return .held }
+        return message.expectsSoon ? .sending : .queued
     }
 
     /// A message from `key`'s composer went to the agent's steer inbox, which shows and keeps it from there.
@@ -391,8 +475,9 @@ final class ChatModel: ObservableObject {
     @Published private(set) var late: Set<UUID> = []
 
     private func updateLate() {
-        let now = Set(pending.filter { $0.late() }.map(\.id))
-        if now != late { late = now }
+        let at = now()
+        let overdue = Set(pending.filter { $0.late(at: at) }.map(\.id))
+        if overdue != late { late = overdue }
     }
 
     /// A late message, back in the composer (before what's there), and off the list.

@@ -84,7 +84,7 @@ struct TeamMessageSnapshots {
             while chat.state != .ready, Date() < deadline { try await Task.sleep(for: .milliseconds(50)) }
             #expect(chat.state == .ready)
             for id in open { chat.expanded.insert(TeamMessageCard.key(ChatEntry(id: id, at: nil, kind: .reply("")))) }
-            let view = ChatView(chat: chat, row: nil, live: false, showTerminal: {}, choose: { _, _ in }, moveTab: { _ in }, resend: { _ in })
+            let view = ChatView(chat: chat, row: nil, live: false, showTerminal: {}, choose: { _, _, _ in }, moveTab: { _ in }, resend: { _ in })
                 .environment(\.teamSummaries, summaries)
                 .frame(width: 760, height: 1500)
                 .background(Color(nsColor: .textBackgroundColor))
