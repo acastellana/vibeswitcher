@@ -5,6 +5,9 @@ public enum ChatItem: Equatable, Sendable, Identifiable {
     case prompt(ChatEntry)
     case reply(ChatEntry)
     case tools(id: String, [ChatTool])
+    /// A message VibeSwitcher handed over (a report, an audit, a notice, the user's words relayed): shown as a card
+    /// under its sender, not as a prompt.
+    case team(ChatEntry, TeamMessage)
     /// "New since you looked", with what happened since.
     case newMarker(summary: String)
 
@@ -12,7 +15,7 @@ public enum ChatItem: Equatable, Sendable, Identifiable {
 
     public var id: String {
         switch self {
-        case .prompt(let entry), .reply(let entry): return entry.id
+        case .prompt(let entry), .reply(let entry), .team(let entry, _): return entry.id
         case .tools(let id, _): return id
         case .newMarker: return "new-marker"
         }
@@ -31,7 +34,9 @@ public enum ChatTimeline {
         }
         for (index, entry) in entries.enumerated() {
             switch entry.kind {
-            case .prompt, .steered: flush(); items.append(.prompt(entry))
+            case .prompt, .steered:
+                flush()
+                items.append(entry.team.map { .team(entry, $0) } ?? .prompt(entry))
             case .reply: flush(); items.append(.reply(entry))
             case .tool(let tool): run.append(tool)
             }
@@ -99,6 +104,8 @@ public enum ChatSearch {
         guard !needle.isEmpty else { return [] }
         return items.filter { item in
             switch item {
+            case .team(_, let message):
+                return message.title.localizedCaseInsensitiveContains(needle) || message.body.localizedCaseInsensitiveContains(needle)
             case .prompt(let entry), .reply(let entry):
                 switch entry.kind {
                 case .prompt(let text, _), .reply(let text), .steered(let text, _): return text.localizedCaseInsensitiveContains(needle)

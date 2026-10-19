@@ -35,6 +35,7 @@ struct ChatContainer: View {
                 .id(chat.path ?? "")
                 .environment(\.chatFolder, model.selectedRow?.cwd)
                 .environment(\.chatRunner, chat.runner)
+                .environment(\.teamSummaries, leads.summaries)
             Divider()
             if let row = model.selectedRow {
                 if row.hostID != nil, actions.isLive(row) {
@@ -113,7 +114,7 @@ struct ChatView: View {
                                 .buttonStyle(.borderless).frame(maxWidth: .infinity).disabled(chat.loadingEarlier)
                         }
                         ForEach(window.items) { item in
-                            ChatItemView(item: item, chat: chat, expanded: item.isTools ? chat.expanded : [],
+                            ChatItemView(item: item, chat: chat, expanded: item.opens ? chat.expanded : [],
                                          agent: row?.markKind ?? .agent(.claude), rowID: row?.draftKey,
                                          canSend: live, resend: resend) { viewing = $0 }
                                 .equatable()
@@ -312,7 +313,7 @@ private struct ChatItemView: View, Equatable {
     let item: ChatItem
     /// For actions only (toggling, editing a draft).
     let chat: ChatModel
-    /// The opened tool groups and tools (only passed to tool items).
+    /// The opened tool groups, tools and team messages (only passed to those items).
     let expanded: Set<String>
     let agent: MarkKind
     let rowID: String?
@@ -383,6 +384,8 @@ private struct ChatItemView: View, Equatable {
                 .help(entry.at.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "")
                 .contextMenu { Button("Copy as Markdown") { Pasteboard.copy(text) } }
             }
+        case .team(let entry, let message):
+            TeamMessageCard(entry: entry, message: message, chat: chat, expanded: expanded).padding(.trailing, 40)
         case .tools(let id, let tools):
             ToolGroupView(id: id, tools: tools, chat: chat, expanded: expanded, openImage: openImage).padding(.leading, 30)
         case .newMarker(let summary):
@@ -700,5 +703,11 @@ private struct FileThumbnail: View {
 }
 
 private extension ChatItem {
-    var isTools: Bool { if case .tools = self { return true } else { return false } }
+    /// Tool groups and team messages open and close.
+    var opens: Bool {
+        switch self {
+        case .tools, .team: return true
+        default: return false
+        }
+    }
 }

@@ -15,6 +15,7 @@ struct ChatTimelineTests {
             switch item {
             case .prompt(let entry): return "prompt:\(entry.id)"
             case .reply(let entry): return "reply:\(entry.id)"
+            case .team(let entry, _): return "team:\(entry.id)"
             case .tools(_, let tools): return "tools:" + tools.map(\.id).joined(separator: ",")
             case .newMarker(let summary): return "new:\(summary)"
             }

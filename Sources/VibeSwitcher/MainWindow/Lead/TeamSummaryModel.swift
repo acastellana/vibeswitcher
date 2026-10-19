@@ -41,6 +41,21 @@ final class TeamSummaryModel: ObservableObject {
         return summarizer.cached(DecisionFeed.summaryKey(decision))
     }
 
+    /// The TL;DR of a long message VibeSwitcher handed a lead (by its chat entry's id), when there's one.
+    func line(_ message: TeamMessage, id: String) -> String? {
+        guard enabled, message.needsSummary else { return nil }
+        return summarizer.cached(Self.messageKey(id))
+    }
+
+    /// Asks for a message's TL;DR, once: its text never changes, so the cache never finds it due again (not after
+    /// a failure either).
+    func request(_ message: TeamMessage, id: String) {
+        guard enabled, message.needsSummary else { return }
+        summarizer.line(Self.messageKey(id), fingerprint: "message") { SummaryPrompts.message(message) }
+    }
+
+    static func messageKey(_ id: String) -> String { "message:\(id)" }
+
     /// Asks for the lines that are due: each task at work (when its agent's transcript changed, at most every three
     /// minutes) and each recent long decision (once).
     func request(rows: [TeamRow], decisions: [LeadDecision]) {

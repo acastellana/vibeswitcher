@@ -142,6 +142,8 @@ public struct ChatEntry: Equatable, Sendable, Identifiable {
     public var id: String
     public var at: Date?
     public var kind: Kind
+    /// A steered message VibeSwitcher handed over, with its sender (see `TeamMessage`).
+    public var team: TeamMessage? = nil
 }
 
 public enum ChatEvent: Sendable {
@@ -309,6 +311,12 @@ public enum ChatReader {
 
     // MARK: Claude Code
 
+    /// The messages of a hook's context, with their senders when it's in the current format.
+    static func delivered(_ context: String) -> [(text: String, fromLead: Bool, team: TeamMessage?)] {
+        if let team = TeamMessage.messages(inContext: context) { return team.map { ($0.text, $0.fromLead, $0) } }
+        return SteerReply.messages(inContext: context).map { ($0.text, $0.fromLead, nil) }
+    }
+
     static func claude(_ line: [String: Any], lineID: String) -> [ChatEvent] {
         if line["isSidechain"] as? Bool == true || line["isMeta"] as? Bool == true { return [] }
         let type = line["type"] as? String
@@ -316,8 +324,8 @@ public enum ChatReader {
             let contents = (attachment["content"] as? [String]) ?? (attachment["content"] as? String).map { [$0] } ?? []
             let at = date(line["timestamp"])
             let uuid = line["uuid"] as? String ?? lineID
-            return contents.flatMap(SteerReply.messages(inContext:)).enumerated().map { index, message in
-                .entry(ChatEntry(id: "\(uuid).\(index)", at: at, kind: .steered(text: message.text, fromLead: message.fromLead)))
+            return contents.flatMap(delivered).enumerated().map { index, message in
+                .entry(ChatEntry(id: "\(uuid).\(index)", at: at, kind: .steered(text: message.text, fromLead: message.fromLead), team: message.team))
             }
         }
         guard type == "user" || type == "assistant", let message = line["message"] as? [String: Any] else { return [] }
@@ -332,7 +340,7 @@ public enum ChatReader {
         }
         if let text = message["content"] as? String {
             if type == "user", let other = TypedText.agentMessage(text) {
-                return [.entry(ChatEntry(id: uuid, at: at, kind: .steered(text: other.body, fromLead: true)))]
+                return [.entry(ChatEntry(id: uuid, at: at, kind: .steered(text: other.body, fromLead: true), team: TeamMessage.typed(text)))]
             }
             guard type == "user", let prompt = humanText(text) else { return [] }
             return [.entry(ChatEntry(id: uuid, at: at, kind: .prompt(text: prompt, images: [])))]

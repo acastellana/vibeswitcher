@@ -156,6 +156,13 @@ public enum SummaryPrompts {
             + "Decision: \(Summarizer.clip(decision, 1_000))\n\nWhy: \(Summarizer.clip(why, 1_000))\n"
     }
 
+    /// What a message VibeSwitcher handed a lead says (a worker's report, an audit), from who sent it and its text.
+    public static func message(_ message: TeamMessage) -> String {
+        "Say in one sentence what this message to a project lead says: what happened and what it asks for "
+            + "(e.g. \"The chat layout is fixed and its tests pass; it's ready for review\").\n\n"
+            + "From: \(message.title)\n\nMessage:\n\(Summarizer.clip(message.body, 4_000))\n"
+    }
+
     static func step(_ entry: TranscriptEntry) -> String {
         let text = Summarizer.clip(entry.text.replacingOccurrences(of: "\n", with: " "), 240)
         switch entry.kind {
