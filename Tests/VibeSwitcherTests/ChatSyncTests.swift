@@ -488,6 +488,9 @@ struct ChatSyncTests {
         let entry = h.send("use the staging database")
         #expect(h.chat.outbox.entry(entry.id) == nil)
         #expect(h.chat.pending.isEmpty)
+        // Posted off the main thread: in the strip as sending until it's in the inbox.
+        #expect(h.chat.steering.map(\.text) == ["use the staging database"])
+        try await h.waitFor { h.chat.steerSending.isEmpty }
         await h.tick()
         // Waiting on both sides: the chat's steering strip, and the agent's inbox its hook reads.
         #expect(h.chat.steering.map(\.text) == ["use the staging database"])

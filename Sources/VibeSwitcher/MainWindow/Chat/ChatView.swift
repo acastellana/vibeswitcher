@@ -150,17 +150,19 @@ struct ChatView: View {
                                         Text("Not delivered: \(row?.session?.agent.displayName ?? "the agent") isn't working, so nothing picks it up.")
                                             .font(.system(size: 10.5)).foregroundStyle(.orange)
                                         if live, let key = row?.draftKey {
-                                            Button("Send now") { if let taken = chat.withdrawSteered(message) { resend(taken.text) } }.controlSize(.small)
+                                            Button("Send now") { chat.withdrawSteered(message) { resend($0.text) } }.controlSize(.small)
                                             Button("Put back in the box") {
-                                                if let taken = chat.withdrawSteered(message) {
+                                                chat.withdrawSteered(message) { taken in
                                                     chat.putBack(PendingMessage(text: taken.text, afterPrompts: 0), rowID: key)
                                                 }
                                             }.controlSize(.small)
                                         } else {
                                             Button("Copy") { Pasteboard.copy(message.text) }.controlSize(.small)
-                                            Button("Withdraw") { _ = chat.withdrawSteered(message) }.controlSize(.small)
+                                            Button("Withdraw") { chat.withdrawSteered(message) { _ in } }.controlSize(.small)
                                         }
                                     }
+                                } else if chat.steerSending.contains(message.id) {
+                                    Text("sending…").font(.system(size: 9.5)).foregroundStyle(.tertiary)
                                 } else {
                                     Text("steering… arrives at its next step").font(.system(size: 9.5)).foregroundStyle(.tertiary)
                                 }

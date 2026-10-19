@@ -326,6 +326,38 @@ final class ChatModel: ObservableObject {
         steering.append(message)
     }
 
+    /// Steered messages on their way into the inbox (`steer`): shown as sending until they're there.
+    @Published private(set) var steerSending: Set<String> = []
+    /// Those messages and the terminal each goes to (they show only with that terminal's).
+    private var inFlight: [(tty: String, message: SteerMessage)] = []
+    /// Where the inbox is posted to and withdrawn from: off the main thread, since its lock can be held for seconds
+    /// (a hook's delivery checks seals through the host), and in order (a withdraw waits for its post).
+    var inbox: (@escaping () -> Void) -> Void = { ChatModel.inboxQueue.async(execute: $0) }
+    var onMain: (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) }
+    private static let inboxQueue = DispatchQueue(label: "vibeswitcher.steer-inbox", qos: .userInitiated)
+
+    /// Steers `message` into `tty`'s inbox: shown at once as sending, posted off the main thread; `done` (on the main
+    /// thread) says whether it's there. One that didn't get there leaves the strip.
+    func steer(_ message: SteerMessage, tty: String, done: @escaping (Bool) -> Void) {
+        steered(message, tty: tty)
+        steerSending.insert(message.id)
+        inFlight.append((tty, message))
+        let root = steerRoot
+        inbox { [onMain] in
+            let posted = (try? SteerInbox.post(message, tty: tty, root: root)) != nil
+            onMain { [weak self] in
+                guard let self else { return }
+                self.steerSending.remove(message.id)
+                self.inFlight.removeAll { $0.message.id == message.id }
+                if !posted {
+                    self.steering.removeAll { $0.id == message.id }
+                    if self.steering.isEmpty { self.steeringStranded = false }
+                }
+                done(posted)
+            }
+        }
+    }
+
     /// The agent the steered messages wait for is idle: they won't arrive by themselves.
     @Published private(set) var steeringStranded = false
 
@@ -338,18 +370,28 @@ final class ChatModel: ObservableObject {
             return
         }
         steeringTTY = tty
-        let waiting = SteerInbox.pending(tty: tty, root: steerRoot).filter { $0.agentPid == agentPid && $0.from == .user }
+        var waiting = SteerInbox.pending(tty: tty, root: steerRoot).filter { $0.agentPid == agentPid && $0.from == .user }
+        let landed = Set(waiting.map(\.id))
+        waiting += inFlight.filter { $0.tty == tty && $0.message.agentPid == agentPid && !landed.contains($0.message.id) }.map(\.message)
         if waiting != steering { steering = waiting }
         let stranded = idle && !waiting.isEmpty
         if stranded != steeringStranded { steeringStranded = stranded }
     }
 
-    /// A waiting steered message, taken back from the inbox (to send it now, or to put it back in the box).
-    func withdrawSteered(_ message: SteerMessage) -> SteerMessage? {
-        guard let tty = steeringTTY, let taken = SteerInbox.withdraw(id: message.id, tty: tty, root: steerRoot) else { return nil }
-        steering.removeAll { $0.id == message.id }
-        if steering.isEmpty { steeringStranded = false }
-        return taken
+    /// A waiting steered message, taken back from the inbox (to send it now, or to put it back in the box): off the
+    /// main thread like a post (`inbox`), then `taken` on it. Not called when the agent took it first.
+    func withdrawSteered(_ message: SteerMessage, taken: @escaping (SteerMessage) -> Void) {
+        guard let tty = steeringTTY else { return }
+        let root = steerRoot
+        inbox { [onMain] in
+            let withdrawn = SteerInbox.withdraw(id: message.id, tty: tty, root: root)
+            onMain { [weak self] in
+                guard let self, let withdrawn else { return }
+                self.steering.removeAll { $0.id == message.id }
+                if self.steering.isEmpty { self.steeringStranded = false }
+                taken(withdrawn)
+            }
+        }
     }
 
     /// Drops steered messages the agent has taken (they show from the transcript then).
@@ -357,8 +399,8 @@ final class ChatModel: ObservableObject {
         guard let tty = steeringTTY, !steering.isEmpty else { return }
         let delivered = SteerInbox.delivered(tty: tty, root: steerRoot)
         let pending = Set(SteerInbox.pending(tty: tty, root: steerRoot).map(\.id))
-        // Taken, or gone from the inbox (a new agent on that terminal dropped it).
-        let left = steering.filter { !delivered.contains($0.id) && pending.contains($0.id) }
+        // Taken, or gone from the inbox (a new agent on that terminal dropped it); one still on its way stays.
+        let left = steering.filter { !delivered.contains($0.id) && (pending.contains($0.id) || steerSending.contains($0.id)) }
         if left != steering { steering = left }
     }
 
