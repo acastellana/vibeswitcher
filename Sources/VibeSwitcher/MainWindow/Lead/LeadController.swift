@@ -75,9 +75,10 @@ struct LeadFiles {
     }
 }
 
-/// Where the lead controller reads and writes the boards: a queue of its own, never the main thread (decoding a day's
-/// board there, most of a MB of JSON, froze the window for a second at a time). One at a time, in the order asked, so
-/// a read after a write sees it; what's read is handed to the main thread.
+/// Where the lead controller reads and writes the boards, and reads its teams' transcripts and inboxes: a queue of its
+/// own, never the main thread (decoding a day's board there, most of a MB of JSON, froze the window for a second at a
+/// time, and so did thirty transcripts). One at a time, in the order asked, so a read after a write sees it; what's
+/// read is handed to the main thread.
 final class LeadReads: @unchecked Sendable {
     private let queue = DispatchQueue(label: "VibeSwitcher.lead-boards", qos: .userInitiated)
     /// The boards and decisions as last read (only on `queue`): read again only when their files changed.
@@ -89,6 +90,39 @@ final class LeadReads: @unchecked Sendable {
             let result = work(&self.files)
             DispatchQueue.main.async { then(result) }
         }
+    }
+}
+
+/// What the witness reads of a lead's team at each look, on `LeadReads`' queue: a team's transcripts are a few hundred
+/// KB each to parse (thirty of them froze the window when read on the main thread). The sessions as they were when the
+/// look began, what each member it watches is doing (`LeadObserver.watching`), the oldest message waiting for each
+/// worker, and the project's workflow.
+struct TeamReading {
+    typealias Watched = (activity: LeadActivity, tail: TranscriptTail?, progress: TranscriptProgress?)
+
+    /// The window's sessions, and the scan's agents in them, by host session id.
+    var hosted: [String: HostSession] = [:]
+    var sessions: [String: Session] = [:]
+    var watched: [String: Watched] = [:]
+    var held: [String: SteerMessage] = [:]
+    var workflow = LeadWorkflow()
+
+    /// A worker's transcript is read whatever it shows: a stall is one that reads as working too (see `LeadStall`). A
+    /// verifier's while it doesn't show working: a turn that ended on an API error reads as finished or waiting, and
+    /// its transcript says which it was.
+    static func read(root: String, board: LeadBoard, hosted: [String: HostSession], sessions: [String: Session],
+                     observer: LeadObserver) -> TeamReading {
+        var team = TeamReading(hosted: hosted, sessions: sessions)
+        let workers = Set(board.tasks.compactMap(\.worker))
+        for id in board.tasks.flatMap({ [$0.worker, $0.verifier] }).compactMap({ $0 }) where team.watched[id] == nil {
+            guard let info = hosted[id], info.isLive, let session = sessions[id], session.status != .working || workers.contains(id) else { continue }
+            team.watched[id] = observer.watching(info, agentPid: session.pid)
+            if workers.contains(id) {
+                team.held[id] = SteerInbox.pending(tty: session.tty).filter { $0.agentPid == session.pid }.min { $0.at < $1.at }
+            }
+        }
+        team.workflow = LeadWorkflow.load(from: (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md"))
+        return team
     }
 }
 
@@ -162,8 +196,9 @@ final class LeadController: ObservableObject {
     @Published private(set) var keptLeads: [String: UUID] = [:]
     private var adopting: Set<UUID> = []
     private var hostWelcome: AnyCancellable?
-    /// The boards and decisions, read off the main thread (and written there too, to keep the order).
-    private let reads = LeadReads()
+    /// The boards and decisions, and the teams' transcripts, read off the main thread (the boards written there too, to
+    /// keep the order; `baseMoves` writes there as well).
+    private let reads: LeadReads
     /// The lead each board names, for the checks that must know it now on the main thread (only those fields read).
     private var names = LeadNames()
     /// A refresh is reading the boards; one asked for meanwhile runs once it's done.
@@ -194,7 +229,9 @@ final class LeadController: ObservableObject {
         self.vault = vault
         self.inbox = inbox
         self.home = home
-        baseMoves = BaseMoves(vault: vault)
+        let reads = LeadReads()
+        self.reads = reads
+        baseMoves = BaseMoves(vault: vault, reads: reads)
         self.claudeCommand = claudeCommand
         summaries.lookup = { [weak host, weak store] id in
             (host?.sessions.first { $0.id.uuidString == id }, store?.sessions.first { $0.hostID?.uuidString == id }?.transcriptPath)
@@ -614,15 +651,28 @@ final class LeadController: ObservableObject {
     /// at that moment, looked up again before anything is typed: a lead replaced meanwhile gets nothing.
     private func wake(root: String) {
         guard let lead = LeadHandover.named(names.board(root)) else { return }
-        let pending = SteerInbox.pending(tty: lead.tty).filter { $0.agentPid == lead.pid }
+        let id = lead.session.flatMap(UUID.init(uuidString:))
+        let hosted = id.flatMap { id in host.sessions.first { $0.id == id } }
+        let observer = observer
+        // What waits for it, and what it's doing (its transcript), read off the main thread.
+        reads.async({ _ in
+            let pending = SteerInbox.pending(tty: lead.tty).filter { $0.agentPid == lead.pid }
+            return (pending, pending.first?.from == .user ? nil : hosted.map { observer.activity($0, agentPid: lead.pid) })
+        }) { [weak self] pending, activity in
+            guard let self, LeadHandover.named(self.names.board(root)) == lead else { return }
+            self.wake(root: root, lead: lead, pending: pending, activity: activity)
+        }
+    }
+
+    private func wake(root: String, lead: LeadAgent, pending: [SteerMessage], activity: LeadActivity?) {
         let reports = LeadWake.reports(pending, agentPid: lead.pid)
         let now = Date().timeIntervalSince1970
         ReportsWaiting.shared.set(LeadWake.waiting(reports, now: now), tty: lead.tty)
         if pending.first?.from == .user { return flush(lead, lead: root) }
         let key = "\(lead.tty)#\(lead.pid)"
-        guard let id = lead.session.flatMap(UUID.init(uuidString:)), let hosted = host.sessions.first(where: { $0.id == id }) else { return }
+        guard let id = lead.session.flatMap(UUID.init(uuidString:)), let activity else { return }
         var state = wakes[key] ?? LeadWake()
-        let step = state.step(reports: reports, activity: observer.activity(hosted, agentPid: lead.pid), now: now)
+        let step = state.step(reports: reports, activity: activity, now: now)
         wakes[key] = state
         switch step {
         case .none:
@@ -660,11 +710,21 @@ final class LeadController: ObservableObject {
     /// missing or stale state file isn't an idle agent (its transcript says whether it's mid-turn). A lead's (`lead`:
     /// its root) only while the board still names it.
     private func flush(_ agent: LeadAgent, lead root: String? = nil) {
-        guard let id = agent.session.flatMap(UUID.init(uuidString:)),
-              SteerInbox.pending(tty: agent.tty).contains(where: { $0.agentPid == agent.pid }),
-              let hosted = host.sessions.first(where: { $0.id == id }),
-              observer.activity(hosted, agentPid: agent.pid).betweenTurns, !flushing.contains(agent.tty),
-              Date().timeIntervalSince(typedAt[agent.tty] ?? .distantPast) > 10 else { return }
+        guard let id = agent.session.flatMap(UUID.init(uuidString:)), let hosted = host.sessions.first(where: { $0.id == id }),
+              !flushing.contains(agent.tty), Date().timeIntervalSince(typedAt[agent.tty] ?? .distantPast) > 10 else { return }
+        let observer = observer
+        // Whether something waits for it and it's between turns: its inbox and its transcript, read off the main thread.
+        reads.async({ _ in
+            SteerInbox.pending(tty: agent.tty).contains { $0.agentPid == agent.pid } && observer.activity(hosted, agentPid: agent.pid).betweenTurns
+        }) { [weak self] ready in
+            guard ready, let self else { return }
+            self.type(waiting: agent, id: id, lead: root)
+        }
+    }
+
+    /// What waits for an agent between turns, typed once its box is empty (see `flush`).
+    private func type(waiting agent: LeadAgent, id: UUID, lead root: String?) {
+        guard !flushing.contains(agent.tty), Date().timeIntervalSince(typedAt[agent.tty] ?? .distantPast) > 10 else { return }
         flushing.insert(agent.tty)
         host.styledScreen(id) { [weak self] screen in
             guard let self else { return }
@@ -717,16 +777,24 @@ final class LeadController: ObservableObject {
         }
         refreshing = true
         let roots = Set(leadSessions.keys)
+        // The sessions as they are now, for the witness to read its teams' transcripts with (see `TeamReading`).
+        let hosted = Dictionary(host.sessions.map { ($0.id.uuidString, $0) }, uniquingKeysWith: { first, _ in first })
+        let sessions = Dictionary(store.sessions.compactMap { session in session.hostID.map { ($0.uuidString, session) } },
+                                  uniquingKeysWith: { first, _ in first })
+        let observer = observer
         reads.async({ files in
             let fired = Self.runTimers(roots)
             var loaded: [String: LeadBoard] = [:]
             for root in roots { loaded[root] = files.board(root) }
             let decisions = Dictionary(uniqueKeysWithValues: roots.map { ($0, files.decisions($0)) })
             files.keep(roots)
-            return (fired, loaded, decisions)
-        }) { [weak self] fired, loaded, decisions in
+            let teams = Dictionary(uniqueKeysWithValues: loaded.map { root, board in
+                (root, TeamReading.read(root: root, board: board, hosted: hosted, sessions: sessions, observer: observer))
+            })
+            return (fired, loaded, decisions, teams)
+        }) { [weak self] fired, loaded, decisions, teams in
             guard let self else { return }
-            self.refreshed(roots: roots, fired: fired, loaded: loaded, decisions: decisions)
+            self.refreshed(roots: roots, fired: fired, loaded: loaded, decisions: decisions, teams: teams)
             self.refreshing = false
             if self.refreshAgain {
                 self.refreshAgain = false
@@ -737,7 +805,7 @@ final class LeadController: ObservableObject {
 
     /// What a refresh read, on the main thread.
     private func refreshed(roots: Set<String>, fired: [String: [(question: LeadQuestion, message: String)]], loaded: [String: LeadBoard],
-                           decisions read: [String: [LeadDecision]]) {
+                           decisions read: [String: [LeadDecision]], teams: [String: TeamReading]) {
         dispatchPrecondition(condition: .onQueue(.main))
         tell(timers: fired)
         if loaded != boards { boards = loaded }
@@ -749,7 +817,7 @@ final class LeadController: ObservableObject {
                 let timer = question.isCounting ? "Going with ‘\(question.proposal ?? "")’ in \(question.decideInText) unless you answer: " : ""
                 notify(question.version > 1 ? "The lead of \(project) updated a question" : "The lead of \(project) asks", timer + question.text)
             }
-            witness(root: root, board: board)
+            witness(root: root, board: board, team: teams[root] ?? TeamReading())
         }
         forgetFinished(loaded)
         // A lead that ended, or another agent on its terminal now: its wake-ups and its waiting count go.
@@ -769,15 +837,16 @@ final class LeadController: ObservableObject {
         }
     }
 
-    /// Tells the lead what its team can't (see `LeadWitness`), and types waiting messages into idle team members.
-    private func witness(root: String, board: LeadBoard) {
-        let hosted = Dictionary(uniqueKeysWithValues: host.sessions.map { ($0.id.uuidString, $0) })
+    /// Tells the lead what its team can't (see `LeadWitness`), and types waiting messages into idle team members. What
+    /// the team's transcripts and inboxes say was read off the main thread, with the sessions as they were then (`team`).
+    private func witness(root: String, board: LeadBoard, team: TeamReading) {
+        let hosted = team.hosted
         var seen: [String: LeadWitness.Seen] = [:]
         let now = Date()
         let workers = Set(board.tasks.compactMap(\.worker))
         for id in board.tasks.flatMap({ [$0.worker, $0.verifier] }).compactMap({ $0 }) {
             guard let info = hosted[id] else { continue }
-            let session = store.sessions.first { $0.hostID?.uuidString == id }
+            let session = team.sessions[id]
             // A turn that ended on an API error reads as finished or waiting; its transcript says which it was. A
             // worker's transcript is read whatever it shows: a stall is one that reads as working too (see `LeadStall`).
             var apiError: (text: String, at: Double?)?
@@ -785,8 +854,7 @@ final class LeadController: ObservableObject {
             var shellRunning = false
             var shells: [BackgroundJob] = []
             var held: SteerMessage?
-            if info.isLive, let session, session.status != .working || workers.contains(id) {
-                let reading = observer.watching(info, agentPid: session.pid)
+            if let session, let reading = team.watched[id] {
                 watched = reading
                 if session.status != .working, case .apiError(let error) = reading.activity { apiError = (error, reading.tail?.at) }
                 if workers.contains(id) {
@@ -797,7 +865,7 @@ final class LeadController: ObservableObject {
                         // here froze the window for minutes at a time on a loaded Mac (sysctl walks every process).
                         shellRunning = !session.backgroundJobs.isEmpty
                     }
-                    held = SteerInbox.pending(tty: session.tty).filter { $0.agentPid == session.pid }.min { $0.at < $1.at }
+                    held = team.held[id]
                 }
             }
             // No agent in the scan a minute on: "agent ended · shell", as good as ended.
@@ -817,7 +885,7 @@ final class LeadController: ObservableObject {
         }
         // Low disk space, once per episode; what takes it is sized off the main thread.
         var disk = disks[root] ?? LeadWitness.Disk()
-        let workflow = LeadWorkflow.load(from: (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md"))
+        let workflow = team.workflow
         if let free = disk.check(root: root, workflow: workflow) {
             let sizing = disk
             DispatchQueue.global(qos: .utility).async { [weak self] in

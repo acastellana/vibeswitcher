@@ -627,13 +627,18 @@ public enum ChatReader {
         return typed
     }
 
-    static func date(_ value: Any?) -> Date? {
-        guard let text = value as? String else { return nil }
+    /// Kept, not made per call: a transcript's tail is hundreds of lines, and making one per line was most of reading it
+    /// (ISO8601DateFormatter is thread-safe).
+    private static let fractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        if let date = formatter.date(from: text) { return date }
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter.date(from: text)
+        return formatter
+    }()
+    private static let whole = ISO8601DateFormatter()
+
+    static func date(_ value: Any?) -> Date? {
+        guard let text = value as? String else { return nil }
+        return fractional.date(from: text) ?? whole.date(from: text)
     }
 
     static func stableID(_ line: Data.SubSequence) -> String {

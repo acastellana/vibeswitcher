@@ -10,6 +10,8 @@ final class BaseMovesTests {
     let book = LeadVault.Book()
     let app: LeadVault
     let root: String
+    /// Where the board is written (the lead controller's queue): read through it, a read sees what was written before.
+    let reads = LeadReads()
     var asked: [String] = []
     var taken: [(to: String, byYou: Bool)] = []
     var logged: [String] = []
@@ -33,7 +35,7 @@ final class BaseMovesTests {
     }
 
     func moves() -> BaseMoves {
-        let moves = BaseMoves(vault: app, background: { $0() }, main: { $0() })
+        let moves = BaseMoves(vault: app, reads: reads, background: { $0() }, main: { $0() })
         moves.onAsk = { [unowned self] _, move in asked.append(move.to) }
         moves.onTaken = { [unowned self] _, move, byYou in taken.append((move.to, byYou)) }
         moves.log = { [unowned self] in logged.append($0) }
@@ -52,6 +54,18 @@ final class BaseMovesTests {
 
     func head() -> String { Git.run(["rev-parse", "main"], in: root).output }
 
+    /// The board as read on `reads`' queue, after every write asked of it before.
+    func board() -> LeadBoard {
+        let done = DispatchSemaphore(value: 0)
+        var board = LeadBoard()
+        reads.async { [root] _ in
+            board = BoardStore(root: root).load()
+            done.signal()
+        }
+        done.wait()
+        return board
+    }
+
     @Test func aCommitOfYoursIsTakenWithoutAsking() throws {
         try yours("git commit -m b") { try commit("b.txt") }
         let moves = moves()
@@ -61,9 +75,29 @@ final class BaseMovesTests {
         #expect(taken.map(\.to) == [head()])
         #expect(taken.first?.byYou == false)
         #expect(app.headMoved(root: root, branch: "main") == nil)
-        let update = try #require(BoardStore(root: root).load().updates.last)
+        let update = try #require(board().updates.last)
         #expect(update.body.hasPrefix("accepted 1 commit on main from your session"), "\(update.body)")
         #expect(logged.contains { $0.contains("accepted 1 commit on main") && $0.contains(String(head().prefix(7))) })
+    }
+
+    /// What was taken is written on the lead controller's queue, never where the move was looked at (the main thread in
+    /// the app): it waits its turn behind what was asked of the queue before it, and a read after it sees it.
+    @Test func whatWasTakenIsWrittenOnTheLeadsQueueInOrder() throws {
+        try yours("git commit -m b") { try commit("b.txt") }
+        let moves = moves()
+        let gate = DispatchSemaphore(value: 0)
+        var wroteOnMain: Bool?
+        reads.async { _ in gate.wait() }
+        moves.look([root])
+        #expect(taken.map(\.to) == [head()])
+        // The queue is held: nothing written yet.
+        #expect(!BoardStore(root: root).load().updates.contains { $0.title.hasPrefix("Took") })
+        reads.async { _ in wroteOnMain = Thread.isMainThread }
+        gate.signal()
+        let update = try #require(board().updates.last)
+        #expect(update.title == "Took 1 commit on main")
+        #expect(update.body.hasPrefix("accepted 1 commit on main from your session"), "\(update.body)")
+        #expect(wroteOnMain == false)
     }
 
     @Test func aMoveNobodyAccountsForIsAskedOnceAndAcceptingTakesIt() throws {
@@ -84,7 +118,7 @@ final class BaseMovesTests {
         #expect(app.head(root: root, branch: "main") == move.to)
         #expect(app.headMoved(root: root, branch: "main") == nil)
         #expect(taken.count == 1 && taken.first?.byYou == true)
-        #expect(BoardStore(root: root).load().updates.last?.body.hasPrefix("You accepted 1 commit on main") == true)
+        #expect(board().updates.last?.body.hasPrefix("You accepted 1 commit on main") == true)
         moves.look([root], now: Date().addingTimeInterval(120))
         #expect(moves.asking.isEmpty)
     }

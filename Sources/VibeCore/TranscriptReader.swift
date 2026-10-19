@@ -364,15 +364,9 @@ public enum TranscriptReader {
         return String(cut)!
     }
 
-    private static let isoFormatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
     private static func time(_ value: Any?) -> Double? {
         guard let text = value as? String else { return nil }
-        return (isoFormatter.date(from: text) ?? ISO8601DateFormatter().date(from: text))?.timeIntervalSince1970
+        return ChatReader.date(text)?.timeIntervalSince1970
     }
 }
 
@@ -481,6 +475,7 @@ public struct TranscriptTail: Equatable, Sendable {
 
     /// The tail of a Claude Code transcript, or nil when it has no main-thread step yet.
     public static func read(url: URL) -> TranscriptTail? {
+        noteRead()
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         guard let size = try? handle.seekToEnd() else { return nil }
@@ -488,6 +483,26 @@ public struct TranscriptTail: Equatable, Sendable {
         guard (try? handle.seek(toOffset: start)) != nil, var data = try? handle.readToEnd() else { return nil }
         if start > 0 { data = data.subdata(in: (data.startIndex + TranscriptReader.tailStart(data))..<data.endIndex) }
         return read(data)
+    }
+
+    /// How many times a transcript's end was read (a tail or its progress, see `TranscriptProgress`), in this
+    /// process, and how many of those on the main thread. The app reads none there: a team's transcripts are a few
+    /// hundred KB each to parse, and reading them there froze the window (`--board-bench` checks).
+    public static var reads: (all: Int, onMainThread: Int) {
+        counter.lock()
+        defer { counter.unlock() }
+        return counts
+    }
+
+    private static let counter = NSLock()
+    nonisolated(unsafe) private static var counts = (all: 0, onMainThread: 0)
+
+    static func noteRead() {
+        let main = Thread.isMainThread
+        counter.lock()
+        counts.all += 1
+        if main { counts.onMainThread += 1 }
+        counter.unlock()
     }
 
     /// From complete transcript lines (a partial last line is skipped).

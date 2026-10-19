@@ -143,6 +143,7 @@ public struct TranscriptProgress: Equatable, Sendable {
     /// The file's tail (see `TranscriptTail.window`), with its subagents' transcripts (`<file>/subagents/`) for when
     /// they were last written to.
     public static func read(url: URL) -> TranscriptProgress? {
+        TranscriptTail.noteRead()
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         guard let size = try? handle.seekToEnd() else { return nil }

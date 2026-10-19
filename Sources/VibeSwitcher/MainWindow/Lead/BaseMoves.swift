@@ -23,6 +23,8 @@ final class BaseMoves: ObservableObject {
     }
 
     private let vault: LeadVault
+    /// Where the boards are written (the lead controller's, see `LeadReads`): off the main thread, in order with its reads.
+    private let reads: LeadReads
     private let background: (@escaping () -> Void) -> Void
     private let main: (@escaping () -> Void) -> Void
     /// A move to ask about appeared (to tell you once, outside the window too).
@@ -41,10 +43,11 @@ final class BaseMoves: ObservableObject {
     /// The moves you kept refused (root → the commit it moved to): not asked again.
     private var kept: [String: String] = [:]
 
-    init(vault: LeadVault = .standard,
+    init(vault: LeadVault = .standard, reads: LeadReads = LeadReads(),
          background: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.global(qos: .utility).async(execute: $0) },
          main: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) }) {
         self.vault = vault
+        self.reads = reads
         self.background = background
         self.main = main
     }
@@ -133,8 +136,10 @@ final class BaseMoves: ObservableObject {
             : move.acceptedLine
         log("lead: \(line) (\(move.from.prefix(8)) → \(move.to.prefix(8)))")
         let store = BoardStore(root: root)
-        try? store.update { $0.updates.append(LeadUpdate(title: "Took \(move.count) on \(move.branch)", body: line)) }
-        try? store.appendProgress(line)
+        reads.async { _ in
+            try? store.update { $0.updates.append(LeadUpdate(title: "Took \(move.count) on \(move.branch)", body: line)) }
+            try? store.appendProgress(line)
+        }
     }
 
     /// The branch the lead merges into, as its tools resolve it.
