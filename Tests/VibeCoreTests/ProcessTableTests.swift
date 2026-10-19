@@ -119,6 +119,113 @@ struct ProcessTableTests {
         #expect(undecided ? read == nil : read != nil)
     }
 
+    /// Processes are mid-exec all the time on a Mac running builds and tests: a terminal's process whose argv can't be
+    /// read yet doesn't cost the table. Fifty snapshots in a row while shells on a terminal fork and exec as fast as
+    /// they can are all read, and each has a process that runs throughout.
+    @Test func execsOnATerminalDontCostTheTable() throws {
+        let one = "i=0; while [ $i -lt 100000 ] && kill -0 $PPID 2>/dev/null; do /bin/date >/dev/null; i=$((i+1)); done"
+        let loop = try onATerminal((0..<4).map { _ in "(\(one)) &" }.joined(separator: " ") + " wait")
+        defer { stop(loop) }
+        try snapshotsStayWhole(while: loop, pause: 0.01)
+    }
+
+    /// The same while a `swift build` of a tiny package runs on a terminal (its compilers and linkers exec there).
+    @Test func aBuildOnATerminalDoesntCostTheTable() throws {
+        let package = scratch.url("tiny-package")
+        try FileManager.default.createDirectory(at: package.appendingPathComponent("Sources/Tiny"), withIntermediateDirectories: true)
+        try """
+        // swift-tools-version:5.9
+        import PackageDescription
+        let package = Package(name: "Tiny", targets: [.executableTarget(name: "Tiny")])
+        """.write(to: package.appendingPathComponent("Package.swift"), atomically: true, encoding: .utf8)
+        try "print(\"tiny\")\n".write(to: package.appendingPathComponent("Sources/Tiny/main.swift"), atomically: true, encoding: .utf8)
+        let build = try onATerminal("swift build --package-path '\(package.path)'")
+        defer { stop(build) }
+        try snapshotsStayWhole(while: build, pause: 0.1)
+    }
+
+    /// An exec'd process on a terminal whose argv can't be read twice in a row (an exec in progress on a loaded Mac)
+    /// doesn't cost the table: it's in it.
+    @Test func aProcessMidExecIsInTheTable() throws {
+        let (terminal, pid) = try sleeperOnATerminal()
+        defer { stop(terminal) }
+        let reads = Reads()
+        let midExec = ArgumentCache { $0 == pid && reads.next() <= 2 ? [] : ProcessTable.readArguments(pid: $0) }
+        let table = ProcessTable.readTable(until: Date().addingTimeInterval(5), arguments: midExec)
+        #expect(table?[pid]?.comm == "sleep")
+    }
+
+    /// `/bin/sleep 60` on a terminal of its own (exec'd by the terminal's shell), and its pid.
+    private func sleeperOnATerminal() throws -> (terminal: Process, pid: pid_t) {
+        let terminal = try onATerminal("exec /bin/sleep 60")
+        var pid: pid_t = 0
+        let started = eventually(timeout: 30) {
+            var children = [pid_t](repeating: 0, count: 4)
+            let count = children.withUnsafeMutableBytes { proc_listchildpids(terminal.processIdentifier, $0.baseAddress, Int32($0.count)) }
+            guard count > 0, let info = ProcessTable.info(pid: children[0]), info.comm == "sleep", info.tty != nil else { return false }
+            pid = children[0]
+            return true
+        }
+        if !started { stop(terminal) }
+        try #require(started)
+        return (terminal, pid)
+    }
+
+    private final class Reads: @unchecked Sendable {
+        private let lock = NSLock()
+        private var count = 0
+        var made: Int { lock.lock(); defer { lock.unlock() }; return count }
+        func next() -> Int { lock.lock(); defer { lock.unlock() }; count += 1; return count }
+    }
+
+    private let scratch = Scratch()
+
+    /// 50 snapshots in a row, `pause` apart: every one read, with a `sleep` started before them in it.
+    private func snapshotsStayWhole(while load: Process, pause: TimeInterval) throws {
+        let sleeper = Process()
+        sleeper.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        sleeper.arguments = ["120"]
+        try sleeper.run()
+        defer { stop(sleeper) }
+        var missed = 0
+        var onATerminal = false
+        for _ in 0..<50 {
+            let table = ProcessTable.trySnapshot()
+            if table?[sleeper.processIdentifier]?.comm != "sleep" { missed += 1 }
+            // The load's shell is on its terminal (else its processes would never be in question).
+            if table?.values.contains(where: { $0.ppid == load.processIdentifier && $0.tty != nil }) == true { onATerminal = true }
+            Thread.sleep(forTimeInterval: pause)
+        }
+        #expect(onATerminal)
+        var load1 = [Double](repeating: 0, count: 3)
+        getloadavg(&load1, 3)
+        print("ProcessTableTests: \(missed) of 50 snapshots not read at load \(load1[0]); load still running: \(load.isRunning)")
+        #expect(missed == 0, "\(missed) of 50 snapshots not read")
+    }
+
+    /// `command` run by /bin/sh on a terminal of its own that is its controlling terminal, as a session's processes are
+    /// (`script` makes one; this test process may have none). It stops when `script` does (`$PPID`, or SIGHUP).
+    private func onATerminal(_ command: String) throws -> Process {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/script")
+        process.arguments = ["-q", "/dev/null", "/bin/sh", "-c", command]
+        process.standardInput = Pipe()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        return process
+    }
+
+    /// Stops `process` and, when it's a terminal's `script`, everything on that terminal (its shell's process group).
+    private func stop(_ process: Process) {
+        let pid = process.processIdentifier
+        var children = [pid_t](repeating: 0, count: 16)
+        let count = children.withUnsafeMutableBytes { proc_listchildpids(pid, $0.baseAddress, Int32($0.count)) }
+        for child in children.prefix(Int(max(0, count))) where child > 0 && getpgid(child) == child { kill(-child, SIGKILL) }
+        if process.isRunning { kill(pid, SIGKILL) }
+        process.waitUntilExit()
+    }
+
     @Test func identity() {
         let claude = ArgumentCache { _ in ["/Users/me/.local/bin/claude"] }
         let blind = ArgumentCache { _ in [] }
