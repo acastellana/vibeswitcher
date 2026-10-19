@@ -349,6 +349,8 @@ public final class LeadToolset: MCPToolset {
                                          "disk_warning_gb": P(type: "number", description: "Free space (GB) on the worktrees' volume below which you're told, once, what takes the space (default 10)"),
                                          "disk_floor_gb": P(type: "number", description: "Free space (GB) below which start_worker refuses (default 3)"),
                                          "test_timeout_min": P(type: "number", description: "Minutes merge lets init_command and test_command run before it takes them as hung and stops them (default 45)"),
+                                         "audit_finders": P(type: "integer", description: "How many finders an audit runs: 1 (one verifier, the default), 2 or 3 (different focuses on one shared build and test run, and a vote keeps what most of them found; each counts against mac_max_sessions)"),
+                                         "audit_nit_cap": P(type: "integer", description: "How many new Nit findings one audit's vote keeps (default 5)"),
                                          "merge_policy": P(type: "string", description: "How merges are handled, as the owner chose once: auto (audited work merges, the user gets an update afterwards), ask_sensitive (a commit touching sensitive_paths waits for the user's approval of that exact commit), ask_all (every merge waits)",
                                                            options: LeadWorkflow.MergePolicy.allCases.map(\.rawValue)),
                                          "sensitive_paths": P(type: "string", description: "The globs ask_sensitive holds back, comma-separated, as in .gitignore (empty: Claude's settings and instructions, .github, .env files, entitlements, keys)")]),
@@ -796,7 +798,9 @@ public final class LeadToolset: MCPToolset {
     }
 
     private func readSession(_ slug: String, who: String) throws -> MCPToolResult {
-        guard let task = store.load().task(slug), let session = who == "verifier" ? task.verifier : task.worker else {
+        // Several finders: the first that ended without submitting, else the first still at work.
+        let live = Dictionary(((try? listed()) ?? []).map { ($0.id, $0.live) }, uniquingKeysWith: { a, _ in a })
+        guard let task = store.load().task(slug), let session = who == "verifier" ? task.awaitedVerifier(ended: { live[$0] != true }) : task.worker else {
             throw Problem(text: "\(slug) has no \(who).")
         }
         let found: String?
@@ -816,9 +820,10 @@ public final class LeadToolset: MCPToolset {
     /// Starts a worker or a verifier with a new grant (it replaces the role's earlier one), bound to its session once
     /// that's started; its launch files go in the vault's folder.
     private func launch(_ role: LeadLaunch.Role, task slug: String, name: String, in folder: String, label: String, trust: Bool,
-                        prompt: String, start: String, model: String? = nil, branch: String? = nil, auditing: String? = nil) throws -> String {
+                        prompt: String, start: String, model: String? = nil, branch: String? = nil, auditing: String? = nil,
+                        finder: LeadVault.Finder? = nil) throws -> String {
         let grant: String
-        do { grant = try vault.issue(role: role, root: root, task: slug, auditing: auditing) } catch { throw Problem(text: "\(error)") }
+        do { grant = try vault.issue(role: role, root: root, task: slug, auditing: auditing, finder: finder) } catch { throw Problem(text: "\(error)") }
         do {
             let launch = try LeadLaunch.prepare(role: role, root: root, task: slug, base: runtime.claudeCommand(root: root), prompt: prompt,
                                                 start: start, server: runtime.server, name: name, model: model, branch: branch,
@@ -847,20 +852,41 @@ public final class LeadToolset: MCPToolset {
         let sessions = try hostSessions("whether the Mac has room for a verifier isn't known; no verifier was started")
         let mac = MacLoad.count(sessions.map { ($0.label, $0.cwd, $0.live) }, load: runtime.loadAverage(),
                                 except: Worktrees.path(root: root, slug: slug))
+        // The finders' number and their Nits' cap as the lead set them, not as a worker rewrote them.
+        try checkSettings(workflow, not: "Not audited, no verifier started", keys: ["audit_finders", "audit_nit_cap"])
+        // Several finders: the audit itself runs init_command and test_command as the lead first (a scratch home is
+        // no boundary), so every guard rail must be the lead's, as for merge.
+        if workflow.auditFinders > 1 { try checkSettings(workflow, not: "Not audited, nothing built or tested, no finder started") }
         if let refusal = macRefusal(mac, workflow, not: "No verifier started") { throw Problem(text: refusal) }
+        // Each finder is a session of its own: the Mac must have room for all of them.
+        let finders = workflow.auditFinders
+        if finders > 1, mac.sessions + finders > workflow.macMaxSessions {
+            let room = max(0, workflow.macMaxSessions - mac.sessions)
+            throw Problem(text: "Not audited, no finder started: audit_finders is \(finders), and mac_max_sessions leaves room for \(room) more session\(room == 1 ? "" : "s") now "
+                          + "(each finder is one, counted with every project's workers and verifiers). Now: \(Self.macText(mac, workflow)). "
+                          + "Try again in about \(MacLoad.retryMinutes) minutes, when sessions have ended, or set audit_finders lower with configure (1 is one verifier).")
+        }
         // Settings, hooks or MCP servers the branch brings would run in the verifier: it starts with project settings
         // off (see LeadLaunch), and VibeSwitcher doesn't say yes to Claude's trust question for that folder.
         let config = Worktrees.agentConfigChanges(root: root, slug: slug, base: workflow.base)
         // A re-audit checks the open findings and the diff since the commit the last audit covered, not everything again.
         let ledger = vault.audits(root: root, task: slug)
         let recheck = ledger.flatMap { ledger in ledger.isReaudit ? reaudit(ledger, slug: slug, head: head) : nil }
-        let session = try launch(.verifier, task: slug, name: "verify-\(slug)", in: Worktrees.path(root: root, slug: slug),
+        let session: String
+        var panel: LeadAuditPanel?
+        if finders > 1 {
+            panel = try startFinders(finders, task: task, head: head, workflow: workflow, recheck: recheck, trust: config.isEmpty)
+            session = panel!.sessions[0]
+        } else {
+            session = try launch(.verifier, task: slug, name: "verify-\(slug)", in: Worktrees.path(root: root, slug: slug),
                                  label: "Verifier: \(task.title)", trust: config.isEmpty,
                                  prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck),
                                  start: "Verify the task now, then call submit_audit.", model: workflow.verifierModel, auditing: head)
+        }
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].verifier = session
+            board.tasks[index].panel = panel
             // A kept task stays kept through a new audit: what holds it back hasn't changed.
             if board.tasks[index].status != .kept { board.tasks[index].status = .review }
             board.tasks[index].evidence = nil
@@ -876,7 +902,77 @@ public final class LeadToolset: MCPToolset {
             return " It's a re-audit (round \(recheck.round)): the verifier checks the \(recheck.open.count) open finding\(recheck.open.count == 1 ? "" : "s") and \(covers)."
         } ?? ""
         let cap = ledger?.reconsider == true ? " " + Self.reconsiderText(ledger!, of: slug) : ""
+        if let panel {
+            return MCPToolResult(text: putBack + "\(panel.size) finders started on \(slug) (checking \(head.prefix(8))): " + Self.focusesText(panel.focuses) + ". "
+                                 + "One build and test run came first, and every finder reads its logs (\(panel.run)): \(panel.logs.joined(separator: ", ")). "
+                                 + "Their findings are voted into one verdict, which arrives as a message once all \(panel.size) have submitted.\(round)\(flagged)\(cap)")
+        }
         return MCPToolResult(text: putBack + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(round)\(flagged)\(cap)")
+    }
+
+    /// "finder 1: contract and acceptance, finder 2: bugs and regressions".
+    static func focusesText(_ focuses: [String]) -> String {
+        focuses.enumerated().map { "finder \($0.offset + 1): \($0.element)" }.joined(separator: ", ")
+    }
+
+    /// An audit by `count` finders: one build and test run of `head` first (its logs kept per commit, so an audit
+    /// of the same commit again reuses them), then each finder started with its focus and those logs, as one panel
+    /// in the vault. A finder that fails to start ends the ones started before it.
+    private func startFinders(_ count: Int, task: LeadTask, head: String, workflow: LeadWorkflow,
+                              recheck: LeadPrompts.Reaudit?, trust: Bool) throws -> LeadAuditPanel {
+        let slug = task.slug
+        guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/audit-\(slug).lock")) else {
+            throw Problem(text: "An audit of \(slug) is already making its build and test run; wait for its result.")
+        }
+        defer { lock.release() }
+        let logs = URL(fileURLWithPath: store.folder).appendingPathComponent("audit/\(slug)/\(head.prefix(12))")
+        let run = Self.sharedRun(at: logs) ?? {
+            Worktrees.auditRun(root: root, commit: head, setup: workflow.initCommand, test: workflow.testCommand,
+                               scratch: vault.scratch(root: root, "audit-\(slug)"), home: vault.scratch(root: root, "audit-\(slug)-home"),
+                               logs: logs, timeout: workflow.testTimeout)
+        }()
+        if case .cancelled = run.outcome {
+            throw Problem(text: "The audit of \(slug) was cancelled during its build and test run; no finder started.")
+        }
+        let changed = Git.run(["diff", "--name-only", "\(workflow.base)...\(head)"], in: root).output.split(whereSeparator: \.isNewline).map(String.init)
+        let sensitive = changed.filter { path in workflow.sensitiveGlobs.contains { LeadWorkflow.matches(path, glob: $0) } }
+        let focuses = LeadPrompts.Focus.panel(count, sensitive: !sensitive.isEmpty)
+        let id = UUID().uuidString
+        var sessions: [String] = []
+        for (offset, focus) in focuses.enumerated() {
+            let index = offset + 1
+            let finder = LeadPrompts.Finder(index: index, size: count, focus: focus, commit: head, logs: run.logs, run: run.outcome.text,
+                                            sensitive: sensitive, nitCap: workflow.auditNitCap)
+            do {
+                sessions.append(try launch(.verifier, task: slug, name: index == 1 ? "verify-\(slug)" : "finder\(index)-\(slug)",
+                                           in: Worktrees.path(root: root, slug: slug), label: "Verifier: \(task.title) (finder \(index)/\(count): \(focus.rawValue))",
+                                           trust: trust, prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, finder: finder),
+                                           start: "Look for findings in your focus now, then call submit_audit.", model: workflow.verifierModel, auditing: head,
+                                           finder: LeadVault.Finder(panel: id, index: index, size: count, focus: focus.rawValue, nitCap: workflow.auditNitCap)))
+            } catch {
+                for started in sessions { try? runtime.kill(started) }
+                throw Problem(text: "Not audited: finder \(index) of \(count) couldn't start (\(error))" + (sessions.isEmpty ? "." : "; the \(sessions.count) started before it were ended."))
+            }
+        }
+        try? store.appendProgress("Audit of \(slug) at \(head.prefix(8)) by \(count) finders (\(focuses.map(\.rawValue).joined(separator: "; "))); the shared run: \(run.outcome.text)")
+        return LeadAuditPanel(focuses: focuses.map(\.rawValue), sessions: sessions, commit: head, logs: run.logs, run: run.outcome.text)
+    }
+
+    /// A finished shared run kept at `logs` (its run.txt is written last), for an audit of the same commit again.
+    static func sharedRun(at logs: URL) -> Worktrees.AuditRun? {
+        guard let said = try? String(contentsOf: logs.appendingPathComponent("run.txt"), encoding: .utf8) else { return nil }
+        let files = ["init.log", "test.log"].map { logs.appendingPathComponent($0).path }.filter { FileManager.default.fileExists(atPath: $0) }
+        let text = said.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Only a run that ran to its end is kept: one that couldn't run runs again.
+        let outcome: Worktrees.AuditRun.Outcome
+        switch text {
+        case Worktrees.AuditRun.Outcome.passed.text: outcome = .passed
+        case Worktrees.AuditRun.Outcome.noTests.text: outcome = .noTests
+        case Worktrees.AuditRun.Outcome.failed("init_command").text: outcome = .failed("init_command")
+        case Worktrees.AuditRun.Outcome.failed("test command").text: outcome = .failed("test command")
+        default: return nil
+        }
+        return Worktrees.AuditRun(outcome: outcome, logs: files)
     }
 
     /// What a re-audit's verifier is handed: the open findings, the closed ones (not to raise again) and the diff its
@@ -1245,6 +1341,8 @@ public final class LeadToolset: MCPToolset {
         // Merged work is in main; leftovers in the worktree (build output) can go. Abandoned work goes only on request.
         // The build folder goes first and whatever git makes of the rest: it's most of the space.
         var freed = removeFolder((worktree as NSString).appendingPathComponent(".build"))
+        // Its audits' shared build and test logs.
+        freed += removeFolder((store.folder as NSString).appendingPathComponent("audit/\(slug)"))
         if FileManager.default.fileExists(atPath: worktree) || branchHead(Worktrees.branch(slug)) != nil {
             try Worktrees.remove(root: root, slug: slug, force: true)
         }
@@ -1518,6 +1616,16 @@ public final class LeadToolset: MCPToolset {
                 guard !value.isEmpty else { break }
                 guard let count = Int(value), count >= 1 else { throw Problem(text: "mac_max_sessions must be a whole number, at least 1.") }
                 value = String(count)
+            case "audit_finders":
+                guard !value.isEmpty else { break }
+                guard let count = Int(value), (1...LeadWorkflow.maxFinders).contains(count) else {
+                    throw Problem(text: "audit_finders must be 1 (one verifier), 2 or \(LeadWorkflow.maxFinders) (that many finders and a vote).")
+                }
+                value = String(count)
+            case "audit_nit_cap":
+                guard !value.isEmpty else { break }
+                guard let count = Int(value), count >= 0 else { throw Problem(text: "audit_nit_cap must be a whole number, 0 or more.") }
+                value = String(count)
             case "test_timeout_min":
                 guard !value.isEmpty else { break }
                 guard let minutes = LeadWorkflow.minutes(value) else { throw Problem(text: "test_timeout_min must be a number of minutes, more than 0.") }
@@ -1556,11 +1664,13 @@ public final class LeadToolset: MCPToolset {
                                       "disk_warning_gb": Self.gb(after.diskWarningGB), "disk_floor_gb": Self.gb(after.diskFloorGB),
                                       "test_timeout_min": Self.gb(after.testTimeoutMinutes),
                                       "load_threshold": after.loadThreshold.map(Self.gb) ?? "", "mac_max_sessions": String(after.macMaxSessions),
+                                      "audit_finders": String(after.auditFinders), "audit_nit_cap": String(after.auditNitCap),
                                       "merge_policy": after.mergePolicy?.rawValue ?? "", "sensitive_paths": after.sensitivePaths?.joined(separator: ", ") ?? "",
                                       "records_dir": after.recordsDir ?? ""]
         // A limit cleared reads back as its default.
         let defaults = ["disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB),
-                        "test_timeout_min": Self.gb(LeadWorkflow().testTimeoutMinutes), "mac_max_sessions": String(LeadWorkflow().macMaxSessions)]
+                        "test_timeout_min": Self.gb(LeadWorkflow().testTimeoutMinutes), "mac_max_sessions": String(LeadWorkflow().macMaxSessions),
+                        "audit_finders": String(LeadWorkflow().auditFinders), "audit_nit_cap": String(LeadWorkflow().auditNitCap)]
         for change in changes where read[change.key] != (change.value.isEmpty ? defaults[change.key] ?? "" : change.value) {
             throw Problem(text: "Wrote workflow.md, but \(change.key) reads back as \"\(read[change.key] ?? "")\", not \"\(change.value)\". Check the file.")
         }
@@ -1583,11 +1693,12 @@ public final class LeadToolset: MCPToolset {
 
     /// workflow.md's guard rails (`LeadVault.guardedKeys`: its commands run as the lead, its policy and limits hold
     /// the team) count only as the lead last set them with configure, since any session of the team can write the file.
-    private func checkSettings(_ workflow: LeadWorkflow, not: String) throws {
-        let changed: [(key: String, value: String)]
+    private func checkSettings(_ workflow: LeadWorkflow, not: String, keys: Set<String>? = nil) throws {
+        var changed: [(key: String, value: String)]
         do { changed = try vault.changedSettings(workflow, root: root) } catch {
             throw Problem(text: "\(not): the session host couldn't say what you last set workflow.md's guard rails to (\(error)).")
         }
+        if let keys { changed = changed.filter { keys.contains($0.key) } }
         guard !changed.isEmpty else { return }
         let now = changed.map { $0.value.isEmpty ? "\($0.key) is now empty" : "\($0.key) is now `\($0.value)`" }.joined(separator: "; ")
         throw Problem(text: "\(not): workflow.md's \(now), not what you last set with configure. Its commands run as you, its policy and limits hold the team, and any session of the team can write the file: a worker may have changed it. If you or the user did, set it again with configure (as it should read) and try again; if not, set it back with configure and tell the user.")
@@ -1716,35 +1827,51 @@ public final class LeadToolset: MCPToolset {
                                  changed: earlier.commit.flatMap { reauditFiles(since: $0, head: audited) })
             } catch { throw Problem(text: "Not recorded: \(error) Nothing was recorded; call submit_audit again.") }
         }
-        let verdict: LeadVault.Verdict
-        do { verdict = try vault.submitVerdict(root: root, completion: completion, integrity: integrity, summary: summary, findings: reports) } catch {
+        let submission: LeadVault.Submission
+        do { submission = try vault.submit(root: root, completion: completion, integrity: integrity, summary: summary, findings: reports) } catch {
             throw Problem(text: "\(error)")
         }
+        let finder = member.finder?.index
+        guard let verdict = submission.verdict else {
+            // One of several finders: its ballot is in, and the vote waits for the others'.
+            try store.update { board in
+                guard let index = board.taskIndex(slug), let finder, let panel = board.tasks[index].panel, !panel.reported.contains(finder) else { return }
+                board.tasks[index].panel?.reported = (panel.reported + [finder]).sorted()
+            }
+            try? store.appendProgress("Audit of \(slug): finder \(finder ?? 0) of \(submission.of) submitted (\(completion.rawValue), \(integrity.rawValue), \(reports.count) finding\(reports.count == 1 ? "" : "s"))")
+            return MCPToolResult(text: "Your findings are in: \(submission.cast) of \(submission.of) finders have submitted, and the vote runs when the last one does. You're done; the lead takes it from here.")
+        }
+        // The verdict: one verifier's, or the finders' vote.
         let ledger = vault.audits(root: root, task: slug)
         let audited = verdict.commit
-        let evidence = LeadEvidence(completion: completion, integrity: integrity, summary: summary, commit: audited)
+        let evidence = LeadEvidence(completion: verdict.completion, integrity: verdict.integrity, summary: verdict.summary, commit: audited)
         let blocking = ledger?.blocking ?? []
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].evidence = evidence
             board.tasks[index].outdatedEvidence = nil
             board.tasks[index].audits = ledger
+            if let size = board.tasks[index].panel?.size { board.tasks[index].panel?.reported = Array(1...size) }
             // A pass that leaves an Important finding open isn't mergeable yet: the lead decides, as on a failure.
             if board.tasks[index].status != .kept { board.tasks[index].status = evidence.passes && blocking.isEmpty ? .review : .failed }
             if !evidence.passes {
-                board.tasks[index].setback = LeadSetback(stage: .review, reason: summary.isEmpty ? "The audit didn't pass (\(completion.rawValue), \(integrity.rawValue))." : summary,
+                board.tasks[index].setback = LeadSetback(stage: .review, reason: evidence.summary.isEmpty ? "The audit didn't pass (\(evidence.completion.rawValue), \(evidence.integrity.rawValue))." : evidence.summary,
                                                          evidence: evidence)
             } else if !blocking.isEmpty {
                 board.tasks[index].setback = LeadSetback(stage: .review, reason: "Important findings open: " + blocking.map(\.line1).joined(separator: "; "), evidence: evidence)
             }
         }
-        try? store.appendProgress("Audit of \(slug): \(completion.rawValue), \(integrity.rawValue)"
-            + (ledger.map { $0.findings.isEmpty ? "" : ", round \($0.rounds): \(Self.findingsTally($0))" } ?? ""))
+        try? store.appendProgress("Audit of \(slug): \(evidence.completion.rawValue), \(evidence.integrity.rawValue)"
+            + (ledger.map { $0.findings.isEmpty ? "" : ", round \($0.rounds): \(Self.findingsTally($0))" } ?? "")
+            + (ledger?.vote.map { " (\($0.text))" } ?? ""))
         let head = branchHead(Worktrees.branch(slug))
         let moved = head == audited ? "" : "\nagent/\(slug) moved during the audit (now \(head?.prefix(8) ?? "gone")): this verdict covers \(audited.prefix(8)) only, and merge refuses newer commits until they're audited."
         var text = evidence.passes
             ? "The audit of \(slug) passed (complete, clean): \(evidence.summary)\n" + (blocking.isEmpty ? "merge(\(slug)) when you're ready.\(moved)" : "")
-            : "The audit of \(slug) did not pass (\(completion.rawValue), \(integrity.rawValue)): \(evidence.summary)\n"
+            : "The audit of \(slug) did not pass (\(evidence.completion.rawValue), \(evidence.integrity.rawValue)): \(evidence.summary)\n"
+        if let vote = ledger?.vote {
+            text += (text.hasSuffix("\n") ? "" : "\n") + vote.text + (vote.unconfirmed > 0 ? " (unconfirmed ones don't hold the merge back; dismiss_finding or add_task(from_finding: …) one that's real)" : "") + ".\n"
+        }
         if let ledger, !ledger.findings.isEmpty {
             text += (text.hasSuffix("\n") ? "" : "\n") + Self.findingsText(ledger, of: slug) + "\n"
         }
@@ -1758,7 +1885,8 @@ public final class LeadToolset: MCPToolset {
             text += "merge(\(slug)) when you're ready: Nits and Pre-existing findings don't hold it back (add_task(from_finding: …) makes one a task).\(moved)"
         }
         let told = try tellLead(text.trimmingCharacters(in: .whitespacesAndNewlines), about: "verifier \(slug)")
-        return MCPToolResult(text: "Verdict recorded. You're done; the lead takes it from here." + (told ? "" : Self.noLead))
+        let recorded = submission.of > 1 ? "Your findings are in, the last of \(submission.of): the vote is done and its verdict recorded." : "Verdict recorded."
+        return MCPToolResult(text: recorded + " You're done; the lead takes it from here." + (told ? "" : Self.noLead))
     }
 
     /// submit_audit's findings as the verifier passed them (a list of objects, or that list as JSON text).
@@ -1779,7 +1907,7 @@ public final class LeadToolset: MCPToolset {
                 throw Problem(text: "\(which): severity is Important, Nit or Pre-existing, not \(word("severity").isEmpty ? "missing" : word("severity")).")
             }
             let status = word("status").isEmpty ? LeadFinding.Status.open : LeadFinding.Status(rawValue: word("status").lowercased())
-            guard let status else { throw Problem(text: "\(which): status is open, fixed or dismissed, not \(word("status")).") }
+            guard let status, status != .unconfirmed else { throw Problem(text: "\(which): status is open, fixed or dismissed, not \(word("status")).") }
             let line = (object["line"] as? Int) ?? (object["line"] as? Double).map { Int($0) } ?? Int(word("line"))
             guard !word("file").isEmpty, let line, line > 0 else {
                 throw Problem(text: "\(which): give the file (path from the repository's root) and the line (a number) where it is.")
@@ -1802,13 +1930,18 @@ public final class LeadToolset: MCPToolset {
     static func findingsTally(_ ledger: LeadAuditLedger) -> String {
         ledger.bySeverity.map { group in
             let open = group.findings.filter(\.isOpen).count
-            return "\(group.findings.count) \(group.severity.rawValue)" + (open == group.findings.count ? " open" : open == 0 ? " closed" : " (\(open) open)")
+            let unconfirmed = group.findings.filter { $0.status == .unconfirmed }.count
+            let all = group.findings.count
+            let state = open == all ? " open" : unconfirmed == all ? " unconfirmed" : open + unconfirmed == 0 ? " closed"
+                : " (" + [open > 0 ? "\(open) open" : nil, unconfirmed > 0 ? "\(unconfirmed) unconfirmed" : nil].compactMap { $0 }.joined(separator: ", ") + ")"
+            return "\(all) \(group.severity.rawValue)" + state
         }.joined(separator: ", ")
     }
 
     /// The findings grouped by severity, open ones first, each named <task>:<id> for dismiss_finding and add_task.
     static func findingsText(_ ledger: LeadAuditLedger, of slug: String) -> String {
         var lines = ["Findings (round \(ledger.rounds); \(findingsTally(ledger))):"]
+        if let vote = ledger.vote { lines.append("Round \(ledger.rounds): \(vote.text) (\(focusesText(vote.focuses))).") }
         for group in ledger.bySeverity {
             lines.append("\(group.severity.rawValue):")
             lines += group.findings.map { "- \(slug):" + clip($0.line1, 300) }
@@ -1948,6 +2081,8 @@ public final class LeadToolset: MCPToolset {
             line += " — worker \(info.live ? (info.status ?? "running") : task.stopped == worker ? "stopped" : "ended")"
         }
         if let evidence = task.evidence ?? task.outdatedEvidence { line += " — " + auditText(evidence, of: task) }
+        if let panel = task.panel, task.evidence == nil, task.status == .review, panel.reported.count < panel.size { line += " — audit by \(panel.progress)" }
+        else if let vote = task.audits?.vote, task.evidence != nil, task.status != .done { line += " — \(vote.text)" }
         if task.rework > 0 { line += " — rework \(task.rework)" }
         if let checkpoint = task.checkpoints?.last { line += " — last progress: \(Self.clip(checkpoint.text, 70))" }
         return Self.clip(line, 200)
@@ -1977,7 +2112,7 @@ public final class LeadToolset: MCPToolset {
             }
             return info.live ? nil : "worker ended without reporting. read_session to see where it stopped; start_worker continues in its worktree."
         case .review where task.evidence == nil:
-            guard let verifier = task.verifier else { return nil }
+            guard let verifier = task.awaitedVerifier(ended: { sessions[$0]?.live != true }) else { return nil }
             guard let info = sessions[verifier] else { return "verifier ended: its session is gone, with no verdict. audit again." }
             return info.live ? nil : "verifier ended without a verdict. audit again."
         default:
@@ -2084,7 +2219,9 @@ public final class LeadToolset: MCPToolset {
                      "- disk_floor_gb: \(Self.gb(workflow.diskFloorGB)) (start_worker refuses below it)",
                      "- test_timeout_min: \(Self.gb(workflow.testTimeoutMinutes)) (merge stops init_command and test_command past it, as hung)",
                      "- load_threshold: \(Self.loadLimitText(workflow)) (above this 1-minute load, Mac-wide, start_worker and audit refuse and merge waits)",
-                     "- mac_max_sessions: \(workflow.macMaxSessions) (workers and verifiers of all projects on this Mac; start_worker and audit refuse at it)"]
+                     "- mac_max_sessions: \(workflow.macMaxSessions) (workers and verifiers of all projects on this Mac; start_worker and audit refuse at it)",
+                     "- audit_finders: \(workflow.auditFinders) (" + (workflow.auditFinders == 1 ? "one verifier per audit" : "finders per audit, on one shared build and test run, with a vote; each counts against mac_max_sessions") + ")",
+                     "- audit_nit_cap: \(workflow.auditNitCap) (new Nit findings one audit's vote keeps)"]
         let policy = workflow.mergePolicy.map { "\($0.rawValue) (\($0.meaning))" } ?? "not set: ask the owner once; until then merges are handled as ask_sensitive"
         lines.append("- merge_policy: \(policy)")
         lines.append("- sensitive_paths: \(workflow.sensitiveGlobs.joined(separator: ", "))\(workflow.sensitivePaths == nil ? " (the defaults)" : "")")
@@ -2144,5 +2281,199 @@ public final class LeadToolset: MCPToolset {
         let mine = all.filter { $0.cwd == root || $0.cwd.hasPrefix(root + "/") }
         guard !mine.isEmpty else { return "No window sessions in this project." }
         return mine.map { "- \($0.id): \($0.label) — \($0.live ? ($0.status ?? "running") : "ended") — \($0.cwd)" }.joined(separator: "\n")
+    }
+}
+
+/// An audit by several finders (audit_finders 2 or 3), each with its own focus, voted into one verdict and one set
+/// of findings, by a rule that needs no model: findings match on file, kind (severity) and line (within
+/// `lineTolerance`), and a finding most finders raised is kept open, the rest kept as unconfirmed. An earlier round's
+/// finding is closed when most finders say it's fixed or dismissed; an unconfirmed one is confirmed when most raise
+/// it again. New Nits beyond the cap are left out, counted. The verdict is each part's majority (the worse one
+/// without a majority); an integrity violation any finder reports makes it at least suspect.
+public enum LeadAuditVote {
+    /// One finder's verdict and findings, as it submitted them.
+    public struct Ballot: Codable, Equatable, Sendable {
+        /// 1-based.
+        public var finder: Int
+        public var focus: String
+        public var completion: LeadEvidence.Completion
+        public var integrity: LeadEvidence.Integrity
+        public var summary: String
+        public var findings: [LeadFinding.Report]
+
+        public init(finder: Int, focus: String, completion: LeadEvidence.Completion, integrity: LeadEvidence.Integrity,
+                    summary: String, findings: [LeadFinding.Report]) {
+            self.finder = finder
+            self.focus = focus
+            self.completion = completion
+            self.integrity = integrity
+            self.summary = summary
+            self.findings = findings
+        }
+
+        public var passes: Bool { completion == .complete && integrity == .clean }
+    }
+
+    /// How a vote went, kept on the ledger (the board and status show it).
+    public struct Outcome: Codable, Equatable, Sendable {
+        public var finders: Int
+        public var focuses: [String]
+        /// New findings most finders raised, and the ones fewer did.
+        public var confirmed: Int
+        public var unconfirmed: Int
+        /// New Nits past audit_nit_cap, left out.
+        public var nitsLeftOut: Int
+        /// The cap they were held to.
+        public var nitCap: Int
+
+        public init(finders: Int, focuses: [String], confirmed: Int, unconfirmed: Int, nitsLeftOut: Int, nitCap: Int) {
+            self.finders = finders
+            self.focuses = focuses
+            self.confirmed = confirmed
+            self.unconfirmed = unconfirmed
+            self.nitsLeftOut = nitsLeftOut
+            self.nitCap = nitCap
+        }
+
+        /// "3 finders voted: 2 new findings confirmed, 1 unconfirmed, 2 Nits past audit_nit_cap (5) left out".
+        public var text: String {
+            var text = "\(finders) finders voted: \(confirmed) new finding\(confirmed == 1 ? "" : "s") confirmed, \(unconfirmed) unconfirmed"
+            if nitsLeftOut > 0 { text += ", \(nitsLeftOut) Nit\(nitsLeftOut == 1 ? "" : "s") past audit_nit_cap (\(nitCap)) left out" }
+            return text
+        }
+    }
+
+    /// What a vote gives the ledger and the verdict.
+    public struct Result: Equatable, Sendable {
+        /// Earlier rounds' findings as voted, and the new ones a majority raised.
+        public var reports: [LeadFinding.Report]
+        /// New findings fewer than most raised.
+        public var unconfirmed: [LeadFinding.Report]
+        public var completion: LeadEvidence.Completion
+        public var integrity: LeadEvidence.Integrity
+        public var summary: String
+        public var outcome: Outcome
+
+        public var passes: Bool { completion == .complete && integrity == .clean }
+    }
+
+    /// How far apart two finders' lines may be for the same finding (they point at a statement from different ends).
+    public static let lineTolerance = 3
+
+    /// More than half of `size`.
+    static func majority(_ count: Int, of size: Int) -> Bool { count * 2 > size }
+
+    /// The finders' ballots (one each, `size` in all) voted against the task's ledger as it was before this audit.
+    public static func tally(_ ballots: [Ballot], size: Int, ledger: LeadAuditLedger, nitCap: Int) -> Result {
+        // Earlier rounds' findings: each finder's word on each, by id (or, raised again, at an unconfirmed one's place).
+        var marks: [String: [(finder: Int, report: LeadFinding.Report)]] = [:]
+        var order: [String] = []
+        struct Group {
+            var file: String
+            var severity: LeadFinding.Severity
+            var line: Int
+            var finders: [Int]
+            var evidence: String
+            var index: Int
+            /// Others raised at its very place with another severity (the ledger keeps one finding per place).
+            var also: [String] = []
+        }
+        var groups: [Group] = []
+        for ballot in ballots {
+            for report in ballot.findings {
+                let named = report.id.flatMap(ledger.finding)
+                    ?? (report.status == .open ? ledger.findings.first { $0.status == .unconfirmed && $0.file == report.file && $0.line == report.line
+                        && $0.severity == report.severity } : nil)
+                if let finding = named {
+                    guard !(marks[finding.id] ?? []).contains(where: { $0.finder == ballot.finder }) else { continue }
+                    if marks[finding.id] == nil { order.append(finding.id) }
+                    marks[finding.id, default: []].append((ballot.finder, report))
+                    continue
+                }
+                if let at = groups.firstIndex(where: { $0.file == report.file && $0.severity == report.severity
+                    && abs($0.line - report.line) <= lineTolerance && !$0.finders.contains(ballot.finder) }) {
+                    groups[at].finders.append(ballot.finder)
+                } else {
+                    groups.append(Group(file: report.file, severity: report.severity, line: report.line, finders: [ballot.finder],
+                                        evidence: report.evidence, index: groups.count))
+                }
+            }
+        }
+
+        var reports: [LeadFinding.Report] = []
+        for id in order {
+            guard let finding = ledger.finding(id), finding.isLive, let said = marks[id] else { continue }
+            let fixed = said.filter { $0.report.status == .fixed }, dismissed = said.filter { $0.report.status == .dismissed }
+            let open = said.filter { $0.report.status == .open }
+            var report = LeadFinding.Report(id: finding.id, severity: finding.severity, file: finding.file, line: finding.line,
+                                            evidence: open.first?.report.evidence ?? finding.evidence)
+            if majority(fixed.count + dismissed.count, of: size) {
+                let closing = fixed.count >= dismissed.count ? fixed : dismissed
+                report.status = closing[0].report.status
+                report.reason = closing.compactMap(\.report.reason).first
+            } else if finding.status == .unconfirmed {
+                // Confirmed only when most raise it again; else it stays as it is.
+                guard majority(open.count, of: size) else { continue }
+            }
+            reports.append(report)
+        }
+
+        // New findings: confirmed ones first, then the more severe, the more seen, the earlier.
+        let rank = { (severity: LeadFinding.Severity) in LeadFinding.Severity.allCases.firstIndex(of: severity) ?? 0 }
+        let ranked = groups.sorted { a, b in
+            let (confirmedA, confirmedB) = (majority(a.finders.count, of: size), majority(b.finders.count, of: size))
+            if confirmedA != confirmedB { return confirmedA }
+            if a.severity != b.severity { return rank(a.severity) < rank(b.severity) }
+            if a.finders.count != b.finders.count { return a.finders.count > b.finders.count }
+            return a.index < b.index
+        }
+        var kept: [Group] = []
+        for group in ranked {
+            // At a place a more severe or confirmed one holds, folded into it, so it stays in view; one more severe than
+            // what holds its place (it's unconfirmed then: confirmed ones come first) stays a finding of its own, so a
+            // severity is never lowered by where it is.
+            if let at = kept.firstIndex(where: { $0.file == group.file && $0.line == group.line }),
+               rank(group.severity) >= rank(kept[at].severity) {
+                kept[at].also.append("also raised here as \(group.severity.rawValue) by \(group.finders.sorted().map { "finder \($0)" }.joined(separator: ", ")): \(group.evidence)")
+            } else {
+                kept.append(group)
+            }
+        }
+        var nits = 0, nitsLeftOut = 0
+        var confirmed: [Group] = [], unconfirmed: [Group] = []
+        for group in kept {
+            if group.severity == .nit {
+                guard nits < nitCap else { nitsLeftOut += 1; continue }
+                nits += 1
+            }
+            if majority(group.finders.count, of: size) { confirmed.append(group) } else { unconfirmed.append(group) }
+        }
+        let byFocus = Dictionary(ballots.map { ($0.finder, $0.focus) }, uniquingKeysWith: { a, _ in a })
+        let who = { (finders: [Int]) in finders.sorted().map { "finder \($0)" + (byFocus[$0].map { " (\($0))" } ?? "") }.joined(separator: ", ") }
+        // In the order the finders raised them.
+        reports += confirmed.sorted { $0.index < $1.index }.map { group in
+            LeadFinding.Report(severity: group.severity, file: group.file, line: group.line,
+                               evidence: group.evidence + " [\(group.finders.count) of \(size) finders]" + group.also.map { "; \($0)" }.joined())
+        }
+        let doubted = unconfirmed.sorted { $0.index < $1.index }.map { group in
+            LeadFinding.Report(severity: group.severity, file: group.file, line: group.line,
+                               evidence: group.evidence + group.also.map { "; \($0)" }.joined(), status: .unconfirmed,
+                               reason: "\(group.finders.count) of \(size) finders saw it: \(who(group.finders))")
+        }
+
+        let completion = verdict(ballots.map(\.completion), size: size, worse: [.complete, .incomplete, .blocked])
+        var integrity = verdict(ballots.map(\.integrity), size: size, worse: [.clean, .suspect, .violation])
+        if integrity == .clean, ballots.contains(where: { $0.integrity == .violation }) { integrity = .suspect }
+        let outcome = Outcome(finders: size, focuses: ballots.map(\.focus), confirmed: confirmed.count, unconfirmed: unconfirmed.count,
+                              nitsLeftOut: nitsLeftOut, nitCap: nitCap)
+        let summary = ballots.map { "Finder \($0.finder) (\($0.focus); \($0.completion.rawValue), \($0.integrity.rawValue)): \($0.summary)" }
+            .joined(separator: "\n") + "\n" + outcome.text + "."
+        return Result(reports: reports, unconfirmed: doubted, completion: completion, integrity: integrity, summary: summary, outcome: outcome)
+    }
+
+    /// What most said; without a majority, the worst any said (`worse`: best first).
+    static func verdict<T: Equatable>(_ said: [T], size: Int, worse: [T]) -> T {
+        if let most = worse.first(where: { value in majority(said.filter { $0 == value }.count, of: size) }) { return most }
+        return said.max { (worse.firstIndex(of: $0) ?? 0) < (worse.firstIndex(of: $1) ?? 0) } ?? worse[worse.count - 1]
     }
 }

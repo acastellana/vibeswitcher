@@ -111,6 +111,14 @@ struct TeamRowDetails: View {
                           systemImage: evidence.passes ? "checkmark.seal.fill" : "xmark.seal.fill")
                         .font(.system(size: 11.5, weight: .medium)).foregroundStyle(evidence.passes ? .green : .red)
                     Text(evidence.summary).font(.system(size: 11.5)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                    if let vote = task.audits?.vote, task.evidence != nil {
+                        Text(vote.text).font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                }
+            } else if let panel = task.panel {
+                part("Audit") {
+                    Text("\(panel.progress) (\(panel.focuses.joined(separator: "; "))); the shared build and test run: \(panel.run)")
+                        .font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                 }
             }
             if let audits = task.audits, !audits.findings.isEmpty {
@@ -122,7 +130,8 @@ struct TeamRowDetails: View {
                             .padding(.top, 2)
                         ForEach(group.findings) { finding in
                             HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Image(systemName: finding.isOpen ? "circle" : finding.status == .fixed ? "checkmark.circle.fill" : "minus.circle")
+                                Image(systemName: finding.isOpen ? "circle" : finding.status == .fixed ? "checkmark.circle.fill"
+                                    : finding.status == .unconfirmed ? "questionmark.circle" : "minus.circle")
                                     .font(.system(size: 9)).foregroundStyle(finding.isOpen ? Color.secondary : finding.status == .fixed ? Color.green : Color.secondary)
                                     .accessibilityHidden(true)
                                 Text(Self.findingText(finding)).font(.system(size: 11.5)).textSelection(.enabled)
@@ -156,10 +165,12 @@ struct TeamRowDetails: View {
         return nil
     }
 
-    /// "Important · 1 open of 2".
+    /// "Important · 1 open of 2", "Nit · 1 open of 3, 1 unconfirmed".
     static func groupTitle(_ severity: LeadFinding.Severity, _ findings: [LeadFinding]) -> String {
         let open = findings.filter(\.isOpen).count
+        let unconfirmed = findings.filter { $0.status == .unconfirmed }.count
         return "\(severity.rawValue) · " + (open == findings.count ? "\(open) open" : "\(open) open of \(findings.count)")
+            + (unconfirmed > 0 ? ", \(unconfirmed) unconfirmed" : "")
     }
 
     /// "F1 b.txt:1 — evidence (fixed in round 2)", "… (dismissed by the lead: reason → task fix-a)".
@@ -167,6 +178,7 @@ struct TeamRowDetails: View {
         var text = "\(finding.id) \(finding.place) — \(finding.evidence)"
         switch finding.status {
         case .open: break
+        case .unconfirmed: text += " (unconfirmed\(finding.reason.map { ": \($0)" } ?? ""))"
         case .fixed: text += " (fixed\(finding.closed.map { " in round \($0)" } ?? ""))"
         case .dismissed:
             text += " (dismissed\(finding.closedBy == "lead" ? " by the lead" : "")\(finding.reason.map { ": \($0)" } ?? "")"

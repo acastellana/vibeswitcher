@@ -27,6 +27,11 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// How many workers and verifiers may run at once across every project the session host knows
     /// (`mac_max_sessions:`); start_worker and audit refuse at it.
     public var macMaxSessions = 6
+    /// How many finders an audit runs (`audit_finders:`, 1 to `maxFinders`): 1 is one verifier, as before; 2 or 3
+    /// run that many with different focuses on one shared build and test run, and a vote keeps what most of them found.
+    public var auditFinders = 1
+    /// How many new Nit findings one audit's vote keeps (`audit_nit_cap:`); the rest are left out, counted.
+    public var auditNitCap = 5
     /// What the owner chose once for merges (`merge_policy:`); nil until they did (then the lead asks them, and merge
     /// treats it as ask_sensitive).
     public var mergePolicy: MergePolicy?
@@ -68,6 +73,8 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "test_timeout_min": workflow.testTimeoutMinutes = minutes(value) ?? Worktrees.testTimeout / 60
                 case "load_threshold": workflow.loadThreshold = positive(value)
                 case "mac_max_sessions": workflow.macMaxSessions = max(1, Int(value) ?? 6)
+                case "audit_finders": workflow.auditFinders = min(maxFinders, max(1, Int(value) ?? 1))
+                case "audit_nit_cap": workflow.auditNitCap = max(0, Int(value) ?? 5)
                 // One it can't read asks for everything rather than merging what the owner meant to see.
                 case "merge_policy": workflow.mergePolicy = present.map { MergePolicy(text: $0) ?? .askAll }
                 case "sensitive_paths": workflow.sensitivePaths = globs(value)
@@ -84,6 +91,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     }
 
     public static let defaultRecordsDir = "docs/lead"
+
+    /// The most finders an audit runs: contract and acceptance, bugs and regressions, and security or tests.
+    public static let maxFinders = 3
 
     /// A `records_dir:` value as a folder inside the repository ("docs/lead", without slashes around it); nil when
     /// it's empty or isn't one (absolute, `..`, or in `.git` or `.vibeswitcher`): the logs then stay local.
@@ -260,7 +270,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// The settings the lead may change with `configure`.
     public static let configurable = ["test_command", "init_command", "base_branch", "verifier_model", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "load_threshold", "mac_max_sessions",
-                                      "merge_policy", "sensitive_paths", "records_dir"]
+                                      "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "records_dir"]
 
     /// `data` with each setting's line changed (an empty value clears it), added when missing; every other line, the
     /// comments, unknown keys, the notes, the line endings and a BOM stay as they were.
@@ -381,6 +391,12 @@ public struct LeadWorkflow: Equatable, Sendable {
     load_threshold:
     # How many workers and verifiers may run at once across all projects on this Mac.
     mac_max_sessions: 6
+    # How many finders an audit runs: 1 is one verifier. 2 or 3 run that many with different focuses (contract and
+    # acceptance; bugs and regressions; security when sensitive_paths are touched, else tests), on one build and test
+    # run the audit makes first; a vote keeps the findings most of them found. Each counts against mac_max_sessions.
+    audit_finders: 1
+    # How many new Nit findings one audit's vote keeps.
+    audit_nit_cap: 5
     # How merges are handled, chosen once by the owner: auto (audited work merges, you get an update afterwards),
     # ask_sensitive (a commit touching sensitive_paths waits for your approval of that exact commit) or ask_all.
     # Empty: not chosen yet; the lead asks you once, and until then merges are handled as ask_sensitive.
@@ -479,7 +495,11 @@ public enum LeadPrompts {
         <task>:<id>) to make it a task of its own (good for Pre-existing ones and worthwhile Nits). After \
         \(LeadAuditLedger.roundCap) audits in a row that left Important findings open, the task's status line says \
         "reconsider the approach": don't send the worker back for another round; re-plan the task (update_task with a \
-        sharper contract or another approach, then status planned) or ask the user.
+        sharper contract or another approach, then status planned) or ask the user. With audit_finders 2 or 3, audit \
+        first builds and tests the commit once (it takes as long as the suite) and starts that many finders on its \
+        logs, each with a focus; the verdict arrives once all have submitted, voted: a finding most of them raised is \
+        open, the rest unconfirmed (shown, never blocking: dismiss_finding or add_task(from_finding:) one that's real). \
+        Each finder counts against mac_max_sessions; when audit says there's no room, wait or lower audit_finders.
         7. Keep the board, the progress log and decisions (record_decision) current. They are your memory: when your \
         context fills up, a new lead continues from them.
         8. When the same mistake happens twice, add a task that turns it into a check (a test, a lint rule), not a note.
@@ -643,14 +663,78 @@ public enum LeadPrompts {
         }
     }
 
-    public static func verifier(task: LeadTask, root: String, workflow: LeadWorkflow, reaudit: Reaudit? = nil) -> String {
+    /// What one of an audit's finders looks for (audit_finders 2 or 3).
+    public enum Focus: String, Sendable, CaseIterable {
+        case contract = "contract and acceptance"
+        case bugs = "bugs and regressions"
+        case bugsAndSecurity = "bugs, regressions and security"
+        case security = "security"
+        case tests = "tests and edge cases"
+
+        /// An audit's `count` finders' focuses: the contract, bugs, then security when the branch touches
+        /// sensitive_paths (else the tests); two finders fold security into the bugs one.
+        public static func panel(_ count: Int, sensitive: Bool) -> [Focus] {
+            let all: [Focus] = count == 2 && sensitive ? [.contract, .bugsAndSecurity] : [.contract, .bugs, sensitive ? .security : .tests]
+            return Array(all.prefix(max(1, count)))
+        }
+
+        func brief(sensitive: [String]) -> String {
+            let touched = sensitive.prefix(8).joined(separator: ", ") + (sensitive.count > 8 ? ", …" : "")
+            switch self {
+            case .contract:
+                return "the contract. Run each acceptance check (a focused test for each, not the whole suite again), compare what the branch does with its goal, and look for edits outside the boundaries, weakened or deleted tests, hard-coded results, leftovers and anything that only looks done."
+            case .bugs:
+                return "bugs and regressions. Read the change line by line with the code around it and its callers: wrong conditions, cases it misses, errors it swallows, races, state it leaves behind, and what it breaks that worked before (the test log shows any failure)."
+            case .bugsAndSecurity:
+                return "bugs, regressions and security. Read the change line by line with the code around it and its callers: wrong conditions, cases it misses, errors it swallows, races, what it breaks that worked before; and since it touches sensitive paths (\(touched)), what it lets in or out: permissions, secrets, commands built from input, trust of what sessions or files say."
+            case .security:
+                return "security: the branch touches sensitive paths (\(touched)). What it lets in or out: permissions, secrets, commands built from input, trust of what sessions or files say, and settings or hooks that would run in other sessions."
+            case .tests:
+                return "the tests: whether they test what the contract says and would fail without the change, any weakened, skipped or flaky one, and edge cases the change doesn't handle."
+            }
+        }
+    }
+
+    /// One of an audit's finders, as its prompt tells it: its focus, and the shared build and test run it reads.
+    public struct Finder: Equatable, Sendable {
+        public var index: Int
+        public var size: Int
+        public var focus: Focus
+        /// The commit the shared run built and tested, its logs, and how it went.
+        public var commit: String
+        public var logs: [String]
+        public var run: String
+        /// The sensitive paths the branch touches.
+        public var sensitive: [String]
+        public var nitCap: Int
+    }
+
+    /// A finder's part of the verifier's prompt: its focus, the shared run's logs instead of a run of its own, and
+    /// the vote its findings go to.
+    static func finding(_ finder: Finder) -> String {
+        let logs = finder.logs.isEmpty ? "(no log was written)" : finder.logs.map { "- \($0)" }.joined(separator: "\n")
+        return """
+        You are finder \(finder.index) of \(finder.size) in this audit. Your focus: \(finder.focus.brief(sensitive: finder.sensitive))
+        The audit built the branch and ran the whole test suite once, at \(finder.commit.prefix(8)), under a scratch home, \
+        before starting its finders: \(finder.run). Its logs, for every finder:
+        \(logs)
+        Read them (grep for what you need; they're long). Don't build the whole project or run the whole suite again: \
+        the logs are that run. Run only focused tests (one test or a filter) for what you need to see yourself.
+        The other finders check the same branch with other focuses, and a vote decides: a finding most finders raise \
+        (the same file, severity and line, give or take \(LeadAuditVote.lineTolerance)) stays open; one fewer raise is \
+        kept as unconfirmed, which doesn't hold the merge back. So give each finding its exact file and line. At most \
+        \(finder.nitCap) new Nits are kept in all: give only the ones that matter.
+        """
+    }
+
+    public static func verifier(task: LeadTask, root: String, workflow: LeadWorkflow, reaudit: Reaudit? = nil, finder: Finder? = nil) -> String {
         """
         You are the verifier for a task of the project lead of \(root). You are read-only: don't edit, fix, commit or \
         stage anything. Check the branch agent/\(task.slug) in this worktree against its contract, independently of \
         what the worker said.
-
+        \(finder.map { "\n" + finding($0) + "\n" } ?? "")
         \(reaudit.map(recheck) ?? """
-        Check: run every acceptance check\(workflow.testCommand.map { " and `\($0)`" } ?? ""); read the whole change \
+        Check: run every acceptance check\(finder != nil ? "" : workflow.testCommand.map { " and `\($0)`" } ?? ""); read the whole change \
         (`git diff \(workflow.base)...HEAD`, `git log \(workflow.base)..HEAD`); look for edits outside the boundaries, weakened or deleted \
         tests, hard-coded results, leftovers and anything that only looks done.
         """)

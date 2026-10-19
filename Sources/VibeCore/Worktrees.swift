@@ -603,13 +603,24 @@ public enum Worktrees {
         }
         guard cancel?.isCancelled != true else { return .cancelled }
         let tested = Git.run(["rev-parse", "HEAD"], in: path).output
+        return runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout).stopped ?? .passed(tested)
+    }
+
+    /// Runs `setup` then `test` (each when given) in `path` with HOME, CFFIXED_USER_HOME and TMPDIR in `home` (made
+    /// here, removed by the caller), as merge and an audit's shared run do. `stopped`: nil when every command passed,
+    /// else how it stopped (failed, hung, cancelled, or the home couldn't be made); `outputs`: each command that ran,
+    /// with all of its output, in order.
+    static func runChecks(setup: String?, test: String?, in path: String, home: String, timeout: TimeInterval)
+        -> (stopped: Check?, outputs: [(name: String, output: String)]) {
+        let cancel = ShellCancel.current
         let tmp = home + "/tmp"
         do {
             try FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         } catch {
-            return .error("Couldn't make the scratch home \(home) to run the tests in: \(error.localizedDescription)")
+            return (.error("Couldn't make the scratch home \(home) to run the tests in: \(error.localizedDescription)"), [])
         }
         let header = "HOME, CFFIXED_USER_HOME and TMPDIR: \(home) (a scratch folder, removed afterwards)\n"
+        var outputs: [(name: String, output: String)] = []
         for (name, command) in [("init_command", setup), ("test command", test)] {
             guard let command, !command.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
             // HOME only once the login shell has read the user's own startup files (their PATH, from their home); the
@@ -618,13 +629,95 @@ public enum Worktrees {
             // All of it, in order: what failed may be anywhere in it, and its tail is often a build's warnings.
             let run = Shell.run(executable: "/bin/zsh", args: ["-lc", script], in: path,
                                 env: ["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"], timeout: timeout, interleaved: true)
-            if run.cancelled || cancel?.isCancelled == true { return .cancelled }
-            if run.timedOut { return .hung(command: name, after: timeout, output: header + run.output) }
+            outputs.append((name, header + run.output))
+            if run.cancelled || cancel?.isCancelled == true { return (.cancelled, outputs) }
+            if run.timedOut { return (.hung(command: name, after: timeout, output: header + run.output), outputs) }
             guard run.ok else {
-                return .failed((name == "init_command" ? "init_command failed:\n" : "") + header + run.output)
+                return (.failed((name == "init_command" ? "init_command failed:\n" : "") + header + run.output), outputs)
             }
         }
-        return .passed(tested)
+        return (nil, outputs)
+    }
+
+    /// An audit's shared run (audit_finders 2 or 3): `setup` and `test` on exactly `commit`, as the branch is (not
+    /// rebased), in a detached worktree of its own at `scratch` under a scratch home, both removed afterwards. Each
+    /// command's whole output goes to `<logs>/init.log` and `<logs>/test.log` for the finders to read, with
+    /// `<logs>/run.txt` saying how it went (written last: a folder without it holds no finished run).
+    public static func auditRun(root: String, commit: String, setup: String?, test: String?, scratch: URL, home: URL,
+                                logs: URL, timeout: TimeInterval = testTimeout) -> AuditRun {
+        let path = scratch.path, homePath = home.path
+        let remove = {
+            ShellCancel.with(nil) {
+                Git.run(["worktree", "remove", "--force", path], in: root)
+                try? FileManager.default.removeItem(atPath: path)
+                Git.run(["worktree", "prune"], in: root)
+                try? FileManager.default.removeItem(atPath: homePath)
+            }
+        }
+        if FileManager.default.fileExists(atPath: path) || FileManager.default.fileExists(atPath: homePath) { remove() }
+        try? FileManager.default.removeItem(at: logs)
+        do {
+            try FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+            try FileManager.default.createDirectory(at: scratch.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                    attributes: [.posixPermissions: 0o700])
+        } catch { return AuditRun(outcome: .error("Couldn't make \(logs.path) for the run's logs: \(error.localizedDescription)"), logs: []) }
+        defer { remove() }
+        let added = Git.run(["worktree", "add", "--detach", "-q", path, commit], in: root)
+        guard added.ok else {
+            return AuditRun(outcome: .error(added.error.isEmpty ? "Couldn't set up a worktree to test \(commit.prefix(8)) in." : added.error), logs: [])
+        }
+        let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: homePath, timeout: timeout)
+        var files: [String] = []
+        for (name, output) in outputs {
+            let file = logs.appendingPathComponent(name == "init_command" ? "init.log" : "test.log")
+            if (try? Data(output.utf8).write(to: file, options: .atomic)) != nil { files.append(file.path) }
+        }
+        let outcome: AuditRun.Outcome
+        switch stopped {
+        case nil: outcome = outputs.contains { $0.name == "test command" } ? .passed : .noTests
+        case .failed: outcome = .failed(outputs.last?.name ?? "test command")
+        case .hung(let command, let after, _): outcome = .hung(command, after: after)
+        case .cancelled: outcome = .cancelled
+        case .error(let text): outcome = .error(text)
+        case .passed, .conflict: outcome = .error("unexpected")
+        }
+        if case .cancelled = outcome { return AuditRun(outcome: outcome, logs: files) }
+        try? Data((outcome.text + "\n").utf8).write(to: logs.appendingPathComponent("run.txt"), options: .atomic)
+        return AuditRun(outcome: outcome, logs: files)
+    }
+
+    /// An audit's shared build and test run: how it went and its logs.
+    public struct AuditRun: Equatable, Sendable {
+        public enum Outcome: Equatable, Sendable {
+            case passed
+            /// No test_command: only init_command ran, if any.
+            case noTests
+            /// That command failed (init_command or the test command).
+            case failed(String)
+            case hung(String, after: TimeInterval)
+            case cancelled
+            case error(String)
+
+            /// "the test command passed", "init_command failed", …: what the finders and the lead are told.
+            public var text: String {
+                switch self {
+                case .passed: return "the test command passed"
+                case .noTests: return "no test_command is set, so no tests ran"
+                case .failed(let command): return "\(command) failed"
+                case .hung(let command, let after): return "\(command) hung, stopped after \(Worktrees.duration(after))"
+                case .cancelled: return "cancelled"
+                case .error(let text): return "it couldn't run: \(text)"
+                }
+            }
+        }
+        public var outcome: Outcome
+        /// The logs written, init.log first.
+        public var logs: [String]
+
+        public init(outcome: Outcome, logs: [String]) {
+            self.outcome = outcome
+            self.logs = logs
+        }
     }
 
     /// How long the merge queue's commands may run before they're taken as hung: generous, a full build and test run

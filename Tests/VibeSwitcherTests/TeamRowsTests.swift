@@ -115,6 +115,31 @@ struct TeamRowsTests {
         #expect(TeamRowDetails.findingText(groups[0].findings[1]) == "F3 a.swift:9 — leak (dismissed by the lead: not ours → task fix-leak)")
     }
 
+    /// An audit by several finders: the row says how many have submitted, and waits on the first that hasn't (one
+    /// that has may end); an unconfirmed finding is shown as such.
+    @Test func anAuditByFindersShowsWhoHasSubmitted() throws {
+        var task = Self.task("fix", .review)
+        task.verifier = "v1"
+        task.panel = LeadAuditPanel(focuses: ["contract and acceptance", "bugs and regressions", "tests and edge cases"], sessions: ["v1", "v2", "v3"],
+                                    reported: [1], commit: "c1", logs: ["/r/.vibeswitcher/audit/fix/c1/test.log"], run: "the test command passed")
+        #expect(task.awaitedVerifiers == ["v2", "v3"])
+        #expect(task.awaitedVerifier() == "v2")
+        let row = row(task, ["v1": Self.ended, "v2": Self.working, "v3": Self.working])
+        #expect(row.mark == .review, "finder 1 ended after submitting: not a verifier that ended without a verdict")
+        #expect(row.activity == "3 finders, 1 reported · Running swift test")
+        #expect(self.row(task, ["v1": Self.ended, "v2": Self.ended, "v3": Self.working]).mark == .ended)
+        // A later finder that ends while an earlier one works is seen at once.
+        #expect(self.row(task, ["v1": Self.ended, "v2": Self.working, "v3": Self.ended]).mark == .ended)
+
+        var audits = LeadAuditLedger()
+        try audits.record([.init(severity: .nit, file: "b.swift", line: 2, evidence: "typo")],
+                          unconfirmed: [.init(severity: .nit, file: "b.swift", line: 9, evidence: "naming", status: .unconfirmed, reason: "1 of 3 finders saw it: finder 2")],
+                          commit: "c1", passes: true)
+        let nits = try #require(audits.bySeverity.first?.findings)
+        #expect(TeamRowDetails.groupTitle(.nit, nits) == "Nit · 1 open of 2, 1 unconfirmed")
+        #expect(TeamRowDetails.findingText(nits[1]) == "F2 b.swift:9 — naming (unconfirmed: 1 of 3 finders saw it: finder 2)")
+    }
+
     @Test func aSessionWaitingOnYouNeedsYouWithoutAClock() {
         let asking = Self.member(needsYou: true, working: false, activity: nil, detail: "Which database?")
         let row = row(Self.task("fix", .running), ["w-fix": asking])

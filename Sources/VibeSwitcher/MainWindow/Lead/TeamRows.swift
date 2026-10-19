@@ -173,9 +173,11 @@ enum TeamRows {
     /// gone (false: nothing is known of the missing ones).
     static func row(_ task: LeadTask, seen: [String: MemberSeen], listed: Bool = false) -> TeamRow {
         let worker = task.worker.flatMap { seen[$0] }
-        let verifier = task.verifier.flatMap { seen[$0] }
+        // With several finders, the first that hasn't submitted (one that has may end while the others work).
+        let awaited = task.awaitedVerifier { seen[$0].map { !$0.live } ?? listed }
+        let verifier = awaited.flatMap { seen[$0] }
         let workerGone = listed && task.worker != nil && worker == nil
-        let verifierGone = listed && task.verifier != nil && verifier == nil
+        let verifierGone = listed && awaited != nil && verifier == nil
         var row = TeamRow(task: task, group: .queued, mark: .queued, state: "Queued", since: nil,
                           checkpoint: task.checkpoints?.last, activity: nil, problem: nil, agent: nil)
 
@@ -257,6 +259,10 @@ enum TeamRows {
                 row.agent = task.verifier
                 row.activity = verifier.flatMap { $0.working ? ($0.activity ?? "Checking the work") : nil }
                     ?? (task.verifier == nil ? "Waiting for the audit" : nil)
+                // Several finders: how many have submitted, before what one of them does.
+                if let panel = task.panel, task.evidence == nil {
+                    row.activity = panel.progress + (row.activity.map { " · \($0)" } ?? "")
+                }
             }
         case .failed:
             if let audits = task.audits, audits.reconsider {

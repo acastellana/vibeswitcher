@@ -81,7 +81,17 @@ blocks and a Pre-existing one never fails the task. The lead resolves each one: 
 handed the open findings and the diff since the audited commit, marks it fixed (it checks that diff only, and never
 raises a closed finding again); or `dismiss_finding` closes it with a reason; or `add_task(from_finding: task:F2)`
 makes it a task of its own. After three audits in a row that left Important findings open, the task's status says
-"reconsider the approach" and the lead re-plans it or asks you, instead of another round. The lead's
+"reconsider the approach" and the lead re-plans it or asks you, instead of another round. With `audit_finders: 2`
+or `3` in `workflow.md` (1, one verifier, is the default), an audit runs that many **finders** instead, each with its
+own focus (contract and acceptance; bugs and regressions; security when the branch touches `sensitive_paths`, else
+the tests). `audit` first builds and tests the audited commit once, in a scratch worktree under a scratch home as
+`merge` does, and hands every finder its logs (`.vibeswitcher/audit/<task>/<commit>/`), so they read code and logs
+and run only focused tests: an audit costs one suite, not one per finder. Each finder counts against
+`mac_max_sessions`, and `audit` refuses, saying so, when the Mac hasn't room for all of them. Their findings are voted
+by a fixed rule (the same file, severity and line give or take 3): one most finders raised is kept open, the rest stay
+in view as **unconfirmed**, which never holds a merge back; new Nits past `audit_nit_cap` (5) are left out, counted.
+The vote is one verdict and one round of findings, so the merge gate and the round cap work as above; `status`,
+`board(task)` and the Team tab show how many finders have submitted and how the vote went. The lead's
 branch is the one checked out when it first starts in the repository (`base_branch:` in `workflow.md` changes it);
 workers start from it. Then the lead
 removes the worktree and branch, and tells you what landed in a few lines. Before merging it checks that nothing
@@ -174,11 +184,11 @@ program of its choosing (only the app may ask for a handover; anyone else's is r
 anything), or end another session through the host (only the app, the session itself or one started from it, and
 its team's lead may). Nor can it get its own commands run as the lead, or loosen the rules its work is merged by:
 `workflow.md`'s guard rails (its test and setup commands, which `merge` runs as the lead; `merge_policy` and
-`sensitive_paths`; `records_dir`; `max_workers`, `mac_max_sessions` and `load_threshold`, each as the team reads it,
+`sensitive_paths`; `records_dir`; `max_workers`, `mac_max_sessions`, `load_threshold`, `audit_finders` and `audit_nit_cap`, each as the team reads it,
 so a line left out is its default) count only as the lead last
 set them with `configure` (the host keeps a hash of each, and takes one only from the app or the lead). When the file
 says anything else, whether a worker's Bash wrote it or a branch's committed copy was merged over it, `merge` and
-`start_worker` refuse, naming the setting, until the lead sets it with `configure`; so do your own edits of those
+`start_worker` refuse (and `audit`: for `audit_finders` and `audit_nit_cap`, and with several finders for all of them, since its shared run runs the test and setup commands as the lead), naming the setting, until the lead sets it with `configure`; so do your own edits of those
 lines by hand, until the lead sets them.
 Nor can it have the app write a session's screen where it says: no notification to the app reads one, and a
 window capture's view tree leaves the terminals' text out. Only the verifier the

@@ -98,7 +98,9 @@ public enum LeadWitness {
                     }
                 }
             }
-            if task.status == .review, task.evidence == nil, let verifier = task.verifier, let info = seen[verifier] {
+            // With several finders, each that hasn't submitted yet.
+            for verifier in task.status == .review && task.evidence == nil ? task.awaitedVerifiers : [] {
+                guard let info = seen[verifier] else { continue }
                 if info.live, !info.agentQuit, let error = info.apiError {
                     events.append(("\(verifier)|api-error-\(Int(info.apiErrorAt ?? 0))", "The verifier on \(task.slug) stopped mid-audit: its turn ended on an API error (\(error)). Tell the user, or audit again."))
                 } else if !info.live || info.agentQuit {
@@ -145,7 +147,8 @@ public enum LeadWitness {
                     lines.append(("\(worker)|ended", "worker on \(task.slug): its agent quit, leaving the session's shell open", .stopFirst))
                 }
             }
-            if task.status == .review, task.evidence == nil, let verifier = task.verifier, let info = seen[verifier], !info.live || info.agentQuit {
+            for verifier in task.status == .review && task.evidence == nil ? task.awaitedVerifiers : [] {
+                guard let info = seen[verifier], !info.live || info.agentQuit else { continue }
                 lines.append(("\(verifier)|ended", "verifier on \(task.slug): \(info.live ? "its agent quit, leaving the session's shell open" : info.ending)", .verifier))
             }
         }

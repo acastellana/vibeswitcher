@@ -106,6 +106,24 @@ struct LeadWitnessTests {
         #expect(events.allSatisfy { key in ["w1", "v1", "w2", "w3"].contains { key.key.contains($0) } })
     }
 
+    /// An audit by finders: one that submitted and ended is no news; one that ended without submitting is, whichever
+    /// it is, even while an earlier one still works.
+    @Test func eachFinderThatHasntSubmittedIsWatched() {
+        let now = Date()
+        var board = LeadBoard()
+        var audited = task("judging", .review, worker: "w0", verifier: "v1")
+        audited.panel = LeadAuditPanel(focuses: ["contract and acceptance", "bugs and regressions", "tests and edge cases"], sessions: ["v1", "v2", "v3"],
+                                       reported: [1], commit: "c1", logs: [], run: "the test command passed")
+        board.tasks = [audited]
+        let seen: [String: LeadWitness.Seen] = [
+            "w0": .init(live: true, status: .idle, since: now - 5), "v1": .init(live: false, exit: 0),
+            "v2": .init(live: true, status: .working, since: now - 5), "v3": .init(live: false, exit: 1),
+        ]
+        let events = LeadWitness.events(board: board, seen: seen, now: now)
+        #expect(events.map(\.key) == ["v3|ended"], "\(events.map(\.text))")
+        #expect(LeadWitness.messages(board: board, seen: seen, now: now, told: { _ in false }).flatMap(\.keys) == ["v3|ended"])
+    }
+
     @Test func anAgentThatQuitLeavingItsShellHasEnded() {
         let now = Date()
         var board = LeadBoard()

@@ -25,9 +25,49 @@ public struct LeadVault: Sendable {
         public var session: String?
         /// For a verifier: the branch's commit it was asked to check.
         public var auditing: String?
+        /// For a verifier that's one of an audit's finders (audit_finders 2 or 3): which one, of how many.
+        public var finder: Finder?
         public var issuedAt: Double
         /// Who asked for it: only they bind or withdraw it.
         public var issuer: Caller
+    }
+
+    /// One of an audit's finders: its findings and verdict go in as its ballot, and once every finder of its panel
+    /// has cast one the vault votes them into the task's one verdict and findings (see `LeadAuditVote`).
+    public struct Finder: Codable, Equatable, Sendable {
+        /// The audit it's part of (the same for all its finders).
+        public var panel: String
+        /// 1-based, of `size`.
+        public var index: Int
+        public var size: Int
+        public var focus: String
+        /// workflow.md's audit_nit_cap when the audit started.
+        public var nitCap: Int
+
+        public init(panel: String, index: Int, size: Int, focus: String, nitCap: Int) {
+            self.panel = panel
+            self.index = index
+            self.size = size
+            self.focus = focus
+            self.nitCap = nitCap
+        }
+    }
+
+    /// The ballots an audit's finders cast so far, until its vote.
+    public struct Ballots: Codable, Equatable, Sendable {
+        public var panel: String
+        public var commit: String
+        public var cast: [LeadAuditVote.Ballot] = []
+        /// The vote ran: no ballot is taken after it.
+        public var voted = false
+    }
+
+    /// What a verifier's submission came to: its verdict, or (one of several finders) its ballot counted, with the
+    /// verdict once the last finder's ballot made the vote.
+    public struct Submission: Equatable, Sendable {
+        public var verdict: Verdict?
+        public var cast: Int
+        public var of: Int
     }
 
     /// A verdict as the verifier's own session gave it.
@@ -60,7 +100,9 @@ public struct LeadVault: Sendable {
         /// A grant for a role (the lead's from the app only; a worker's or verifier's from the repository's lead only).
         /// It replaces the role's earlier one: only the newest session holds the role. A new verifier also voids the
         /// task's verdict.
-        case issue(role: LeadLaunch.Role, root: String, task: String?, auditing: String?)
+        /// `finder`: a verifier that's one of an audit's finders; it replaces only the task's verifiers from other
+        /// audits (and the same finder of its own).
+        case issue(role: LeadLaunch.Role, root: String, task: String?, auditing: String?, finder: Finder? = nil)
         case bind(grant: String, root: String, session: String)
         case revoke(grant: String, root: String)
         /// The task is over: its worker's and verifier's grants and its verdict go (the lead).
@@ -73,6 +115,8 @@ public struct LeadVault: Sendable {
         case submitVerdict(root: String, completion: LeadEvidence.Completion, integrity: LeadEvidence.Integrity, summary: String,
                            findings: [LeadFinding.Report]? = nil)
         case verdict(root: String, task: String)
+        /// The ballots the task's finders cast so far.
+        case ballots(root: String, task: String)
         /// The task's findings and audit rounds.
         case audits(root: String, task: String)
         /// The lead closes one of a task's open findings with a reason (and the task it became, if one did).
@@ -112,7 +156,10 @@ public struct LeadVault: Sendable {
         case grant(String)
         case member(Member?)
         case verdict(Verdict?)
+        /// A finder's ballot was taken: how many of how many are in, and the verdict once they all are.
+        case ballot(cast: Int, of: Int, verdict: Verdict?)
         case audits(LeadAuditLedger?)
+        case ballots(Ballots?)
         case head(String?)
         case seal(String)
         case verified([Bool])
@@ -154,8 +201,8 @@ public struct LeadVault: Sendable {
 
     // MARK: Grants
 
-    public func issue(role: LeadLaunch.Role, root: String, task: String?, auditing: String? = nil) throws -> String {
-        guard case .grant(let grant) = try call(.issue(role: role, root: root, task: task, auditing: auditing)) else { throw Self.unexpected }
+    public func issue(role: LeadLaunch.Role, root: String, task: String?, auditing: String? = nil, finder: Finder? = nil) throws -> String {
+        guard case .grant(let grant) = try call(.issue(role: role, root: root, task: task, auditing: auditing, finder: finder)) else { throw Self.unexpected }
         return grant
     }
 
@@ -223,9 +270,26 @@ public struct LeadVault: Sendable {
     @discardableResult
     public func submitVerdict(root: String, completion: LeadEvidence.Completion, integrity: LeadEvidence.Integrity,
                               summary: String, findings: [LeadFinding.Report]? = nil) throws -> Verdict {
-        guard case .verdict(let verdict?) = try call(.submitVerdict(root: root, completion: completion, integrity: integrity,
-                                                                   summary: summary, findings: findings)) else { throw Self.unexpected }
+        guard let verdict = try submit(root: root, completion: completion, integrity: integrity, summary: summary, findings: findings).verdict else {
+            throw Self.unexpected
+        }
         return verdict
+    }
+
+    /// A verifier's verdict and findings: recorded (one verifier), or cast as its ballot (one of several finders).
+    public func submit(root: String, completion: LeadEvidence.Completion, integrity: LeadEvidence.Integrity,
+                       summary: String, findings: [LeadFinding.Report]? = nil) throws -> Submission {
+        switch try call(.submitVerdict(root: root, completion: completion, integrity: integrity, summary: summary, findings: findings)) {
+        case .verdict(let verdict?): return Submission(verdict: verdict, cast: 1, of: 1)
+        case .ballot(let cast, let of, let verdict): return Submission(verdict: verdict, cast: cast, of: of)
+        default: throw Self.unexpected
+        }
+    }
+
+    /// The ballots an audit's finders cast so far (nil: the task's audit has no finders).
+    public func ballots(root: String, task: String) -> Ballots? {
+        guard case .ballots(let ballots)? = try? call(.ballots(root: root, task: task)) else { return nil }
+        return ballots
     }
 
     public func verdict(root: String, task: String) -> Verdict? {
@@ -361,6 +425,8 @@ extension LeadVault {
             var guarded: [String: String]?
             /// The commits you approved merging, by task, newest last (optional: older vaults have none).
             var approvals: [String: [String]]?
+            /// Each task's audit by several finders: their ballots until the vote (optional: older vaults have none).
+            var ballots: [String: Ballots]?
 
             /// Takes the members `drop` picks out; the sessions the workers and verifiers among them were bound to
             /// become `former`.
@@ -531,18 +597,29 @@ extension LeadVault {
 
         private func answer(_ request: Request, from caller: Caller, userOpened: Bool, changed: inout Bool) -> Reply {
             switch request {
-            case .issue(let role, let root, let task, let auditing):
+            case .issue(let role, let root, let task, let auditing, let finder):
                 if role == .lead {
                     guard caller == .app else { return .refused("Only VibeSwitcher starts a project lead.") }
                 } else {
                     guard isLead(caller, root) else { return .refused("Only the repository's lead starts workers and verifiers.") }
                     guard task != nil else { return .refused("A worker or verifier is for a task.") }
                 }
+                let finder = role == .verifier ? finder : nil
+                if let finder, !(1...max(1, finder.size)).contains(finder.index) || finder.size < 2 || finder.panel.isEmpty {
+                    return .refused("A finder is one of 2 or more, numbered from 1.")
+                }
                 let member = Member(id: UUID().uuidString, role: role, task: role == .lead ? nil : task, session: nil,
-                                    auditing: auditing, issuedAt: Date().timeIntervalSince1970, issuer: caller)
+                                    auditing: auditing, finder: finder, issuedAt: Date().timeIntervalSince1970, issuer: caller)
                 change(root, &changed) { team in
-                    team.remove { $0.role == role && $0.task == member.task }
-                    if role == .verifier, let task { team.verdicts[task] = nil }
+                    // A finder replaces the verifiers of other audits and its own earlier self, not its panel's others.
+                    team.remove { other in
+                        other.role == role && other.task == member.task
+                            && (finder == nil || other.finder?.panel != finder?.panel || other.finder?.index == finder?.index)
+                    }
+                    if role == .verifier, let task {
+                        team.verdicts[task] = nil
+                        if team.ballots?[task]?.panel != finder?.panel { team.ballots?[task] = nil }
+                    }
                     team.members.append(member)
                 }
                 return .grant(member.id)
@@ -572,6 +649,7 @@ extension LeadVault {
                     // A new task of the same name starts with none.
                     team.audits?[task] = nil
                     team.approvals?[task] = nil
+                    team.ballots?[task] = nil
                 }
                 return .ok
             case .whoami(let root):
@@ -584,6 +662,11 @@ extension LeadVault {
                       let member = team(root)?.members.first(where: { $0.session == session }), member.role == .verifier,
                       let task = member.task, let commit = member.auditing else {
                     return .refused("Only the verifier VibeSwitcher's lead started on a task gives its verdict, from its own session.")
+                }
+                if let finder = member.finder {
+                    return castBallot(finder, root: root, task: task, commit: commit, session: session, changed: &changed,
+                                      LeadAuditVote.Ballot(finder: finder.index, focus: finder.focus, completion: completion, integrity: integrity,
+                                                           summary: summary, findings: findings ?? []))
                 }
                 let verdict = Verdict(task: task, completion: completion, integrity: integrity, summary: summary, commit: commit,
                                       verifier: member.id, session: session, at: Date().timeIntervalSince1970)
@@ -599,6 +682,8 @@ extension LeadVault {
                 return .verdict(team(root)?.verdicts[task])
             case .audits(let root, let task):
                 return .audits(team(root)?.audits?[task])
+            case .ballots(let root, let task):
+                return .ballots(team(root)?.ballots?[task])
             case .dismissFinding(let root, let task, let id, let reason, let followUp):
                 guard isLead(caller, root) else { return .refused("Only the lead dismisses a finding.") }
                 guard var ledger = team(root)?.audits?[task] else { return .refused("\(task) has no findings.") }
@@ -690,6 +775,42 @@ extension LeadVault {
         }
 
         private func team(_ root: String) -> Team? { state.teams[LeadVault.key(root)] }
+
+        /// A finder's ballot: its findings checked against the task's ledger as one audit's would be (refused whole,
+        /// as a verifier's are), then kept, in place of an earlier one of its own. The last of its panel's ballots makes
+        /// the vote: one verdict and one set of findings on the ledger, from the verifier `current` names (finder 1),
+        /// so merge reads it as any audit's.
+        private func castBallot(_ finder: Finder, root: String, task: String, commit: String, session: String, changed: inout Bool,
+                                _ ballot: LeadAuditVote.Ballot) -> Reply {
+            var ledger = team(root)?.audits?[task] ?? LeadAuditLedger()
+            do {
+                var trial = ledger
+                try trial.record(ballot.findings, commit: commit, passes: ballot.passes)
+            } catch { return .refused("\(error)") }
+            var ballots = team(root)?.ballots?[task].flatMap { $0.panel == finder.panel ? $0 : nil } ?? Ballots(panel: finder.panel, commit: commit)
+            guard !ballots.voted else { return .refused("The finders' vote on \(task) is done; this audit takes no more findings.") }
+            ballots.cast.removeAll { $0.finder == ballot.finder }
+            ballots.cast.append(ballot)
+            ballots.cast.sort { $0.finder < $1.finder }
+            guard ballots.cast.count >= finder.size else {
+                change(root, &changed) { $0.ballots = ($0.ballots ?? [:]).merging([task: ballots]) { $1 } }
+                return .ballot(cast: ballots.cast.count, of: finder.size, verdict: nil)
+            }
+            let vote = LeadAuditVote.tally(ballots.cast, size: finder.size, ledger: ledger, nitCap: finder.nitCap)
+            do {
+                try ledger.record(vote.reports, unconfirmed: vote.unconfirmed, vote: vote.outcome, commit: commit, passes: vote.passes)
+            } catch { return .refused("The finders' vote on \(task) couldn't be recorded (\(error)); nothing was. The lead audits again.") }
+            let first = team(root)?.members.first { $0.role == .verifier && $0.task == task }
+            let verdict = Verdict(task: task, completion: vote.completion, integrity: vote.integrity, summary: vote.summary, commit: commit,
+                                  verifier: first?.id ?? "", session: first?.session ?? session, at: Date().timeIntervalSince1970)
+            ballots.voted = true
+            change(root, &changed) { team in
+                team.verdicts[task] = verdict
+                team.audits = (team.audits ?? [:]).merging([task: ledger]) { $1 }
+                team.ballots = (team.ballots ?? [:]).merging([task: ballots]) { $1 }
+            }
+            return .ballot(cast: ballots.cast.count, of: finder.size, verdict: verdict)
+        }
 
         /// Why `caller` may not seal a message as `sender`'s (nil: it may). The user's words are the app's to seal;
         /// a lead's, a lead's (or the app's, passing them on); VibeSwitcher's, the app's, but for the reports a
