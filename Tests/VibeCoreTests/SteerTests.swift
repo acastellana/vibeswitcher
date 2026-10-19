@@ -33,6 +33,18 @@ struct SteerTests {
         #expect(SteerInbox.delivered(tty: "ttys001", root: root) == ["a", "b"])
     }
 
+    /// A scratch folder spelled `/private/tmp/…` that doesn't exist yet: Foundation spells it `/tmp/…` once it does,
+    /// and the message sealed before must still be the user's when it's taken (2026-10-19, ChatSyncTests under a
+    /// TMPDIR in /private/tmp: the steer came out as "a message marked as the user's that VibeSwitcher didn't send").
+    @Test func aUsersMessageStaysTheirsWhenItsFolderIsMadeByThePost() throws {
+        let root = temp.adopt(URL(fileURLWithPath: "/private/tmp/vs-steer-\(UUID().uuidString)"))
+        #expect(!FileManager.default.fileExists(atPath: root.path))
+        try SteerInbox.post(message("use the staging database", id: "a"), tty: "ttys001", root: root)
+        let taken = SteerInbox.take(tty: "ttys001", agentPid: 42, root: root)
+        #expect(taken.map(\.text) == ["use the staging database"])
+        #expect(taken.map(\.from) == [.user])
+    }
+
     @Test func messagesForAnEarlierAgentOnTheSameTerminalAreDropped() throws {
         let root = try root()
         try SteerInbox.post(message("stale", pid: 7, id: "old"), tty: "ttys001", root: root)

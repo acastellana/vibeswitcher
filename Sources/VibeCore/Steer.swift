@@ -256,7 +256,18 @@ public struct SteerSeal: Sendable {
     }
 
     public static func `for`(_ root: URL) -> SteerSeal {
-        root.standardizedFileURL.path == VibePaths.root.standardizedFileURL.path ? .host : .scratch(root)
+        place(root) == place(VibePaths.root) ? .host : .scratch(root)
+    }
+
+    /// The folder however it's written, and whether it exists yet or not: Foundation's standardized path drops
+    /// `/private` from `/private/tmp/…` only once the folder exists, so a key looked up by it before the first post
+    /// made the folder wasn't the one found after (and a scratch inbox's user messages failed their seals).
+    static func place(_ root: URL) -> String {
+        var path = root.standardizedFileURL.path
+        for top in ["/private/tmp", "/private/var", "/private/etc"] where path == top || path.hasPrefix(top + "/") {
+            path = String(path.dropFirst("/private".count))
+        }
+        return path
     }
 
     /// The session host's key. A host that answers but doesn't vouch for them (one older than the app) counts as no seal.
@@ -279,7 +290,7 @@ public struct SteerSeal: Sendable {
     private static func scratchKey(_ root: URL) -> SymmetricKey {
         scratchLock.lock()
         defer { scratchLock.unlock() }
-        let path = root.standardizedFileURL.path
+        let path = place(root)
         if let key = scratchKeys[path] { return key }
         let key = SymmetricKey(size: .bits256)
         scratchKeys[path] = key
