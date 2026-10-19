@@ -282,7 +282,8 @@ struct ActivityRow: View {
                 trailing.append("exit \(code)")
                 spoken.append("exit code \(code)")
             } else if command.background {
-                trailing.append("in background")
+                // Not the glossary's "in background", which is a session's state.
+                trailing.append("sent to background")
                 spoken.append("running in the background")
             } else if command.running {
                 spoken.append("running")
