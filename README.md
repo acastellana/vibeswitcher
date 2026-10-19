@@ -159,8 +159,9 @@ process tree it's in; a connection that anything else then sends on (a child it 
 exec) counts as no one. The app is the app only once it proves it on that connection: the host greets each
 connection with a fresh challenge, and only the app's code (its cdhash, the one of the app beside the host, not its
 path), outside every session, answering with an HMAC under the app's key, counts as the app. That key sits in your
-login Keychain in an item only the app's code reads without asking (`security find-generic-password -w` in a
-worker's shell makes macOS ask you), and in the host's vault; the app hands it to a host it starts on the host's
+login Keychain in an item only the app reads without asking (`security find-generic-password -w` in a
+worker's shell makes macOS ask you; "the app" there is its signing identity, not its exact build: see
+[Security: the signing identity](#security-the-signing-identity)), and in the host's vault; the app hands it to a host it starts on the host's
 stdin, and neither ever logs it or an answer. So whatever the kernel names as the connection's process when the host
 reads it, a connection the app didn't make isn't the app's. So a worker's Bash,
 whether it runs the tool server as the verifier or the lead or writes to the socket itself, is the worker (or,
@@ -351,6 +352,9 @@ How it's kept safe:
 ./scripts/build-app.sh --install        # builds, copies to /Applications, launches
 ```
 
+With the signing identity (`scripts/setup-signing.sh`, see [Development](#development)), macOS asks for the
+signing keychain's password as the build signs.
+
 On first launch a short welcome window sets VibeSwitcher up. Every step says why it's needed, shows its live
 state, and can be skipped; Settings (⌘,) › General › **Show Welcome…** brings the window back.
 
@@ -388,6 +392,41 @@ hooks and can be deleted by hand.
 Everything stays on your Mac, readable only by you (`~/.vibeswitcher` is `0700`, its files `0600`). The hook writes a few facts per terminal (last event, your last prompt, the
 agent's last message, both truncated) to `~/.vibeswitcher/state/`, and the app reads them plus Terminal's
 tab titles. The Today totals are kept per day in `~/.vibeswitcher/stats/` (project names and seconds). Nothing is sent anywhere. Delete `~/.vibeswitcher` to remove all of it.
+
+## Security: the signing identity
+
+`scripts/setup-signing.sh` makes the self-signed "VibeSwitcher Local Signing" identity every build is signed with,
+so macOS keeps your permissions across rebuilds. Whatever is signed with it is VibeSwitcher to macOS: it keeps the
+Accessibility and Automation permissions you gave the app, and it reads the app's Keychain key without asking. The
+key's access list (`AppProof.appOnlyAccess`, `SecTrustedApplicationCreateFromPath`) binds the app's designated
+requirement, which for a build signed with the identity is `identifier "dev.vibeswitcher.VibeSwitcher" and
+certificate leaf = H"…"`: the identity, not the cdhash. Checked (2026-10-19) with an item made the same way in a
+scratch keychain: another binary with the same identifier and identity, but a different cdhash, read it with no
+prompt; an ad-hoc signed one (whose requirement is its cdhash: why a rebuild without the identity is another
+program to the Keychain) and one with another identifier were refused. The host's vault key is bound the same
+way, to the host's identifier and the identity. So the identity is kept from everything but you:
+
+- Its key can't be exported, and only `/usr/bin/codesign` may use it; anything else that tries makes macOS ask you.
+- Its keychain (`~/.vibeswitcher/signing`) stays locked. Its password is one you choose in `setup-signing.sh`,
+  never saved and never on a command line (where `ps` shows it to any process). Each `build-app.sh` run makes
+  macOS ask you for it in a dialog when codesign first signs, and locks the keychain again when the build ends
+  (and after 5 minutes, or on sleep, if it doesn't). A dialog asking for it when you didn't start a build is
+  something else trying to sign as VibeSwitcher: cancel it.
+- `scripts/test-signing.sh` fails if anything in `scripts/` passes a keychain password as an argument; with
+  `--build` it runs the setup and a build on a scratch HOME and checks the key, the lock and the signatures.
+- An identity made by an earlier `setup-signing.sh` (its password saved in `~/.vibeswitcher/signing/password`,
+  its key exportable) is refused by `build-app.sh`; run `./scripts/setup-signing.sh` in Terminal to replace it.
+  macOS asks for VibeSwitcher's permissions and Keychain items once more. It still holds the permissions you gave
+  the old identity until you reset them (the script prints the `tccutil` commands), and the app's Keychain items
+  still trust it (Keychain Access › the item › Access Control), so a copy of the old key, if one was taken, signs
+  a binary those trust.
+
+What a process running as you can still do: while a build has the keychain unlocked (the seconds codesign runs),
+run `/usr/bin/codesign` with the identity itself. A binary signed that way, or by you answering a dialog it
+caused, is VibeSwitcher to macOS: it gets the app's permissions, the app's Keychain key and, signed as
+`vibeswitcher-host`, the host's vault key (so the sealed vault on disk). It still isn't the app to the session
+host, which takes as the app only the exact code beside it (its cdhash, checked on each connection) answering
+with that key: holding the key isn't being the app.
 
 ## How status is detected
 
@@ -489,9 +528,11 @@ own HOME, only when you ask for it: `VIBESWITCHER_KEYCHAIN_LIVE=1 swift test --f
 It makes an item under a test service of its own (never the app's) and deletes it. The load harness and
 the lead's worker and verifier prompts never set that variable.
 
-Run `./scripts/setup-signing.sh` once: it creates a self-signed signing identity in its own keychain
-file (`~/.vibeswitcher/signing`, your login keychain is untouched) so every rebuild keeps the same code
-identity, and trusts that certificate for code signing (your user only; macOS asks for your password).
+Run `./scripts/setup-signing.sh` once, in Terminal: it creates a self-signed signing identity in its own
+keychain file (`~/.vibeswitcher/signing`, your login keychain is untouched) so every rebuild keeps the same code
+identity, and trusts that certificate for code signing (your user only; macOS asks for your password). You choose
+the signing keychain's password there; every `build-app.sh` run then asks for it in a dialog as it signs (see
+[Security: the signing identity](#security-the-signing-identity)). `scripts/test-signing.sh` checks the scripts.
 macOS only keeps a permission across rebuilds for a trusted signature: otherwise, ad-hoc or not, it pins
 the Accessibility and Automation permissions to the exact build and silently drops them on the next one,
 while System Settings still shows them as on.

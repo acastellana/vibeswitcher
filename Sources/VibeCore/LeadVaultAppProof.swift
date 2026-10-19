@@ -76,8 +76,12 @@ public enum AppProof {
         }
     }
 
-    /// Who reads the item without macOS asking you: this program's code only (never "any application"); anything
-    /// else that asks (`security find-generic-password -w` in a worker's shell) gets a prompt naming it.
+    /// Who reads the item without macOS asking you: this program only (never "any application"); anything else that
+    /// asks (`security find-generic-password -w` in a worker's shell) gets a prompt naming it. The access list holds
+    /// this program's designated requirement: for a build signed with the local identity, its identifier and
+    /// certificate, not its cdhash, so any binary signed with that identity and identifier reads it too (checked in a
+    /// scratch keychain: README, "Security: the signing identity"); for an ad-hoc build, its cdhash. Being the app to
+    /// the host takes its cdhash as well (`AppCode`).
     static func appOnlyAccess() -> SecAccess? {
         var me: SecTrustedApplication?
         var access: SecAccess?
