@@ -866,14 +866,18 @@ final class PhoneAccess: ObservableObject {
             return respond(.error(400, "missing option"))
         }
         let sid = session.identity, tty = session.tty
-        if let answer = answered[sid], answer.until > Date(), answer.fingerprint == fingerprint {
-            return respond(.error(409, "Still taking your last answer. Check the screen before tapping again."))
+        let busy = { [weak self] in
+            self?.answered[sid].map { $0.until > Date() && $0.fingerprint == fingerprint } == true
         }
+        let stillAnswering = HTTPResponse.error(409, "Still taking your last answer. Check the screen before tapping again.")
+        if busy() { return respond(stillAnswering) }
         // On the main thread, with the screen just read: the session checked again, its menu noted, the tap decided.
+        // Asked again here: another tap (this phone's or another's) may have answered it while the screen was read.
         let decide = { [weak self] (raw: String?) -> MenuTap in
             guard let self, self.store.sessions.first(where: { $0.tty == tty })?.identity == sid else {
                 return .refuse(.error(409, Self.sessionChanged))
             }
+            if busy() { return .refuse(stillAnswering) }
             guard let raw else { return .refuse(.error(503, "Couldn't read that tab right now.")) }
             let needsInput = self.store.sessions.first { $0.identity == sid }?.status == .needsInput
             self.menus[sid] = (Date(), PhoneMenu.detect(screen: raw, needsInput: needsInput))
