@@ -515,13 +515,24 @@ final class LeadController: ObservableObject {
     /// Your answer: recorded on the board and delivered to the lead (steered in while it works, typed while idle).
     /// `question` is the card as you saw it: the answer is tied to that version, so if the lead revised it meanwhile
     /// it's told which wording you answered; if the lead had withdrawn it, the card says so and the lead gets your
-    /// answer as a note.
+    /// answer as a note. An answer approving a held merge ("Approve <commit>") is recorded in the vault too, where
+    /// merge looks for it (see `LeadVault.recordApproval`).
     func answer(_ question: LeadQuestion, root: String, with text: String) {
         let store = BoardStore(root: root)
-        reads.async({ _ in (try? store.update { board in board.answer(question.id, with: text, saw: question.version) }) ?? .missing }) { [weak self] outcome in
+        let vault = self.vault
+        reads.async({ _ -> (LeadAnswerOutcome, String?) in
+            let outcome = (try? store.update { board in board.answer(question.id, with: text, saw: question.version) }) ?? .missing
+            guard case .answered(let answered, _) = outcome else { return (outcome, nil) }
+            do {
+                guard let tasks = try vault.recordApproval(text, of: answered, root: root) else { return (outcome, nil) }
+                return (outcome, tasks.isEmpty ? "No task's branch is at that commit now, so the approval wasn't recorded: merge won't take it." : nil)
+            } catch {
+                return (outcome, "Your approval wasn't recorded, so merge won't take it: \(error)")
+            }
+        }) { [weak self] outcome, approval in
             guard let self else { return }
             switch outcome {
-            case .answered: self.answerNotices[question.id] = nil
+            case .answered: self.answerNotices[question.id] = approval
             case .withdrawn(let withdrawn):
                 self.answerNotices[question.id] = "Withdrawn before your answer: \(withdrawn.withdrawReason ?? "no reason given"). The lead got your answer as a note."
             case .afterAutoDecision(let decided):

@@ -42,11 +42,19 @@ struct LeadMergePolicyTests: LeadTeamFixture {
         return Git.run(["rev-parse", "agent/change"], in: root).output
     }
 
-    /// The user answers a question in the app.
+    /// The user answers a question in the app: on the board, and (an approval) in the vault, as the app records it.
     func answer(_ root: String, _ text: String, asked: String = "Merge change?", options: [String]? = nil) throws {
+        let outcome = try forged(root, text, asked: asked, options: options)
+        guard case .answered(let question, _) = outcome else { Issue.record("not answered: \(outcome)"); return }
+        try vault.recordApproval(text, of: question, root: root)
+    }
+
+    /// An answer written into board.json only, as a lead's or worker's Bash can: the app never saw it.
+    @discardableResult
+    func forged(_ root: String, _ text: String, asked: String = "Merge change?", options: [String]? = nil) throws -> LeadAnswerOutcome {
         try BoardStore(root: root).update { board in
             let question = board.ask(asked, options: options ?? [text, "Not yet"], priority: .blocking, whyNow: nil, proposal: nil, decideIn: nil)
-            _ = board.answer(question.id, with: text, saw: question.version)
+            return board.answer(question.id, with: text, saw: question.version)
         }
     }
 

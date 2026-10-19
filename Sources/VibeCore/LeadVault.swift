@@ -92,6 +92,10 @@ public struct LeadVault: Sendable {
         case guarded(root: String)
         /// The app, or the repository's lead: these settings' hashes, by key, are the lead's now (the others stay).
         case setGuarded(root: String, hashes: [String: String])
+        /// The app only: you approved merging the task at this commit (see `LeadVault.recordApproval`).
+        case approve(root: String, task: String, commit: String)
+        /// Whether you approved merging the task at exactly this commit.
+        case approved(root: String, task: String, commit: String)
     }
 
     public enum Reply: Codable, Equatable, Sendable {
@@ -106,6 +110,7 @@ public struct LeadVault: Sendable {
         case startedOver(Double?)
         case move(BaseMove)
         case guarded([String: String]?)
+        case approved(Bool)
     }
 
     /// The host said no, or couldn't be asked.
@@ -323,6 +328,8 @@ extension LeadVault {
             /// workflow.md's guard rails as the lead last set them (`LeadVault.guardedHashes`); nil until it did
             /// (optional: older vaults have none).
             var guarded: [String: String]?
+            /// The commits you approved merging, by task, newest last (optional: older vaults have none).
+            var approvals: [String: [String]]?
 
             /// Takes the members `drop` picks out; the sessions the workers and verifiers among them were bound to
             /// become `former`.
@@ -531,6 +538,8 @@ extension LeadVault {
                 change(root, &changed) { team in
                     team.remove { $0.task == task }
                     team.verdicts[task] = nil
+                    // A new task of the same name starts with none.
+                    team.approvals?[task] = nil
                 }
                 return .ok
             case .whoami(let root):
@@ -610,6 +619,21 @@ extension LeadVault {
                 guard caller == .app || isLead(caller, root) else { return .refused("Only VibeSwitcher or the lead records workflow.md's guard rails.") }
                 change(root, &changed) { $0.guarded = ($0.guarded ?? [:]).merging(hashes) { $1 } }
                 return .ok
+            case .approve(let root, let task, let commit):
+                // Only your answer in the app approves a merge: not the lead that asks for it, nor a worker whose
+                // work it is, whatever they write on the board.
+                guard caller == .app else { return .refused("Only VibeSwitcher records your approval of a merge, when you answer in it.") }
+                let commit = commit.lowercased()
+                guard LeadVault.isFullCommit(commit) else { return .refused("An approval names a whole commit (\(commit.prefix(12)) isn't one).") }
+                guard !task.isEmpty else { return .refused("An approval is for a task.") }
+                change(root, &changed) { team in
+                    var approvals = team.approvals ?? [:]
+                    approvals[task] = Array(((approvals[task] ?? []).filter { $0 != commit } + [commit]).suffix(20))
+                    team.approvals = approvals
+                }
+                return .ok
+            case .approved(let root, let task, let commit):
+                return .approved(team(root)?.approvals?[task]?.contains(commit.lowercased()) == true)
             }
         }
 

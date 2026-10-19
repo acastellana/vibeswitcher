@@ -950,7 +950,8 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// The owner's merge policy (workflow.md's merge_policy): a commit it holds back waits for the user's answer
-    /// approving that exact commit (`LeadWorkflow.approves`), as the app recorded it on the board.
+    /// approving that exact commit for this task, as the app recorded it in the vault when they answered (the board's
+    /// copy of the answer is for showing: the team can write board.json).
     private func checkMergePolicy(_ task: LeadTask, commit: String) throws {
         let workflow = self.workflow
         // The policy as the lead set it, not as a worker rewrote it.
@@ -959,14 +960,21 @@ public final class LeadToolset: MCPToolset {
         let diff = Git.run(["diff", "--name-only", "\(workflow.base)...\(commit)"], in: root)
         guard diff.ok else { throw Problem(text: "Not merged: can't tell which files \(task.slug) changes (\(diff.error)), so the merge policy can't be checked.") }
         let changed = diff.output.split(whereSeparator: \.isNewline).map(String.init)
-        guard let files = workflow.filesNeedingApproval(changed),
-              !store.load().questions.contains(where: { LeadWorkflow.approves($0, commit: commit) }) else { return }
+        guard let files = workflow.filesNeedingApproval(changed) else { return }
+        let approved: Bool
+        do { approved = try vault.approved(root: root, task: task.slug, commit: commit) } catch {
+            throw Problem(text: "Not merged: the vault can't say whether the user approved \(task.slug) at \(commit.prefix(8)) (\(error)).")
+        }
+        if approved { return }
+        // An approval only the board shows wasn't given in the app: it doesn't count.
+        let boardOnly = store.load().questions.contains { LeadWorkflow.approves($0, commit: commit) }
+            ? " The board shows an approval of \(commit.prefix(8)), but the user gave none in VibeSwitcher for \(task.slug): only their answer there counts." : ""
         let policy = workflow.mergePolicy?.rawValue ?? "ask_sensitive (no merge_policy is set yet: ask the owner once which one they want, then set it with configure)"
         let touches = files.isEmpty ? "" : " It touches " + files.prefix(8).joined(separator: ", ") + (files.count > 8 ? ", …" : "") + "."
         throw Problem(text: "Not merged yet: the merge policy is \(policy), so the user approves \(task.slug) at \(commit.prefix(8)) first.\(touches) "
             + "Ask once: ask_user(question: \"Merge \(task.slug) (\(task.title)) at \(commit.prefix(8))? …what it changes and the risk…\", "
             + "options: [\"\(LeadWorkflow.approval(of: commit))\", \"Not yet\"], priority: blocking), with no timer, and merge again when they approve. "
-            + "The approval covers this commit only: a new commit needs a new one.")
+            + "The approval covers this commit only: a new commit needs a new one.\(boardOnly)")
     }
 
     /// A failed merge's test run, told by what failed: the failing tests and their lines first (the output's end
