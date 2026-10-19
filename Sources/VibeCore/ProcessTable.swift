@@ -96,12 +96,12 @@ public enum ProcessTable {
 
     /// A process's record: its parent, owner and state from its short record (any user's); name, terminal and start
     /// time from its full one (only the user's own processes give it), or else the kernel's record of that one process
-    /// (sysctl KERN_PROC_PID); which agent it is from its name or argv. A zombie is gone: it has ended.
+    /// (sysctl KERN_PROC_PID); which agent it is from its name or argv. A zombie, or one on its way out, has ended.
     static func record(_ pid: pid_t, arguments: ArgumentCache) -> Record {
         var short = proc_bsdshortinfo()
         let shortSize = Int32(MemoryLayout<proc_bsdshortinfo>.size)
         guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, shortSize) == shortSize else { return failure() }
-        if short.pbsi_status == SZOMB { return .gone }
+        if short.pbsi_status == SZOMB || short.pbsi_flags & UInt32(PROC_FLAG_INEXIT) != 0 { return .gone }
         let comm: String
         let device: dev_t
         let start: timeval
@@ -137,7 +137,14 @@ public enum ProcessTable {
         switch identity {
         case .agent(let found): agent = found
         case .none: agent = nil
-        case .unknown: return proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, shortSize) == shortSize ? .unreadable : failure()
+        case .unknown:
+            // One on its way out (its argv gone first) has ended; one still running that can't be told is no table.
+            guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, shortSize) == shortSize else { return failure() }
+            if short.pbsi_status == SZOMB || short.pbsi_flags & UInt32(PROC_FLAG_INEXIT) != 0 { return .gone }
+            // Except a fork that hasn't exec'd (a shell's subshell, for the moment its argv can't be read, EIO): it runs
+            // its parent's program, never a session of its own.
+            guard short.pbsi_flags & UInt32(PROC_FLAG_EXEC) == 0 else { return .unreadable }
+            agent = nil
         }
         return .found(ProcInfo(pid: pid, ppid: Int32(short.pbsi_ppid), tty: tty, comm: comm, startTime: date(start), agent: agent))
     }
