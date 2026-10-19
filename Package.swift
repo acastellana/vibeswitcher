@@ -1,6 +1,10 @@
 // swift-tools-version:6.0
 import PackageDescription
 
+// Each test target refuses to run on the user's own ~/.vibeswitcher, checked as its bundle loads (`@_section`, an
+// initializer: `refuseTheAccountRoot` in its TestSupport.swift).
+let testSettings: [SwiftSetting] = [.enableExperimentalFeature("SymbolLinkageMarkers")]
+
 let package = Package(
     name: "VibeSwitcher",
     platforms: [.macOS(.v14)],
@@ -21,13 +25,14 @@ let package = Package(
         .executableTarget(name: "vibeswitcher-hook", dependencies: ["VibeCore"]),
         // The project lead's tool server (MCP over stdio) for the lead, its workers and its verifiers.
         .executableTarget(name: "vibeswitcher-mcp", dependencies: ["VibeCore"]),
-        .testTarget(name: "VibeCoreTests", dependencies: ["VibeCore"]),
+        .testTarget(name: "VibeCoreTests", dependencies: ["VibeCore"], swiftSettings: testSettings),
         // Depends on the host executable too: sessions are started through it (`--pty-exec`). Fixtures: terminal
         // output captured from scratch programs.
         .testTarget(name: "VibeHostTests", dependencies: ["VibeHost", "VibeCore", "vibeswitcher-host"],
-                    resources: [.copy("Fixtures")]),
+                    resources: [.copy("Fixtures")], swiftSettings: testSettings),
         // The app's menus and window commands. The host too: a scratch one runs the sessions of a test of the app's client.
-        .testTarget(name: "VibeSwitcherTests", dependencies: ["VibeSwitcher", "VibeCore", "VibeHost", "vibeswitcher-host"]),
+        .testTarget(name: "VibeSwitcherTests", dependencies: ["VibeSwitcher", "VibeCore", "VibeHost", "vibeswitcher-host"],
+                    swiftSettings: testSettings),
     ],
     swiftLanguageModes: [.v5]
 )

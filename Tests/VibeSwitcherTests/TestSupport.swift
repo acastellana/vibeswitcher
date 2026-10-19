@@ -1,4 +1,20 @@
 import Foundation
+import VibeCore
+
+/// Set when `refuseTheAccountRoot` has run (a test in each target checks it did).
+var homeGuardRan = false
+
+/// Runs as the test bundle loads (a Mach-O initializer, like a C constructor), before any test: a run whose VibeSwitcher
+/// folder is the user's own ~/.vibeswitcher stops here, with one message and no test run. Tests write there (logs,
+/// state, the lead's files); a run on a scratch HOME alone used to reach the user's app.log (E-30 + R10). A scratch
+/// home under the user's home (a worktree's .build/scratchhome) runs: only that one folder is refused.
+@_used @_section("__DATA,__mod_init_func")
+private let refuseTheAccountRoot: @convention(c) () -> Void = {
+    homeGuardRan = true
+    guard let refusal = VibePaths.testRefusal() else { return }
+    FileHandle.standardError.write(Data((refusal + "\n").utf8))
+    exit(78)
+}
 
 /// How long a wait may go on before the test calls it hung. Every wait ends as soon as what it waits for happens;
 /// this is only a guard, sized for a Mac running several suites at once (load 100+), never a measure of speed.
