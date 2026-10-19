@@ -145,9 +145,16 @@ public enum HostCall {
         try queue.sync { _ = try connection.send(.hello(protocolVersion: HostProtocol.version, app: "vibeswitcher-mcp")) }
         guard done.wait(timeout: .now() + timeout) == .success else { throw Failure(description: "The session host didn't answer in time.") }
         if let unsent = queue.sync(execute: { unsent }) { throw Failure(description: "\(unsent)") }
-        return queue.sync {
-            if closed && sessions == nil { return ([], nil, nil) }
-            return (sessions ?? [], reply, refusal)
+        return try queue.sync {
+            // A host that drops the connection (handing over to a new build, stopping: its clients' fds don't go
+            // with it) has no sessions to tell and answered nothing: never "no sessions".
+            guard let sessions else {
+                throw Failure(description: "The session host closed the connection before its welcome (it may be restarting).")
+            }
+            if closed, request != nil, expectsReply, reply == nil, refusal == nil {
+                throw Failure(description: "The session host closed the connection before answering (it may be restarting).")
+            }
+            return (sessions, reply, refusal)
         }
     }
 }
