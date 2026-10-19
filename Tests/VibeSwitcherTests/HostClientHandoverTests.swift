@@ -23,6 +23,8 @@ struct HostClientHandoverTests {
         case refuse(String)
         /// The new build's probe takes this long (a loaded Mac's first exec), then the rest as `then`.
         case after(TimeInterval, then: OnHandover)
+        /// The probe goes on for as long as the test does.
+        case hold
     }
 
     /// A host on its own socket: welcomes every hello with one live session and the handover capability.
@@ -115,6 +117,8 @@ struct HostClientHandoverTests {
                 send(.error(message), replyTo: seq, on: fd)
             case .after(let delay, let then):
                 queue.asyncAfter(deadline: .now() + delay) { [weak self] in self?.handOver(then, replyTo: seq, on: fd) }
+            case .hold:
+                break
             }
         }
 
@@ -202,10 +206,21 @@ struct HostClientHandoverTests {
     }
 
     /// The host's probe of the new build takes past a request's 15 s (a loaded Mac's first exec waits on amfid): the
-    /// handover is waited for, with a breadcrumb every 15 s, and logged as handed over; never as failed first. Any
-    /// other request still gets its 15 s.
+    /// handover is waited for, with a breadcrumb every 15 s, and logged as handed over; never as failed first.
     @Test func aProbePastFifteenSecondsIsWaitedFor() async throws {
-        let host = try FakeHost(pid: 31589, build: 8, onHandover: .after(17, then: .reExec(build: 9)))
+        let host = try FakeHost(pid: 31589, build: 8, onHandover: .after(20, then: .reExec(build: 9)))
+        defer { host.stop() }
+        let log = Log()
+        let client = client(of: host, log: log)
+        #expect(await until { client.state == .connected })
+        #expect(log.handover == ["host: handed over (pid 31589, build 9)"], "\(log.lines)")
+        #expect(log.lines.contains("host: handover: waiting for the new build's probe, 15 s"), "\(log.lines)")
+        #expect(!log.lines.contains { $0.contains("didn't answer") || $0.contains("no answer") }, "\(log.lines)")
+    }
+
+    /// While a handover is waited for, any other request still gets its 15 s.
+    @Test func otherRequestsKeepTheirFifteenSecondsDuringAHandover() async throws {
+        let host = try FakeHost(pid: 31589, build: 8, onHandover: .hold)
         defer { host.stop() }
         let log = Log()
         let client = client(of: host, log: log)
@@ -213,12 +228,12 @@ struct HostClientHandoverTests {
         let asked = Date()
         var screen: (text: String?, after: TimeInterval)?
         client.screen(UUID()) { screen = ($0, Date().timeIntervalSince(asked)) }
-        #expect(await until { client.state == .connected })
-        #expect(log.handover == ["host: handed over (pid 31589, build 9)"], "\(log.lines)")
-        #expect(log.lines.contains("host: handover: waiting for the new build's probe, 15 s"), "\(log.lines)")
-        #expect(!log.lines.contains { $0.contains("didn't answer") || $0.contains("no answer") }, "\(log.lines)")
+        #expect(await until { screen != nil })
         let unanswered = try #require(screen)
         #expect(unanswered.text == nil && unanswered.after >= 14.9, "\(unanswered)")
+        // The handover is still waited for.
+        #expect(log.handover.isEmpty && !log.lines.contains { $0.contains("no answer") }, "\(log.lines)")
+        #expect(client.state == .outdated(live: 1, compatible: true))
     }
 
     /// The handover's wait runs out and the host hands over after it: the connection was kept, and the new build's
