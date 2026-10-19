@@ -439,7 +439,9 @@ private struct ComposerTextView: NSViewRepresentable {
     var cardKey: (AnswerKeys.Key) -> Bool = { _ in false }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let textView = ComposerNSTextView()
+        // TextKit 1 from the start: `measure` asks for the layout manager, which switches a TextKit 2 view over, and
+        // the TextKit 2 views it drops (content, selection, viewport) stayed alive, one set per chat opened.
+        let textView = ComposerNSTextView(usingTextLayoutManager: false)
         textView.attachImage = attachImage
         textView.cardKey = cardKey
         textView.delegate = context.coordinator
