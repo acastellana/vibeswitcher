@@ -605,7 +605,7 @@ enum HostApp {
         configuration.addsToRecentItems = false
         NSWorkspace.shared.openApplication(at: url, configuration: configuration)
     }
-    private static let requests = DispatchQueue(label: "vibeswitcher.host-app.activate", qos: .utility, attributes: .concurrent)
+    private static let requests = DispatchQueue(label: "vibeswitcher.host-app.activate", qos: .userInitiated, attributes: .concurrent)
 
     /// Returns at once from any thread: the main thread yields our activation to `app` (UI state, async), then
     /// `request` runs on `requests`.

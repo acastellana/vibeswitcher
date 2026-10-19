@@ -34,34 +34,35 @@ struct HostAppMainThreadTests {
     }
 
     /// Runs `call` off the main thread with `HostApp.request` replaced by one that takes `requestTime`; main-queue
-    /// blocks are timed every 0.1 s from just before it starts (as `PhoneMainThreadTests.whileReading` does).
+    /// blocks are timed every 0.1 s from the moment it starts (it schedules them), so a main thread held by other tests
+    /// before then doesn't count. A request on the main thread, or one it waits for, holds every one of them.
     private func whileRequesting(_ call: @escaping @Sendable () -> Void) async throws -> Waited {
         let started = Box<Date?>(nil), finished = Box<Date?>(nil), onMain = Box(false), requested = Box<[Int32]>([])
+        let ran = Box<[(due: Date, at: Date)]>([]), steps = Int(Self.requestTime * 10)
         let original = HostApp.request
         defer { HostApp.request = original }
         HostApp.request = { app in
             if Thread.isMainThread { onMain.value = true }
             requested.value.append(app.processIdentifier)
             guard started.value == nil else { return }
-            started.value = Date()
+            let origin = Date()
+            started.value = origin
+            for step in 1...steps {
+                let delay = 0.1 * Double(step)
+                DispatchQueue.main.asyncAfter(deadline: .now() + delay) { ran.value.append((origin + delay, Date())) }
+            }
             Thread.sleep(forTimeInterval: Self.requestTime)
             finished.value = Date()
         }
         let done = Box(false)
-        var ran: [(due: Date, at: Date)] = []
-        let origin = Date(), steps = Int(Self.requestTime * 10)
-        for step in 1...steps {
-            let delay = 0.1 * Double(step)
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { ran.append((origin + delay, Date())) }
-        }
         DispatchQueue.global(qos: .userInitiated).async {
             call()
             done.value = true
         }
-        #expect(await until(timeout: 15) { done.value && finished.value != nil && ran.count == steps })
+        #expect(await until { done.value && finished.value != nil && ran.value.count == steps })
         let start = try #require(started.value), end = try #require(finished.value)
         #expect(end.timeIntervalSince(start) >= Self.requestTime - 0.05)
-        let during = ran.filter { $0.due > start && $0.due < end - 0.15 }
+        let during = ran.value.filter { $0.due > start && $0.due < end - 0.15 }
         #expect(during.count >= steps / 2, "only \(during.count) blocks were due during the request")
         return Waited(requested: requested.value, requestOnMain: onMain.value,
                       lateness: during.map { $0.at.timeIntervalSince($0.due) })
