@@ -8,6 +8,23 @@ import VibeCore
 final class HostTerminalView: TerminalView {
     var onReply: ((Data) -> Void)?
 
+    #if DEBUG
+    /// For `--idle-bench`: the terminal views alive now (made and freed on the main thread).
+    static var live = 0
+
+    override init(frame: CGRect, font: NSFont? = nil, options: TerminalOptions) {
+        super.init(frame: frame, font: font, options: options)
+        Self.live += 1
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        Self.live += 1
+    }
+
+    deinit { Self.live -= 1 }
+    #endif
+
     override func send(source: Terminal, data: ArraySlice<UInt8>) {
         onReply?(Data(data))
     }

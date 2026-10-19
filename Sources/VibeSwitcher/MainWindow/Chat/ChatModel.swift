@@ -86,7 +86,16 @@ final class ChatModel: ObservableObject {
         self.outbox = outbox
         self.home = home
         self.steerRoot = steerRoot
+        #if DEBUG
+        Self.live += 1
+        #endif
     }
+
+    #if DEBUG
+    /// For `--idle-bench`: the chat models alive now (made and freed on the main thread).
+    static var live = 0
+    deinit { Self.live -= 1 }
+    #endif
     /// The composer (row draft key) whose conversation this is: its outbox is matched against this transcript.
     private(set) var outboxKey: String?
     /// Run, on code blocks.
