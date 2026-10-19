@@ -254,8 +254,9 @@ struct DiskSpaceTests: LeadTeamFixture {
         // The disk is full: one notice, the reports still waiting, none of them handed.
         let first = try #require(stop(root, disk: true, written: &written))
         let object = try #require(try JSONSerialization.jsonObject(with: first) as? [String: Any])
-        #expect(object["decision"] as? String == "block")
-        let reason = try #require(object["reason"] as? String)
+        let specific = try #require(object["hookSpecificOutput"] as? [String: Any])
+        #expect(specific["hookEventName"] as? String == "Stop")
+        let reason = try #require(specific["additionalContext"] as? String)
         #expect(reason.contains("disk is probably full"))
         #expect(reason.contains("7 messages wait"))
         #expect(!reason.contains("report 1"))
