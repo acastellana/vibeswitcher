@@ -367,26 +367,12 @@ public struct LeadVault: Sendable {
 
     /// Creates `folder` (and what's under it up to `url`) private to you.
     public func ensurePrivate(_ url: URL) throws {
-        var created: [URL] = []
-        var current = url
-        while current.path.hasPrefix(folder.path), !FileManager.default.fileExists(atPath: current.path) {
-            created.append(current)
-            current = current.deletingLastPathComponent()
-        }
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        for directory in created + [folder] { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: directory.path) }
+        try VibePaths.ensurePrivate(url, within: folder)
     }
 
-    /// Writes a file only you can read (0600), atomically.
+    /// Writes a file only you can read (0600), atomically (`VibePaths.writePrivate`).
     public static func writePrivate(_ data: Data, to url: URL) throws {
-        let temporary = url.deletingLastPathComponent().appendingPathComponent(".\(url.lastPathComponent).\(UUID().uuidString)")
-        guard FileManager.default.createFile(atPath: temporary.path, contents: data, attributes: [.posixPermissions: 0o600]) else {
-            throw CocoaError(.fileWriteNoPermission)
-        }
-        guard rename(temporary.path, url.path) == 0 else {
-            unlink(temporary.path)
-            throw CocoaError(.fileWriteUnknown)
-        }
+        try VibePaths.writePrivate(data, to: url)
     }
 
     static func hash(_ text: String) -> String {

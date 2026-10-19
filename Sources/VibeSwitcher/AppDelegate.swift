@@ -115,6 +115,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             hooksInstalled: Dictionary(uniqueKeysWithValues: Agent.allCases.map { ($0, HookInstaller.isInstalled(agent: $0)) }))
         HookBinary.sync()
         VibePaths.ensurePrivateDirectories()
+        PrivateRepair.atLaunch()
         hostClient.connectIfRunning()
         // Leads' witness and questions work with the window closed too.
         _ = leadController

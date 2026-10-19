@@ -186,12 +186,25 @@ public final class LeadRecords: @unchecked Sendable {
             guard let old = try? String(contentsOfFile: local, encoding: .utf8) else { continue }
             let path = store.recordPath(kind.name)
             let current = try? String(contentsOfFile: path, encoding: .utf8)
-            try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-            try merged(old: Redaction.secrets(in: old), into: current, kind: kind).write(toFile: path, atomically: true, encoding: .utf8)
+            try write(merged(old: Redaction.secrets(in: old), into: current, kind: kind), to: path, in: store)
             let moved = local + ".moved"
             try? FileManager.default.removeItem(atPath: moved)
             try FileManager.default.moveItem(atPath: local, toPath: moved)
         }
+    }
+
+    /// Writes a record's whole text, with its folder. In the project's `.vibeswitcher/` it's private (0600, in 0700
+    /// folders) like everything there; in `records_dir` it's one of the repository's own files, committed, so it gets
+    /// the repository's usual modes.
+    static func write(_ text: String, to path: String, in store: BoardStore) throws {
+        let folder = (path as NSString).deletingLastPathComponent
+        guard (folder + "/").hasPrefix(store.folder + "/") else {
+            try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            try text.write(toFile: path, atomically: true, encoding: .utf8)
+            return
+        }
+        try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
+        try VibePaths.writePrivate(Data(text.utf8), to: URL(fileURLWithPath: path))
     }
 
     /// `current` (or a new log) with `old`'s entries before its own, each only once, in the order of their times.

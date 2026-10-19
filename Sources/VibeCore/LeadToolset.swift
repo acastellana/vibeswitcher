@@ -630,7 +630,7 @@ public final class LeadToolset: MCPToolset {
     /// process holds it.
     private func exclusively<T>(_ name: String, _ body: () throws -> T) throws -> T {
         let path = (store.folder as NSString).appendingPathComponent("run/\(name).lock")
-        try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try? VibePaths.ensurePrivate(URL(fileURLWithPath: (path as NSString).deletingLastPathComponent, isDirectory: true))
         // Its own open file: flock locks are per open file, so another thread's open of it waits too.
         let fd = open(path, O_CREAT | O_RDWR, 0o600)
         guard fd >= 0 else { throw Problem(text: "Couldn't open \(path) to take its lock: \(String(cString: strerror(errno))).") }
@@ -1741,7 +1741,7 @@ public final class LeadToolset: MCPToolset {
         let path = workflowPath
         let current = FileManager.default.contents(atPath: path) ?? Data(LeadWorkflow.template.utf8)
         let before = LeadWorkflow.load(from: path)
-        try LeadWorkflow.updating(current, with: changes).write(to: URL(fileURLWithPath: path), options: .atomic)
+        try LeadWorkflow.write(LeadWorkflow.updating(current, with: changes), to: path)
         // What the next read sees is what counts.
         let after = LeadWorkflow.load(from: path)
         let read: [String: String] = ["test_command": after.testCommand ?? "", "regression_command": after.regressionCommand ?? "",

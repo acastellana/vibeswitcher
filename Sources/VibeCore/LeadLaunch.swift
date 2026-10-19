@@ -106,7 +106,7 @@ public enum LeadLaunch {
                                server: String, name: String, model: String? = nil, branch: String? = nil,
                                records: String? = nil, folder: URL? = nil) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
-        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
         let mcpFile = (folder as NSString).appendingPathComponent("mcp.json")
         let settingsFile = (folder as NSString).appendingPathComponent("settings.json")
@@ -153,7 +153,7 @@ public enum LeadLaunch {
             unlink(file)
             return nil
         }
-        try FileManager.default.createDirectory(atPath: (file as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try VibePaths.ensurePrivate(URL(fileURLWithPath: (file as NSString).deletingLastPathComponent, isDirectory: true))
         try LeadVault.writePrivate(Data(turns.utf8), to: URL(fileURLWithPath: file))
         return file
     }

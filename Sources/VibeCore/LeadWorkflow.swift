@@ -292,6 +292,12 @@ public struct LeadWorkflow: Equatable, Sendable {
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "load_threshold", "mac_max_sessions",
                                       "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "records_dir"]
 
+    /// Writes the workflow file (`.vibeswitcher/workflow.md`), private to you (0600), atomically: the template the first
+    /// time (`BoardStore.prepare`), the lead's `configure` after.
+    public static func write(_ data: Data, to path: String) throws {
+        try VibePaths.writePrivate(data, to: URL(fileURLWithPath: path))
+    }
+
     /// `data` with each setting's line changed (an empty value clears it), added when missing; every other line, the
     /// comments, unknown keys, the notes, the line endings and a BOM stay as they were.
     public static func updating(_ data: Data, with changes: [(key: String, value: String)]) -> Data {

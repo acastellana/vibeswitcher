@@ -18,6 +18,7 @@ enum FocusLog {
     private static var failures = 0
     private static var total = 0
     private static let queue = DispatchQueue(label: "focus-log")
+    static var file: URL { VibePaths.root.appendingPathComponent("focus-debug.json") }
 
     static func begin(_ session: Session, source: String) -> Attempt {
         var attempt = Attempt(tty: session.tty, name: session.displayName, source: source)
@@ -67,7 +68,7 @@ enum FocusLog {
             ]
             if JSONSerialization.isValidJSONObject(object),
                let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
-                try? data.write(to: VibePaths.root.appendingPathComponent("focus-debug.json"))
+                try? VibePaths.writePrivate(data, to: file)
             }
         }
     }

@@ -218,15 +218,19 @@ final class SidebarController {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
             guard let self else { return }
             self.debugWritePending = false
-            let object: [String: Any] = [
+            Self.writeDebug([
                 "updatedAt": ISO8601DateFormatter().string(from: Date()),
                 "edgeHits": self.edgeHits, "edgeMisses": self.edgeMisses, "recentMisses": self.recentMisses, "trail": self.trail,
                 "strips": self.strips.map { NSStringFromRect($0.frame) },
-            ]
-            if JSONSerialization.isValidJSONObject(object),
-               let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
-                try? data.write(to: VibePaths.root.appendingPathComponent("sidebar-debug.json"))
-            }
+            ])
+        }
+    }
+
+    /// ~/.vibeswitcher/sidebar-debug.json, private to you (0600).
+    static func writeDebug(_ object: [String: Any]) {
+        if JSONSerialization.isValidJSONObject(object),
+           let data = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
+            try? VibePaths.writePrivate(data, to: VibePaths.root.appendingPathComponent("sidebar-debug.json"))
         }
     }
 

@@ -995,7 +995,7 @@ public final class FileLock {
     private init(fd: Int32) { self.fd = fd }
 
     public static func attempt(_ path: String) -> FileLock? {
-        try? FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try? VibePaths.ensurePrivate(URL(fileURLWithPath: (path as NSString).deletingLastPathComponent, isDirectory: true))
         let fd = open(path, O_CREAT | O_RDWR, 0o600)
         guard fd >= 0 else { return nil }
         guard flock(fd, LOCK_EX | LOCK_NB) == 0 else {
@@ -1100,7 +1100,7 @@ public final class BoardStore: @unchecked Sendable {
         board.refreshScores(now: now)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        try encoder.encode(board).write(to: URL(fileURLWithPath: file), options: .atomic)
+        try VibePaths.writePrivate(try encoder.encode(board), to: URL(fileURLWithPath: file))
         return result
     }
 
@@ -1166,7 +1166,7 @@ public final class BoardStore: @unchecked Sendable {
         }
         let workflow = (folder as NSString).appendingPathComponent("workflow.md")
         if !FileManager.default.fileExists(atPath: workflow) {
-            try LeadWorkflow.template.write(toFile: workflow, atomically: true, encoding: .utf8)
+            try LeadWorkflow.write(Data(LeadWorkflow.template.utf8), to: workflow)
         }
         return workflow
     }
@@ -1185,8 +1185,11 @@ public final class BoardStore: @unchecked Sendable {
         try (current + line).write(toFile: exclude, atomically: true, encoding: .utf8)
     }
 
+    /// The `.vibeswitcher` folder, private to you (0700); the first time this version writes in it, what older ones left
+    /// there is made private too (`PrivateRepair.project`).
     private func ensureFolder() throws {
-        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
+        PrivateRepair.project(folder)
     }
 
     /// Appends to a record (redacted), in `records_dir` when the workflow sets one, moving the old local file's entries
@@ -1196,8 +1199,7 @@ public final class BoardStore: @unchecked Sendable {
         try withRecordsLock {
             try LeadRecords.migrate(self)
             let path = recordPath(name)
-            try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-            if !FileManager.default.fileExists(atPath: path) { try header.write(toFile: path, atomically: true, encoding: .utf8) }
+            if !FileManager.default.fileExists(atPath: path) { try LeadRecords.write(header, to: path, in: self) }
             let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
             defer { try? handle.close() }
             try handle.seekToEnd()
@@ -1220,9 +1222,7 @@ public final class BoardStore: @unchecked Sendable {
 
     /// Replaces a record's whole text (the benches' made-up decisions), where `recordPath` keeps it.
     public func replaceRecord(_ name: String, with text: String) throws {
-        let path = recordPath(name)
-        try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
-        try text.write(toFile: path, atomically: true, encoding: .utf8)
+        try LeadRecords.write(text, to: recordPath(name), in: self)
     }
 
     /// Runs `body` holding the records' lock (across processes: the app's timers write decisions too).
