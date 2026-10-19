@@ -39,7 +39,7 @@ struct BriefingSnapshots {
                                      keyStore: AppProof.MemorySecret(), generate: { _ in nil }, voice: voice, defaults: defaults)
         template.press()
         #expect(await until { template.phase == .speaking })
-        let preferences = Preferences(defaults: defaults, presetsFile: URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("\(suite).json"))
+        let preferences = Preferences(defaults: defaults, presetsFile: scratchRoot.appendingPathComponent("\(suite).json"))
         for scheme in [ColorScheme.light, .dark] {
             try draw(VStack(spacing: 0) {
                 HStack { Text("VibeSwitcher").font(.headline); BriefMeButton(model: model); Spacer() }.padding(10)
@@ -50,6 +50,6 @@ struct BriefingSnapshots {
             try draw(Form { BriefingSettings(preferences: preferences, briefing: model) }.formStyle(.grouped),
                      size: CGSize(width: 620, height: 260), scheme: scheme, name: "briefing-settings")
         }
-        try? FileManager.default.removeItem(atPath: NSTemporaryDirectory() + "\(suite).json")
+        try? FileManager.default.removeItem(at: scratchRoot.appendingPathComponent("\(suite).json"))
     }
 }

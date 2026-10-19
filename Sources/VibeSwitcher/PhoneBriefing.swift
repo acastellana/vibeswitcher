@@ -110,12 +110,14 @@ final class PhoneBriefer: @unchecked Sendable {
 /// The Mac's own voice for a text, rendered to an AAC (.m4a) file instead of the speakers: what the phone plays when
 /// there's no ElevenLabs key. The same voice `BriefingSpeaker` would use; the file is a temporary one, removed once read.
 enum MacVoiceFile {
-    /// The audio, or nil when the Mac has no voice for it or it takes longer than `timeout`. Blocks; not on main.
-    static func render(_ text: String, language: String, timeout: TimeInterval = 60) -> Data? {
+    /// The audio, or nil when the Mac has no voice for it or it takes longer than `timeout`. Blocks; not on main. The
+    /// file is written in `folder` (a test's scratch folder; the user's temporary folder otherwise).
+    static func render(_ text: String, language: String, timeout: TimeInterval = 60,
+                       folder: URL = FileManager.default.temporaryDirectory) -> Data? {
         let synthesizer = AVSpeechSynthesizer()
         let utterance = AVSpeechUtterance(string: text)
         utterance.voice = AVSpeechSynthesisVoice(language: BriefingSpeaker.locale(language)) ?? AVSpeechSynthesisVoice(language: language)
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("vs-briefing-\(UUID().uuidString).m4a")
+        let url = folder.appendingPathComponent("vs-briefing-\(UUID().uuidString).m4a")
         defer { try? FileManager.default.removeItem(at: url) }
         let lock = NSLock()
         var file: AVAudioFile?

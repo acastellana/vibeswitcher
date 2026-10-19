@@ -239,12 +239,13 @@ struct PhoneBriefingTests {
 
     /// The real renderer: the Mac's speech synthesizer (on the Mac, no network) to AAC in an MP4 container.
     @Test func theMacsVoiceRendersToAnM4AFile() async throws {
-        let data = try #require(await Task.detached { MacVoiceFile.render("Two tasks landed.", language: "en") }.value)
+        let temp = Scratch()
+        let folder = temp.url("mac-voice")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let data = try #require(await Task.detached { MacVoiceFile.render("Two tasks landed.", language: "en", folder: folder) }.value)
         #expect(data.count > 1000)
         #expect(String(decoding: data.dropFirst(4).prefix(4), as: UTF8.self) == "ftyp")
-        let leftovers = try FileManager.default.contentsOfDirectory(atPath: FileManager.default.temporaryDirectory.path)
-            .filter { $0.hasPrefix("vs-briefing-") }
-        #expect(leftovers.isEmpty)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: folder.path).isEmpty)
     }
 
     /// The page plays the briefing from a blob (fetched with the token in its header): media from the page's own

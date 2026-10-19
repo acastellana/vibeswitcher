@@ -243,7 +243,7 @@ struct KeepAwakeTests {
         let suite = "KeepAwakeTests-\(UUID().uuidString)"
         let defaults = try #require(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
-        let presets = FileManager.default.temporaryDirectory.appendingPathComponent("\(suite).json")
+        let presets = scratchRoot.appendingPathComponent("\(suite).json")
         defer { try? FileManager.default.removeItem(at: presets) }
         let preferences = Preferences(defaults: defaults, presetsFile: presets)
         #expect(preferences.keepAwake == .onPower)
