@@ -13,10 +13,10 @@ struct WindowGroupsTests {
         return WindowRow(content: .agent(session), project: project)
     }
 
-    func hosted(agent: String? = nil, live: Bool = true, title: String = "", project: String = "p") -> WindowRow {
+    func hosted(agent: String? = nil, live: Bool = true, exit: Int32 = 1, title: String = "", project: String = "p") -> WindowRow {
         let info = HostSession(id: UUID(), tty: "ttys900", childPID: 2, cwd: "/dev/\(project)", command: nil, label: "Shell",
                                agent: agent, title: title, startedAt: Date(timeIntervalSince1970: 5), cols: 80, rows: 24,
-                               exit: live ? nil : .init(status: 1, at: Date(timeIntervalSince1970: 9_000)))
+                               exit: live ? nil : .init(status: exit, at: Date(timeIntervalSince1970: 9_000)))
         return WindowRow(content: .hosted(info), project: project)
     }
 
@@ -104,7 +104,7 @@ struct WindowGroupsTests {
         }
         #expect(busy.state(now: now).text == "Run tests")
         #expect(busy.state(now: now).since == Date(timeIntervalSince1970: 50))
-        #expect(hosted(live: false).state(now: now).text == "ended · exit 1")
+        #expect(hosted(live: false).state(now: now).text == "exit 1")
         #expect(hosted(agent: "codex").state(now: Date(timeIntervalSince1970: 30)).text == "starting")
         #expect(hosted().state(now: now).text == "shell")
         #expect(agent("t", status: .unknown).state(now: now).since == nil)
@@ -152,7 +152,7 @@ struct WindowGroupsTests {
         }
         #expect(scanned(info, tableReadAt: now, undecided: Undecided(ttys: ["ttys901"])).state(now: now).text == "agent ended · shell")
         // Ended sessions and plain shells read the same whatever the table.
-        #expect(scanned(hosted(agent: "claude", live: false).hosted!, tableReadAt: nil).state(now: now).text == "ended · exit 1")
+        #expect(scanned(hosted(agent: "claude", live: false).hosted!, tableReadAt: nil).state(now: now).text == "exit 1")
         #expect(scanned(hosted().hosted!, tableReadAt: now).state(now: now).text == "shell")
     }
 
@@ -161,5 +161,40 @@ struct WindowGroupsTests {
                                       agent("d", status: .background)]) == "2 need you · 2 working")
         #expect(WindowGroups.summary([agent("a", status: .needsInput)]) == "1 needs you")
         #expect(WindowGroups.summary([agent("a", status: .idle)]) == "")
+    }
+
+    /// One mapping for how a session ended (WL-1): VibeSwitcher's hangup or terminate (129, 143) is a normal end, as is
+    /// exit 0; any other code is a failure, said as its code.
+    @Test func howASessionEndedReadsTheSameEverywhere() {
+        let cases: [(Int32, String, Bool, String)] = [(0, "finished", false, "checkmark.circle"), (129, "ended", false, "stop.circle"),
+                                                      (143, "ended", false, "stop.circle"), (1, "exit 1", true, "exclamationmark.circle")]
+        for (status, text, failure, symbol) in cases {
+            let end = SessionEnd(status: status)
+            #expect(end.text == text, "\(status)")
+            #expect(end.isFailure == failure, "\(status)")
+            #expect(end.symbol == symbol, "\(status)")
+            let row = hosted(live: false, exit: status)
+            #expect(row.end == end)
+            #expect(row.state(now: now).text == text)
+            #expect(row.state(now: now).group == .idle)
+            #expect(row.state(now: now).since == Date(timeIntervalSince1970: 9_000))
+        }
+        #expect(SessionEnd(status: 2).isFailure && SessionEnd(status: 137).text == "exit 137")
+        #expect(hosted().end == nil && agent("t").end == nil)
+    }
+
+    /// Ended rows leave their sections for the "Ended (n)" fold, in the order shown; a row kept (a team member under
+    /// its lead) stays, and a section left empty goes.
+    @Test func endedRowsFoldAwayFromTheirSections() {
+        let live = agent("a"), shell = hosted(project: "q")
+        let ended = hosted(live: false, exit: 129), failed = hosted(live: false, exit: 1, project: "q"), member = hosted(live: false, exit: 143)
+        let sections = [WindowSection(project: "p", rows: [live, ended, member]), WindowSection(project: "q", rows: [failed, shell]),
+                        WindowSection(project: "r", rows: [hosted(live: false, exit: 0, project: "r")])]
+        let (kept, folded) = WindowGroups.foldEnded(sections, keep: [member.id])
+        #expect(kept.map(\.project) == ["p", "q"])
+        #expect(kept[0].rows.map(\.id) == [live.id, member.id])
+        #expect(kept[1].rows.map(\.id) == [shell.id])
+        #expect(folded.map(\.id) == [ended.id, failed.id, sections[2].rows[0].id])
+        #expect(WindowGroups.foldEnded([WindowSection(project: "p", rows: [live])]).ended.isEmpty)
     }
 }

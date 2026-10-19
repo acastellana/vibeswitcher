@@ -29,7 +29,38 @@ public struct RowState: Equatable, Sendable {
     public var group: AttentionGroup
 }
 
+/// How a window session ended, as every row and bar says it: the hangup or terminate that ending a session sends
+/// (exit 129, 143: VibeSwitcher ended it, or a signal did) reads "ended", 0 "finished", any other code "exit N", a
+/// failure (orange, with a warning glyph).
+public struct SessionEnd: Equatable, Sendable {
+    public var status: Int32
+
+    public init(status: Int32) { self.status = status }
+
+    public var isFailure: Bool { ![0, 129, 143].contains(status) }
+
+    public var text: String {
+        switch status {
+        case 0: return "finished"
+        case 129, 143: return "ended"
+        default: return "exit \(status)"
+        }
+    }
+
+    /// The glyph beside it: a warning for a failure, else a neutral one.
+    public var symbol: String {
+        switch status {
+        case 0: return "checkmark.circle"
+        case 129, 143: return "stop.circle"
+        default: return "exclamationmark.circle"
+        }
+    }
+}
+
 extension WindowRow {
+    /// How its session ended; nil while it runs, and for scanned sessions (they leave the list when they end).
+    public var end: SessionEnd? { hosted?.exit.map { SessionEnd(status: $0.status) } }
+
     /// Headline: your name for it, else what it's working on, else the program's own title, else the project.
     public var title: String {
         switch content {
@@ -41,7 +72,7 @@ extension WindowRow {
     public func state(now: Date) -> RowState {
         switch content {
         case .hosted(let info):
-            if let exit = info.exit { return RowState(text: "ended · exit \(exit.status)", since: exit.at, group: .idle) }
+            if let exit = info.exit { return RowState(text: SessionEnd(status: exit.status).text, since: exit.at, group: .idle) }
             // No agent the scan knows, but a program that says what it's doing (OSC 7501): that, over its preset.
             if let program = info.liveProgramStatus { return Self.state(of: program) }
             if info.agent != nil {
@@ -169,6 +200,21 @@ public enum WindowGroups {
             let rows = section.rows.filter { $0.searchText.localizedCaseInsensitiveContains(needle) }
             return rows.isEmpty ? nil : WindowSection(project: section.project, rows: rows)
         }
+    }
+
+    /// The ended rows taken out of `sections`, in the order shown, for the "Ended (n)" fold at the list's end;
+    /// sections left empty are dropped. Rows in `keep` stay where they are (a team member under its lead).
+    public static func foldEnded(_ sections: [WindowSection], keep: Set<String> = []) -> (sections: [WindowSection], ended: [WindowRow]) {
+        var ended: [WindowRow] = []
+        let kept = sections.compactMap { section -> WindowSection? in
+            let rows = section.rows.filter { row in
+                guard row.end != nil, !keep.contains(row.id) else { return true }
+                ended.append(row)
+                return false
+            }
+            return rows.isEmpty ? nil : WindowSection(project: section.project, rows: rows)
+        }
+        return (kept, ended)
     }
 
     /// "2 need you · 3 working"; empty when nothing needs you and nothing works.

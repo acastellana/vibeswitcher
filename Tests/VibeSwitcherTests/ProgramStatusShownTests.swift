@@ -141,7 +141,7 @@ struct ProgramStatusShownTests {
         // Ended: no program status, in the row or the header.
         took["plain ended"] = await say("q", to: plain) { row(plain)?.hosted?.isLive == false }
         #expect(row(plain)?.hosted?.liveProgramStatus == nil)
-        #expect(row(plain)?.state(now: Date()).text == "ended · exit 0")
+        #expect(row(plain)?.state(now: Date()).text == "finished")
         #expect(header(plain) == "Ended")
 
         // Each change reached the window as the host sent it (no scan timer runs here: the store isn't started).

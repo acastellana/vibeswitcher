@@ -166,7 +166,7 @@ struct ProgramStatusInAppTests {
         #expect(ended.liveProgramStatus == nil)
         #expect(hosted(program(.working)).liveProgramStatus?.state == .working)
         let state = WindowRow(content: .hosted(ended), project: "p").state(now: now.addingTimeInterval(30))
-        #expect(state.text == "ended · exit 0" && state.group == .idle)
+        #expect(state.text == "finished" && state.group == .idle)
         #expect(WindowRow(content: .hosted(ended), project: "p").statusSince == ended.startedAt)
     }
 }

@@ -61,18 +61,10 @@ public enum LeadTeams {
         return hosted.isLive && !row.agentQuit
     }
 
-    /// What a team member's row says: as any row, except that a normal end (exit 0, or the hangup or terminate
-    /// that ending a session sends: 129, 143) reads "finished" or "ended", not as an exit code.
+    /// What a team member's row says: as any row, so a normal end (exit 0, or the hangup or terminate that ending a
+    /// session sends: 129, 143) reads "finished" or "ended", not as an exit code (see `SessionEnd`).
     public static func state(of row: WindowRow, now: Date) -> RowState {
-        var state = row.state(now: now)
-        if let exit = row.hosted?.exit {
-            switch exit.status {
-            case 0: state.text = "finished"
-            case 129, 143: state.text = "ended"
-            default: break
-            }
-        }
-        return state
+        row.state(now: now)
     }
 
     /// "team: 1 needs you · 2 working · 1 in review": the live members' tasks (a worker and its verifier are one

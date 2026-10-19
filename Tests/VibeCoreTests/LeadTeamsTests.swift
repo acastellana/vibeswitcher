@@ -98,7 +98,7 @@ struct LeadTeamsTests {
         #expect(text(129) == "ended")
         #expect(text(143) == "ended")
         #expect(text(0) == "finished")
-        #expect(text(1) == "ended · exit 1")
+        #expect(text(1) == "exit 1")
     }
 
     @Test func theSummaryCountsLiveTasksOnly() {
