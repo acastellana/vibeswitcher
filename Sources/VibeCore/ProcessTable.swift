@@ -257,11 +257,11 @@ public enum ProcessTable {
         return path.isEmpty ? nil : path
     }
 
-    /// Ancestors of `pid`, nearest first (excluding pid itself and launchd).
-    public static func ancestors(of pid: Int32, limit: Int = 32) -> [ProcInfo] {
+    /// Ancestors of `pid`, nearest first (excluding pid itself and launchd). `info` reads a process (tests give a table).
+    public static func ancestors(of pid: Int32, limit: Int = 32, info: (Int32) -> ProcInfo? = { info(pid: $0) }) -> [ProcInfo] {
         var chain: [ProcInfo] = []
-        var current = info(pid: pid)?.ppid ?? 0
-        while current > 1, chain.count < limit, let proc = info(pid: current) {
+        var current = info(pid)?.ppid ?? 0
+        while current > 1, chain.count < limit, let proc = info(current) {
             chain.append(proc)
             current = proc.ppid
         }

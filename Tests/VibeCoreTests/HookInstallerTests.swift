@@ -264,4 +264,29 @@ extension HookInstallerTests {
         }
         #expect(try Data(contentsOf: fresh) == Data(#"{"theirs": true}"#.utf8))
     }
+
+    /// R11: every event the installer installs, for Claude and for Codex, is one the hook records (`HookState.reduce`)
+    /// and SessionEnd the one it deletes for. The hook ignores any other name, so an event added to the installer and
+    /// not to `reduce` would be dropped silently: this fails instead.
+    @Test func everyInstalledEventIsOneTheHookRecords() {
+        for (agent, events) in [(Agent.claude, HookInstaller.claudeEvents), (.codex, HookInstaller.codexEvents)] {
+            for event in events {
+                var payload: [String: Any] = ["hook_event_name": event, "session_id": "s"]
+                if event == "Notification" { payload["notification_type"] = "permission_prompt" }
+                let update = HookState.reduce(current: nil, payload: payload, agent: agent, tty: "ttys001", agentPid: 7, now: 1)
+                switch update {
+                case .write(let state): #expect(state.lastEvent == event, "\(agent) \(event)")
+                case .delete: #expect(event == "SessionEnd", "\(agent) \(event)")
+                case .ignore: Issue.record("\(agent) \(event) is installed but ignored")
+                }
+            }
+        }
+        // Any other name, a session's state there or not, is ignored.
+        var current = HookState(agent: .claude, tty: "ttys001", lastEvent: "Stop", lastEventAt: 1)
+        current.sessionId = "s"
+        for state in [nil, current] {
+            #expect(HookState.reduce(current: state, payload: ["hook_event_name": "NoSuchEvent", "session_id": "s"],
+                                     agent: .claude, tty: "ttys001", agentPid: 7, now: 2) == .ignore)
+        }
+    }
 }

@@ -185,8 +185,11 @@ extension HookState {
                 state.lastEventAt = at
                 return .write(state)
             }
-        default:
+        case "Interrupt", "SubagentStart", "SubagentStop":
             break
+        default:
+            // Not an event the installer installs (`HookInstaller`), so a malformed or forged call: the state stays.
+            return .ignore
         }
         if event != "PreCompact" { (state.eventBeforeCompact, state.eventBeforeCompactAt) = (nil, nil) }
         if event != "PreToolUse", event != "PermissionRequest", event != "Notification" { state.toolStartedAt = nil }

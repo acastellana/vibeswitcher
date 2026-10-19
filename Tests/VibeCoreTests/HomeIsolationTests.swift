@@ -45,6 +45,32 @@ struct HomeIsolationTests {
         #expect(VibePaths.statsDir.deletingLastPathComponent() == VibePaths.root)
     }
 
+    /// VibeSwitcher's folder and its state folder (each session's prompts and tool calls) are the user's alone (E-32):
+    /// made 0700 with their parents, and an older install's 0755 tightened with what's in it kept.
+    @Test func vibeSwitchersFoldersAreMadePrivateAndOlderOnesTightened() throws {
+        let fm = FileManager.default
+        let root = temp.url("private").appendingPathComponent("home/.vibeswitcher")
+        let state = root.appendingPathComponent("state")
+        func mode(_ url: URL) throws -> Int { try #require(fm.attributesOfItem(atPath: url.path)[.posixPermissions] as? Int) }
+        func isFolder(_ url: URL) -> Bool { var folder: ObjCBool = false; return fm.fileExists(atPath: url.path, isDirectory: &folder) && folder.boolValue }
+
+        VibePaths.ensurePrivateDirectories(root: root)
+        #expect(isFolder(root) && isFolder(state))
+        #expect(try mode(root) == 0o700 && mode(state) == 0o700)
+        #expect(try fm.contentsOfDirectory(atPath: root.path) == ["state"])
+        #expect(try fm.contentsOfDirectory(atPath: state.path).isEmpty)
+
+        // An older install's, open to others, with a session's state in it.
+        let saved = state.appendingPathComponent("ttys001.json")
+        try Data("{}".utf8).write(to: saved)
+        for folder in [root, state] { try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: folder.path) }
+        VibePaths.ensurePrivateDirectories(root: root)
+        #expect(try mode(root) == 0o700 && mode(state) == 0o700)
+        #expect(try Data(contentsOf: saved) == Data("{}".utf8))
+        // The state folder it makes private is the one the hook writes in.
+        #expect(VibePaths.stateDir == VibePaths.root.appendingPathComponent("state"))
+    }
+
     /// Only the account's own folder is refused, however it's spelled; a scratch home under the account's home (a
     /// worktree's, the merge runner's) is not.
     @Test func theTestsRefuseOnlyTheAccountsOwnFolder() throws {

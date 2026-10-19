@@ -730,6 +730,54 @@ struct ShellTests {
         #expect(eventually { kill(child, 0) != 0 })
     }
 
+    /// E-32: `signalFamily` stops a process and what it started (its children and theirs), each matched by pid and
+    /// start time; a process outside the family, or one an earlier walk names that has since been replaced, is left be.
+    /// Only processes this test started are signalled.
+    @Test func signalFamilyStopsAProcessAndWhatItStartedAndNothingElse() throws {
+        let dir = temp.url("family").path
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        func start(_ executable: String, _ args: [String]) throws -> Process {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: executable)
+            process.arguments = args
+            process.currentDirectoryURL = URL(fileURLWithPath: dir)
+            try process.run()
+            return process
+        }
+        func written(_ name: String) -> Int32? {
+            (try? String(contentsOfFile: dir + "/" + name, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        }
+        /// Running as it was when read: gone, or its pid another process's by now, is not.
+        func running(_ process: ProcInfo) -> Bool { ProcessTable.info(pid: process.pid)?.startTime == process.startTime }
+        // A shell, the leader of a process group of its own (Process starts it so), with a child and a grandchild that
+        // ignore nothing; and a process outside it.
+        let shell = try start("/bin/sh", ["-c", "sleep \(Self.childRuns) & echo $! > child; (sleep \(Self.childRuns) & echo $! > grandchild; wait) & wait"])
+        let outsider = try start("/bin/sleep", ["\(Self.childRuns)"])
+        defer {
+            for process in [shell, outsider] where process.isRunning { kill(process.processIdentifier, SIGKILL) }
+            for name in ["child", "grandchild"] { if let pid = written(name), getpgid(pid) == shell.processIdentifier { kill(pid, SIGKILL) } }
+        }
+        #expect(eventually { written("child") != nil && written("grandchild") != nil })
+        let root = try #require(ProcessTable.info(pid: shell.processIdentifier))
+        let child = try #require(written("child").flatMap(ProcessTable.info(pid:)))
+        let grandchild = try #require(written("grandchild").flatMap(ProcessTable.info(pid:)))
+        let other = try #require(ProcessTable.info(pid: outsider.processIdentifier))
+        #expect(getpgid(root.pid) == root.pid && getpgid(child.pid) == root.pid && getpgid(grandchild.pid) == root.pid)
+        #expect(getpgid(other.pid) != root.pid)
+
+        // The outsider named by an earlier walk, but with another start time: a pid since given to another process.
+        let replaced = ProcInfo(pid: other.pid, ppid: other.ppid, tty: other.tty, comm: other.comm,
+                                startTime: other.startTime.addingTimeInterval(-60), agent: nil)
+        let signalled = Shell.signalFamily(of: root.pid, SIGTERM, also: [replaced])
+        #expect(Set([root.pid, child.pid, grandchild.pid]).isSubset(of: Set(signalled.map(\.pid))))
+        // The shell is this process's child: it's gone once Process has reaped it.
+        #expect(eventually { !shell.isRunning && !running(child) && !running(grandchild) })
+        #expect(shell.terminationReason == .uncaughtSignal && shell.terminationStatus == SIGTERM)
+        #expect(running(other) && outsider.isRunning)
+        outsider.terminate()
+        outsider.waitUntilExit()
+    }
+
     @Test func aTimedOutRunSaysSoAndIsntOk() {
         let run = Shell.run(executable: "/bin/sleep", args: ["\(Self.childRuns)"], in: "/", timeout: 0.5, grace: 1)
         #expect(run.timedOut && !run.cancelled && !run.ok)

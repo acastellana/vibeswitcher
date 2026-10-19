@@ -71,9 +71,10 @@ public enum VibePaths {
     /// Launch presets (see `LaunchPresets`).
     public static var presetsFile: URL { root.appendingPathComponent("presets.json") }
 
-    /// Creates `~/.vibeswitcher` and its state folder private to you (0700), fixing older installs too.
-    public static func ensurePrivateDirectories() {
-        for dir in [root, stateDir] { try? ensurePrivate(dir) }
+    /// Creates `~/.vibeswitcher` and its state folder private to you (0700), fixing older installs too. `root` is
+    /// VibeSwitcher's folder (tests give a scratch one).
+    public static func ensurePrivateDirectories(root: URL = VibePaths.root) {
+        for dir in [root, root.appendingPathComponent("state")] { try? ensurePrivate(dir) }
     }
 
     // MARK: Private files

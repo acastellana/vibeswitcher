@@ -345,6 +345,38 @@ struct ProcessTableTests {
         process.waitUntilExit()
     }
 
+    /// The hook and the MCP server find their session among `ancestors`: nearest first, up to launchd and never past
+    /// `limit` (all that stops reused pids that loop), cut where a parent is no longer there.
+    @Test func ancestorsAreNearestFirstUpToLaunchd() {
+        func process(_ pid: Int32, _ ppid: Int32) -> ProcInfo { ProcInfo(pid: pid, ppid: ppid, tty: nil, comm: "sh", startTime: .distantPast, agent: nil) }
+        // The caller (10) under 20 under 30 under 40, launchd's child.
+        let table: [Int32: ProcInfo] = [10: process(10, 20), 20: process(20, 30), 30: process(30, 40), 40: process(40, 1)]
+        #expect(ProcessTable.ancestors(of: 10) { table[$0] }.map(\.pid) == [20, 30, 40])
+        #expect(ProcessTable.ancestors(of: 30) { table[$0] }.map(\.pid) == [40])
+        // The root: launchd's child has none, launchd neither.
+        #expect(ProcessTable.ancestors(of: 40) { table[$0] }.isEmpty)
+        #expect(ProcessTable.ancestors(of: 1) { [1: process(1, 0)][$0] }.isEmpty)
+        // A parent that's gone: the ones found below it, nearest first.
+        var gap = table
+        gap[30] = nil
+        #expect(ProcessTable.ancestors(of: 10) { gap[$0] }.map(\.pid) == [20])
+        // The caller itself gone: none.
+        #expect(ProcessTable.ancestors(of: 99) { table[$0] }.isEmpty)
+        // Reused pids that loop: `limit` of them, then it stops.
+        let loop: [Int32: ProcInfo] = [7: process(7, 8), 8: process(8, 7)]
+        #expect(ProcessTable.ancestors(of: 7) { loop[$0] }.map(\.pid) == Array([[Int32]](repeating: [8, 7], count: 16).joined()))
+        #expect(ProcessTable.ancestors(of: 7, limit: 3) { loop[$0] }.map(\.pid) == [8, 7, 8])
+        // A chain deeper than `limit`: its nearest `limit`.
+        var deep: [Int32: ProcInfo] = [100: process(100, 1)]
+        for pid in Int32(101)...200 { deep[pid] = process(pid, pid - 1) }
+        #expect(ProcessTable.ancestors(of: 200) { deep[$0] }.map(\.pid) == Array((168...199).reversed()))
+        #expect(ProcessTable.ancestors(of: 200, limit: 100) { deep[$0] }.map(\.pid) == Array((100...199).reversed()))
+        // This process's own, read from the kernel: its parent first, each the parent of the one before.
+        let mine = ProcessTable.ancestors(of: getpid())
+        #expect(mine.first?.pid == getppid())
+        #expect(zip(mine, mine.dropFirst()).allSatisfy { $0.ppid == $1.pid })
+    }
+
     @Test func identity() {
         let claude = ArgumentCache { _ in ["/Users/me/.local/bin/claude"] }
         let blind = ArgumentCache { _ in [] }

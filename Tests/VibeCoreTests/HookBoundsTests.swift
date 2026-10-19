@@ -196,6 +196,70 @@ struct HookBoundsTests {
         return try FileHandle(forReadingFrom: file)
     }
 
+    /// Every path under `root`: its mode, and a file's contents and modification time.
+    func tree(_ root: URL) throws -> [String: String] {
+        let fm = FileManager.default
+        var tree: [String: String] = [:]
+        for case let path as String in fm.enumerator(atPath: root.path)?.allObjects ?? [] {
+            let url = root.appendingPathComponent(path)
+            let attributes = try fm.attributesOfItem(atPath: url.path)
+            let mode = String((attributes[.posixPermissions] as? Int) ?? -1, radix: 8)
+            if attributes[.type] as? FileAttributeType == .typeDirectory {
+                tree[path] = "folder \(mode)"
+            } else {
+                let modified = (attributes[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+                tree[path] = "file \(mode) \(modified) \(try Data(contentsOf: url).base64EncodedString())"
+            }
+        }
+        return tree
+    }
+
+    /// E-32 + R11: what isn't an event (not JSON, cut short, JSON that isn't an object, an object naming no event, or
+    /// one the installer never installs: a malformed or forged call) ends the built hook quietly: exit 0, nothing
+    /// printed (an agent reads a hook's stdout), and the session's state, its lock and everything else under the home
+    /// as they were.
+    @Test func whatIsntAnEventLeavesTheStateAsItWas() throws {
+        let home = try home()
+        let fm = FileManager.default
+        // The state an earlier event left for the terminal the hook records for (one named for none, without one), in
+        // folders as private as the hook makes them.
+        let root = home.appendingPathComponent(".vibeswitcher"), folder = root.appendingPathComponent("state")
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        try fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: root.path)
+        let tty = Self.terminal ?? "ttys001"
+        var saved = HookState(agent: .claude, tty: tty, lastEvent: "Stop", lastEventAt: 1)
+        saved.sessionId = "s"
+        saved.lastPrompt = "fix the build"
+        let state = folder.appendingPathComponent("\(tty).json")
+        try saved.save(to: state)
+        #expect(fm.createFile(atPath: state.path + ".lock", contents: nil, attributes: [.posixPermissions: 0o600]))
+        let before = try tree(home)
+        #expect(before.keys.sorted() == [".vibeswitcher", ".vibeswitcher/state", ".vibeswitcher/state/\(tty).json", ".vibeswitcher/state/\(tty).json.lock"])
+
+        let inputs: [(name: String, bytes: Data)] = [
+            ("not JSON", Data("hello, hook\n".utf8)),
+            ("empty", Data()),
+            ("truncated", Data(#"{"hook_event_name": "UserPromptSubmit", "session_id": "s", "prompt": "fix the"#.utf8)),
+            ("not UTF-8", Data([0xFF, 0xFE, 0x7B, 0x00, 0xC3])),
+            ("an array", Data(#"[{"hook_event_name": "UserPromptSubmit", "session_id": "s", "prompt": "hi"}]"#.utf8)),
+            ("a string", Data(#""UserPromptSubmit""#.utf8)),
+            ("no event", Data(#"{"session_id": "s", "prompt": "hi"}"#.utf8)),
+            ("an event that isn't a name", Data(#"{"hook_event_name": 7, "session_id": "s", "prompt": "hi"}"#.utf8)),
+            // The session's own id: were it taken for an event, it would be recorded over the state.
+            ("an event that isn't one", Data(#"{"hook_event_name": "NoSuchEvent", "session_id": "s", "prompt": "hi"}"#.utf8)),
+        ]
+        for input in inputs {
+            let file = temp.url("hook-input")
+            try input.bytes.write(to: file)
+            let run = try runHook(home: home, input: FileHandle(forReadingFrom: file))
+            #expect(run.reason == .exit && run.status == 0, "\(input.name): \(run.reason) \(run.status)")
+            #expect(run.stdout.isEmpty, "\(input.name): \(String(decoding: run.stdout, as: UTF8.self))")
+            let after = try tree(home)
+            #expect(after == before, "\(input.name): \(Set(before.keys).union(after.keys).filter { before[$0] != after[$0] }.sorted()) changed")
+        }
+        #expect(HookState.load(from: state)?.lastPrompt == "fix the build")
+    }
+
     @Test func anInputThatNeverEndsHoldsTheHookThreeSeconds() throws {
         let home = try home()
         let pipe = Pipe()
