@@ -100,7 +100,7 @@ public enum LeadWitness {
             }
             // With several finders, each that hasn't submitted yet.
             for verifier in task.status == .review && task.evidence == nil ? task.awaitedVerifiers : [] {
-                guard let info = seen[verifier] else { continue }
+                guard let info = seen[verifier], !gaveVerdict(info, on: task) else { continue }
                 if info.live, !info.agentQuit, let error = info.apiError {
                     events.append(("\(verifier)|api-error-\(Int(info.apiErrorAt ?? 0))", "The verifier on \(task.slug) stopped mid-audit: its turn ended on an API error (\(error)). Tell the user, or audit again."))
                 } else if !info.live || info.agentQuit {
@@ -136,6 +136,14 @@ public enum LeadWitness {
 
     private enum Restart { case worker, stopFirst, verifier }
 
+    /// The verifier gave the verdict the board keeps for an older commit (it, or its panel, was at work before that
+    /// verdict came): its audit is done, and the worker committed again since (report told the lead to audit that).
+    /// A verifier the lead starts for the new commit starts after that verdict, and is watched as any other.
+    private static func gaveVerdict(_ info: Seen, on task: LeadTask) -> Bool {
+        guard let earlier = task.outdatedEvidence, let started = info.started else { return false }
+        return earlier.at >= started
+    }
+
     /// Each session `events` tells as ended, in a line: "worker on a: killed by SIGTERM".
     private static func endings(board: LeadBoard, seen: [String: Seen]) -> [(key: String, line: String, restart: Restart)] {
         var lines: [(key: String, line: String, restart: Restart)] = []
@@ -148,7 +156,7 @@ public enum LeadWitness {
                 }
             }
             for verifier in task.status == .review && task.evidence == nil ? task.awaitedVerifiers : [] {
-                guard let info = seen[verifier], !info.live || info.agentQuit else { continue }
+                guard let info = seen[verifier], !info.live || info.agentQuit, !gaveVerdict(info, on: task) else { continue }
                 lines.append(("\(verifier)|ended", "verifier on \(task.slug): \(info.live ? "its agent quit, leaving the session's shell open" : info.ending)", .verifier))
             }
         }
