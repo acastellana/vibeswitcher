@@ -324,6 +324,29 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         #expect(state.secretFD != nil && state.sessions.count == 5)
     }
 
+    /// A new build's first run can wait minutes on a loaded Mac, before any of its code runs: the system checks each new
+    /// ad-hoc signed binary on its first exec (amfid), one at a time for the whole Mac. On 2026-10-19, 30 probes at once
+    /// beside scripts/test-under-load.sh took 5 s each, and amfid answered nothing for 108 s at load 200. Here the probe
+    /// waits 20 s before it starts (longer than the 15 s it was once given): a build slow to start still takes over.
+    @Test func aBuildSlowToStartStillTakesOver() throws {
+        let scene = try scene()
+        defer { end(scene) }
+        let slow = scene.host.script("slow-host", """
+            case " $* " in *" --handover-probe "*) sleep 20;; esac
+            exec '\(scene.host.newBinary)' "$@"
+            """)
+        let seq = scene.client.send(.handover(executable: slow))
+        #expect(eventually { scene.client.reply(to: seq) != nil })
+        guard scene.client.reply(to: seq) == .ok else {
+            Issue.record("handover to a build slow to start: \(String(describing: scene.client.reply(to: seq))); \(scene.host.log)")
+            return
+        }
+        #expect(eventually { scene.host.log.contains("took over 5 sessions") }, "\(scene.host.log)")
+        let (_, _, build, sessions, _, pid, _) = try TestClient.welcomed(scene.host.socket, appKey: scene.host.appKey)
+        #expect(build == scene.host.newBuild && pid == scene.host.pid)
+        #expect(sessions.map(\.id) == scene.all.map(\.id))
+    }
+
     /// The new build passes the probe, then can't restore: it executes the old build's own copy, which does.
     @Test func aBuildThatCantRestoreGoesBackToTheOldOne() throws {
         let scene = try scene()
