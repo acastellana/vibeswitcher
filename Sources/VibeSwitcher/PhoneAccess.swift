@@ -104,6 +104,19 @@ final class PhoneAccess: ObservableObject {
     /// How long an answer's keys may take to show before its menu may be answered again.
     private static let answerWait: TimeInterval = 2.5
     static let menuChanged = "That question changed or is gone, so nothing was typed. Here it is now."
+    /// Brief me from the phone: writes one briefing with its audio (`PhoneBriefer`) and calls back on the main thread;
+    /// nil, the route answers 503.
+    var brief: ((@escaping (PhoneBriefing) -> Void) -> Void)?
+    /// Each phone's briefing, by device: being written (that press's number), or written and kept until its next press.
+    private var briefings: [String: Briefed] = [:]
+    private enum Briefed {
+        case writing(Int)
+        case ready(PhoneBriefing)
+    }
+    private var briefingRun = 0
+    /// Briefings started, per source (see `RemoteGate.source`): each runs headless Claude and may spend ElevenLabs
+    /// credit, so one source gets a few every ten minutes, and can't use up anyone else's.
+    private var briefingStarts = FailureThrottle(limit: 6, window: 600)
 
     init(store: SessionStore) {
         self.store = store
@@ -404,12 +417,26 @@ final class PhoneAccess: ObservableObject {
         case ("GET", "/api/conversation/tool"): conversationTool(request, respond: reply)
         case ("GET", "/api/devpages"): devPages(respond: reply)
         case ("POST", "/api/preview"): preview(request, device: device, respond: reply)
+        // Read-only, like /api/state and /api/screen: nothing is typed, so the screen lock doesn't apply (the phone is
+        // where a briefing is wanted while away from a locked Mac), and neither does the replies switch.
+        case ("POST", "/api/briefing"): reply(startBriefing(request, device: device))
+        case ("GET", "/api/briefing"): reply(briefing(for: device))
         case ("POST", "/api/unpair"):
             remove(device)
             respond(.json(["ok": true]))
         default: respond(.error(404, "not found"))
         }
     }
+
+    #if DEBUG
+    /// Tests: requests answered as once `tailscale serve` is up for `status`, with nothing listening or started.
+    func serveForTests(_ status: TailscaleCLI.Status) {
+        tailscale = status
+        state = .on
+    }
+
+    func handleForTests(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) { route(request, respond: respond) }
+    #endif
 
     private func body(_ request: HTTPRequest) -> [String: Any]? {
         (try? JSONSerialization.jsonObject(with: request.body)) as? [String: Any]
@@ -1014,6 +1041,36 @@ final class PhoneAccess: ObservableObject {
         }
         audit("\(device.name) \(object["duration"] as? String == "resume" ? "resumed" : "paused") \(session.displayName)")
         return .json(["ok": true])
+    }
+
+    // MARK: - Brief me
+
+    /// Starts a fresh briefing for this phone (the one under way, if any, instead of a second); the phone then asks
+    /// `GET /api/briefing` until it's written (a briefing takes longer than a request may stay open).
+    private func startBriefing(_ request: HTTPRequest, device: PairedDevice) -> HTTPResponse {
+        guard let brief else { return .error(503, "Briefings aren't available on this Mac.") }
+        if case .writing = briefings[device.id] { return .json(["writing": true]) }
+        let source = RemoteGate.source(login: request.header("tailscale-user-login"), forwardedFor: request.header("x-forwarded-for"))
+        if briefingStarts.isThrottled(source) { return .error(429, "That's a lot of briefings; wait a few minutes.") }
+        briefingStarts.recordFailure(source)
+        briefings = briefings.filter { id, _ in devices.contains { $0.id == id } }
+        briefingRun += 1
+        let run = briefingRun
+        briefings[device.id] = .writing(run)
+        audit("briefing for \(device.name)")
+        brief { [weak self] briefing in
+            guard let self, case .writing(run) = self.briefings[device.id] else { return }
+            self.briefings[device.id] = .ready(briefing)
+        }
+        return .json(["writing": true])
+    }
+
+    private func briefing(for device: PairedDevice) -> HTTPResponse {
+        switch briefings[device.id] {
+        case nil: return .error(404, "No briefing yet: press Brief me.")
+        case .writing: return .json(["writing": true])
+        case .ready(let briefing): return .json(briefing.json)
+        }
     }
 
     // MARK: - Push notifications

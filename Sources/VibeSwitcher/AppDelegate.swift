@@ -149,6 +149,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         notifier?.onAlert = { [weak self] title, body, tty in self?.phoneAccess.notify(title: title, body: body, tty: tty) }
         phoneAccess.onEvent = { [weak self] title, body in self?.notifier?.postInfo(title: title, body: body) }
         phoneAccess.hostClient = hostClient
+        // Brief me from the phone: the Mac button's briefing (same inputs and key store), its audio made here for the phone.
+        phoneAccess.brief = PhoneBriefer(
+            snapshot: { [weak self] in BriefingModel.Snapshot(boards: self?.leadController.boards ?? [:], sessions: self?.store.sessions ?? []) },
+            language: { [weak self] in BriefingLanguage.named(self?.preferences.briefingLanguage ?? "") ?? .preferred() },
+            keyStore: AppProof.KeychainSecret(account: AppProof.elevenLabsAccount)).brief
         phoneAccess.startIfEnabled()
 
         if UserDefaults.standard.object(forKey: Self.positionKey) == nil {

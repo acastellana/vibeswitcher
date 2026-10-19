@@ -29,7 +29,7 @@ struct HTTPResponse {
         head += "Content-Type: \(contentType)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n"
         // Everything is served from our own origin; nothing may be framed, sniffed or leaked via referrers.
         head += "Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; "
-            + "connect-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\r\n"
+            + "media-src 'self' blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'\r\n"
         head += "X-Content-Type-Options: nosniff\r\nX-Frame-Options: DENY\r\nReferrer-Policy: no-referrer\r\n"
         head += "Cross-Origin-Opener-Policy: same-origin\r\n"
         head += "Cache-Control: \(cacheable ? "no-cache" : "no-store")\r\n\r\n"
