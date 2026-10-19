@@ -65,7 +65,7 @@ enum CodexTrust {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev"
         _ = try call(1, "initialize", ["clientInfo": ["name": "vibeswitcher", "title": "VibeSwitcher", "version": version]])
         try send(["jsonrpc": "2.0", "method": "initialized"])
-        let listing = try call(2, "hooks/list", ["cwds": [NSHomeDirectory()]])
+        let listing = try call(2, "hooks/list", ["cwds": [VibePaths.home]])
         let entries = (listing["data"] as? [[String: Any]]) ?? []
         var trust: [String: Any] = [:]
         let ourFile = realPath(HookInstaller.configURL(for: .codex).path)

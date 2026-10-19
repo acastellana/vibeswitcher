@@ -14,8 +14,11 @@ public enum HookInstaller {
                               "SubagentStart", "SubagentStop"]
     static let toolEvents: Set<String> = ["PreToolUse", "PostToolUse", "PermissionRequest"]
 
-    public static func configURL(for agent: Agent) -> URL {
-        let home = URL(fileURLWithPath: NSHomeDirectory())
+    /// In the home this process was given (`VibePaths.home`), the one Claude Code and Codex follow: a scratch HOME or
+    /// CFFIXED_USER_HOME keeps a test, a bench or a debug run off the user's own files. `NSHomeDirectory()` didn't
+    /// follow HOME alone.
+    public static func configURL(for agent: Agent, home: String = VibePaths.home) -> URL {
+        let home = URL(fileURLWithPath: home)
         switch agent {
         case .claude: return home.appendingPathComponent(".claude/settings.json")
         case .codex: return home.appendingPathComponent(".codex/hooks.json")

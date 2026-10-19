@@ -1,6 +1,6 @@
 import Foundation
 import Testing
-import VibeCore
+@testable import VibeCore
 
 /// A scratch HOME or VIBESWITCHER_HOME keeps a process off the user's own ~/.vibeswitcher, and the tests refuse to run
 /// on it (docs/eval/open-2026-10-19.md, E-30 + R10). 2026-10-19: tests run on a scratch HOME alone still wrote the
@@ -137,6 +137,94 @@ struct HomeIsolationTests {
         #expect(after.names == before.names, "new under \(real.path): \(after.names.subtracting(before.names).sorted())")
         // The hook's own file, if the user's folder has one by that name (a terminal of theirs, long closed), is untouched.
         #expect(after.modified["state/" + file] == before.modified["state/" + file])
+    }
+
+    /// The installer's default home is the one this process was given: an explicit one is used as it is.
+    @Test func theInstallersDefaultHomeIsVibePathsHome() {
+        #expect(HookInstaller.configURL(for: .claude).path == VibePaths.home + "/.claude/settings.json")
+        #expect(HookInstaller.configURL(for: .codex).path == VibePaths.home + "/.codex/hooks.json")
+        #expect(HookInstaller.configURL(for: .claude, home: Self.scratch).path == Self.scratch + "/.claude/settings.json")
+        #expect(HookInstaller.configURL(for: .codex, home: Self.real).path == "/Users/jane/.codex/hooks.json")
+    }
+
+    /// Runs only in the children of `theInstallerOnAScratchHomeWritesThereAndNotInTheUsersFiles`, with HOME alone on a
+    /// scratch home: installs or uninstalls both agents' hooks at the installer's defaults. A default that isn't under
+    /// HOME is recorded before anything is written, so a wrong one never reaches the user's files.
+    @Test(.enabled(if: ["install", "uninstall"].contains(ProcessInfo.processInfo.environment["VIBESWITCHER_INSTALLER_PROBE"])))
+    func installerProbe() throws {
+        let environment = ProcessInfo.processInfo.environment
+        let home = try #require(environment["HOME"])
+        for agent in Agent.allCases {
+            let url = HookInstaller.configURL(for: agent)
+            guard url.path.hasPrefix(home + "/") else {
+                Issue.record("installer probe: \(agent.rawValue)'s default \(url.path) isn't under HOME \(home)")
+                continue
+            }
+            if environment["VIBESWITCHER_INSTALLER_PROBE"] == "install" {
+                try HookInstaller.install(agent: agent)
+            } else {
+                try HookInstaller.uninstall(agent: agent)
+            }
+            print("installer probe: \(agent.rawValue) installed=\(HookInstaller.isInstalled(agent: agent)) at \(url.path)")
+        }
+    }
+
+    /// The test bundle with only HOME set (no CFFIXED_USER_HOME, so `NSHomeDirectory()` is the user's, and no
+    /// VIBESWITCHER_HOME) installs both agents' hooks into the scratch home's ~/.claude and ~/.codex, then uninstalls
+    /// them there; the user's own config files are only stat'd, before and after, and nothing changes or appears.
+    @Test func theInstallerOnAScratchHomeWritesThereAndNotInTheUsersFiles() throws {
+        let bundle = try #require(Bundle(for: TestBundleAnchor.self).executablePath)
+        let helper = try #require(Self.testingHelper, "no swiftpm-testing-helper to start the bundle with")
+        let home = temp.url("home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let before = Self.configListing(home: VibePaths.accountHome)
+        let files = Agent.allCases.map { HookInstaller.configURL(for: $0, home: home.path) }
+
+        func probe(_ mode: String) throws -> String {
+            let environment = ["HOME": home.path, "PATH": "/usr/bin:/bin", "VIBESWITCHER_INSTALLER_PROBE": mode]
+            let (status, output) = try Self.run(helper, ["--test-bundle-path", bundle, bundle, "--testing-library", "swift-testing",
+                                                         "--filter", "HomeIsolationTests/installerProbe"], environment: environment)
+            #expect(status == 0, "\(output)")
+            #expect(!output.contains("isn't under HOME"), "\(output)")
+            return output
+        }
+
+        let installed = try probe("install")
+        for (agent, file) in zip(Agent.allCases, files) {
+            #expect(installed.contains("installer probe: \(agent.rawValue) installed=true at \(file.path)"), "\(installed)")
+            let config = try HookInstaller.readConfigThrowing(file)
+            #expect(HookInstaller.isComplete(in: config, agent: agent), "\(file.path)")
+            // The hook binary it wrote is the scratch home's too.
+            let text = try String(contentsOf: file, encoding: .utf8)
+            #expect(text.contains(home.path + "/.vibeswitcher/bin/vibeswitcher-hook"), "\(text)")
+        }
+
+        let uninstalled = try probe("uninstall")
+        for (agent, file) in zip(Agent.allCases, files) {
+            #expect(uninstalled.contains("installer probe: \(agent.rawValue) installed=false at \(file.path)"), "\(uninstalled)")
+            #expect(!HookInstaller.isInstalled(in: try HookInstaller.readConfigThrowing(file)), "\(file.path)")
+        }
+
+        let after = Self.configListing(home: VibePaths.accountHome)
+        #expect(after == before, "the user's config files changed: \(before) → \(after)")
+    }
+
+    /// Whether ~/.claude and ~/.codex in `home` are there, and each entry in them named after the installer's file
+    /// (the config, its backup, a temp file mid-write) with its size and when it was last changed. Read-only: stat only.
+    static func configListing(home: String) -> [String: String] {
+        var listing: [String: String] = [:]
+        for agent in Agent.allCases {
+            let file = HookInstaller.configURL(for: agent, home: home)
+            let folder = file.deletingLastPathComponent()
+            listing[folder.path] = FileManager.default.fileExists(atPath: folder.path) ? "folder" : "absent"
+            for name in (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+            where name.contains(file.lastPathComponent) {
+                let attributes = try? FileManager.default.attributesOfItem(atPath: folder.appendingPathComponent(name).path)
+                let modified = (attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0
+                listing[folder.appendingPathComponent(name).path] = "\((attributes?[.size] as? NSNumber)?.int64Value ?? 0) bytes, \(modified)"
+            }
+        }
+        return listing
     }
 
     /// The names in `root` and its state and stats folders, and when each was last changed. Read-only.
