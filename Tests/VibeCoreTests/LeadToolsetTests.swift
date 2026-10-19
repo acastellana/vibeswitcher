@@ -21,6 +21,13 @@ final class FakeRuntime: LeadRuntime {
     var pids: [String: Int32] = [:]
     /// Set: the session host can't be read (the error it gives).
     var hostDown: String?
+    /// The Mac's 1-minute load (an idle Mac unless set; the real one varies with what else runs), and readings handed
+    /// out first, one per read.
+    var load: Double? = 0.5
+    var loadReadings: [Double?] = []
+    var loadReads = 0
+    /// Sessions of other projects' teams the host also lists.
+    var others: [LeadSessionInfo] = []
 
     let server = "/App/vibeswitcher-mcp"
     func claudeCommand(root: String) -> String { "claude --dangerously-skip-permissions" }
@@ -46,7 +53,11 @@ final class FakeRuntime: LeadRuntime {
     }
     func sessions() throws -> [LeadSessionInfo] {
         if let hostDown { throw BoardError(text: hostDown) }
-        return spawned.filter { !forgotten.contains($0.id) }.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: "working", tty: nil, pid: pids[$0.id] ?? getpid()) }
+        return spawned.filter { !forgotten.contains($0.id) }.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: "working", tty: nil, pid: pids[$0.id] ?? getpid()) } + others
+    }
+    func loadAverage() -> Double? {
+        loadReads += 1
+        return loadReadings.isEmpty ? load : loadReadings.removeFirst()
     }
     func transcript(of session: String) throws -> String? {
         if let hostDown { throw BoardError(text: hostDown) }
@@ -78,6 +89,7 @@ final class FakeSeat: LeadRuntime {
     func transcript(of session: String) throws -> String? { try shared.transcript(of: session) }
     func currentAgent() -> LeadAgent? { agent }
     func isRunning(_ agent: LeadAgent) -> Bool { shared.isRunning(agent) }
+    func loadAverage() -> Double? { shared.loadAverage() }
 }
 
 /// The team as VibeSwitcher starts it, with a vault of its own: the book a session host would hold, asked in

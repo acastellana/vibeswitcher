@@ -561,4 +561,5 @@ final class NoAgent: LeadRuntime {
     func transcript(of session: String) -> String? { nil }
     func currentAgent() -> LeadAgent? { nil }
     func isRunning(_ agent: LeadAgent) -> Bool { false }
+    func loadAverage() -> Double? { shared.loadAverage() }
 }

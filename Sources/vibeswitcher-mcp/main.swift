@@ -117,6 +117,8 @@ final class HostRuntime: LeadRuntime {
         }
     }
 
+    func loadAverage() -> Double? { MacLoad.oneMinute() }
+
     func forget(_ session: String) {
         guard let id = UUID(uuidString: session) else { return }
         _ = try? HostCall.request(.remove(id: id), timeout: 3)

@@ -30,6 +30,7 @@ final class ConcurrentRuntime: LeadRuntime, @unchecked Sendable {
     func transcript(of session: String) throws -> String? { nil }
     func currentAgent() -> LeadAgent? { me }
     func isRunning(_ agent: LeadAgent) -> Bool { true }
+    func loadAverage() -> Double? { 0.5 }
 }
 
 extension LeadToolsetTests {
