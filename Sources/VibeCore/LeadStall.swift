@@ -58,10 +58,14 @@ public struct LeadStall: Codable, Equatable, Sendable {
         }
     }
 
-    /// "stalled: <reason>, last activity N min ago".
+    /// "stalled: <reason>, last activity N min ago" ("no activity seen yet" without a time for it).
     public func text(now: Date = Date()) -> String {
-        "stalled: \(why(now: now)), last activity \(LeadToolset.age(now.timeIntervalSince1970 - lastActivity)) ago"
+        let last = Self.known(lastActivity).map { "last activity \(LeadToolset.age(now.timeIntervalSince1970 - $0)) ago" }
+        return "stalled: \(why(now: now)), \(last ?? "no activity seen yet")"
     }
+
+    /// A time, unless it's a placeholder for none (`.distantPast`, or anything before 2001).
+    static func known(_ at: Double) -> Double? { at >= Date(timeIntervalSinceReferenceDate: 0).timeIntervalSince1970 ? at : nil }
 
     /// What the lead can do about it.
     public func advice(slug: String) -> String {
@@ -95,8 +99,11 @@ public struct LeadStall: Codable, Equatable, Sendable {
         let betweenTurns = seen.activity?.betweenTurns ?? [.done, .idle, .background].contains(seen.status ?? .unknown)
         // Between turns waiting on its own background task: its transcript says (see `LeadActivity`), or its shells.
         let background = betweenTurns ? seen.waitingOn : nil
-        // Between turns with no transcript to read, its status says since when.
-        if let last = seen.lastActivity ?? (betweenTurns ? seen.since?.timeIntervalSince1970 : nil) {
+        // Between turns with no transcript to read, its status says since when. Neither counts from before this
+        // session started: one first seen before its hooks fire reads as between turns since ever (`.distantPast`),
+        // one on a reused terminal as the earlier session left it.
+        let since = seen.lastActivity ?? (betweenTurns ? seen.since?.timeIntervalSince1970 : nil)
+        if let last = since.flatMap({ known(max($0, seen.started ?? -.infinity)) }) {
             let quiet = at - last
             // A compaction once its turn was over is Claude tidying an idle session: it's idle, if anything.
             if let compacted = seen.compactedAt, !betweenTurns, quiet >= compactedAfter {

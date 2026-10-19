@@ -221,6 +221,76 @@ struct LeadStallTests {
         #expect(LeadStall.detect(seen, task: Self.task("fix", .blocked), now: now).isEmpty)
     }
 
+    /// 2026-10-19 00:08 (22:08Z): start_worker started test-hosts-exit-with, and within a minute, before any hook
+    /// event, the witness said it was "stalled: it's between turns without having reported, and has no question to
+    /// the lead pending, last activity 739908 d ago". Its first sighting read as between turns since ever (the status
+    /// before its hooks fire has no time, `.distantPast`), or as the terminal it reuses was left by an earlier session.
+    @Test func aJustStartedWorkerIsntStalled() throws {
+        let t0 = 1_792_361_280.0  // 2026-10-19 00:08 CEST
+        let started = t0
+        let firstSightings: [LeadWitness.Seen] = [
+            // Nothing read yet: the status alone, or its hooks' SessionStart (between turns).
+            .init(live: true, status: .idle, since: .distantPast, started: started),
+            .init(live: true, status: .idle, since: .distantPast, activity: .idle(background: nil), started: started),
+            .init(live: true, status: .idle, since: .distantPast, activity: .unknown, started: started),
+            // The prompt and one command in its transcript.
+            .init(live: true, status: .idle, since: .distantPast, activity: .working("Bash"), lastActivity: started + 3, started: started),
+            .init(live: true, status: .idle, since: .distantPast, activity: .idle(background: nil), lastActivity: started + 3, started: started),
+            // The terminal's earlier session finished there a quarter of an hour ago.
+            .init(live: true, status: .done, since: Date(timeIntervalSince1970: t0 - 900), started: started),
+            .init(live: true, status: .done, since: Date(timeIntervalSince1970: t0 - 900), activity: .idle(background: nil), started: started),
+            .init(live: true, status: .done, since: Date(timeIntervalSince1970: t0 - 900), activity: .unknown, started: started),
+        ]
+        for seen in firstSightings {
+            for after: Double in [2, 10, 30, 60, 540] {
+                let now = Date(timeIntervalSince1970: t0 + after)
+                #expect(LeadStall.detect(seen, task: Self.task(), now: now).isEmpty, "\(after)s in: \(seen)")
+                let texts = LeadWitness.events(board: Self.board(), seen: ["w1": seen], now: now).map(\.text)
+                #expect(texts.allSatisfy { !$0.contains("stalled") && !$0.contains(" d ago") }, "\(after)s in: \(texts)")
+            }
+        }
+        // Never moving once started: idle 10 min counted from its start, not from ever.
+        let never = firstSightings[1]
+        let late = Date(timeIntervalSince1970: t0 + 11 * 60)
+        let stall = try #require(LeadStall.detect(never, task: Self.task(), now: late).first)
+        #expect(stall.reason == .idle && stall.lastActivity == started)
+        #expect(stall.text(now: late).hasSuffix("last activity 11 min ago"))
+        // The earlier session's status on a reused terminal counts from this session's start too.
+        let reused = try #require(LeadStall.detect(firstSightings[6], task: Self.task(), now: late).first)
+        #expect(reused.lastActivity == started)
+        #expect(LeadStall.detect(firstSightings[6], task: Self.task(), now: Date(timeIntervalSince1970: t0 + 9 * 60)).isEmpty)
+    }
+
+    /// Its start known, a worker that really sits idle is still stalled 10 min after its real last activity, and one
+    /// waiting on its background task only past the 45-min ceiling.
+    @Test func onceStartedTheStallClockCountsFromItsRealLastActivity() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        var idle = Self.seen(Self.turnOver(at: now.timeIntervalSince1970 - 11 * 60))
+        idle.started = now.timeIntervalSince1970 - 3600
+        idle.since = Date(timeIntervalSince1970: now.timeIntervalSince1970 - 11 * 60)
+        let stall = try #require(LeadStall.detect(idle, task: Self.task(), now: now).first)
+        #expect(stall.reason == .idle && stall.text(now: now).hasSuffix("last activity 11 min ago"))
+        #expect(LeadStall.detect(idle, task: Self.task(), now: now - 2 * 60).isEmpty)
+
+        var loads = Self.seen(Self.waitingOnItsLoadRuns)
+        loads.since = Date(timeIntervalSince1970: Self.loadRunsTurnEnded)
+        loads.started = Self.loadRunsStarted - 3600
+        #expect(LeadStall.detect(loads, task: Self.task(), now: Date(timeIntervalSince1970: Self.loadRunsTurnEnded + 44 * 60)).isEmpty)
+        let late = try #require(LeadStall.detect(loads, task: Self.task(), now: Date(timeIntervalSince1970: Self.loadRunsTurnEnded + 46 * 60)).first)
+        #expect(late.reason == .idle && late.background != nil)
+    }
+
+    /// With no time known for anything (no status time, transcript or start), nothing is called stalled, and a stall
+    /// kept without one never says an age counted from `.distantPast`.
+    @Test func noActivityTimeKnownIsNoStall() {
+        let now = Date(timeIntervalSince1970: 1_792_361_280)
+        let unknown = LeadWitness.Seen(live: true, status: .idle, since: .distantPast, activity: .idle(background: nil))
+        #expect(LeadStall.detect(unknown, task: Self.task(), now: now).isEmpty)
+        #expect(LeadWitness.events(board: Self.board(), seen: ["w1": unknown], now: now).allSatisfy { !$0.text.contains("stalled") })
+        let placeholder = LeadStall(reason: .idle, lastActivity: Date.distantPast.timeIntervalSince1970, at: now.timeIntervalSince1970)
+        #expect(placeholder.text(now: now) == "stalled: it's between turns without having reported, and has no question to the lead pending, no activity seen yet")
+    }
+
     // MARK: (c) stuck after a compaction
 
     @Test func anIdleCompactionIsNeitherWorkNorACompactionStall() throws {
