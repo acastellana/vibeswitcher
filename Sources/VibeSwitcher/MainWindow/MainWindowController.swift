@@ -27,11 +27,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     let chat = ChatModel()
     /// The chat's side of the selected session's terminal: its answer card, and what's typed into it.
     private lazy var sync = makeSync()
-    private lazy var chatHost = NSHostingView(rootView: AnyView(EmptyView()))
+    private var chatHost = MainWindowController.makeHost()
     private lazy var endedHost = NSHostingView(rootView: AnyView(EmptyView()))
     private let sidebarHost = NSHostingController(rootView: AnyView(EmptyView()))
     private let inspectorHost = NSHostingController(rootView: AnyView(EmptyView()))
-    private let headerHost = NSHostingView(rootView: AnyView(EmptyView()))
+    private var headerHost = MainWindowController.makeHost()
     /// Whether the window's SwiftUI views are in place. A closed window keeps its views, and with them their
     /// observers and tasks (git runs, transcript reads on every hook event): they come down on close.
     private var mounted = false
@@ -66,6 +66,27 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         mounted = false
         for host in [sidebarHost, inspectorHost] { host.rootView = AnyView(EmptyView()) }
         for host in [headerHost, endedHost, chatHost] { host.rootView = AnyView(EmptyView()) }
+        // Made again each time the window's views come down: AppKit keeps, on a hosting view, what each of its layouts
+        // read (a dependency set that grows with every conversation and session shown, holding the SwiftUI responders
+        // and text layouts it saw) until the view itself goes. These two had most of it.
+        chatHost = Self.renewed(chatHost)
+        headerHost = Self.renewed(headerHost)
+    }
+
+    /// A hosting view sized by its superview (the chat's by the body, the header's by its slot in the stack).
+    private static func makeHost() -> NSHostingView<AnyView> {
+        let host = NSHostingView(rootView: AnyView(EmptyView()))
+        host.sizingOptions = []
+        host.autoresizingMask = [.width, .height]
+        return host
+    }
+
+    private static func renewed(_ host: NSHostingView<AnyView>) -> NSHostingView<AnyView> {
+        let fresh = makeHost()
+        fresh.frame = host.frame
+        fresh.isHidden = host.isHidden
+        host.superview?.replaceSubview(host, with: fresh)
+        return fresh
     }
 
     /// Follows the transcript while the chat is on screen.
@@ -177,17 +198,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     required init?(coder: NSCoder) { fatalError("not used") }
 
     private func makeMiddle() -> NSView {
-        let header = headerHost
+        // The header's slot, so its hosting view can be made again without touching the stack's constraints.
+        let header = NSView()
+        headerHost.frame = header.bounds
+        header.addSubview(headerHost)
         let divider = NSBox()
         divider.boxType = .separator
         endedBar.isHidden = true
         // Their size comes from the stack. Left to their content, an empty bar asks to be zero wide, which
         // pins the whole middle pane (and so the window) at its minimum width.
-        header.sizingOptions = []
         endedHost.sizingOptions = []
         // The terminal and the chat share the space; the chat covers the terminal when shown.
         let body = NSView()
-        chatHost.sizingOptions = []
         for view in [pane.view, chatHost] {
             view.frame = body.bounds
             view.autoresizingMask = [.width, .height]
@@ -463,6 +485,18 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         chat.show(path: nil)
         unmountViews()
         NSApp.setActivationPolicy(.accessory)
+        giveBackFreedPages()
+    }
+
+    /// What the window's views and the conversation used is freed once they're down, but malloc keeps the pages: a
+    /// conversation's parse and layout leave them scattered (after ten minutes of sessions and chats coming and going
+    /// they were 40–60 MB of the footprint, in use under 5 MB of it), and it gives them back only when the Mac is short
+    /// of memory. The app then sits closed for hours, so they go back a moment after it closes, off the main thread.
+    private func giveBackFreedPages() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self, self.window?.isVisible != true else { return }
+            DispatchQueue.global(qos: .utility).async { malloc_zone_pressure_relief(nil, 0) }
+        }
     }
 
     // MARK: Toolbar
