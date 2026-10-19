@@ -158,10 +158,48 @@ struct HookBoundsTests {
         }
     }()
 
+    /// The hook's first exec after a build waits on macOS's check of the new binary (amfid, which checks one at a time
+    /// under load): in a full run right after a rebuild, the alarm and lock cases took 58 s each and 3.9 s alone
+    /// (2026-10-20). So the suite runs it once, untimed, before any timed case (`runHook` waits for this), with nothing
+    /// on stdin: it leaves before it reads a home, and its home is one it couldn't write to anyway.
+    static let warmUp: TimeInterval = {
+        let process = Process()
+        process.executableURL = hook
+        process.arguments = ["claude"]
+        var environment = ProcessInfo.processInfo.environment
+        environment["HOME"] = "/var/empty"
+        environment["CFFIXED_USER_HOME"] = "/var/empty"
+        environment["VIBESWITCHER_HOME"] = nil
+        process.environment = environment
+        process.standardInput = FileHandle.nullDevice
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        let ended = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in ended.signal() }
+        let start = Date()
+        guard (try? process.run()) != nil else { return 0 }
+        if ended.wait(timeout: .now() + hangGuard) == .timedOut { process.terminate() }
+        let seconds = Date().timeIntervalSince(start)
+        print("HookBoundsTests: the hook's first run, untimed, took \(seconds) s")
+        return seconds
+    }()
+
+    /// Bytes of `fd` not yet read (a pipe's or a file's, whose offset the hook shares), nil if it can't tell.
+    static func unread(_ fd: Int32) -> Int32? {
+        let fionread: UInt = 0x4004_667F  // FIONREAD, _IOR('f', 127, int): its macro isn't imported
+        var count: Int32 = 0
+        return ioctl(fd, fionread, &count) == 0 ? count : nil
+    }
+
     /// Runs the built hook (`claude`) on a scratch home with `input` as its stdin: how it ended, how long it took and
-    /// what it printed.
-    func runHook(home: URL, input: FileHandle) throws -> (status: Int32, reason: Process.TerminationReason, seconds: TimeInterval, stdout: Data) {
+    /// what it printed. `own` is the hook's own time, from its first read of `input` (its first act, as it sets its
+    /// alarm) to its exit, not from the exec, which can stall on macOS's check of a fresh binary (see `warmUp`): a
+    /// range, from the first poll that saw `input` read to the last that saw it unread, so each bound holds on the
+    /// hook's time and not on the poll's. Exec to first read is logged. A hook that never read `input` is timed from
+    /// its exec, as before (an empty input, a hook that left first).
+    func runHook(home: URL, input: FileHandle) throws -> (status: Int32, reason: Process.TerminationReason, own: ClosedRange<TimeInterval>, stdout: Data) {
         #expect(FileManager.default.isExecutableFile(atPath: Self.hook.path), "build it first: swift build")
+        _ = Self.warmUp
         let output = temp.url("hook-stdout")
         FileManager.default.createFile(atPath: output.path, contents: nil)
         let process = Process()
@@ -177,11 +215,28 @@ struct HookBoundsTests {
         process.standardError = FileHandle.nullDevice
         let ended = DispatchSemaphore(value: 0)
         process.terminationHandler = { _ in ended.signal() }
-        let start = Date()
+        let watched = (Self.unread(input.fileDescriptor) ?? 0) > 0  // else nothing tells when it reads
+        let exec = Date()
+        var unreadAt = exec, readAt: Date?
         try process.run()
+        var running = true
+        // One more poll once it has ended: it may have read and left between two.
+        while watched, readAt == nil {
+            let polled = Date()
+            guard let left = Self.unread(input.fileDescriptor) else { break }
+            if left == 0 { readAt = Date() } else if running { unreadAt = polled } else { break }
+            if readAt == nil, ended.wait(timeout: .now() + .microseconds(500)) == .success { ended.signal(); running = false }
+        }
         if ended.wait(timeout: .now() + hangGuard) == .timedOut { process.terminate() }
-        let seconds = Date().timeIntervalSince(start)
-        return (process.terminationStatus, process.terminationReason, seconds, (try? Data(contentsOf: output)) ?? Data())
+        let exited = Date()
+        let own = readAt.map { exited.timeIntervalSince($0)...exited.timeIntervalSince(unreadAt) }
+            ?? exited.timeIntervalSince(exec)...exited.timeIntervalSince(exec)
+        if let readAt {
+            print("HookBoundsTests: the hook read its input \(readAt.timeIntervalSince(exec)) s after its exec, then ran \(own) s")
+        } else {
+            print("HookBoundsTests: no read of its input seen; the hook ran \(own.upperBound) s from its exec")
+        }
+        return (process.terminationStatus, process.terminationReason, own, (try? Data(contentsOf: output)) ?? Data())
     }
 
     func home() throws -> URL {
@@ -269,7 +324,7 @@ struct HookBoundsTests {
         try? pipe.fileHandleForWriting.close()
         #expect(run.reason == .exit && run.status == 0)
         #expect(run.stdout.isEmpty)
-        #expect(run.seconds >= 2.9 && run.seconds < 8, "took \(run.seconds) s")
+        #expect(run.own.lowerBound >= 2.9 && run.own.upperBound < 8, "took \(run.own) s")
     }
 
     @Test(.enabled(if: HookBoundsTests.terminal != nil, "the hook records for no terminal from here"))
@@ -289,7 +344,7 @@ struct HookBoundsTests {
         let held = try runHook(home: home, input: payload(["hook_event_name": "UserPromptSubmit", "session_id": "s", "prompt": "next"]))
         #expect(held.reason == .exit && held.status == 0 && held.stdout.isEmpty)
         // A second for the lock, then on: well before the alarm.
-        #expect(held.seconds >= 0.95 && held.seconds < 2.9, "took \(held.seconds) s")
+        #expect(held.own.lowerBound >= 0.95 && held.own.upperBound < 2.9, "took \(held.own) s")
         #expect(HookState.load(from: state)?.lastPrompt == Self.clipBefore(prompt))
         flock(lock, LOCK_UN)
     }
