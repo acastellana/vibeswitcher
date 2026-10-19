@@ -296,6 +296,26 @@ notch. VibeSwitcher starts next to the clock, where overflow never reaches (⌘-
 like). If its icon does get hidden, a floating pill with the same numbered dots appears automatically;
 drag it anywhere. Set it to Always / Never in Settings › General.
 
+## Briefing
+
+**Brief me** (the speech-bubble button in the window's toolbar and the menu bar's header) tells you in about
+30 seconds what happened lately across every project VibeSwitcher leads: what landed, what's stuck, what waits on
+you, and which sessions need you. It covers what's new since your last briefing, or the last 3 hours if that's
+longer. It's written from each lead's progress log (its updates and merges, the newest 8 per project), its board
+(running, being checked, blocked, open questions) and the sessions that need input, all redacted first, by the
+same headless Claude as the Team tab's one-liners (`claude -p` with haiku, no tools), in 70–90 words, in the
+language set in Settings › General › Briefing (the Mac's first language until you pick one). Without Claude, a
+plain English briefing from the same notes is shown, and the panel says so. The text shows in a panel (select
+and copy it) with the time it was written; Play reads it again, and pressing Brief me while it writes or reads
+stops it.
+
+It's read aloud by ElevenLabs (the `eleven_v4` model, in the chosen language) when you've saved an ElevenLabs
+API key in Settings › General › Briefing, else by the Mac's own voice; if ElevenLabs refuses or can't be reached,
+the Mac's voice reads it and the panel says why. The briefing's text goes to ElevenLabs only then, and only when
+you press Brief me, Play or Test voice: nothing is sent on its own. The key is kept in your login Keychain only
+(beside the app's own key, readable without asking by VibeSwitcher alone), never in the app's preferences, its
+logs or the phone. A different voice: `defaults write dev.vibeswitcher.VibeSwitcher briefingVoice <voice id>`.
+
 ## Phone Access (over Tailscale)
 
 See your sessions on your phone: the list with live status, each session's screen, the Today summary,
@@ -406,7 +426,7 @@ hooks and can be deleted by hand.
 
 Everything stays on your Mac, readable only by you (`~/.vibeswitcher` is `0700`, its files `0600`). The hook writes a few facts per terminal (last event, your last prompt, the
 agent's last message, both truncated) to `~/.vibeswitcher/state/`, and the app reads them plus Terminal's
-tab titles. The Today totals are kept per day in `~/.vibeswitcher/stats/` (project names and seconds). Nothing is sent anywhere. Delete `~/.vibeswitcher` to remove all of it.
+tab titles. The Today totals are kept per day in `~/.vibeswitcher/stats/` (project names and seconds). Nothing is sent anywhere but what you ask for: the Team tab's one-liners and Brief me go to Claude through your own `claude` command, and a briefing's text goes to ElevenLabs when you press Brief me with a key saved (see [Briefing](#briefing)). Delete `~/.vibeswitcher` to remove all of it.
 
 ## Security: the signing identity
 
@@ -562,7 +582,8 @@ so. See [docs/eval/runtime-data/idle-bench.md](docs/eval/runtime-data/idle-bench
 Tests never touch your Keychain. Workers and verifiers run `swift test` with HOME and CFFIXED_USER_HOME
 on a scratch folder, where there's no login keychain, and macOS answers a Keychain call there with a
 "Keychain Not Found" dialog rather than an error. So the app's key store is injected (`AppKeyStore`:
-the app passes `AppProof.KeychainStore()`, tests hold their key in memory), and `KeychainLintTests` fails
+the app passes `AppProof.KeychainStore()`, tests hold their key in memory; the ElevenLabs key likewise,
+`AppProof.KeychainSecret` in the app and `AppProof.MemorySecret` in tests), and `KeychainLintTests` fails
 if Keychain code is reachable from a test some other way. The one test of the real Keychain runs in your
 own HOME, only when you ask for it: `VIBESWITCHER_HOME=$(mktemp -d) VIBESWITCHER_KEYCHAIN_LIVE=1 swift test --filter
 KeychainLiveTests` (VIBESWITCHER_HOME keeps the run off your `~/.vibeswitcher`, so the tests' guard lets it start).
