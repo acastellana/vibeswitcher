@@ -2,6 +2,7 @@ import Darwin
 import Foundation
 import Testing
 @testable import VibeCore
+@testable import VibeHost
 @testable import VibeSwitcher
 
 /// What app.log says about a handover, on a fake host (a socket that speaks the protocol; no real host, no real
@@ -9,7 +10,7 @@ import Testing
 @MainActor
 struct HostClientHandoverTests {
     /// What the fake host does when it's asked to hand over.
-    enum OnHandover {
+    indirect enum OnHandover {
         /// Re-executes in place as `build`: the same pid, the connection dropped without an answer.
         case reExec(build: Int)
         /// The new build couldn't take over and went back to this one: the same pid and build.
@@ -20,6 +21,8 @@ struct HostClientHandoverTests {
         case quit
         /// Says no, and carries on.
         case refuse(String)
+        /// The new build's probe takes this long (a loaded Mac's first exec), then the rest as `then`.
+        case after(TimeInterval, then: OnHandover)
     }
 
     /// A host on its own socket: welcomes every hello with one live session and the handover capability.
@@ -83,26 +86,35 @@ struct HostClientHandoverTests {
                 send(.welcome(protocolVersion: HostProtocol.version, hostBuild: build, sessions: [session],
                               capabilities: [HostProtocol.Capability.handover], pid: pid), replyTo: envelope.seq, on: fd)
             case .handover:
-                switch onHandover {
-                case .reExec(let build):
-                    self.build = build
-                    drop(fd)
-                case .fallBack:
-                    drop(fd)
-                case .replacedBy(let pid, let build):
-                    self.pid = pid
-                    self.build = build
-                    drop(fd)
-                case .quit:
-                    Array(clients.keys).forEach(drop)
-                    listener?.cancel()
-                    listener = nil
-                    unlink(path)
-                case .refuse(let message):
-                    send(.error(message), replyTo: envelope.seq, on: fd)
-                }
+                handOver(onHandover, replyTo: envelope.seq, on: fd)
+            case .screen:
+                // Never answered: the request's own wait ends it.
+                break
             default:
                 send(.ok, replyTo: envelope.seq, on: fd)
+            }
+        }
+
+        private func handOver(_ how: OnHandover, replyTo seq: Int, on fd: Int32) {
+            switch how {
+            case .reExec(let build):
+                self.build = build
+                drop(fd)
+            case .fallBack:
+                drop(fd)
+            case .replacedBy(let pid, let build):
+                self.pid = pid
+                self.build = build
+                drop(fd)
+            case .quit:
+                Array(clients.keys).forEach(drop)
+                listener?.cancel()
+                listener = nil
+                unlink(path)
+            case .refuse(let message):
+                send(.error(message), replyTo: seq, on: fd)
+            case .after(let delay, let then):
+                queue.asyncAfter(deadline: .now() + delay) { [weak self] in self?.handOver(then, replyTo: seq, on: fd) }
             }
         }
 
@@ -127,9 +139,14 @@ struct HostClientHandoverTests {
     }
 
     /// A client of `host` whose bundled build is 9, connected to it (an outdated host at build 8, so it hands over).
-    func client(of host: FakeHost, log: Log) -> HostClient {
+    /// `wait`: its handover's wait and breadcrumb, shortened.
+    func client(of host: FakeHost, log: Log, wait: (handover: TimeInterval, breadcrumb: TimeInterval)? = nil) -> HostClient {
         let client = HostClient(socketPath: host.path, appKey: { nil }, bundledBuild: { 9 }, reconnectDelays: [0.05, 0.1, 0.2],
                                 note: { log.note($0) })
+        if let wait {
+            client.handoverWait = wait.handover
+            client.handoverBreadcrumb = wait.breadcrumb
+        }
         client.connectIfRunning()
         return client
     }
@@ -184,9 +201,67 @@ struct HostClientHandoverTests {
         #expect(client.state == .outdated(live: 1, compatible: true))
     }
 
+    /// The host's probe of the new build takes past a request's 15 s (a loaded Mac's first exec waits on amfid): the
+    /// handover is waited for, with a breadcrumb every 15 s, and logged as handed over; never as failed first. Any
+    /// other request still gets its 15 s.
+    @Test func aProbePastFifteenSecondsIsWaitedFor() async throws {
+        let host = try FakeHost(pid: 31589, build: 8, onHandover: .after(17, then: .reExec(build: 9)))
+        defer { host.stop() }
+        let log = Log()
+        let client = client(of: host, log: log)
+        #expect(await until { log.lines.contains { $0.hasPrefix("host: handing over") } })
+        let asked = Date()
+        var screen: (text: String?, after: TimeInterval)?
+        client.screen(UUID()) { screen = ($0, Date().timeIntervalSince(asked)) }
+        #expect(await until { client.state == .connected })
+        #expect(log.handover == ["host: handed over (pid 31589, build 9)"], "\(log.lines)")
+        #expect(log.lines.contains("host: handover: waiting for the new build's probe, 15 s"), "\(log.lines)")
+        #expect(!log.lines.contains { $0.contains("didn't answer") || $0.contains("no answer") }, "\(log.lines)")
+        let unanswered = try #require(screen)
+        #expect(unanswered.text == nil && unanswered.after >= 14.9, "\(unanswered)")
+    }
+
+    /// The handover's wait runs out and the host hands over after it: the connection was kept, and the new build's
+    /// welcome is the handover's success.
+    @Test func aHandoverAfterTheWaitIsLoggedAsHandedOver() async throws {
+        let host = try FakeHost(pid: 31589, build: 8, onHandover: .after(8, then: .reExec(build: 9)))
+        defer { host.stop() }
+        let log = Log()
+        let client = client(of: host, log: log, wait: (handover: 2, breadcrumb: 1))
+        #expect(await until { client.state == .connected })
+        #expect(log.handover == ["host: handed over after the wait (pid 31589, build 9)"], "\(log.lines)")
+        let waiting = log.lines.filter { $0.hasPrefix("host: handover: ") }
+        #expect(waiting == ["host: handover: waiting for the new build's probe, 1 s",
+                            "host: handover: no answer in 2 s; the connection stays open and the next welcome says how it went"])
+    }
+
+    /// The host refuses after the app stopped waiting: that's the handover failing, and the old build carries on.
+    @Test func aRefusalAfterTheWaitIsLoggedAsAFailure() async throws {
+        let host = try FakeHost(pid: 31589, build: 8, onHandover: .after(6, then: .refuse("Couldn't hand over: probe failed.")))
+        defer { host.stop() }
+        let log = Log()
+        let client = client(of: host, log: log, wait: (handover: 1, breadcrumb: 1))
+        #expect(await until { !log.handover.isEmpty })
+        #expect(log.handover == ["host: handover failed: Couldn't hand over: probe failed."], "\(log.lines)")
+        #expect(log.lines.contains { $0.hasPrefix("host: handover: no answer in 1 s") }, "\(log.lines)")
+        #expect(client.state == .outdated(live: 1, compatible: true))
+    }
+
+    /// The app's wait covers the host's: its probe limit, and a margin for saving the sessions and the exec.
+    @Test func theHandoverWaitCoversTheHostsProbe() {
+        #expect(HostClient.hostProbeLimit == HostHandover.probeLimit)
+        let client = HostClient(socketPath: "/nonexistent", bundledBuild: { 0 }, note: { _ in })
+        #expect(client.handoverWait >= HostHandover.probeLimit + 15)
+        #expect(client.handoverBreadcrumb == 15)
+        #expect(HostClient.replyWait == 15)
+    }
+
     @Test func theOutcomeNamesWhoAnswered() {
         let asked: (pid: Int32?, build: Int) = (31589, 9)
         #expect(HostClient.handoverOutcome(asked: asked, pid: 31589, build: 9) == "host: handed over (pid 31589, build 9)")
+        #expect(HostClient.handoverOutcome(asked: asked, pid: 31589, build: 9, afterTheWait: true)
+                == "host: handed over after the wait (pid 31589, build 9)")
+        #expect(HostClient.handoverOutcome(asked: asked, pid: 31589, build: 8, afterTheWait: true).hasPrefix("host: handover failed: the old build"))
         #expect(HostClient.handoverOutcome(asked: asked, pid: 31589, build: 8).hasPrefix("host: handover failed: the old build"))
         #expect(HostClient.handoverOutcome(asked: asked, pid: 1, build: 9).hasPrefix("host: handover failed: a different host"))
         #expect(HostClient.handoverOutcome(asked: asked, pid: nil, build: 9).hasPrefix("host: handover failed: a different host"))

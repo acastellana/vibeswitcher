@@ -50,6 +50,11 @@ final class HostClient: ObservableObject {
     /// the bundled build asked for. The connection drops by design; the next welcome says whether it went through.
     private var handover: (pid: Int32?, build: Int)?
     private var handingOver: Bool { handover != nil }
+    /// Each handover asked counts up: a wait or answer of an earlier one has nothing to say about a later one.
+    private var handoverAsk = 0
+    /// The host's answer to the handover asked didn't come in `handoverWait`: the connection stays open, and the next
+    /// welcome says how it went.
+    private var handoverWaitedOut = false
     /// The pid the connected host gave in its welcome (nil from an older host).
     private var hostPID: Int32?
     /// The bundled build a handover was last asked for: asked once per build, so a failing one isn't asked again
@@ -94,11 +99,27 @@ final class HostClient: ObservableObject {
 
     /// The reply every request still waiting gets when the connection drops.
     static let wentAway = "The session host went away."
+    /// How long a request's reply is waited for (a handover's: `handoverWait`).
+    static let replyWait: TimeInterval = 15
+    /// How long the host gives the new build's probe (`HostHandover.probeLimit`, which a test holds this to): on a
+    /// loaded Mac the new build's first exec waits on amfid, one new binary at a time for the whole Mac (on 2026-10-19
+    /// it answered nothing for 108 s at load 200).
+    static let hostProbeLimit: TimeInterval = 180
+    /// How long the host's answer to a handover is waited for: its probe of the new build, then saving the sessions and
+    /// the exec. Tests shorten it.
+    var handoverWait: TimeInterval = hostProbeLimit + 30
+    /// How often app.log is told the handover is still waiting for the new build's probe. Tests shorten it.
+    var handoverBreadcrumb: TimeInterval = 15
+
+    /// The bundled host a handover asks for; a test's scratch build instead.
+    private let handoverExecutable: () -> String
 
     init(socketPath: String = VibePaths.hostSocket.path, appKey: @escaping () -> SymmetricKey? = { nil },
          bundledBuild: @escaping () -> Int = { HostBuild.id(ofExecutableAt: HostClient.hostExecutable.path) },
+         handoverExecutable: @escaping () -> String = { HostClient.hostExecutable.path },
          reconnectDelays: [TimeInterval] = [0.2, 0.5, 1, 2, 3, 5], note: @escaping (String) -> Void = { Breadcrumbs.shared.note($0) }) {
         self.socketPath = socketPath
+        self.handoverExecutable = handoverExecutable
         proofKey = appKey
         self.bundledBuild = bundledBuild
         self.reconnectDelays = reconnectDelays
@@ -278,6 +299,7 @@ final class HostClient: ObservableObject {
         if let asked = handover {
             note("host: handover failed: the host (pid \(asked.pid.map(String.init) ?? "?")) went away and no build answered")
             handover = nil
+            handoverWaitedOut = false
         }
         note("host: gone; \(sessions.filter(\.isLive).count) sessions marked ended")
         reconnectAttempt = 0
@@ -309,8 +331,9 @@ final class HostClient: ObservableObject {
             restartedForWaiting = false
             hostPID = pid
             if let asked = handover {
-                note(Self.handoverOutcome(asked: asked, pid: pid, build: build))
+                note(Self.handoverOutcome(asked: asked, pid: pid, build: build, afterTheWait: handoverWaitedOut))
                 handover = nil
+                handoverWaitedOut = false
             }
             sessions = list
             canHandOver = hostCapabilities.contains(HostProtocol.Capability.handover)
@@ -391,7 +414,8 @@ final class HostClient: ObservableObject {
 
     /// The line for app.log when the first welcome after a handover was asked comes: handed over when the bundled build
     /// answers from the same process (the host re-executes itself in place), else a failure that says who answered.
-    static func handoverOutcome(asked: (pid: Int32?, build: Int), pid: Int32?, build: Int) -> String {
+    /// `afterTheWait`: the host's answer didn't come in `handoverWait`, and this welcome is how it went.
+    static func handoverOutcome(asked: (pid: Int32?, build: Int), pid: Int32?, build: Int, afterTheWait: Bool = false) -> String {
         let shown = { (pid: Int32?) in pid.map(String.init) ?? "?" }
         if let was = asked.pid, pid != was {
             return "host: handover failed: a different host answered (pid \(shown(pid)), build \(build); was pid \(was))"
@@ -399,26 +423,54 @@ final class HostClient: ObservableObject {
         guard build == asked.build else {
             return "host: handover failed: the old build answered (pid \(shown(pid)), build \(build); asked for \(asked.build))"
         }
-        return "host: handed over (pid \(shown(pid)), build \(build))"
+        return "host: handed over\(afterTheWait ? " after the wait" : "") (pid \(shown(pid)), build \(build))"
     }
 
     /// Asks the running host to become the bundled build, keeping every session: it answers ok, the connection drops
-    /// and the new build's welcome comes on the next one (`connectionLost` reconnects).
+    /// and the new build's welcome comes on the next one (`connectionLost` reconnects). The host first probes the new
+    /// build, for up to `hostProbeLimit`: its answer is waited for that long (`handoverWait`), not a request's 15 s.
     private func handOver() {
-        guard !handingOver else { return }
+        // Asked again (the window's restart) once an earlier ask's answer was waited for in vain.
+        guard !handingOver || handoverWaitedOut else { return }
         let bundled = bundledBuild()
         note("host: handing over to the bundled build \(bundled) (pid \(hostPID.map(String.init) ?? "?"))")
         handover = (hostPID, bundled)
+        handoverWaitedOut = false
         handedOverTo = bundled
-        request(.handover(executable: Self.hostExecutable.path)) { [weak self] event in
-            guard let self, case .error(let message) = event, self.handingOver else { return }
+        handoverAsk += 1
+        let ask = handoverAsk
+        var answered = false
+        request(.handover(executable: handoverExecutable()), wait: nil) { [weak self] event in
+            answered = true
+            guard let self, ask == self.handoverAsk, case .error(let message) = event, self.handingOver else { return }
             // The host re-executes itself: the connection drops by design (its ok can go with it). The next welcome
             // says how it went (`handoverOutcome`), or `hostGone` that no build came back.
             guard message != Self.wentAway else { return note("host: connection dropped for the handover; waiting for the new build") }
             note("host: handover failed: \(message)")
             self.handover = nil
+            self.handoverWaitedOut = false
             // Carry on with the old build, as without a handover.
             if !self.isUsable { self.finishWaiting("The session host is out of date. Restart it from the window.") }
+        }
+        waitForHandover(ask, waited: 0, answered: { answered })
+    }
+
+    /// While the host's answer to handover `ask` hasn't come: a breadcrumb every `handoverBreadcrumb`, and once
+    /// `handoverWait` is up, the wait ends without calling it failed (the host may still hand over: its next welcome
+    /// says, see `handoverOutcome`). A refusal that comes later still fails it.
+    private func waitForHandover(_ ask: Int, waited: TimeInterval, answered: @escaping () -> Bool) {
+        let step = min(handoverBreadcrumb, handoverWait - waited)
+        DispatchQueue.main.asyncAfter(deadline: .now() + step) { [weak self] in
+            guard let self, ask == self.handoverAsk, self.handingOver, !answered() else { return }
+            let waited = waited + step
+            guard waited < self.handoverWait else {
+                self.handoverWaitedOut = true
+                self.note("host: handover: no answer in \(Int(waited)) s; the connection stays open and the next welcome says how it went")
+                if !self.isUsable { self.finishWaiting("The session host is out of date. Restart it from the window.") }
+                return
+            }
+            self.note("host: handover: waiting for the new build's probe, \(Int(waited)) s")
+            self.waitForHandover(ask, waited: waited, answered: answered)
         }
     }
 
@@ -466,7 +518,8 @@ final class HostClient: ObservableObject {
         }
     }
 
-    private func request(_ request: HostRequest, reply: ((HostEvent) -> Void)? = nil) {
+    /// `wait`: how long the reply is waited for before it's taken as unanswered; nil waits until the connection drops.
+    private func request(_ request: HostRequest, wait: TimeInterval? = HostClient.replyWait, reply: ((HostEvent) -> Void)? = nil) {
         guard let connection else {
             reply?(.error("Not connected to the session host."))
             return
@@ -481,8 +534,9 @@ final class HostClient: ObservableObject {
         }
         guard let reply else { return }
         replies[seq] = reply
+        guard let wait else { return }
         // A reply that never comes must not leave its caller (e.g. a phone request) waiting forever.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + wait) { [weak self] in
             self?.replies.removeValue(forKey: seq)?(.error("The session host didn't answer."))
         }
     }
