@@ -475,8 +475,11 @@ struct ChatSyncTests {
         #expect(h.chat.outbox.outbox.entries.isEmpty)
     }
 
-    @Test func aSteerDuringTheTurnWaitsOnBothSidesAndClearsOnBothWhenTaken() async throws {
-        let h = try await Harness.start(temp)
+    /// In the test's scratch folder, and in one spelled `/private/tmp/…` whatever TMPDIR is (a verifier's is there:
+    /// 2026-10-19, the steer reached the agent as not the user's, see `SteerSeal.place`).
+    @Test(arguments: [nil, "/private/tmp"] as [String?])
+    func aSteerDuringTheTurnWaitsOnBothSidesAndClearsOnBothWhenTaken(in folder: String?) async throws {
+        let h = try await Harness.start(temp, in: folder.map { URL(fileURLWithPath: $0, isDirectory: true) })
         defer { h.stop() }
         h.tell(["op": "work"])
         try await h.settle { $0.contains("Working") }
@@ -567,6 +570,8 @@ final class Harness {
     let transcript: URL, control: URL, state: URL
     /// The steer inbox (`SteerInbox`'s root), scratch.
     let steerRoot: URL
+    /// The folder the harness's files are in (the test's scratch folder unless a case names one).
+    let scratch: URL
     let key = "host:harness"
     var session: HostSession!
     /// Where the chat sends (nil: the fake agent's session).
@@ -574,11 +579,13 @@ final class Harness {
     /// The agent is in its turn, as the composer sees it.
     var working = false
 
-    private init(_ temp: Scratch) throws {
+    private init(_ temp: Scratch, in folder: URL?) throws {
         let launcher = Bundle(for: HarnessAnchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host").path
         socket = "/tmp/vsh-sync-\(UUID().uuidString.prefix(8)).sock"
         let key = SymmetricKey(size: .bits256)
-        let home = temp.url("sync-home").resolvingSymlinksInPath()
+        scratch = folder ?? scratchRoot
+        let home = (folder.map { temp.adopt($0.appendingPathComponent("sync-home-\(UUID().uuidString)")) } ?? temp.url("sync-home"))
+            .resolvingSymlinksInPath()
         let folder = home.appendingPathComponent(".claude/projects/-tmp-fake")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         transcript = folder.appendingPathComponent("\(UUID().uuidString).jsonl")
@@ -610,8 +617,8 @@ final class Harness {
 
     private let command: String
 
-    static func start(_ temp: Scratch) async throws -> Harness {
-        let h = try Harness(temp)
+    static func start(_ temp: Scratch, in folder: URL? = nil) async throws -> Harness {
+        let h = try Harness(temp, in: folder)
         #expect(h.placesAreScratch, "the harness reads and writes outside its scratch: \(h.places)")
         h.host.connectIfRunning()
         #expect(await until { h.host.state == .connected })
@@ -640,7 +647,7 @@ final class Harness {
     var places: [String] { files + [socket] }
     private var files: [String] { [steerRoot.path, chat.steerRoot.path, chat.home, transcript.path, state.path, control.path] }
 
-    /// Each place is the test's own: the files in the test's scratch folder, the socket a short `/tmp` one (a socket's
+    /// Each place is the test's own: the files in its scratch folder, the socket a short `/tmp` one (a socket's
     /// path can't be as long as a scratch folder's), and none in the real home's or this HOME's `.vibeswitcher` or `.claude`.
     var placesAreScratch: Bool {
         // `/tmp/x` and `/private/tmp/x` are one place (Foundation spells it either way).
@@ -651,7 +658,7 @@ final class Harness {
         func inside(_ path: String, _ folder: String) -> Bool { spelled(path) == spelled(folder) || spelled(path).hasPrefix(spelled(folder) + "/") }
         let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
         let theirs = [realHome, NSHomeDirectory()].flatMap { [$0 + "/.vibeswitcher", $0 + "/.claude"] }
-        return files.allSatisfy { inside($0, scratchRoot.path) } && spelled(socket).hasPrefix("/tmp/vsh-sync-")
+        return files.allSatisfy { inside($0, scratch.path) } && spelled(socket).hasPrefix("/tmp/vsh-sync-")
             && !places.contains { place in theirs.contains { inside(place, $0) } }
     }
 
