@@ -5,9 +5,16 @@ cd "$(dirname "$0")/.."
 
 SIGNING_DIR="$HOME/.vibeswitcher/signing"
 # Made by an earlier setup-signing.sh: don't sign with a key any process running as you could use.
+# Its password file stays until setup-signing.sh has made the new keychain, so a replacement that stopped
+# half way (the old keychain removed, the new one not made) is refused too, rather than built ad-hoc.
 if [[ -f "$SIGNING_DIR/password" ]]; then
-    echo "The signing keychain's password is saved in $SIGNING_DIR/password, where any process running as you" >&2
-    echo "can read it and sign as VibeSwitcher. Run ./scripts/setup-signing.sh in Terminal to replace it." >&2
+    if [[ -f "$SIGNING_DIR/vibeswitcher.keychain-db" ]]; then
+        echo "The signing keychain's password is saved in $SIGNING_DIR/password, where any process running as you" >&2
+        echo "can read it and sign as VibeSwitcher. Run ./scripts/setup-signing.sh in Terminal to replace it." >&2
+    else
+        echo "The signing keychain is missing: ./scripts/setup-signing.sh stopped while replacing it (the old one is" >&2
+        echo "removed, the new one isn't made). Run ./scripts/setup-signing.sh in Terminal again to finish it." >&2
+    fi
     exit 1
 fi
 

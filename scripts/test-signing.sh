@@ -62,13 +62,35 @@ check "no keychain password in argv anywhere in scripts/" '[[ -z $found ]]'
 check "nothing in scripts/ reads a saved signing password" \
     '! grep -nE "cat[^|]*signing/password|cat[^|]*SIGNING_DIR/password" $(find scripts -type f)'
 
-# build-app.sh refuses an earlier setup's password file, before it builds anything.
+# build-app.sh refuses an earlier setup's password file, before it builds anything; and, once setup-signing.sh has
+# removed that setup's keychain but not yet made the new one (the password file stays until then), says so.
 old="$work/old-home"
 mkdir -p "$old/.vibeswitcher/signing"
 printf 'secret' > "$old/.vibeswitcher/signing/password"
+: > "$old/.vibeswitcher/signing/vibeswitcher.keychain-db"
 out=$(HOME="$old" CFFIXED_USER_HOME="$old" scripts/build-app.sh </dev/null 2>&1)
 status=$?
-check "build-app.sh refuses a saved signing password" '[[ $status -ne 0 && $out == *setup-signing.sh* && $out != *Compiling* ]]'
+check "build-app.sh refuses a saved signing password" \
+    '[[ $status -ne 0 && $out == *"password is saved"*setup-signing.sh* && $out != *Compiling* ]]'
+rm "$old/.vibeswitcher/signing/vibeswitcher.keychain-db"
+out=$(HOME="$old" CFFIXED_USER_HOME="$old" scripts/build-app.sh </dev/null 2>&1)
+status=$?
+check "build-app.sh refuses a replacement setup-signing.sh didn't finish" \
+    '[[ $status -ne 0 && $out == *"keychain is missing"*setup-signing.sh* && $out != *Compiling* ]]'
+
+# setup-signing.sh says what each dialog or prompt wants just before it: the trust dialogs here, from the script (run,
+# they'd change trust), and the new keychain's password below, from a run too. The code line before a command:
+before() {
+    awk -v cmd="$1" '/^[[:space:]]*#/ { next } index($0, cmd) { print prev } { prev = $0 }' scripts/setup-signing.sh
+}
+trust_line='macOS now asks for your Mac login password (the one you log in with) to change certificate trust. $1'
+check "macOS's trust dialog is named as asking for the Mac login password" \
+    'grep -F "echo \"$trust_line\"" scripts/setup-signing.sh >/dev/null'
+check "it's announced before the new certificate is trusted, with what Cancel leaves" \
+    '[[ $(before "security add-trusted-cert") == *"trust_dialog \"Cancel is safe: the certificate just stays untrusted and macOS asks for permissions again after each rebuild.\"" ]]'
+check "and before the old certificate is untrusted" '[[ $(before "security remove-trusted-cert") == *"trust_dialog \"Cancel is safe: "* ]]'
+check "a NEW password is asked for just before create-keychain" \
+    '[[ $(before "security create-keychain") == *"Choose a NEW password for the signing keychain and type it twice"* ]]'
 
 if [[ "${1:-}" == "--build" ]]; then
     home="$work/home"
@@ -101,9 +123,45 @@ EOF
     printf 'old-password\nold-password\n' | run no_tty security create-keychain "$keychain" >/dev/null 2>&1
     printf 'old-password' > "$signing/password"
 
+    # Ctrl-C at the new keychain's password prompt: a security first on the script's PATH sends SIGINT to its process
+    # group, as Terminal would, when asked to create the keychain; anything else goes to the real one.
+    mkdir "$work/ctrl-c"
+    printf '#!/bin/bash\n[[ "${1:-}" == create-keychain ]] && kill -INT 0\nexec /usr/bin/security "$@"\n' > "$work/ctrl-c/security"
+    chmod +x "$work/ctrl-c/security"
+    printf 'test-password\ntest-password\n' |
+        run env PATH="$work/ctrl-c:$PATH" python3 -I -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' \
+            scripts/setup-signing.sh --no-trust > "$work/stopped.log" 2>&1
+    status=$?
+    summary() { grep -E "^ +$1: +$2\$" "$work/stopped.log" >/dev/null; }
+    check "a setup stopped at the password prompt exits with an error" '[[ $status -ne 0 ]]'
+    check "it says the old keychain was removed and the new one not made" \
+        'grep -x "Setup stopped before it finished. What was done:" "$work/stopped.log" >/dev/null &&
+         summary "old identity untrusted" "no \(--no-trust\)" && summary "old keychain removed" yes &&
+         summary "new keychain created" "no.*" && summary "certificate trusted" no'
+    check "and that running it again is safe" \
+        'grep -x "Running ./scripts/setup-signing.sh again is safe: it continues from there." "$work/stopped.log" >/dev/null'
+    check "it leaves no keychain, and keeps the password file" '[[ ! -e $keychain && -f $signing/password ]]'
+    check "the search list is as it was after a stopped setup" '[[ $(run security list-keychains -d user) == "$search_list" ]]'
+    out=$(run scripts/build-app.sh </dev/null 2>&1)
+    status=$?
+    check "build-app.sh then refuses, naming setup-signing.sh" \
+        '[[ $status -ne 0 && $out == *"keychain is missing"*setup-signing.sh* && $out != *Compiling* ]]'
+
     printf 'test-password\ntest-password\n' | run no_tty scripts/setup-signing.sh --no-trust > "$work/setup.log" 2>&1
     status=$?
-    check "setup-signing.sh replaces an earlier setup" '[[ $status -eq 0 ]] && grep "Created .VibeSwitcher Local Signing. in" "$work/setup.log" >/dev/null'
+    check "setup-signing.sh, run again, finishes replacing an earlier setup" \
+        '[[ $status -eq 0 ]] && grep "Created .VibeSwitcher Local Signing. in" "$work/setup.log" >/dev/null'
+    # Whether the setup's output has each text, in turn, each after the one before (security's prompts end no line).
+    in_order() {
+        awk 'BEGIN { n = ARGC - 1; for (i = 1; i <= n; i++) want[i] = ARGV[i]; ARGC = 1 } { text = text $0 "\n" }
+             END { for (i = 1; i <= n; i++) { at = index(text, want[i]); if (!at) exit 1; text = substr(text, at + length(want[i])) } }' \
+            "$@" < "$work/setup.log"
+    }
+    check "it announces the old password, the new one and trust in order, each before its step" \
+        'in_order "The old keychain'"'"'s password is not needed: that file is read by nobody, and is deleted" \
+            "Choose a NEW password for the signing keychain and type it twice; it is never saved; each build after login or wake asks for it once." \
+            "password for new keychain:" "Created '"'"'VibeSwitcher Local Signing'"'"' in" "Certificate not trusted (--no-trust)"'
+    check "a finished setup prints no summary" '! grep "Setup stopped" "$work/setup.log" >/dev/null'
     check "no password file is left" '[[ ! -e $signing/password && $(ls "$signing") == vibeswitcher.keychain-db ]]'
     check "the keychain is locked after setup" '[[ $(lockstate) == locked ]]'
     check "the search list is as it was" '[[ $(run security list-keychains -d user) == "$search_list" ]]'
