@@ -387,6 +387,95 @@ public enum Worktrees {
         return stuck.path
     }
 
+    /// The task's worktree on something other than its branch, with nothing in progress there: a branch made in it
+    /// (for a review, by a review flow) or a detached HEAD. Workers and the lead are denied `git switch` on purpose,
+    /// so the lead's tools put it back (`putBack`).
+    public struct OffBranch: Error, Equatable, Sendable, CustomStringConvertible {
+        public var path: String
+        /// The task's branch.
+        public var branch: String
+        /// The branch it's on instead; nil when HEAD is detached.
+        public var on: String?
+        /// The commit it's on.
+        public var commit: String
+        /// Its commits that aren't on the task's branch ("1a2b3c4d subject"), newest first.
+        public var ahead: [String] = []
+        public var uncommitted: [Uncommitted] = []
+
+        /// "branch review-x" or "a detached HEAD".
+        public var place: String { on.map { "branch \($0)" } ?? "a detached HEAD" }
+        /// What brings its commits onto the task's branch, run there.
+        public var mergeCommand: String { "git merge \(on ?? String(commit.prefix(12)))" }
+        /// What commits the uncommitted files where they are: `git add` for the new ones, then one `git commit -am`.
+        public var commitCommand: String {
+            let new = uncommitted.filter { $0.state == "untracked" }.map(\.path)
+            return (new.isEmpty ? "" : "`git add \(new.map(Self.quoted).joined(separator: " "))`, then ") + "`git commit -am \"<what they are>\"`"
+        }
+
+        public var description: String {
+            var text = "\(path) is on \(place) at \(commit.prefix(8)), not on \(branch)"
+            if !ahead.isEmpty {
+                text += "; \(ahead.count) commit\(ahead.count == 1 ? "" : "s") there \(ahead.count == 1 ? "isn't" : "aren't") on \(branch): "
+                    + ahead.prefix(5).joined(separator: "; ") + (ahead.count > 5 ? "; …" : "")
+            }
+            if !uncommitted.isEmpty { text += "; uncommitted: " + uncommitted.map { "\($0.path) (\($0.state))" }.joined(separator: ", ") }
+            return text + "."
+        }
+
+        static func quoted(_ path: String) -> String {
+            path.allSatisfy { $0.isLetter || $0.isNumber || "/._-".contains($0) } ? path : "'\(path.replacingOccurrences(of: "'", with: "'\\''"))'"
+        }
+    }
+
+    /// The task's worktree when it's this repository's worktree but not on the task's branch (which exists), and no
+    /// rebase, merge, cherry-pick, revert or bisect is in progress there (those are `interrupted`'s, or not the
+    /// task's to undo); nil otherwise.
+    public static func offBranch(root: String, slug: String) -> OffBranch? {
+        let path = path(root: root, slug: slug), branch = branch(slug)
+        guard FileManager.default.fileExists(atPath: path + "/.git") else { return nil }
+        let resolved = { (p: String) in URL(fileURLWithPath: p).resolvingSymlinksInPath().path }
+        let top = Git.run(["rev-parse", "--show-toplevel"], in: path)
+        guard top.ok, resolved(top.output) == resolved(path) else { return nil }
+        let common = { (dir: String) -> String? in
+            let found = Git.run(["rev-parse", "--path-format=absolute", "--git-common-dir"], in: dir)
+            return found.ok ? resolved(found.output) : nil
+        }
+        guard let mine = common(path), mine == common(root) else { return nil }
+        guard Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"], in: root).ok else { return nil }
+        let on = Git.run(["symbolic-ref", "-q", "HEAD"], in: path).output
+        guard on != "refs/heads/\(branch)" else { return nil }
+        let gitPath = { (name: String) in Git.run(["rev-parse", "--path-format=absolute", "--git-path", name], in: path).output }
+        for busy in ["rebase-merge", "rebase-apply", "MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "BISECT_LOG"]
+        where FileManager.default.fileExists(atPath: gitPath(busy)) { return nil }
+        let commit = Git.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: path).output
+        guard !commit.isEmpty else { return nil }
+        let ahead = Git.run(["log", "--format=%h %s", "--abbrev=8", "refs/heads/\(branch)..\(commit)"], in: path).output
+            .split(whereSeparator: \.isNewline).map(String.init)
+        let status = Git.run(["status", "--porcelain=v2", "-z", "--untracked-files=all"], in: path)
+        return OffBranch(path: path, branch: branch, on: on.hasPrefix("refs/heads/") ? String(on.dropFirst("refs/heads/".count)) : nil,
+                         commit: commit, ahead: ahead, uncommitted: uncommitted(porcelain: status.output))
+    }
+
+    /// Switches the task's worktree that's off its branch back onto it, returning where it was. Uncommitted files
+    /// stop it (thrown as the `OffBranch`, nothing moved), unless `carry`: then they come along as `git switch`
+    /// carries them, which refuses (a `Failure`, nothing moved) rather than overwrite any. The other branch, and the
+    /// commit it was on, stay as they were.
+    @discardableResult
+    public static func putBack(root: String, slug: String, carry: Bool = false) throws -> OffBranch {
+        guard let off = offBranch(root: root, slug: slug) else {
+            throw Failure(description: "\(path(root: root, slug: slug)) isn't this repository's worktree on another branch or a detached HEAD.")
+        }
+        guard carry || off.uncommitted.isEmpty else { throw off }
+        let switched = Git.run(["switch", "-q", off.branch], in: off.path)
+        guard switched.ok else {
+            throw Failure(description: "git switch \(off.branch) failed in \(off.path): \(switched.error.isEmpty ? switched.output : switched.error)")
+        }
+        guard isWorktree(root: root, slug: slug) else {
+            throw Failure(description: "After git switch \(off.branch), \(off.path) still isn't on \(off.branch).")
+        }
+        return off
+    }
+
     /// The task's worktree: the existing one, or a new one. An empty leftover folder is replaced; one with files
     /// in it is never touched (they might be someone's). One stopped partway through a rebase of the task's branch,
     /// or a merge on a detached HEAD, is thrown as `Interrupted`, or, with `recover`, aborted back to the branch

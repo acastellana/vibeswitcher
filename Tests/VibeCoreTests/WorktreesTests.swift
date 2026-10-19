@@ -449,6 +449,77 @@ struct WorktreesTests {
         #expect(FileManager.default.fileExists(atPath: Git.run(["rev-parse", "--path-format=absolute", "--git-path", "rebase-merge"], in: worktree).output))
     }
 
+    /// A worktree on a branch made in it (for a review) goes back on the task's branch, the other branch kept, and
+    /// says the commits there the task's branch doesn't have.
+    @Test func aWorktreeOnAnotherBranchIsPutBackOnItsOwn() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "rv")
+        try commit("b.txt", "bee\n", in: worktree)
+        let head = Git.run(["rev-parse", "HEAD"], in: worktree).output
+        #expect(Worktrees.offBranch(root: root, slug: "rv") == nil)
+        Git.run(["switch", "-q", "-c", "review-rv"], in: worktree)
+        try commit("r.txt", "review\n", in: worktree)
+        let review = Git.run(["rev-parse", "HEAD"], in: worktree).output
+        #expect(!Worktrees.isWorktree(root: root, slug: "rv"))
+        let off = try #require(Worktrees.offBranch(root: root, slug: "rv"))
+        #expect(off.on == "review-rv" && off.commit == review && off.branch == "agent/rv")
+        #expect(off.ahead.count == 1 && off.ahead[0].hasSuffix("change r.txt") && off.uncommitted.isEmpty)
+        #expect(off.mergeCommand == "git merge review-rv")
+        #expect(off.description.contains("on branch review-rv at \(review.prefix(8)), not on agent/rv"))
+        #expect(try Worktrees.putBack(root: root, slug: "rv") == off)
+        #expect(Worktrees.isWorktree(root: root, slug: "rv"))
+        #expect(Git.run(["rev-parse", "HEAD"], in: worktree).output == head)
+        #expect(Git.run(["rev-parse", "refs/heads/review-rv"], in: root).output == review)
+        #expect(Worktrees.offBranch(root: root, slug: "rv") == nil)
+        #expect(throws: Worktrees.Failure.self) { try Worktrees.putBack(root: root, slug: "rv") }
+    }
+
+    /// Detached, with uncommitted files: described with them, and not switched unless they're carried along.
+    @Test func aDetachedWorktreeWithUncommittedFilesIsNotSwitchedOverThem() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "dt")
+        let head = Git.run(["rev-parse", "HEAD"], in: worktree).output
+        Git.run(["switch", "-q", "--detach"], in: worktree)
+        try "worker\n".write(toFile: worktree + "/a.txt", atomically: true, encoding: .utf8)
+        try "new\n".write(toFile: worktree + "/new file.txt", atomically: true, encoding: .utf8)
+        let off = try #require(Worktrees.offBranch(root: root, slug: "dt"))
+        #expect(off.on == nil && off.commit == head && off.ahead.isEmpty)
+        #expect(off.uncommitted == [Worktrees.Uncommitted(path: "a.txt", state: "modified"), Worktrees.Uncommitted(path: "new file.txt", state: "untracked")])
+        #expect(off.description.contains("a detached HEAD") && off.description.contains("a.txt (modified), new file.txt (untracked)"))
+        #expect(off.commitCommand == "`git add 'new file.txt'`, then `git commit -am \"<what they are>\"`")
+        #expect(throws: Worktrees.OffBranch.self) { try Worktrees.putBack(root: root, slug: "dt") }
+        #expect(Git.run(["symbolic-ref", "-q", "HEAD"], in: worktree).output.isEmpty)
+        // Carried, they come along onto the branch, as they were.
+        #expect(try Worktrees.putBack(root: root, slug: "dt", carry: true).uncommitted.count == 2)
+        #expect(Worktrees.isWorktree(root: root, slug: "dt"))
+        #expect(try String(contentsOfFile: worktree + "/a.txt", encoding: .utf8) == "worker\n")
+        #expect(FileManager.default.fileExists(atPath: worktree + "/new file.txt"))
+    }
+
+    /// Carried files that the task's branch changes too: git refuses, and nothing moves.
+    @Test func carriedFilesTheSwitchWouldOverwriteStopIt() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "ow")
+        try commit("a.txt", "branch\n", in: worktree)
+        Git.run(["switch", "-q", "--detach", "main"], in: worktree)
+        try "uncommitted\n".write(toFile: worktree + "/a.txt", atomically: true, encoding: .utf8)
+        #expect(throws: Worktrees.Failure.self) { try Worktrees.putBack(root: root, slug: "ow", carry: true) }
+        #expect(Worktrees.offBranch(root: root, slug: "ow") != nil)
+        #expect(try String(contentsOfFile: worktree + "/a.txt", encoding: .utf8) == "uncommitted\n")
+    }
+
+    /// Something in progress on the other branch isn't the task's to undo: not off-branch, as before.
+    @Test func aWorktreeMidRebaseOfAnotherBranchIsntPutBack() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "ip")
+        Git.run(["switch", "-q", "-c", "other"], in: worktree)
+        try commit("a.txt", "other\n", in: worktree)
+        try commit("a.txt", "main\n", in: root)
+        #expect(!Git.run(["rebase", "main"], in: worktree).ok)
+        #expect(Worktrees.offBranch(root: root, slug: "ip") == nil)
+        #expect(throws: Worktrees.Failure.self) { try Worktrees.putBack(root: root, slug: "ip") }
+    }
+
     /// A hook in the repository that fails, saying `text`.
     func failingHook(_ name: String, saying text: String, in root: String) throws {
         let hooks = Git.run(["rev-parse", "--path-format=absolute", "--git-path", "hooks"], in: root).output
