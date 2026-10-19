@@ -192,12 +192,12 @@ struct HookBoundsTests {
     }
 
     /// Runs the built hook (`claude`) on a scratch home with `input` as its stdin: how it ended, how long it took and
-    /// what it printed. `own` is the hook's own time, from its first read of `input` (its first act, as it sets its
-    /// alarm) to its exit, not from the exec, which can stall on macOS's check of a fresh binary (see `warmUp`): a
-    /// range, from the first poll that saw `input` read to the last that saw it unread, so each bound holds on the
-    /// hook's time and not on the poll's. Exec to first read is logged. A hook that never read `input` is timed from
-    /// its exec, as before (an empty input, a hook that left first).
-    func runHook(home: URL, input: FileHandle) throws -> (status: Int32, reason: Process.TerminationReason, own: ClosedRange<TimeInterval>, stdout: Data) {
+    /// what it printed. `seconds` runs from its exec, as it always did; `own`, from the hook's first read of `input`
+    /// (its first act, as it sets its alarm), since an exec can stall on macOS's check of a fresh binary (see
+    /// `warmUp`). A stall only adds to `seconds`, so a least time is asserted on it; a most time on `own`, taken from
+    /// the last poll that saw `input` unread, so it's never under the hook's own. Exec to first read is logged. A hook
+    /// whose read isn't seen (an empty input, one that left without) has `own` from its exec too.
+    func runHook(home: URL, input: FileHandle) throws -> (status: Int32, reason: Process.TerminationReason, seconds: TimeInterval, own: TimeInterval, stdout: Data) {
         #expect(FileManager.default.isExecutableFile(atPath: Self.hook.path), "build it first: swift build")
         _ = Self.warmUp
         let output = temp.url("hook-stdout")
@@ -229,14 +229,13 @@ struct HookBoundsTests {
         }
         if ended.wait(timeout: .now() + hangGuard) == .timedOut { process.terminate() }
         let exited = Date()
-        let own = readAt.map { exited.timeIntervalSince($0)...exited.timeIntervalSince(unreadAt) }
-            ?? exited.timeIntervalSince(exec)...exited.timeIntervalSince(exec)
+        let seconds = exited.timeIntervalSince(exec), own = readAt == nil ? seconds : exited.timeIntervalSince(unreadAt)
         if let readAt {
-            print("HookBoundsTests: the hook read its input \(readAt.timeIntervalSince(exec)) s after its exec, then ran \(own) s")
+            print("HookBoundsTests: the hook read its input \(readAt.timeIntervalSince(exec)) s after its exec, then ran \(exited.timeIntervalSince(readAt))...\(own) s")
         } else {
-            print("HookBoundsTests: no read of its input seen; the hook ran \(own.upperBound) s from its exec")
+            print("HookBoundsTests: no read of its input seen; the hook ran \(seconds) s from its exec")
         }
-        return (process.terminationStatus, process.terminationReason, own, (try? Data(contentsOf: output)) ?? Data())
+        return (process.terminationStatus, process.terminationReason, seconds, own, (try? Data(contentsOf: output)) ?? Data())
     }
 
     func home() throws -> URL {
@@ -324,7 +323,7 @@ struct HookBoundsTests {
         try? pipe.fileHandleForWriting.close()
         #expect(run.reason == .exit && run.status == 0)
         #expect(run.stdout.isEmpty)
-        #expect(run.own.lowerBound >= 2.9 && run.own.upperBound < 8, "took \(run.own) s")
+        #expect(run.seconds >= 2.9 && run.own < 8, "took \(run.seconds) s from its exec, \(run.own) s its own")
     }
 
     @Test(.enabled(if: HookBoundsTests.terminal != nil, "the hook records for no terminal from here"))
@@ -344,7 +343,7 @@ struct HookBoundsTests {
         let held = try runHook(home: home, input: payload(["hook_event_name": "UserPromptSubmit", "session_id": "s", "prompt": "next"]))
         #expect(held.reason == .exit && held.status == 0 && held.stdout.isEmpty)
         // A second for the lock, then on: well before the alarm.
-        #expect(held.own.lowerBound >= 0.95 && held.own.upperBound < 2.9, "took \(held.own) s")
+        #expect(held.seconds >= 0.95 && held.own < 2.9, "took \(held.seconds) s from its exec, \(held.own) s its own")
         #expect(HookState.load(from: state)?.lastPrompt == Self.clipBefore(prompt))
         flock(lock, LOCK_UN)
     }
