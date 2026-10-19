@@ -456,7 +456,9 @@ struct BriefingSettings: View {
             }
             LabeledContent("ElevenLabs API key") {
                 HStack {
-                    SecureField(briefing.keySaved == true ? "Saved in your Keychain" : "Not set", text: $key)
+                    SecureField("ElevenLabs API key", text: $key,
+                                prompt: Text(briefing.keySaved == true ? "Saved in your Keychain" : "Not set"))
+                        .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 220)
                         .onSubmit(save)
