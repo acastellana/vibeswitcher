@@ -61,7 +61,9 @@ card you answer with a click. For window sessions the composer types into the se
 ↑ recalls earlier prompts, / completes commands and @ files, pasted or dropped images and files are attached
 (thumbnails), and the chips under it show and switch the mode and model and how full the context is. While the
 agent works, ↩ **steers** it: the message reaches it at its next step without stopping it (through the hooks);
-⌥↩ queues it for when the turn ends instead, and ■ stops the turn. Drafts, attachments and queued messages are
+⌥↩ queues it for when the turn ends instead, and ■ stops the turn. A message that arrives as the turn ends keeps it
+going. Claude Code's window then shows `Ran 1 stop hook` / `Stop hook feedback: [VibeSwitcher · messages, v2] …`,
+which is the delivery and not an error (docs/eval/stop-hook-shapes). Drafts, attachments and queued messages are
 kept per session. A Terminal session can be moved into the window between turns (Move to Window) to reply from
 here, in full color.
 
