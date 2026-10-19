@@ -97,7 +97,12 @@ struct LeadRelaunchTests {
     func relaunched(_ world: World) -> (HostClient, LeadController) {
         let host = HostClient(socketPath: world.socket, appKey: { world.key })
         let store = SessionStore(scanner: SessionScanner(processes: { [:] }, stateDir: { world.stateDir }, cwd: { _ in nil }, arguments: { _ in [] }))
-        let controller = LeadController(host: host, store: store, vault: world.vault) { _ in "exec /bin/sleep 600" }
+        // Its inboxes and home are scratch ones too: a test never reads or writes the user's ~/.vibeswitcher.
+        let inbox = temp.url("inbox")
+        try? FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+        let controller = LeadController(host: host, store: store, vault: world.vault, inbox: inbox, home: temp.url("home").path) { _ in
+            "exec /bin/sleep 600"
+        }
         controller.answersTrust = false
         return (host, controller)
     }
@@ -147,6 +152,54 @@ struct LeadRelaunchTests {
         #expect(host.sessions.map(\.id) == [lead.id])
         #expect(asked.isEmpty)
         #expect(world.vault.current(.lead, root: world.root, task: nil)?.id == grant)
+    }
+
+    /// The user's own home, from the user database (HOME and CFFIXED_USER_HOME point at a scratch one in a test run):
+    /// read only.
+    static var usersHome: URL {
+        URL(fileURLWithPath: getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? "/nonexistent", isDirectory: true)
+    }
+
+    /// The end of a log file: its size, and its last bytes.
+    struct LogEnd: Equatable {
+        let size: Int
+        let tail: Data
+
+        init(_ file: URL) {
+            let data = (try? Data(contentsOf: file)) ?? Data()
+            size = data.count
+            tail = data.suffix(256)
+        }
+    }
+
+    /// 2026-10-19: tests on the user's home (the load script's runs) wrote 'lead: kept the running lead of
+    /// relaunch-DABE6BDC-…' into the user's ~/.vibeswitcher/debug/app.log. A relaunch notes the lead it kept (in memory,
+    /// as the app does), and the user's app.log is left as it was: what it held is still there, and nothing that
+    /// came after it (the running app writes there meanwhile) is from this test.
+    @Test func aRelaunchLeavesTheUsersAppLogAlone() async throws {
+        let log = Self.usersHome.appendingPathComponent(".vibeswitcher/debug/app.log")
+        let before = LogEnd(log)
+        let world = try world()
+        defer { world.stop() }
+        let (lead, _) = try await leadStarted(in: world)
+        let (host, controller) = relaunched(world)
+        controller.confirm = { _, _, _ in 0 }
+        controller.select = { _ in }
+        host.connectIfRunning()
+        #expect(await until { controller.keptLeads[world.root] == lead.id })
+        let kept = "lead: kept the running lead of \(world.project) (session \(lead.id.uuidString.prefix(8)))"
+        #expect(Breadcrumbs.shared.lines.contains { $0.hasSuffix(kept) })
+        Breadcrumbs.shared.flush()
+
+        let data = (try? Data(contentsOf: log)) ?? Data()
+        let rotated = (try? Data(contentsOf: log.appendingPathExtension("1"))) ?? Data()
+        if data.count >= before.size, data.prefix(before.size).suffix(256) == before.tail {
+            // Only appended to since: by the running app alone.
+            #expect(data.count == before.size || !String(decoding: data.dropFirst(before.size), as: UTF8.self).contains(world.project))
+        } else {
+            // Rotated by the running app meanwhile (app.log.1): neither holds a line of this test.
+            #expect(!String(decoding: rotated + data, as: UTF8.self).contains(world.project))
+        }
     }
 
     @Test func aNewLeadWhileOneRunsIsAskedForAndTheOldOneIsSentToIt() async throws {

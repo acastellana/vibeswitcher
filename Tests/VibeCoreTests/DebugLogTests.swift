@@ -58,7 +58,42 @@ struct BreadcrumbsTests {
         #expect(size > 0 && size <= 2_000)
         #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("app.log.1").path))
     }
+
+    /// The file is looked up each time the lines are written, not once: on the home the process has then.
+    @Test func theFileIsLookedUpWhenWritten() throws {
+        let (first, second) = (temp.url("first").appendingPathComponent("app.log"), temp.url("second").appendingPathComponent("app.log"))
+        let current = Locked(first)
+        let crumbs = Breadcrumbs(capacity: 10)
+        crumbs.write { current.get() }
+        crumbs.note("one")
+        crumbs.flush()
+        current.set(second)
+        crumbs.note("two")
+        crumbs.flush()
+        #expect(try String(contentsOf: first, encoding: .utf8).hasSuffix(" one\n"))
+        #expect(try String(contentsOf: second, encoding: .utf8).hasSuffix(" two\n"))
+    }
+
+    /// The app's log is written only once the app turns it on (its `main`): a test process, whatever its HOME, never
+    /// writes the user's ~/.vibeswitcher/debug/app.log. Its lines are still kept in memory.
+    @Test func theAppsLogWritesNothingUntilTheAppTurnsItOn() {
+        #expect(Breadcrumbs.shared.file == nil)
+        Breadcrumbs.shared.note("test: \(UUID().uuidString)")
+        Breadcrumbs.shared.flush()
+        #expect(Breadcrumbs.shared.pending == 0)
+        #expect(Breadcrumbs.shared.lines.last?.contains("test: ") == true)
+        #expect(Breadcrumbs.appLog.path == NSHomeDirectory() + "/.vibeswitcher/debug/app.log")
+    }
+
+    /// Without a file, what isn't written doesn't pile up.
+    @Test func withoutAFileNothingPilesUp() {
+        let crumbs = Breadcrumbs(capacity: 5)
+        for index in 0..<2_000 { crumbs.note("a line that takes some room \(index)") }
+        #expect(crumbs.pending < 8_300)
+        #expect(crumbs.lines.count == 5)
+    }
 }
+
 
 struct PendingDeliveryTests {
     @Test func aSentMessageNotSeenSoonIsLate() {

@@ -46,10 +46,15 @@ public struct StallDetector: Sendable {
 /// What the app did lately, for reading after a hang or a crash: the newest lines in memory, all of them in a
 /// small log file (rotated once it's full). Any thread.
 public final class Breadcrumbs: @unchecked Sendable {
-    public static let shared = Breadcrumbs(capacity: 400, file: VibePaths.root.appendingPathComponent("debug/app.log"))
+    /// The app's: in memory until the app turns its file on (`write(to:)` with `appLog`, first thing in its `main`),
+    /// so a test process, whatever its HOME, never writes the user's ~/.vibeswitcher/debug/app.log.
+    public static let shared = Breadcrumbs(capacity: 400)
+    /// `debug/app.log` under the home this process has when it's written.
+    public static var appLog: URL { VibePaths.root.appendingPathComponent("debug/app.log") }
 
     private let capacity: Int
-    private let file: URL?
+    /// Where the lines go, looked up at each write (none: they're kept in memory only).
+    private var location: (@Sendable () -> URL)?
     private let maxFileBytes: Int
     private let lock = NSLock()
     private var ring: [String] = []
@@ -62,8 +67,29 @@ public final class Breadcrumbs: @unchecked Sendable {
 
     public init(capacity: Int, file: URL? = nil, maxFileBytes: Int = 1_000_000) {
         self.capacity = capacity
-        self.file = file
+        self.location = file.map { file in { file } }
         self.maxFileBytes = maxFileBytes
+    }
+
+    /// Writes the lines from now on to the file `file` gives, asked each time they're written.
+    public func write(to file: @escaping @Sendable () -> URL) {
+        lock.lock()
+        location = file
+        lock.unlock()
+    }
+
+    /// The file the next lines go to, if any.
+    public var file: URL? {
+        lock.lock()
+        defer { lock.unlock() }
+        return location?()
+    }
+
+    /// Bytes noted and not written yet.
+    var pending: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return unwritten.utf8.count
     }
 
     public func note(_ text: String) {
@@ -87,7 +113,11 @@ public final class Breadcrumbs: @unchecked Sendable {
     public func flush() {
         lock.lock()
         defer { lock.unlock() }
-        guard let file, !unwritten.isEmpty else { return }
+        guard !unwritten.isEmpty else { return }
+        guard let file = location?() else {
+            unwritten = ""  // No file: the lines are only kept in memory.
+            return
+        }
         let fm = FileManager.default
         try? fm.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let size = (try? fm.attributesOfItem(atPath: file.path)[.size] as? Int) ?? 0

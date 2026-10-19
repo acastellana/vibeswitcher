@@ -1,6 +1,10 @@
 import AppKit
 import VibeCore
 
+// The app's breadcrumbs go to ~/.vibeswitcher/debug/app.log from its start (the debug aids' to their scratch home's).
+// Only here: a test process never runs this, so it never writes the user's log.
+Breadcrumbs.shared.write { Breadcrumbs.appLog }
+
 // Command-line maintenance modes, e.g. `VibeSwitcher.app/Contents/MacOS/VibeSwitcher --dump`.
 let arguments = CommandLine.arguments
 if let index = arguments.firstIndex(of: "--chat-bench"), arguments.indices.contains(index + 1) {
