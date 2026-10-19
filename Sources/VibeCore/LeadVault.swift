@@ -88,6 +88,10 @@ public struct LeadVault: Sendable {
         /// Take the branch as it is now if the move since the lead last left it is the user's own (see `judge`).
         /// The app, or the repository's lead.
         case acceptMove(root: String, branch: String)
+        /// What the lead last set workflow.md's guard rails to (see `LeadVault.guardedKeys`).
+        case guarded(root: String)
+        /// The app, or the repository's lead: these settings' hashes, by key, are the lead's now (the others stay).
+        case setGuarded(root: String, hashes: [String: String])
     }
 
     public enum Reply: Codable, Equatable, Sendable {
@@ -101,6 +105,7 @@ public struct LeadVault: Sendable {
         case refused(String)
         case startedOver(Double?)
         case move(BaseMove)
+        case guarded([String: String]?)
     }
 
     /// The host said no, or couldn't be asked.
@@ -315,6 +320,9 @@ extension LeadVault {
             /// they may still run: they hold no role, but they're still the lead's to end. Newest last (optional:
             /// older vaults have none).
             var former: [String]?
+            /// workflow.md's guard rails as the lead last set them (`LeadVault.guardedHashes`); nil until it did
+            /// (optional: older vaults have none).
+            var guarded: [String: String]?
 
             /// Takes the members `drop` picks out; the sessions the workers and verifiers among them were bound to
             /// become `former`.
@@ -594,6 +602,14 @@ extension LeadVault {
                 return .ok
             case .acceptMove:
                 return .refused("Asked outside the lock.")
+            case .guarded(let root):
+                return .guarded(team(root)?.guarded)
+            case .setGuarded(let root, let hashes):
+                // Its commands run as the lead in merge, and its limits hold the team: a worker's or verifier's
+                // session (or anything outside the sessions) that wrote workflow.md doesn't get them taken as the lead's.
+                guard caller == .app || isLead(caller, root) else { return .refused("Only VibeSwitcher or the lead records workflow.md's guard rails.") }
+                change(root, &changed) { $0.guarded = ($0.guarded ?? [:]).merging(hashes) { $1 } }
+                return .ok
             }
         }
 

@@ -72,7 +72,9 @@ extension LeadToolsetTests {
         _ = try audited(lead, runtime, root: root)
         let marks = try marks()
         // 0.05 min: 3 s.
-        try workflow(root, "test_timeout_min: 0.05\ntest_command: sleep \(ShellTests.childRuns) & echo $! > \(marks)/child; wait")
+        // As the lead sets them: merge runs only the commands it set.
+        let set = call(lead, "configure", ["test_timeout_min": "0.05", "test_command": "sleep \(ShellTests.childRuns) & echo $! > \(marks)/child; wait"])
+        #expect(!set.isError, "\(set.text)")
         let main = Git.run(["rev-parse", "main"], in: root).output
         let started = Date()
         let merged = call(lead, "merge", ["task": "add-b"])
@@ -85,7 +87,7 @@ extension LeadToolsetTests {
         mergeLeftNothingBehind(root)
         if let child = pid(in: marks + "/child") { #expect(eventually { kill(child, 0) != 0 }) }
         // With the limit raised and tests that end, the same audit merges.
-        try workflow(root, "test_command: test -f b.txt")
+        #expect(!call(lead, "configure", ["test_timeout_min": "", "test_command": "test -f b.txt"]).isError)
         let again = call(lead, "merge", ["task": "add-b"])
         #expect(!again.isError, "\(again.text)")
     }
@@ -98,7 +100,7 @@ extension LeadToolsetTests {
         let lead = try lead(root, runtime)
         _ = try audited(lead, runtime, root: root)
         let marks = try marks()
-        try workflow(root, "test_command: sleep \(ShellTests.childRuns) & echo $! > \(marks)/child; wait")
+        #expect(!call(lead, "configure", ["test_command": "sleep \(ShellTests.childRuns) & echo $! > \(marks)/child; wait"]).isError)
         let server = MCPServer(name: "vibeswitcher", version: "test", toolset: lead)
         let replies = Locked<[[String: Any]]>([])
         let send = { (message: [String: Any]) in

@@ -260,8 +260,8 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         try passingAudit(lead, runtime)
         let audited = head("agent/add-b", root)
         // While the tests run, the worker commits and edits in its worktree; the tests read b.txt.
-        try "---\ntest_command: grep -q bee b.txt && echo late > \(worktree)/late.txt && git -C \(worktree) add late.txt && git -C \(worktree) commit -qm late && echo evil > \(worktree)/b.txt\n---"
-            .write(toFile: root + "/.vibeswitcher/workflow.md", atomically: true, encoding: .utf8)
+        let set = lead.call("configure", ["test_command": "grep -q bee b.txt && echo late > \(worktree)/late.txt && git -C \(worktree) add late.txt && git -C \(worktree) commit -qm late && echo evil > \(worktree)/b.txt"])
+        #expect(!set.isError, "\(set.text)")
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
         // The lead's records go in a commit of their own on top (LeadRecords).

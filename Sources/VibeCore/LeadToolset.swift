@@ -539,12 +539,13 @@ public final class LeadToolset: MCPToolset {
         guard [.planned, .failed, .blocked, .running].contains(task.status) else {
             throw Problem(text: "\(slug) is \(task.status.rawValue); start a worker only on a planned, failed or blocked task, or a running one whose worker ended.")
         }
+        let workflow = self.workflow
+        try checkSettings(workflow, not: "Not started")
         let running = board.tasks.filter { $0.status == .running && $0.id != task.id }.count
         let limit = workflow.maxWorkers
         guard running < limit else {
             throw Problem(text: "\(running) workers already run (max_workers is \(limit) in workflow.md). Wait for one to finish; you'll get a message.")
         }
-        let workflow = self.workflow
         // The Mac is every project's: its load and their teams count, not only this one's. A session already in this
         // task's worktree (an ended worker's earlier verifier) is the one this worker replaces.
         let mac = MacLoad.count(sessions.map { ($0.label, $0.cwd, $0.live) }, load: runtime.loadAverage(),
@@ -795,6 +796,7 @@ public final class LeadToolset: MCPToolset {
         }
         defer { lock.release() }
         let workflow = self.workflow
+        try checkSettings(workflow, not: "Not merged (nothing was tested)")
         let base = workflow.base
         // One merge into a branch at a time: each checks the head the other one moves.
         let baseLock = vault.scratch(root: root, "merge-into-\(LeadVault.hash(base).prefix(16)).lock")
@@ -883,6 +885,8 @@ public final class LeadToolset: MCPToolset {
     /// approving that exact commit (`LeadWorkflow.approves`), as the app recorded it on the board.
     private func checkMergePolicy(_ task: LeadTask, commit: String) throws {
         let workflow = self.workflow
+        // The policy as the lead set it, not as a worker rewrote it.
+        try checkSettings(workflow, not: "Not merged")
         guard workflow.mergePolicy != .auto else { return }
         let diff = Git.run(["diff", "--name-only", "\(workflow.base)...\(commit)"], in: root)
         guard diff.ok else { throw Problem(text: "Not merged: can't tell which files \(task.slug) changes (\(diff.error)), so the merge policy can't be checked.") }
@@ -1272,6 +1276,7 @@ public final class LeadToolset: MCPToolset {
         try store.prepare()
         let path = workflowPath
         let current = FileManager.default.contents(atPath: path) ?? Data(LeadWorkflow.template.utf8)
+        let before = LeadWorkflow.load(from: path)
         try LeadWorkflow.updating(current, with: changes).write(to: URL(fileURLWithPath: path), options: .atomic)
         // What the next read sees is what counts.
         let after = LeadWorkflow.load(from: path)
@@ -1289,12 +1294,33 @@ public final class LeadToolset: MCPToolset {
         for change in changes where read[change.key] != (change.value.isEmpty ? defaults[change.key] ?? "" : change.value) {
             throw Problem(text: "Wrote workflow.md, but \(change.key) reads back as \"\(read[change.key] ?? "")\", not \"\(change.value)\". Check the file.")
         }
+        // The guard rails set here are the lead's; the others stay as recorded (any not recorded yet, as they were).
+        let given = LeadVault.guardedHashes(after).filter { key, _ in changes.contains { $0.key == key } }
+        do {
+            let recorded = try vault.guardedSettings(root: root) ?? [:]
+            let hashes = LeadVault.guardedHashes(before).filter { recorded[$0.key] == nil }.merging(given) { $1 }
+            if !hashes.isEmpty { try vault.setGuardedSettings(hashes, root: root) }
+        } catch {
+            throw Problem(text: "Wrote workflow.md, but the session host didn't record its settings as yours (\(error)); merge and start_worker refuse them until it does. Run configure with them again.")
+        }
         // A branch the lead hasn't merged into yet: its head now is where merges into it start from.
         let base = self.base
         if vault.head(root: root, branch: base) == nil, let head = branchHead(base) { try? vault.setHead(head, root: root, branch: base) }
         let set = changes.map { $0.value.isEmpty ? "cleared \($0.key)" : "\($0.key) = `\($0.value)`" }.joined(separator: ", ")
         try? store.appendProgress("Workflow: \(set)")
         return MCPToolResult(text: "Set \(set).\n\n\(workflowText())")
+    }
+
+    /// workflow.md's guard rails (`LeadVault.guardedKeys`: its commands run as the lead, its policy and limits hold
+    /// the team) count only as the lead last set them with configure, since any session of the team can write the file.
+    private func checkSettings(_ workflow: LeadWorkflow, not: String) throws {
+        let changed: [(key: String, value: String)]
+        do { changed = try vault.changedSettings(workflow, root: root) } catch {
+            throw Problem(text: "\(not): the session host couldn't say what you last set workflow.md's guard rails to (\(error)).")
+        }
+        guard !changed.isEmpty else { return }
+        let now = changed.map { $0.value.isEmpty ? "\($0.key) is now empty" : "\($0.key) is now `\($0.value)`" }.joined(separator: "; ")
+        throw Problem(text: "\(not): workflow.md's \(now), not what you last set with configure. Its commands run as you, its policy and limits hold the team, and any session of the team can write the file: a worker may have changed it. If you or the user did, set it again with configure (as it should read) and try again; if not, set it back with configure and tell the user.")
     }
 
     private func setStatus(_ slug: String, _ status: LeadTask.Status, setback: LeadSetback? = nil) throws {

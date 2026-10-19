@@ -285,14 +285,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             default: break
             }
         }
-        DistributedNotificationCenter.default().addObserver(forName: AppStatus.screenNotification, object: nil,
-                                                            queue: .main) { [weak self] note in
-            guard let self, let text = note.object as? String, let path = note.userInfo?["path"] as? String, DebugOutput.allowed(path),
-                  let session = self.hostClient.sessions.first(where: { $0.label.contains(text) && $0.isLive }) else { return }
-            self.hostClient.screen(session.id) { screen in
-                try? Redaction.secrets(in: screen ?? "(no screen)").write(toFile: path, atomically: true, encoding: .utf8)
-            }
-        }
+        // No notification reads a session's screen: any process can post one, a worker's Bash too, and the screen
+        // would land wherever it said (the `--screen` debug aid did that, and went).
         DistributedNotificationCenter.default().addObserver(forName: AppStatus.leadNotification, object: nil,
                                                             queue: .main) { [weak self] note in
             guard let folder = note.object as? String else { return }
@@ -521,22 +515,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             view.cacheDisplay(in: view.bounds, to: bitmap)
             let file = index == 0 ? path : (path as NSString).deletingPathExtension + "-\(index + 1).png"
             try? bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: file))
-            // The view tree beside it (class, frame, hidden; a terminal's colors and first lines): the picture
-            // misses some layer-drawn content, such as the terminals' text.
+            // The view tree beside it (class, frame, hidden; a terminal's colors). Not the terminals' text: any
+            // process can ask for a capture, a worker's Bash too, and a session's screen isn't theirs to read.
             var tree = ""
             func describe(_ view: NSView, _ depth: Int) {
                 guard depth < 14 else { return }
                 tree += String(repeating: "  ", count: depth) + "\(type(of: view)) \(NSStringFromRect(view.frame))\(view.isHidden ? " hidden" : "")\n"
                 if let terminal = view as? HostTerminalView {
-                    let screen = terminal.getTerminal()
-                    var visible = (0..<screen.rows).compactMap { row -> String? in
-                        screen.getLine(row: row)?.translateToString(trimRight: false, skipNullCellsFollowingWide: true)
-                            .replacingOccurrences(of: "\u{0}", with: " ").trimmingCharacters(in: .whitespaces)
-                    }
-                    while visible.last?.isEmpty == true { visible.removeLast() }
-                    let text = Redaction.secrets(in: visible.suffix(40).joined(separator: "\n"))
                     tree += String(repeating: "  ", count: depth + 1)
-                        + "background \(terminal.nativeBackgroundColor) layer \(terminal.layer?.backgroundColor.map { "\($0)" } ?? "none") text: \(text)\n"
+                        + "background \(terminal.nativeBackgroundColor) layer \(terminal.layer?.backgroundColor.map { "\($0)" } ?? "none")\n"
                 }
                 view.subviews.forEach { describe($0, depth + 1) }
             }

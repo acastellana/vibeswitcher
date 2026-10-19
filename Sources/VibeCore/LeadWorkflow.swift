@@ -36,6 +36,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// repository (`records_dir:`); nil (an empty value) keeps them in `.vibeswitcher/`, uncommitted, as before.
     public var recordsDir: String? = LeadWorkflow.defaultRecordsDir
     public var notes = ""
+    /// Each setting in the front matter as written (a key's last line), whatever the key: what the vault's hashes of
+    /// the guard rails are of (`LeadVault.guardedKeys`).
+    public var settings: [String: String] = [:]
     /// Why the file's settings couldn't be read (missing, unreadable, no front matter); nil when they were.
     public var problem: String?
 
@@ -51,6 +54,7 @@ public struct LeadWorkflow: Equatable, Sendable {
         if let end = frontMatterEnd(lines) {
             for line in lines[1..<end] {
                 guard let (key, value) = setting(line) else { continue }
+                workflow.settings[key] = value
                 let present = value.isEmpty ? nil : value
                 switch key {
                 case "max_workers": workflow.maxWorkers = max(1, Int(value) ?? 3)

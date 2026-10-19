@@ -161,7 +161,16 @@ can't give a verdict, take the lead's tools, record the lead's branch, seal a me
 lead's terminal (a session in a team takes keys only from the app, itself or its lead), hand the host over to a
 program of its choosing (only the app may ask for a handover; anyone else's is refused before the host runs
 anything), or end another session through the host (only the app, the session itself or one started from it, and
-its team's lead may). Only the verifier the
+its team's lead may). Nor can it get its own commands run as the lead, or loosen the rules its work is merged by:
+`workflow.md`'s guard rails (its test and setup commands, which `merge` runs as the lead; `merge_policy` and
+`sensitive_paths`; `records_dir`; `max_workers`, `mac_max_sessions` and `load_threshold`, each as the team reads it,
+so a line left out is its default) count only as the lead last
+set them with `configure` (the host keeps a hash of each, and takes one only from the app or the lead). When the file
+says anything else, whether a worker's Bash wrote it or a branch's committed copy was merged over it, `merge` and
+`start_worker` refuse, naming the setting, until the lead sets it with `configure`; so do your own edits of those
+lines by hand, until the lead sets them.
+Nor can it have the app write a session's screen where it says: no notification to the app reads one, and a
+window capture's view tree leaves the terminals' text out. Only the verifier the
 lead last started on a task gives its verdict, from its own session, about the commit it was started on. Not
 protected: anything that runs code as the app or the host (a debugger, a library injected into the app's binary,
 which isn't built with the hardened runtime, or the app's files rewritten: they're yours to write), or
@@ -170,7 +179,12 @@ another program you run yourself with your full rights; you approving a Keychain
 VibeSwitcher; the app's window itself when a worker drives it through Accessibility; signals (any process running
 as you can end any other, a session's program or the host itself, without asking the host); ordinary (non-team)
 sessions, which still take keys from anyone running as you; messages labelled as the lead's or VibeSwitcher's,
-which aren't sealed; and three narrow windows where the host learns the app's key without a proof. A host that holds
+which aren't sealed; a window capture (`--capture-window`, which any process can ask for), whose picture shows what
+the window shows, a chat's text included; the code a merge's tests run from the audited branch itself (the
+verifier read it; nothing else checks it); `workflow.md`'s guard rails in a project where none are recorded yet (a
+lead that never set them, a vault that began empty): those in the file when the lead first configures, starts a
+worker or merges are taken as the lead's; its other settings (`test_timeout_min`, the disk limits, `base_branch`,
+whose moves `merge` checks on its own); `audit`, which reads the session limits without that check; and three narrow windows where the host learns the app's key without a proof. A host that holds
 no key yet (the first one after an update from a host before keys, or a host whose vault couldn't be read and that
 VibeSwitcher didn't start) takes the first key given on a connection by the app's code, logged in
 `~/.vibeswitcher/debug/host.log`: the app sends it as it reconnects right after the update, and a process that
@@ -417,7 +431,7 @@ cat ~/.vibeswitcher/app-status.json   # debug aid: what the running app currentl
 ls ~/.vibeswitcher/debug/             # app.log: what the app did lately; hang-*.txt/.log: a sample of every thread
                                       # and the app's state whenever its main thread was stuck for over 2 s
 VibeSwitcher --chat-bench TRANSCRIPT  # debug aid: the chat view offscreen on a transcript, timing its layouts
-VibeSwitcher --capture-window /tmp/w.png # debug aid: the running app draws its windows into PNGs (+ view tree .txt; /tmp or ~/.vibeswitcher only)
+VibeSwitcher --capture-window /tmp/w.png # debug aid: the running app draws its windows into PNGs (+ view tree .txt, without the terminals' text; /tmp or ~/.vibeswitcher only)
 ```
 
 (`VibeSwitcher` = `/Applications/VibeSwitcher.app/Contents/MacOS/VibeSwitcher`.)

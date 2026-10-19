@@ -94,8 +94,8 @@ extension LeadToolsetTests {
         #expect(refused.text.contains("Try again in about 5 minutes"))
         #expect(runtime.spawned.isEmpty)
         #expect(BoardStore(root: root).load().task("one")?.status == .planned)
-        // A threshold the owner set is said as theirs.
-        try workflow(root, "load_threshold: 100")
+        // A threshold the owner set is said as theirs (the lead sets it: merge and start_worker take guard rails only so).
+        #expect(!call(lead, "configure", ["load_threshold": "100"]).isError)
         #expect(call(lead, "start_worker", ["task": "one"]).text.contains("load_threshold 100 in workflow.md"))
         // Once it eases, it starts.
         runtime.load = 3
@@ -117,8 +117,8 @@ extension LeadToolsetTests {
         #expect(refused.text.contains("7 team sessions across 3 projects (genswap 4, films 2, \((root as NSString).lastPathComponent) 1) (mac_max_sessions 6)"))
         #expect(!refused.text.contains("above load_threshold"))
         #expect(runtime.spawned.count == 1)
-        // The owner raises the cap: it starts.
-        try workflow(root, "mac_max_sessions: 8")
+        // The owner raises the cap (through the lead): it starts.
+        #expect(!call(lead, "configure", ["mac_max_sessions": "8"]).isError)
         #expect(!call(lead, "start_worker", ["task": "two"]).isError)
     }
 
@@ -159,7 +159,7 @@ extension LeadToolsetTests {
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         _ = try audited(lead, runtime, root: root)
-        try workflow(root, "load_threshold: 24")
+        #expect(!call(lead, "configure", ["load_threshold": "24"]).isError)
         lead.loadPoll = 0.01
         runtime.loadReadings = [150, 120, 40, 3]
         let reads = runtime.loadReads
