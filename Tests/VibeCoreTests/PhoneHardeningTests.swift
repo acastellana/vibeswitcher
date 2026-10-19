@@ -332,7 +332,7 @@ struct PhoneMenuTests {
 
 /// PH-1, the phone's side: Web/app.js in node on a fake DOM, with a fake Mac (Tests/Web/phone-menu.test.mjs). It draws
 /// the state's menu as buttons (text only), hides the quick replies, posts a tap's index with the menu's fingerprint,
-/// and shows a 409's message with the menu that's up now.
+/// and shows a 409's message with the menu that's up now. And its Brief me button (Tests/Web/phone-briefing.test.mjs).
 struct PhoneWebTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
     static let node: String? = {
@@ -353,5 +353,22 @@ struct PhoneWebTests {
         process.waitUntilExit()
         #expect(process.terminationStatus == 0, "\(text)")
         #expect(text.contains("phone-menu: ok"))
+    }
+
+    /// Brief me (Tests/Web/phone-briefing.test.mjs): the press posts /api/briefing with the token, shows a spinner,
+    /// asks until it's written, then plays the Mac's bytes from a blob through the page's <audio> and shows the text.
+    @Test(.enabled(if: node != nil, "node isn't installed on this Mac: the phone's web test can't run"))
+    func thePhonesBriefMePlaysTheBriefingAndShowsItsText() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: try #require(Self.node))
+        process.arguments = [Self.repo.appendingPathComponent("Tests/Web/phone-briefing.test.mjs").path]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0, "\(text)")
+        #expect(text.contains("phone-briefing: ok"))
     }
 }

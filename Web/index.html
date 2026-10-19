@@ -37,6 +37,16 @@
   </section>
 
   <section id="list" hidden>
+    <div id="briefCard" class="card brief">
+      <div class="briefBar">
+        <button id="briefMe" class="briefButton" type="button"><span id="briefSpinner" class="spinner" hidden></span><span id="briefLabel">Brief me</span></button>
+        <button id="briefPlay" class="chip-btn" type="button" hidden>■ Stop</button>
+      </div>
+      <audio id="briefAudio" preload="auto" hidden></audio>
+      <p id="briefText" class="briefText" aria-live="polite" hidden></p>
+      <p id="briefNotice" class="muted small" hidden></p>
+      <p id="briefError" class="error" hidden></p>
+    </div>
     <div id="counts" class="counts"></div>
     <div id="sessions"></div>
     <p id="empty" class="muted center" hidden>No Claude Code or Codex sessions running.</p>

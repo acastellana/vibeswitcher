@@ -930,6 +930,112 @@ async function enableNotifications() {
   }
 }
 
+// ---------- Brief me ----------
+// The Mac writes a briefing of what happened lately and makes its audio (ElevenLabs' voice when it has a key, else its
+// own); the phone gets it with its token and plays it from a blob. A briefing takes longer than a request may stay
+// open, so the press starts one and the phone asks until it's written.
+
+const brief = { gen: 0, url: null, writing: false, ready: false };
+const BRIEF_POLL = 1000;      // ms between asks
+const BRIEF_WAIT = 150;       // asks: Claude may take a minute, ElevenLabs half of one more
+
+function wait(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+
+// A tenth of a second of silence as a WAV. Started from the tap itself, it lets the briefing play when it arrives:
+// phones only let a page start audio from a tap.
+function silence() {
+  const samples = 800;   // 8 kHz, 8-bit mono
+  const bytes = new Uint8Array(44 + samples);
+  const view = new DataView(bytes.buffer);
+  const ascii = (at, text) => { for (let i = 0; i < text.length; i++) bytes[at + i] = text.charCodeAt(i); };
+  ascii(0, 'RIFF'); view.setUint32(4, 36 + samples, true); ascii(8, 'WAVE'); ascii(12, 'fmt ');
+  view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, 1, true);
+  view.setUint32(24, 8000, true); view.setUint32(28, 8000, true); view.setUint16(32, 1, true); view.setUint16(34, 8, true);
+  ascii(36, 'data'); view.setUint32(40, samples, true);
+  bytes.fill(128, 44);
+  return new Blob([bytes], { type: 'audio/wav' });
+}
+
+function setBriefAudio(blob) {
+  if (brief.url) URL.revokeObjectURL(brief.url);
+  brief.url = URL.createObjectURL(blob);
+  $('briefAudio').src = brief.url;
+}
+
+function renderBrief() {
+  const audio = $('briefAudio');
+  const playing = brief.ready && !audio.paused && !audio.ended;
+  $('briefMe').disabled = brief.writing;
+  $('briefSpinner').hidden = !brief.writing;
+  $('briefLabel').textContent = brief.writing ? 'Writing your briefing…' : 'Brief me';
+  const play = $('briefPlay');
+  play.hidden = !brief.writing && !brief.ready;
+  play.textContent = brief.writing || playing ? '■ Stop' : '▶ Play';
+}
+
+function showBriefError(message) {
+  $('briefError').textContent = message;
+  $('briefError').hidden = !message;
+}
+
+async function briefMe() {
+  if (brief.writing) return;
+  const gen = ++brief.gen;
+  const audio = $('briefAudio');
+  audio.pause();
+  brief.ready = false;
+  brief.writing = true;
+  showBriefError('');
+  try { setBriefAudio(silence()); audio.play().catch(() => {}); } catch (error) { /* no audio here: the text still shows */ }
+  renderBrief();
+  try {
+    let result = await api('/api/briefing', { method: 'POST', body: '{}' });
+    for (let asked = 0; result.writing && asked < BRIEF_WAIT; asked++) {
+      await wait(BRIEF_POLL);
+      if (gen !== brief.gen) return;
+      result = await api('/api/briefing');
+    }
+    if (gen !== brief.gen) return;
+    if (result.writing) throw new Error('The Mac is taking too long to write it. Try again in a minute.');
+    showBriefing(result);
+  } catch (error) {
+    if (gen === brief.gen) showBriefError(error.message);
+  } finally {
+    if (gen === brief.gen) { brief.writing = false; renderBrief(); }
+  }
+}
+
+function showBriefing(result) {
+  const text = $('briefText');
+  text.textContent = result.text || '';
+  text.lang = result.language || '';
+  text.hidden = !result.text;
+  $('briefNotice').textContent = result.notice || '';
+  $('briefNotice').hidden = !result.notice;
+  if (!result.audio) return;
+  const bytes = Uint8Array.from(atob(result.audio), c => c.charCodeAt(0));
+  setBriefAudio(new Blob([bytes], { type: result.audioType || 'audio/mpeg' }));
+  brief.ready = true;
+  // A phone that won't start it on its own: ▶ Play does.
+  $('briefAudio').play().catch(() => renderBrief());
+}
+
+// Stop while it's written (it isn't played when it arrives), stop what's playing, or play it again.
+function toggleBriefAudio() {
+  const audio = $('briefAudio');
+  if (brief.writing) {
+    brief.gen++;
+    brief.writing = false;
+    audio.pause();
+  } else if (!audio.paused && !audio.ended) {
+    audio.pause();
+    audio.currentTime = 0;
+  } else {
+    audio.play().catch(error => showBriefError(`Couldn't play it here (${error.message}).`));
+  }
+  renderBrief();
+}
+
 // ---------- Startup ----------
 
 function route() {
@@ -1030,6 +1136,9 @@ document.addEventListener('DOMContentLoaded', () => {
   $('quickCancel').addEventListener('click', closeQuickEditor);
   $('quickReset').addEventListener('click', () => saveQuickReplies(DEFAULT_QUICK_REPLIES));
   renderQuickReplies();
+  $('briefMe').addEventListener('click', () => briefMe());
+  $('briefPlay').addEventListener('click', toggleBriefAudio);
+  for (const type of ['play', 'pause', 'ended']) $('briefAudio').addEventListener(type, renderBrief);
   $('prev').addEventListener('click', () => step(-1));
   $('next').addEventListener('click', () => step(1));
   window.addEventListener('resize', layoutSession);
