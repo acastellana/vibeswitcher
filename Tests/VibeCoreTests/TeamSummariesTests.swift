@@ -130,21 +130,39 @@ struct TeamSummariesTests {
     }
 
     @Test func aSlowOrFailingRunGivesNothingInTime() {
+        let root = scratchRoot.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
         // Late: it would answer after twice the hang guard. Given up on, it returns long before that. Only once its
         // sleep ends well: the family is stopped children first, and a busy Mac can let the shell go on to the echo
         // between the sleep's signal and its own.
         let start = Date()
-        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "sleep \(Int(2 * hangGuard)) && echo late"], timeout: 0.5) == nil)
+        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "sleep \(Int(2 * hangGuard)) && echo late"], timeout: 0.5, root: root) == nil)
         #expect(Date().timeIntervalSince(start) < hangGuard)
         // Whatever its sleep's end: a shell that goes on to the echo, even one that ignores TERM and so answers after
         // its time is up and exits 0, answers too late. (Its sleep ignores TERM too, and ends within the grace.)
-        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "sleep \(Int(2 * hangGuard)); echo late"], timeout: 0.5) == nil)
-        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "trap '' TERM; sleep 1; echo late"], timeout: 0.5) == nil)
+        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "sleep \(Int(2 * hangGuard)); echo late"], timeout: 0.5, root: root) == nil)
+        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "trap '' TERM; sleep 1; echo late"], timeout: 0.5, root: root) == nil)
         #expect(Date().timeIntervalSince(start) < hangGuard)
         // These end by themselves: the timeout is only a hang guard.
-        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "echo nope; exit 1"], timeout: hangGuard) == nil)
-        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "echo Fixing the parser"], timeout: hangGuard) == "Fixing the parser")
-        #expect(ClaudeHeadless.run(executable: "/nonexistent/claude", args: [], timeout: hangGuard) == nil)
+        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "echo nope; exit 1"], timeout: hangGuard, root: root) == nil)
+        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "echo Fixing the parser"], timeout: hangGuard, root: root) == "Fixing the parser")
+        #expect(ClaudeHeadless.run(executable: "/nonexistent/claude", args: [], timeout: hangGuard, root: root) == nil)
+    }
+
+    @Test func itRunsInAnEmptyFolderOfItsOwnNotTheTempFolder() throws {
+        let root = scratchRoot.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let folder = try #require(ClaudeHeadless.folder(root: root))
+        #expect(folder == root.appendingPathComponent("headless").path)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: folder).isEmpty)
+        // Anything left in it is gone before the next run: the run sees its folder, and it's empty.
+        try FileManager.default.createDirectory(atPath: folder + "/left/deep", withIntermediateDirectories: true)
+        try "x".write(toFile: folder + "/.hidden", atomically: true, encoding: .utf8)
+        let seen = try #require(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "pwd -P; ls -A | wc -l"], timeout: hangGuard, root: root))
+        let lines = seen.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        func real(_ path: String) -> String? { realpath(path, nil).map { resolved in defer { free(resolved) }; return String(cString: resolved) } }
+        #expect(lines == [try #require(real(folder)), "0"])
+        #expect(real(folder) != real(NSTemporaryDirectory()))
     }
 
     /// One real `claude -p` call on made-up text, only with `TEAM_SUMMARY_LIVE=1 swift test --filter TeamSummariesTests`.

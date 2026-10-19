@@ -211,9 +211,22 @@ public enum ClaudeHeadless {
         return run(executable: command.executable, args: command.args, timeout: timeout)
     }
 
-    /// Runs it in a scratch folder (no project's CLAUDE.md), its output when it exits cleanly in time.
-    static func run(executable: String, args: [String], timeout: TimeInterval) -> String? {
-        let result = Shell.run(executable: executable, args: args, in: NSTemporaryDirectory(), timeout: timeout, grace: 1)
+    /// Runs it in `folder(root:)`, its output when it exits cleanly in time; nil too when the folder can't be made.
+    static func run(executable: String, args: [String], timeout: TimeInterval, root: URL = VibePaths.root) -> String? {
+        guard let folder = folder(root: root) else { return nil }
+        let result = Shell.run(executable: executable, args: args, in: folder, timeout: timeout, grace: 1)
         return result.ok && !result.output.isEmpty ? result.output : nil
+    }
+
+    /// The folder it runs in: `headless` under the app's own folder, made on demand and emptied of anything left in
+    /// it. Empty, so Claude Code's start-up scan of its working folder (`rg --files --hidden`) finds nothing; not the
+    /// temp folder, which holds every test's scratch tree, and not a project (no CLAUDE.md read in).
+    static func folder(root: URL = VibePaths.root) -> String? {
+        let fm = FileManager.default
+        let folder = root.appendingPathComponent("headless")
+        guard (try? fm.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])) != nil,
+              let left = try? fm.contentsOfDirectory(atPath: folder.path) else { return nil }
+        for name in left { try? fm.removeItem(at: folder.appendingPathComponent(name)) }
+        return (try? fm.contentsOfDirectory(atPath: folder.path))?.isEmpty == true ? folder.path : nil
     }
 }
