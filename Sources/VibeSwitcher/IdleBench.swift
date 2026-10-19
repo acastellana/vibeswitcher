@@ -16,10 +16,10 @@ import VibeCore
 /// `--churn MINUTES` (R8, docs/eval/open-2026-10-19.md): after the window-closed phase, MINUTES of a working day's
 /// churn, one cycle per 15 s: a shell and an agent session start, the oldest of each ends (at most 3 live), the window
 /// opens on the new shell, the chat opens on the last agent and closes, the window closes. `--churn-speed X` (10)
-/// compresses it: a cycle takes 15/X s, so 10 minutes run in 60 s. First a warm-up of `--churn-warmup N` cycles (1),
+/// compresses it: a cycle takes 15/X s, so 10 minutes run in 60 s. First a warm-up of `--churn-warmup N` cycles (4),
 /// everything it started ended and the window-closed phase measured again: what's paid once (the first terminal that
-/// redraws often is drawn on the GPU, and CoreAnimation's accelerated renderer keeps ~12 MB from then on) is in that
-/// baseline, not in the growth. Then the churn, everything it started ended, and the window-closed phase measured once
+/// redraws often is drawn on the GPU, and CoreAnimation's accelerated renderer keeps ~12 MB from then on, a second
+/// ~4.2 MB of textures when draws overlap on a loaded Mac) is in that baseline, not in the growth. Then the churn, everything it started ended, and the window-closed phase measured once
 /// more and compared with the warm baseline (`RESULT` lines: the first, cold, closed footprint, the warm baseline, after
 /// churn, the growth from the warm baseline, and the live views and chats, cold and after; the growth by vmmap's region
 /// categories, the top growers first; then what malloc gives back when asked, which the phases after it start from).
@@ -38,7 +38,7 @@ enum IdleBench {
         let value = { (name: String) in arguments.firstIndex(of: name).flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil } }
         let transcript = value("--transcript")
         let churn = value("--churn").flatMap(Double.init).map {
-            Churn(minutes: $0, speed: value("--churn-speed").flatMap(Double.init) ?? 10, warmup: value("--churn-warmup").flatMap(Int.init) ?? 1)
+            Churn(minutes: $0, speed: value("--churn-speed").flatMap(Double.init) ?? 10, warmup: value("--churn-warmup").flatMap(Int.init) ?? 4)
         }
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
