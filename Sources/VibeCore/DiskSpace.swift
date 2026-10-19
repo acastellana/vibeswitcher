@@ -96,7 +96,7 @@ public struct TaskFolder: Equatable, Sendable {
     public var kind: Kind
     public var path: String
     public var bytes: Int64
-    /// The task is finished (merged or abandoned): cleanup removes it.
+    /// The task is finished (merged, folded or abandoned): cleanup removes it.
     public var finished: Bool
 
     public init(task: String, kind: Kind, path: String, bytes: Int64, finished: Bool) {
@@ -113,7 +113,7 @@ public struct TaskFolder: Equatable, Sendable {
         var folders: [TaskFolder] = []
         for task in board.tasks {
             let worktree = Worktrees.path(root: root, slug: task.slug)
-            let finished = task.status == .done || (task.status == .failed && task.worktree == nil)
+            let finished = LeadTeams.isFinished(task)
             if FileManager.default.fileExists(atPath: worktree) {
                 folders.append(TaskFolder(task: task.slug, kind: .worktree, path: worktree, bytes: size(worktree), finished: finished))
             }
