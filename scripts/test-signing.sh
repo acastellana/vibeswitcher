@@ -120,7 +120,8 @@ EOF
     check "the key's sign entry trusts codesign alone" \
         'grep -A6 "authorizations.*sign" <<<"$key" | grep "applications (1):" >/dev/null'
 
-    keychain_info() { run security show-keychain-info "$keychain" 2>&1; }
+    # Its lock settings, read only while it's unlocked (reading them from a locked keychain asks you).
+    keychain_info() { [[ $(lockstate) == unlocked ]] && run security show-keychain-info "$keychain" 2>&1; }
     check "the keychain locks on sleep, with no inactivity timeout" '[[ $(keychain_info) == *"lock-on-sleep no-timeout" ]]'
     # As an earlier setup-signing.sh left it, locking after 5 minutes too: the first build makes it lock on sleep only.
     run security set-keychain-settings -l -u -t 300 "$keychain"

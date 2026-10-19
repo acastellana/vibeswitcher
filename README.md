@@ -356,7 +356,9 @@ How it's kept safe:
 ```
 
 With the signing identity (`scripts/setup-signing.sh`, see [Development](#development)), macOS asks for the
-signing keychain's password as the build signs.
+signing keychain's password, in a dialog, at the first build after you log in or wake the Mac; later builds and
+installs sign without asking until the Mac sleeps or you log out. So an install right after login or wake, yours or
+one the lead runs for you, needs you at the keyboard once to type it; installs later in the session run unattended.
 
 On first launch a short welcome window sets VibeSwitcher up. Every step says why it's needed, shows its live
 state, and can be skipped; Settings (⌘,) › General › **Show Welcome…** brings the window back.
@@ -410,13 +412,20 @@ program to the Keychain) and one with another identifier were refused. The host'
 way, to the host's identifier and the identity. So the identity is kept from everything but you:
 
 - Its key can't be exported, and only `/usr/bin/codesign` may use it; anything else that tries makes macOS ask you.
-- Its keychain (`~/.vibeswitcher/signing`) stays locked. Its password is one you choose in `setup-signing.sh`,
-  never saved and never on a command line (where `ps` shows it to any process). Each `build-app.sh` run makes
-  macOS ask you for it in a dialog when codesign first signs, and locks the keychain again when the build ends
-  (and after 5 minutes, or on sleep, if it doesn't). A dialog asking for it when you didn't start a build is
-  something else trying to sign as VibeSwitcher: cancel it.
-- `scripts/test-signing.sh` fails if anything in `scripts/` passes a keychain password as an argument; with
-  `--build` it runs the setup and a build on a scratch HOME and checks the key, the lock and the signatures.
+- Its keychain (`~/.vibeswitcher/signing`) is locked until you unlock it. Its password is one you choose in
+  `setup-signing.sh`, never saved and never on a command line (where `ps` shows it to any process). The dialog
+  asking for it appears at the first build after you log in or wake the Mac, when codesign first signs. The
+  keychain then stays unlocked, so later builds don't ask, until the Mac sleeps or you log out: it locks on sleep,
+  with no inactivity timeout. A dialog asking for it when you didn't start a build is something else trying to
+  sign as VibeSwitcher: cancel it. Lock it yourself at any time with
+  `security lock-keychain ~/.vibeswitcher/signing/vibeswitcher.keychain-db`, or have it lock after a while as
+  well, for example an hour: `security set-keychain-settings -l -u -t 3600 <that keychain>`. `build-app.sh` keeps
+  any timeout you set; the one exception is the 5-minute timeout an earlier `setup-signing.sh` set, which the next
+  build removes.
+- `scripts/test-signing.sh` fails if anything in `scripts/` passes a keychain password as an argument. With
+  `--build`, it runs the setup and three builds on a scratch HOME. It checks the key, the signatures and when a
+  build asks for the password: the first build after setup asks, a second one doesn't, and after a lock the next
+  one asks again.
 - An identity made by an earlier `setup-signing.sh` (its password saved in `~/.vibeswitcher/signing/password`,
   its key exportable) is refused by `build-app.sh`; run `./scripts/setup-signing.sh` in Terminal to replace it.
   macOS asks for VibeSwitcher's permissions and Keychain items once more. It still holds the permissions you gave
@@ -424,8 +433,11 @@ way, to the host's identifier and the identity. So the identity is kept from eve
   still trust it (Keychain Access › the item › Access Control), so a copy of the old key, if one was taken, signs
   a binary those trust.
 
-What a process running as you can still do: while a build has the keychain unlocked (the seconds codesign runs),
-run `/usr/bin/codesign` with the identity itself. A binary signed that way, or by you answering a dialog it
+What a process running as you can still do: while the keychain is unlocked (from the first build after you log in
+or wake the Mac until it sleeps or you log out), run `/usr/bin/codesign` with the identity itself, as often as it
+likes and with no dialog. That is the cost of one dialog per session instead of one per build. The window is the
+one in which everything else you run, running as you, already acts with your rights; lock the keychain yourself to
+close it sooner. A binary signed that way, or by you answering a dialog it
 caused, is VibeSwitcher to macOS: it gets the app's permissions, the app's Keychain key and, signed as
 `vibeswitcher-host`, the host's vault key (so the sealed vault on disk). It still isn't the app to the session
 host, which takes as the app only the exact code beside it (its cdhash, checked on each connection) answering
@@ -534,7 +546,8 @@ the lead's worker and verifier prompts never set that variable.
 Run `./scripts/setup-signing.sh` once, in Terminal: it creates a self-signed signing identity in its own
 keychain file (`~/.vibeswitcher/signing`, your login keychain is untouched) so every rebuild keeps the same code
 identity, and trusts that certificate for code signing (your user only; macOS asks for your password). You choose
-the signing keychain's password there; every `build-app.sh` run then asks for it in a dialog as it signs (see
+the signing keychain's password there. The first `build-app.sh` run after you log in or wake the Mac then asks
+for it in a dialog as it signs, and later runs don't until the Mac sleeps or you log out (see
 [Security: the signing identity](#security-the-signing-identity)). `scripts/test-signing.sh` checks the scripts.
 macOS only keeps a permission across rebuilds for a trusted signature: otherwise, ad-hoc or not, it pins
 the Accessibility and Automation permissions to the exact build and silently drops them on the next one,
