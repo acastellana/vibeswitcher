@@ -63,9 +63,12 @@ public enum SessionNaming {
     /// Prompts that are not something the user typed: background-task notices and other injected
     /// system messages arrive through UserPromptSubmit as XML-ish blocks.
     public static func isSystemPrompt(_ prompt: String) -> Bool {
+        // Only its start tells (the hook asks of every prompt, whatever its size): past leading white space, 4 KB.
+        let start = String(String.UnicodeScalarView(prompt.unicodeScalars.drop { CharacterSet.whitespacesAndNewlines.contains($0) }
+            .prefix(4096)))
         // Messages from other sessions and subagents arrive as prompts too; they aren't the user's.
-        if TypedText.agentMessage(prompt) != nil { return true }
-        let trimmed = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        if TypedText.agentMessage(start) != nil { return true }
+        let trimmed = start.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.hasPrefix("<"), let close = trimmed.firstIndex(of: ">") else { return false }
         // The tag's name (attributes may follow it).
         let tag = trimmed[trimmed.index(after: trimmed.startIndex)..<close].prefix { $0 != " " }

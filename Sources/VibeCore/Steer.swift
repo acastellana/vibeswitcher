@@ -109,7 +109,7 @@ public enum SteerInbox {
               let probe = try? file(tty, "check", root: root) else { return [] }
         let sealer = sealer ?? .for(root)
         var delivered: [SteerMessage] = []
-        try? locked(url) { handle in
+        try? locked(url, wait: 1) { handle in
             try handle.seek(toOffset: 0)
             let data = try handle.readToEnd() ?? Data()
             guard !data.isEmpty else { return }
@@ -134,7 +134,7 @@ public enum SteerInbox {
                 partial?.handedOver = part.range.upperBound
             }
             if partial == nil, !delivered.isEmpty, let log = try? file(tty, "delivered", root: root) {
-                try? locked(log) { log in
+                try? locked(log, wait: 1) { log in
                     try log.seekToEnd()
                     try log.write(contentsOf: Data(delivered.map { $0.id + "\n" }.joined().utf8))
                 }
@@ -231,12 +231,14 @@ public enum SteerInbox {
         data.split(separator: 0x0A).compactMap { try? JSONDecoder().decode(SteerMessage.self, from: Data($0)) }
     }
 
-    /// Runs `body` on the file (created private if missing) under an exclusive lock.
-    private static func locked(_ url: URL, _ body: (FileHandle) throws -> Void) throws {
+    /// Runs `body` on the file (created private if missing) under an exclusive lock, or throws when that isn't had
+    /// within `wait` seconds. The hook's (`deliver`) waits 1 s: the agent waits on it, and the messages stay for its
+    /// next step. Everyone else's waits longer than a hook can hold it (its alarm, 3 s), so only a stuck one fails it.
+    private static func locked(_ url: URL, wait: TimeInterval = 5, _ body: (FileHandle) throws -> Void) throws {
         let fd = open(url.path, O_RDWR | O_CREAT | O_NOFOLLOW, 0o600)
         guard fd >= 0 else { throw CocoaError(.fileWriteNoPermission) }
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-        flock(fd, LOCK_EX)
+        guard HookLock.exclusive(fd, within: wait) else { throw CocoaError(.fileLocking) }
         defer { flock(fd, LOCK_UN) }
         try body(handle)
     }

@@ -69,9 +69,14 @@ public enum HostCall {
         return reply
     }
 
+    /// How long `vault` waits by default (`LeadVault.standard`'s calls). The hook sets 1 s: it runs on every event of
+    /// every session, and the agent waits on it.
+    nonisolated(unsafe) public static var vaultTimeout: TimeInterval = 5
+
     /// Asks the host's lead vault. Throws only when the host can't be asked; one that doesn't know the request (older
     /// than the app) refuses it.
-    public static func vault(_ request: LeadVault.Request, socket: String = VibePaths.hostSocket.path, timeout: TimeInterval = 5) throws -> LeadVault.Reply {
+    public static func vault(_ request: LeadVault.Request, socket: String = VibePaths.hostSocket.path,
+                             timeout: TimeInterval = HostCall.vaultTimeout) throws -> LeadVault.Reply {
         switch try self.request(.vault(request), socket: socket, timeout: timeout) {
         case .vault(let reply): return reply
         case .error(let message): return .refused(message)

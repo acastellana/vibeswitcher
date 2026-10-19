@@ -8,9 +8,30 @@ import Darwin
 import Foundation
 import VibeCore
 
+// The agent waits on every hook: VibeSwitcher's own work on an event takes a second at most (its locks and the host
+// get one each), and past 3 s (an input that never ends, a stuck disk) the hook leaves, quietly, rather than hold the
+// turn (docs/eval/open-2026-10-19.md, R4).
+signal(SIGALRM) { _ in _exit(0) }
+alarm(3)
+HostCall.vaultTimeout = 1
+
+/// The event, to the end of stdin: nil past `limit` bytes (no event is that big) or on a read error.
+func readInput(limit: Int) -> Data? {
+    var data = Data()
+    var buffer = [UInt8](repeating: 0, count: 1 << 16)
+    while true {
+        let count = read(STDIN_FILENO, &buffer, buffer.count)
+        if count < 0, errno == EINTR { continue }
+        guard count >= 0 else { return nil }
+        if count == 0 { return data }
+        data.append(buffer, count: count)
+        guard data.count <= limit else { return nil }
+    }
+}
+
 let agent = Agent(rawValue: CommandLine.arguments.dropFirst().first ?? "") ?? .claude
-let input = FileHandle.standardInput.readDataToEndOfFile()
-guard let payload = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any] else { exit(0) }
+guard let input = readInput(limit: 32 << 20),
+      let payload = (try? JSONSerialization.jsonObject(with: input)) as? [String: Any] else { exit(0) }
 
 // The agent process is our nearest `claude`/`codex` ancestor; its TTY identifies the session (agents launch hooks
 // in a fresh session with no controlling terminal). A second agent further up (e.g. Claude running `codex exec` as a
@@ -42,22 +63,24 @@ case .none:
 VibePaths.ensurePrivateDirectories()
 let stateURL = VibePaths.stateFile(tty: tty)
 
-// Serialize concurrent hooks (parallel tool calls fire PreToolUse at the same time).
+// Serialize concurrent hooks (parallel tool calls fire PreToolUse at the same time). One that holds the lock over a
+// second (stuck) costs this event its state: the next event's is written.
 let lock = open(stateURL.path + ".lock", O_CREAT | O_RDWR, 0o600)
-if lock >= 0 { flock(lock, LOCK_EX) }
-
-// Codex's async questions don't hold the turn: at its end, the rollout says whether one is still open.
-let rolloutQuestion = agent == .codex && payload["hook_event_name"] as? String == "Stop"
-    ? (payload["transcript_path"] as? String).flatMap { TranscriptReader.openAsyncQuestion(atPath: $0, home: NSHomeDirectory()) }
-    : nil
-let update = HookState.reduce(current: HookState.load(from: stateURL), payload: payload, agent: agent,
-                              tty: tty, agentPid: agentPid, now: Date().timeIntervalSince1970, rolloutQuestion: rolloutQuestion)
-switch update {
-case .write(let state): try? state.save(to: stateURL)
-case .delete: try? FileManager.default.removeItem(at: stateURL)
-case .ignore: break
+if lock < 0 || HookLock.exclusive(lock, within: 1) {
+    // Codex's async questions don't hold the turn: at its end, the rollout says whether one is still open.
+    let rolloutQuestion = agent == .codex && payload["hook_event_name"] as? String == "Stop"
+        ? (payload["transcript_path"] as? String).flatMap { TranscriptReader.openAsyncQuestion(atPath: $0, home: NSHomeDirectory()) }
+        : nil
+    let update = HookState.reduce(current: HookState.load(from: stateURL), payload: payload, agent: agent,
+                                  tty: tty, agentPid: agentPid, now: Date().timeIntervalSince1970, rolloutQuestion: rolloutQuestion)
+    switch update {
+    case .write(let state): try? state.save(to: stateURL)
+    case .delete: try? FileManager.default.removeItem(at: stateURL)
+    case .ignore: break
+    }
+    if lock >= 0 { flock(lock, LOCK_UN) }
 }
-if lock >= 0 { flock(lock, LOCK_UN); close(lock) }
+if lock >= 0 { close(lock) }
 
 // A git command that can move a branch, before and after it runs: the session host records it under the session it
 // tells this process is in (nothing said here names one), so a commit of yours on a lead's base is taken as yours.

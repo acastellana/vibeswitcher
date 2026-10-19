@@ -53,6 +53,20 @@ public struct HookState: Codable, Equatable, Sendable {
     }
 }
 
+/// An exclusive `flock` that gives up instead of waiting for ever: the hook's locks (its state file, the steer inbox)
+/// are held by other hooks, and one stuck holding it mustn't hold every other event of the session too.
+public enum HookLock {
+    /// Whether the lock on `fd` was had within `seconds` (tried every 10 ms).
+    public static func exclusive(_ fd: Int32, within seconds: TimeInterval) -> Bool {
+        let deadline = DispatchTime.now().uptimeNanoseconds + UInt64(max(seconds, 0) * 1e9)
+        while flock(fd, LOCK_EX | LOCK_NB) != 0 {
+            guard errno == EWOULDBLOCK || errno == EINTR, DispatchTime.now().uptimeNanoseconds < deadline else { return false }
+            usleep(10_000)
+        }
+        return true
+    }
+}
+
 public enum HookUpdate: Equatable {
     case write(HookState)
     case delete
@@ -221,14 +235,47 @@ extension HookState {
         return nil
     }
 
+    /// Reads only the text's head (`head(_:units:)`, 4 UTF-16 units per character kept, and never under 1 KB, so a
+    /// shorter text comes out as it always did): a 5 MB prompt costs what a short one does, where masking all of it
+    /// took seconds, inside the hook's lock (docs/eval/open-2026-10-19.md, R4).
     static func clip(_ text: String?, to limit: Int = 280) -> String? {
         guard let text else { return nil }
+        let head = head(text, units: max(4 * limit, 1024))
+        let cut = head.endIndex < text.endIndex
+        // Cut in its first word: all of the head is a word that may be a secret, and not recognisable as one without
+        // its end.
+        guard !cut || head.utf16.contains(where: { !isBreak($0) }) else { return Redaction.mask + "…" }
         // One line of plain text: drop newlines and the markdown emphasis agents like to use.
-        let flat = Redaction.secrets(in: text).split(whereSeparator: \.isNewline).joined(separator: " ")
+        let flat = Redaction.secrets(in: String(head)).split(whereSeparator: \.isNewline).joined(separator: " ")
             .replacingOccurrences(of: "**", with: "")
             .replacingOccurrences(of: "`", with: "")
             .trimmingCharacters(in: .whitespaces)
         guard !flat.isEmpty else { return nil }
-        return flat.count > limit ? String(flat.prefix(limit)) + "…" : flat
+        return flat.count > limit || cut ? String(flat.prefix(limit)) + "…" : flat
+    }
+
+    /// The text's first `units` UTF-16 units, without the word the cut goes through: back to the last space (or `*`,
+    /// backtick: what `clip` drops). What's left of a secret cut in two may not be recognised as one, and once
+    /// newlines and emphasis are dropped it could be among what's shown.
+    static func head(_ text: String, units: Int) -> Substring {
+        let utf16 = text.utf16
+        // Step by step: an offset into a long text would first index all of it.
+        var cut = utf16.startIndex
+        for _ in 0..<units where cut < utf16.endIndex { cut = utf16.index(after: cut) }
+        guard cut < utf16.endIndex else { return text[...] }
+        var end = cut
+        while end > utf16.startIndex, !isBreak(utf16[end]) {
+            let before = utf16.index(before: end)
+            if isBreak(utf16[before]) { break }
+            end = before
+        }
+        return text[..<end]
+    }
+
+    /// Where a word ends for `head`: white space as `Redaction` takes it, `*` and the backtick.
+    static func isBreak(_ c: UInt16) -> Bool {
+        if c < 128 { return c == 32 || (c &- 9) < 5 || c == 42 || c == 96 }
+        return c == 0x85 || c == 0xA0 || c == 0x1680 || (c &- 0x2000) < 11 || c == 0x2028 || c == 0x2029 || c == 0x202F
+            || c == 0x205F || c == 0x3000
     }
 }
