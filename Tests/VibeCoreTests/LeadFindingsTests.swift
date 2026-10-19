@@ -1,0 +1,431 @@
+import Foundation
+import Testing
+@testable import VibeCore
+
+/// An audit's findings as a state machine (`LeadAuditLedger`): what a round may add or close, what it may never raise
+/// again, and when the rounds call for reconsidering the approach.
+struct LeadAuditLedgerTests {
+    typealias Report = LeadFinding.Report
+
+    func important(_ file: String = "Sources/A.swift", _ line: Int = 12, id: String? = nil, status: LeadFinding.Status = .open, reason: String? = nil) -> Report {
+        Report(id: id, severity: .important, file: file, line: line, evidence: "swift test fails: testA", status: status, reason: reason)
+    }
+
+    @Test func aFirstAuditRaisesItsFindingsOpenWithIDs() throws {
+        var ledger = LeadAuditLedger()
+        try ledger.record([important(), Report(severity: .nit, file: "Sources/B.swift", line: 3, evidence: "typo"),
+                           Report(severity: .preExisting, file: "Sources/C.swift", line: 9, evidence: "leaks on main too")],
+                          commit: "c1", passes: true)
+        #expect(ledger.findings.map(\.id) == ["F1", "F2", "F3"])
+        #expect(ledger.findings.allSatisfy { $0.isOpen && $0.raised == 1 })
+        #expect(ledger.rounds == 1 && ledger.commit == "c1")
+        // Only the Important one blocks; the Pre-existing one isn't the branch's to recheck.
+        #expect(ledger.blocking.map(\.id) == ["F1"])
+        #expect(ledger.toRecheck.map(\.id) == ["F1", "F2"])
+        #expect(ledger.failedRounds == 1)
+        #expect(ledger.bySeverity.map(\.severity) == [.important, .nit, .preExisting])
+    }
+
+    @Test func aCleanRoundWithOnlyNitsAndPreExistingOnesIsNotAFailure() throws {
+        var ledger = LeadAuditLedger()
+        try ledger.record([Report(severity: .nit, file: "a", line: 1, evidence: "e"), Report(severity: .preExisting, file: "b", line: 1, evidence: "e")],
+                          commit: "c1", passes: true)
+        #expect(ledger.blocking.isEmpty)
+        #expect(ledger.failedRounds == 0)
+        #expect(!ledger.reconsider)
+    }
+
+    @Test func aReauditClosesWhatWasFixedAndMustSaySoForEachOpenOne() throws {
+        var ledger = LeadAuditLedger()
+        try ledger.record([important(), Report(severity: .nit, file: "Sources/B.swift", line: 3, evidence: "typo")], commit: "c1", passes: false)
+        let before = ledger
+        // Leaving out an open one is refused, and changes nothing.
+        #expect(throws: LeadAuditLedger.Refusal.self) {
+            try ledger.record([self.important(id: "F1", status: .fixed)], commit: "c2", passes: true, changed: ["Sources/A.swift"])
+        }
+        #expect(ledger == before)
+        try ledger.record([important(id: "f1", status: .fixed), Report(id: "F2", severity: .nit, file: "Sources/B.swift", line: 3, evidence: "still", status: .open)],
+                          commit: "c2", passes: true, changed: ["Sources/A.swift"])
+        #expect(ledger.finding("F1")?.status == .fixed)
+        #expect(ledger.finding("F1")?.closed == 2)
+        #expect(ledger.finding("F1")?.closedBy == "verifier")
+        #expect(ledger.finding("F2")?.isOpen == true)
+        #expect(ledger.blocking.isEmpty)
+        #expect(ledger.failedRounds == 0)
+        #expect(ledger.rounds == 2 && ledger.commit == "c2")
+    }
+
+    @Test func aClosedFindingIsNeverRaisedAgain() throws {
+        var ledger = LeadAuditLedger()
+        try ledger.record([important()], commit: "c1", passes: false)
+        try ledger.record([important(id: "F1", status: .fixed)], commit: "c2", passes: true, changed: ["Sources/A.swift"])
+        let closed = ledger
+        // Reopened by its id…
+        #expect(throws: LeadAuditLedger.Refusal.self) {
+            try ledger.record([self.important(id: "F1", status: .open)], commit: "c3", passes: false, changed: ["Sources/A.swift"])
+        }
+        // …or raised as a new one at its place.
+        #expect(throws: LeadAuditLedger.Refusal.self) {
+            try ledger.record([self.important()], commit: "c3", passes: false, changed: ["Sources/A.swift"])
+        }
+        #expect(ledger == closed)
+        // Saying again that it's fixed is no news, and fine.
+        try ledger.record([important(id: "F1", status: .fixed)], commit: "c3", passes: true, changed: [])
+        #expect(ledger.findings.count == 1)
+        #expect(ledger.finding("F1")?.closed == 2)
+    }
+
+    @Test func aReauditRaisesNewFindingsFromTheNewDiffOnly() throws {
+        var ledger = LeadAuditLedger()
+        try ledger.record([], commit: "c1", passes: true)
+        #expect(throws: LeadAuditLedger.Refusal.self) {
+            try ledger.record([self.important("Sources/Untouched.swift", 4)], commit: "c2", passes: false, changed: ["Sources/A.swift"])
+        }
+        try ledger.record([important("Sources/A.swift", 4)], commit: "c2", passes: false, changed: ["Sources/A.swift"])
+        #expect(ledger.findings.map(\.place) == ["Sources/A.swift:4"])
+        #expect(ledger.finding("F1")?.raised == 2)
+    }
+
+    @Test func aNewFindingIsOpenAndNotAtAnOpenOnesPlace() throws {
+        var ledger = LeadAuditLedger()
+        #expect(throws: LeadAuditLedger.Refusal.self) { try ledger.record([self.important(status: .fixed)], commit: "c1", passes: true) }
+        #expect(throws: LeadAuditLedger.Refusal.self) { try ledger.record([self.important(), self.important()], commit: "c1", passes: true) }
+        try ledger.record([important()], commit: "c1", passes: true)
+        #expect(throws: LeadAuditLedger.Refusal.self) {
+            try ledger.record([self.important(id: "F1"), self.important()], commit: "c2", passes: true, changed: ["Sources/A.swift"])
+        }
+    }
+
+    @Test func theLeadDismissesAnOpenFindingWithAReason() throws {
+        var ledger = LeadAuditLedger()
+        try ledger.record([important()], commit: "c1", passes: true)
+        #expect(throws: LeadAuditLedger.Refusal.self) { try ledger.dismiss("F1", reason: "  ") }
+        #expect(throws: LeadAuditLedger.Refusal.self) { try ledger.dismiss("F9", reason: "no") }
+        try ledger.dismiss("F1", reason: "the contract allows it", followUp: "fix-a")
+        #expect(ledger.blocking.isEmpty)
+        #expect(ledger.finding("F1")?.closedBy == "lead")
+        #expect(ledger.finding("F1")?.followUp == "fix-a")
+        #expect(throws: LeadAuditLedger.Refusal.self) { try ledger.dismiss("F1", reason: "again") }
+        // A dismissed one isn't raised again either.
+        #expect(throws: LeadAuditLedger.Refusal.self) {
+            try ledger.record([self.important()], commit: "c2", passes: true, changed: ["Sources/A.swift"])
+        }
+    }
+
+    @Test func threeRoundsThatLeaveImportantFindingsOpenCallForReconsidering() throws {
+        var ledger = LeadAuditLedger()
+        try ledger.record([important()], commit: "c1", passes: true)
+        try ledger.record([important(id: "F1")], commit: "c2", passes: true, changed: ["Sources/A.swift"])
+        #expect(!ledger.reconsider)
+        try ledger.record([important(id: "F1")], commit: "c3", passes: true, changed: ["Sources/A.swift"])
+        #expect(ledger.failedRounds == 3)
+        #expect(ledger.reconsider)
+        // Re-planned: the rounds count from there.
+        var replanned = ledger
+        replanned.replan()
+        #expect(!replanned.reconsider)
+        // A round that leaves nothing Important open ends it.
+        try ledger.record([important(id: "F1", status: .fixed)], commit: "c4", passes: true, changed: ["Sources/A.swift"])
+        #expect(ledger.failedRounds == 0)
+        #expect(!ledger.reconsider)
+    }
+
+    @Test func failedVerdictsCountAsFailedRoundsToo() throws {
+        var ledger = LeadAuditLedger()
+        for commit in ["c1", "c2", "c3"] { try ledger.record([], commit: commit, passes: false, changed: []) }
+        #expect(ledger.reconsider)
+    }
+}
+
+/// The findings through the tools: a fake verifier's submit_audit, the merge gate, the lead's dismissals and tasks
+/// made of findings, re-audits and the round cap.
+struct LeadFindingsToolTests: LeadTeamFixture {
+    let temp = Scratch()
+    let vault: LeadVault
+    init() { vault = Self.newVault(in: temp) }
+
+    func repo() throws -> String {
+        let url = temp.url("lead")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let root = url.resolvingSymlinksInPath().path
+        for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: root) }
+        try "one\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "a.txt"], in: root)
+        Git.run(["commit", "-q", "-m", "first"], in: root)
+        return root
+    }
+
+    func call(_ tools: LeadToolset, _ name: String, _ arguments: [String: Any] = [:]) -> MCPToolResult { tools.call(name, arguments) }
+
+    /// The worker commits `file` and reports done.
+    func work(_ runtime: FakeRuntime, root: String, slug: String = "add-b", file: String, text: String) throws {
+        let worktree = Worktrees.path(root: root, slug: slug)
+        try text.write(toFile: worktree + "/" + file, atomically: true, encoding: .utf8)
+        Git.run(["add", file], in: worktree)
+        Git.run(["commit", "-q", "-m", "work on \(file)"], in: worktree)
+        let reported = call(try seat("worker-\(slug)", runtime), "report", ["status": "done", "summary": "did \(file)"])
+        #expect(!reported.isError, "\(reported.text)")
+    }
+
+    /// A task started and worked on, ready for its audit.
+    func started(_ lead: LeadToolset, _ runtime: FakeRuntime, root: String) throws {
+        _ = call(lead, "add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]])
+        #expect(!call(lead, "start_worker", ["task": "add-b"]).isError)
+        try work(runtime, root: root, file: "b.txt", text: "bee\n")
+    }
+
+    /// The last verifier started's prompt.
+    func verifierPrompt(_ runtime: FakeRuntime) throws -> String {
+        let spawn = try #require(runtime.spawned.last { $0.command.contains("--name 'verify-") })
+        let range = try #require(spawn.command.range(of: #"--append-system-prompt-file '([^']+)'"#, options: .regularExpression))
+        let path = String(spawn.command[range].dropFirst("--append-system-prompt-file '".count).dropLast())
+        return try String(contentsOfFile: path, encoding: .utf8)
+    }
+
+    func audit(_ lead: LeadToolset, _ runtime: FakeRuntime, _ verdict: [String: Any], slug: String = "add-b") throws -> MCPToolResult {
+        let started = call(lead, "audit", ["task": slug])
+        #expect(!started.isError, "\(started.text)")
+        return call(try seat("verify-\(slug)", runtime), "submit_audit", verdict)
+    }
+
+    static let threeKinds: [[String: Any]] = [
+        ["severity": "Important", "file": "b.txt", "line": 1, "evidence": "test -f b.txt passes but b.txt says bee, the contract wants b", "status": "open"],
+        ["severity": "Nit", "file": "b.txt", "line": 2, "evidence": "no trailing newline", "status": "open"],
+        ["severity": "Pre-existing", "file": "a.txt", "line": 1, "evidence": "a.txt says one; it did on main too"],
+    ]
+
+    @Test func aVerifierThatFindsNothingAndPassesIsUnchangedForTheLead() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        let submitted = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "test -f b.txt passes"])
+        #expect(!submitted.isError, "\(submitted.text)")
+        #expect(runtime.steered.last?.text == "The audit of add-b passed (complete, clean): test -f b.txt passes\nmerge(add-b) when you're ready.")
+        #expect(!call(lead, "status").text.contains("findings"))
+        #expect(BoardStore(root: root).load().task("add-b")?.status == .review)
+        #expect(!call(lead, "merge", ["task": "add-b"]).isError)
+    }
+
+    @Test func theVerifierIsAskedForFindingsWithEvidence() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        _ = call(lead, "audit", ["task": "add-b"])
+        let prompt = try verifierPrompt(runtime)
+        for words in ["findings", "Important", "Nit", "Pre-existing", "file and line", "the command you ran and what it gave"] {
+            #expect(prompt.contains(words), "\(words)")
+        }
+        let schema = try #require(try seat("verify-add-b", runtime).tools.first { $0.name == "submit_audit" })
+        #expect(schema.properties["findings"]?.type == "array")
+        #expect(schema.required == ["completion", "integrity", "summary"])
+    }
+
+    @Test func anOpenImportantFindingHoldsTheMergeBackAndNitsAndPreExistingOnesDont() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        let submitted = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "checked", "findings": Self.threeKinds])
+        #expect(!submitted.isError, "\(submitted.text)")
+        // The vault keeps them; the board mirrors them.
+        let ledger = try #require(vault.audits(root: root, task: "add-b"))
+        #expect(ledger.findings.map(\.id) == ["F1", "F2", "F3"])
+        let task = try #require(BoardStore(root: root).load().task("add-b"))
+        #expect(task.audits == ledger)
+        #expect(task.status == .failed)
+        let told = try #require(runtime.steered.last?.text)
+        #expect(told.contains("Important:\n- add-b:F1 b.txt:1"), "\(told)")
+        #expect(told.contains("Nit:\n- add-b:F2 b.txt:2"))
+        #expect(told.contains("Pre-existing:\n- add-b:F3 a.txt:1"))
+        #expect(told.contains("merge refuses while an Important finding is open"))
+
+        // status and board(task) show them, by severity.
+        let status = call(lead, "status").text
+        #expect(status.contains("findings: Important open F1 b.txt:1; 1 Important open, 1 Nit open, 1 Pre-existing open"), "\(status)")
+        let board = call(lead, "board", ["task": "add-b"]).text
+        #expect(board.contains("Findings (round 1; 1 Important open, 1 Nit open, 1 Pre-existing open):\nImportant:\n- add-b:F1"), "\(board)")
+
+        // merge names the open Important one.
+        let refused = call(lead, "merge", ["task": "add-b"])
+        #expect(refused.isError)
+        #expect(refused.text.contains("add-b:F1 b.txt:1"), "\(refused.text)")
+        #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
+
+        // A report on the audited commit leaves it failed, the verdict and its open finding standing.
+        try #require(!call(try seat("worker-add-b", runtime), "report", ["status": "done", "summary": "nothing new"]).isError)
+        #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)
+        #expect(runtime.steered.last?.text.contains("with Important findings open (add-b:F1)") == true, "\(runtime.steered.last?.text ?? "")")
+
+        // Dismissed with a reason, it no longer holds the merge back; the Nit and the Pre-existing one never did.
+        #expect(call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": ""]).isError)
+        let dismissed = call(lead, "dismiss_finding", ["task": "add-b", "id": "add-b:F1", "reason": "the contract only asks for the file"])
+        #expect(!dismissed.isError, "\(dismissed.text)")
+        #expect(vault.audits(root: root, task: "add-b")?.finding("F1")?.status == .dismissed)
+        #expect(BoardStore(root: root).load().task("add-b")?.audits?.finding("F1")?.reason == "the contract only asks for the file")
+        let merged = call(lead, "merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(FileManager.default.fileExists(atPath: root + "/b.txt"))
+    }
+
+    @Test func onlyTheLeadDismissesAFinding() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        _ = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "checked", "findings": Self.threeKinds])
+        #expect(throws: LeadVault.Refused.self) {
+            try self.vault(for: FakeSeat(runtime, agent: LeadAgent(pid: 1, tty: "x", session: "session-1"))).dismissFinding(root: root, task: "add-b", id: "F1", reason: "mine")
+        }
+        #expect(vault.audits(root: root, task: "add-b")?.finding("F1")?.isOpen == true)
+    }
+
+    @Test func aPreExistingFindingBecomesATaskInOneCall() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        _ = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "checked", "findings": Self.threeKinds])
+        let added = call(lead, "add_task", ["from_finding": "add-b:F3"])
+        #expect(!added.isError, "\(added.text)")
+        let board = BoardStore(root: root).load()
+        let made = try #require(board.tasks.last)
+        #expect(made.slug != "add-b")
+        #expect(made.contract.goal.contains("a.txt:1"))
+        #expect(made.contract.context.contains("a.txt says one"))
+        #expect(!made.contract.acceptance.isEmpty)
+        let finding = try #require(vault.audits(root: root, task: "add-b")?.finding("F3"))
+        #expect(finding.status == .dismissed)
+        #expect(finding.followUp == made.slug)
+        // What the lead passes replaces that part.
+        #expect(!call(lead, "add_task", ["from_finding": "add-b:F2", "title": "Tidy b"]).isError)
+        #expect(BoardStore(root: root).load().tasks.last?.title == "Tidy b")
+        #expect(call(lead, "add_task", ["from_finding": "add-b:F9"]).isError)
+        #expect(call(lead, "add_task", ["title": "No goal"]).isError)
+    }
+
+    @Test func aReauditChecksTheOpenFindingsAndTheNewDiffAndNeverRepeatsAClosedOne() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        let first = Git.run(["rev-parse", "agent/add-b"], in: root).output
+        _ = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "checked", "findings": Self.threeKinds])
+        // The worker fixes it.
+        try work(runtime, root: root, file: "c.txt", text: "sea\n")
+        let started = call(lead, "audit", ["task": "add-b"])
+        #expect(started.text.contains("re-audit (round 2)"), "\(started.text)")
+        let prompt = try verifierPrompt(runtime)
+        #expect(prompt.contains("re-audit (round 2)"))
+        #expect(prompt.contains("git diff \(first)"))
+        #expect(prompt.contains("- F1 [Important] b.txt:1"))
+        #expect(prompt.contains("- F2 [Nit] b.txt:2"))
+        #expect(prompt.contains("+sea"), "the diff since the audited commit")
+        #expect(!prompt.contains("+bee"), "only the diff since the audited commit")
+        let verifier = try seat("verify-add-b", runtime)
+        let verdict: [String: Any] = ["completion": "complete", "integrity": "clean", "summary": "checked again"]
+        // Each open finding must be marked.
+        let skipped = call(verifier, "submit_audit", verdict.merging(["findings": [["id": "F1", "severity": "Important", "file": "b.txt", "line": 1, "evidence": "fixed", "status": "fixed"]]]) { $1 })
+        #expect(skipped.isError)
+        #expect(skipped.text.contains("F2"), "\(skipped.text)")
+        // New findings only from the new diff.
+        let marks: [[String: Any]] = [["id": "F1", "severity": "Important", "file": "b.txt", "line": 1, "evidence": "b.txt says b now", "status": "fixed"],
+                                      ["id": "F2", "severity": "Nit", "file": "b.txt", "line": 2, "evidence": "still no newline", "status": "open"]]
+        let outside = call(verifier, "submit_audit", verdict.merging(["findings": marks + [["severity": "Nit", "file": "a.txt", "line": 5, "evidence": "old"]]]) { $1 })
+        #expect(outside.isError)
+        #expect(outside.text.contains("new diff only"), "\(outside.text)")
+        #expect(vault.verdict(root: root, task: "add-b") == nil, "nothing recorded on a refusal")
+        let passed = call(verifier, "submit_audit", verdict.merging(["findings": marks + [["severity": "Nit", "file": "c.txt", "line": 1, "evidence": "sea is spelled see in the contract"]]]) { $1 })
+        #expect(!passed.isError, "\(passed.text)")
+        let ledger = try #require(vault.audits(root: root, task: "add-b"))
+        #expect(ledger.rounds == 2)
+        #expect(ledger.finding("F1")?.status == .fixed)
+        #expect(ledger.finding("F4")?.place == "c.txt:1")
+        #expect(ledger.blocking.isEmpty)
+        #expect(runtime.steered.last?.text.contains("Nits and Pre-existing findings don't hold it back") == true)
+
+        // A third round can't bring F1 back, by id or at its place.
+        try work(runtime, root: root, file: "b.txt", text: "b\n")
+        _ = call(lead, "audit", ["task": "add-b"])
+        #expect(try verifierPrompt(runtime).contains("- F1 [Important, fixed] b.txt:1"))
+        let third = try seat("verify-add-b", runtime)
+        let open: [[String: Any]] = [["id": "F2", "severity": "Nit", "file": "b.txt", "line": 2, "evidence": "e", "status": "fixed"],
+                                     ["id": "F4", "severity": "Nit", "file": "c.txt", "line": 1, "evidence": "e", "status": "open"]]
+        let reopened = call(third, "submit_audit", verdict.merging(["findings": open + [["id": "F1", "severity": "Important", "file": "b.txt", "line": 1, "evidence": "back", "status": "open"]]]) { $1 })
+        #expect(reopened.isError)
+        #expect(reopened.text.contains("isn't raised again"), "\(reopened.text)")
+        let renamed = call(third, "submit_audit", verdict.merging(["findings": open + [["severity": "Important", "file": "b.txt", "line": 1, "evidence": "back again"]]]) { $1 })
+        #expect(renamed.isError)
+        #expect(renamed.text.contains("isn't raised again"), "\(renamed.text)")
+        #expect(!call(third, "submit_audit", verdict.merging(["findings": open]) { $1 }).isError)
+        #expect(vault.audits(root: root, task: "add-b")?.findings.count == 4)
+        #expect(!call(lead, "merge", ["task": "add-b"]).isError)
+    }
+
+    @Test func afterThreeRoundsWithImportantFindingsOpenTheLeadIsToldToReconsider() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        let still: [String: Any] = ["id": "F1", "severity": "Important", "file": "b.txt", "line": 1, "evidence": "still wrong", "status": "open"]
+        _ = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "1", "findings": [Self.threeKinds[0]]])
+        #expect(!call(lead, "status").text.contains("reconsider the approach"))
+        try work(runtime, root: root, file: "c.txt", text: "1\n")
+        #expect(!(try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "2", "findings": [still]])).isError)
+        #expect(runtime.steered.last?.text.contains("Reconsider the approach") == false)
+        try work(runtime, root: root, file: "c.txt", text: "2\n")
+        #expect(!(try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "3", "findings": [still]])).isError)
+        let told = try #require(runtime.steered.last?.text)
+        #expect(told.contains("Reconsider the approach"), "\(told)")
+        #expect(told.contains("re-plan add-b") && told.contains("ask the user"))
+        let status = call(lead, "status").text
+        #expect(status.contains("add-b: Add b — reconsider the approach (3 audits left Important findings open)"), "\(status)")
+        #expect(call(lead, "board", ["task": "add-b"]).text.contains("Reconsider the approach"))
+        // The lead's own prompt says what to do then.
+        #expect(LeadPrompts.lead(project: "p", root: root, workflow: LeadWorkflow()).contains("\"reconsider the approach\": don't send the worker back"))
+        // Re-planned, the rounds count from there.
+        #expect(!call(lead, "update_task", ["task": "add-b", "status": "planned"]).isError)
+        #expect(vault.audits(root: root, task: "add-b")?.reconsider == false)
+        #expect(!call(lead, "status").text.contains("reconsider the approach"))
+    }
+
+    @Test func malformedFindingsAreRefusedSaying() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        _ = call(lead, "audit", ["task": "add-b"])
+        let verifier = try seat("verify-add-b", runtime)
+        let base: [String: Any] = ["completion": "complete", "integrity": "clean", "summary": "s"]
+        for (finding, words) in [(["severity": "Major", "file": "b.txt", "line": 1, "evidence": "e"], "Important, Nit or Pre-existing"),
+                                 (["severity": "Nit", "file": "b.txt", "evidence": "e"], "line"),
+                                 (["severity": "Nit", "file": "b.txt", "line": 1], "evidence"),
+                                 (["severity": "Nit", "file": "b.txt", "line": 1, "evidence": "e", "status": "dismissed"], "reason")] as [([String: Any], String)] {
+            let refused = call(verifier, "submit_audit", base.merging(["findings": [finding]]) { $1 })
+            #expect(refused.isError)
+            #expect(refused.text.contains(words), "\(refused.text)")
+        }
+        #expect(vault.verdict(root: root, task: "add-b") == nil)
+        // A list given as JSON text, with the line as text, is read.
+        let json = #"[{"severity": "nit", "file": "b.txt", "line": "2", "evidence": "e"}]"#
+        #expect(!call(verifier, "submit_audit", base.merging(["findings": json]) { $1 }).isError)
+        #expect(vault.audits(root: root, task: "add-b")?.finding("F1")?.place == "b.txt:2")
+    }
+
+    /// Findings stay through a new verifier and a worker's report; the task's cleanup takes them with its verdict.
+    @Test func theFindingsOutliveEachVerifierAndGoWithTheTask() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        _ = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "s", "findings": Self.threeKinds])
+        try work(runtime, root: root, file: "c.txt", text: "c\n")
+        #expect(vault.verdict(root: root, task: "add-b") == nil)
+        #expect(vault.audits(root: root, task: "add-b")?.findings.count == 3)
+        _ = call(lead, "audit", ["task": "add-b"])
+        #expect(vault.audits(root: root, task: "add-b")?.findings.count == 3)
+        #expect(!call(lead, "cleanup", ["task": "add-b", "force": true]).isError)
+        #expect(vault.audits(root: root, task: "add-b") == nil)
+    }
+}

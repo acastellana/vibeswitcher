@@ -79,6 +79,36 @@ struct TeamRowsTests {
         }
     }
 
+    @Test func aTaskWhoseRoundsKeepLeavingImportantFindingsSaysReconsider() throws {
+        var task = Self.task("fix", .failed, since: 22 * 60)
+        task.setback = LeadSetback(stage: .review, reason: "Important findings open: F1 a.swift:1")
+        var audits = LeadAuditLedger()
+        let still = LeadFinding.Report(id: "F1", severity: .important, file: "a.swift", line: 1, evidence: "still fails")
+        for (index, commit) in ["c1", "c2"].enumerated() { try audits.record([still], commit: commit, passes: true, changed: index == 0 ? nil : ["a.swift"]) }
+        task.audits = audits
+        #expect(row(task, ["w-fix": Self.idle]).state == "Failed")
+        try audits.record([still], commit: "c3", passes: true, changed: ["a.swift"])
+        task.audits = audits
+        let reconsider = row(task, ["w-fix": Self.idle])
+        #expect(reconsider.state == "Reconsider" && reconsider.mark == .failed && reconsider.group == .needsYou)
+        #expect(reconsider.line(summary: "ignored")?.hasPrefix("Reconsider the approach: 3 audits in a row left Important findings open") == true)
+    }
+
+    @Test func theTaskViewShowsFindingsBySeverity() throws {
+        var audits = LeadAuditLedger()
+        try audits.record([.init(severity: .nit, file: "b.swift", line: 2, evidence: "typo"),
+                           .init(severity: .important, file: "a.swift", line: 1, evidence: "test fails"),
+                           .init(severity: .important, file: "a.swift", line: 9, evidence: "leak")], commit: "c1", passes: true)
+        try audits.dismiss("F3", reason: "not ours", followUp: "fix-leak")
+        let groups = audits.bySeverity
+        #expect(groups.map(\.severity) == [.important, .nit])
+        #expect(groups[0].findings.map(\.id) == ["F2", "F3"])
+        #expect(TeamRowDetails.groupTitle(.important, groups[0].findings) == "Important · 1 open of 2")
+        #expect(TeamRowDetails.groupTitle(.nit, groups[1].findings) == "Nit · 1 open")
+        #expect(TeamRowDetails.findingText(groups[0].findings[0]) == "F2 a.swift:1 — test fails")
+        #expect(TeamRowDetails.findingText(groups[0].findings[1]) == "F3 a.swift:9 — leak (dismissed by the lead: not ours → task fix-leak)")
+    }
+
     @Test func aSessionWaitingOnYouNeedsYouWithoutAClock() {
         let asking = Self.member(needsYou: true, working: false, activity: nil, detail: "Which database?")
         let row = row(Self.task("fix", .running), ["w-fix": asking])

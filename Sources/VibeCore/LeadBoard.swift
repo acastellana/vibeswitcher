@@ -84,6 +84,203 @@ public struct LeadMergeRecord: Codable, Equatable, Sendable {
     }
 }
 
+/// Something a verifier found in a task's branch, kept until it's resolved: fixed (a later audit saw it fixed) or
+/// dismissed with a reason (by a verifier, or by the lead, who may turn it into a task of its own).
+public struct LeadFinding: Codable, Equatable, Sendable, Identifiable {
+    public enum Severity: String, Codable, Sendable, CaseIterable {
+        /// Must be fixed (or dismissed with a reason) before the task merges.
+        case important = "Important"
+        /// Worth fixing; never holds a merge back.
+        case nit = "Nit"
+        /// Already wrong before this branch: never fails the task; the lead may make it a task of its own.
+        case preExisting = "Pre-existing"
+    }
+    public enum Status: String, Codable, Sendable, CaseIterable { case open, fixed, dismissed }
+
+    /// What a verifier's submit_audit says about one finding: a new one (no id, or one not seen before), or one
+    /// raised in an earlier round (its id) marked fixed, dismissed or still open.
+    public struct Report: Codable, Equatable, Sendable {
+        public var id: String?
+        public var severity: Severity
+        public var file: String
+        public var line: Int
+        public var evidence: String
+        public var status: Status
+        public var reason: String?
+
+        public init(id: String? = nil, severity: Severity, file: String, line: Int, evidence: String, status: Status = .open, reason: String? = nil) {
+            self.id = id
+            self.severity = severity
+            self.file = file
+            self.line = line
+            self.evidence = evidence
+            self.status = status
+            self.reason = reason
+        }
+    }
+
+    public var id: String
+    public var severity: Severity
+    public var file: String
+    public var line: Int
+    /// What shows it: the code at file:line, and what was run and what it gave.
+    public var evidence: String
+    public var status: Status
+    /// Why it was dismissed (or how it was fixed, when the verifier said).
+    public var reason: String?
+    /// The audit round that raised it, and the one that closed it (fixed or dismissed).
+    public var raised: Int
+    public var closed: Int?
+    /// Who closed it: the verifier, or the lead.
+    public var closedBy: String?
+    /// The task the lead made of it (add_task from_finding).
+    public var followUp: String?
+
+    public var isOpen: Bool { status == .open }
+    /// An open Important finding: merge refuses while there's one.
+    public var blocks: Bool { isOpen && severity == .important }
+    public var place: String { "\(file):\(line)" }
+    /// "F2 (Important, Sources/A.swift:12)".
+    public var label: String { "\(id) (\(severity.rawValue), \(place))" }
+    /// "F2 Sources/A.swift:12 — evidence [fixed: reason]", for the lead's text.
+    public var line1: String {
+        var text = "\(id) \(place) — \(evidence)"
+        if status != .open { text += " [\(status.rawValue)\(closedBy == "lead" ? " by the lead" : "")\(reason.map { ": \($0)" } ?? "")]" }
+        if let followUp { text += " → task \(followUp)" }
+        return text
+    }
+
+    /// The same finding, however its id is written ("f2", " F2 ").
+    func named(_ name: String) -> Bool { id.lowercased() == name.trimmingCharacters(in: .whitespaces).lowercased() }
+}
+
+/// A task's audits: the findings raised across its rounds, each with its state, and how the rounds went. The vault
+/// keeps it with the task's verdict (the board shows a copy). A verifier changes it only through `record`, the lead
+/// only through `dismiss` and `replan`; a finding once closed stays closed.
+public struct LeadAuditLedger: Codable, Equatable, Sendable {
+    public var findings: [LeadFinding] = []
+    /// Audits recorded.
+    public var rounds = 0
+    /// Audits in a row that left an Important finding open or didn't pass; a clean round, or the lead re-planning
+    /// the task, starts it over.
+    public var failedRounds = 0
+    /// The commit the last audit covered: a re-audit checks the diff since it.
+    public var commit: String?
+    /// The last audit's verdict passed.
+    public var passed: Bool?
+
+    /// Failed rounds after which the task should be re-planned, not sent back for another.
+    public static let roundCap = 3
+
+    public init() {}
+
+    public var open: [LeadFinding] { findings.filter(\.isOpen) }
+    /// Open Important findings: merge refuses while there are any.
+    public var blocking: [LeadFinding] { findings.filter(\.blocks) }
+    /// The open findings a re-audit must say fixed or still open about (an open Pre-existing one isn't the branch's).
+    public var toRecheck: [LeadFinding] { open.filter { $0.severity != .preExisting } }
+    /// A re-audit: an earlier one is recorded, so new findings come from the diff since its commit only.
+    public var isReaudit: Bool { rounds > 0 && commit != nil }
+    /// `roundCap` audits in a row left Important findings open (or failed) and the last one still does.
+    public var reconsider: Bool { failedRounds >= Self.roundCap && (!blocking.isEmpty || passed == false) }
+
+    public func finding(_ id: String) -> LeadFinding? { findings.first { $0.named(id) } }
+
+    public struct Refusal: Error, CustomStringConvertible, Equatable {
+        public var description: String
+        public init(_ description: String) { self.description = description }
+    }
+
+    /// One audit's findings, on `commit`, with its verdict: each one an earlier round raised is marked as reported
+    /// (open, fixed or dismissed with a reason); each new one is added open. `changed`: the files changed since the
+    /// last audited commit, when known; a re-audit's new findings must be in them. Refused whole, leaving the ledger
+    /// as it was, when it raises again a finding already closed (by id, or at the same file:line), adds one at the
+    /// place of one still open, skips an open one a re-audit must recheck, or brings a new one from outside the diff.
+    public mutating func record(_ reports: [LeadFinding.Report], commit: String, passes: Bool, changed: Set<String>? = nil) throws {
+        var next = self
+        let round = rounds + 1
+        var seen: Set<String> = []
+        for report in reports {
+            if let id = report.id?.trimmingCharacters(in: .whitespaces), !id.isEmpty, let index = next.findings.firstIndex(where: { $0.named(id) }) {
+                let finding = next.findings[index]
+                guard seen.insert(finding.id).inserted else { throw Refusal("\(finding.id) is in findings twice; say it once.") }
+                guard finding.isOpen else {
+                    // Saying again how it was closed is no news; reopening it is refused.
+                    if report.status == finding.status { continue }
+                    throw Refusal("\(finding.label) was closed in round \(finding.closed ?? 0) (\(finding.status.rawValue)\(finding.reason.map { ": \($0)" } ?? "")); a closed finding isn't raised again.")
+                }
+                switch report.status {
+                case .open: break
+                case .fixed, .dismissed:
+                    next.findings[index].status = report.status
+                    next.findings[index].reason = report.reason
+                    next.findings[index].closed = round
+                    next.findings[index].closedBy = "verifier"
+                }
+            } else {
+                guard report.status == .open else {
+                    throw Refusal("\(report.id ?? "A finding at \(report.file):\(report.line)") isn't one raised before (\(next.findings.isEmpty ? "none was" : next.findings.map(\.id).joined(separator: ", "))), so it can't be \(report.status.rawValue); a new finding is open.")
+                }
+                if let there = next.findings.first(where: { $0.file == report.file && $0.line == report.line }) {
+                    throw there.isOpen
+                        ? Refusal("\(there.label) is already open at \(there.place); mark that one (its id) instead of raising a new one.")
+                        : Refusal("\(there.label) at \(there.place) was closed in round \(there.closed ?? 0) (\(there.status.rawValue)); a closed finding isn't raised again.")
+                }
+                if next.isReaudit, let changed, !changed.contains(report.file) {
+                    throw Refusal("\(report.file) isn't changed since the audited commit \(next.commit.map { String($0.prefix(8)) } ?? ""): a re-audit raises new findings from the new diff only (it changes \(changed.isEmpty ? "nothing" : changed.sorted().prefix(12).joined(separator: ", "))).")
+                }
+                var id = report.id?.trimmingCharacters(in: .whitespaces) ?? ""
+                if id.isEmpty || next.finding(id) != nil {
+                    var number = next.findings.count + 1
+                    while next.finding("F\(number)") != nil { number += 1 }
+                    id = "F\(number)"
+                }
+                seen.insert(id)
+                next.findings.append(LeadFinding(id: id, severity: report.severity, file: report.file, line: report.line, evidence: report.evidence,
+                                                 status: .open, reason: nil, raised: round))
+            }
+        }
+        if isReaudit {
+            let skipped = toRecheck.filter { !seen.contains($0.id) }
+            guard skipped.isEmpty else {
+                throw Refusal("Say for each open finding whether it's fixed or still open: \(skipped.map(\.label).joined(separator: ", ")) \(skipped.count == 1 ? "isn't" : "aren't") in findings.")
+            }
+        }
+        next.rounds = round
+        next.commit = commit
+        next.passed = passes
+        next.failedRounds = passes && next.blocking.isEmpty ? 0 : failedRounds + 1
+        self = next
+    }
+
+    /// The lead closes an open finding with a reason (a dismissal, or the task it became).
+    public mutating func dismiss(_ id: String, reason: String, followUp: String? = nil) throws {
+        guard let index = findings.firstIndex(where: { $0.named(id) }) else {
+            throw Refusal("No finding \(id)\(findings.isEmpty ? "" : " (there are \(findings.map(\.id).joined(separator: ", ")))").")
+        }
+        guard findings[index].isOpen else {
+            throw Refusal("\(findings[index].label) is \(findings[index].status.rawValue) already.")
+        }
+        guard !reason.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { throw Refusal("Say why it's dismissed (reason).") }
+        findings[index].status = .dismissed
+        findings[index].reason = reason
+        findings[index].closed = rounds
+        findings[index].closedBy = "lead"
+        findings[index].followUp = followUp
+    }
+
+    /// The lead re-planned the task: its rounds count from here.
+    public mutating func replan() { failedRounds = 0 }
+
+    /// The findings by severity (Important, Nit, Pre-existing), each group's open ones first; empty groups left out.
+    public var bySeverity: [(severity: LeadFinding.Severity, findings: [LeadFinding])] {
+        LeadFinding.Severity.allCases.compactMap { severity in
+            let group = findings.filter { $0.severity == severity }
+            return group.isEmpty ? nil : (severity, group.filter(\.isOpen) + group.filter { !$0.isOpen })
+        }
+    }
+}
+
 public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public enum Status: String, Codable, Sendable, CaseIterable {
         /// On the board, no worker yet.
@@ -150,6 +347,8 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var stall: LeadStall?
     /// Why the lead keeps it unmerged (status kept).
     public var keptBecause: String?
+    /// Its audits' findings and rounds, as the vault last had them (for showing; merge goes by the vault's).
+    public var audits: LeadAuditLedger?
 
     public static let keptCheckpoints = 40
 

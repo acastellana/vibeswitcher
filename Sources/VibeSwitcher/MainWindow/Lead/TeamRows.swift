@@ -259,8 +259,14 @@ enum TeamRows {
                     ?? (task.verifier == nil ? "Waiting for the audit" : nil)
             }
         case .failed:
-            red(.failed, "Failed", task.setback?.reason ?? task.evidence?.summary ?? "It failed; the lead decides what next.",
-                since: task.since.map(Date.init(timeIntervalSince1970:)))
+            if let audits = task.audits, audits.reconsider {
+                // Rounds of fixes aren't landing: the lead re-plans it or asks you, rather than another round.
+                red(.failed, "Reconsider", "Reconsider the approach: \(audits.failedRounds) audits in a row left Important findings open; the lead re-plans it or asks you.",
+                    since: task.since.map(Date.init(timeIntervalSince1970:)))
+            } else {
+                red(.failed, "Failed", task.setback?.reason ?? task.evidence?.summary ?? "It failed; the lead decides what next.",
+                    since: task.since.map(Date.init(timeIntervalSince1970:)))
+            }
         case .blocked:
             red(.blocked, "Blocked", task.blocker ?? "Waiting on something.", since: task.since.map(Date.init(timeIntervalSince1970:)))
         case .kept:

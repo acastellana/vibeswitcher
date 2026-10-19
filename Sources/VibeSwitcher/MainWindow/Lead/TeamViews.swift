@@ -113,6 +113,27 @@ struct TeamRowDetails: View {
                     Text(evidence.summary).font(.system(size: 11.5)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 }
             }
+            if let audits = task.audits, !audits.findings.isEmpty {
+                part("Findings (round \(audits.rounds))") {
+                    ForEach(audits.bySeverity, id: \.severity) { group in
+                        Text(Self.groupTitle(group.severity, group.findings))
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(group.severity == .important && group.findings.contains(where: \.blocks) ? Color.red : Color.secondary)
+                            .padding(.top, 2)
+                        ForEach(group.findings) { finding in
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Image(systemName: finding.isOpen ? "circle" : finding.status == .fixed ? "checkmark.circle.fill" : "minus.circle")
+                                    .font(.system(size: 9)).foregroundStyle(finding.isOpen ? Color.secondary : finding.status == .fixed ? Color.green : Color.secondary)
+                                    .accessibilityHidden(true)
+                                Text(Self.findingText(finding)).font(.system(size: 11.5)).textSelection(.enabled)
+                                    .foregroundStyle(finding.isOpen ? Color.primary : Color.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                            .accessibilityElement(children: .combine)
+                        }
+                    }
+                }
+            }
             if let merged = task.merged {
                 Text("Merged \(merged.commit.prefix(8)) at \(LeadBoard.clock(merged.at))" + (merged.tested ? ", tests passed" : ", no tests ran"))
                     .font(.system(size: 11)).foregroundStyle(.secondary)
@@ -133,6 +154,25 @@ struct TeamRowDetails: View {
         if task.status == .failed { return task.evidence?.summary }
         if task.status == .blocked { return task.blocker }
         return nil
+    }
+
+    /// "Important · 1 open of 2".
+    static func groupTitle(_ severity: LeadFinding.Severity, _ findings: [LeadFinding]) -> String {
+        let open = findings.filter(\.isOpen).count
+        return "\(severity.rawValue) · " + (open == findings.count ? "\(open) open" : "\(open) open of \(findings.count)")
+    }
+
+    /// "F1 b.txt:1 — evidence (fixed in round 2)", "… (dismissed by the lead: reason → task fix-a)".
+    static func findingText(_ finding: LeadFinding) -> String {
+        var text = "\(finding.id) \(finding.place) — \(finding.evidence)"
+        switch finding.status {
+        case .open: break
+        case .fixed: text += " (fixed\(finding.closed.map { " in round \($0)" } ?? ""))"
+        case .dismissed:
+            text += " (dismissed\(finding.closedBy == "lead" ? " by the lead" : "")\(finding.reason.map { ": \($0)" } ?? "")"
+                + "\(finding.followUp.map { " → task \($0)" } ?? ""))"
+        }
+        return text
     }
 
     private func link(_ title: String, action: @escaping () -> Void) -> some View {

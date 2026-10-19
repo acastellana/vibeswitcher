@@ -73,7 +73,15 @@ tell it what you want; it plans the work into tasks, each with a contract (goal,
 and starts up to three **workers**, each a Claude session in its own git worktree (`.vibeswitcher/worktrees/<task>`
 on `agent/<task>`). When a worker reports, the lead starts a read-only **verifier** that checks the work against
 the contract with real commands (and tries to break it); only work the verifier passes is rebased on the lead's branch,
-tested (the workflow's `test_command`) and fast-forwarded into it, never with a merge commit or a force. The lead's
+tested (the workflow's `test_command`) and fast-forwarded into it, never with a merge commit or a force. The
+verifier's verdict comes with **findings**, each tagged Important, Nit or Pre-existing at a file:line with its
+evidence (what it ran and saw), kept in the session host's vault with the verdict and shown, by severity, in `status`,
+`board(task)` and the Team tab's task view. `merge` refuses while an Important finding is open, naming it; a Nit never
+blocks and a Pre-existing one never fails the task. The lead resolves each one: the worker fixes it and a re-audit,
+handed the open findings and the diff since the audited commit, marks it fixed (it checks that diff only, and never
+raises a closed finding again); or `dismiss_finding` closes it with a reason; or `add_task(from_finding: task:F2)`
+makes it a task of its own. After three audits in a row that left Important findings open, the task's status says
+"reconsider the approach" and the lead re-plans it or asks you, instead of another round. The lead's
 branch is the one checked out when it first starts in the repository (`base_branch:` in `workflow.md` changes it);
 workers start from it. Then the lead
 removes the worktree and branch, and tells you what landed in a few lines. Before merging it checks that nothing

@@ -399,7 +399,7 @@ public struct LeadWorkflow: Equatable, Sendable {
 
 /// What each role is told (appended to Claude Code's own system prompt).
 public enum LeadPrompts {
-    public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, record_decision, merge, cleanup, configure"
+    public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, dismiss_finding, record_decision, merge, cleanup, configure"
 
     /// What workers and verifiers are told about putting load on the Mac: a verifier once ran four times its
     /// contract's load on a Mac other sessions and the user were using, and a turn that ended left its burners running.
@@ -470,7 +470,16 @@ public enum LeadPrompts {
         kept, reason: what holds it) keeps its branch and worktree, and merge refuses it until you set it back. \
         Otherwise merge(task) as the merge policy below says, then post_update with what changed, how it was checked \
         (screenshots when there's UI), the risk and how to revert it, then cleanup(task). If the audit didn't pass: \
-        tell the worker exactly what failed (message) or start a fresh worker with a sharper contract. After 3 failed attempts on one task, re-plan it or ask the user.
+        tell the worker exactly what failed (message) or start a fresh worker with a sharper contract.
+        Audits come with findings, each Important, Nit or Pre-existing at a file:line with its evidence, named \
+        <task>:<id> (status and board(task) list them by severity). merge refuses while an Important one is open; \
+        Nits never block, and a Pre-existing one never fails the task. Resolve each Important one: message the worker \
+        the open ids to fix, then audit again (a re-audit checks those and the diff since, and a closed finding isn't \
+        raised again); or dismiss_finding with a reason when it isn't a real problem; or add_task(from_finding: \
+        <task>:<id>) to make it a task of its own (good for Pre-existing ones and worthwhile Nits). After \
+        \(LeadAuditLedger.roundCap) audits in a row that left Important findings open, the task's status line says \
+        "reconsider the approach": don't send the worker back for another round; re-plan the task (update_task with a \
+        sharper contract or another approach, then status planned) or ask the user.
         7. Keep the board, the progress log and decisions (record_decision) current. They are your memory: when your \
         context fills up, a new lead continues from them.
         8. When the same mistake happens twice, add a task that turns it into a check (a test, a lint rule), not a note.
@@ -574,22 +583,80 @@ public enum LeadPrompts {
         """
     }
 
-    public static func verifier(task: LeadTask, root: String, workflow: LeadWorkflow) -> String {
+    /// What a re-audit's verifier is handed: what the earlier rounds left open, what they closed, and the diff since
+    /// the commit the last one covered.
+    public struct Reaudit: Equatable, Sendable {
+        /// The diff is given whole up to this many characters; past it, its stat and the command.
+        public static let diffLimit = 40_000
+        public var round: Int
+        /// The commit the last audit covered, and the one this one checks.
+        public var since: String
+        public var head: String
+        /// The open findings to say fixed or still open about.
+        public var open: [LeadFinding]
+        /// The closed ones (and open Pre-existing ones): never raised again.
+        public var known: [LeadFinding]
+        public var stat: String
+        public var diff: String?
+
+        public init(round: Int, since: String, head: String, open: [LeadFinding], known: [LeadFinding], stat: String, diff: String?) {
+            self.round = round
+            self.since = since
+            self.head = head
+            self.open = open
+            self.known = known
+            self.stat = stat
+            self.diff = diff
+        }
+    }
+
+    public static func verifier(task: LeadTask, root: String, workflow: LeadWorkflow, reaudit: Reaudit? = nil) -> String {
         """
         You are the verifier for a task of the project lead of \(root). You are read-only: don't edit, fix, commit or \
         stage anything. Check the branch agent/\(task.slug) in this worktree against its contract, independently of \
         what the worker said.
 
+        \(reaudit.map(recheck) ?? """
         Check: run every acceptance check\(workflow.testCommand.map { " and `\($0)`" } ?? ""); read the whole change \
         (`git diff \(workflow.base)...HEAD`, `git log \(workflow.base)..HEAD`); look for edits outside the boundaries, weakened or deleted \
         tests, hard-coded results, leftovers and anything that only looks done.
+        """)
         \(loadTests) Reproduce at the contract's load and stop there.
         Then call submit_audit with: completion complete / incomplete / blocked; integrity clean, suspect (you're not \
-        sure) or violation (edits outside the boundaries, tests weakened, results faked, files you changed); and a \
-        summary with the evidence (commands run and their results).
+        sure) or violation (edits outside the boundaries, tests weakened, results faked, files you changed); a \
+        summary with the evidence (commands run and their results); and findings, one for each problem you found, \
+        minor ones included: {severity, file, line, evidence, status}. severity: Important (must be fixed before \
+        it merges: an acceptance check that fails, a bug, a weakened test, an edit outside the boundaries), Nit (worth \
+        fixing, never holds the merge back) or Pre-existing (already wrong before this branch; never fails the task). \
+        The evidence rule: each finding names the file and line where it is (path from the repository's root) and \
+        what shows it: the command you ran and what it gave, or what the code at that line does. No finding without \
+        it; a hunch is not a finding. Nothing found: leave findings out. Whatever stays open as Important holds the \
+        merge back, so don't pass a branch "with minor notes": make each note a finding of its own.
 
         \(WorkerBrief.render(task))
         """
+    }
+
+    /// A re-audit's instructions: the open findings, the closed ones, and the diff since the last audited commit.
+    static func recheck(_ reaudit: Reaudit) -> String {
+        var text = """
+        This is a re-audit (round \(reaudit.round)): an earlier audit checked the branch at \(reaudit.since.prefix(8)), and \
+        the worker changed it since. Check the open findings below and the diff since then (`git diff \(reaudit.since) \
+        \(reaudit.head)`), and run every acceptance check again; don't re-review what the earlier audit covered.
+        In submit_audit's findings, give each open finding below by its id with status fixed (you checked it is), \
+        open (it still is: say what you saw) or dismissed (with a reason). New findings come from the new diff only, \
+        in files it changes. A closed finding below is never raised again, under its id or another.
+        """
+        if !reaudit.open.isEmpty {
+            text += "\n\nOpen findings:\n" + reaudit.open.map { "- \($0.id) [\($0.severity.rawValue)] \($0.place): \($0.evidence)" }.joined(separator: "\n")
+        }
+        if !reaudit.known.isEmpty {
+            text += "\n\nClosed or pre-existing (not to raise again):\n"
+                + reaudit.known.map { "- \($0.id) [\($0.severity.rawValue), \($0.status.rawValue)] \($0.place): \($0.evidence)" }.joined(separator: "\n")
+        }
+        text += "\n\nThe diff since \(reaudit.since.prefix(8)):\n" + (reaudit.stat.isEmpty ? "(nothing changed)" : reaudit.stat)
+        if let diff = reaudit.diff, !diff.isEmpty { text += "\n\n```diff\n\(diff)\n```" }
+        return text
     }
 }
 

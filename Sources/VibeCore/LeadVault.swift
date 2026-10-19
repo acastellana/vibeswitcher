@@ -68,9 +68,17 @@ public struct LeadVault: Sendable {
         /// The caller's own role in the repository.
         case whoami(root: String)
         case current(role: LeadLaunch.Role, root: String, task: String?)
-        /// The verdict of the verifier the caller's session is, on the commit it was started on.
-        case submitVerdict(root: String, completion: LeadEvidence.Completion, integrity: LeadEvidence.Integrity, summary: String)
+        /// The verdict of the verifier the caller's session is, on the commit it was started on, with its findings
+        /// (applied to the task's `LeadAuditLedger`: refused whole when they break its rules).
+        case submitVerdict(root: String, completion: LeadEvidence.Completion, integrity: LeadEvidence.Integrity, summary: String,
+                           findings: [LeadFinding.Report]? = nil)
         case verdict(root: String, task: String)
+        /// The task's findings and audit rounds.
+        case audits(root: String, task: String)
+        /// The lead closes one of a task's open findings with a reason (and the task it became, if one did).
+        case dismissFinding(root: String, task: String, id: String, reason: String, followUp: String?)
+        /// The lead re-planned the task: its failed audit rounds count from zero.
+        case replan(root: String, task: String)
         /// The lead, or the task's worker (a new report means new work).
         case clearVerdict(root: String, task: String)
         case head(root: String, branch: String)
@@ -103,6 +111,7 @@ public struct LeadVault: Sendable {
         case grant(String)
         case member(Member?)
         case verdict(Verdict?)
+        case audits(LeadAuditLedger?)
         case head(String?)
         case seal(String)
         case verified([Bool])
@@ -212,9 +221,9 @@ public struct LeadVault: Sendable {
 
     @discardableResult
     public func submitVerdict(root: String, completion: LeadEvidence.Completion, integrity: LeadEvidence.Integrity,
-                              summary: String) throws -> Verdict {
+                              summary: String, findings: [LeadFinding.Report]? = nil) throws -> Verdict {
         guard case .verdict(let verdict?) = try call(.submitVerdict(root: root, completion: completion, integrity: integrity,
-                                                                   summary: summary)) else { throw Self.unexpected }
+                                                                   summary: summary, findings: findings)) else { throw Self.unexpected }
         return verdict
     }
 
@@ -225,6 +234,24 @@ public struct LeadVault: Sendable {
 
     public func clearVerdict(root: String, task: String) throws {
         _ = try call(.clearVerdict(root: root, task: task))
+    }
+
+    /// The task's findings and audit rounds (nil: none recorded, or the vault can't be asked).
+    public func audits(root: String, task: String) -> LeadAuditLedger? {
+        guard case .audits(let ledger)? = try? call(.audits(root: root, task: task)) else { return nil }
+        return ledger
+    }
+
+    @discardableResult
+    public func dismissFinding(root: String, task: String, id: String, reason: String, followUp: String? = nil) throws -> LeadAuditLedger? {
+        guard case .audits(let ledger) = try call(.dismissFinding(root: root, task: task, id: id, reason: reason, followUp: followUp)) else { throw Self.unexpected }
+        return ledger
+    }
+
+    @discardableResult
+    public func replan(root: String, task: String) throws -> LeadAuditLedger? {
+        guard case .audits(let ledger) = try call(.replan(root: root, task: task)) else { throw Self.unexpected }
+        return ledger
     }
 
     /// Why `task` has no verdict here when that isn't the whole story: the vault began empty after an earlier
@@ -317,6 +344,9 @@ extension LeadVault {
             var root: String
             var members: [Member] = []
             var verdicts: [String: Verdict] = [:]
+            /// Each task's findings and audit rounds, through every verifier started on it (optional: older vaults
+            /// have none).
+            var audits: [String: LeadAuditLedger]?
             /// Each branch's head as the lead last left it (after its own merges, or when it started).
             var heads: [String: String] = [:]
             /// The git commands sessions ran here that can move a branch, newest last (optional: older vaults have none).
@@ -539,6 +569,7 @@ extension LeadVault {
                     team.remove { $0.task == task }
                     team.verdicts[task] = nil
                     // A new task of the same name starts with none.
+                    team.audits?[task] = nil
                     team.approvals?[task] = nil
                 }
                 return .ok
@@ -547,7 +578,7 @@ extension LeadVault {
                 return .member(team(root)?.members.first { $0.session == session })
             case .current(let role, let root, let task):
                 return .member(team(root)?.members.first { $0.role == role && $0.task == task })
-            case .submitVerdict(let root, let completion, let integrity, let summary):
+            case .submitVerdict(let root, let completion, let integrity, let summary, let findings):
                 guard case .session(let session) = caller,
                       let member = team(root)?.members.first(where: { $0.session == session }), member.role == .verifier,
                       let task = member.task, let commit = member.auditing else {
@@ -555,10 +586,30 @@ extension LeadVault {
                 }
                 let verdict = Verdict(task: task, completion: completion, integrity: integrity, summary: summary, commit: commit,
                                       verifier: member.id, session: session, at: Date().timeIntervalSince1970)
-                change(root, &changed) { $0.verdicts[task] = verdict }
+                // The findings go with the verdict or neither does.
+                var ledger = team(root)?.audits?[task] ?? LeadAuditLedger()
+                do { try ledger.record(findings ?? [], commit: commit, passes: verdict.passes) } catch { return .refused("\(error)") }
+                change(root, &changed) { team in
+                    team.verdicts[task] = verdict
+                    team.audits = (team.audits ?? [:]).merging([task: ledger]) { $1 }
+                }
                 return .verdict(verdict)
             case .verdict(let root, let task):
                 return .verdict(team(root)?.verdicts[task])
+            case .audits(let root, let task):
+                return .audits(team(root)?.audits?[task])
+            case .dismissFinding(let root, let task, let id, let reason, let followUp):
+                guard isLead(caller, root) else { return .refused("Only the lead dismisses a finding.") }
+                guard var ledger = team(root)?.audits?[task] else { return .refused("\(task) has no findings.") }
+                do { try ledger.dismiss(id, reason: reason, followUp: followUp) } catch { return .refused("\(error)") }
+                change(root, &changed) { $0.audits?[task] = ledger }
+                return .audits(ledger)
+            case .replan(let root, let task):
+                guard isLead(caller, root) else { return .refused("Only the lead re-plans a task.") }
+                guard var ledger = team(root)?.audits?[task] else { return .audits(nil) }
+                ledger.replan()
+                change(root, &changed) { $0.audits?[task] = ledger }
+                return .audits(ledger)
             case .clearVerdict(let root, let task):
                 let worker: Bool = {
                     guard case .session(let session) = caller else { return false }
