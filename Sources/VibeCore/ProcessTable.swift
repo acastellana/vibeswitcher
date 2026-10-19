@@ -11,14 +11,21 @@ public struct ProcInfo: Sendable {
     public let startTime: Date
     /// Set for terminal-attached `claude` / `codex` processes.
     public let agent: Agent?
+    /// Whether it's an agent couldn't be told when it was read (`agent` is nil): one of the user's terminal processes
+    /// whose argv couldn't be read, mid-exec on a busy Mac. A session whose process this is is unknown at that read, not
+    /// ended and not another agent. With `tty` nil, its terminal couldn't be read either (a process with no terminal is
+    /// never unknown: it can't be a session).
+    public let identityUnknown: Bool
 
-    public init(pid: Int32, ppid: Int32, tty: String?, comm: String, startTime: Date, agent: Agent?) {
+    public init(pid: Int32, ppid: Int32, tty: String?, comm: String, startTime: Date, agent: Agent?,
+                identityUnknown: Bool = false) {
         self.pid = pid
         self.ppid = ppid
         self.tty = tty
         self.comm = comm
         self.startTime = startTime
         self.agent = agent
+        self.identityUnknown = identityUnknown
     }
 }
 
@@ -50,8 +57,9 @@ public enum ProcessTable {
     /// (load 100+), where reading the whole table at once (sysctl KERN_PROC_ALL) stalled for 10 to 80 s.
     public static let snapshotLimit: TimeInterval = 2
 
-    /// Every process, read whole within `limit`; nil when it couldn't be, not "no processes" and never part of the
-    /// table: a process missing from a snapshot has ended (callers act on that, as a session's agent that quit).
+    /// Every process, read whole within `limit`; nil when it couldn't be (past `limit`, or the pid list unread), not
+    /// "no processes" and never part of the table: a process missing from a snapshot has ended (callers act on that,
+    /// as a session's agent that quit). One that couldn't be told (mid-exec) is in it, `identityUnknown`.
     ///
     /// One process at a time (`proc_listallpids`, then each one's record), not KERN_PROC_ALL. A caller waits `limit`
     /// at most, whatever the kernel does: the read runs on another thread and is dropped when it's late; while a late
@@ -62,20 +70,33 @@ public enum ProcessTable {
 
     static let reads = BoundedReads()
 
-    /// The whole table, or nil: past `deadline`, or a process there that couldn't be read.
+    /// How long a table read waits before telling its undecided processes once more (see `record`).
+    static let undecidedPause: TimeInterval = 0.02
 
-    /// The whole table, or nil: past `deadline`, or a process there that couldn't be read.
-    static func readTable(until deadline: Date, arguments: ArgumentCache = argumentCache) -> [Int32: ProcInfo]? {
-        guard let pids = allPids() else { return nil }
+    /// The whole table, or nil: past `deadline`, or the pid list couldn't be read. A process that couldn't be read, or
+    /// told, is in it as such (`identityUnknown`), never left out (it would read as ended) or the table's loss.
+    static func readTable(until deadline: Date, arguments: ArgumentCache = argumentCache, pids: () -> [pid_t]? = allPids,
+                          pause: TimeInterval = undecidedPause) -> [Int32: ProcInfo]? {
+        guard let pids = pids() else { return nil }
         var table: [Int32: ProcInfo] = [:]
         table.reserveCapacity(pids.count)
+        var undecided: [ProcInfo] = []
         for pid in pids {
             guard Date() < deadline else { return nil }
             switch record(pid, arguments: arguments) {
             case .gone: continue
-            case .unreadable: return nil
             case .found(let info): table[pid] = info
+            case .undecided(let info): undecided.append(info)
             }
+        }
+        // One pause for all of them, not one each: an exec in progress on a loaded Mac takes a moment to finish.
+        if !undecided.isEmpty {
+            guard deadline.timeIntervalSinceNow > pause else { return nil }
+            Thread.sleep(forTimeInterval: pause)
+        }
+        for info in undecided {
+            guard Date() < deadline else { return nil }
+            if let info = retry(info, arguments: arguments) { table[info.pid] = info }
         }
         arguments.prune { table[$0] != nil }
         return table
@@ -92,7 +113,9 @@ public enum ProcessTable {
         return pids.prefix(Int(listed)).filter { $0 > 0 }
     }
 
-    enum Record { case found(ProcInfo), gone, unreadable }
+    /// `undecided`: an exec'd process whose argv couldn't be read yet, to be told again after a pause (`retry`); its
+    /// info is as it would be in the table if it stays so (`identityUnknown`).
+    enum Record { case found(ProcInfo), gone, undecided(ProcInfo) }
 
     /// A process's record: its parent, owner and state from its short record (any user's); name, terminal and start
     /// time from its full one (only the user's own processes give it), or else the kernel's record of that one process
@@ -100,7 +123,9 @@ public enum ProcessTable {
     static func record(_ pid: pid_t, arguments: ArgumentCache) -> Record {
         var short = proc_bsdshortinfo()
         let shortSize = Int32(MemoryLayout<proc_bsdshortinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, shortSize) == shortSize else { return failure() }
+        guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, shortSize) == shortSize else {
+            return errno == ESRCH ? .gone : kernelRecord(pid)
+        }
         if short.pbsi_status == SZOMB || short.pbsi_flags & UInt32(PROC_FLAG_INEXIT) != 0 { return .gone }
         let comm: String
         let device: dev_t
@@ -119,7 +144,9 @@ public enum ProcessTable {
             var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
             var kinfo = kinfo_proc()
             var size = MemoryLayout<kinfo_proc>.stride
-            guard sysctl(&mib, 4, &kinfo, &size, nil, 0) == 0 else { return failure() }
+            guard sysctl(&mib, 4, &kinfo, &size, nil, 0) == 0 else {
+                return errno == ESRCH ? .gone : .found(unread(pid, ppid: Int32(short.pbsi_ppid), comm: String(decoding: text(short.pbsi_comm), as: UTF8.self)))
+            }
             guard size > 0 else { return .gone }
             comm = String(decoding: text(kinfo.kp_proc.p_comm), as: UTF8.self)
             device = kinfo.kp_eproc.e_tdev
@@ -128,34 +155,77 @@ public enum ProcessTable {
         let tty = ttyName(device)
         // Only the user's own processes' argv can be read (another user's isn't an agent of theirs unless named one).
         let readable = short.pbsi_uid == geteuid() ? arguments : nil
-        var identity = Identity.unknown
-        // A process being set up or exiting has no argv to read for a moment: once more, then it's that, or gone.
-        for _ in 0..<2 where identity == .unknown {
-            identity = identify(pid: pid, start: start.tv_sec, comm: comm, tty: tty, arguments: readable)
+        let info = { (agent: Agent?, unknown: Bool) in
+            ProcInfo(pid: pid, ppid: Int32(short.pbsi_ppid), tty: tty, comm: comm, startTime: date(start), agent: agent,
+                     identityUnknown: unknown)
         }
-        let agent: Agent?
-        switch identity {
-        case .agent(let found): agent = found
-        case .none: agent = nil
+        switch identify(pid: pid, start: start.tv_sec, comm: comm, tty: tty, arguments: readable) {
+        case .agent(let found): return .found(info(found, false))
+        case .none: return .found(info(nil, false))
         case .unknown:
-            // One on its way out (its argv gone first) has ended; one still running that can't be told is no table.
-            guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, shortSize) == shortSize else { return failure() }
-            if short.pbsi_status == SZOMB || short.pbsi_flags & UInt32(PROC_FLAG_INEXIT) != 0 { return .gone }
-            // Except a fork that hasn't exec'd (a shell's subshell, for the moment its argv can't be read, EIO): it runs
-            // its parent's program, never a session of its own.
-            guard short.pbsi_flags & UInt32(PROC_FLAG_EXEC) == 0 else { return .unreadable }
-            agent = nil
+            // A process being set up or exiting has no argv to read for a moment.
+            switch settled(pid) {
+            case .gone: return .gone
+            // A fork that hasn't exec'd (a shell's subshell, for the moment its argv can't be read, EIO) runs its
+            // parent's program, never a session of its own.
+            case .forked: return .found(info(nil, false))
+            case .execd, .unread: return .undecided(info(nil, true))
+            }
         }
-        return .found(ProcInfo(pid: pid, ppid: Int32(short.pbsi_ppid), tty: tty, comm: comm, startTime: date(start), agent: agent))
+    }
+
+    /// An undecided process (see `record`) told once more: as it is now, or nil when it has ended. Still unknown, it
+    /// is so in the table.
+    static func retry(_ info: ProcInfo, arguments: ArgumentCache) -> ProcInfo? {
+        let found = { (agent: Agent?, unknown: Bool) in
+            ProcInfo(pid: info.pid, ppid: info.ppid, tty: info.tty, comm: info.comm, startTime: info.startTime, agent: agent,
+                     identityUnknown: unknown)
+        }
+        switch identify(pid: info.pid, start: Int(info.startTime.timeIntervalSince1970), comm: info.comm, tty: info.tty,
+                        arguments: arguments) {
+        case .agent(let agent): return found(agent, false)
+        case .none: return found(nil, false)
+        case .unknown:
+            // One on its way out (its argv gone first) has ended.
+            return settled(info.pid) == .gone ? nil : info
+        }
+    }
+
+    private enum Progress { case gone, forked, execd, unread }
+
+    /// Where a process whose argv couldn't be read is: ended (or ending), a fork that hasn't exec'd, exec'd, or its
+    /// short record couldn't be read either.
+    private static func settled(_ pid: pid_t) -> Progress {
+        var short = proc_bsdshortinfo()
+        let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, size) == size else { return errno == ESRCH ? .gone : .unread }
+        if short.pbsi_status == SZOMB || short.pbsi_flags & UInt32(PROC_FLAG_INEXIT) != 0 { return .gone }
+        return short.pbsi_flags & UInt32(PROC_FLAG_EXEC) == 0 ? .forked : .execd
+    }
+
+    /// A process whose short record couldn't be read, from the kernel's record of it (sysctl KERN_PROC_PID): its owner
+    /// isn't checked, so one on a terminal is unknown; nothing read, it's there and nothing more is known.
+    private static func kernelRecord(_ pid: pid_t) -> Record {
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
+        var kinfo = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        guard sysctl(&mib, 4, &kinfo, &size, nil, 0) == 0 else { return errno == ESRCH ? .gone : .found(unread(pid)) }
+        guard size > 0 else { return .gone }
+        if kinfo.kp_proc.p_stat == SZOMB || kinfo.kp_proc.p_flag & P_WEXIT != 0 { return .gone }
+        let info = makeInfo(kinfo)
+        return .found(ProcInfo(pid: pid, ppid: info.ppid, tty: info.tty, comm: info.comm, startTime: info.startTime, agent: nil,
+                               identityUnknown: info.tty != nil))
+    }
+
+    /// A process there whose terminal and start time couldn't be read.
+    private static func unread(_ pid: pid_t, ppid: Int32 = 0, comm: String = "") -> ProcInfo {
+        ProcInfo(pid: pid, ppid: ppid, tty: nil, comm: comm, startTime: .distantPast, agent: nil, identityUnknown: true)
     }
 
     /// A fixed-size C string field's bytes, up to its NUL or its end.
     private static func text<Field>(_ field: Field) -> [UInt8] {
         withUnsafeBytes(of: field) { bytes in Array(bytes.prefix { $0 != 0 }) }
     }
-
-    /// What a failed read of a process means: it has ended, or it couldn't be read.
-    private static func failure() -> Record { errno == ESRCH ? .gone : .unreadable }
 
     private static func date(_ start: timeval) -> Date {
         Date(timeIntervalSince1970: Double(start.tv_sec) + Double(start.tv_usec) / 1_000_000)

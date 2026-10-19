@@ -102,21 +102,49 @@ struct ProcessTableTests {
         #expect(ProcessTable.readTable(until: Date().addingTimeInterval(5)) != nil)
     }
 
-    /// One of the user's terminal processes whose argv can't be read (so whether it's an agent is unknown) makes the
-    /// whole table unread, not a table without that session.
-    @Test func aProcessThatCantBeToldIsNoTable() throws {
-        let table = try #require(ProcessTable.trySnapshot())
-        let uid = getuid()
-        let undecided = table.values.contains { process in
-            guard process.tty != nil, Agent(comm: process.comm) != .claude else { return false }
-            var info = proc_bsdshortinfo()
-            let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
-            return proc_pidinfo(process.pid, PROC_PIDT_SHORTBSDINFO, 1, &info, size) == size && info.pbsi_uid == uid
-        }
-        let blind = ArgumentCache { _ in [] }
-        let read = ProcessTable.readTable(until: Date().addingTimeInterval(5), arguments: blind)
-        // A Mac with none of the user's processes on a terminal has nothing to be unsure of.
-        #expect(undecided ? read == nil : read != nil)
+    /// The pid list unread is no table, as past the deadline: the two ways a read is nil.
+    @Test func anUnreadPidListIsNoTable() {
+        #expect(ProcessTable.readTable(until: Date().addingTimeInterval(5), pids: { nil }) == nil)
+    }
+
+    /// One of the user's terminal processes whose argv can't be read (so whether it's an agent is unknown) is in the
+    /// table as unknown: no agent, not a session's end, not the table's loss. Told once more after a pause, not more.
+    @Test func aProcessThatCantBeToldIsUnknown() throws {
+        let (terminal, pid) = try sleeperOnATerminal()
+        defer { stop(terminal) }
+        let reads = Reads()
+        let blind = ArgumentCache { $0 == pid ? (reads.next(), []).1 : ProcessTable.readArguments(pid: $0) }
+        let table = try #require(ProcessTable.readTable(until: Date().addingTimeInterval(5), arguments: blind))
+        let sleeper = try #require(table[pid])
+        #expect(sleeper.identityUnknown)
+        #expect(sleeper.agent == nil)
+        #expect(sleeper.comm == "sleep" && sleeper.tty != nil)
+        #expect(reads.made == 2)
+        // No argv readable at all: the user's terminal processes are unknown, the rest (no terminal) known.
+        let none = try #require(ProcessTable.readTable(until: Date().addingTimeInterval(5), arguments: ArgumentCache { _ in [] }))
+        #expect(none[pid]?.identityUnknown == true)
+        #expect(none[1]?.identityUnknown == false)
+        #expect(none[getpid()].map { $0.tty != nil || !$0.identityUnknown } == true)
+    }
+
+    /// One whose argv can be read after a moment is told: an agent, or not one, never unknown.
+    @Test func aProcessToldOnTheRetryIsKnown() throws {
+        let (terminal, pid) = try sleeperOnATerminal()
+        defer { stop(terminal) }
+        let reads = Reads()
+        let late = ArgumentCache { $0 == pid ? (reads.next() == 1 ? [] : ["/Users/me/.local/bin/claude"]) : ProcessTable.readArguments(pid: $0) }
+        let table = try #require(ProcessTable.readTable(until: Date().addingTimeInterval(5), arguments: late))
+        #expect(table[pid]?.agent == .claude)
+        #expect(table[pid]?.identityUnknown == false)
+        #expect(reads.made == 2)
+    }
+
+    /// A read that has its undecided processes to tell again and no time left for the pause is past its deadline: nil.
+    @Test func noTimeForThePauseIsNoTable() throws {
+        let (terminal, pid) = try sleeperOnATerminal()
+        defer { stop(terminal) }
+        let blind = ArgumentCache { $0 == pid ? [] : ProcessTable.readArguments(pid: $0) }
+        #expect(ProcessTable.readTable(until: Date().addingTimeInterval(5), arguments: blind, pause: 60) == nil)
     }
 
     /// Processes are mid-exec all the time on a Mac running builds and tests: a terminal's process whose argv can't be
