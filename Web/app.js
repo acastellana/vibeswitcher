@@ -373,16 +373,61 @@ function renderSessionMeta() {
   const status = el('span', `when ${session.status}`, `${session.statusLabel} ${elapsed(session.since)}`.trim());
   meta.replaceChildren(badge(session), status);
   if (session.activity) meta.append(el('span', 'activity', `⚙ ${session.activity} · ${elapsed(session.activitySince)}`));
-  // What it's asking you, where you'll answer it.
-  const asking = session.status === 'needsInput' && !session.paused;
+  // What it's asking you, where you'll answer it: with its options as buttons once the Mac has read them off the screen.
+  const menu = session.paused ? null : session.menu || null;
+  const asking = (session.status === 'needsInput' && !session.paused) || Boolean(menu);
   $('askCard').hidden = !asking;
-  if (asking) $('askText').textContent = session.detail || 'Waiting for you';
-  renderPauseControls(session);
+  if (asking) $('askText').textContent = (menu && menu.question) || session.detail || 'Waiting for you';
   const canType = state.inputAllowed && session.inTerminal;
+  renderMenu(session, menu, canType);
+  renderPauseControls(session);
   $('composer').hidden = !canType;
   $('inputOff').hidden = state.inputAllowed || !session.inTerminal;
   $('reply').placeholder = `Message ${session.name}…`;
   layoutSession();
+}
+
+// ---------- Menu (a question, permission prompt or picker) ----------
+
+let drawnMenu = '';   // what the option buttons were drawn from: redrawn only when that changes
+
+/// One full-width button per option (and a multi-select's Submit row); a tap answers it. Text only, via textContent.
+function renderMenu(session, menu, canAnswer) {
+  const box = $('askOptions');
+  const key = menu ? JSON.stringify([session.sid, menu.fingerprint, menu.selected, menu.checked || null, canAnswer]) : '';
+  if (key !== drawnMenu) {
+    drawnMenu = key;
+    box.hidden = !menu;
+    const options = menu ? menu.options.map((label, index) => optionButton(menu, index, label,
+                                                                           (menu.descriptions || [])[index], canAnswer)) : [];
+    if (menu && menu.submit) options.push(optionButton(menu, menu.options.length, menu.submit, null, canAnswer));
+    box.replaceChildren(...options);
+  }
+  // A menu is answered with its buttons: typed text would be taken as "let's discuss the question".
+  syncQuickReplies();
+}
+
+function optionButton(menu, index, label, description, canAnswer) {
+  const button = el('button', index === menu.selected ? 'option selected' : 'option');
+  button.type = 'button';
+  const box = menu.checked && index < menu.checked.length ? (menu.checked[index] ? '☑ ' : '☐ ') : '';
+  button.append(el('span', 'optionLabel', `${box}${label}`));
+  if (description) button.append(el('span', 'optionDetail', description));
+  button.disabled = !canAnswer;
+  button.addEventListener('click', () => chooseOption(index, menu.fingerprint, label));
+  return button;
+}
+
+/// Sends the tap with the fingerprint of the menu it was drawn from: the Mac types it only if that menu is still up.
+async function chooseOption(index, fingerprint, label) {
+  for (const button of $('askOptions').children) button.disabled = true;
+  await send({ choose: index, fingerprint }, null, `“${label}” ✓`);
+  drawnMenu = '';   // redrawn from the next state: the answered menu, the next one, or a changed one after a 409
+  refreshList(false);
+}
+
+function syncQuickReplies() {
+  $('quickReplies').hidden = !$('askOptions').hidden || !$('quickEditor').hidden;
 }
 
 function pauseLabel(session) {
@@ -762,7 +807,7 @@ function openQuickEditor() {
 
 function closeQuickEditor() {
   $('quickEditor').hidden = true;
-  $('quickReplies').hidden = false;
+  syncQuickReplies();
 }
 
 function saveQuickReplies(list) {
@@ -782,7 +827,7 @@ function setInputStatus(message, isError = false) {
   if (message && !isError) statusTimer = setTimeout(() => { status.hidden = true; }, 2000);
 }
 
-async function send(payload, button) {
+async function send(payload, button, doneLabel) {
   if (!current) return false;
   if (button) button.disabled = true;
   try {
@@ -791,7 +836,7 @@ async function send(payload, button) {
     await api('/api/input', { method: 'POST', body: JSON.stringify({ tty: current, sid: currentSid, ...payload }),
                               timeout: 30000, timeoutMessage: "The Mac didn't confirm in time. Check the screen before sending again." });
     const label = button && button.classList.contains('quickChip') ? `“${payload.text}” sent ✓` : 'Sent ✓';
-    setInputStatus(payload.text && payload.submit ? label : `${button ? button.textContent : 'Key'} ✓`);
+    setInputStatus(doneLabel || (payload.text && payload.submit ? label : `${button ? button.textContent : 'Key'} ✓`));
     setTimeout(refreshScreen, 250);
     setTimeout(refreshScreen, 1200);
     return true;

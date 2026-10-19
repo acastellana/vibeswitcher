@@ -109,6 +109,15 @@ select.chip-btn { appearance: none; -webkit-appearance: none; }
 
 .ask { flex: none; background: var(--card); border-left: 4px solid var(--st-needsInput); border-radius: 10px; padding: 10px 12px;
   font-size: 15px; max-height: 30dvh; overflow: auto; }
+.ask:has(.options:not([hidden])) { max-height: 55dvh; }
+#askText { white-space: pre-wrap; overflow-wrap: anywhere; }
+.options { display: grid; gap: 6px; margin-top: 8px; }
+.option { display: grid; gap: 2px; width: 100%; min-height: 44px; text-align: left; border: 1px solid var(--accent); border-radius: 10px;
+  padding: 9px 12px; background: transparent; color: var(--text); font: inherit; font-weight: 600; overflow-wrap: anywhere; }
+.option.selected { border-width: 2px; }
+.option:active { background: var(--accent); color: #fff; }
+.option:disabled { opacity: 0.5; }
+.optionDetail { font-size: 13px; font-weight: 400; color: var(--muted); }
 .askLabel { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--st-needsInput); margin-bottom: 3px; }
 
 .composer { flex: none; background: var(--card); border-radius: 14px; padding: 8px;

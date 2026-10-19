@@ -329,3 +329,29 @@ struct PhoneMenuTests {
         #expect(PhoneMenu.answer(choose: -1, fingerprint: fingerprint, screen: prompt(), needsInput: true, sid: sid) == .invalid)
     }
 }
+
+/// PH-1, the phone's side: Web/app.js in node on a fake DOM, with a fake Mac (Tests/Web/phone-menu.test.mjs). It draws
+/// the state's menu as buttons (text only), hides the quick replies, posts a tap's index with the menu's fingerprint,
+/// and shows a 409's message with the menu that's up now.
+struct PhoneWebTests {
+    static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    static let node: String? = {
+        let path = ProcessInfo.processInfo.environment["PATH"]?.split(separator: ":").map(String.init) ?? []
+        return (path + ["/opt/homebrew/bin", "/usr/local/bin"]).map { "\($0)/node" }.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }()
+
+    @Test(.enabled(if: node != nil, "node isn't installed on this Mac: the phone's web test can't run"))
+    func thePhoneDrawsTheMenuAsButtonsAndPostsATap() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: try #require(Self.node))
+        process.arguments = [Self.repo.appendingPathComponent("Tests/Web/phone-menu.test.mjs").path]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0, "\(text)")
+        #expect(text.contains("phone-menu: ok"))
+    }
+}
