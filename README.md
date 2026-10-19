@@ -363,6 +363,13 @@ and notifications when a session needs you or finishes. Optionally reply and pre
      supported. A dev app's login cookies (HttpOnly) stay on the Mac, kept per opened page and sent only back
      to that app; cookies its own scripts read are shared between the previews (browsers scope cookies by
      host, not port).
+6. **Brief me** at the top of the list: the Mac writes the same briefing as its own Brief me button (see
+   [Briefing](#briefing)) and makes its audio, ElevenLabs' voice when a key is saved on the Mac, else the Mac's
+   own voice rendered to an audio file; the phone plays it and shows its text underneath. A spinner shows while
+   it's written (up to a minute or so); **■ Stop** stops it (or stops waiting), **▶ Play** plays it again. A
+   phone's briefing counts as your last one on the Mac too. It works while the Mac is locked: reading a briefing
+   types nothing, so, like the list and the screens, it isn't held back by the lock or by the replies switch.
+   Each source can start 6 every 10 minutes (each runs Claude and may spend ElevenLabs credit).
 
 How it's kept safe:
 
@@ -386,6 +393,8 @@ How it's kept safe:
   token the terminal wrapped onto the next row. Notifications are end-to-end
   encrypted (Web Push, RFC 8291): Google's push service relays them but can't read them. By default the
   phone is notified only while you're away from the Mac. No page content is cached on the phone.
+- **The ElevenLabs key stays on the Mac.** A phone's briefing is made on the Mac: the key is read from the
+  Keychain there and sent to ElevenLabs only; the phone gets the text and the audio, never the key.
 
 ## Install
 
