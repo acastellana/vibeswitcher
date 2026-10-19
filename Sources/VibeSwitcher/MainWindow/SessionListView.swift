@@ -143,7 +143,7 @@ struct EndedHeader: View {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold)).rotationEffect(.degrees(open ? 90 : 0))
                     .accessibilityHidden(true)
-                Text("Ended")
+                Text(StateWord.ended.label)
                 Text("\(count)").foregroundStyle(.tertiary).monospacedDigit()
                 Spacer(minLength: 0)
             }
@@ -154,7 +154,7 @@ struct EndedHeader: View {
         .foregroundStyle(.secondary)
         .help(open ? "Hide the ended sessions" : "Show the ended sessions")
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(count == 1 ? "Ended, 1 session" : "Ended, \(count) sessions")
+        .accessibilityLabel("\(StateWord.ended.label), \(count == 1 ? "1 session" : "\(count) sessions")")
         .accessibilityValue(open ? "expanded" : "collapsed")
         .accessibilityHint(open ? "Hides the ended sessions" : "Shows the ended sessions")
         .accessibilityAddTraits([.isHeader, .isButton])
@@ -202,7 +202,7 @@ struct WindowRowView: View {
                         Text(row.title).font(.system(size: nested ? 12 : 13, weight: .medium)).lineLimit(1)
                         Spacer(minLength: 4)
                         if let since = state.since {
-                            Text(Durations.compact(context.date.timeIntervalSince(since)))
+                            Text(Durations.short(context.date.timeIntervalSince(since)))
                                 .font(.system(size: 11).monospacedDigit()).foregroundStyle(.tertiary)
                         }
                     }

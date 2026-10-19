@@ -78,32 +78,33 @@ public enum LeadTeams {
             tasks[key, default: []].append(row)
         }
         guard !order.isEmpty else { return "team: none running" }
-        var counts: [String: Int] = [:]
+        // The glossary's words (`StateWord`), and the board's "in review" (nil here).
+        var counts: [StateWord?: Int] = [:]
         for key in order {
             let rows = tasks[key] ?? []
             let groups = rows.map { $0.state(now: now).group }
             let status = board?.task(key)?.status
-            let word: String
+            let word: StateWord?
             if groups.contains(.needsYou) {
-                word = "needs you"
+                word = .needsYou
             } else if status == .done {
-                word = "done"
+                word = .done
             } else if status == .review || rows.contains(where: { role(label: label($0)) == .verifier }) {
-                word = "in review"
+                word = nil
             } else if groups.contains(.working) {
-                word = "working"
-            } else if rows.contains(where: { $0.session?.status == .unknown || $0.state(now: now).text == "status unknown" }) {
+                word = .working
+            } else if rows.contains(where: { $0.session?.status == .unknown || $0.state(now: now).text == StateWord.unknown.text }) {
                 // Nothing to read its state from (no hook state, or no process table read since its agent should
                 // have shown up): not known to be idle.
-                word = "unknown"
+                word = .unknown
             } else {
-                word = "idle"
+                word = .idle
             }
             counts[word, default: 0] += 1
         }
-        let parts = ["needs you", "working", "in review", "done", "idle", "unknown"].compactMap { word -> String? in
+        let parts = ([.needsYou, .working, nil, .done, .idle, .unknown] as [StateWord?]).compactMap { word -> String? in
             guard let count = counts[word] else { return nil }
-            return word == "needs you" ? (count == 1 ? "1 needs you" : "\(count) need you") : "\(count) \(word)"
+            return word?.counted(count) ?? "\(count) in review"
         }
         return "team: " + parts.joined(separator: " · ")
     }

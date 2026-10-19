@@ -2,27 +2,29 @@ import Foundation
 
 /// How the window's session list is grouped.
 public enum WindowGrouping: String, CaseIterable, Sendable {
-    /// Needs you, Working, Ready, Idle.
+    /// Needs you, Working, Done, Idle.
     case attention
     /// By project, in the store's order.
     case projects
 }
 
-/// The window's attention groups, in the order they're shown.
+/// The window's attention groups, in the order they're shown. `ready` is the Done group: finished turns.
 public enum AttentionGroup: CaseIterable, Sendable {
     case needsYou, working, ready, idle
 
+    /// The group's header, the glossary's word (`StateWord`).
     public var title: String {
         switch self {
-        case .needsYou: return "Needs you"
-        case .working: return "Working"
-        case .ready: return "Ready"
-        case .idle: return "Idle"
+        case .needsYou: return StateWord.needsYou.label
+        case .working: return StateWord.working.label
+        case .ready: return StateWord.done.label
+        case .idle: return StateWord.idle.label
         }
     }
 }
 
-/// What a row says about its session right now, and since when.
+/// What a row says about its session right now, and since when: the glossary's word for its state (`StateWord`), what
+/// it's running, or for a window session without an agent's state "starting" or "shell", and how it ended (`SessionEnd`).
 public struct RowState: Equatable, Sendable {
     public var text: String
     public var since: Date?
@@ -79,22 +81,23 @@ extension WindowRow {
                     return RowState(text: "starting", since: info.startedAt, group: .working)
                 }
                 // A minute on, but no table read since says whether its agent is there (a loaded Mac): not known.
-                return RowState(text: "status unknown", since: nil, group: .idle)
+                return RowState(text: StateWord.unknown.text, since: nil, group: .idle)
             }
             return RowState(text: "shell", since: info.startedAt, group: .idle)
         case .agent(let session):
-            if session.isPaused { return RowState(text: "paused", since: nil, group: .idle) }
+            if session.isPaused { return RowState(text: StateWord.paused.text, since: nil, group: .idle) }
             let since: Date? = session.statusSince
+            let text = session.status.word.text
             switch session.status {
-            case .needsInput: return RowState(text: "waiting", since: since, group: .needsYou)
+            case .needsInput: return RowState(text: text, since: since, group: .needsYou)
             case .working, .background:
                 if let activity = session.activity {
                     return RowState(text: activity, since: session.activitySince ?? since, group: .working)
                 }
-                return RowState(text: session.status == .working ? "working" : "background jobs", since: since, group: .working)
-            case .done: return RowState(text: "done", since: since, group: .ready)
-            case .idle: return RowState(text: "idle", since: since, group: .idle)
-            case .unknown: return RowState(text: "status unknown", since: nil, group: .idle)
+                return RowState(text: text, since: since, group: .working)
+            case .done: return RowState(text: text, since: since, group: .ready)
+            case .idle: return RowState(text: text, since: since, group: .idle)
+            case .unknown: return RowState(text: text, since: nil, group: .idle)
             }
         }
     }
@@ -103,10 +106,10 @@ extension WindowRow {
     static func state(of program: ProgramStatus) -> RowState {
         let since = program.since
         switch StatusRules.status(for: program) {
-        case .needsInput: return RowState(text: "waiting", since: since, group: .needsYou)
-        case .working, .background: return RowState(text: program.title ?? "working", since: since, group: .working)
-        case .done: return RowState(text: program.state == .error ? "error" : "done", since: since, group: .ready)
-        case .idle, .unknown: return RowState(text: "idle", since: since, group: .idle)
+        case .needsInput: return RowState(text: StateWord.needsYou.text, since: since, group: .needsYou)
+        case .working, .background: return RowState(text: program.title ?? StateWord.working.text, since: since, group: .working)
+        case .done: return RowState(text: program.state == .error ? "error" : StateWord.done.text, since: since, group: .ready)
+        case .idle, .unknown: return RowState(text: StateWord.idle.text, since: since, group: .idle)
         }
     }
 
@@ -169,7 +172,7 @@ public enum WindowGroups {
     public static let startingFor: TimeInterval = 60
 
     /// The rows of `sections` regrouped by what they need from you. Within a group: needs-you longest
-    /// waiting first, working earliest started first (so rows don't jump each turn), ready most recent
+    /// waiting first, working earliest started first (so rows don't jump each turn), done most recent
     /// first, idle in the given order. Empty groups are left out.
     public static func attention(_ sections: [WindowSection], now: Date = Date()) -> [WindowSection] {
         let rows = sections.flatMap(\.rows).enumerated().map { (index: $0.offset, row: $0.element) }
@@ -218,11 +221,11 @@ public enum WindowGroups {
     /// "2 need you · 3 working"; empty when nothing needs you and nothing works.
     public static func summary(_ rows: [WindowRow], now: Date = Date()) -> String {
         let groups = rows.map { $0.state(now: now).group }
-        let waiting = groups.filter { $0 == .needsYou }.count
+        let needsYou = groups.filter { $0 == .needsYou }.count
         let working = groups.filter { $0 == .working }.count
         var parts: [String] = []
-        if waiting > 0 { parts.append(waiting == 1 ? "1 needs you" : "\(waiting) need you") }
-        if working > 0 { parts.append("\(working) working") }
+        if needsYou > 0 { parts.append(StateWord.needsYou.counted(needsYou)) }
+        if working > 0 { parts.append(StateWord.working.counted(working)) }
         return parts.joined(separator: " · ")
     }
 }

@@ -27,7 +27,7 @@ struct ReplacedLeadTests {
         #expect(replaced.label == "replaced — continue in Lead · genswap")
         #expect(replaced.rowState.text == replaced.label)
         #expect(replaced.rowState.group == .idle && replaced.rowState.since == nil)
-        let ordinary = ["waiting", "working", "done", "idle", "status unknown", "paused", "starting", "shell"]
+        let ordinary = ["needs you", "working", "background", "done", "idle", "unknown", "paused", "starting", "shell"]
         #expect(!ordinary.contains(replaced.rowState.text))
         #expect(replaced.routed("split the GenLayer layer out")
                 == "(typed into the replaced lead's session on ttys004, which has no tools; VibeSwitcher sent it on to you) split the GenLayer layer out")

@@ -120,7 +120,7 @@ struct SessionHeaderView: View {
     }
 }
 
-/// "Needs input · 4m" in the status color.
+/// "Needs you · 4m" in the status color.
 struct StatusPill: View {
     let row: WindowRow
     let now: Date
@@ -135,7 +135,7 @@ struct StatusPill: View {
             }
             Text(replaced == nil ? row.pillLabel(state) : "Replaced")
             if let since = state.since {
-                Text("· \(Durations.compact(now.timeIntervalSince(since)))").monospacedDigit()
+                Text("· \(Durations.short(now.timeIntervalSince(since)))").monospacedDigit()
             }
         }
         .font(.system(size: 11, weight: .medium))
@@ -150,15 +150,16 @@ struct StatusPill: View {
 }
 
 extension WindowRow {
-    /// The header's word for the row's state: "Needs input", "Working", "Shell", "Ended"…
+    /// The header's word for the row's state, the glossary's (`StateWord`): "Needs you", "Working", "Ended"…; a window
+    /// session with no agent's state says "Starting" or "Shell".
     func pillLabel(_ state: RowState) -> String {
         switch content {
         case .hosted(let info):
-            if !info.isLive { return "Ended" }
+            if !info.isLive { return StateWord.ended.label }
             if let program = info.liveProgramStatus { return StatusRules.status(for: program).label }
             return state.group == .working ? "Starting" : "Shell"
         case .agent(let session):
-            return session.isPaused ? "Paused" : session.status.label
+            return session.isPaused ? StateWord.paused.label : session.status.label
         }
     }
 }

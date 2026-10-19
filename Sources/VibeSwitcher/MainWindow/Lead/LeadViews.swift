@@ -204,7 +204,7 @@ private struct LeadQuestionCard: View {
                     .foregroundStyle(question.rank == .whenever ? AnyShapeStyle(.secondary) : AnyShapeStyle(.white))
                     .background(Capsule().fill(question.rank == .whenever ? Color.secondary.opacity(0.15) : question.rank.color))
                 TimelineView(.ticking(every: 30)) { context in
-                    Text("asked \(Durations.compact(context.date.timeIntervalSince1970 - question.askedAt)) ago")
+                    Text("asked \(Durations.short(context.date.timeIntervalSince1970 - question.askedAt)) ago")
                         .font(.system(size: 10.5)).foregroundStyle(.tertiary)
                 }
                 Spacer()

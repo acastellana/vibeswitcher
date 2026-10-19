@@ -477,6 +477,10 @@ final class PhoneAccess: ObservableObject {
         if Date().timeIntervalSince(last) > 300 { saveDevices() }
     }
 
+    /// `/api/state`'s word for a session's state, the glossary's (`StateWord`; app.js shows it as is). A paused
+    /// session keeps it: the phone tags it Paused beside it, as the popover does.
+    static func statusLabel(_ session: Session) -> String { session.status.label }
+
     private func stateObject(for device: PairedDevice) -> [String: Any] {
         readMenusIfDue()
         let sessions: [[String: Any]] = store.sessions.enumerated().map { index, session in
@@ -484,7 +488,7 @@ final class PhoneAccess: ObservableObject {
                 "tty": session.tty, "number": index + 1, "name": Redaction.secrets(in: session.displayName),
                 "sid": session.identity, "project": Redaction.secrets(in: session.project),
                 "agent": session.agent.rawValue, "status": session.status.rawValue,
-                "statusLabel": session.status.label, "inTerminal": session.inTerminalApp || session.inWindow, "inWindow": session.inWindow, "viewing": session.isCurrent,
+                "statusLabel": Self.statusLabel(session), "inTerminal": session.inTerminalApp || session.inWindow, "inWindow": session.inWindow, "viewing": session.isCurrent,
             ]
             if session.statusSince > Date.distantPast.addingTimeInterval(1) { row["since"] = session.statusSince.timeIntervalSince1970 }
             if let task = session.task { row["task"] = Redaction.secrets(in: task) }

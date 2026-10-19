@@ -92,7 +92,7 @@ struct WindowGroupsTests {
     }
 
     @Test func stateTextAndSince() {
-        #expect(agent("t", status: .needsInput, since: 100).state(now: now).text == "waiting")
+        #expect(agent("t", status: .needsInput, since: 100).state(now: now).text == "needs you")
         #expect(agent("t", status: .needsInput, since: 100).state(now: now).since == Date(timeIntervalSince1970: 100))
         #expect(agent("t", status: .done).state(now: now).text == "done")
         #expect(agent("t", status: .working).state(now: now).text == "working")
@@ -137,7 +137,7 @@ struct WindowGroupsTests {
             #expect(!row.agentQuit)
             #expect(row.state(now: Date(timeIntervalSince1970: 30)).text == "starting")
             let later = row.state(now: now)
-            #expect(later.text == "status unknown", "table read at \(String(describing: readAt))")
+            #expect(later.text == "unknown", "table read at \(String(describing: readAt))")
             #expect(later.group == .idle)
             #expect(later.since == nil)
         }
@@ -148,7 +148,7 @@ struct WindowGroupsTests {
         for undecided in [Undecided(ttys: [info.tty]), Undecided(anywhere: true)] {
             let row = scanned(info, tableReadAt: now, undecided: undecided)
             #expect(!row.agentQuit)
-            #expect(row.state(now: now).text == "status unknown")
+            #expect(row.state(now: now).text == "unknown")
         }
         #expect(scanned(info, tableReadAt: now, undecided: Undecided(ttys: ["ttys901"])).state(now: now).text == "agent ended · shell")
         // Ended sessions and plain shells read the same whatever the table.

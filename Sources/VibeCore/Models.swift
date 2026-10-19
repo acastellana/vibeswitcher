@@ -35,14 +35,53 @@ public enum SessionStatus: String, Codable, Sendable {
     /// No hooks and no readable terminal title, so the state can't be told.
     case unknown
 
+    /// Its word in the glossary.
+    public var word: StateWord {
+        switch self {
+        case .needsInput: return .needsYou
+        case .working: return .working
+        case .background: return .background
+        case .done: return .done
+        case .idle: return .idle
+        case .unknown: return .unknown
+        }
+    }
+
+    /// "Needs you", "Working"…: the glossary's label (`StateWord`).
+    public var label: String { word.label }
+}
+
+/// The one word for each state a session can be in, used by every surface that names one: the window's rows, group
+/// headers and status pill, the popover, the sidebar, the menu bar, the phone (`/api/state`'s `statusLabel`, and
+/// `WORDS` in Web/app.js, which `GlossaryTests` holds to this) and the team summary. A word outside it for one of
+/// these states fails `GlossaryTests`. How a window session ended is said by `SessionEnd` ("ended", "finished",
+/// "exit N").
+public enum StateWord: String, CaseIterable, Sendable {
+    case needsYou, working, background, done, idle, paused, ended, unknown
+
+    /// On its own, as a header, pill or badge says it: "Needs you".
     public var label: String {
         switch self {
-        case .needsInput: return "Needs input"
+        case .needsYou: return "Needs you"
         case .working: return "Working"
         case .background: return "Background"
         case .done: return "Done"
         case .idle: return "Idle"
+        case .paused: return "Paused"
+        case .ended: return "Ended"
         case .unknown: return "Unknown"
+        }
+    }
+
+    /// Inside a line of text: "needs you", "working"…
+    public var text: String { label.lowercased() }
+
+    /// After a count: "1 needs you", "2 need you", "1 in background", "3 working".
+    public func counted(_ count: Int) -> String {
+        switch self {
+        case .needsYou: return count == 1 ? "1 needs you" : "\(count) need you"
+        case .background: return "\(count) in background"
+        default: return "\(count) \(text)"
         }
     }
 }

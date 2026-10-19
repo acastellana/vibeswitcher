@@ -587,7 +587,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         let sessions = WindowGroups.attention(model.sections).flatMap(\.rows).map { row in
             let state = row.state(now: now)
             var subtitle = "\(row.project) · \(state.text)"
-            if let since = state.since { subtitle += " · \(Durations.compact(now.timeIntervalSince(since)))" }
+            if let since = state.since { subtitle += " · \(Durations.short(now.timeIntervalSince(since)))" }
             return PaletteItem(id: row.id, title: row.title, subtitle: subtitle, icon: .mark(row.markKind, row.statusColor)) {
                 [weak self] in self?.model.selectedID = row.id
             }

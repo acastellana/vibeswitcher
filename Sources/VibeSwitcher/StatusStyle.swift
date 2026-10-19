@@ -27,9 +27,6 @@ extension SessionStatus {
     /// A number or glyph drawn on a status fill: white in light mode, near-black in dark.
     static let onInkNSColor = NSColor(name: nil) { StatusPalette.onInk(dark: $0.isDark).nsColor }
     static var onInk: Color { Color(nsColor: onInkNSColor) }
-
-    /// Short enough for the sidebar's first line.
-    var shortLabel: String { self == .needsInput ? "Needs you" : label }
 }
 
 extension ReplacedLead {

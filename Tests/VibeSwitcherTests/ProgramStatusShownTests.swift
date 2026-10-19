@@ -116,7 +116,7 @@ struct ProgramStatusShownTests {
         #expect(header(plain) == "Working")
         #expect(row(plain)?.statusColor == SessionStatus.working.color)
         took["plain blocked"] = await say("b", to: plain) { row(plain)?.state(now: Date()).group == .needsYou }
-        #expect(header(plain) == "Needs input")
+        #expect(header(plain) == "Needs you")
         #expect(row(plain)?.statusColor == SessionStatus.needsInput.color)
         #expect(row(plain)?.hosted?.liveProgramStatus.flatMap(StatusRules.detail(for:)) == "Asks permission: Bash")
         took["plain done"] = await say("d", to: plain) { row(plain)?.state(now: Date()).group == .ready }
@@ -125,7 +125,7 @@ struct ProgramStatusShownTests {
         // An agent without hooks: the store's status, and so its row's and the header's, are the program's.
         took["agent blocked"] = await say("b", to: agent) { row(agent)?.session?.status == .needsInput }
         #expect(row(agent)?.session?.detail == "Asks permission: Bash")
-        #expect(header(agent) == "Needs input")
+        #expect(header(agent) == "Needs you")
         took["agent working"] = await say("w", to: agent) { row(agent)?.session?.status == .working }
         #expect(header(agent) == "Working")
 

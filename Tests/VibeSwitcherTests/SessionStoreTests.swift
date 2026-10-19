@@ -130,7 +130,7 @@ struct SessionStoreTests {
         let later = read + 600
 
         #expect(store.tableReadAt == nil)
-        #expect(row()?.state(now: later).text == "status unknown")
+        #expect(row()?.state(now: later).text == "unknown")
         #expect(row().map(LeadTeams.isLive) == true)
 
         try await refreshAndSettle(store)
@@ -138,7 +138,7 @@ struct SessionStoreTests {
         clock.advance(600)
         try await refreshAndSettle(store)
         #expect(store.tableReadAt == read)
-        #expect(row()?.state(now: later).text == "status unknown")
+        #expect(row()?.state(now: later).text == "unknown")
         #expect(row().map { LeadTeams.state(of: $0, now: later).group } == .idle)
         #expect(row().map(LeadTeams.isLive) == true)
 
@@ -180,7 +180,7 @@ struct SessionStoreTests {
         try await refreshAndSettle(store)
         #expect(store.undecided.contains("ttys980"))
         #expect(!store.agentQuit(window))
-        #expect(row()?.state(now: clock.now).text == "status unknown")
+        #expect(row()?.state(now: clock.now).text == "unknown")
         #expect(row().map(LeadTeams.isLive) == true)
         // Only that terminal is in question.
         var elsewhere = window

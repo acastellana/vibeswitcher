@@ -126,24 +126,24 @@ struct PopoverView: View {
                 if count > 0 {
                     HStack(spacing: 4) {
                         StatusMarkView(StatusMark(status: status), color: status.color, size: 9)
-                        Text(words ? "\(count) \(status.label.lowercased())" : "\(count)")
+                        Text(words ? status.word.counted(count) : "\(count)")
                             .font(.caption).foregroundStyle(.secondary).fixedSize()
                     }
-                    .help("\(count) \(status.label.lowercased())")
+                    .help(status.word.counted(count))
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("\(count) \(status.label.lowercased())")
+                    .accessibilityLabel(status.word.counted(count))
                 }
             }
             let paused = store.sessions.filter(\.isPaused).count
             if paused > 0 {
                 HStack(spacing: 3) {
                     Image(systemName: "pause.circle").imageScale(.small).accessibilityHidden(true)
-                    Text(words ? "\(paused) paused" : "\(paused)").fixedSize()
+                    Text(words ? StateWord.paused.counted(paused) : "\(paused)").fixedSize()
                 }
                 .font(.caption).foregroundStyle(.secondary)
-                .help("\(paused) paused: no notifications until you resume them")
+                .help("\(StateWord.paused.counted(paused)): no notifications until you resume them")
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel("\(paused) paused")
+                .accessibilityLabel(StateWord.paused.counted(paused))
             }
         }
     }
@@ -353,7 +353,7 @@ struct SessionRow: View {
                             .help("The Terminal tab you're looking at right now")
                     }
                     if session.isPaused {
-                        Label("Paused", systemImage: "pause.fill")  // a11y: labelled by its title
+                        Label(StateWord.paused.label, systemImage: "pause.fill")  // a11y: labelled by its title
                             .labelStyle(PausedLabelStyle(compact: compact))
                             .font(.system(size: 10, weight: .semibold))
                             .padding(.horizontal, 5).padding(.vertical, 1)
@@ -364,12 +364,12 @@ struct SessionRow: View {
                     HStack(spacing: 4) {
                         // The status as a shape and a word, not just the badge's colour.
                         StatusMarkView(session: session, size: 9).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
-                        Text(compact ? session.status.shortLabel : session.status.label)
+                        Text(session.status.label)
                             .foregroundStyle(session.isPaused ? Color.secondary : session.status.color)
                             .lineLimit(1).fixedSize()
                         if session.statusSince > Date.distantPast.addingTimeInterval(1) {
                             TimelineView(.ticking(every: 1)) { context in
-                                Text(Self.elapsed(from: session.statusSince, to: context.date))
+                                Text(Durations.short(context.date.timeIntervalSince(session.statusSince)))
                                     .foregroundStyle(.secondary)
                             }
                         }
@@ -392,7 +392,7 @@ struct SessionRow: View {
                         HStack(spacing: 4) {
                             Image(systemName: "gearshape.2").imageScale(.small).accessibilityHidden(true)
                             Text(activity).lineLimit(1).truncationMode(.middle)
-                            Text("· " + Self.elapsed(from: since, to: context.date))
+                            Text("· " + Durations.short(context.date.timeIntervalSince(since)))
                                 .foregroundStyle(seconds > 600 ? AnyShapeStyle(SessionStatus.working.color) : AnyShapeStyle(.secondary))
                         }
                         .font(.caption).foregroundStyle(.secondary)
@@ -425,13 +425,6 @@ struct SessionRow: View {
             ? until.formatted(date: .omitted, time: .shortened)
             : until.formatted(date: .abbreviated, time: .shortened)
         return "Paused until \(when): no notifications or reminders"
-    }
-
-    static func elapsed(from start: Date, to now: Date) -> String {
-        let seconds = max(0, Int(now.timeIntervalSince(start)))
-        if seconds < 60 { return "\(seconds)s" }
-        if seconds < 3600 { return "\(seconds / 60)m" }
-        return "\(seconds / 3600)h \((seconds % 3600) / 60)m"
     }
 }
 
@@ -479,7 +472,7 @@ private struct PausedLabelStyle: LabelStyle {
             if !compact { configuration.title }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Paused")
+        .accessibilityLabel(StateWord.paused.label)
     }
 }
 

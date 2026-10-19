@@ -475,7 +475,7 @@ struct OnboardingView: View {
                     ForEach([SessionStatus.needsInput, .working, .done, .idle], id: \.self) { status in
                         HStack(spacing: 6) {
                             Circle().fill(status.color).frame(width: 10, height: 10)
-                            Text(status == .needsInput ? "Needs you" : status.label).font(.callout)
+                            Text(status.label).font(.callout)
                         }
                     }
                 }

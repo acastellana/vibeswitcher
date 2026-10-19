@@ -147,13 +147,13 @@ struct LeadTeamsTests {
         for readAt in [nil, started - 30, started + 30] {
             let row = shellRow(worker, tableReadAt: readAt)
             #expect(LeadTeams.isLive(row), "table read at \(String(describing: readAt))")
-            #expect(LeadTeams.state(of: row, now: now).text == "status unknown")
+            #expect(LeadTeams.state(of: row, now: now).text == "unknown")
             #expect(LeadTeams.summary([row], label: label, board: nil, now: now) == "team: 1 unknown")
         }
         // Read a minute on, but its terminal's process couldn't be told (mid-exec): still live, unknown.
         let undecided = shellRow(worker, tableReadAt: now, undecided: Undecided(ttys: [worker.tty]))
         #expect(LeadTeams.isLive(undecided))
-        #expect(LeadTeams.state(of: undecided, now: now).text == "status unknown")
+        #expect(LeadTeams.state(of: undecided, now: now).text == "unknown")
         #expect(LeadTeams.summary([undecided], label: label, board: nil, now: now) == "team: 1 unknown")
         let ended = shellRow(worker, tableReadAt: started + 60)
         #expect(!LeadTeams.isLive(ended))

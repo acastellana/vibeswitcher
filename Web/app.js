@@ -8,7 +8,19 @@ const STATUS_COLORS = {
   idle: 'var(--st-idle)', unknown: 'transparent',
 };
 const ORDER = ['needsInput', 'working', 'background', 'done'];
-const LABELS = { needsInput: 'need you', working: 'working', background: 'background', done: 'done' };
+// The glossary (VibeCore's StateWord), keyed by status, plus paused and ended: each state's label, and its phrase after
+// a count of one and of more. GlossaryTests holds this to the Mac's words.
+const WORDS = {
+  needsInput: { label: 'Needs you', one: 'needs you', many: 'need you' },
+  working: { label: 'Working', one: 'working', many: 'working' },
+  background: { label: 'Background', one: 'in background', many: 'in background' },
+  done: { label: 'Done', one: 'done', many: 'done' },
+  idle: { label: 'Idle', one: 'idle', many: 'idle' },
+  paused: { label: 'Paused', one: 'paused', many: 'paused' },
+  ended: { label: 'Ended', one: 'ended', many: 'ended' },
+  unknown: { label: 'Unknown', one: 'unknown', many: 'unknown' },
+};
+function counted(state, count) { return `${count} ${count === 1 ? WORDS[state].one : WORDS[state].many}`; }
 
 let token = localStorage.getItem('vs.token');
 let state = null;
@@ -110,16 +122,16 @@ function show(view) {
   }
 }
 
-function elapsed(since) {
-  if (!since) return '';
-  const seconds = Math.max(0, Math.floor(Date.now() / 1000 + clockOffset - since));
-  if (seconds < 60) return `${seconds}s`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ${Math.floor(seconds % 3600 / 60)}m`;
-  return `${Math.floor(seconds / 86400)}d ${Math.floor(seconds % 86400 / 3600)}h`;
+// 45s, 12m, 3h 5m, 2d 4h: the Mac's Durations.short, which GlossaryTests holds this to.
+function short(seconds) {
+  const s = Math.max(0, Math.floor(seconds));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m`;
+  if (s < 86400) return s % 3600 >= 60 ? `${Math.floor(s / 3600)}h ${Math.floor(s % 3600 / 60)}m` : `${Math.floor(s / 3600)}h`;
+  return `${Math.floor(s / 86400)}d ${Math.floor(s % 86400 / 3600)}h`;
 }
 
-function duration(seconds) { return elapsed(Date.now() / 1000 + clockOffset - seconds); }
+function elapsed(since) { return since ? short(Date.now() / 1000 + clockOffset - since) : ''; }
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -172,11 +184,11 @@ function renderList() {
     const chip = el('span', 'chip');
     const dot = el('i');
     dot.style.background = STATUS_COLORS[status];
-    chip.append(dot, `${count} ${LABELS[status]}`);
+    chip.append(dot, counted(status, count));
     counts.append(chip);
   }
   const paused = sessions.filter(s => s.paused).length;
-  if (paused) counts.append(el('span', 'chip', `⏸ ${paused} paused`));
+  if (paused) counts.append(el('span', 'chip', `⏸ ${counted('paused', paused)}`));
   const list = $('sessions');
   list.replaceChildren(...sessions.map(session => {
     const row = el('button', session.paused ? 'row paused' : 'row');
@@ -185,7 +197,7 @@ function renderList() {
     const text = el('div', 'text');
     const first = el('div', 'line1');
     first.append(el('b', 'name', session.name), el('span', `agent ${session.agent}`, session.agent === 'claude' ? 'Claude' : 'Codex'));
-    if (session.paused) first.append(el('span', 'pausedTag', '⏸ Paused'));
+    if (session.paused) first.append(el('span', 'pausedTag', `⏸ ${WORDS.paused.label}`));
     const when = el('span', `when ${session.status}`, `${session.statusLabel} ${elapsed(session.since)}`.trim());
     first.append(when);
     text.append(first);
@@ -205,12 +217,12 @@ function renderToday() {
   const box = $('today');
   box.hidden = !today || (today.agentsWorking < 60 && today.waitingOnYou < 60);
   if (box.hidden) return;
-  $('todayLine').textContent = `${duration(today.agentsWorking)} agents working · ${duration(today.waitingOnYou)} waiting on you`;
+  $('todayLine').textContent = `${short(today.agentsWorking)} agents working · ${short(today.waitingOnYou)} waiting on you`;
   $('todayRows').replaceChildren(...today.projects.map(p => {
     const row = el('div', 'todayRow');
     row.append(el('span', 'name', p.project),
-               el('span', 'muted', `worked ${duration(p.working)}`),
-               el('span', p.waiting > p.working ? 'warn' : 'muted', `waited ${duration(p.waiting)}`));
+               el('span', 'muted', `worked ${short(p.working)}`),
+               el('span', p.waiting > p.working ? 'warn' : 'muted', `waited ${short(p.waiting)}`));
     return row;
   }));
 }
@@ -431,7 +443,7 @@ function syncQuickReplies() {
 }
 
 function pauseLabel(session) {
-  if (!session.pausedUntil) return 'Paused';
+  if (!session.pausedUntil) return WORDS.paused.label;
   const until = new Date(session.pausedUntil * 1000);
   const sameDay = until.toDateString() === new Date().toDateString();
   return `Until ${until.toLocaleString([], sameDay ? { hour: '2-digit', minute: '2-digit' }
@@ -645,7 +657,7 @@ function entryNode(entry, full = false) {
     box.dataset.entry = JSON.stringify({ id: entry.id, tool: entry.tool, text: entry.text, at: entry.at });
     const summary = el('summary');
     const status = entry.output === undefined ? '…' : (entry.failed ? '✗' : '✓');
-    const took = entry.duration >= 1 ? ` · ${duration(entry.duration)}` : '';
+    const took = entry.duration >= 1 ? ` · ${short(entry.duration)}` : '';
     summary.append(el('span', 'toolName', entry.tool || 'tool'), el('span', 'toolText', entry.text),
                    el('span', 'toolMeta', `${took} ${status}`.trim()));
     box.append(summary);

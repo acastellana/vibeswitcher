@@ -266,26 +266,15 @@ public enum StatusSummary {
         for status in [SessionStatus.needsInput, .working, .background, .done, .idle, .unknown] {
             let count = sessions.filter { $0.status == status && !$0.isPaused }.count
             guard count > 0 else { continue }
-            parts.append("\(count) \(phrase(status, count: count))")
+            parts.append(status.word.counted(count))
         }
         let paused = sessions.filter(\.isPaused).count
-        if paused > 0 { parts.append("\(paused) paused") }
+        if paused > 0 { parts.append(StateWord.paused.counted(paused)) }
         return "VibeSwitcher: " + parts.joined(separator: ", ")
     }
 
     /// One session: "3, docs-site, done".
     public static func spoken(number: Int, name: String, status: SessionStatus, paused: Bool) -> String {
-        "\(number), \(name), \(paused ? "paused" : status.label.lowercased())"
-    }
-
-    static func phrase(_ status: SessionStatus, count: Int) -> String {
-        switch status {
-        case .needsInput: return count == 1 ? "needs you" : "need you"
-        case .working: return "working"
-        case .background: return "in background"
-        case .done: return "done"
-        case .idle: return "idle"
-        case .unknown: return "unknown"
-        }
+        "\(number), \(name), \((paused ? StateWord.paused : status.word).text)"
     }
 }

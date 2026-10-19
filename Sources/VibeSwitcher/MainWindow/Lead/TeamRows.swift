@@ -78,7 +78,7 @@ struct TeamRow: Identifiable, Equatable {
     /// "Working 12m", "Rework 1 · 22m", "In review 3m", "Needs you", "Queued".
     func stateText(now: Date) -> String {
         guard let since else { return state }
-        let elapsed = Durations.compact(now.timeIntervalSince(since))
+        let elapsed = Durations.short(now.timeIntervalSince(since))
         return mark == .rework ? "\(state) · \(elapsed)" : "\(state) \(elapsed)"
     }
 
@@ -191,12 +191,12 @@ enum TeamRows {
 
         // A session waiting on an answer needs you, whatever the board says.
         if task.status != .done, let worker, worker.needsYou {
-            red(.needsYou, "Needs you", worker.detail.flatMap { $0.isEmpty ? nil : $0 } ?? "The worker is waiting for an answer.", since: nil)
+            red(.needsYou, StateWord.needsYou.label, worker.detail.flatMap { $0.isEmpty ? nil : $0 } ?? "The worker is waiting for an answer.", since: nil)
             row.agent = task.worker
             return row
         }
         if task.status == .review, let verifier, verifier.needsYou {
-            red(.needsYou, "Needs you", verifier.detail.flatMap { $0.isEmpty ? nil : $0 } ?? "The verifier is waiting for an answer.", since: nil)
+            red(.needsYou, StateWord.needsYou.label, verifier.detail.flatMap { $0.isEmpty ? nil : $0 } ?? "The verifier is waiting for an answer.", since: nil)
             row.agent = task.verifier
             return row
         }
@@ -238,7 +238,7 @@ enum TeamRows {
             }
             row.group = .working
             row.mark = rework > 0 ? .rework : .working
-            row.state = rework > 0 ? "Rework \(rework)" : "Working"
+            row.state = rework > 0 ? "Rework \(rework)" : StateWord.working.label
             row.since = stageStart(task, session: worker)
             row.activity = working ? worker?.activity : nil
             row.agent = task.worker
@@ -299,8 +299,8 @@ enum TeamRows {
         var counts: [TeamRow.Group: Int] = [:]
         for row in rows { counts[row.group, default: 0] += 1 }
         var parts: [String] = []
-        if let count = counts[.needsYou] { parts.append(count == 1 ? "1 needs you" : "\(count) need you") }
-        if let count = counts[.working] { parts.append("\(count) working") }
+        if let count = counts[.needsYou] { parts.append(StateWord.needsYou.counted(count)) }
+        if let count = counts[.working] { parts.append(StateWord.working.counted(count)) }
         if let count = counts[.review] { parts.append("\(count) in review") }
         if let count = counts[.queued] { parts.append("\(count) queued") }
         return parts.isEmpty ? "team: none running" : "team: " + parts.joined(separator: " · ")

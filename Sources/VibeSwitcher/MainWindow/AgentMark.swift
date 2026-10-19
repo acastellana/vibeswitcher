@@ -103,18 +103,11 @@ extension WindowRow {
         }
     }
 
-    /// The status in words, as the header's pill says it: "Needs input", "Working", "Ended"…
+    /// The status in words, as the header's pill says it: "Needs you", "Working", "Ended"…
     var spokenStatus: String { pillLabel(state(now: Date())) }
 
     var isDimmed: Bool {
         if case .hosted(let info) = content { return !info.isLive }
         return session?.isPaused == true
-    }
-}
-
-extension Durations {
-    /// Just the largest unit: "45s", "12m", "3h", "2d".
-    static func compact(_ seconds: TimeInterval) -> String {
-        String(short(seconds).split(separator: " ").first ?? "")
     }
 }
