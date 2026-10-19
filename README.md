@@ -466,6 +466,12 @@ It also fails when a run leaves anything in its TMPDIR. Tests put scratch files 
 (`$TMPDIR`, which Foundation's `temporaryDirectory` ignores) and remove them: a suite keeps a `Scratch`
 (`let temp = Scratch()`, then `temp.url("name")`), which removes what its test made when the test ends.
 
+When a change touches what the app does at rest, run `scripts/ui-bench.sh -B project-lead 2`: the window on
+a scratch home (clicks, busy leads, 2 minutes idle) for project-lead's build and this one, alternately. Its
+idle instructions/s rises with the Mac's load, so the branch is judged against the base measured in the same
+run (at most 20 % over), not a fixed number; over `test-under-load.sh`'s threshold it doesn't judge and says
+so. See [docs/eval/runtime-data/idle-bench.md](docs/eval/runtime-data/idle-bench.md).
+
 Tests never touch your Keychain. Workers and verifiers run `swift test` with HOME and CFFIXED_USER_HOME
 on a scratch folder, where there's no login keychain, and macOS answers a Keychain call there with a
 "Keychain Not Found" dialog rather than an error. So the app's key store is injected (`AppKeyStore`:

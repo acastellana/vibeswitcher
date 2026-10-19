@@ -14,7 +14,8 @@ import VibeCore
 /// 2. busy leads: their boards rewritten every few seconds and a decision added (by another process), as leads at work
 ///    do: CPU, instructions and the main thread's longest stall, shown.
 /// 3. idle: MINUTES (default 5) of nothing happening: CPU and instructions each minute and on average, and memory after
-///    the first minute.
+///    the first minute. The average instructions/s is printed as `RESULT idle-instructions-per-second N` for
+///    scripts/ui-bench.sh, which judges it against a base build's.
 /// It exits 1 when a check fails. The window is off screen unless `--onscreen` (then it shows, without taking focus).
 /// `--ticking` has the busy screen redraw a line each second. For narrowing a cost down: VIBESWITCHER_BENCH_INSPECTOR
 /// (team, overview or activity: the inspector's tab, team by default) and VIBESWITCHER_BENCH_RESULTS (the results on
@@ -56,8 +57,9 @@ enum UIBench {
     /// What switching between the two leads may cost (the median, in instructions; a debug build). Measured: 5.8 G
     /// when the Team pane drew every result, 1.0-1.4 G since (0.85 G of it the terminal's).
     static let switchBudget: Double = 2.5e9
-    /// What two idle leads may cost, in instructions a second. Measured: 80 M while the lead controller decoded the
-    /// boards every 3 s, 30 M since.
+    /// What two idle leads may cost, in instructions a second, on an idle Mac: shown, not checked (the rate rises with
+    /// the Mac's load; scripts/ui-bench.sh -B compares it with a base build's). Measured: 80 M while the lead controller
+    /// decoded the boards every 3 s, 30 M since.
     static let idleBudget: Double = 50e6
 
     /// Checks that passed or failed, printed as they're decided.
@@ -172,6 +174,16 @@ enum UIBench {
     exec /bin/cat
     """
 
+    /// The made-up process table: a session host, and the agents (pid by the tty they run in) under it. Two agents on
+    /// one pid (a lead's old session not yet let go when the new one starts) make one process, the first tty's.
+    static func processTable(agents: [String: Int32], launched: Date) -> [Int32: ProcInfo] {
+        var procs = [ProcInfo(pid: 60_000, ppid: 1, tty: nil, comm: "vibeswitcher-hos", startTime: launched, agent: nil)]
+        for (tty, pid) in agents.sorted(by: { $0.key < $1.key }) {
+            procs.append(ProcInfo(pid: pid, ppid: 60_000, tty: tty, comm: "claude", startTime: launched, agent: .claude))
+        }
+        return Dictionary(procs.map { ($0.pid, $0) }, uniquingKeysWith: { first, _ in first })
+    }
+
     private final class Bench {
         let minutes: Double
         let onscreen: Bool
@@ -188,6 +200,8 @@ enum UIBench {
         /// The made-up agents, by the tty of the window session they run in (read on the scanner's queue).
         private let lock = NSLock()
         private var agentTTYs: [String: (pid: Int32, root: String)] = [:]
+        /// The made-up agents started so far (on the main thread).
+        private var agentsStarted = 0
         var roots: [String] { ["alpha", "beta"].map { (NSHomeDirectory() as NSString).appendingPathComponent("lead-\($0)") } }
         var transcripts: [String: String] = [:]
 
@@ -208,12 +222,7 @@ enum UIBench {
             lock.lock()
             let agents = agentTTYs
             lock.unlock()
-            let launched = started.addingTimeInterval(-7200)
-            var procs = [ProcInfo(pid: 60_000, ppid: 1, tty: nil, comm: "vibeswitcher-hos", startTime: launched, agent: nil)]
-            for (tty, agent) in agents {
-                procs.append(ProcInfo(pid: agent.pid, ppid: 60_000, tty: tty, comm: "claude", startTime: launched, agent: .claude))
-            }
-            return Dictionary(uniqueKeysWithValues: procs.map { ($0.pid, $0) })
+            return UIBench.processTable(agents: agents.mapValues(\.pid), launched: started.addingTimeInterval(-7200))
         }
 
         private func cwd(_ pid: Int32) -> String? {
@@ -285,7 +294,9 @@ enum UIBench {
                     guard let self else { return }
                     switch result {
                     case .success(let session):
-                        let pid = Int32(60_100 + index + Int.random(in: 0..<50) * 2)
+                        // A new pid for each agent started, as a real one gets.
+                        self.agentsStarted += 1
+                        let pid = Int32(60_100 + self.agentsStarted)
                         var state = HookState(agent: .claude, tty: session.tty, lastEvent: "Stop", lastEventAt: Date().timeIntervalSince1970 - 600)
                         state.agentPid = pid
                         state.sessionId = UUID().uuidString
@@ -533,8 +544,11 @@ enum UIBench {
                     let cpu = (now.cpu - start.cpu) / (now.wall - start.wall) * 100
                     UIBench.check(cpu < 2, String(format: "idle: cpu %.2f %% on average (under 2 %%)", cpu))
                     let rate = Double(now.instructions - start.instructions) / (now.wall - start.wall)
-                    UIBench.check(rate < UIBench.idleBudget, String(format: "idle: %.1f M instructions/s (under %.0f M)", rate / 1e6,
-                                                                    UIBench.idleBudget / 1e6))
+                    // Not a check here: the rate moves with the Mac's load (30 M idle, 73-79 M at load 30-90 on one
+                    // build), so scripts/ui-bench.sh -B judges it against a base build's in the same run.
+                    print(String(format: "INFO  idle: %.1f M instructions/s (%.0f M on an idle Mac's budget)", rate / 1e6,
+                                 UIBench.idleBudget / 1e6))
+                    print(String(format: "RESULT idle-instructions-per-second %.0f", rate))
                     let first = samples[min(1, samples.count - 1)]
                     let growth = (Double(now.rss) - Double(first.rss)) / Double(first.rss) * 100
                     UIBench.check(growth <= 10, String(format: "idle: rss %.0f → %.0f MB after the first minute (%+.1f %%, at most +10 %%)",
