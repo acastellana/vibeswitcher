@@ -6,7 +6,12 @@ import VibeCore
 final class WindowModel: ObservableObject {
     @Published private(set) var sections: [WindowSection] = []
     @Published var selectedID: String? {
-        didSet { if selectedID != oldValue { UserDefaults.standard.set(selectedID, forKey: Self.selectionKey) } }
+        didSet {
+            guard selectedID != oldValue else { return }
+            UserDefaults.standard.set(selectedID, forKey: Self.selectionKey)
+            // An ended session chosen from Home, the palette or a filter shows in the sidebar: its fold opens.
+            if !endedOpen, let selectedID, foldsAway(selectedID) { endedOpen = true }
+        }
     }
     @Published var grouping: WindowGrouping {
         didSet { UserDefaults.standard.set(grouping.rawValue, forKey: Self.groupingKey) }
@@ -60,6 +65,12 @@ final class WindowModel: ObservableObject {
     /// "Ended (n)" fold's rows, filtered; a team member stays under its lead.
     func folded(_ arranged: LeadTeams.Arranged) -> (sections: [WindowSection], ended: [WindowRow]) {
         WindowGroups.foldEnded(WindowGroups.filter(arranged.sections, query: filter), keep: arranged.nested)
+    }
+
+    /// The row is in the sidebar's "Ended (n)" fold (not under an open lead), whatever the filter.
+    func foldsAway(_ id: String) -> Bool {
+        let arranged = self.arranged
+        return WindowGroups.foldEnded(arranged.sections, keep: arranged.nested).ended.contains { $0.id == id }
     }
 
     /// Every ended row but a lead's team's, whatever the filter (Home's fold).

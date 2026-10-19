@@ -75,6 +75,44 @@ struct EndedFoldTests {
         #expect(!again.endedOpen && again.homeEndedOpen)
     }
 
+    /// Choosing an ended session while the sidebar's fold is closed (from Home, the palette, ⌘-navigation or a filter)
+    /// opens the fold, so the selected row shows; choosing a live one leaves it as it is.
+    @Test func selectingAnEndedSessionOpensTheFold() {
+        let (model, ended, live) = Self.model()
+        defer { UserDefaults.standard.removeObject(forKey: WindowModel.endedOpenKey) }
+        model.selectedID = model.rows.first?.id
+        #expect(!model.endedOpen)
+        // Home's row, or the palette: by id.
+        model.selectedID = "host:\(ended[1].id)"
+        #expect(model.endedOpen)
+        #expect(model.rows.contains { $0.id == model.selectedID })
+        #expect(UserDefaults.standard.bool(forKey: WindowModel.endedOpenKey))
+
+        // A filter that leaves only ended rows, then ⌘1.
+        model.endedOpen = false
+        model.selectedID = "tty:\(live[0].tty)"
+        #expect(!model.endedOpen)
+        model.filter = "docs"
+        model.select(hostID: ended[2].id)
+        #expect(model.endedOpen)
+        #expect(model.rows.map(\.id) == ["host:\(ended[2].id)"])
+        model.endedOpen = false
+        model.selectedID = nil
+        model.select(index: 0)
+        #expect(model.selectedID == nil)  // the fold hides it: nothing to choose
+        model.endedOpen = true
+        model.selectedID = nil
+        model.select(index: 0)
+        #expect(model.selectedID == "host:\(ended[2].id)" && model.endedOpen)
+
+        // Moving through the list from a live row: an open fold stays open, a closed one is skipped.
+        model.filter = ""
+        model.endedOpen = false
+        model.selectedID = "tty:\(live[0].tty)"
+        model.move(by: 1)
+        #expect(model.selectedRow?.end == nil && !model.endedOpen)
+    }
+
     /// A team's ended members stay with their lead (its Team view and history rule), not in Home's fold.
     @Test func aLeadsTeamStaysOutOfHomesFold() {
         let model = WindowModel()
