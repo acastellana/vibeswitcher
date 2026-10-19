@@ -108,6 +108,41 @@ struct SessionStoreTests {
         #expect(store.tableReadAt == read + 120)
     }
 
+    /// The witness tells a window session's agent as quit only from a table read that could tell what runs on its
+    /// terminal: while its process there can't be told (mid-exec on a busy Mac), it's unknown, not quit.
+    @Test func anAgentQuitNeedsATableThatToldItsTerminal() async throws {
+        AppStatus.enabled = false
+        try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: stateDir) }
+        let clock = Clock()
+        let started = clock.now
+        let readable = Readable()
+        let shell = ProcInfo(pid: 980, ppid: 1, tty: "ttys980", comm: "zsh", startTime: started, agent: nil)
+        let midExec = ProcInfo(pid: 981, ppid: 980, tty: "ttys980", comm: "2.1.302", startTime: started, agent: nil,
+                               identityUnknown: true)
+        let dir = stateDir
+        let store = SessionStore(scanner: SessionScanner(
+            processes: { [980: shell] .merging(readable.value ? [:] : [981: midExec]) { a, _ in a } }, stateDir: { dir },
+            cwd: { _ in "/tmp/store-tests" }, arguments: { _ in [] }))
+        store.clock = { clock.now }
+        let window = HostSession(id: UUID(), tty: "ttys980", childPID: 980, cwd: "/tmp/store-tests", command: "claude", label: "w",
+                                 agent: "claude", title: "w", startedAt: started, cols: 80, rows: 24, exit: nil)
+        #expect(!store.agentQuit(window))
+        readable.value = false
+        clock.advance(120)
+        try await refreshAndSettle(store)
+        #expect(store.undecided.contains("ttys980"))
+        #expect(!store.agentQuit(window))
+        // Only that terminal is in question.
+        var elsewhere = window
+        elsewhere.tty = "ttys981"
+        #expect(store.agentQuit(elsewhere))
+        readable.value = true
+        try await refreshAndSettle(store)
+        #expect(store.undecided == Undecided())
+        #expect(store.agentQuit(window))
+    }
+
     private final class Readable: @unchecked Sendable {
         private let lock = NSLock()
         private var readable = true

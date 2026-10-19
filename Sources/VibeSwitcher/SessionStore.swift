@@ -13,6 +13,8 @@ final class SessionStore: ObservableObject {
     /// When the process table `sessions` come from was read (see `SessionScanner.readAt`): a session missing from them
     /// had no agent then. nil until a table was read.
     private(set) var tableReadAt: Date?
+    /// The terminals that table couldn't tell an agent on or not (see `SessionScanner.undecided`).
+    private(set) var undecided = Undecided()
     /// Called when a session newly turns red (needs input) or green (done, unseen).
     var onAttention: ((Session) -> Void)?
     /// Called once per episode when a session has waited on you, or shown no progress, for too long.
@@ -183,6 +185,7 @@ final class SessionStore: ObservableObject {
             let now = clock()
             let raw = self.scanner.scan(now: now)
             let readAt = self.scanner.readAt
+            let undecided = self.scanner.undecided
             let transcripts = Self.transcripts(for: raw)
             // AppleScript is the expensive part; query at most every `terminalInterval` unless forced.
             let inTerminal = Set(raw.filter(\.inTerminalApp).map(\.tty))
@@ -199,6 +202,7 @@ final class SessionStore: ObservableObject {
                     AppStatus.write(sessions: self.sessions, terminalAccess: access)
                 }
                 self.tableReadAt = readAt
+                self.undecided = undecided
                 self.apply(raw: raw, tabs: tabs, hosted: hosted, background: background, transcripts: transcripts, now: now)
                 self.scansApplied += 1
                 self.scanning = false
@@ -212,11 +216,20 @@ final class SessionStore: ObservableObject {
         }
     }
 
+    /// A window session started for an agent that the sessions don't have: its agent quit (`HostSession.agentQuit`) as of
+    /// when their table was read, a minute on, and only from a table that could tell what runs on its terminal. While
+    /// the table can't be read, or its process there couldn't be told (mid-exec on a busy Mac), it's unknown, not ended.
+    func agentQuit(_ info: HostSession) -> Bool {
+        guard let tableReadAt, !undecided.contains(info.tty) else { return false }
+        return info.agentQuit(now: tableReadAt)
+    }
+
     /// Synchronous scan on the calling (main) thread, used by `--snapshot`.
     func refreshNow() {
         let now = Date()
         let raw = scanner.scan(now: now)
         tableReadAt = scanner.readAt
+        undecided = scanner.undecided
         let quiet = Set(raw.filter { $0.agent == .claude }.map(\.tty))
         var terminal = TerminalPoll<TerminalTab>()
         terminalAccess = terminal.poll(now: now, interval: 0, terminalTTYs: Set(raw.filter(\.inTerminalApp).map(\.tty)),

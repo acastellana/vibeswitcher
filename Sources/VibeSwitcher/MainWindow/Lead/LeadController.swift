@@ -869,9 +869,9 @@ final class LeadController: ObservableObject {
                 }
             }
             // No agent in the scan a minute on: "agent ended · shell", as good as ended. A minute on as of when the scan's
-            // process table was read: while it can't be (a loaded Mac), its sessions are that table's, and one started
-            // since is unknown, not ended.
-            let quit = session == nil && store.tableReadAt.map { info.agentQuit(now: $0) } == true
+            // process table was read, and from a table that could tell what runs on its terminal: while it can't be read
+            // (a loaded Mac), or its process there couldn't be told (mid-exec), it's unknown, not ended.
+            let quit = session == nil && store.agentQuit(info)
             seen[id] = LeadWitness.Seen(live: info.isLive, exit: info.exit?.status, cause: info.exit?.cause, status: session?.status,
                                         since: session?.statusSince, detail: session?.detail,
                                         agentQuit: quit, apiError: apiError?.text,
