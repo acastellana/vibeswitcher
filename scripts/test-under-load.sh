@@ -12,7 +12,8 @@
 # The busy loops' pids are recorded (--pid-file) and killed by pid on any exit, Ctrl-C too; never by name.
 #
 # Each run gets its own empty TMPDIR (tests put their scratch files under it, see `scratchRoot` in the tests'
-# TestSupport.swift) and must leave it empty; what's left is named by prefix. Run 1's is long (about 130 characters, as
+# TestSupport.swift) and must leave it empty; what's left is named by prefix. Each run gets its own empty home too
+# (HOME and CFFIXED_USER_HOME), so nothing a test writes under ~ (~/.vibeswitcher, ~/.claude) reaches yours. Run 1's is long (about 130 characters, as
 # a Claude session's scratchpad is): the suite passes whatever TMPDIR is, sockets and names included. The runs start
 # the test bundle the way `swift test` does (swiftpm-testing-helper), directly: three `swift test` would take turns on
 # SwiftPM's lock on .build.
@@ -280,6 +281,11 @@ tmpdir() {
     echo "$dir"
 }
 
+# Run N's home (HOME and CFFIXED_USER_HOME): an empty folder of its own, gone with the scratch.
+home() {
+    echo "$scratch/home-$1"
+}
+
 started=$(date +%s)
 failed=0
 if [[ ${#command[@]} -gt 0 ]]; then
@@ -292,10 +298,10 @@ if [[ ${#command[@]} -gt 0 ]]; then
     echo "${command[*]} exited $failed"
 else
     for run in $(seq 1 "$runs"); do
-        mkdir -p "$(tmpdir "$run")"
+        mkdir -p "$(tmpdir "$run")" "$(home "$run")"
         args=(--test-bundle-path "$bundle")
         [[ -n $filter ]] && args+=(--filter "$filter")
-        TMPDIR="$(tmpdir "$run")/" "$helper" "${args[@]}" "$bundle" --testing-library swift-testing > "$logs/run-$run.log" 2>&1 &
+        HOME="$(home "$run")" CFFIXED_USER_HOME="$(home "$run")" TMPDIR="$(tmpdir "$run")/" "$helper" "${args[@]}" "$bundle" --testing-library swift-testing > "$logs/run-$run.log" 2>&1 &
         tests+=($!)
         echo $! >> "$scratch/pids"
     done

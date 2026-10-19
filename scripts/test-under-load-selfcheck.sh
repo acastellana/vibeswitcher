@@ -1,8 +1,8 @@
 #!/bin/bash
 # Checks that scripts/test-under-load.sh leaves no load behind: its busy loops (2, for a few seconds) are gone after a
-# failing command, after Ctrl-C, after its owner dies and after it's killed outright; and that it refuses more than
-# 2 × ncpu, an already loaded Mac, low memory and a session with no live owner. Like the harness, it won't start on a
-# loaded Mac: run it again once `uptime` is under 2 × ncpu.
+# failing command, after Ctrl-C, after its owner dies and after it's killed outright; that it refuses more than
+# 2 × ncpu, an already loaded Mac, low memory and a session with no live owner; and that a run's home is its own. Like
+# the harness, it won't start on a loaded Mac: run it again once `uptime` is under 2 × ncpu.
 #
 # scripts/test-under-load-selfcheck.sh
 set -uo pipefail
@@ -119,6 +119,15 @@ else
     check "the harness started its load for SIGKILL" false
     cat "$work/kill.out"
 fi
+
+# A run's home is its own (HOME and CFFIXED_USER_HOME under the harness's scratch), never yours: one test's run says
+# where it found itself (LoadHarnessTests.aRunsHomeIsTheOneItsEnvironmentNames).
+TEST_UNDER_LOAD_HOME_REPORT="$work/home.txt" $harness --load 2 -r 1 -f aRunsHomeIsTheOneItsEnvironmentNames > "$work/home.out" 2>&1
+status=$?
+report=$(cat "$work/home.txt" 2>/dev/null)
+check "a run's HOME and CFFIXED_USER_HOME are its own, under the harness's scratch" \
+    "[[ $status -eq 0 && \$report =~ ^home=(/private)?/tmp/vs-load\.[^/]+/home-1\ HOME=(/private)?/tmp/vs-load\.[^/]+/home-1\ CFFIXED_USER_HOME=(/private)?/tmp/vs-load\.[^/]+/home-1$ ]]"
+[[ $status -eq 0 ]] || cat "$work/home.out"
 
 if [[ $failures -eq 0 ]]; then echo "all checks passed"; else echo "$failures checks failed"; fi
 exit $((failures > 0))

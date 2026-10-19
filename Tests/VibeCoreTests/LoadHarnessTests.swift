@@ -81,6 +81,17 @@ import Testing
         #expect(!FileManager.default.fileExists(atPath: pids.path))
     }
 
+    /// The test process's home is the one its environment names. Under the harness (each run on a home of its own),
+    /// it says where that was in the file TEST_UNDER_LOAD_HOME_REPORT names, for scripts/test-under-load-selfcheck.sh.
+    @Test func aRunsHomeIsTheOneItsEnvironmentNames() throws {
+        let environment = ProcessInfo.processInfo.environment
+        if let fixed = environment["CFFIXED_USER_HOME"] { #expect(NSHomeDirectory() == fixed) }
+        if let report = environment["TEST_UNDER_LOAD_HOME_REPORT"] {
+            let text = "home=\(NSHomeDirectory()) HOME=\(environment["HOME"] ?? "") CFFIXED_USER_HOME=\(environment["CFFIXED_USER_HOME"] ?? "")"
+            try text.write(toFile: report, atomically: true, encoding: .utf8)
+        }
+    }
+
     @Test func workersAndVerifiersRunLoadTestsOnlyThroughTheHarness() {
         let task = LeadTask(slug: "t", title: "T", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))
         for prompt in [LeadPrompts.worker(task: task, root: "/r", workflow: LeadWorkflow()),
