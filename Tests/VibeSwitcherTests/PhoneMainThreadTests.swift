@@ -194,15 +194,17 @@ struct PhoneMainThreadTests {
     }
 }
 
-/// No `DispatchQueue.main.sync` on the phone's paths wraps a Terminal read, a host call or a process: the main thread
-/// is asked synchronously only for the store's state, each such hop listed here with why. A new one fails until it's
-/// added; one that reads a screen, types or runs anything fails whatever the list says.
+/// No `DispatchQueue.main.sync` on the phone's paths, or on bringing Terminal or a host app forward, wraps a Terminal
+/// read, a host call or a process: the main thread is asked synchronously only for the store's state, each such hop
+/// listed here with why. A new one fails until it's added; one that reads a screen, types, activates an app or runs
+/// anything fails whatever the list says.
 struct PhoneMainSyncLintTests {
     static let sources = URL(fileURLWithPath: #filePath)
         .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         .appendingPathComponent("Sources/VibeSwitcher")
-    /// The phone's read and input paths.
-    static let files = ["PhoneAccess.swift", "RemoteInput.swift", "RemoteServer.swift"]
+    /// The phone's read and input paths; Terminal's bridge and `HostApp` (bringToFront), and the app's open of a
+    /// session (`HostApp.activate`), which have none.
+    static let files = ["PhoneAccess.swift", "RemoteInput.swift", "RemoteServer.swift", "TerminalBridge.swift", "AppDelegate.swift"]
 
     /// Each allowed hop, by what its block says, how many there are, and why.
     static let allowed: [(body: String, count: Int, why: String)] = [
@@ -213,7 +215,8 @@ struct PhoneMainSyncLintTests {
 
     /// What a main-thread hop may never wrap: reading a screen, the session host, typing, running something, waiting.
     static let forbidden = ["TerminalBridge", "readTerminalScreen", "readTab", "hostClient", "RemoteInput.send", "Process(",
-                            "osascript", "AppleScript", "screens(", "history(", "usleep", "sleep(", ".wait("]
+                            "osascript", "AppleScript", "screens(", "history(", "usleep", "sleep(", ".wait(",
+                            "HostApp", "bringToFront", "activate(", "openApplication"]
 
     /// The block of each `DispatchQueue.main.sync` in `text` (comments left out), braces balanced.
     static func mainSyncBlocks(in text: String) -> [String] {
@@ -237,7 +240,10 @@ struct PhoneMainSyncLintTests {
         var blocks: [String] = []
         for file in Self.files {
             let url = Self.sources.appendingPathComponent(file)
-            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            guard FileManager.default.fileExists(atPath: url.path) else {
+                Issue.record("\(file) is gone: the lint no longer covers it (follow it to its new name)")
+                continue
+            }
             blocks += Self.mainSyncBlocks(in: try String(contentsOf: url, encoding: .utf8))
         }
         for block in blocks {
@@ -263,5 +269,16 @@ struct PhoneMainSyncLintTests {
         #expect(blocks.count == 2)
         #expect(Self.forbidden.contains(where: blocks[0].contains))
         #expect(!Self.forbidden.contains(where: blocks[1].contains))
+    }
+
+    @Test func theLintFindsTheActivationsThatHeldTheWindow() {
+        // bringToFrontAndWait's and AppDelegate.open's old hops: caught.
+        let old = """
+            DispatchQueue.main.sync { bringToFront(app) }
+            DispatchQueue.main.sync { if !HostApp.activate(forPID: session.pid) { result = "failed" } }
+            """
+        let blocks = Self.mainSyncBlocks(in: old)
+        #expect(blocks.count == 2)
+        #expect(blocks.allSatisfy { Self.forbidden.contains(where: $0.contains) })
     }
 }

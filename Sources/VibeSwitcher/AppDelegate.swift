@@ -807,7 +807,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 FocusLog.finish(attempt)
             } else {
                 result = "host-app"
-                DispatchQueue.main.sync { if !HostApp.activate(forPID: session.pid) { result = "failed" } }
+                if !HostApp.activate(forPID: session.pid) { result = "failed" }
             }
             DispatchQueue.main.async {
                 AppStatus.extras["lastOpen"] = "\(session.tty) \(result) \(ISO8601DateFormatter().string(from: Date()))"

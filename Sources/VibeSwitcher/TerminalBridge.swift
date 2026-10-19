@@ -591,9 +591,13 @@ final class AppleScriptRunner: @unchecked Sendable {
 /// macOS 14+ ignores activation requests from a background app (which a menu bar app nearly always is),
 /// including AppleScript's `activate`. Opening the app through Launch Services counts as user intent and
 /// is honored, so that is the reliable path; yielding our own activation first helps when we are active.
+///
+/// Nothing here waits on the main thread: it is asked (async) only to yield our activation, and the requests to the
+/// app and Launch Services, which a slow or hung host can hold up, run on `requests` after it.
 enum HostApp {
-    static func bringToFront(_ app: NSRunningApplication) {
-        NSApp.yieldActivation(to: app)
+    /// The requests that bring `app` forward: the app's own activation, then the Launch Services open. Run on
+    /// `requests`, never the main thread. Replaceable for tests.
+    nonisolated(unsafe) static var request: (NSRunningApplication) -> Void = { app in
         app.activate(from: NSRunningApplication.current, options: [])
         guard let url = app.bundleURL else { return }
         let configuration = NSWorkspace.OpenConfiguration()
@@ -601,18 +605,29 @@ enum HostApp {
         configuration.addsToRecentItems = false
         NSWorkspace.shared.openApplication(at: url, configuration: configuration)
     }
+    private static let requests = DispatchQueue(label: "vibeswitcher.host-app.activate", qos: .utility, attributes: .concurrent)
+
+    /// Returns at once from any thread: the main thread yields our activation to `app` (UI state, async), then
+    /// `request` runs on `requests`.
+    static func bringToFront(_ app: NSRunningApplication) {
+        DispatchQueue.main.async {
+            NSApp?.yieldActivation(to: app)
+            let request = Self.request
+            requests.async { request(app) }
+        }
+    }
 
     /// Off the main thread: activates `app` and waits (up to `timeout`) until it is really frontmost,
     /// retrying the Launch Services open once if the first request was swallowed.
     static func bringToFrontAndWait(_ app: NSRunningApplication, timeout: TimeInterval = 1.5) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         var retried = false
-        DispatchQueue.main.sync { bringToFront(app) }
+        bringToFront(app)
         while Date() < deadline {
             if NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier { return true }
             if !retried, deadline.timeIntervalSinceNow < timeout / 2 {
                 retried = true
-                DispatchQueue.main.sync { bringToFront(app) }
+                bringToFront(app)
             }
             Thread.sleep(forTimeInterval: 0.03)
         }
@@ -620,6 +635,7 @@ enum HostApp {
     }
 
     /// For sessions that are not in Terminal.app (iTerm, VS Code, …): activate whichever GUI app hosts them.
+    /// Any thread (off the main one: it walks the process table); returns once the app is found, not activated.
     static func activate(forPID pid: Int32) -> Bool {
         var current = pid
         for _ in 0..<32 {
