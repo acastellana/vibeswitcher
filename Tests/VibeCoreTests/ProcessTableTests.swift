@@ -46,16 +46,28 @@ struct ProcessTableTests {
         #expect(ProcessTable.trySnapshot().map { $0[pid] == nil } == true)
     }
 
-    /// Every core busy twice over (unless the Mac already is), a snapshot takes well under a second.
+    /// Every core busy twice over (unless the Mac already is), a snapshot stays about as quick as on this Mac without
+    /// them: the median of five within 20 times the fastest of three taken before, and none near a hang (the whole-table
+    /// sysctl it replaced stalled 10 to 80 s). Relative, not a bare bound: a loaded Mac stalls any one read now and then
+    /// (0.741 s once at load 49), while a regression makes every one slow.
     @Test func aSnapshotIsQuickOnABusyMac() throws {
+        let cores = ProcessInfo.processInfo.activeProcessorCount
+        let timed = { () -> TimeInterval in
+            let started = Date()
+            let table = ProcessTable.trySnapshot()
+            let took = Date().timeIntervalSince(started)
+            #expect(table.map { $0.count > 2 * cores } == true)
+            return took
+        }
+        let quiet = (0..<3).map { _ in timed() }
         var burners: [Process] = []
         defer {
             for burner in burners where burner.isRunning { kill(burner.processIdentifier, SIGKILL) }
             for burner in burners { burner.waitUntilExit() }
         }
-        let cores = ProcessInfo.processInfo.activeProcessorCount
         var load = [Double](repeating: 0, count: 3)
         getloadavg(&load, 3)
+        // As scripts/test-under-load.sh would: 2 × ncpu at most, only on a Mac not already that loaded, killed by pid.
         if load[0] < Double(2 * cores) {
             for _ in 0..<(2 * cores) {
                 let burner = Process()
@@ -65,16 +77,13 @@ struct ProcessTableTests {
                 burners.append(burner)
             }
         }
-        var times: [TimeInterval] = []
-        for _ in 0..<5 {
-            let started = Date()
-            let table = ProcessTable.trySnapshot()
-            times.append(Date().timeIntervalSince(started))
-            #expect(table.map { $0.count > 2 * cores } == true)
-        }
-        let took = times.map { String(format: "%.3f s", $0) }
-        print("ProcessTableTests: load \(load[0]) on \(cores) cores, \(burners.count) burners added; snapshots took \(took)")
-        #expect(times.allSatisfy { $0 < 0.5 }, "snapshots took \(took)")
+        let times = (0..<5).map { _ in timed() }
+        let fastest = try #require(quiet.min())
+        let median = times.sorted()[times.count / 2]
+        let shown = { (times: [TimeInterval]) in times.map { String(format: "%.3f s", $0) } }
+        print("ProcessTableTests: load \(load[0]) on \(cores) cores, \(burners.count) burners added; snapshots took \(shown(quiet)) before, \(shown(times)) with them")
+        #expect(times.allSatisfy { $0 < 5 }, "snapshots took \(shown(times))")
+        #expect(median <= 20 * fastest, "median \(shown([median])[0]), fastest before the burners \(shown([fastest])[0])")
     }
 
     /// A read past its time limit leaves its caller at the limit, told nil; while it's still stuck in the kernel the
