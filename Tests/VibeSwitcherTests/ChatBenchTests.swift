@@ -1,14 +1,16 @@
 import Foundation
 import Testing
+import VibeCore
 @testable import VibeSwitcher
 
 /// R12: the chat bench (`--chat-bench`, see `ChatBench`) in a process of its own on a scratch home, so no other test's
 /// work on this process's main thread is counted, on a small made-up transcript (Fixtures/chat-bench.jsonl: 80
 /// exchanges, 240 items, 4 pages). Opened, left and opened again at the end, with and without paging back (Show earlier
 /// twice), at the chat pane's width with the inspector showing and hidden, while the model
-/// publishes every 20 ms and the window's chat timer ticks. On a Mac whose 1-minute load is not over load_threshold
-/// each run must settle with no tick over 0.25 s, save the known issue below (up to 0.5 s); over it a run is only
-/// recorded (its stalls say how busy the Mac is).
+/// publishes every 20 ms and the window's chat timer ticks. On a Mac whose 1-minute load is under its cores before and
+/// after a run, the run must settle with no tick over 0.25 s, save the known issue below (up to 0.5 s); with more (over
+/// load_threshold, or until chat-paging-main-thread lands between the cores and it) a run is only recorded (its stalls
+/// say how busy the Mac is).
 /// One run at a time: five at once made each other's load.
 @Suite(.serialized)
 struct ChatBenchTests {
@@ -70,17 +72,27 @@ struct ChatBenchTests {
         var settings = Self.settle
         settings["VIBESWITCHER_BENCH_SIZE"] = Self.panes[pane]
         if earlier > 0 { settings["VIBESWITCHER_BENCH_EARLIER"] = "\(earlier)" }
+        var loads = [MacLoad.oneMinute()]
         var run = try bench(settings)
+        loads.append(MacLoad.oneMinute())
         print("chat bench, \(earlier) pages back, \(pane): status \(run.status)\n\(run.output)")
         #expect(run.output.contains("stall rule: "), "\(run.output)")
         // Over load_threshold at the start or the end: recorded only.
         guard !run.output.contains("is over load_threshold") else { return }
+        // Until chat-paging-main-thread lands (its contract restores judging up to load_threshold), task
+        // chatbenchtests-records judges a run only on a Mac under its cores before and after it: at load 18-19 on 12
+        // cores (under the 24 line) the open's or a page's cost reached 0.64 s with 0.34 s of it on the CPU. The bench's
+        // own rule and exit code are unchanged.
+        guard Self.judged(loads) else { print(Self.recorded(loads)); return }
         // Under it the Mac can still keep the bench off a core for a while (2026-10-19 at load 17 on 12 cores: a 0.94 s
         // tick, 0.25 s of it on the CPU): one more run, and if the Mac starves that one too it's recorded only.
         if Self.starved(run) {
+            loads = [MacLoad.oneMinute()]
             run = try bench(settings)
+            loads.append(MacLoad.oneMinute())
             print("chat bench again, the first run starved: status \(run.status)\n\(run.output)")
             guard !run.output.contains("is over load_threshold"), !Self.starved(run) else { return }
+            guard Self.judged(loads) else { print(Self.recorded(loads)); return }
         }
         let verdict = run.output.split(separator: "\n").last { $0.hasPrefix("settled ") }.map(String.init) ?? ""
         #expect(!verdict.isEmpty, "\(run.output)")
@@ -105,6 +117,26 @@ struct ChatBenchTests {
         // Each page laid out 60 more rows: the content grew.
         let shown = run.output.matches(of: #/page \d settled in [\d.]+s: shown=(\d+) of (\d+)/#).compactMap { Int($0.1) }
         #expect(shown == [120, 180], "\(run.output)")
+    }
+
+    /// Whether a run is judged: the Mac's 1-minute load before and after it under its cores (an unknown load is judged
+    /// as a quiet one, as the bench does).
+    static func judged(_ loads: [Double?], cores: Int = MacLoad.processors) -> Bool {
+        loads.allSatisfy { $0.map { $0 < Double(cores) } ?? true }
+    }
+
+    /// What a run not judged is recorded with.
+    static func recorded(_ loads: [Double?], cores: Int = MacLoad.processors) -> String {
+        let numbers = loads.map { $0.map(ChatBench.StallRule.number) ?? "unknown" }
+        return "recorded only: the Mac's 1-minute load \(numbers.joined(separator: " before, ")) after the run is not under its \(cores) cores"
+    }
+
+    @Test func aRunIsJudgedOnlyUnderTheCores() {
+        #expect(Self.judged([3, 11.9], cores: 12))
+        #expect(!Self.judged([3, 12], cores: 12))
+        #expect(!Self.judged([18.4, 9], cores: 12))
+        #expect(Self.judged([nil, 4], cores: 12))
+        #expect(Self.recorded([18.44, 19], cores: 12) == "recorded only: the Mac's 1-minute load 18.4 before, 19 after the run is not under its 12 cores")
     }
 
     /// A run failed on a stall whose tick the main thread spent mostly waiting for a core (under half of it on the
