@@ -17,6 +17,8 @@ struct ChatContainer: View {
     let showTerminal: () -> Void
     /// Esc in the terminal: closes the slash-command menu.
     var dismissMenu: () -> Void = {}
+    /// The answer card's keys: the composer hands it 1–9, ↩ and ↑ / ↓ while it's empty. Held, not observed.
+    @State private var cardKeys = AnswerCardKeys()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,7 +38,8 @@ struct ChatContainer: View {
                      inTerminal: terminal.map { session in { actions.openInTerminal(session) } },
                      leadQuestions: lead?.board.questionStack() ?? [], leadNotices: leads.answerNotices,
                      answerLead: { question, text in if let lead { leads.answer(question, root: lead.root, with: text) } },
-                     showTerminal: showTerminal, choose: choose, moveTab: moveTab, resend: { _ = composer.send($0) }, dismissMenu: dismissMenu)
+                     showTerminal: showTerminal, choose: choose, moveTab: moveTab, resend: { _ = composer.send($0) }, dismissMenu: dismissMenu,
+                     cardKeys: cardKeys)
                 .id(chat.path ?? "")
                 .environment(\.chatFolder, model.selectedRow?.cwd)
                 .environment(\.chatRunner, chat.runner)
@@ -51,7 +54,8 @@ struct ChatContainer: View {
                                      let sent = composer.send(text)
                                      if sent { chat.scrollToBottom() }
                                      return sent
-                                 }, steer: composer.steer, stop: composer.stop, cycleMode: composer.cycleMode))
+                                 }, steer: composer.steer, stop: composer.stop, cycleMode: composer.cycleMode),
+                                 cardKeys: cardKeys)
                     // A text box of its own per session: nothing typed for one can end up in another.
                     .id(row.id)
                 } else if let session = row.session, session.inTerminalApp, session.agent == .claude, session.status == .working {
@@ -92,6 +96,8 @@ struct ChatView: View {
     let resend: (String) -> Void
     /// Esc in the terminal: closes the slash-command menu.
     var dismissMenu: () -> Void = {}
+    /// The answer card's highlight and keys, shared with the composer.
+    var cardKeys = AnswerCardKeys()
     /// Whether the end is on screen. Held, not observed: scrolling changes it, and only the Latest button needs
     /// redrawing for that.
     @State private var bottom = BottomTracker()
@@ -197,7 +203,8 @@ struct ChatView: View {
                         if live || inTerminal != nil, let menu = chat.menu {
                             AnswerCard(menu: menu, pending: chat.log.pendingQuestions, agent: row?.session?.agent.displayName ?? "The agent",
                                        notice: chat.answerNotice, answering: chat.answering, choose: { choose(menu, $0, $1) },
-                                       moveTab: moveTab, showTerminal: showTerminal, dismiss: dismissMenu, openInTerminal: inTerminal)
+                                       moveTab: moveTab, showTerminal: showTerminal, dismiss: dismissMenu, openInTerminal: inTerminal,
+                                       keys: cardKeys)
                         } else if let row {
                             LiveStateView(row: row, showTerminal: showTerminal, openInTerminal: inTerminal, notice: inTerminal == nil ? nil : chat.answerNotice)
                         }
@@ -584,8 +591,15 @@ struct AnswerCard: View {
     /// A session in a Terminal tab: opens it there. An answer is asked about first, in one line: it brings
     /// Terminal to the front to type.
     var openInTerminal: (() -> Void)?
+    /// The highlighted option and the keys handed to the card (by the composer, or the card's own in a Terminal session).
+    @ObservedObject var keys: AnswerCardKeys
     @State private var otherText = ""
     @State private var typingOther = false
+    @State private var hovered: Int?
+    /// A Terminal session has no composer: the card takes the keys itself.
+    @FocusState private var cardFocused: Bool
+    @FocusState private var otherFocused: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// The answer waiting for your go-ahead (Terminal sessions): option index, the free text typed for it.
     @State private var confirming: Choice?
 
@@ -596,7 +610,8 @@ struct AnswerCard: View {
 
     init(menu: ScreenMenu, pending: [ChatQuestion]?, agent: String, notice: String?, answering: Bool,
          choose: @escaping (Int, String?) -> Void, moveTab: @escaping (Int) -> Void, showTerminal: @escaping () -> Void,
-         dismiss: @escaping () -> Void, openInTerminal: (() -> Void)? = nil, confirming: Choice? = nil) {
+         dismiss: @escaping () -> Void, openInTerminal: (() -> Void)? = nil, keys: AnswerCardKeys = AnswerCardKeys(),
+         confirming: Choice? = nil) {
         self.menu = menu
         self.pending = pending
         self.agent = agent
@@ -607,7 +622,34 @@ struct AnswerCard: View {
         self.showTerminal = showTerminal
         self.dismiss = dismiss
         self.openInTerminal = openInTerminal
+        self.keys = keys
         _confirming = State(initialValue: confirming)
+    }
+
+    /// A row chosen by key: as its click (the free-text row opens its field). Not while the card waits.
+    private func act(_ index: Int, _ content: AnswerCardContent) {
+        guard !answering, confirming == nil else { return }
+        switch AnswerKeys.pick(index, in: content) {
+        case .freeText:
+            otherText = content.otherText ?? ""
+            typingOther = true
+            DispatchQueue.main.async { otherFocused = true }
+        case .answer(let index):
+            pick(index, nil)
+        }
+    }
+
+    /// The card's own keys (a Terminal session): ↩, ↑, ↓ and 1–9, unmodified.
+    private static func key(_ press: KeyPress) -> AnswerKeys.Key? {
+        guard press.modifiers.subtracting([.numericPad, .shift, .capsLock]).isEmpty else { return nil }
+        switch press.key {
+        case .return: return press.modifiers.contains(.shift) ? nil : .enter
+        case .upArrow: return .up
+        case .downArrow: return .down
+        default:
+            guard press.characters.count == 1, let n = Int(press.characters), (1...9).contains(n) else { return nil }
+            return .digit(n)
+        }
     }
 
     /// A click on the card: answered now in a window session; in a Terminal one, once you confirm.
@@ -662,26 +704,35 @@ struct AnswerCard: View {
             }
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(content.options, id: \.index) { option in
+                    let count = content.options.count
                     switch option.kind {
                     case .other:
-                        otherRow(option, typed: content.otherText)
+                        otherRow(option, typed: content.otherText,
+                                 spoken: AnswerKeys.spoken(option.index, of: count, label: content.otherText.map { "Other: \($0)" } ?? "Other"))
+                            .padding(.horizontal, 4).padding(.vertical, 2)
+                            .overlay(ring(option.index, cornerRadius: 6))
                     case .chat:
                         Button { pick(option.index, nil) } label: {
                             Label("Discuss it instead of answering", systemImage: "bubble.left.and.bubble.right").font(.system(size: 12))
                         }
-                        .buttonStyle(.borderless).padding(.top, 2)
+                        .buttonStyle(.borderless).padding(.horizontal, 4).padding(.vertical, 2)
+                        .overlay(ring(option.index, cornerRadius: 6)).padding(.top, 2)
+                        .accessibilityLabel(AnswerKeys.spoken(option.index, of: count, label: "Discuss it instead of answering"))
                     case .plain:
-                        optionButton(option, selected: option.index == content.selected)
+                        optionButton(option, of: count, selected: option.index == content.selected)
                     }
                 }
                 if let submit = content.submit {
                     Button { pick(content.options.count, nil) } label: {
                         Text(submit).font(.system(size: 12.5, weight: .semibold)).frame(minWidth: 70)
                     }
-                    .buttonStyle(.borderedProminent).controlSize(.small).padding(.top, 2)
+                    .buttonStyle(.borderedProminent).controlSize(.small)
+                    .padding(2).overlay(ring(content.options.count, cornerRadius: 8)).padding(.top, 2)
                     .help(submit == "Next" ? "On to the next question" : "Send these answers")
+                    .accessibilityAddTraits(keys.highlight == content.options.count ? .isSelected : [])
                 }
             }
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: keys.highlight)
             .disabled(answering || confirming != nil)
             .opacity(answering || confirming != nil ? 0.55 : 1)
             if let confirming {
@@ -705,11 +756,38 @@ struct AnswerCard: View {
         .padding(16)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.accentColor.opacity(0.45)))
+        .focusable(openInTerminal != nil)
+        .focused($cardFocused)
+        .focusEffectDisabled()
+        .onKeyPress(phases: .down) { press in
+            guard openInTerminal != nil, !typingOther, let key = Self.key(press) else { return .ignored }
+            return keys.take(key, composer: "", content: content, busy: answering || confirming != nil) ? .handled : .ignored
+        }
+        .onAppear {
+            keys.highlight = content.selected
+            // Nothing else takes keys under a Terminal session's card; never from a field you're typing in.
+            if openInTerminal != nil, !(NSApp.keyWindow?.firstResponder is NSText) {
+                DispatchQueue.main.async { cardFocused = true }
+            }
+        }
+        .onDisappear { keys.highlight = nil }
+        .onChange(of: keys.press) { _, press in if let press { act(press.index, content) } }
         // Asked about one question, never answered on the next one: its index means another option there.
-        .onChange(of: menu) { old, new in if !new.sameQuestion(as: old) { confirming = nil } }
+        .onChange(of: menu) { old, new in
+            if !new.sameQuestion(as: old) { confirming = nil }
+            // The terminal's cursor moved (or another question): the highlight starts from it again.
+            if !new.sameQuestion(as: old) || new.selected != old.selected { keys.highlight = new.selected }
+        }
     }
 
-    private func optionButton(_ option: AnswerCardContent.Option, selected: Bool) -> some View {
+    /// The focus ring on the highlighted row (the one ↩ answers).
+    @ViewBuilder private func ring(_ index: Int, cornerRadius: CGFloat) -> some View {
+        if keys.highlight == index {
+            RoundedRectangle(cornerRadius: cornerRadius).strokeBorder(Color.accentColor, lineWidth: 2).allowsHitTesting(false)
+        }
+    }
+
+    private func optionButton(_ option: AnswerCardContent.Option, of count: Int, selected: Bool) -> some View {
         Button { pick(option.index, nil) } label: {
             HStack(alignment: .top, spacing: 10) {
                 if let checked = option.checked {
@@ -729,17 +807,29 @@ struct AnswerCard: View {
                 Spacer(minLength: 0)
             }
             .padding(.horizontal, 12).padding(.vertical, 9)
-            .background(RoundedRectangle(cornerRadius: 9).fill(selected ? Color.accentColor.opacity(0.12) : Color.secondary.opacity(0.07)))
+            .background(RoundedRectangle(cornerRadius: 9).fill(
+                selected ? Color.accentColor.opacity(hovered == option.index ? 0.18 : 0.12)
+                         : Color.secondary.opacity(hovered == option.index ? 0.15 : 0.07)))
+            .overlay(ring(option.index, cornerRadius: 9))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .onHover { inside in
+            if inside { hovered = option.index } else if hovered == option.index { hovered = nil }
+        }
+        .help(option.index < 9 ? "Or press \(option.index + 1)" : "")
+        .accessibilityLabel(AnswerKeys.spoken(option.index, of: count, label: option.label))
+        .accessibilityValue(option.checked.map { $0 ? "Chosen" : "Not chosen" } ?? "")
+        .accessibilityHint(option.detail ?? "")
+        .accessibilityAddTraits(keys.highlight == option.index ? .isSelected : [])
     }
 
-    @ViewBuilder private func otherRow(_ option: AnswerCardContent.Option, typed: String?) -> some View {
+    @ViewBuilder private func otherRow(_ option: AnswerCardContent.Option, typed: String?, spoken: String) -> some View {
         let index = option.index
         if typingOther {
             HStack(spacing: 8) {
                 TextField("Your answer", text: $otherText).textFieldStyle(.roundedBorder)
+                    .focused($otherFocused)
                     .onSubmit { sendOther(index) }
                 Button("Answer") { sendOther(index) }.buttonStyle(.borderedProminent)
                     .disabled(otherText.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -761,11 +851,14 @@ struct AnswerCard: View {
                 }
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel(spoken)
+            .accessibilityValue(option.checked.map { $0 ? "Chosen" : "Not chosen" } ?? "")
         } else {
             Button { typingOther = true } label: {
                 Label("Other…", systemImage: "square.and.pencil").font(.system(size: 12.5))
             }
             .buttonStyle(.borderless)
+            .accessibilityLabel(spoken)
         }
     }
 
@@ -775,6 +868,97 @@ struct AnswerCard: View {
         pick(index, text)
         otherText = ""
         typingOther = false
+    }
+}
+
+/// The answer card's keys, as in the terminal: while a question is up and the composer is empty, 1–9 choose, ↩
+/// confirms the highlighted option, ↑ / ↓ move the highlight (stopping at the ends, like the terminal's cursor; a
+/// multi-select's Submit row is the last stop). With anything in the composer, they're the composer's.
+enum AnswerKeys {
+    enum Key: Equatable {
+        /// 1–9 (anything else is never an option).
+        case digit(Int)
+        case enter, up, down
+    }
+
+    enum Action: Equatable {
+        /// Not the card's: typed into the composer, or the composer's own (send, history).
+        case pass
+        /// A digit: that option.
+        case choose(Int)
+        /// ↩: the highlighted row.
+        case confirm(Int)
+        /// ↑ / ↓: the highlight goes there (where it is, at an end).
+        case move(Int)
+    }
+
+    /// `options`: the card's numbered rows; `submit`: a Submit row under them (index `options`, no number);
+    /// `highlighted`: the row the card has highlighted.
+    static func action(for key: Key, composer: String, options: Int, submit: Bool = false, highlighted: Int?) -> Action {
+        guard composer.isEmpty, options > 0 else { return .pass }
+        let rows = options + (submit ? 1 : 0)
+        switch key {
+        case .digit(let n):
+            return (1...min(options, 9)).contains(n) ? .choose(n - 1) : .pass
+        case .enter:
+            guard let highlighted, (0..<rows).contains(highlighted) else { return .pass }
+            return .confirm(highlighted)
+        case .up:
+            return .move(highlighted.map { max(0, min(rows - 1, $0 - 1)) } ?? rows - 1)
+        case .down:
+            return .move(highlighted.map { max(0, min(rows - 1, $0 + 1)) } ?? 0)
+        }
+    }
+
+    /// What VoiceOver reads for option `index` (from 0) of `count`.
+    static func spoken(_ index: Int, of count: Int, label: String) -> String { "option \(index + 1) of \(count), \(label)" }
+
+    enum Pick: Equatable {
+        /// Answered (asked first in a Terminal session), as a click does.
+        case answer(Int)
+        /// The free-text row: its field opens for your answer.
+        case freeText
+    }
+
+    /// What choosing row `index` of `content` by key does.
+    static func pick(_ index: Int, in content: AnswerCardContent) -> Pick {
+        content.options.first { $0.index == index }?.kind == .other ? .freeText : .answer(index)
+    }
+}
+
+/// The answer card's highlight and the keys handed to it, shared by the card (which draws the highlight and acts on
+/// a press) and the composer (which has the keys while you're in it). Held, not observed, by the chat container:
+/// only the card redraws for a move.
+final class AnswerCardKeys: ObservableObject {
+    /// A row chosen by key; counted, so the same key twice is two presses.
+    struct Press: Equatable {
+        var index: Int
+        var serial: Int
+    }
+
+    @Published var highlight: Int?
+    @Published private(set) var press: Press?
+
+    /// One key while `content`'s card is up: true when it was the card's (it doesn't go into the composer).
+    /// `busy`: the card is waiting for an answer's keys to show; its keys go nowhere meanwhile.
+    @discardableResult
+    func take(_ key: AnswerKeys.Key, composer: String, content: AnswerCardContent, busy: Bool = false) -> Bool {
+        guard !content.commands else { return false }
+        // No highlight yet (the card's only just up): it starts at the terminal's cursor, as the card draws it.
+        let action = AnswerKeys.action(for: key, composer: composer, options: content.options.count,
+                                       submit: content.submit != nil, highlighted: highlight ?? content.selected)
+        switch action {
+        case .pass:
+            return false
+        case _ where busy:
+            return true
+        case .move(let index):
+            highlight = index
+        case .choose(let index), .confirm(let index):
+            highlight = index
+            press = Press(index: index, serial: (press?.serial ?? 0) + 1)
+        }
+        return true
     }
 }
 

@@ -27,6 +27,8 @@ struct ComposerView: View {
     /// Only steering (a Terminal session: nothing can be typed into it from here).
     var steerOnly = false
     let actions: ComposerActions
+    /// The answer card above, when it's a window session's: 1–9, ↩ and ↑ / ↓ are its while the box is empty.
+    var cardKeys: AnswerCardKeys?
     @State private var height: CGFloat = 22
     @State private var suggestions = Suggestions()
     @State private var notice: String?
@@ -74,7 +76,8 @@ struct ComposerView: View {
                     }
                     ComposerTextView(text: text, height: $height, suggestions: $suggestions, history: { [chat] in chat.log.prompts },
                                      focusRequests: chat.focusComposerRequests, complete: complete,
-                                     submit: { submit(queue: false) }, queue: { submit(queue: true) }, attachImage: attachImage)
+                                     submit: { submit(queue: false) }, queue: { submit(queue: true) }, attachImage: attachImage,
+                                     cardKey: cardKey)
                         .frame(height: min(max(height, 22), 220))
                 }
                 .padding(.horizontal, 10).padding(.vertical, 8)
@@ -140,6 +143,14 @@ struct ComposerView: View {
             return
         }
         suggestions = Suggestions()
+    }
+
+    /// A key the answer card may take (WC-1): only while it shows a question and nothing's in the box (attached
+    /// images count: ↩ sends them).
+    private func cardKey(_ key: AnswerKeys.Key) -> Bool {
+        guard let cardKeys, chat.state == .ready, let menu = chat.menu else { return false }
+        let content = AnswerCardContent(menu: menu, pending: chat.log.pendingQuestions)
+        return cardKeys.take(key, composer: text.wrappedValue + images.joined(), content: content, busy: chat.answering)
     }
 
     /// Send now, from the outbox strip: typed in again (queued if the agent works), never steered.
@@ -424,10 +435,13 @@ private struct ComposerTextView: NSViewRepresentable {
     let queue: () -> Void
     /// A pasted or dropped image (saved to a file): attached, not written into the text.
     let attachImage: (URL) -> Void
+    /// A key for the answer card (true: it took it, so it isn't typed or sent).
+    var cardKey: (AnswerKeys.Key) -> Bool = { _ in false }
 
     func makeNSView(context: Context) -> NSScrollView {
         let textView = ComposerNSTextView()
         textView.attachImage = attachImage
+        textView.cardKey = cardKey
         textView.delegate = context.coordinator
         textView.font = .systemFont(ofSize: 13)
         textView.isRichText = false
@@ -457,6 +471,7 @@ private struct ComposerTextView: NSViewRepresentable {
         context.coordinator.parent = self
         guard let textView = scroll.documentView as? NSTextView else { return }
         (textView as? ComposerNSTextView)?.attachImage = attachImage
+        (textView as? ComposerNSTextView)?.cardKey = cardKey
         if textView.string != text {
             textView.string = text
             context.coordinator.undo.removeAllActions()
@@ -554,6 +569,8 @@ private struct ComposerTextView: NSViewRepresentable {
                     break
                 }
             }
+            // ↩ and ↑ / ↓ in an empty box: the answer card's, while it shows a question.
+            if let key = Self.cardKey(selector, flags: NSApp.currentEvent?.modifierFlags ?? []), parent.cardKey(key) { return true }
             switch selector {
             case #selector(NSResponder.insertNewline(_:)), #selector(NSResponder.insertNewlineIgnoringFieldEditor(_:)):
                 let flags = NSApp.currentEvent?.modifierFlags ?? []
@@ -571,6 +588,17 @@ private struct ComposerTextView: NSViewRepresentable {
                 return walkHistory(textView, by: 1)
             default:
                 return false
+            }
+        }
+
+        /// The answer card's key for a command: plain ↩ (⇧↩ and ⌥↩ stay the box's), ↑, ↓.
+        static func cardKey(_ selector: Selector, flags: NSEvent.ModifierFlags) -> AnswerKeys.Key? {
+            switch selector {
+            case #selector(NSResponder.insertNewline(_:)):
+                return flags.intersection([.shift, .option, .command, .control]).isEmpty ? .enter : nil
+            case #selector(NSResponder.moveUp(_:)): return .up
+            case #selector(NSResponder.moveDown(_:)): return .down
+            default: return nil
             }
         }
 
@@ -598,6 +626,20 @@ private struct ComposerTextView: NSViewRepresentable {
 /// Pastes images as saved files and drops files as their paths.
 private final class ComposerNSTextView: NSTextView {
     var attachImage: (URL) -> Void = { _ in }
+    /// 1–9 typed: the answer card's when it takes them (see `ComposerTextView.cardKey`).
+    var cardKey: (AnswerKeys.Key) -> Bool = { _ in false }
+
+    override func keyDown(with event: NSEvent) {
+        if !hasMarkedText(), let digit = Self.digit(event), cardKey(digit) { return }
+        super.keyDown(with: event)
+    }
+
+    /// A key that types 1–9 (with ⇧ where the layout needs it, as on AZERTY), not a shortcut.
+    static func digit(_ event: NSEvent) -> AnswerKeys.Key? {
+        guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty, let typed = event.characters,
+              typed.count == 1, let n = Int(typed), (1...9).contains(n) else { return nil }
+        return .digit(n)
+    }
 
     /// A plain-text view only enables Paste for clipboards it can read: without these, an image-only clipboard
     /// leaves ⌘V disabled and `paste(_:)` is never called.

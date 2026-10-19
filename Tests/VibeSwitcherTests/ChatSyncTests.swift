@@ -559,6 +559,58 @@ struct ChatSyncTests {
         #expect(h.chat.log.pendingQuestions == nil)
         #expect(h.answers.contains("\"Which fruit?\"=\"Plum\""), "answers: \(h.answers)")
     }
+
+    // MARK: Keys (WC-1)
+
+    @Test func twoPressedInTheWindowAnswersOptionTwoInTheTerminal() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "ask", "questions": [Self.fruit]])
+        try await h.settle { $0.contains("Which fruit?") }
+        #expect(h.press(.digit(2), composer: "") == "")
+        try await h.waitFor { h.agent["mode"] as? String == "working" }
+        try await h.settle { !$0.contains("Which fruit?") }
+        #expect(h.answers.contains("\"Which fruit?\"=\"Pear\""), "answers: \(h.answers)")
+        #expect(h.card == nil)
+        // Answered, not sent: no "2" as a message, held or typed.
+        #expect(h.chat.outbox.outbox.entries.isEmpty)
+        #expect(!h.prompts.contains("2") && !h.agentPrompts.contains("2"))
+    }
+
+    @Test func twoPressedWithTextInTheComposerIsTheTextsAndTheQuestionStaysOpen() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "ask", "questions": [Self.fruit]])
+        try await h.settle { $0.contains("Which fruit?") }
+        #expect(h.press(.digit(2), composer: "Version ") == "Version 2")
+        // ↑ / ↓ and ↩ with text are the box's too.
+        #expect(h.press(.down, composer: "Version 2") == "Version 2")
+        #expect(h.press(.enter, composer: "Version 2") == "Version 2")
+        try await h.quiet()
+        #expect(h.agent["mode"] as? String == "question", "\(h.agent)")
+        #expect(h.card?.question == "Which fruit?")
+        #expect(h.screen.contains("❯ 1. Apple"), "\(h.screen)")
+        #expect(h.chat.outbox.outbox.entries.isEmpty)
+    }
+
+    @Test func theArrowsMoveTheHighlightAndReturnAnswersIt() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "ask", "questions": [Self.fruit]])
+        try await h.settle { $0.contains("Which fruit?") }
+        // From the terminal's cursor (Apple), down twice to Plum; down again stops at the last row, up comes back.
+        #expect(h.press(.down, composer: "") == "")
+        #expect(h.press(.down, composer: "") == "")
+        #expect(h.cardKeys.highlight == 2)
+        // Only the card's highlight moved: the terminal's cursor waits for ↩.
+        try await h.quiet()
+        #expect(h.screen.contains("❯ 1. Apple"), "\(h.screen)")
+        #expect(h.press(.enter, composer: "") == "")
+        try await h.waitFor { h.agent["mode"] as? String == "working" }
+        await h.tick()
+        #expect(h.answers.contains("\"Which fruit?\"=\"Plum\""), "answers: \(h.answers)")
+        #expect(h.chat.outbox.outbox.entries.isEmpty)
+    }
 }
 
 /// A scratch host running the fake Claude Code, the app's terminal pane showing it, and the chat following it.
@@ -799,6 +851,29 @@ final class Harness {
     /// A click on the card's option `index` (the card as drawn: `drawn`, else what the chat shows now).
     func click(_ index: Int, typing: String? = nil, drawn: ScreenMenu? = nil) {
         sync.choose(index, typing: typing, drawn: drawn ?? chat.menu)
+    }
+
+    /// The answer card's highlight and keys (the window shares one between the card and the composer).
+    let cardKeys = AnswerCardKeys()
+
+    /// A key pressed in the composer holding `composer`: the composer hands it to the card (`ComposerView.cardKey`),
+    /// which answers as its click does (`AnswerCard.act`, a window session's: no asking first); a key the card
+    /// doesn't take goes into the box. What the box holds afterwards.
+    func press(_ key: AnswerKeys.Key, composer: String) -> String {
+        guard let menu = chat.menu else { return composer + Self.typed(key) }
+        let content = AnswerCardContent(menu: menu, pending: chat.log.pendingQuestions)
+        let before = cardKeys.press
+        guard cardKeys.take(key, composer: composer, content: content, busy: chat.answering) else { return composer + Self.typed(key) }
+        if let press = cardKeys.press, press != before, case .answer(let index) = AnswerKeys.pick(press.index, in: content) {
+            sync.choose(index, drawn: menu)
+        }
+        return composer
+    }
+
+    /// What a key the card didn't take puts in the box (↩ and the arrows put nothing).
+    private static func typed(_ key: AnswerKeys.Key) -> String {
+        if case .digit(let n) = key { return "\(n)" }
+        return ""
     }
 
     func clickTab(_ index: Int) {
