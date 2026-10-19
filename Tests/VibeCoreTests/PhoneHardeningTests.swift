@@ -228,3 +228,104 @@ struct PreviewShadowCookieTests {
                                    siblingOrigins: [], publicPort: 8444, accepts: { $0 == "good" }) == .forward(sessionToken: "good"))
     }
 }
+
+/// PH-1: a question, permission prompt or picker reaches the phone as option buttons, masked, and a tap is typed as the
+/// menu's keys only while the screen still shows the menu it was drawn from.
+struct PhoneMenuTests {
+    let sid = "4242-1700000000"
+    func prompt(command: String = "curl -H TOKEN=abc123s3cr3t https://example.com", cursor: Int = 0) -> String {
+        let options = ["Yes", "Yes, and don't ask again for TOKEN=abc123s3cr3t", "No, and tell Claude what to do differently (esc)"]
+        let rows = options.enumerated().map { index, option in "│ \(index == cursor ? "❯" : " ") \(index + 1). \(option) │" }
+        return (["⏺ Bash(\(command))", "╭──────────────────────────────────────╮", "│ Bash command │", "│ │", "│   \(command) │",
+                 "│   Fetch with SECRET=hunter2hunter2 │", "│ │", "│ Do you want to proceed? │"] + rows
+                + ["╰──────────────────────────────────────╯", "", "", ""]).joined(separator: "\n")
+    }
+
+    @Test func theStateCarriesTheMenuMasked() throws {
+        let menu = try #require(PhoneMenu.detect(screen: prompt(cursor: 1), needsInput: true))
+        let object = PhoneMenu.json(menu, sid: sid)
+        #expect(JSONSerialization.isValidJSONObject(object))
+        let text = String(decoding: try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), as: UTF8.self)
+        #expect(!text.contains("abc123s3cr3t"))
+        #expect(!text.contains("hunter2hunter2"))
+        #expect(Set(object.keys) == ["question", "options", "descriptions", "selected", "fingerprint"])
+        #expect(object["question"] as? String == "Bash command\ncurl -H TOKEN=••• https://example.com\nFetch with SECRET=•••\nDo you want to proceed?")
+        #expect(object["options"] as? [String] == ["Yes", "Yes, and don't ask again for TOKEN=•••",
+                                                    "No, and tell Claude what to do differently (esc)"])
+        #expect((object["descriptions"] as? [Any])?.count == 3)
+        #expect((object["descriptions"] as? [Any])?.allSatisfy { $0 is NSNull } == true)
+        #expect(object["selected"] as? Int == 1)
+        #expect(object["fingerprint"] as? String == PhoneMenu.fingerprint(menu, sid: sid))
+    }
+
+    @Test func descriptionsAndAMultiSelectsBoxesAndSubmitRowGoToo() throws {
+        let screen = ["☐ Toppings", "Which toppings?", "❯ 1. [✔] Cream", "     Whipped, with TOKEN=abcdefgh1234", "  2. [ ] Nuts", "    Submit", "",
+                      "Enter to select · ↑/↓ to navigate · Esc to cancel"].joined(separator: "\n")
+        let menu = try #require(PhoneMenu.detect(screen: screen, needsInput: false))
+        let object = PhoneMenu.json(menu, sid: sid)
+        #expect(object["options"] as? [String] == ["Cream", "Nuts"])
+        #expect((object["descriptions"] as? [Any])?.first as? String == "Whipped, with TOKEN=•••")
+        #expect(object["checked"] as? [Bool] == [true, false])
+        #expect(object["submit"] as? String == "Submit")
+        // The Submit row is a choice too: down twice from Cream, then Enter.
+        let fingerprint = PhoneMenu.fingerprint(menu, sid: sid)
+        #expect(PhoneMenu.answer(choose: 2, fingerprint: fingerprint, screen: screen, needsInput: false, sid: sid)
+                == .keys([HostInput.Write(bytes: [27, 91, 66], delay: 0), HostInput.Write(bytes: [27, 91, 66], delay: 0.03),
+                          HostInput.Write(bytes: [13], delay: 0.08)], label: "Submit"))
+        #expect(PhoneMenu.answer(choose: 3, fingerprint: fingerprint, screen: screen, needsInput: false, sid: sid) == .invalid)
+    }
+
+    @Test func numberedTextIsAMenuOnlyWhenItAsks() {
+        let list = ["Plan:", "❯ 1. Build", "  2. Test"].joined(separator: "\n")
+        #expect(PhoneMenu.detect(screen: list, needsInput: false) == nil)
+        #expect(PhoneMenu.detect(screen: list, needsInput: true)?.options == ["Build", "Test"])
+        #expect(PhoneMenu.detect(screen: list + "\n\nEnter to select · Esc to cancel", needsInput: false)?.options == ["Build", "Test"])
+        #expect(PhoneMenu.detect(screen: "$ ls\nREADME.md", needsInput: true) == nil)
+    }
+
+    @Test func theFingerprintIsTheQuestionNotTheCursor() throws {
+        let first = try #require(PhoneMenu.detect(screen: prompt(cursor: 0), needsInput: true))
+        let moved = try #require(PhoneMenu.detect(screen: prompt(cursor: 2), needsInput: true))
+        let other = try #require(PhoneMenu.detect(screen: prompt(command: "rm -rf build"), needsInput: true))
+        #expect(PhoneMenu.fingerprint(first, sid: sid) == PhoneMenu.fingerprint(moved, sid: sid))
+        #expect(PhoneMenu.fingerprint(first, sid: sid) != PhoneMenu.fingerprint(other, sid: sid))
+        // Another session showing the same prompt has its own.
+        #expect(PhoneMenu.fingerprint(first, sid: sid) != PhoneMenu.fingerprint(first, sid: "4243-1700000000"))
+    }
+
+    @Test func aTapTypesTheKeysFromWhereTheCursorIsNow() throws {
+        let drawn = try #require(PhoneMenu.detect(screen: prompt(cursor: 0), needsInput: true))
+        let fingerprint = PhoneMenu.fingerprint(drawn, sid: sid)
+        let down: [UInt8] = [27, 91, 66], up: [UInt8] = [27, 91, 65]
+        guard case .keys(let writes, let label) = PhoneMenu.answer(choose: 2, fingerprint: fingerprint, screen: prompt(cursor: 0),
+                                                                   needsInput: true, sid: sid) else {
+            Issue.record("not answered")
+            return
+        }
+        #expect(writes.map(\.bytes) == [down, down, [13]])
+        #expect(label == "No, and tell Claude what to do differently (esc)")
+        // The cursor moved on the Mac since the phone drew it: the same question, keys from where it is now.
+        guard case .keys(let fromThere, _) = PhoneMenu.answer(choose: 0, fingerprint: fingerprint, screen: prompt(cursor: 2),
+                                                              needsInput: true, sid: sid) else {
+            Issue.record("not answered")
+            return
+        }
+        #expect(fromThere.map(\.bytes) == [up, up, [13]])
+    }
+
+    @Test func aStaleTapIsRefusedNotTyped() throws {
+        let drawn = try #require(PhoneMenu.detect(screen: prompt(), needsInput: true))
+        let fingerprint = PhoneMenu.fingerprint(drawn, sid: sid)
+        // Another question took its place.
+        #expect(PhoneMenu.answer(choose: 0, fingerprint: fingerprint, screen: prompt(command: "rm -rf build"), needsInput: true, sid: sid)
+                == .stale)
+        // It was answered on the Mac and the agent went on.
+        #expect(PhoneMenu.answer(choose: 0, fingerprint: fingerprint, screen: "⏺ Done.\n> ", needsInput: false, sid: sid) == .stale)
+        // The same prompt in another session (its tab changed hands).
+        #expect(PhoneMenu.answer(choose: 0, fingerprint: fingerprint, screen: prompt(), needsInput: true, sid: "4243-1700000000") == .stale)
+        // A made-up fingerprint, and options that aren't there.
+        #expect(PhoneMenu.answer(choose: 0, fingerprint: "AAAAAAAAAAAAAAAA", screen: prompt(), needsInput: true, sid: sid) == .stale)
+        #expect(PhoneMenu.answer(choose: 3, fingerprint: fingerprint, screen: prompt(), needsInput: true, sid: sid) == .invalid)
+        #expect(PhoneMenu.answer(choose: -1, fingerprint: fingerprint, screen: prompt(), needsInput: true, sid: sid) == .invalid)
+    }
+}
