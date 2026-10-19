@@ -1,7 +1,7 @@
 import Foundation
 
-/// The lead's decision log and progress log in the repository: `<records_dir>/decisions.md` and `progress.md`
-/// (`records_dir:` in workflow.md, `docs/lead` by default), committed to the base branch by the lead's tool server, so
+/// The lead's decision log, progress log and incident log in the repository: `<records_dir>/decisions.md`,
+/// `progress.md` and `incidents.md` (`records_dir:` in workflow.md, `docs/lead` by default), committed to the base branch by the lead's tool server, so
 /// the plan's reasoning survives a deleted `.vibeswitcher`, another Mac or a new lead. The board stays local.
 ///
 /// The lead itself may not edit files or run git that writes; its tool server commits for it, batched (after each
@@ -12,12 +12,24 @@ import Foundation
 /// so the next merge's check that nothing else moved the branch takes it.
 public final class LeadRecords: @unchecked Sendable {
     public enum Kind: CaseIterable, Sendable {
-        case decisions, progress
+        case decisions, progress, incidents
 
-        public var name: String { self == .decisions ? "decisions.md" : "progress.md" }
-        var header: String { self == .decisions ? "# Decisions\n\n" : "# Progress\n\n" }
+        public var name: String {
+            switch self {
+            case .decisions: return "decisions.md"
+            case .progress: return "progress.md"
+            case .incidents: return "incidents.md"
+            }
+        }
+        var header: String {
+            switch self {
+            case .decisions: return "# Decisions\n\n"
+            case .progress: return "# Progress\n\n"
+            case .incidents: return "# Incidents\n\n"
+            }
+        }
         /// How each entry's first line starts.
-        var marker: String { self == .decisions ? "## " : "- " }
+        var marker: String { self == .progress ? "- " : "## " }
     }
 
     /// What a flush did.
@@ -35,7 +47,7 @@ public final class LeadRecords: @unchecked Sendable {
     public static let subject = "Lead: decisions and progress"
 
     static func message(_ dir: String) -> String {
-        "\(subject)\n\nThe project lead's \(dir)/decisions.md and \(dir)/progress.md, committed by VibeSwitcher for the lead "
+        "\(subject)\n\nThe project lead's \(dir)/decisions.md, \(dir)/progress.md and \(dir)/incidents.md, committed by VibeSwitcher for the lead "
             + "(its tool server); nothing else is in this commit.\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
     }
 
@@ -164,7 +176,7 @@ public final class LeadRecords: @unchecked Sendable {
 
     // MARK: Moving the old logs
 
-    /// Moves `.vibeswitcher/decisions.md` and `progress.md` into `records_dir` once: their entries go before the ones
+    /// Moves `.vibeswitcher/decisions.md`, `progress.md` and `incidents.md` into `records_dir` once: their entries go before the ones
     /// already there (but those it already has), redacted, and the old file is renamed `<name>.moved`. Called under
     /// the records' lock.
     static func migrate(_ store: BoardStore) throws {
@@ -209,7 +221,7 @@ public final class LeadRecords: @unchecked Sendable {
             else if found.isEmpty { preamble.append(line) }
             else { found[found.count - 1].append(line) }
         }
-        let ending = kind == .decisions ? "\n\n" : "\n"
+        let ending = kind == .progress ? "\n" : "\n\n"
         let entries = found.map { $0.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines) + ending }
         let head = preamble.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         return (head.isEmpty ? "" : head + "\n\n", entries)

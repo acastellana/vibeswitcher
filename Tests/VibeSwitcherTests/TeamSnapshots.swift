@@ -159,4 +159,32 @@ struct TeamSnapshots {
         opened.seen[opened.board.tasks[phone].verifier!] = Self.member(working: false)
         try write(view(opened, openRows: [opened.board.tasks[phone].id]), name: "expanded-row", folder: folder)
     }
+
+    /// The scorecard over a few merged tasks (one reverted, one merged without tests), and a merged row opened with
+    /// its score.
+    @Test(.enabled(if: folder != nil)) func drawScorecard() throws {
+        let folder = try #require(Self.folder)
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        let at = Self.now.timeIntervalSince1970
+        var team = Self.quiet()
+        for (index, rounds) in [1, 1, 2, 1, 3].enumerated() {
+            var audits = LeadAuditLedger()
+            audits.rounds = rounds
+            audits.passed = true
+            team.board.tasks[index].audits = audits
+            team.board.tasks[index].merged = LeadMergeRecord(commit: "abc\(index)def", tested: index != 3, at: at - Double(index) * 3_000)
+        }
+        team.board.tasks[4].merged?.revertedBy = "9f3e2a1c77"
+        var question = LeadQuestion(text: "Merge it?", options: ["Yes"], at: at - 3_600)
+        question.task = team.board.tasks[4].slug
+        question.answer = "Yes"
+        question.answeredAt = at - 3_600 + 14 * 60
+        team.board.questions = [question]
+        team.board.refreshScores(now: at)
+        let card = ScorecardView(scorecard: LeadScorecard(team.board, now: at)).padding(14)
+        try write(card, name: "scorecard", folder: folder)
+        try write(ScorecardView(scorecard: LeadScorecard(LeadBoard())).padding(14), name: "scorecard-empty", folder: folder)
+        try write(TeamRowDetails(row: try #require(TeamRows.rows(team.board, seen: [:]).first { $0.task.id == team.board.tasks[4].id }),
+                                 canOpen: { _ in false }, open: { _ in }).padding(14), name: "scored-row", folder: folder)
+    }
 }

@@ -147,6 +147,11 @@ struct TeamRowDetails: View {
                 Text("Merged \(merged.commit.prefix(8)) at \(LeadBoard.clock(merged.at))" + (merged.tested ? ", tests passed" : ", no tests ran"))
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
+            if let score = task.score, score.rounds > 0 || score.questions > 0 || task.merged != nil {
+                Text(score.line).font(.system(size: 11))
+                    .foregroundStyle(score.revertedBy != nil ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if task.worker.map(canOpen) == true || task.verifier.map(canOpen) == true {
                 HStack(spacing: 8) {
                     if let worker = task.worker, canOpen(worker) { link("Open worker") { open(worker) } }
@@ -233,6 +238,37 @@ struct TeamTaskList: View {
         TeamRowView(row: row, now: now, summary: summary(row), isOpen: openRows.contains(row.id), canOpen: canOpen, open: open) {
             if openRows.contains(row.id) { openRows.remove(row.id) } else { openRows.insert(row.id) }
         }
+    }
+}
+
+/// The lead's scorecard in a row of four small numbers: mean audit rounds to pass, the share passing the first audit,
+/// the user's minutes per merged task, and reverts (red when there's one); merges without tests under it.
+struct ScorecardView: View {
+    let scorecard: LeadScorecard
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if scorecard.merged == 0 {
+                Text("Nothing merged yet: the numbers start with the first merge.").font(.system(size: 11.5)).foregroundStyle(.secondary)
+            } else {
+                HStack(alignment: .firstTextBaseline, spacing: 16) {
+                    ForEach(Array(scorecard.items.enumerated()), id: \.offset) { index, item in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(item.value).font(.system(size: 15, weight: .semibold).monospacedDigit())
+                                .foregroundStyle(index == 3 && scorecard.reverts > 0 ? Color.red : Color.primary)
+                            Text(item.label).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+                Text("Over \(scorecard.merged) merged task\(scorecard.merged == 1 ? "" : "s")"
+                     + (scorecard.counted < scorecard.merged ? " (audit rounds known for \(scorecard.counted))" : "")
+                     + (scorecard.mergedWithoutTests > 0 ? "; \(scorecard.mergedWithoutTests) merged without tests" : "") + ".")
+                    .font(.system(size: 10.5)).foregroundStyle(scorecard.mergedWithoutTests > 0 ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.tertiary))
+            }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(scorecard.spoken)
     }
 }
 

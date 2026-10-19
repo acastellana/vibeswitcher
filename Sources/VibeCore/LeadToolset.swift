@@ -319,7 +319,8 @@ public final class LeadToolset: MCPToolset {
                                                        options: LeadQuestion.Priority.allCases.map(\.rawValue)),
                                          "why_now": P(type: "string", description: "One line: why you need it now (shown with the question)"),
                                          "proposal": P(type: "string", description: "Your proposed answer, one of the options: it starts a timer, and silence means you go ahead with it (reversible choices only)"),
-                                         "decide_in": P(type: "integer", description: "Minutes until you go ahead with the proposal (default \(LeadQuestion.defaultDecideIn))")],
+                                         "decide_in": P(type: "integer", description: "Minutes until you go ahead with the proposal (default \(LeadQuestion.defaultDecideIn))"),
+                                         "task": P(type: "string", description: "The task it's about (its slug), when it's about one: its wait on the user counts on that task's score")],
                             required: ["question"]),
                 MCPToolInfo(name: "revise_question", description: "Reword an open question when you've learned something: it keeps its place and id, the user sees what changed and why, and an answer to the earlier wording says so.",
                             properties: ["id": P(type: "string", description: "The question's id (its first 8 characters will do)"),
@@ -339,9 +340,15 @@ public final class LeadToolset: MCPToolset {
                 MCPToolInfo(name: "record_decision", description: "Write a decision and its reason to decisions.md.",
                             properties: ["decision": P(type: "string", description: "The decision"), "why": P(type: "string", description: "The reason")],
                             required: ["decision", "why"]),
+                MCPToolInfo(name: "record_incident", description: "Record an incident (something broke the user's work: a hang, a lost message, a reverted merge) in incidents.md, and plan a task that turns it into a check that runs before merge (a test, or a case in regression_command's corpus), so a merge that brings it back is refused.",
+                            properties: ["what": P(type: "string", description: "What happened, in one line"),
+                                         "evidence": P(type: "string", description: "How it showed: the transcript, log, commit or steps that reproduce it"),
+                                         "task": P(type: "string", description: "The task it happened in or came from (its slug), if any")],
+                            required: ["what", "evidence"]),
                 MCPToolInfo(name: "sessions", description: "This project's window sessions, live or ended."),
                 MCPToolInfo(name: "configure", description: "The project's workflow settings (workflow.md's front matter): without arguments, shows them with suggestions from the repository; with some, sets those (an empty string clears one) and keeps the rest of the file as it is.",
                             properties: ["test_command": P(type: "string", description: "The project's checks; merge runs it on each rebased branch and merges only when it passes"),
+                                         "regression_command": P(type: "string", description: "The checks incidents became (e.g. a bench corpus run); merge runs it after test_command and merges only when it passes too"),
                                          "init_command": P(type: "string", description: "What a fresh worktree needs before work starts (install, build)"),
                                          "base_branch": P(type: "string", description: "The branch workers start from and verified work is merged into (an existing local branch)"),
                                          "verifier_model": P(type: "string", description: "The verifier's model (e.g. sonnet, opus); a different one than the workers' gives a second opinion"),
@@ -386,6 +393,7 @@ public final class LeadToolset: MCPToolset {
             case "questions": return MCPToolResult(text: questionsText())
             case "post_update": return try postUpdate(arguments)
             case "record_decision": return try recordDecision(arguments)
+            case "record_incident": return try recordIncident(arguments)
             case "sessions": return MCPToolResult(text: sessionsText())
             case "configure": return try configure(arguments)
             case "report": return try report(arguments)
@@ -1217,7 +1225,7 @@ public final class LeadToolset: MCPToolset {
         let waited = try waitForLoad(workflow, slug: slug)
         // Exactly the audited commit, rebased and tested where no agent works.
         let tested: String
-        switch Worktrees.rebaseAndTest(root: root, commit: verdict.commit, onto: current, setup: workflow.initCommand, test: workflow.testCommand,
+        switch Worktrees.rebaseAndTest(root: root, commit: verdict.commit, onto: current, setup: workflow.initCommand, test: workflow.mergeChecks,
                                        scratch: vault.scratch(root: root, "merge-\(slug)"), home: vault.scratch(root: root, "merge-\(slug)-home"),
                                        timeout: workflow.testTimeout) {
         case .passed(let commit): tested = commit
@@ -1238,7 +1246,8 @@ public final class LeadToolset: MCPToolset {
             // The setback names the failing tests; the output's last line only when none is named.
             let tests = TestFailures(output: output).tests.joined(separator: ", ")
             let last = tests.isEmpty ? output.split(whereSeparator: \.isNewline).last.map(String.init) ?? "" : tests
-            try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Tests fail rebased onto \(base)" + (last.isEmpty ? "." : ": \(last.prefix(200))")))
+            let what = output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker) ? "regression_command fails" : "Tests fail"
+            try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "\(what) rebased onto \(base)" + (last.isEmpty ? "." : ": \(last.prefix(200))")))
             throw Problem(text: testFailure(output, slug: slug, base: base, commit: verdict.commit, onto: current))
         case .error(let text):
             throw Problem(text: "Not merged: \(text)")
@@ -1253,14 +1262,16 @@ public final class LeadToolset: MCPToolset {
             try store.update { board in
                 guard let index = board.taskIndex(slug) else { return }
                 board.tasks[index].status = .done
-                board.tasks[index].merged = LeadMergeRecord(commit: tested, tested: workflow.testCommand != nil)
+                board.tasks[index].merged = LeadMergeRecord(commit: tested, tested: workflow.testCommand != nil, onto: current,
+                                                             regression: workflow.regressionCommand.map { _ in true })
             }
             // Nothing ran: say so, it isn't a pass.
             let untested = workflow.testCommand == nil
                 ? " (merged without tests: no test_command\(workflow.problem.map { "; \($0)" } ?? ""). Set one with configure.)" : ""
             try? store.appendProgress("Merged \(slug): \(task.title)\(untested.isEmpty ? "" : " (without tests: no test_command)")")
+            let ran = workflow.regressionCommand == nil ? "" : " (regression_command passed too.)"
             let patience = waited.map { " (The tests waited \(Worktrees.duration($0.after)) for the Mac's load to drop from \(MacLoad.number($0.from)) below load_threshold.)" } ?? ""
-            return MCPToolResult(text: "Merged \(slug) into \(base)\(untested). Post an update for the user, then cleanup.\(patience)")
+            return MCPToolResult(text: "Merged \(slug) into \(base)\(untested). Post an update for the user, then cleanup.\(ran)\(patience)")
         case .refused(let reason):
             throw Problem(text: "Not merged: \(reason)")
         }
@@ -1290,7 +1301,7 @@ public final class LeadToolset: MCPToolset {
         let touches = files.isEmpty ? "" : " It touches " + files.prefix(8).joined(separator: ", ") + (files.count > 8 ? ", …" : "") + "."
         throw Problem(text: "Not merged yet: the merge policy is \(policy), so the user approves \(task.slug) at \(commit.prefix(8)) first.\(touches) "
             + "Ask once: ask_user(question: \"Merge \(task.slug) (\(task.title)) at \(commit.prefix(8))? …what it changes and the risk…\", "
-            + "options: [\"\(LeadWorkflow.approval(of: commit))\", \"Not yet\"], priority: blocking), with no timer, and merge again when they approve. "
+            + "options: [\"\(LeadWorkflow.approval(of: commit))\", \"Not yet\"], priority: blocking, task: \"\(task.slug)\"), with no timer, and merge again when they approve. "
             + "The approval covers this commit only: a new commit needs a new one.\(boardOnly)")
     }
 
@@ -1308,7 +1319,10 @@ public final class LeadToolset: MCPToolset {
         let inside = [place.path, place.resolvingSymlinksInPath().path].map { $0 + "/" }
         let files = failures.errorFiles.map { file in inside.first(where: file.hasPrefix).map { String(file.dropFirst($0.count)) } ?? file }
         let touched = baseCommits(touching: files, slug: slug, base: base, commit: commit, onto: current).map { $0 + "\n" } ?? ""
-        return "The \(setup ? "init_command" : "test command") fails on \(slug) rebased onto \(base).\n\(found)\n\(touched)"
+        // The test command passed and the incidents' checks ran after it.
+        let regression = !setup && output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker)
+        let which = setup ? "init_command" : regression ? "regression_command (the checks incidents became; test_command passed)" : "test command"
+        return "The \(which) fails on \(slug) rebased onto \(base).\n\(found)\n\(touched)"
             + (saved.map { "Full output: \($0)" } ?? "(The full output couldn't be saved.)")
     }
 
@@ -1510,6 +1524,11 @@ public final class LeadToolset: MCPToolset {
         var proposal = (arguments["proposal"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
         if proposal?.isEmpty == true { proposal = nil }
         let decideIn = try minutes(arguments["decide_in"])
+        var about: String?
+        if let wanted = (arguments["task"] as? String)?.trimmingCharacters(in: .whitespaces), !wanted.isEmpty {
+            guard let task = store.load().task(wanted) else { throw Problem(text: "No task \(wanted) on the board: name the task the question is about by its slug, or leave task out.") }
+            about = task.slug
+        }
         if decideIn != nil, proposal == nil { throw Problem(text: "decide_in needs a proposal: the answer you'd go ahead with.") }
         if let given = proposal {
             if let refusal = LeadQuestion.timerRefusal(text: question, options: options, whyNow: whyNow, priority: priority) { throw Problem(text: refusal) }
@@ -1519,7 +1538,7 @@ public final class LeadToolset: MCPToolset {
             proposal = option
         }
         let asked = try store.update { board in
-            board.ask(question, options: options, priority: priority, whyNow: whyNow, proposal: proposal, decideIn: decideIn)
+            board.ask(question, options: options, priority: priority, whyNow: whyNow, proposal: proposal, decideIn: decideIn, task: about)
         }
         let timer = asked.proposal.map { proposal in
             " You proposed ‘\(proposal)’: unless the user answers or holds it, a message at \(LeadBoard.clock(asked.decideBy ?? 0)) (in \(asked.decideInText)) "
@@ -1613,6 +1632,46 @@ public final class LeadToolset: MCPToolset {
         return MCPToolResult(text: store.recordsDir.map { "Recorded in \($0)/decisions.md (committed to \(base) with the next batch)." } ?? "Recorded.")
     }
 
+    /// An incident in incidents.md, and the planned task that turns it into a check run before merge.
+    private func recordIncident(_ arguments: [String: Any]) throws -> MCPToolResult {
+        let given = { (key: String) in (arguments[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+        let what = given("what"), evidence = given("evidence"), wanted = given("task")
+        guard !what.isEmpty else { throw Problem(text: "Say what happened (what), in one line.") }
+        guard !evidence.isEmpty else { throw Problem(text: "Give the evidence: the transcript, log, commit or steps that show it (evidence).") }
+        var about: String?
+        if !wanted.isEmpty {
+            guard let task = store.load().task(wanted) else { throw Problem(text: "No task \(wanted) on the board: name the task by its slug, or leave task out.") }
+            about = task.slug
+        }
+        let workflow = self.workflow
+        let contract = Self.incidentContract(what: what, evidence: evidence, task: about, workflow: workflow)
+        let title = "Turn this incident into a check: " + Self.clip(what.split(whereSeparator: \.isNewline).joined(separator: " "), 60)
+        let task = try store.update { board -> LeadTask in
+            let task = LeadTask(slug: Slug.make(title, taken: Set(board.tasks.map(\.slug))), title: title, contract: contract)
+            board.tasks.append(task)
+            return task
+        }
+        try store.appendIncident(what, evidence: evidence, task: about, check: task.slug)
+        try? store.appendProgress("Incident: \(Self.clip(what, 160))\(about.map { " (in \($0))" } ?? ""); planned \(task.slug) to turn it into a check")
+        let file = store.recordsDir.map { "\($0)/incidents.md (committed to \(base) with the next batch)" } ?? "incidents.md"
+        let regression = workflow.regressionCommand.map { " regression_command is `\($0)`: its check can be a case there." }
+            ?? " There's no regression_command yet: when the check is a run of its own (a bench corpus), set it with configure (regression_command), and merge runs it after test_command."
+        return MCPToolResult(text: "Recorded in \(file). Planned task \(task.slug) turns it into a check that runs before merge.\(regression) Start it with start_worker.")
+    }
+
+    /// The contract of the task an incident becomes: a check that fails while the incident can happen and runs before
+    /// every merge.
+    static func incidentContract(what: String, evidence: String, task: String?, workflow: LeadWorkflow) -> LeadContract {
+        let tests = workflow.testCommand.map { "`\($0)` passes" } ?? "The project's tests pass"
+        return LeadContract(
+            goal: "This incident becomes a check that runs before every merge, so a merge that brings it back is refused: \(what)",
+            acceptance: ["A new check reproduces the incident: it fails on the code as it was when it happened (or with its fix reverted), shown with its output in the report",
+                         "It passes now, and runs in test_command or regression_command" + (workflow.regressionCommand.map { " (`\($0)`)" } ?? " (the lead sets regression_command with configure when it's a run of its own)") + ", so merge runs it",
+                         tests],
+            boundaries: ["The check and what it needs (tests, a bench corpus case, fixtures); the behaviour it guards changes only if the incident still happens"],
+            context: "Incident (in incidents.md): \(what)\nEvidence: \(evidence)" + (task.map { "\nIt happened in task \($0)." } ?? ""))
+    }
+
     private func configure(_ arguments: [String: Any]) throws -> MCPToolResult {
         let unknown = Set(arguments.keys).subtracting(LeadWorkflow.configurable)
         guard unknown.isEmpty else {
@@ -1685,7 +1744,8 @@ public final class LeadToolset: MCPToolset {
         try LeadWorkflow.updating(current, with: changes).write(to: URL(fileURLWithPath: path), options: .atomic)
         // What the next read sees is what counts.
         let after = LeadWorkflow.load(from: path)
-        let read: [String: String] = ["test_command": after.testCommand ?? "", "init_command": after.initCommand ?? "",
+        let read: [String: String] = ["test_command": after.testCommand ?? "", "regression_command": after.regressionCommand ?? "",
+                                      "init_command": after.initCommand ?? "",
                                       "base_branch": after.baseBranch ?? "", "verifier_model": after.verifierModel ?? "",
                                       "max_workers": String(after.maxWorkers),
                                       "disk_warning_gb": Self.gb(after.diskWarningGB), "disk_floor_gb": Self.gb(after.diskFloorGB),
@@ -2088,7 +2148,33 @@ public final class LeadToolset: MCPToolset {
                 return "- \(wording) → \(question.answer ?? "")" + (saw < question.version ? " (to version \(saw) of \(question.version))" : "")
             }
         }
+        let reverted = recordReverts(base: workflow.base)
+        if !reverted.isEmpty {
+            lines.append("\nReverted on \(workflow.base) since they merged (\(reverted.count)): " + reverted.map { "\($0.slug) (by \($0.commit.prefix(8)))" }.joined(separator: ", ")
+                + ". Each is an incident: record_incident(what, evidence, task) so it becomes a check that runs before merge.")
+        }
         return lines.joined(separator: "\n")
+    }
+
+    /// Finds the merges the base reverted since (`LeadReverts`) and records each on its task's merge; returns the
+    /// ones found now.
+    @discardableResult
+    func recordReverts(base: String) -> [(slug: String, commit: String)] {
+        let merges = store.load().tasks.compactMap { task in task.merged.map { (slug: task.slug, merged: $0) } }
+        let found = LeadReverts.find(root: root, base: base, merges: merges)
+        guard !found.isEmpty else { return [] }
+        let now = Date().timeIntervalSince1970
+        try? store.update { board in
+            for (slug, commit) in found {
+                guard let index = board.taskIndex(slug), board.tasks[index].merged?.revertedBy == nil else { continue }
+                board.tasks[index].merged?.revertedBy = commit
+                board.tasks[index].merged?.revertedAt = now
+            }
+        }
+        for (slug, commit) in found.sorted(by: { $0.key < $1.key }) {
+            try? store.appendProgress("Reverted on \(base): \(slug)'s merge, by \(commit.prefix(8))")
+        }
+        return found.sorted { $0.key < $1.key }.map { (slug: $0.key, commit: $0.value) }
     }
 
     /// A task in one line (bounded): its title, what its worker does, its audit, rework, why it's kept, its last
@@ -2238,6 +2324,7 @@ public final class LeadToolset: MCPToolset {
         let detectedInit = LeadWorkflow.detectInitCommand(root: root)
         var lines = ["Workflow settings (.vibeswitcher/workflow.md):",
                      "- test_command: " + (workflow.testCommand.map { "`\($0)`" } ?? "not set: merges run no tests"),
+                     "- regression_command: " + (workflow.regressionCommand.map { "`\($0)` (merge runs it after test_command)" } ?? "not set: the incidents' checks (record_incident) run only as part of test_command"),
                      "- init_command: " + (workflow.initCommand.map { "`\($0)`" } ?? "not set" + (detectedInit.map { " (suggested from the repository: `\($0)`)" } ?? "")),
                      "- base_branch: " + (raw.baseBranch ?? "not set: \(fallback) (the branch the lead first started on)"),
                      "- verifier_model: " + (workflow.verifierModel ?? "not set: the workers' model"),
@@ -2283,7 +2370,9 @@ public final class LeadToolset: MCPToolset {
         var counts: [LeadTask.Status: Int] = [:]
         for task in board.tasks { counts[task.status, default: 0] += 1 }
         let tally = LeadTask.Status.allCases.compactMap { state in counts[state].map { "\($0) \(state.rawValue)" } }.joined(separator: ", ")
-        var lines = ["Board of \(project) (base \(workflow.base)): \(board.tasks.count) task(s)\(tally.isEmpty ? "" : ": \(tally)"). board(task) shows one in full."]
+        var lines = ["Board of \(project) (base \(workflow.base)): \(board.tasks.count) task(s)\(tally.isEmpty ? "" : ": \(tally)"). board(task) shows one in full, with its score."]
+        let scorecard = LeadScorecard(board)
+        if scorecard.merged > 0 { lines.append(scorecard.line) }
         lines += board.tasks.map { task in
             let ended = sessions.flatMap { Self.endedMember(task, $0) }
             // A running task whose worker ended reads so, not running.

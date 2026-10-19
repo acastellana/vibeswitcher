@@ -7,6 +7,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     public var testCommand: String?
     /// Gets a fresh worktree ready (install, build).
     public var initCommand: String?
+    /// The checks every incident became (`regression_command:`, e.g. a bench corpus run): merge runs it after
+    /// test_command, and merges only when it passes too.
+    public var regressionCommand: String?
     public var workerAgent = "claude"
     /// The verifier's model, different from the workers' when possible (a second opinion).
     public var verifierModel: String?
@@ -50,6 +53,22 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// The branch, as the prompts name it.
     var base: String { baseBranch ?? "main" }
 
+    /// The line merge's output has before regression_command's own, so a failure there is told apart from
+    /// test_command's.
+    public static let regressionMarker = "--- regression_command (workflow.md) ---"
+
+    /// What merge runs after init_command: test_command, then regression_command, each when set, as one script that
+    /// stops at the first that fails (regression_command's output after `regressionMarker`); nil when neither is set.
+    public var mergeChecks: String? {
+        let marker = "echo '\(Self.regressionMarker)'"
+        switch (testCommand, regressionCommand) {
+        case (nil, nil): return nil
+        case (let test?, nil): return test
+        case (nil, let regression?): return "\(marker)\n\(regression)"
+        case (let test?, let regression?): return "{\n\(test)\n} && {\n\(marker)\n\(regression)\n}"
+        }
+    }
+
     public init() {}
 
     public static func parse(_ text: String) -> LeadWorkflow {
@@ -65,6 +84,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "max_workers": workflow.maxWorkers = max(1, Int(value) ?? 3)
                 case "test_command": workflow.testCommand = present
                 case "init_command": workflow.initCommand = present
+                case "regression_command": workflow.regressionCommand = present
                 case "worker_agent": workflow.workerAgent = present ?? "claude"
                 case "verifier_model": workflow.verifierModel = present
                 case "base_branch": workflow.baseBranch = present
@@ -268,7 +288,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     // MARK: Changing settings
 
     /// The settings the lead may change with `configure`.
-    public static let configurable = ["test_command", "init_command", "base_branch", "verifier_model", "max_workers",
+    public static let configurable = ["test_command", "regression_command", "init_command", "base_branch", "verifier_model", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "load_threshold", "mac_max_sessions",
                                       "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "records_dir"]
 
@@ -373,6 +393,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     max_workers: 3
     # The project's checks. The merge queue runs this on each rebased branch and merges only when it passes.
     test_command:
+    # The checks incidents became (record_incident), e.g. a bench corpus run of the transcripts that once hung. Merge
+    # runs it after test_command and merges only when it passes too, so a merge that brings an incident back is
+    # refused. Empty: nothing more.
+    regression_command:
     # What a fresh worktree needs before work starts (install, build). Empty: nothing.
     init_command:
     # Who works: claude (Codex support comes later).
@@ -404,8 +428,8 @@ public struct LeadWorkflow: Equatable, Sendable {
     # The globs ask_sensitive holds back, comma-separated (as in .gitignore). Empty: Claude's settings and
     # instructions, .github, .env files, entitlements and keys.
     sensitive_paths:
-    # Where the lead's decisions.md and progress.md are kept, committed to the base branch by VibeSwitcher (only those
-    # two files, in small commits of their own), so the plan's reasoning travels with the repository. Empty: kept in
+    # Where the lead's decisions.md, progress.md and incidents.md are kept, committed to the base branch by VibeSwitcher
+    # (only those files, in small commits of their own), so the plan's reasoning travels with the repository. Empty: kept in
     # .vibeswitcher, uncommitted. The board stays local either way.
     records_dir: docs/lead
     ---
@@ -415,7 +439,7 @@ public struct LeadWorkflow: Equatable, Sendable {
 
 /// What each role is told (appended to Claude Code's own system prompt).
 public enum LeadPrompts {
-    public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, dismiss_finding, record_decision, merge, cleanup, configure"
+    public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, dismiss_finding, record_decision, record_incident, merge, cleanup, configure"
 
     /// What workers and verifiers are told about putting load on the Mac: a verifier once ran four times its
     /// contract's load on a Mac other sessions and the user were using, and a turn that ended left its burners running.
@@ -502,7 +526,11 @@ public enum LeadPrompts {
         Each finder counts against mac_max_sessions; when audit says there's no room, wait or lower audit_finders.
         7. Keep the board, the progress log and decisions (record_decision) current. They are your memory: when your \
         context fills up, a new lead continues from them.
-        8. When the same mistake happens twice, add a task that turns it into a check (a test, a lint rule), not a note.
+        8. Every incident becomes a check that runs before merge. When something broke the user's work (a hang, a \
+        lost message, a merge that had to be reverted, the same mistake twice), record_incident(what, evidence, task) \
+        right away: it goes into incidents.md and plans a task that turns it into a check (a test, or a case in \
+        regression_command's corpus, which merge runs after test_command), not a note. When a question to the user is \
+        about one task, ask_user with its task: its wait on the user counts on that task's score.
         9. Check in: after every few merges (about 3), or about every couple of hours of active work, post_update a \
         short "How it's going": what landed, what's stuck, what you plan next. If one open question matters (a \
         direction, a priority), ask it with ask_user; don't ask for the sake of asking.

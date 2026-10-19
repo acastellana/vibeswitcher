@@ -526,6 +526,11 @@ struct LeadTeamView: View {
     }
 
     @ViewBuilder private var rest: some View {
+        if !board.tasks.isEmpty {
+            section("Scorecard") {
+                ScorecardView(scorecard: LeadScorecard(board, now: (clock ?? Date()).timeIntervalSince1970))
+            }
+        }
         let closed = board.questions.filter { !$0.isOpen }
         if !closed.isEmpty {
             section("Answered and withdrawn") {
@@ -539,7 +544,7 @@ struct LeadTeamView: View {
         }
         section("Files") {
             HStack(spacing: 8) {
-                ForEach(["workflow.md", "decisions.md", "progress.md"], id: \.self) { name in
+                ForEach(["workflow.md", "decisions.md", "progress.md", "incidents.md"], id: \.self) { name in
                     Button(name) {
                         let path = name == "workflow.md" ? (root as NSString).appendingPathComponent(".vibeswitcher/\(name)") : BoardStore(root: root).recordPath(name)
                         if FileManager.default.fileExists(atPath: path) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) } else { NSSound.beep() }
@@ -548,7 +553,7 @@ struct LeadTeamView: View {
                 }
             }
             let shown = root.replacingOccurrences(of: NSHomeDirectory(), with: "~")
-            Text(BoardStore(root: root).recordsDir.map { "workflow.md is kept in \(shown)/.vibeswitcher (not committed); decisions.md and progress.md in \(shown)/\($0), committed to the lead's branch." }
+            Text(BoardStore(root: root).recordsDir.map { "workflow.md is kept in \(shown)/.vibeswitcher (not committed); decisions.md, progress.md and incidents.md in \(shown)/\($0), committed to the lead's branch." }
                  ?? "Kept in \(shown)/.vibeswitcher (not committed).")
                 .font(.system(size: 10.5)).foregroundStyle(.tertiary)
         }

@@ -114,10 +114,20 @@ public struct LeadMergeRecord: Codable, Equatable, Sendable {
     /// The test command ran on it and passed (false: there was none, so nothing ran).
     public var tested: Bool
     public var at: Double
+    // The fields below are optional: older records have none of them.
+    /// The branch's head it went onto: `onto..commit` are the commits it put there.
+    public var onto: String?
+    /// regression_command ran on it too, and passed.
+    public var regression: Bool?
+    /// The base's commit that reverted it (all or part of it), and when that was found (see `LeadReverts`).
+    public var revertedBy: String?
+    public var revertedAt: Double?
 
-    public init(commit: String, tested: Bool, at: Double = Date().timeIntervalSince1970) {
+    public init(commit: String, tested: Bool, onto: String? = nil, regression: Bool? = nil, at: Double = Date().timeIntervalSince1970) {
         self.commit = commit
         self.tested = tested
+        self.onto = onto
+        self.regression = regression
         self.at = at
     }
 }
@@ -485,6 +495,8 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var panel: LeadAuditPanel?
     /// The lead's notes on it since its contract (appended context, messages to its worker), oldest first.
     public var notes: [LeadNote]?
+    /// How it went, in the scorecard's numbers, as of the board's last change (see `LeadTaskScore`).
+    public var score: LeadTaskScore?
 
     public static let keptCheckpoints = 40
     /// Notes kept per task, the newest: an approval is rarely more than a few dozen messages back.
@@ -586,6 +598,8 @@ public struct LeadQuestion: Codable, Equatable, Sendable, Identifiable {
     public var heldAt: Double?
     /// When the timer ran out and the lead went ahead with its proposal.
     public var autoDecidedAt: Double?
+    /// The task it's about (its slug), when the lead said: its wait on the user counts on that task's score.
+    public var task: String?
 
     public init(id: String = UUID().uuidString, text: String, options: [String], priority: Priority? = nil, whyNow: String? = nil,
                 proposal: String? = nil, decideIn: Int? = nil, at: Double = Date().timeIntervalSince1970) {
@@ -854,8 +868,9 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     /// A `proposal` starts its timer: `decideIn` minutes (10 when nil) from `at`.
     @discardableResult
     public mutating func ask(_ text: String, options: [String], priority: LeadQuestion.Priority?, whyNow: String?,
-                             proposal: String? = nil, decideIn: Int? = nil, at: Double = Date().timeIntervalSince1970) -> LeadQuestion {
-        let question = LeadQuestion(text: text, options: options, priority: priority, whyNow: whyNow, proposal: proposal, decideIn: decideIn, at: at)
+                             proposal: String? = nil, decideIn: Int? = nil, task: String? = nil, at: Double = Date().timeIntervalSince1970) -> LeadQuestion {
+        var question = LeadQuestion(text: text, options: options, priority: priority, whyNow: whyNow, proposal: proposal, decideIn: decideIn, at: at)
+        question.task = task
         questions.append(question)
         return question
     }
@@ -1082,6 +1097,7 @@ public final class BoardStore: @unchecked Sendable {
         for index in board.tasks.indices where before[board.tasks[index].id] != board.tasks[index].status {
             board.tasks[index].since = before[board.tasks[index].id] == nil ? board.tasks[index].createdAt : now
         }
+        board.refreshScores(now: now)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try encoder.encode(board).write(to: URL(fileURLWithPath: file), options: .atomic)
@@ -1114,6 +1130,15 @@ public final class BoardStore: @unchecked Sendable {
     public func appendDecision(_ decision: String, why: String) throws {
         let heading = decision.split(whereSeparator: \.isNewline).joined(separator: " ")
         try append("## \(LeadDecision.stamp(Date())) \(heading)\n\n\(why)\n\n", to: "decisions.md", header: "# Decisions\n\n")
+    }
+
+    /// An incident under a `## <date and time> <what>` heading (one line), its evidence, the task it happened in and
+    /// the task that turns it into a check below (`record_incident`).
+    public func appendIncident(_ what: String, evidence: String, task: String?, check: String) throws {
+        let heading = what.split(whereSeparator: \.isNewline).joined(separator: " ")
+        let about = task.map { "Task: \($0)\n" } ?? ""
+        try append("## \(LeadDecision.stamp(Date())) \(heading)\n\nEvidence: \(evidence)\n\n\(about)Check: task \(check) turns it into a check that runs before merge.\n\n",
+                   to: "incidents.md", header: "# Incidents\n\n")
     }
 
     /// The lead's decisions, oldest first. Everything that shows them reads them here, so where they're kept can
