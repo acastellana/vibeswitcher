@@ -558,6 +558,8 @@ struct ChatSyncTests {
 final class Harness {
     let server: HostServer
     let socket: String
+    /// The app's key its client proves itself with, in memory: never the Keychain's.
+    let keyStore: AppProof.MemoryStore
     let host: HostClient
     let pane: TerminalPaneController
     let chat: ChatModel
@@ -597,7 +599,8 @@ final class Harness {
         config.appExecutable = HostServer.executable(of: getpid())
         server = HostServer(config: config)
         try server.start()
-        host = HostClient(socketPath: socket, appKey: { key })
+        keyStore = AppProof.MemoryStore(key: key)
+        host = HostClient(socketPath: socket, appKey: { [keyStore] in keyStore.key() })
         pane = TerminalPaneController(host: host)
         steerRoot = home.appendingPathComponent("vibeswitcher")
         chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: steerRoot)
@@ -609,6 +612,7 @@ final class Harness {
 
     static func start(_ temp: Scratch) async throws -> Harness {
         let h = try Harness(temp)
+        #expect(h.placesAreScratch, "the harness reads and writes outside its scratch: \(h.places)")
         h.host.connectIfRunning()
         #expect(await until { h.host.state == .connected })
         var result: Result<HostSession, HostClientError>?
@@ -629,6 +633,26 @@ final class Harness {
         #expect(await until(timeout: Harness.wait) { h.chat.state == .ready })
         try await h.paneShows { $0.contains("? for shortcuts") }
         return h
+    }
+
+    /// Where the harness reads and writes: its steer inbox, the chat's home (the fake agent's transcript), the fake
+    /// agent's state and control files, and its host's socket.
+    var places: [String] { files + [socket] }
+    private var files: [String] { [steerRoot.path, chat.steerRoot.path, chat.home, transcript.path, state.path, control.path] }
+
+    /// Each place is the test's own: the files in the test's scratch folder, the socket a short `/tmp` one (a socket's
+    /// path can't be as long as a scratch folder's), and none in the real home's or this HOME's `.vibeswitcher` or `.claude`.
+    var placesAreScratch: Bool {
+        // `/tmp/x` and `/private/tmp/x` are one place (Foundation spells it either way).
+        func spelled(_ path: String) -> String {
+            let standard = (path as NSString).standardizingPath
+            return standard.hasPrefix("/private/") ? String(standard.dropFirst("/private".count)) : standard
+        }
+        func inside(_ path: String, _ folder: String) -> Bool { spelled(path) == spelled(folder) || spelled(path).hasPrefix(spelled(folder) + "/") }
+        let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? NSHomeDirectory()
+        let theirs = [realHome, NSHomeDirectory()].flatMap { [$0 + "/.vibeswitcher", $0 + "/.claude"] }
+        return files.allSatisfy { inside($0, scratchRoot.path) } && spelled(socket).hasPrefix("/tmp/vsh-sync-")
+            && !places.contains { place in theirs.contains { inside(place, $0) } }
     }
 
     func stop() {
