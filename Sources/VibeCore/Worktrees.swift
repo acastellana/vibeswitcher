@@ -18,9 +18,18 @@ public enum Git {
     /// TERM) they would leave it, and every git that changes that index refuses until someone removes it.
     public static let environment = ["GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"]
 
+    /// A run that was stopped (out of time, or cancelled) gives no output, only `error` saying so: its callers take
+    /// `output` as git's answer, and what it wrote until then isn't one (a shell it ran may even answer after its
+    /// time is up, and exit 0).
     @discardableResult
-    public static func run(_ args: [String], in directory: String) -> Result {
-        Shell.run(executable: "/usr/bin/git", args: args, in: directory, env: environment)
+    public static func run(_ args: [String], in directory: String, timeout: TimeInterval = 120, grace: TimeInterval = 5) -> Result {
+        var result = Shell.run(executable: "/usr/bin/git", args: args, in: directory, env: environment, timeout: timeout, grace: grace)
+        if result.timedOut || result.cancelled {
+            result.output = ""
+            let stopped = result.cancelled ? "git was stopped: cancelled." : "git was stopped: it ran past \(Worktrees.duration(timeout))."
+            result.error = result.error.isEmpty ? stopped : stopped + "\n" + result.error
+        }
+        return result
     }
 }
 

@@ -6,14 +6,14 @@ import VibeCore
 /// The lead controller's look every 3 s, off the main thread (`LeadReads`): a board or decisions file is read again only
 /// when it changed, and what's read is handed to the main thread.
 struct LeadFilesTests {
-    private func scratchRoot() throws -> String {
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("lead-files-\(UUID().uuidString)").path
+    private func newRoot() throws -> String {
+        let root = scratchRoot.appendingPathComponent("lead-files-\(UUID().uuidString)").path
         try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
         return root
     }
 
     @Test func anUnchangedBoardIsNotReadAgain() throws {
-        let root = try scratchRoot()
+        let root = try newRoot()
         defer { try? FileManager.default.removeItem(atPath: root) }
         let store = BoardStore(root: root)
         try store.update { $0.baseBranch = "main" }
@@ -48,7 +48,7 @@ struct LeadFilesTests {
     }
 
     @Test @MainActor func boardsAreReadOffTheMainThreadAndHandedToIt() async throws {
-        let root = try scratchRoot()
+        let root = try newRoot()
         defer { try? FileManager.default.removeItem(atPath: root) }
         let store = BoardStore(root: root)
         try store.update { $0.baseBranch = "main" }
@@ -62,7 +62,7 @@ struct LeadFilesTests {
     }
 
     @Test @MainActor func aBoardThatDoesntReadIsShownEmptyAsBefore() async throws {
-        let root = try scratchRoot()
+        let root = try newRoot()
         defer { try? FileManager.default.removeItem(atPath: root) }
         let store = BoardStore(root: root)
         try FileManager.default.createDirectory(atPath: store.folder, withIntermediateDirectories: true)
@@ -76,7 +76,7 @@ struct LeadFilesTests {
     /// Whom to deliver to, read on the main thread: only the lead's fields, the same as the whole board says, and read
     /// again only when the board changed.
     @Test func theLeadsNameIsReadAloneAndOnlyWhenTheBoardChanged() throws {
-        let root = try scratchRoot()
+        let root = try newRoot()
         defer { try? FileManager.default.removeItem(atPath: root) }
         let store = BoardStore(root: root)
         try store.update { board in
@@ -98,7 +98,7 @@ struct LeadFilesTests {
     }
 
     @Test func aBoardThatDoesntReadNamesNoLead() throws {
-        let root = try scratchRoot()
+        let root = try newRoot()
         defer { try? FileManager.default.removeItem(atPath: root) }
         let store = BoardStore(root: root)
         try FileManager.default.createDirectory(atPath: store.folder, withIntermediateDirectories: true)
@@ -109,7 +109,7 @@ struct LeadFilesTests {
     }
 
     @Test func aMissingBoardIsAnEmptyOneAndIsLookedForAgain() throws {
-        let root = try scratchRoot()
+        let root = try newRoot()
         defer { try? FileManager.default.removeItem(atPath: root) }
         var files = LeadFiles()
         #expect(files.board(root) == LeadBoard())

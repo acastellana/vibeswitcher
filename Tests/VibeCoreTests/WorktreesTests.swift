@@ -611,6 +611,36 @@ struct ShellTests {
         let run = Shell.run(executable: "/bin/sleep", args: ["\(Self.childRuns)"], in: "/", timeout: 0.5, grace: 1)
         #expect(run.timedOut && !run.cancelled && !run.ok)
     }
+
+    /// A shell that ignores TERM goes on after its time is up, answers and exits 0. What it wrote is kept (evidence of
+    /// what it was doing) but the run isn't ok; Git.run, whose callers take its output as git's answer, gives none.
+    /// On a busy Mac the shell may be stopped before it set its trap: then it's run again with twice the time.
+    @Test func aLateAnswerIsNeverTheResult() throws {
+        let dir = temp.url("shell").path
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        var timeout: TimeInterval = 0.25
+        var shell: Git.Result?
+        while shell == nil, timeout < hangGuard {
+            let run = Shell.run(executable: "/bin/sh", args: ["-c", "trap '' TERM; sleep \(2 * timeout); echo late"], in: dir,
+                                timeout: timeout, grace: hangGuard)
+            if run.timedOut, run.output == "late" { shell = run }
+            timeout *= 2
+        }
+        let late = try #require(shell)
+        #expect(late.status == 0 && !late.ok)
+
+        Git.run(["init", "-q"], in: dir)
+        timeout = 0.25
+        var answered = false
+        while !answered, timeout < hangGuard {
+            let script = "trap '' TERM; sleep \(2 * timeout); echo late; echo > answered"
+            let git = Git.run(["-c", "alias.late=!\(script)", "late"], in: dir, timeout: timeout, grace: hangGuard)
+            answered = git.timedOut && FileManager.default.fileExists(atPath: dir + "/answered")
+            #expect(!git.timedOut || (!git.ok && git.output.isEmpty && git.error.contains("stopped")))
+            timeout *= 2
+        }
+        #expect(answered)
+    }
 }
 
 /// A value shared between threads.

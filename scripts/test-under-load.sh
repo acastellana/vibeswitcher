@@ -5,8 +5,10 @@
 # project-lead.
 #
 # Each run gets its own empty TMPDIR (tests put their scratch files under it, see `scratchRoot` in the tests'
-# TestSupport.swift) and must leave it empty; what's left is named by prefix. The runs start the test bundle the way
-# `swift test` does (swiftpm-testing-helper), directly: three `swift test` would take turns on SwiftPM's lock on .build.
+# TestSupport.swift) and must leave it empty; what's left is named by prefix. Run 1's is long (about 130 characters, as
+# a Claude session's scratchpad is): the suite passes whatever TMPDIR is, sockets and names included. The runs start
+# the test bundle the way `swift test` does (swiftpm-testing-helper), directly: three `swift test` would take turns on
+# SwiftPM's lock on .build.
 # Logs: .build/test-under-load/run-N.log. Everything else (the TMPDIRs, the burner) is gone when it exits, Ctrl-C too.
 #
 # scripts/test-under-load.sh [-r RUNS] [-f FILTER]
@@ -123,12 +125,22 @@ for _ in $(seq 1 "$cores"); do
 done
 echo "burning $cores cores; load $(sysctl -n vm.loadavg)"
 
+# Run N's TMPDIR: run 1's long, the others' short.
+tmpdir() {
+    local dir="$scratch/$1"
+    if [[ $1 -eq 1 ]]; then
+        dir+="/long"
+        while [[ ${#dir} -lt 130 ]]; do dir+="-tmpdir"; done
+    fi
+    echo "$dir"
+}
+
 started=$(date +%s)
 for run in $(seq 1 "$runs"); do
-    mkdir "$scratch/$run"
+    mkdir -p "$(tmpdir "$run")"
     args=(--test-bundle-path "$bundle")
     [[ -n $filter ]] && args+=(--filter "$filter")
-    TMPDIR="$scratch/$run/" "$helper" "${args[@]}" "$bundle" --testing-library swift-testing > "$logs/run-$run.log" 2>&1 &
+    TMPDIR="$(tmpdir "$run")/" "$helper" "${args[@]}" "$bundle" --testing-library swift-testing > "$logs/run-$run.log" 2>&1 &
     tests+=($!)
     echo $! >> "$scratch/pids"
 done
@@ -138,14 +150,14 @@ for run in $(seq 1 "$runs"); do
     status=0
     wait "${tests[$((run - 1))]}" || status=$?
     tail=$(grep -E "Test run with" "$logs/run-$run.log" | tail -1 | sed -E 's/\x1B\[[0-9;]*m//g')
-    echo "run $run: exit $status  ${tail:-(no result line)}  ($logs/run-$run.log)"
+    echo "run $run$([[ $run -eq 1 ]] && echo " (long TMPDIR)"): exit $status  ${tail:-(no result line)}  ($logs/run-$run.log)"
     if [[ $status -ne 0 ]]; then
         failed=1
         summary=$("$failures" --test-failures "$logs/run-$run.log")
         echo "${summary:-the run failed without naming a test; see the log}" | sed 's/^/    /'
     fi
     # What the run left in its TMPDIR, by prefix (the name without its UUID or random tail).
-    left=$(ls -A "$scratch/$run")
+    left=$(ls -A "$(tmpdir "$run")")
     if [[ -n $left ]]; then
         failed=1
         echo "    left in TMPDIR ($(wc -l <<< "$left" | tr -d ' ') entries), by prefix:"

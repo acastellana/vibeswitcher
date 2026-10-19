@@ -337,7 +337,7 @@ struct HostCallTests {
     @Test func inputLargerThanTheSocketBufferReachesABusyHost() throws {
         // E-06: `send` used to close 50 ms after queueing; a host busy for longer than that lost what was still
         // waiting to go out (over ~8 KB), while the caller reported the message as typed.
-        let path = scratchRoot.appendingPathComponent("busy-\(UUID().uuidString.prefix(8)).sock").path
+        let path = "\(shortScratchRoot)/busy-\(UUID().uuidString.prefix(8)).sock"
         let listener = try UnixSocket.listen(path: path)
         final class Seen: @unchecked Sendable { var bytes = 0 }
         let seen = Seen()
@@ -441,7 +441,7 @@ struct HostCallTests {
     @Test func aLongLeadMessageIsTypedWholeIntoAnIdleSession() throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        let out = FileManager.default.temporaryDirectory.appendingPathComponent("typed-\(UUID().uuidString.prefix(8))").path
+        let out = scratchRoot.appendingPathComponent("typed-\(UUID().uuidString.prefix(8))").path
         defer { unlink(out) }
         let session = try client.spawn("stty raw -echo; echo ready; exec cat > \(out)")
         client.attach(session.id)
@@ -450,7 +450,7 @@ struct HostCallTests {
         #expect(brief.utf8.count > 30_000)
         let rule = String(repeating: "─", count: 40)
         let empty = LeadDelivery.Screen(text: "\(rule)\n❯ \n\(rule)")
-        let root = FileManager.default.temporaryDirectory.appendingPathComponent("lead-\(UUID().uuidString.prefix(8))")
+        let root = scratchRoot.appendingPathComponent("lead-\(UUID().uuidString.prefix(8))")
         defer { try? FileManager.default.removeItem(at: root) }
         let agent = LeadAgent(pid: 7, tty: "ttys908", session: session.id.uuidString)
         let delivered = try LeadDelivery.deliver(brief, from: .lead("lead"), to: agent, activity: .idle(background: nil), styledScreen: { empty },

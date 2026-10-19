@@ -52,8 +52,25 @@ public enum ClaudeScratch {
     /// Claude's longest folder name; a longer one is cut there and given a hash of the whole.
     static let longest = 200
 
+    /// The name Claude gives `folder`'s temporary folder (its `sanitizePath`): within `longest`, the dashed path;
+    /// longer, its first `longest` characters, a dash and a hash of the whole path. Two folders whose paths start
+    /// the same for that long (a deep project's tasks) still have names of their own.
     public static func name(for folder: String) -> String {
-        String(folder.unicodeScalars.map { $0.isASCII && CharacterSet.alphanumerics.contains($0) ? Character($0) : "-" })
+        let name = dashed(folder)
+        return name.utf16.count > longest ? String(decoding: name.utf16.prefix(longest), as: UTF16.self) + "-" + hash(folder) : name
+    }
+
+    /// Each character that isn't an ASCII letter or digit made a dash, counted as JavaScript does (in UTF-16 units:
+    /// a character beyond them is two dashes).
+    static func dashed(_ folder: String) -> String {
+        let kept = Set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789".utf16), dash = "-".utf16.first!
+        return String(decoding: folder.utf16.map { kept.contains($0) ? $0 : dash }, as: UTF16.self)
+    }
+
+    /// Claude's hash for a long name: Java's string hash over the UTF-16 units in 32 bits, its magnitude in base 36.
+    static func hash(_ text: String) -> String {
+        let value = text.utf16.reduce(Int32(0)) { $0 &* 31 &+ Int32($1) }
+        return String(Int64(value).magnitude, radix: 36)
     }
 
     /// The temporary folders under `root` that belong to sessions run in `folder` exactly (not in a folder whose
@@ -64,15 +81,8 @@ public enum ClaudeScratch {
             paths.append(String(cString: resolved))
             free(resolved)
         }
-        let entries = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
-        var found: [URL] = []
-        for name in Set(paths.map(Self.name(for:))) {
-            let matches = name.count > longest
-                ? entries.filter { $0.hasPrefix(String(name.prefix(longest)) + "-") && $0.count > longest + 1 }
-                : entries.filter { $0 == name }
-            found += matches.map { root.appendingPathComponent($0, isDirectory: true) }
-        }
-        return found.filter { url in
+        let entries = Set((try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? [])
+        return Set(paths.map(name(for:))).intersection(entries).map { root.appendingPathComponent($0, isDirectory: true) }.filter { url in
             var directory: ObjCBool = false
             return FileManager.default.fileExists(atPath: url.path, isDirectory: &directory) && directory.boolValue
         }.sorted { $0.path < $1.path }

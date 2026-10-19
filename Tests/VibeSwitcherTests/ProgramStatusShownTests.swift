@@ -51,7 +51,7 @@ struct ProgramStatusShownTests {
         config.appExecutable = HostServer.executable(of: getpid())
         let server = HostServer(config: config)
         try server.start()
-        let stateDir = FileManager.default.temporaryDirectory.appendingPathComponent("program-status-\(UUID().uuidString)")
+        let stateDir = scratchRoot.appendingPathComponent("program-status-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
         defer {
             server.stop(terminateSessions: true)

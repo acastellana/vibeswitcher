@@ -136,6 +136,11 @@ struct TeamSummariesTests {
         let start = Date()
         #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "sleep \(Int(2 * hangGuard)) && echo late"], timeout: 0.5) == nil)
         #expect(Date().timeIntervalSince(start) < hangGuard)
+        // Whatever its sleep's end: a shell that goes on to the echo, even one that ignores TERM and so answers after
+        // its time is up and exits 0, answers too late. (Its sleep ignores TERM too, and ends within the grace.)
+        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "sleep \(Int(2 * hangGuard)); echo late"], timeout: 0.5) == nil)
+        #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "trap '' TERM; sleep 1; echo late"], timeout: 0.5) == nil)
+        #expect(Date().timeIntervalSince(start) < hangGuard)
         // These end by themselves: the timeout is only a hang guard.
         #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "echo nope; exit 1"], timeout: hangGuard) == nil)
         #expect(ClaudeHeadless.run(executable: "/bin/sh", args: ["-c", "echo Fixing the parser"], timeout: hangGuard) == "Fixing the parser")

@@ -49,6 +49,26 @@ struct DiskSpaceTests: LeadTeamFixture {
                 == "-Users-albert-dev-vibeswitcher--vibeswitcher-worktrees-fix-the-chat-layout")
     }
 
+    /// Past 200 characters Claude cuts the name and adds a hash of the whole path (these are from its own code, run
+    /// with Node): a deep project's tasks, alike for 200 characters, keep folders of their own.
+    @Test func claudeCutsALongNameAndHashesThePath() throws {
+        let deep = "/Users/x/dev/" + String(repeating: "a-very-long-project-folder-name/", count: 6) + ".vibeswitcher/worktrees/"
+        #expect(ClaudeScratch.name(for: deep + "fix-the-chat-layout") == "-Users-x-dev-"
+                + String(repeating: "a-very-long-project-folder-name-", count: 5) + "a-very-long-project-folder--yokhzf")
+        #expect(ClaudeScratch.name(for: "/tmp/é/" + String(repeating: "x", count: 200))
+                == "-tmp---" + String(repeating: "x", count: 193) + "-2pechf")
+        // Counted in UTF-16 units, as JavaScript does: a character beyond them is two.
+        #expect(ClaudeScratch.name(for: "/tmp/🙂/" + String(repeating: "x", count: 200))
+                == "-tmp----" + String(repeating: "x", count: 192) + "-7dc8pv")
+
+        let scratch = try folder("scratch")
+        try fill(temporary(for: deep + "fix-the-chat", in: scratch))
+        try fill(temporary(for: deep + "fix-the-chat-layout", in: scratch))
+        #expect(ClaudeScratch.folders(for: deep + "fix-the-chat", in: scratch).map(\.lastPathComponent) == [ClaudeScratch.name(for: deep + "fix-the-chat")])
+        #expect(ClaudeScratch.folders(for: deep + "fix-the-chat-layout", in: scratch).map(\.lastPathComponent)
+                == [ClaudeScratch.name(for: deep + "fix-the-chat-layout")])
+    }
+
     @Test func onlyTheFoldersOwnTemporaryFolderIsFound() throws {
         let scratch = try folder("scratch")
         let worktree = "/Users/x/dev/app/.vibeswitcher/worktrees/fix-the-chat"
@@ -133,7 +153,8 @@ struct DiskSpaceTests: LeadTeamFixture {
         #expect(told.contains("8.0 GB free"))
         #expect(told.contains("big's temporary folder 2"))
         #expect(told.contains("finished: cleanup removes it"))
-        #expect(told.range(of: "big's")!.lowerBound < told.range(of: "small's")!.lowerBound)
+        let big = try #require(told.range(of: "big's")), small = try #require(told.range(of: "small's"))
+        #expect(big.lowerBound < small.lowerBound)
         // Still low, lower, or back up a little: the same episode.
         for level in [7.0, 2.0, 10.5] {
             free = DiskSpace.bytes(level)

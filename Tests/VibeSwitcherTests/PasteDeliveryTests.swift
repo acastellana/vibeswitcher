@@ -15,7 +15,7 @@ struct PasteDeliveryTests {
         let socket = "/tmp/vsh-paste-\(UUID().uuidString.prefix(8)).sock"
         let server: HostServer
         let host: HostClient
-        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("paste-\(UUID().uuidString.prefix(8))")
+        let folder = scratchRoot.appendingPathComponent("paste-\(UUID().uuidString.prefix(8))")
 
         @MainActor
         init() throws {
