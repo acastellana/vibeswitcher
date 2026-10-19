@@ -10,11 +10,15 @@ final class SessionStore: ObservableObject {
     @Published private(set) var hooksInstalled: [Agent: Bool] = [:]
     /// Several sessions are native tabs of one window, but we can't read the tab order (no Accessibility).
     @Published private(set) var tabOrderUnavailable = false
-    /// When the process table `sessions` come from was read (see `SessionScanner.readAt`): a session missing from them
-    /// had no agent then. nil until a table was read.
-    private(set) var tableReadAt: Date?
+    /// The process table `sessions` come from: when it was read and the terminals it couldn't tell an agent on or not.
+    /// Published after `sessions`, so the window never pairs a newer table with older sessions (an agent the newer
+    /// table finds would read as quit).
+    @Published private(set) var tableRead = TableRead()
+    /// When that table was read (see `SessionScanner.readAt`): a session missing from them had no agent then. nil
+    /// until a table was read.
+    var tableReadAt: Date? { tableRead.at }
     /// The terminals that table couldn't tell an agent on or not (see `SessionScanner.undecided`).
-    private(set) var undecided = Undecided()
+    var undecided: Undecided { tableRead.undecided }
     /// Called when a session newly turns red (needs input) or green (done, unseen).
     var onAttention: ((Session) -> Void)?
     /// Called once per episode when a session has waited on you, or shown no progress, for too long.
@@ -201,9 +205,9 @@ final class SessionStore: ObservableObject {
                     self.terminalAccess = access
                     AppStatus.write(sessions: self.sessions, terminalAccess: access)
                 }
-                self.tableReadAt = readAt
-                self.undecided = undecided
                 self.apply(raw: raw, tabs: tabs, hosted: hosted, background: background, transcripts: transcripts, now: now)
+                let read = TableRead(at: readAt, undecided: undecided)
+                if read != self.tableRead { self.tableRead = read }
                 self.scansApplied += 1
                 self.scanning = false
                 if self.rescanRequested {
@@ -216,26 +220,21 @@ final class SessionStore: ObservableObject {
         }
     }
 
-    /// A window session started for an agent that the sessions don't have: its agent quit (`HostSession.agentQuit`) as of
-    /// when their table was read, a minute on, and only from a table that could tell what runs on its terminal. While
-    /// the table can't be read, or its process there couldn't be told (mid-exec on a busy Mac), it's unknown, not ended.
-    func agentQuit(_ info: HostSession) -> Bool {
-        guard let tableReadAt, !undecided.contains(info.tty) else { return false }
-        return info.agentQuit(now: tableReadAt)
-    }
+    /// A window session started for an agent that the sessions don't have: whether its agent quit, by their table
+    /// (`TableRead.agentQuit`, the rule the window's rows use too).
+    func agentQuit(_ info: HostSession) -> Bool { tableRead.agentQuit(info) }
 
     /// Synchronous scan on the calling (main) thread, used by `--snapshot`.
     func refreshNow() {
         let now = Date()
         let raw = scanner.scan(now: now)
-        tableReadAt = scanner.readAt
-        undecided = scanner.undecided
         let quiet = Set(raw.filter { $0.agent == .claude }.map(\.tty))
         var terminal = TerminalPoll<TerminalTab>()
         terminalAccess = terminal.poll(now: now, interval: 0, terminalTTYs: Set(raw.filter(\.inTerminalApp).map(\.tty)),
                                        quiet: quiet, force: true, bridge: bridge)?.access ?? .unknown
         apply(raw: raw, tabs: terminal.tabs, hosted: [:], background: terminal.backgroundWork,
               transcripts: Self.transcripts(for: raw), now: now)
+        tableRead = TableRead(at: scanner.readAt, undecided: scanner.undecided)
     }
 
     /// Off the main thread: each session's transcript, if its hook named one inside the agents' folders.

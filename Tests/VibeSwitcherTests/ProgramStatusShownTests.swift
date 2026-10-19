@@ -67,8 +67,10 @@ struct ProgramStatusShownTests {
         var wiring: Set<AnyCancellable> = []
         defer { wiring.removeAll() }
         host.$sessions.receive(on: DispatchQueue.main).sink { store.updateHosted($0) }.store(in: &wiring)
-        store.$sessions.combineLatest(host.$sessions, host.$state).receive(on: DispatchQueue.main)
-            .sink { sessions, hosted, state in model.update(sessions: sessions, hosted: hosted, hostAnswered: state != .connecting) }
+        store.$sessions.combineLatest(host.$sessions, host.$state, store.$tableRead).receive(on: DispatchQueue.main)
+            .sink { sessions, hosted, state, table in
+                model.update(sessions: sessions, hosted: hosted, table: table, hostAnswered: state != .connecting)
+            }
             .store(in: &wiring)
         host.connectIfRunning()
         #expect(await until { host.state == .connected })

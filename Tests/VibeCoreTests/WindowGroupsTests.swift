@@ -113,11 +113,47 @@ struct WindowGroupsTests {
     /// A preset that keeps a shell open leaves a live session with an agent label after the agent quits: it
     /// isn't "starting" for ever.
     @Test func aWindowSessionWhoseAgentNeverShowsUpStopsBeingStarting() {
-        let row = hosted(agent: "claude")   // started at 5
-        #expect(row.state(now: Date(timeIntervalSince1970: 30)).group == .working)
-        let later = row.state(now: Date(timeIntervalSince1970: 5 + 61))
+        let info = hosted(agent: "claude").hosted!   // started at 5
+        #expect(scanned(info, tableReadAt: Date(timeIntervalSince1970: 30)).state(now: Date(timeIntervalSince1970: 30)).group == .working)
+        let later = scanned(info, tableReadAt: Date(timeIntervalSince1970: 5 + 61)).state(now: Date(timeIntervalSince1970: 5 + 61))
         #expect(later.group == .idle)
         #expect(later.text == "agent ended · shell")
+    }
+
+    /// Its row as the window builds it from a scan of a process table read at `tableReadAt` that found no agent on it
+    /// (and couldn't tell what runs on the `undecided` terminals).
+    func scanned(_ info: HostSession, tableReadAt: Date?, undecided: Undecided = Undecided()) -> WindowRow {
+        WindowRows.sections(sessions: [], hosted: [info], table: TableRead(at: tableReadAt, undecided: undecided),
+                            projectName: { _ in "p" })[0].rows[0]
+    }
+
+    /// Under load the process table can't be read for minutes (the store keeps the sessions of the last one read): a
+    /// minute on by the clock, the agent isn't known to have quit until a table read a minute after the session started
+    /// says so. Never read, read before it started or less than a minute after: unknown, never "agent ended".
+    @Test func anUnreadOrStaleTableNeverEndsTheAgent() {
+        let info = hosted(agent: "claude").hosted!   // started at 5
+        for readAt in [nil, Date(timeIntervalSince1970: 1), Date(timeIntervalSince1970: 5 + 59)] {
+            let row = scanned(info, tableReadAt: readAt)
+            #expect(!row.agentQuit)
+            #expect(row.state(now: Date(timeIntervalSince1970: 30)).text == "starting")
+            let later = row.state(now: now)
+            #expect(later.text == "status unknown", "table read at \(String(describing: readAt))")
+            #expect(later.group == .idle)
+            #expect(later.since == nil)
+        }
+        let ended = scanned(info, tableReadAt: Date(timeIntervalSince1970: 5 + 60)).state(now: now)
+        #expect(ended.text == "agent ended · shell")
+        #expect(ended.group == .idle)
+        // Read a minute on, but what runs on its terminal couldn't be told (a process mid-exec): unknown as well.
+        for undecided in [Undecided(ttys: [info.tty]), Undecided(anywhere: true)] {
+            let row = scanned(info, tableReadAt: now, undecided: undecided)
+            #expect(!row.agentQuit)
+            #expect(row.state(now: now).text == "status unknown")
+        }
+        #expect(scanned(info, tableReadAt: now, undecided: Undecided(ttys: ["ttys901"])).state(now: now).text == "agent ended · shell")
+        // Ended sessions and plain shells read the same whatever the table.
+        #expect(scanned(hosted(agent: "claude", live: false).hosted!, tableReadAt: nil).state(now: now).text == "ended · exit 1")
+        #expect(scanned(hosted().hosted!, tableReadAt: now).state(now: now).text == "shell")
     }
 
     @Test func summaryCountsWhatNeedsYouAndWhatWorks() {

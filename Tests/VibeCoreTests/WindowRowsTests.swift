@@ -31,7 +31,7 @@ struct WindowRowsTests {
         let older = hosted("ttys009", cwd: "/x/alpha", started: 1)
         let newer = hosted("ttys010", cwd: "/x/gamma", started: 2)
         let ended = hosted("ttys011", cwd: "/x/alpha", live: false, started: 3)
-        let sections = WindowRows.sections(sessions: sessions, hosted: [older, ended, newer],
+        let sections = WindowRows.sections(sessions: sessions, hosted: [older, ended, newer], table: TableRead(),
                                            projectName: { ($0 as NSString).lastPathComponent })
         #expect(sections.map(\.project) == ["beta", "alpha", "gamma"])
         #expect(sections[0].rows.map(\.id) == ["tty:ttys005", "tty:ttys002"])
@@ -43,7 +43,7 @@ struct WindowRowsTests {
     /// must still be the window session's (same id), or the window loses its selection.
     @Test func anAgentOnAHostedTTYGetsTheHostIDBeforeTheStoreKnows() {
         let shell = hosted("ttys009", cwd: "/x/alpha")
-        let sections = WindowRows.sections(sessions: [agent("ttys009", project: "alpha")], hosted: [shell],
+        let sections = WindowRows.sections(sessions: [agent("ttys009", project: "alpha")], hosted: [shell], table: TableRead(),
                                            projectName: { ($0 as NSString).lastPathComponent })
         #expect(sections.flatMap(\.rows).map(\.id) == ["host:\(shell.id)"])
         #expect(sections.first?.rows.first?.hostID == shell.id)
@@ -56,7 +56,7 @@ struct WindowRowsTests {
         let info = hosted("ttys001", cwd: "/x/alpha", live: false)
         let id = info.id
         let sessions = [agent("ttys001", project: "alpha", host: id)]
-        let rows = WindowRows.sections(sessions: sessions, hosted: [info], projectName: { ($0 as NSString).lastPathComponent })
+        let rows = WindowRows.sections(sessions: sessions, hosted: [info], table: TableRead(), projectName: { ($0 as NSString).lastPathComponent })
             .flatMap(\.rows)
         #expect(rows.map(\.id) == ["host:\(id)"])
     }

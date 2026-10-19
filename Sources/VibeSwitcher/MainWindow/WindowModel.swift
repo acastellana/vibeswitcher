@@ -87,7 +87,7 @@ final class WindowModel: ObservableObject {
 
     /// `hostAnswered`: false while the session host hasn't listed its sessions yet (at launch); a window
     /// session that was selected is kept until then.
-    func update(sessions: [Session], hosted: [HostSession], hostAnswered: Bool = true) {
+    func update(sessions: [Session], hosted: [HostSession], table: TableRead, hostAnswered: Bool = true) {
         for session in sessions {
             if let host = session.hostID, let id = session.agentSessionID {
                 agentSessions[host] = (session.agent, id, session.transcriptPath ?? agentSessions[host]?.transcript)
@@ -97,7 +97,7 @@ final class WindowModel: ObservableObject {
         agentSessions = agentSessions.filter { known.contains($0.key) }
         let labels = Dictionary(uniqueKeysWithValues: hosted.map { ($0.id, $0.label) })
         if labels != hostLabels { hostLabels = labels }
-        let fresh = WindowRows.sections(sessions: sessions, hosted: hosted) { SessionNaming.name(forProjectRoot: $0) }
+        let fresh = WindowRows.sections(sessions: sessions, hosted: hosted, table: table) { SessionNaming.name(forProjectRoot: $0) }
         if fresh != sections { sections = fresh }
         // Keep the selection while its row exists (or before anything has loaded).
         let all = allRows

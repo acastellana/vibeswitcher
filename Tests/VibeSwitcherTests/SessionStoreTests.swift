@@ -108,6 +108,47 @@ struct SessionStoreTests {
         #expect(store.tableReadAt == read + 120)
     }
 
+    /// The window's row and a team row read a window session's agent as quit by the witness's rule: only from the
+    /// store's table read a minute after the session started. Never read, or read before it started (the table
+    /// unreadable since, on a loaded Mac): unknown and live, not "agent ended · shell".
+    @Test func rowsTellAnAgentQuitOnlyFromATableReadAMinuteAfterItStarted() async throws {
+        AppStatus.enabled = false
+        defer { try? FileManager.default.removeItem(at: stateDir) }
+        let clock = Clock()
+        let read = clock.now
+        let readable = Readable()
+        let store = try store(started: read, readable: { readable.value })
+        store.clock = { clock.now }
+        // A worker's window session whose agent the store's table doesn't show, started just after the first read.
+        let worker = HostSession(id: UUID(), tty: "ttys980", childPID: 980, cwd: "/r/acme/.vibeswitcher/worktrees/k", command: nil,
+                                 label: "Worker: K", agent: "claude", title: "", startedAt: read + 10, cols: 80, rows: 24, exit: nil)
+        let model = WindowModel()
+        func row() -> WindowRow? {
+            model.update(sessions: store.sessions, hosted: [worker], table: store.tableRead)
+            return model.allRows.first { $0.hostID == worker.id }
+        }
+        let later = read + 600
+
+        #expect(store.tableReadAt == nil)
+        #expect(row()?.state(now: later).text == "status unknown")
+        #expect(row().map(LeadTeams.isLive) == true)
+
+        try await refreshAndSettle(store)
+        readable.value = false
+        clock.advance(600)
+        try await refreshAndSettle(store)
+        #expect(store.tableReadAt == read)
+        #expect(row()?.state(now: later).text == "status unknown")
+        #expect(row().map { LeadTeams.state(of: $0, now: later).group } == .idle)
+        #expect(row().map(LeadTeams.isLive) == true)
+
+        readable.value = true
+        try await refreshAndSettle(store)
+        #expect(store.tableReadAt == later)
+        #expect(row()?.state(now: later).text == "agent ended · shell")
+        #expect(row().map(LeadTeams.isLive) == false)
+    }
+
     /// The witness tells a window session's agent as quit only from a table read that could tell what runs on its
     /// terminal: while its process there can't be told (mid-exec on a busy Mac), it's unknown, not quit.
     @Test func anAgentQuitNeedsATableThatToldItsTerminal() async throws {
@@ -128,11 +169,19 @@ struct SessionStoreTests {
         let window = HostSession(id: UUID(), tty: "ttys980", childPID: 980, cwd: "/tmp/store-tests", command: "claude", label: "w",
                                  agent: "claude", title: "w", startedAt: started, cols: 80, rows: 24, exit: nil)
         #expect(!store.agentQuit(window))
+        // The window's row and a team row read it as the witness does.
+        let model = WindowModel()
+        func row() -> WindowRow? {
+            model.update(sessions: store.sessions, hosted: [window], table: store.tableRead)
+            return model.allRows.first { $0.hostID == window.id }
+        }
         readable.value = false
         clock.advance(120)
         try await refreshAndSettle(store)
         #expect(store.undecided.contains("ttys980"))
         #expect(!store.agentQuit(window))
+        #expect(row()?.state(now: clock.now).text == "status unknown")
+        #expect(row().map(LeadTeams.isLive) == true)
         // Only that terminal is in question.
         var elsewhere = window
         elsewhere.tty = "ttys981"
@@ -141,6 +190,8 @@ struct SessionStoreTests {
         try await refreshAndSettle(store)
         #expect(store.undecided == Undecided())
         #expect(store.agentQuit(window))
+        #expect(row()?.state(now: clock.now).text == "agent ended · shell")
+        #expect(row().map(LeadTeams.isLive) == false)
     }
 
     private final class Readable: @unchecked Sendable {

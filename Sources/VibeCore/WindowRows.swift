@@ -11,10 +11,15 @@ public struct WindowRow: Identifiable, Equatable, Sendable {
 
     public var content: Content
     public var project: String
+    /// A window session's agent has quit, as told by a process table read a minute after the session started that could
+    /// tell what runs on its terminal (see `TableRead.agentQuit`): its shell lives on. False while no such table has
+    /// been read.
+    public var agentQuit: Bool
 
-    public init(content: Content, project: String) {
+    public init(content: Content, project: String, agentQuit: Bool = false) {
         self.content = content
         self.project = project
+        self.agentQuit = agentQuit
     }
 
     /// Window sessions are keyed by their host id, so a row keeps its identity (and selection) when the
@@ -55,8 +60,10 @@ public enum WindowRows {
         hosted.filter { !($0.isLive && agentTTYs.contains($0.tty)) }
     }
 
-    /// Sections by project, in the store's order; window-only rows (live first, newest first) after.
-    public static func sections(sessions: [Session], hosted: [HostSession], projectName: (String) -> String) -> [WindowSection] {
+    /// Sections by project, in the store's order; window-only rows (live first, newest first) after. `table` is the
+    /// process table `sessions` come from (the store's): whether a window session's agent has quit.
+    public static func sections(sessions: [Session], hosted: [HostSession], table: TableRead,
+                                projectName: (String) -> String) -> [WindowSection] {
         var order: [String] = []
         var rows: [String: [WindowRow]] = [:]
         // One row per id: a window session ended a moment ago (a host restart ends them one by one) is still the
@@ -77,7 +84,7 @@ public enum WindowRows {
             if $0.isLive != $1.isLive { return $0.isLive }
             return $0.startedAt < $1.startedAt
         }
-        extras.forEach { add(WindowRow(content: .hosted($0), project: projectName($0.cwd))) }
+        extras.forEach { add(WindowRow(content: .hosted($0), project: projectName($0.cwd), agentQuit: table.agentQuit($0))) }
         return order.map { WindowSection(project: $0, rows: rows[$0] ?? []) }
     }
 }

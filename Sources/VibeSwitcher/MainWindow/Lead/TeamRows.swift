@@ -125,7 +125,7 @@ enum TeamRows {
         for row in rows {
             guard let id = row.hostID?.uuidString else { continue }
             let state = row.state(now: now)
-            let live = LeadTeams.isLive(row, now: now)
+            let live = LeadTeams.isLive(row)
             // A window session whose agent hasn't shown up yet is being briefed.
             let activity = row.session?.activity ?? (row.session == nil && live && state.group == .working ? "Starting…" : nil)
             let started: Date
@@ -276,7 +276,7 @@ enum TeamRows {
     /// An ended worker or verifier of a merged or abandoned task: the lead's history, not the list's. The host is
     /// told to forget these (see `LeadController`); until it has, the team folding leaves them out.
     static func isHistory(_ row: WindowRow, boards: [String: LeadBoard], now: Date) -> Bool {
-        guard let cwd = row.cwd, !LeadTeams.isLive(row, now: now), let root = LeadTeams.root(ofWorktree: cwd),
+        guard let cwd = row.cwd, !LeadTeams.isLive(row), let root = LeadTeams.root(ofWorktree: cwd),
               let slug = LeadTeams.task(ofWorktree: cwd), let task = boards[(root as NSString).standardizingPath]?.task(slug) else { return false }
         return LeadTeams.isFinished(task)
     }

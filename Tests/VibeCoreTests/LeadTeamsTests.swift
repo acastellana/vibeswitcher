@@ -45,6 +45,13 @@ struct LeadTeamsTests {
                     startedAt: started, cols: 80, rows: 24, exit: exit.map { HostSession.Exit(status: $0, at: Date()) })
     }
 
+    /// A window session's row with no agent in the scan of a process table read at `tableReadAt` (that couldn't tell
+    /// what runs on the `undecided` terminals).
+    func shellRow(_ info: HostSession, tableReadAt: Date?, undecided: Undecided = Undecided()) -> WindowRow {
+        WindowRows.sections(sessions: [], hosted: [info], table: TableRead(at: tableReadAt, undecided: undecided),
+                            projectName: { _ in "p" })[0].rows[0]
+    }
+
     func agentRow(_ cwd: String, status: SessionStatus) -> WindowRow {
         var session = Session(tty: "ttys\(UUID().uuidString.prefix(4))", agent: .claude, pid: 1, startedAt: Date(), cwd: cwd, project: "p",
                               task: nil, status: status, statusSince: Date(), detail: nil, hasHooks: true, inTerminalApp: false)
@@ -112,12 +119,12 @@ struct LeadTeamsTests {
         for index in 0..<14 {
             team.append(member("Worker: Old", WindowRow(content: .hosted(session("Worker: Old", cwd: wt + "old\(index)", exit: 129)), project: "old")))
         }
-        team.append(member("Worker: D", WindowRow(content: .hosted(session("Worker: D", cwd: wt + "d", started: now - 600)), project: "d")))
+        team.append(member("Worker: D", shellRow(session("Worker: D", cwd: wt + "d", started: now - 600), tableReadAt: now)))
         #expect(LeadTeams.summary(team, label: { labels[$0.id] }, board: board, now: now) == "team: 2 working · 1 in review")
 
         // Waiting on you comes first; a merged task's live worker is done; a just-started one is working.
         team.append(member("Worker: E", agentRow(wt + "e", status: .idle)))
-        team.append(member("Worker: F", WindowRow(content: .hosted(session("Worker: F", cwd: wt + "f", started: now - 5)), project: "f")))
+        team.append(member("Worker: F", shellRow(session("Worker: F", cwd: wt + "f", started: now - 5), tableReadAt: now)))
         team[0] = member("Worker: A", agentRow(wt + "a", status: .needsInput))
         #expect(LeadTeams.summary(team, label: { labels[$0.id] }, board: board, now: now) == "team: 1 needs you · 2 working · 1 in review · 1 done")
         // Without the board, a live verifier still means the task is in review; an idle worker is idle.
@@ -127,5 +134,30 @@ struct LeadTeamsTests {
         let unread = [member("Worker: I", agentRow(wt + "i", status: .working)), member("Worker: J", agentRow(wt + "j", status: .unknown))]
         #expect(LeadTeams.summary(unread, label: { labels[$0.id] }, board: nil, now: now) == "team: 1 working · 1 unknown")
         #expect(LeadTeams.summary(Array(team[4..<18]), label: { labels[$0.id] }, board: board, now: now) == "team: none running")
+    }
+
+    /// Under load the process table can't be read for a while (the store keeps the sessions of the last one read): a
+    /// worker's agent counts as quit only from a table read a minute after its session started, not from the clock.
+    @Test func aTeamMemberEndsOnlyByATableReadAMinuteAfterItStarted() {
+        let now = Date()
+        let started = now - 600
+        let wt = "/r/acme/.vibeswitcher/worktrees/"
+        let worker = session("Worker: K", cwd: wt + "k", started: started)
+        let label: (WindowRow) -> String? = { _ in "Worker: K" }
+        for readAt in [nil, started - 30, started + 30] {
+            let row = shellRow(worker, tableReadAt: readAt)
+            #expect(LeadTeams.isLive(row), "table read at \(String(describing: readAt))")
+            #expect(LeadTeams.state(of: row, now: now).text == "status unknown")
+            #expect(LeadTeams.summary([row], label: label, board: nil, now: now) == "team: 1 unknown")
+        }
+        // Read a minute on, but its terminal's process couldn't be told (mid-exec): still live, unknown.
+        let undecided = shellRow(worker, tableReadAt: now, undecided: Undecided(ttys: [worker.tty]))
+        #expect(LeadTeams.isLive(undecided))
+        #expect(LeadTeams.state(of: undecided, now: now).text == "status unknown")
+        #expect(LeadTeams.summary([undecided], label: label, board: nil, now: now) == "team: 1 unknown")
+        let ended = shellRow(worker, tableReadAt: started + 60)
+        #expect(!LeadTeams.isLive(ended))
+        #expect(LeadTeams.state(of: ended, now: now).text == "agent ended · shell")
+        #expect(LeadTeams.summary([ended], label: label, board: nil, now: now) == "team: none running")
     }
 }

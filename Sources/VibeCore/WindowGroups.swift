@@ -45,8 +45,12 @@ extension WindowRow {
             // No agent the scan knows, but a program that says what it's doing (OSC 7501): that, over its preset.
             if let program = info.liveProgramStatus { return Self.state(of: program) }
             if info.agent != nil {
-                if info.agentQuit(now: now) { return RowState(text: "agent ended · shell", since: nil, group: .idle) }
-                return RowState(text: "starting", since: info.startedAt, group: .working)
+                if agentQuit { return RowState(text: "agent ended · shell", since: nil, group: .idle) }
+                if now.timeIntervalSince(info.startedAt) < WindowGroups.startingFor {
+                    return RowState(text: "starting", since: info.startedAt, group: .working)
+                }
+                // A minute on, but no table read since says whether its agent is there (a loaded Mac): not known.
+                return RowState(text: "status unknown", since: nil, group: .idle)
             }
             return RowState(text: "shell", since: info.startedAt, group: .idle)
         case .agent(let session):
@@ -105,6 +109,29 @@ extension HostSession {
     /// on: an agent shows up within seconds, so it has quit and left the session's shell running.
     public func agentQuit(now: Date) -> Bool {
         isLive && agent != nil && now.timeIntervalSince(startedAt) >= WindowGroups.startingFor
+    }
+}
+
+/// The process table a scan's sessions come from: when it was read, and the terminals it couldn't tell an agent on or
+/// not (see `SessionScanner.readAt`, `.undecided`).
+public struct TableRead: Equatable, Sendable {
+    /// nil until a table was read.
+    public var at: Date?
+    public var undecided: Undecided
+
+    public init(at: Date? = nil, undecided: Undecided = Undecided()) {
+        self.at = at
+        self.undecided = undecided
+    }
+
+    /// A window session started for an agent that the scan doesn't have: its agent quit (`HostSession.agentQuit`) as
+    /// of when this table was read, a minute on, not the clock's, and only from a table that could tell what runs on
+    /// its terminal. While the table can't be read (a loaded Mac) the scan's sessions are an older table's, so a
+    /// session started since, or less than a minute before it, is unknown, not ended; so is one whose process there
+    /// couldn't be told (mid-exec). Never read: not quit.
+    public func agentQuit(_ info: HostSession) -> Bool {
+        guard let at, !undecided.contains(info.tty) else { return false }
+        return info.agentQuit(now: at)
     }
 }
 

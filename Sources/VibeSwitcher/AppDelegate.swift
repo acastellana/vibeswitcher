@@ -262,10 +262,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .receive(on: RunLoop.main)
             .sink { [weak self] sessions in self?.store.updateHosted(sessions) }
             .store(in: &cancellables)
-        store.$sessions.combineLatest(hostClient.$sessions, hostClient.$state)
+        store.$sessions.combineLatest(hostClient.$sessions, hostClient.$state, store.$tableRead)
             .receive(on: RunLoop.main)
-            .sink { [weak self] sessions, hosted, state in
-                self?.windowModel.update(sessions: sessions, hosted: hosted, hostAnswered: state != .connecting)
+            .sink { [weak self] sessions, hosted, state, table in
+                self?.windowModel.update(sessions: sessions, hosted: hosted, table: table, hostAnswered: state != .connecting)
             }
             .store(in: &cancellables)
         MainMenu.install()

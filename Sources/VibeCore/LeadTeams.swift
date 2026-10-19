@@ -54,10 +54,11 @@ public enum LeadTeams {
         }.map(\.id)
     }
 
-    /// A team member is still at it: its session runs and so does its agent (or the agent is still starting).
-    public static func isLive(_ row: WindowRow, now: Date) -> Bool {
+    /// A team member is still at it: its session runs and so does its agent (or the agent is still starting, or not
+    /// known to have quit: see `WindowRow.agentQuit`).
+    public static func isLive(_ row: WindowRow) -> Bool {
         guard let hosted = row.hosted else { return true }
-        return hosted.isLive && !hosted.agentQuit(now: now)
+        return hosted.isLive && !row.agentQuit
     }
 
     /// What a team member's row says: as any row, except that a normal end (exit 0, or the hangup or terminate
@@ -79,7 +80,7 @@ public enum LeadTeams {
     public static func summary(_ team: [WindowRow], label: (WindowRow) -> String?, board: LeadBoard?, now: Date) -> String {
         var order: [String] = []
         var tasks: [String: [WindowRow]] = [:]
-        for row in team where isLive(row, now: now) {
+        for row in team where isLive(row) {
             let key = row.cwd.flatMap(task(ofWorktree:)) ?? row.id
             if tasks[key] == nil { order.append(key) }
             tasks[key, default: []].append(row)
@@ -99,8 +100,9 @@ public enum LeadTeams {
                 word = "in review"
             } else if groups.contains(.working) {
                 word = "working"
-            } else if rows.contains(where: { $0.session?.status == .unknown }) {
-                // Nothing to read its state from (no hook state): not known to be idle.
+            } else if rows.contains(where: { $0.session?.status == .unknown || $0.state(now: now).text == "status unknown" }) {
+                // Nothing to read its state from (no hook state, or no process table read since its agent should
+                // have shown up): not known to be idle.
                 word = "unknown"
             } else {
                 word = "idle"
