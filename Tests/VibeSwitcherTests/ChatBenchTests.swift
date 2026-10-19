@@ -8,6 +8,8 @@ import Testing
 /// twice), at the chat pane's width with the inspector showing and hidden, while the model
 /// publishes every 20 ms and the window's chat timer ticks. On a Mac whose 1-minute load is not over load_threshold
 /// each run must settle with no tick over 0.25 s; over it a run is only recorded (its stalls say how busy the Mac is).
+/// One run at a time: five at once made each other's load.
+@Suite(.serialized)
 struct ChatBenchTests {
     static let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/chat-bench.jsonl")
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -117,8 +119,12 @@ struct ChatBenchTests {
         #expect(!loaded.failed, "\(loaded.text)")
         #expect(loaded.text.hasSuffix("rule: the Mac's 1-minute load 30.3 is over load_threshold 24 (twice the 12 cores): the first "
             + "open's ticks are only recorded, later ones fail over 4 × its longest (0.40s), never under 0.25s = 1.60s"), "\(loaded.text)")
-        ticks.note(1.7)
-        #expect(rule.verdict(ticks, load: 30).failed)
+        // How much of it the main thread was on the CPU tells a layout from a wait for a core.
+        ticks.note(1.7, cpu: 0.3)
+        let starved = rule.verdict(ticks, load: 30)
+        #expect(starved.failed)
+        #expect(starved.text.hasPrefix("FAIL: a tick stalled 1.70s (t=7s, page 1, 0.30s of it on the CPU), over 1.60s;"), "\(starved.text)")
+        #expect(ChatBench.LongestTicks.text(ticks.page, cpu: ticks.pageCPU) == "1.70s (cpu 0.30s)")
         // A first open quicker than 0.25 s doesn't make a loaded Mac stricter than a quiet one.
         #expect(ChatBench.StallRule.limit(loaded: true, firstOpen: 0.05) == 0.25)
         #expect(rule.describe(load: nil) == "the Mac's 1-minute load is unknown: any tick over 0.25s fails")

@@ -85,10 +85,14 @@ enum ChatBench {
         var worst: TimeInterval = 0
         let longest = LongestTicks()
         var opened = false
+        let mainThread = mach_thread_self()
+        var lastCPU: TimeInterval?
         let beat = Timer(timeInterval: 0.02, repeats: true) { _ in
             let now = Date()
             worst = max(worst, now.timeIntervalSince(last))
-            longest.note(now.timeIntervalSince(last))
+            let cpu = Self.cpuTime(of: mainThread)
+            longest.note(now.timeIntervalSince(last), cpu: cpu.flatMap { now in lastCPU.map { now - $0 } })
+            lastCPU = cpu
             last = now
             // Opened on the first beat, so the ticks count its layout and not the app's launch.
             if !opened {
@@ -212,15 +216,15 @@ enum ChatBench {
                     if second - since > seconds {
                         let after = paging.pressedSecond == nil ? "it loaded" : "pressing Show earlier (page \(paging.settles.count + 1))"
                         print("FAIL: the content height still changes \(second - since) s after \(after): height=\(probe.heights.last ?? 0) "
-                            + "heights=\(probe.heights.count) range=\(probe.range) \(paging.summary(pages: earlier)) longest tick=\(Self.seconds(longest.overall))")
+                            + "heights=\(probe.heights.count) range=\(probe.range) \(paging.summary(pages: earlier)) longest tick=\(LongestTicks.text(longest.overall, cpu: longest.overallCPU))")
                         finish(3)
                     }
                     return
                 }
                 if let pressedAt = paging.pressedAt {
-                    paging.settled(max(0, probe.lastChange.timeIntervalSince(pressedAt)), longestTick: longest.page)
+                    paging.settled(max(0, probe.lastChange.timeIntervalSince(pressedAt)), longestTick: LongestTicks.text(longest.page, cpu: longest.pageCPU))
                     print("  page \(paging.settles.count) settled in \(Self.seconds(paging.settles.last ?? 0)): shown=\(min(chat.items.count, chat.shownLimit)) "
-                        + "of \(chat.items.count) height=\(probe.heights.last ?? 0), longest tick \(Self.seconds(longest.page))")
+                        + "of \(chat.items.count) height=\(probe.heights.last ?? 0), longest tick \(LongestTicks.text(longest.page, cpu: longest.pageCPU))")
                 } else {
                     print("  settled \(second - readyAt) s after it loaded: height=\(probe.heights.last ?? 0)")
                 }
@@ -243,7 +247,7 @@ enum ChatBench {
                 if paging.settles.count < earlier { print("  nothing earlier to show after \(paging.settles.count) pages") }
                 print("settled \(second - reopenedAt) s after opening (loaded after \(readyAt - reopenedAt) s): height=\(probe.heights.last ?? 0) "
                     + "heights=\(probe.heights.count) range=\(probe.range) layouts=\(probe.layouts) last 3 s: \(probe.layoutsRecently) layouts "
-                    + "\(paging.summary(pages: earlier)) longest tick=\(Self.seconds(longest.overall))")
+                    + "\(paging.summary(pages: earlier)) longest tick=\(LongestTicks.text(longest.overall, cpu: longest.overallCPU))")
                 finish(0)
             }
             if earlier > 0 { return }
@@ -258,7 +262,7 @@ enum ChatBench {
                     }
                     let verdict = probe.changedRecently(seconds: 3) ? "FAIL: the content height still changes" : "settled"
                     print("\(verdict) \(second - reopenedAt) s after opening (loaded after \(readyAt - reopenedAt) s): height=\(probe.heights.last ?? 0) heights=\(probe.heights.count) "
-                        + "range=\(probe.range) layouts=\(probe.layouts) last 3 s: \(probe.layoutsRecently) layouts longest tick=\(Self.seconds(longest.overall))")
+                        + "range=\(probe.range) layouts=\(probe.layouts) last 3 s: \(probe.layoutsRecently) layouts longest tick=\(LongestTicks.text(longest.overall, cpu: longest.overallCPU))")
                     finish(probe.changedRecently(seconds: 3) ? 3 : 0)
                 }
                 finish(0)
@@ -270,6 +274,17 @@ enum ChatBench {
     }
 
     static func seconds(_ value: TimeInterval) -> String { String(format: "%.2fs", value) }
+
+    /// The CPU time `thread` has used.
+    static func cpuTime(of thread: thread_act_t) -> TimeInterval? {
+        var info = thread_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / MemoryLayout<integer_t>.size)
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { thread_info(thread, thread_flavor_t(THREAD_BASIC_INFO), $0, &count) }
+        }
+        guard result == KERN_SUCCESS else { return nil }
+        return Double(info.user_time.seconds + info.system_time.seconds) + Double(info.user_time.microseconds + info.system_time.microseconds) / 1e6
+    }
 
     /// A tick is the main thread's longest gap between the bench's 20 ms beats. One over 0.25 s fails the bench. On a
     /// Mac whose 1-minute load is over load_threshold (VIBESWITCHER_BENCH_WORKFLOW's workflow.md, else twice the cores,
@@ -346,13 +361,23 @@ enum ChatBench {
         private(set) var afterOpen: TimeInterval = 0
         private(set) var afterOpenPlace = ""
         private(set) var page: TimeInterval = 0
+        /// The main thread's CPU time in the overall and the page's longest: near the tick, the main thread was busy
+        /// (a layout); far under it, it waited for a core (the Mac's load).
+        private(set) var overallCPU: TimeInterval?
+        private(set) var pageCPU: TimeInterval?
 
-        func note(_ gap: TimeInterval) {
+        /// A tick of `gap` seconds, `cpu` of them on the main thread's CPU.
+        func note(_ gap: TimeInterval, cpu: TimeInterval? = nil) {
             guard started else { started = true; return }
-            let place = "t=\(second + 1)s, \(phase)"
-            if gap > overall { overall = gap; overallPlace = place }
+            let place = "t=\(second + 1)s, \(phase)" + (cpu.map { ", \(ChatBench.seconds($0)) of it on the CPU" } ?? "")
+            if gap > overall { overall = gap; overallPlace = place; overallCPU = cpu }
             if firstOpen != nil, gap > afterOpen { afterOpen = gap; afterOpenPlace = place }
-            page = max(page, gap)
+            if gap > page { page = gap; pageCPU = cpu }
+        }
+
+        /// "0.66s (cpu 0.61s)".
+        static func text(_ tick: TimeInterval, cpu: TimeInterval?) -> String {
+            ChatBench.seconds(tick) + (cpu.map { " (cpu \(ChatBench.seconds($0)))" } ?? "")
         }
 
         func endFirstOpen() {
@@ -362,6 +387,7 @@ enum ChatBench {
 
         func startPage(_ number: Int) {
             page = 0
+            pageCPU = nil
             phase = "page \(number)"
         }
     }
@@ -371,24 +397,24 @@ enum ChatBench {
         private(set) var pressedAt: Date?
         private(set) var pressedSecond: Int?
         private(set) var settles: [TimeInterval] = []
-        private var longestTicks: [TimeInterval] = []
+        private var longestTicks: [String] = []
 
         func pressed(at date: Date, second: Int) {
             pressedAt = date
             pressedSecond = second
         }
 
-        func settled(_ settle: TimeInterval, longestTick: TimeInterval) {
+        func settled(_ settle: TimeInterval, longestTick: String) {
             settles.append(settle)
             longestTicks.append(longestTick)
             pressedAt = nil
             pressedSecond = nil
         }
 
-        /// "earlier=2 settled=[0.41s,0.38s] page ticks=[0.08s,0.07s]": the pages asked for, each one's settle (from
-        /// the press to its last height change) and longest tick.
+        /// "earlier=2 settled=[0.41s,0.38s] page ticks=[0.08s (cpu 0.07s),0.07s (cpu 0.07s)]": the pages asked for, each
+        /// one's settle (from the press to its last height change) and longest tick.
         func summary(pages: Int) -> String {
-            "earlier=\(pages) settled=[\(settles.map(ChatBench.seconds).joined(separator: ","))] page ticks=[\(longestTicks.map(ChatBench.seconds).joined(separator: ","))]"
+            "earlier=\(pages) settled=[\(settles.map(ChatBench.seconds).joined(separator: ","))] page ticks=[\(longestTicks.joined(separator: ","))]"
         }
     }
 
