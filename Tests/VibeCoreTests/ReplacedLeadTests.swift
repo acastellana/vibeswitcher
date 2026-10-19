@@ -140,7 +140,7 @@ struct ReplacedLeadTests {
             #expect(start.contains("You replace the lead on ttys004"))
             #expect(start.contains("Before greeting, read \(file)"))
             #expect(start.contains("act on what the user asked there"))
-            #expect(start.contains("\(root)/.vibeswitcher/decisions.md"))
+            #expect(start.contains("\(root)/docs/lead/decisions.md"))
         }
         // A replaced lead with no transcript: no file (an earlier one goes), and the prompt names none.
         #expect(try LeadLaunch.writeTurns(nil, root: root) == nil)

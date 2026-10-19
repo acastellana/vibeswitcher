@@ -644,7 +644,8 @@ public final class FileLock {
     deinit { release() }
 }
 
-/// The board on disk: `<repo>/.vibeswitcher/board.json`, with the progress log and decisions next to it.
+/// The board on disk: `<repo>/.vibeswitcher/board.json`; the progress log and decisions are in the workflow's
+/// `records_dir` (committed by `LeadRecords`), or next to the board when it sets none.
 public final class BoardStore: @unchecked Sendable {
     public let root: String
     public var folder: String { (root as NSString).appendingPathComponent(".vibeswitcher") }
@@ -762,9 +763,12 @@ public final class BoardStore: @unchecked Sendable {
     /// The lead's decisions, oldest first. Everything that shows them reads them here, so where they're kept can
     /// change in this one place.
     public func decisions() -> [LeadDecision] {
-        let path = (folder as NSString).appendingPathComponent("decisions.md")
-        guard let text = try? String(contentsOfFile: path, encoding: .utf8) else { return [] }
-        return LeadDecision.parse(text)
+        // Not moved yet (nothing was written since records_dir was set): the old file's, merged in as a move would.
+        let local = (folder as NSString).appendingPathComponent("decisions.md")
+        let path = recordPath("decisions.md")
+        let text = try? String(contentsOfFile: path, encoding: .utf8)
+        guard path != local, let old = try? String(contentsOfFile: local, encoding: .utf8) else { return text.map(LeadDecision.parse) ?? [] }
+        return LeadDecision.parse(LeadRecords.merged(old: old, into: text, kind: .decisions))
     }
 
     /// Sets a repository up for a lead: the `.vibeswitcher` folder, kept out of git, with the workflow notes (a
@@ -804,14 +808,53 @@ public final class BoardStore: @unchecked Sendable {
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
     }
 
+    /// Appends to a record (redacted), in `records_dir` when the workflow sets one, moving the old local file's entries
+    /// there first (`LeadRecords.migrate`); under the records' lock, which the commit takes too.
     private func append(_ text: String, to name: String, header: String) throws {
         try ensureFolder()
-        let path = (folder as NSString).appendingPathComponent(name)
-        if !FileManager.default.fileExists(atPath: path) { try header.write(toFile: path, atomically: true, encoding: .utf8) }
-        let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
-        defer { try? handle.close() }
-        try handle.seekToEnd()
-        try handle.write(contentsOf: Data(text.utf8))
+        try withRecordsLock {
+            try LeadRecords.migrate(self)
+            let path = recordPath(name)
+            try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+            if !FileManager.default.fileExists(atPath: path) { try header.write(toFile: path, atomically: true, encoding: .utf8) }
+            let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: path))
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data(Redaction.secrets(in: text).utf8))
+        }
+    }
+
+    /// The folder the workflow keeps the decision and progress logs in, relative to the repository (`records_dir:`);
+    /// nil when they're kept in `.vibeswitcher`.
+    public var recordsDir: String? {
+        LeadWorkflow.load(from: (folder as NSString).appendingPathComponent("workflow.md")).recordsDir
+    }
+
+    /// Where `decisions.md` or `progress.md` is kept: in `records_dir`, else in `.vibeswitcher`. Everything that reads
+    /// or writes them finds them here.
+    public func recordPath(_ name: String) -> String {
+        guard let dir = recordsDir else { return (folder as NSString).appendingPathComponent(name) }
+        return ((root as NSString).appendingPathComponent(dir) as NSString).appendingPathComponent(name)
+    }
+
+    /// Replaces a record's whole text (the benches' made-up decisions), where `recordPath` keeps it.
+    public func replaceRecord(_ name: String, with text: String) throws {
+        let path = recordPath(name)
+        try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        try text.write(toFile: path, atomically: true, encoding: .utf8)
+    }
+
+    /// Runs `body` holding the records' lock (across processes: the app's timers write decisions too).
+    func withRecordsLock<T>(_ body: () throws -> T) throws -> T {
+        try ensureFolder()
+        let fd = open((folder as NSString).appendingPathComponent("records.lock"), O_CREAT | O_RDWR, 0o600)
+        guard fd >= 0 else { throw CocoaError(.fileWriteNoPermission) }
+        flock(fd, LOCK_EX)
+        defer {
+            flock(fd, LOCK_UN)
+            close(fd)
+        }
+        return try body()
     }
 
     private static func stamp() -> String {

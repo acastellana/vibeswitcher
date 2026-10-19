@@ -1045,3 +1045,107 @@ public struct TestFailures: Equatable, Sendable {
         return text
     }
 }
+
+extension Worktrees {
+    /// What `commitFiles` did.
+    public enum FilesCommit: Equatable, Sendable {
+        /// `commit`, whose only parent is `parent`, is the branch's head now.
+        case committed(commit: String, parent: String)
+        /// The files are as the branch has them: nothing to commit.
+        case unchanged
+        case failed(String)
+    }
+
+    /// Commits `paths` (relative to the repository), as they are in `root`'s working tree, onto `branch` as one commit
+    /// whose only parent is the branch's head, touching nothing else: the tree is built in an index of its own, and
+    /// the branch moves only from the head that was read (`update-ref` with the old value). When the branch is checked
+    /// out at `root`, only those paths' entries in its index are set to what was committed (before the branch moves:
+    /// so a stop between the two leaves them staged, never undone), and put back if the branch couldn't move; every
+    /// other staged or unstaged change there stays exactly as it was. A held index.lock is waited for up to
+    /// `lockWait`, never removed. A path missing from the working tree is left as the branch has it. With `contents`,
+    /// a path's text is what it gives (a snapshot taken under the caller's lock) instead of the working tree's; with
+    /// `expected`, only on top of that head.
+    public static func commitFiles(root: String, branch: String, paths: [String], contents: [String: Data] = [:], message: String,
+                                   from expected: String? = nil, lockWait: TimeInterval = 5) -> FilesCommit {
+        let git = { (args: [String], env: [String: String]) in
+            Shell.run(executable: "/usr/bin/git", args: args, in: root, env: Git.environment.merging(env) { $1 }, timeout: 60)
+        }
+        let said = { (result: Git.Result) in result.error.isEmpty ? result.output : result.error }
+        let head = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"], in: root).output
+        guard !head.isEmpty else { return .failed("There's no branch \(branch).") }
+        if let expected, expected != head { return .failed("\(branch) is at \(head.prefix(8)), not at \(expected.prefix(8)); it moved meanwhile.") }
+        let resolved = { (p: String) in URL(fileURLWithPath: p).resolvingSymlinksInPath().path }
+        let place = checkout(of: branch, root: root)
+        if let place, resolved(place) != resolved(root) { return .failed("\(branch) is checked out in \(place), not here.") }
+        let scratch = FileManager.default.temporaryDirectory.appendingPathComponent("vibeswitcher-files-\(UUID().uuidString)").path
+        defer { try? FileManager.default.removeItem(atPath: scratch) }
+        do { try FileManager.default.createDirectory(atPath: scratch, withIntermediateDirectories: true) } catch { return .failed("\(error)") }
+        var blobs: [(path: String, blob: String)] = []
+        for path in paths {
+            guard let data = contents[path] ?? FileManager.default.contents(atPath: (root as NSString).appendingPathComponent(path)) else { continue }
+            // Hashed from a copy, as the path's own (its attributes' filters apply).
+            let copy = (scratch as NSString).appendingPathComponent("\(blobs.count)")
+            guard FileManager.default.createFile(atPath: copy, contents: data) else { return .failed("Couldn't copy \(path) to hash it.") }
+            let hashed = git(["hash-object", "-w", "--path=\(path)", "--", copy], [:])
+            guard hashed.ok, !hashed.output.isEmpty else { return .failed("git hash-object \(path) failed: \(said(hashed))") }
+            blobs.append((path, hashed.output))
+        }
+        guard !blobs.isEmpty else { return .unchanged }
+        // The tree: the head's, with these files.
+        let index = (scratch as NSString).appendingPathComponent("index")
+        let own = ["GIT_INDEX_FILE": index]
+        let read = git(["read-tree", head], own)
+        guard read.ok else { return .failed("git read-tree failed: \(said(read))") }
+        for (path, blob) in blobs {
+            let added = git(["update-index", "--add", "--cacheinfo", "100644,\(blob),\(path)"], own)
+            guard added.ok else { return .failed("git update-index failed: \(said(added))") }
+        }
+        let tree = git(["write-tree"], own)
+        guard tree.ok, !tree.output.isEmpty else { return .failed("git write-tree failed: \(said(tree))") }
+        guard tree.output != Git.run(["rev-parse", "\(head)^{tree}"], in: root).output else { return .unchanged }
+        let made = git(["-c", "commit.gpgsign=false", "commit-tree", tree.output, "-p", head, "-m", message], [:])
+        guard made.ok, !made.output.isEmpty else { return .failed("git commit-tree failed: \(said(made))") }
+        let commit = made.output
+        // The checkout's index, for these paths only: what was there, then what's committed.
+        let checkedOut = place != nil
+        var before: [String: String] = [:]
+        if checkedOut {
+            let listed = git(["ls-files", "-s", "-z", "--"] + blobs.map(\.path), [:])
+            guard listed.ok else { return .failed("git ls-files failed: \(said(listed))") }
+            for entry in listed.output.split(separator: "\0") {
+                // "<mode> <blob> <stage>\t<path>"
+                let parts = entry.split(separator: "\t", maxSplits: 1)
+                guard parts.count == 2 else { continue }
+                let fields = parts[0].split(separator: " ")
+                if fields.count == 3 { before[String(parts[1])] = "\(fields[0]),\(fields[1])" }
+            }
+            let set = withIndexLock(root: root, wait: lockWait) {
+                git(["update-index", "--add"] + blobs.flatMap { ["--cacheinfo", "100644,\($0.blob),\($0.path)"] }, [:])
+            }
+            guard set.ok else { return .failed("The checkout's index couldn't be updated, nothing was committed: \(said(set))") }
+        }
+        let moved = git(["update-ref", "-m", "commit: \(message.split(whereSeparator: \.isNewline).first ?? "")",
+                         "refs/heads/\(branch)", commit, head], [:])
+        guard moved.ok else {
+            if checkedOut {
+                // Back as it was: the entry it had, or none.
+                let args = blobs.flatMap { entry in
+                    before[entry.path].map { ["--cacheinfo", "\($0),\(entry.path)"] } ?? ["--force-remove", entry.path]
+                }
+                _ = withIndexLock(root: root, wait: lockWait) { git(["update-index", "--add"] + args, [:]) }
+            }
+            return .failed("\(branch) moved meanwhile, nothing was committed: \(said(moved))")
+        }
+        return .committed(commit: commit, parent: head)
+    }
+
+    /// Runs a git command that takes `root`'s index.lock, again for up to `wait` while another git holds it.
+    static func withIndexLock(root: String, wait: TimeInterval, _ run: () -> Git.Result) -> Git.Result {
+        let deadline = Date().addingTimeInterval(wait)
+        while true {
+            let result = run()
+            guard !result.ok, result.error.contains("index.lock"), Date() < deadline else { return result }
+            usleep(200_000)
+        }
+    }
+}

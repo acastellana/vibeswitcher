@@ -670,7 +670,7 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(!merged.isError, "\(merged.text)")
         #expect(merged.text.contains("feature"))
         #expect(FileManager.default.fileExists(atPath: root + "/b.txt"))
-        #expect(Git.run(["rev-parse", "feature"], in: root).output == Git.run(["rev-parse", "agent/add-b"], in: root).output)
+        #expect(underRecords("feature", in: root) == Git.run(["rev-parse", "agent/add-b"], in: root).output)
         // main didn't move.
         #expect(Git.run(["ls-tree", "--name-only", "main"], in: root).output == "a.txt")
         // Workers may not switch to it.

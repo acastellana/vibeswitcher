@@ -32,6 +32,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     public var mergePolicy: MergePolicy?
     /// The globs ask_sensitive holds back (`sensitive_paths:`, comma-separated); nil: `defaultSensitivePaths`.
     public var sensitivePaths: [String]?
+    /// Where the lead's decision log and progress log are kept and committed to the base branch, relative to the
+    /// repository (`records_dir:`); nil (an empty value) keeps them in `.vibeswitcher/`, uncommitted, as before.
+    public var recordsDir: String? = LeadWorkflow.defaultRecordsDir
     public var notes = ""
     /// Why the file's settings couldn't be read (missing, unreadable, no front matter); nil when they were.
     public var problem: String?
@@ -64,6 +67,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 // One it can't read asks for everything rather than merging what the owner meant to see.
                 case "merge_policy": workflow.mergePolicy = present.map { MergePolicy(text: $0) ?? .askAll }
                 case "sensitive_paths": workflow.sensitivePaths = globs(value)
+                case "records_dir": workflow.recordsDir = recordsFolder(value)
                 default: break
                 }
             }
@@ -73,6 +77,17 @@ public struct LeadWorkflow: Equatable, Sendable {
         }
         workflow.notes = body.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         return workflow
+    }
+
+    public static let defaultRecordsDir = "docs/lead"
+
+    /// A `records_dir:` value as a folder inside the repository ("docs/lead", without slashes around it); nil when
+    /// it's empty or isn't one (absolute, `..`, or in `.git` or `.vibeswitcher`): the logs then stay local.
+    public static func recordsFolder(_ value: String) -> String? {
+        let parts = value.trimmingCharacters(in: .whitespaces).split(separator: "/").map(String.init).filter { $0 != "." }
+        guard !value.trimmingCharacters(in: .whitespaces).hasPrefix("/"), !value.hasPrefix("~"), !parts.isEmpty,
+              !parts.contains(".."), ![".git", ".vibeswitcher"].contains(parts[0]) else { return nil }
+        return parts.joined(separator: "/")
     }
 
     /// A size in GB (at least 0); nil when it isn't one.
@@ -241,7 +256,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// The settings the lead may change with `configure`.
     public static let configurable = ["test_command", "init_command", "base_branch", "verifier_model", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "load_threshold", "mac_max_sessions",
-                                      "merge_policy", "sensitive_paths"]
+                                      "merge_policy", "sensitive_paths", "records_dir"]
 
     /// `data` with each setting's line changed (an empty value clears it), added when missing; every other line, the
     /// comments, unknown keys, the notes, the line endings and a BOM stay as they were.
@@ -369,6 +384,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     # The globs ask_sensitive holds back, comma-separated (as in .gitignore). Empty: Claude's settings and
     # instructions, .github, .env files, entitlements and keys.
     sensitive_paths:
+    # Where the lead's decisions.md and progress.md are kept, committed to the base branch by VibeSwitcher (only those
+    # two files, in small commits of their own), so the plan's reasoning travels with the repository. Empty: kept in
+    # .vibeswitcher, uncommitted. The board stays local either way.
+    records_dir: docs/lead
     ---
     Notes for the lead: conventions, priorities, what not to touch. The lead reads this at the start of every session.
     """
@@ -394,9 +413,9 @@ public enum LeadPrompts {
     /// `replaced`: the lead this one replaces (its terminal) and the file holding its last turns (see `LastTurns`):
     /// what the user told it there never reached the board (it had no tools), so it's read and acted on first.
     public static func leadStart(root: String, goal: String?, note: String, replaced: (tty: String, turnsFile: String)? = nil) -> String {
-        let folder = (root as NSString).appendingPathComponent(".vibeswitcher")
-        let memory = "Read status, the workflow notes, \(folder)/decisions.md (every decision: one may hold a task back from "
-            + "merging or its branch from deletion) and the end of \(folder)/progress.md"
+        let store = BoardStore(root: root)
+        let memory = "Read status, the workflow notes, \(store.recordPath("decisions.md")) (every decision: one may hold a task back from "
+            + "merging or its branch from deletion) and the end of \(store.recordPath("progress.md"))"
         let handover = replaced.map {
             " You replace the lead on \($0.tty), whose tools are off now: what the user told it may never have reached the board. Before greeting, read "
                 + "\($0.turnsFile) (its last turns: what the user asked, what it answered) and act on what the user asked there "

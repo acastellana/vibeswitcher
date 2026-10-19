@@ -56,7 +56,7 @@ struct LeadToolTripTests: LeadTeamFixture {
         #expect(prompt.contains("kept"))
         for goal in [nil, "build it"] {
             let start = LeadPrompts.leadStart(root: "/r", goal: goal, note: "n")
-            #expect(start.contains("/r/.vibeswitcher/decisions.md") && start.contains("/r/.vibeswitcher/progress.md"))
+            #expect(start.contains("/r/docs/lead/decisions.md") && start.contains("/r/docs/lead/progress.md"))
         }
     }
 

@@ -541,13 +541,15 @@ struct LeadTeamView: View {
             HStack(spacing: 8) {
                 ForEach(["workflow.md", "decisions.md", "progress.md"], id: \.self) { name in
                     Button(name) {
-                        let path = (root as NSString).appendingPathComponent(".vibeswitcher/\(name)")
+                        let path = name == "workflow.md" ? (root as NSString).appendingPathComponent(".vibeswitcher/\(name)") : BoardStore(root: root).recordPath(name)
                         if FileManager.default.fileExists(atPath: path) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) } else { NSSound.beep() }
                     }
                     .controlSize(.small)
                 }
             }
-            Text("Kept in \(root.replacingOccurrences(of: NSHomeDirectory(), with: "~"))/.vibeswitcher (not committed).")
+            let shown = root.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+            Text(BoardStore(root: root).recordsDir.map { "workflow.md is kept in \(shown)/.vibeswitcher (not committed); decisions.md and progress.md in \(shown)/\($0), committed to the lead's branch." }
+                 ?? "Kept in \(shown)/.vibeswitcher (not committed).")
                 .font(.system(size: 10.5)).foregroundStyle(.tertiary)
         }
     }

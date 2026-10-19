@@ -42,8 +42,9 @@ public enum LeadLaunch {
     /// role's `--name`), every tool server and the app ("cat" is in /Applications). `kill <pid>` stays open.
     static let killsByName = ["Bash(pkill:*)", "Bash(killall:*)", "Bash(/usr/bin/pkill:*)", "Bash(/usr/bin/killall:*)"]
 
-    /// What each role may not do.
-    public static func deny(_ role: Role, base: String? = nil) -> [String] {
+    /// What each role may not do. `records`: the workflow's `records_dir`, which only the lead's tool server writes
+    /// (and commits to the base branch): a worker editing it would conflict with those commits.
+    public static func deny(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
         switch role {
         case .lead, .verifier:
             return readOnly + gitWrites + gitAround + fileWrites + privateFiles + killsByName
@@ -66,6 +67,7 @@ public enum LeadLaunch {
                       "Bash(git switch --ignore-other-worktrees:*)", "Bash(git branch -f:*)", "Bash(git branch --force:*)",
                       "Bash(git branch -m:*)", "Bash(git branch -M:*)", "Bash(git commit-tree:*)"]
             rules += ["Bash(git branch -D:*)", "Bash(git branch -d:*)", "Bash(git worktree:*)", "Bash(git tag:*)", "Bash(git commit --amend:*)"]
+            if let records { rules += ["Edit(\(records)/**)", "Write(\(records)/**)", "Bash(git add \(records)*)", "Bash(git rm \(records)*)"] }
             return rules + gitAround + privateFiles + killsByName
         }
     }
@@ -102,7 +104,7 @@ public enum LeadLaunch {
     /// for the role (`LeadVault.runFolder`, outside the repository); `<root>/.vibeswitcher/run/<name>/` when none is given.
     public static func prepare(role: Role, root: String, task: String?, base: String, prompt: String, start: String,
                                server: String, name: String, model: String? = nil, branch: String? = nil,
-                               folder: URL? = nil) throws -> Prepared {
+                               records: String? = nil, folder: URL? = nil) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
@@ -116,7 +118,7 @@ public enum LeadLaunch {
         let mcp: [String: Any] = ["mcpServers": ["vibeswitcher": entry]]
         try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: mcp, options: [.prettyPrinted, .sortedKeys]),
                                    to: URL(fileURLWithPath: mcpFile))
-        var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch), "deny": deny(role, base: branch)]]
+        var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch), "deny": deny(role, base: branch, records: records)]]
         if !environment(role).isEmpty { settings["env"] = environment(role) }
         try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]),
                                    to: URL(fileURLWithPath: settingsFile))

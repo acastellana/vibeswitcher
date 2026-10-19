@@ -231,8 +231,7 @@ enum UIBench {
             for (index, root) in roots.enumerated() {
                 let store = BoardStore(root: root)
                 try? store.update { $0 = UIBench.board(tasks: 50, seed: index) }
-                try? UIBench.decisions(count: 30, newest: started.addingTimeInterval(-3600))
-                    .write(toFile: (store.folder as NSString).appendingPathComponent("decisions.md"), atomically: true, encoding: .utf8)
+                try? store.replaceRecord("decisions.md", with: UIBench.decisions(count: 30, newest: started.addingTimeInterval(-3600)))
             }
             if let source = transcriptSource {
                 let folder = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/projects/-bench")
@@ -499,8 +498,7 @@ enum UIBench {
                 fflush(stdout)
                 // The decisions just added fade for three minutes: let them go before measuring idle.
                 for root in self.roots {
-                    try? UIBench.decisions(count: 30, newest: Date().addingTimeInterval(-3600))
-                        .write(toFile: (BoardStore(root: root).folder as NSString).appendingPathComponent("decisions.md"), atomically: true, encoding: .utf8)
+                    try? BoardStore(root: root).replaceRecord("decisions.md", with: UIBench.decisions(count: 30, newest: Date().addingTimeInterval(-3600)))
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 5) { self.idle() }
             }

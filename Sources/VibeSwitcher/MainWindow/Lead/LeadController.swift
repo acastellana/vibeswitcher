@@ -60,7 +60,7 @@ struct LeadFiles {
 
     mutating func decisions(_ root: String) -> [LeadDecision] {
         let store = BoardStore(root: root)
-        let stamp = Stamp((store.folder as NSString).appendingPathComponent("decisions.md"))
+        let stamp = Stamp(store.recordPath("decisions.md"))
         if let stamp, let kept = decisionLists[root], kept.stamp == stamp { return kept.decisions }
         fileReads += 1
         let decisions = store.decisions()

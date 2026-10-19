@@ -80,7 +80,15 @@ removes the worktree and branch, and tells you what landed in a few lines. Befor
 holds the task back (a recorded decision, the task's notes, your word, e.g. "prototype: never merge until I've
 looked"): such a task it sets to **kept** with the reason, which keeps its branch and worktree, and `merge` refuses a
 kept task, naming why, until the lead sets it back. A new lead reads `decisions.md` and `progress.md`, not just the
-board, before it acts. How merges are handled is yours to choose once per project, as `merge_policy:` in
+board, before it acts. Those two logs live in the repository, in `records_dir:` (`docs/lead` by default; empty keeps
+them in `.vibeswitcher`, uncommitted, as before), so the plan's reasoning survives a deleted `.vibeswitcher`, another
+Mac or a new lead; the board stays local. The lead can't commit, so its tool server does, to the lead's branch: after
+each merge and at most every five minutes, as small commits of their own ("Lead: decisions and progress") that hold
+only those two files, built in an index of their own, so your staged and unstaged changes in the main checkout stay
+exactly as they were. None lands while a merge tests, the next merge takes them as the lead's own, workers may not
+edit that folder, a held `index.lock` is waited for briefly (never removed), and a commit that fails or waits shows
+in the lead's status, its entries kept in the files for the next try. Everything written there is redacted, and the
+old `.vibeswitcher` logs are moved in once. How merges are handled is yours to choose once per project, as `merge_policy:` in
 `workflow.md`: `auto` (audited work merges, and the lead posts what changed, how it was checked, the risk and how to
 revert it afterwards), `ask_sensitive` (a commit touching `sensitive_paths:`, comma-separated globs as in
 `.gitignore`, by default Claude's settings and instructions, `.github`, `.env` files, entitlements and keys, waits for

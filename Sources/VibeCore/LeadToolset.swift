@@ -82,6 +82,8 @@ public final class LeadToolset: MCPToolset {
     let runtime: LeadRuntime
     let store: BoardStore
     let vault: LeadVault
+    /// The decision and progress logs, committed to the base branch (the lead's server only; see `keepRecords`).
+    public let records: LeadRecords
     /// The grant the session held when the server started: a newer session for the role withdraws it.
     private let grant: String?
     let refusal: String?
@@ -106,6 +108,7 @@ public final class LeadToolset: MCPToolset {
         self.runtime = runtime
         self.vault = vault
         store = BoardStore(root: root)
+        records = LeadRecords(store: store, vault: vault)
         var member: LeadVault.Member?
         var problem: String?
         let deadline = Date().addingTimeInterval(wait)
@@ -222,6 +225,16 @@ public final class LeadToolset: MCPToolset {
         }
         let base = self.base
         if vault.head(root: root, branch: base) == nil, let head = branchHead(base) { try? vault.setHead(head, root: root, branch: base) }
+    }
+
+    /// The lead's server commits the decision and progress logs every few minutes while it holds the role
+    /// (`LeadRecords`), besides after each merge.
+    public func keepRecords() {
+        guard role == .lead else { return }
+        records.start { [weak self] in
+            guard let self, (try? self.authenticate()) != nil else { return nil }
+            return self.base
+        }
     }
 
     private func branchHead(_ branch: String) -> String? {
@@ -354,7 +367,10 @@ public final class LeadToolset: MCPToolset {
             case "message": return try message(try taskSlug(arguments), arguments)
             case "read_session": return try readSession(try taskSlug(arguments), who: arguments["who"] as? String ?? "worker")
             case "audit": return try audit(try taskSlug(arguments))
-            case "merge": return try merge(try taskSlug(arguments))
+            case "merge":
+                let merged = try merge(try taskSlug(arguments))
+                records.flush(base: base)
+                return merged
             case "cleanup": return try cleanup(try taskSlug(arguments), force: arguments["force"] as? Bool ?? false)
             case "ask_user": return try askUser(arguments)
             case "revise_question": return try reviseQuestion(arguments)
@@ -679,7 +695,7 @@ public final class LeadToolset: MCPToolset {
         do {
             let launch = try LeadLaunch.prepare(role: role, root: root, task: slug, base: runtime.claudeCommand(root: root), prompt: prompt,
                                                 start: start, server: runtime.server, name: name, model: model, branch: branch,
-                                                folder: vault.runFolder(root: root, name: name))
+                                                records: workflow.recordsDir, folder: vault.runFolder(root: root, name: name))
             let session = try runtime.spawn(cwd: folder, command: launch.command, label: label, agent: "claude", trust: trust)
             try vault.bind(grant, root: root, session: session)
             return session
@@ -1195,7 +1211,7 @@ public final class LeadToolset: MCPToolset {
     private func recordDecision(_ arguments: [String: Any]) throws -> MCPToolResult {
         guard let decision = arguments["decision"] as? String, let why = arguments["why"] as? String else { throw Problem(text: "A decision needs a reason.") }
         try store.appendDecision(decision, why: why)
-        return MCPToolResult(text: "Recorded.")
+        return MCPToolResult(text: store.recordsDir.map { "Recorded in \($0)/decisions.md (committed to \(base) with the next batch)." } ?? "Recorded.")
     }
 
     private func configure(_ arguments: [String: Any]) throws -> MCPToolResult {
@@ -1239,6 +1255,11 @@ public final class LeadToolset: MCPToolset {
                 value = policy.rawValue
             case "sensitive_paths":
                 value = LeadWorkflow.globs(value)?.joined(separator: ", ") ?? ""
+            case "records_dir" where !value.isEmpty:
+                guard let folder = LeadWorkflow.recordsFolder(value) else {
+                    throw Problem(text: "records_dir is a folder inside the repository (e.g. docs/lead), not in .git or .vibeswitcher; empty keeps the logs in .vibeswitcher.")
+                }
+                value = folder
             case "base_branch" where !value.isEmpty:
                 guard Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(value)"], in: root).ok else {
                     throw Problem(text: "There's no local branch \(value) to work on.")
@@ -1260,7 +1281,8 @@ public final class LeadToolset: MCPToolset {
                                       "disk_warning_gb": Self.gb(after.diskWarningGB), "disk_floor_gb": Self.gb(after.diskFloorGB),
                                       "test_timeout_min": Self.gb(after.testTimeoutMinutes),
                                       "load_threshold": after.loadThreshold.map(Self.gb) ?? "", "mac_max_sessions": String(after.macMaxSessions),
-                                      "merge_policy": after.mergePolicy?.rawValue ?? "", "sensitive_paths": after.sensitivePaths?.joined(separator: ", ") ?? ""]
+                                      "merge_policy": after.mergePolicy?.rawValue ?? "", "sensitive_paths": after.sensitivePaths?.joined(separator: ", ") ?? "",
+                                      "records_dir": after.recordsDir ?? ""]
         // A limit cleared reads back as its default.
         let defaults = ["disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB),
                         "test_timeout_min": Self.gb(LeadWorkflow().testTimeoutMinutes), "mac_max_sessions": String(LeadWorkflow().macMaxSessions)]
@@ -1425,6 +1447,7 @@ public final class LeadToolset: MCPToolset {
         var lines = ["Project \(project) on branch \(workflow.base) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once."]
         lines += workflowWarnings(workflow)
         lines += diskWarning(workflow, board: board)
+        if let line = records.statusLine { lines.append(line) }
         if let listing {
             let mac = MacLoad.count(listing.map { ($0.label, $0.cwd, $0.live) }, load: runtime.loadAverage())
             let full = macRefusal(mac, workflow, not: "") != nil

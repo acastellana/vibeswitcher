@@ -215,7 +215,7 @@ struct LeadProgressTests: LeadTeamFixture {
         try audited(lead, runtime, root: root)
         #expect(!lead.call("merge", ["task": "add-b"]).isError)
         let merged = try #require(task(root, "add-b")?.merged)
-        #expect(merged.commit == Git.run(["rev-parse", "main"], in: root).output)
+        #expect(merged.commit == underRecords("main", in: root))
         #expect(merged.tested == false)
 
         let other = try repo()

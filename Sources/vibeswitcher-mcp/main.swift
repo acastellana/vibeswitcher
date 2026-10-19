@@ -249,7 +249,10 @@ let toolset = MCPHostedToolset(attempt: {
     guard hostAnswers(.standard) else { return nil }
     let toolset = LeadToolset(arguments: arguments, runtime: runtime, wait: 3)
     // No tools: that's the host's answer, unless it couldn't be asked by then either.
-    return toolset.tools.isEmpty && !hostAnswers(.standard) ? nil : toolset
+    if toolset.tools.isEmpty && !hostAnswers(.standard) { return nil }
+    // The lead's decision and progress logs go into the repository every few minutes (and after each merge).
+    toolset.keepRecords()
+    return toolset
 }, giveUp: { LeadToolset(arguments: arguments, runtime: runtime) })
 // This binary as it is now: when an app update replaces it, the server switches to the new one between requests,
 // once the session host answers (the new build asks it first thing).

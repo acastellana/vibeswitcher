@@ -239,7 +239,7 @@ struct LeadMergePolicyTests: LeadTeamFixture {
         let root = try repo()
         let lead = try lead(root, FakeRuntime())
         #expect(!lead.call("post_update", ["title": "Retrospective: merges", "body": "Went well: audits.\nWent wrong: two conflicts."]).isError)
-        let log = try String(contentsOfFile: root + "/.vibeswitcher/progress.md", encoding: .utf8)
+        let log = try String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)
         #expect(log.contains("Update: Retrospective: merges — Went well: audits."))
         #expect(!log.contains("two conflicts"))
     }

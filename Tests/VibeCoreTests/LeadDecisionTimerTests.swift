@@ -21,7 +21,7 @@ struct LeadDecisionTimerTests: LeadTeamFixture {
     }
 
     func decisions(_ root: String) -> String {
-        (try? String(contentsOfFile: root + "/.vibeswitcher/decisions.md", encoding: .utf8)) ?? ""
+        (try? String(contentsOfFile: BoardStore(root: root).recordPath("decisions.md"), encoding: .utf8)) ?? ""
     }
 
     func occurrences(_ needle: String, in text: String) -> Int { text.components(separatedBy: needle).count - 1 }

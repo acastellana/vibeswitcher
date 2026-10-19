@@ -63,9 +63,11 @@ struct LeadBoardTests {
         try store.appendProgress("Planned two tasks")
         try store.appendProgress("Merged add-login")
         try store.appendDecision("Use SQLite", why: "no server to run")
-        let progress = try String(contentsOfFile: store.folder + "/progress.md", encoding: .utf8)
+        // In the workflow's records_dir (docs/lead when there's no workflow.md).
+        #expect(store.recordPath("progress.md") == store.root + "/docs/lead/progress.md")
+        let progress = try String(contentsOfFile: store.recordPath("progress.md"), encoding: .utf8)
         #expect(progress.contains("Planned two tasks") && progress.contains("Merged add-login"))
-        let decisions = try String(contentsOfFile: store.folder + "/decisions.md", encoding: .utf8)
+        let decisions = try String(contentsOfFile: store.recordPath("decisions.md"), encoding: .utf8)
         #expect(decisions.contains("Use SQLite") && decisions.contains("no server to run"))
     }
 }

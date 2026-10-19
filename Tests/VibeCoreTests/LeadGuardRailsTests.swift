@@ -264,7 +264,8 @@ struct LeadGuardRailsTests: LeadTeamFixture {
             .write(toFile: root + "/.vibeswitcher/workflow.md", atomically: true, encoding: .utf8)
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
-        #expect(head("main", root) == audited)
+        // The lead's records go in a commit of their own on top (LeadRecords).
+        #expect(underRecords("main", in: root) == audited)
         #expect(try String(contentsOfFile: root + "/b.txt", encoding: .utf8) == "bee\n")
         #expect(!FileManager.default.fileExists(atPath: root + "/late.txt"))
         // The worker's branch did move; only the audited commit landed.
@@ -541,9 +542,10 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         let landed = lead.call("merge", ["task": "add-b"])
         #expect(!landed.isError, "\(landed.text)")
         #expect(Git.run(["rev-list", "--merges", "main"], in: root).output.isEmpty)
-        #expect(head("main~1", root) == mainBefore)
+        let work = underRecords("main", in: root)
+        #expect(head("\(work)~1", root) == mainBefore)
         #expect(Git.run(["show", "main:b.txt"], in: root).output == "bee and main's own")
-        #expect(Git.run(["log", "-1", "--format=%s", "main"], in: root).output == "change b.txt")
+        #expect(Git.run(["log", "-1", "--format=%s", work], in: root).output == "change b.txt")
     }
 }
 

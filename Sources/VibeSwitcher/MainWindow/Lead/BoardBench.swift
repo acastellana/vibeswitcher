@@ -226,8 +226,7 @@ enum BoardBench {
         func start() {
             let store = BoardStore(root: root)
             try? store.update { $0 = BoardBench.board(seed: 0) }
-            try? UIBench.decisions(count: 30, newest: started.addingTimeInterval(-3600))
-                .write(toFile: (store.folder as NSString).appendingPathComponent("decisions.md"), atomically: true, encoding: .utf8)
+            try? store.replaceRecord("decisions.md", with: UIBench.decisions(count: 30, newest: started.addingTimeInterval(-3600)))
             let size = ((try? FileManager.default.attributesOfItem(atPath: (store.folder as NSString).appendingPathComponent("board.json")))?[.size] as? Int) ?? 0
             print(String(format: "board bench: a board of %.0f KB, %d rounds", Double(size) / 1024, rounds))
             fflush(stdout)
