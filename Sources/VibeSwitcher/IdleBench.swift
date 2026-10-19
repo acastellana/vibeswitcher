@@ -612,11 +612,13 @@ enum IdleBench {
                 let process = Process()
                 process.executableURL = URL(fileURLWithPath: "/usr/bin/\(tool)")
                 process.arguments = arguments
-                FileManager.default.createFile(atPath: "\(prefix)-\(tool).txt", contents: nil)
-                process.standardOutput = FileHandle(forWritingAtPath: "\(prefix)-\(tool).txt")
+                let pipe = Pipe()
+                process.standardOutput = pipe
                 process.standardError = FileHandle.nullDevice
                 guard (try? process.run()) != nil else { continue }
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
                 process.waitUntilExit()
+                try? VibePaths.writePrivate(data, to: URL(fileURLWithPath: "\(prefix)-\(tool).txt"))
             }
         }
 
