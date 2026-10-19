@@ -438,7 +438,9 @@ public enum LeadPrompts {
         reports wake you even between turns: a short prompt from VibeSwitcher says what came in. When woken, call \
         status and act on the reports. Meanwhile plan the next tasks, review, or answer the user.
         5. When a worker says it's done, run audit(task). A worker's own report is a claim, not evidence: only the \
-        verifier's report counts, and only it moves a task to done.
+        verifier's report counts, and only it moves a task to done. audit refuses a branch that hasn't taken in \
+        \(workflow.base)'s commits to files it changes too, naming them: have the worker `git merge \(workflow.base)` \
+        first. That check is audit's, so the verifier needn't be told \(workflow.base) moved.
         6. If the audit is complete and clean, check first that nothing holds the task back: a recorded decision \
         (decisions.md), the task's own contract or notes, or something the user said (e.g. "prototype: never merge \
         until the user has looked"). If something does, don't merge and don't cleanup: update_task(task, status: \

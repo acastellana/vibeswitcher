@@ -696,6 +696,7 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "\(slug) has no worktree to check.")
         }
         let workflow = self.workflow
+        try checkUpToDate(slug, head: head, base: workflow.base)
         // Not on a Mac every project's teams already load: the task's own worker (done) and earlier verifier aren't
         // counted, the verifier takes their place.
         let sessions = try hostSessions("whether the Mac has room for a verifier isn't known; no verifier was started")
@@ -718,6 +719,33 @@ public final class LeadToolset: MCPToolset {
         }
         let flagged = config.isEmpty ? "" : " The branch changes Claude's settings or instructions (\(config.prefix(5).joined(separator: ", "))\(config.count > 5 ? ", …" : "")): the verifier runs with project settings off, and VibeSwitcher didn't answer its trust question; tell the user it waits for them to decide, and have the verifier look hard at those files."
         return MCPToolResult(text: "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(flagged)")
+    }
+
+    /// A branch that hasn't taken in what the base did since to files it changes too breaks or conflicts once it's
+    /// rebased at merge: refused before a verifier spends its runs on it (2026-10-19, twice: base commits that came
+    /// after a worker's last `git merge` changed the test file it changed, and the merge's build failed).
+    private func checkUpToDate(_ slug: String, head: String, base: String) throws {
+        let since: Worktrees.BaseSince
+        switch Worktrees.baseSince(root: root, base: base, commit: head) {
+        case .success(let found): since = found
+        case .failure(let error): throw Problem(text: "No verifier started: whether agent/\(slug) is up to date with \(base) can't be told (\(error)).")
+        }
+        let files = since.overlap
+        guard !files.isEmpty else { return }
+        let commits = since.commits(touching: files)
+        let listed = commits.prefix(8).map { commit in
+            "\(commit.line) (\(commit.files.filter(files.contains).joined(separator: ", ")))"
+        }
+        throw Problem(text: "Not audited, no verifier started: \(base) has \(commits.count) commit\(commits.count == 1 ? "" : "s") since agent/\(slug) last took it in (at \(since.mergeBase.prefix(8))) "
+                      + "that change files the branch changes too, so it would break or conflict at merge. "
+                      + "\(base)'s commits: \(listed.joined(separator: "; "))\(commits.count > 8 ? "; …" : ""). "
+                      + "Files: \(files.prefix(12).joined(separator: ", "))\(files.count > 12 ? ", …" : ""). "
+                      + Self.bringUpToDate(base))
+    }
+
+    /// What the lead tells a worker whose branch is behind the base where it matters.
+    private static func bringUpToDate(_ base: String) -> String {
+        "Message its worker to bring its branch up to date by merging, in its worktree: `git merge \(base)`, resolve the conflicts, `git add` the files, then `git commit`, each command on its own (no pipes, && or 2>&1); then run the tests and report again (start_worker again if it has stopped). Then audit again; merge puts the work on top of \(base) itself."
     }
 
     private func merge(_ slug: String) throws -> MCPToolResult {
@@ -802,13 +830,13 @@ public final class LeadToolset: MCPToolset {
                           + "If they only need longer, raise test_timeout_min (\(Self.gb(workflow.testTimeoutMinutes)) in workflow.md) with configure; else have the worker find what hangs.")
         case .conflict:
             try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Conflicts with \(base): the branch needs bringing up to date."))
-            throw Problem(text: "\(slug) conflicts with \(base). Message its worker to bring its branch up to date by merging, in its worktree: `git merge \(base)`, resolve the conflicts, `git add` the files, then `git commit`, each command on its own (no pipes, && or 2>&1); then run the tests and report again (start_worker again if it has stopped). Then audit again; merge puts the work on top of \(base) itself.")
+            throw Problem(text: "\(slug) conflicts with \(base). " + Self.bringUpToDate(base))
         case .failed(let output):
             // The setback names the failing tests; the output's last line only when none is named.
             let tests = TestFailures(output: output).tests.joined(separator: ", ")
             let last = tests.isEmpty ? output.split(whereSeparator: \.isNewline).last.map(String.init) ?? "" : tests
             try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Tests fail rebased onto \(base)" + (last.isEmpty ? "." : ": \(last.prefix(200))")))
-            throw Problem(text: testFailure(output, slug: slug, base: base))
+            throw Problem(text: testFailure(output, slug: slug, base: base, commit: verdict.commit, onto: current))
         case .error(let text):
             throw Problem(text: "Not merged: \(text)")
         }
@@ -855,14 +883,42 @@ public final class LeadToolset: MCPToolset {
 
     /// A failed merge's test run, told by what failed: the failing tests and their lines first (the output's end
     /// is usually the build's warnings), with all of the output saved where the lead can read it.
-    private func testFailure(_ output: String, slug: String, base: String) -> String {
+    private func testFailure(_ output: String, slug: String, base: String, commit: String, onto current: String) -> String {
         let setup = output.hasPrefix("init_command failed:\n")
         let output = setup ? String(output.dropFirst("init_command failed:\n".count)) : output
         let saved = saveMergeLog(output, slug: slug)
-        let found = TestFailures(output: output).summary()
+        let failures = TestFailures(output: output)
+        let found = failures.summary()
             ?? "Nothing in the output names a failing test or an error; it ends:\n" + String(output.suffix(1500))
-        return "The \(setup ? "init_command" : "test command") fails on \(slug) rebased onto \(base).\n\(found)\n"
+        // The errors name files in the merge's own worktree (see rebaseAndTest).
+        let place = vault.scratch(root: root, "merge-\(slug)")
+        let inside = [place.path, place.resolvingSymlinksInPath().path].map { $0 + "/" }
+        let files = failures.errorFiles.map { file in inside.first(where: file.hasPrefix).map { String(file.dropFirst($0.count)) } ?? file }
+        let touched = baseCommits(touching: files, slug: slug, base: base, commit: commit, onto: current).map { $0 + "\n" } ?? ""
+        return "The \(setup ? "init_command" : "test command") fails on \(slug) rebased onto \(base).\n\(found)\n\(touched)"
             + (saved.map { "Full output: \($0)" } ?? "(The full output couldn't be saved.)")
+    }
+
+    /// For each file in a build's errors, the base's commits since the branch last
+    /// took it in that touched it: what the worker's `git merge` brings in, for the lead's message. Nil when the
+    /// errors name no file.
+    private func baseCommits(touching paths: [String], slug: String, base: String, commit: String, onto current: String) -> String? {
+        guard !paths.isEmpty else { return nil }
+        guard case .success(let since) = Worktrees.baseSince(root: root, base: current, commit: commit) else {
+            return "(Which of \(base)'s commits touched the files in the errors couldn't be told.)"
+        }
+        // The repository's path each error's path ends with, the longest one (one the compiler wrote otherwise).
+        let known = Set(since.baseFiles + since.branchFiles).sorted { $0.count > $1.count }
+        var lines: [String] = []
+        for path in paths {
+            let file = known.first { path == $0 || path.hasSuffix("/" + $0) } ?? path
+            guard !lines.contains(where: { $0.hasPrefix("- \(file):") }) else { continue }
+            let commits = since.commits(touching: [file])
+            lines.append("- \(file): " + (commits.isEmpty ? "no commit of \(base)'s since \(since.mergeBase.prefix(8))"
+                : commits.prefix(6).map(\.line).joined(separator: "; ") + (commits.count > 6 ? "; …" : "")))
+        }
+        return "\(base)'s commits since agent/\(slug) last took it in (at \(since.mergeBase.prefix(8))), by file in the errors (its worker's `git merge \(base)` brings them in):\n"
+            + lines.joined(separator: "\n")
     }
 
     /// Saves a merge's test output where the lead can read it; its path, or nil when it couldn't be saved.

@@ -577,6 +577,62 @@ public enum Worktrees {
         return Array(Set(committed.filter { isAgentConfig($0) } + local)).sorted()
     }
 
+    /// What `base` brought since `commit` (a task's branch) last took it in: the commits since their merge-base, each
+    /// with the files it touched, and the files the base and the branch each changed since then.
+    public struct BaseSince: Equatable, Sendable {
+        public struct Commit: Equatable, Sendable {
+            public var sha: String
+            public var subject: String
+            public var files: [String]
+            /// "abc1234 subject".
+            public var line: String { "\(sha) \(subject)" }
+        }
+
+        public var mergeBase: String
+        /// Newest first.
+        public var commits: [Commit]
+        public var baseFiles: [String]
+        public var branchFiles: [String]
+
+        /// Files both sides changed: a branch that hasn't taken in what the base did to them breaks or conflicts
+        /// at merge, rebased onto the base.
+        public var overlap: [String] { Set(baseFiles).intersection(branchFiles).sorted() }
+
+        /// The base's commits that touched any of `files`, newest first.
+        public func commits(touching files: [String]) -> [Commit] {
+            let wanted = Set(files)
+            return commits.filter { !wanted.isDisjoint(with: $0.files) }
+        }
+    }
+
+    /// `BaseSince` for `commit` on `base` (both refs or shas), or what git said when it can't be told.
+    public static func baseSince(root: String, base: String, commit: String) -> Swift.Result<BaseSince, Failure> {
+        let found = Git.run(["merge-base", base, commit], in: root)
+        guard found.ok, !found.output.isEmpty else {
+            return .failure(Failure(description: "git merge-base \(base) \(commit.prefix(8)) failed: \(said(found))"))
+        }
+        let mergeBase = found.output
+        // Renames as a deletion and an addition: both paths count.
+        func changed(to tip: String) -> Swift.Result<[String], Failure> {
+            let diff = Git.run(["diff", "--name-only", "--no-renames", "-z", mergeBase, tip], in: root)
+            guard diff.ok else { return .failure(Failure(description: "git diff \(mergeBase.prefix(8)) \(tip.prefix(8)) failed: \(said(diff))")) }
+            return .success(diff.output.split(separator: "\0").map(String.init))
+        }
+        // "\u{1}sha\u{2}subject\0\nfile\0file\0" per commit; a merge with what it brought to the base's line.
+        let log = Git.run(["log", "-z", "--name-only", "--no-renames", "--diff-merges=first-parent", "--format=%x01%h%x02%s", "\(mergeBase)..\(base)"], in: root)
+        guard log.ok else { return .failure(Failure(description: "git log \(mergeBase.prefix(8))..\(base) failed: \(said(log))")) }
+        let commits = log.output.split(separator: "\u{1}").compactMap { chunk -> BaseSince.Commit? in
+            var parts = chunk.split(separator: "\0", omittingEmptySubsequences: false).map(String.init)
+            guard !parts.isEmpty else { return nil }
+            let header = parts.removeFirst().split(separator: "\u{2}", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+            let files = parts.map { $0.hasPrefix("\n") ? String($0.dropFirst()) : $0 }.filter { !$0.isEmpty }
+            return BaseSince.Commit(sha: header[0], subject: header.count > 1 ? header[1] : "", files: files)
+        }
+        return changed(to: base).flatMap { baseFiles in
+            changed(to: commit).map { BaseSince(mergeBase: mergeBase, commits: commits, baseFiles: baseFiles, branchFiles: $0) }
+        }
+    }
+
     /// Under `.claude/`, what Claude Code reads as settings or instructions (the rest there is its own state: locks,
     /// scheduled-task bookkeeping).
     static let agentConfigFolders: Set<String> = ["commands", "agents", "skills", "hooks", "output-styles", "rules"]
@@ -928,6 +984,17 @@ public struct TestFailures: Equatable, Sendable {
             }
         }
         unfinished = started.filter { !ended.contains($0) }
+    }
+
+    /// The files the compiler's errors are in ("/path/File.swift:51:10: error: …"), in the order they first appear.
+    public var errorFiles: [String] {
+        var files: [String] = []
+        for line in errors {
+            guard let match = line.range(of: #"^.+?(?=:\d+(:\d+)?: error: )"#, options: .regularExpression) else { continue }
+            let file = String(line[match])
+            if !files.contains(file) { files.append(file) }
+        }
+        return files
     }
 
     private mutating func add(_ name: String) {
