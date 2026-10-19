@@ -5,7 +5,7 @@ import SwiftUI
 import VibeCore
 
 /// Debug aid (`CFFIXED_USER_HOME=<scratch> VibeSwitcher --idle-bench [SECONDS] [--transcript PATH] [--sidebar]
-/// [--churn MINUTES [--churn-speed X] [--dump FOLDER]]`): what the app costs while nothing changes. In this process, on
+/// [--churn MINUTES [--churn-speed X] [--churn-warmup N] [--dump FOLDER]]`): what the app costs while nothing changes. In this process, on
 /// a scratch home: the session store scanning made-up agent sessions (one with a background shell, whose age is in its
 /// detail), a private session host running a few quiet shells, the hang watchdog and the lead controller's timer, and
 /// the main window off screen. Each phase settles, then runs SECONDS (default 20) and prints its CPU, wakeups, how often
@@ -16,12 +16,16 @@ import VibeCore
 /// `--churn MINUTES` (R8, docs/eval/open-2026-10-19.md): after the window-closed phase, MINUTES of a working day's
 /// churn, one cycle per 15 s: a shell and an agent session start, the oldest of each ends (at most 3 live), the window
 /// opens on the new shell, the chat opens on the last agent and closes, the window closes. `--churn-speed X` (10)
-/// compresses it: a cycle takes 15/X s, so 10 minutes run in 60 s. Then everything churn started has ended, and the
-/// window-closed phase is measured again and compared with the first (`RESULT` lines; the growth by vmmap's region
+/// compresses it: a cycle takes 15/X s, so 10 minutes run in 60 s. First a warm-up of `--churn-warmup N` cycles (1),
+/// everything it started ended and the window-closed phase measured again: what's paid once (the first terminal that
+/// redraws often is drawn on the GPU, and CoreAnimation's accelerated renderer keeps ~12 MB from then on) is in that
+/// baseline, not in the growth. Then the churn, everything it started ended, and the window-closed phase measured once
+/// more and compared with the warm baseline (`RESULT` lines: the first, cold, closed footprint, the warm baseline, after
+/// churn, the growth from the warm baseline, and the live views and chats, cold and after; the growth by vmmap's region
 /// categories, the top growers first; then what malloc gives back when asked, which the phases after it start from).
 /// Without `--transcript` it writes a made-up one. Every 10 cycles a line gives the footprint and malloc's bytes in use
-/// and held so far. `--dump FOLDER` also writes vmmap, heap and leaks in full (and a memgraph) at both closed snapshots,
-/// as FOLDER/before-* and FOLDER/after-*, to diff what grew.
+/// and held so far. `--dump FOLDER` also writes vmmap, heap and leaks in full (and a memgraph) at the closed snapshots,
+/// as FOLDER/cold-*, FOLDER/before-* (the warm baseline) and FOLDER/after-*, to diff what grew.
 enum IdleBench {
     static func run(arguments: [String]) -> Never {
         let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? ""
@@ -33,7 +37,9 @@ enum IdleBench {
         let seconds = arguments.first.flatMap(TimeInterval.init) ?? 20
         let value = { (name: String) in arguments.firstIndex(of: name).flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil } }
         let transcript = value("--transcript")
-        let churn = value("--churn").flatMap(Double.init).map { Churn(minutes: $0, speed: value("--churn-speed").flatMap(Double.init) ?? 10) }
+        let churn = value("--churn").flatMap(Double.init).map {
+            Churn(minutes: $0, speed: value("--churn-speed").flatMap(Double.init) ?? 10, warmup: value("--churn-warmup").flatMap(Int.init) ?? 1)
+        }
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
         VibePaths.ensurePrivateDirectories()
@@ -64,6 +70,8 @@ enum IdleBench {
         static let cycle: TimeInterval = 15
         let minutes: Double
         let speed: Double
+        /// Cycles before the baseline: what the first ones pay once isn't growth.
+        let warmup: Int
         var cycles: Int { max(1, Int((minutes * 60 / Self.cycle).rounded())) }
         var interval: TimeInterval { Self.cycle / max(speed, 0.01) }
     }
@@ -179,7 +187,8 @@ enum IdleBench {
         var endedShell: UUID?
         var churnAgents: [(tty: String, pid: Int32, transcript: String)] = []
         var endedAgent: (tty: String, pid: Int32, transcript: String)?
-        /// The window-closed phase before churn.
+        /// The first window-closed phase, before any churn, and the one after the warm-up (the baseline).
+        var cold: Snapshot?
         var baseline: Snapshot?
 
         init(seconds: TimeInterval, transcript: String?, sidebar: Bool, churn: Churn?, dump: String?) {
@@ -293,7 +302,11 @@ enum IdleBench {
                 if let last = self?.shells.last { self?.model.selectedID = "host:\(last)" }
             }))
             steps.append(.phase("window closed", { controller.window?.close() }))
-            if churn != nil {
+            if let churn {
+                if churn.warmup > 0 {
+                    steps.append(.warmup)
+                    steps.append(.phase("window closed, warmed up", { controller.window?.close() }))
+                }
                 steps.append(.churn)
                 steps.append(.phase(Self.afterChurn, { controller.window?.close() }))
             }
@@ -317,6 +330,8 @@ enum IdleBench {
 
         enum Step {
             case phase(String, () -> Void)
+            /// The window-closed phase just measured is the cold one; then `--churn-warmup`'s cycles.
+            case warmup
             /// The window-closed phase just measured is the baseline; then `--churn`'s cycles.
             case churn
         }
@@ -326,15 +341,20 @@ enum IdleBench {
         private func run(_ steps: ArraySlice<Step>) {
             guard let step = steps.first else { return finish() }
             guard case .phase(let name, let setUp) = step else {
-                return snapshot { [weak self] baseline in
+                let warmup: Bool
+                if case .warmup = step { warmup = true } else { warmup = false }
+                return snapshot(warmup ? "cold" : "before") { [weak self] snapshot in
                     guard let self, let churn = self.churn else { return }
-                    self.baseline = baseline
-                    print(String(format: "churn: %.0f minutes at %.0f× (%d cycles of %.0f s, each %.2f s here)", churn.minutes, churn.speed,
-                                 churn.cycles, Churn.cycle, churn.interval))
+                    if warmup { self.cold = snapshot } else { self.baseline = snapshot }
+                    print(warmup ? String(format: "churn: warm-up, %d cycle(s)", churn.warmup)
+                                 : String(format: "churn: %.0f minutes at %.0f× (%d cycles of %.0f s, each %.2f s here)", churn.minutes,
+                                          churn.speed, churn.cycles, Churn.cycle, churn.interval))
                     fflush(stdout)
                     let began = Date()
-                    self.churnCycle(0, of: churn.cycles, interval: churn.interval) { [weak self] in
-                        print(String(format: "churn: done in %.0f s", Date().timeIntervalSince(began)))
+                    // The warm-up's cycles come first; the churn's go on from them (its sessions' ttys and pids).
+                    let first = warmup ? 0 : churn.warmup
+                    self.churnCycle(first, of: first + (warmup ? churn.warmup : churn.cycles), interval: churn.interval) { [weak self] in
+                        print(String(format: "churn: %@ in %.0f s", warmup ? "warmed up" : "done", Date().timeIntervalSince(began)))
                         self?.run(steps.dropFirst())
                     }
                 }
@@ -359,8 +379,8 @@ enum IdleBench {
                     }
                     fflush(stdout)
                     guard name == Self.afterChurn, let baseline = self.baseline else { return self.run(steps.dropFirst()) }
-                    self.snapshot { [weak self] now in
-                        Self.compare(baseline, now)
+                    self.snapshot("after") { [weak self] now in
+                        Self.compare(cold: self?.cold, baseline, now)
                         self?.run(steps.dropFirst())
                     }
                 }
@@ -497,11 +517,11 @@ enum IdleBench {
 
         /// The footprint and live counts now, and vmmap's categories (read off the main thread; vmmap suspends this
         /// process while it looks).
-        private func snapshot(_ done: @escaping (Snapshot) -> Void) {
+        private func snapshot(_ label: String, _ done: @escaping (Snapshot) -> Void) {
             let footprint = Usage.now().footprint
             let (views, chats) = (Live.views, Live.chats)
             let pid = getpid()
-            let dump = dumpFolder.map { ($0 as NSString).appendingPathComponent(baseline == nil ? "before" : "after") }
+            let dump = dumpFolder.map { ($0 as NSString).appendingPathComponent(label) }
             DispatchQueue.global().async {
                 if let dump { VMMap.dump(pid: pid, to: dump) }
                 let (regions, allocated) = VMMap.summary(pid: pid)
@@ -511,21 +531,24 @@ enum IdleBench {
             }
         }
 
-        /// R8's target: under 150 MB with the window closed, at most 10 % more after churn, no views or chats left behind.
-        private static func compare(_ before: Snapshot, _ after: Snapshot) {
+        /// R8's target: under 150 MB with the window closed (cold), at most 10 % more after churn than after the warm-up,
+        /// no views or chats left behind.
+        private static func compare(cold: Snapshot?, _ before: Snapshot, _ after: Snapshot) {
             let mb = { (bytes: Double) in bytes / 1_048_576 }
+            let first = cold ?? before
             let growth = (Double(after.footprint) / Double(max(before.footprint, 1)) - 1) * 100
-            print(String(format: "RESULT footprint-window-closed-mb %.1f", mb(Double(before.footprint))))
+            print(String(format: "RESULT footprint-window-closed-mb %.1f", mb(Double(first.footprint))))
+            print(String(format: "RESULT footprint-warm-baseline-mb %.1f", mb(Double(before.footprint))))
             print(String(format: "RESULT footprint-after-churn-mb %.1f", mb(Double(after.footprint))))
             print(String(format: "RESULT churn-growth-percent %.1f", growth))
-            print("RESULT live-terminal-views \(before.views.map(String.init) ?? "n/a") \(after.views.map(String.init) ?? "n/a")")
-            print("RESULT live-chat-models \(before.chats.map(String.init) ?? "n/a") \(after.chats.map(String.init) ?? "n/a")")
-            print(String(format: "target: window closed under 150 MB: %@; growth after churn at most 10 %%: %@",
-                         mb(Double(before.footprint)) < 150 ? "met" : "MISSED", growth <= 10 ? "met" : "MISSED"))
+            print("RESULT live-terminal-views \(first.views.map(String.init) ?? "n/a") \(after.views.map(String.init) ?? "n/a")")
+            print("RESULT live-chat-models \(first.chats.map(String.init) ?? "n/a") \(after.chats.map(String.init) ?? "n/a")")
+            print(String(format: "target: window closed under 150 MB: %@; growth after churn (from the warm baseline) at most 10 %%: %@",
+                         mb(Double(first.footprint)) < 150 ? "met" : "MISSED", growth <= 10 ? "met" : "MISSED"))
             if before.regions.isEmpty || after.regions.isEmpty {
                 print("top growers: vmmap gave nothing")
             } else {
-                print("top growers (vmmap dirty + swapped, after churn minus before):")
+                print("top growers (vmmap dirty + swapped, after churn minus the warm baseline):")
                 let names = Set(before.regions.keys).union(after.regions.keys)
                 let grown = names.map { ($0, (after.regions[$0] ?? 0) - (before.regions[$0] ?? 0)) }.sorted { $0.1 > $1.1 }
                 for (name, delta) in grown.prefix(6) {
@@ -543,7 +566,7 @@ enum IdleBench {
             let held = Usage.now().footprint
             malloc_zone_pressure_relief(nil, 0)
             let relieved = Usage.now().footprint
-            print(String(format: "diagnosis: with malloc's free pages given back (malloc_zone_pressure_relief) the footprint goes %.1f → %.1f MB, %+.1f %% on the first",
+            print(String(format: "diagnosis: with malloc's free pages given back (malloc_zone_pressure_relief) the footprint goes %.1f → %.1f MB, %+.1f %% on the warm baseline",
                          mb(Double(held)), mb(Double(relieved)), (Double(relieved) / Double(max(before.footprint, 1)) - 1) * 100))
             fflush(stdout)
         }
