@@ -50,6 +50,14 @@ or command, or starts a preset in a recent project; ⌘J goes to the next sessio
 header's stop button or the row's menu) always asks first, unless the session has ended already. The Edit menu
 is the standard one: Undo, Redo, Cut, Paste and Match Style work in the composer, the filter and Settings.
 
+**New Project…** (the start page, beside Choose Folder…): a name (its folder name, shown under it, is the name
+lowercased with hyphens for spaces, and can be edited), a location (the projects folder from Settings › General,
+`~/dev` unless you change it; made with 0755 if it isn't there yet), and on by default, a git repository on git's
+`init.defaultBranch` (else `main`) with a README.md, a .gitignore (.DS_Store, .build/) and a first commit, so a lead
+can start in it at once. Then nothing, a session from one of your launch presets (Claude by default), or the
+project lead with an optional first goal. A name that's taken is refused before anything is written; if git fails,
+one alert says what it said and the half-made folder is removed. The new project is listed on the start page at once.
+
 **Chat** (⌥⌘2; ⌥⌘1 back to the terminal): any Claude or Codex session as a readable conversation, built from
 its transcript. Replies are rendered markdown (tables, lists, code with syntax colors and Copy); the tool calls
 between two messages fold into one line ("Ran 3 commands · edited 2 files") that opens to each command and its

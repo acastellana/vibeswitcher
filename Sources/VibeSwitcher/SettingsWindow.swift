@@ -95,6 +95,25 @@ struct GeneralSettings: View {
                 SettingsFooter("Window sessions keep running when VibeSwitcher quits or updates. Ended sessions stay listed for a day.")
             }
             if let host { HostRestartSection(host: host) }
+            Section {
+                LabeledContent("Projects folder") {
+                    HStack {
+                        TextField("Projects folder", text: $preferences.projectsFolder, prompt: Text(ProjectCreation.defaultLocation))
+                            .labelsHidden().accessibilityLabel("Projects folder")
+                            .font(.system(.body, design: .monospaced))
+                        Button("Choose…") {
+                            if let folder = ProjectsFolderPanel.choose(startingAt: preferences.projectsFolderPath) {
+                                preferences.projectsFolder = ProjectCreation.tildePath(folder)
+                            }
+                        }
+                        .accessibilityLabel("Choose the projects folder")
+                    }
+                }
+            } header: {
+                Text("Projects")
+            } footer: {
+                SettingsFooter("Home's New Project… makes each new project in a folder here. If this folder isn't there yet, it's made (0755) when you create the first one, and the sheet says so first.")
+            }
             Section("Menu bar") {
                 Picker("Order sessions", selection: $preferences.sessionOrder) {
                     ForEach(SessionOrder.allCases, id: \.self) { Text($0.label).tag($0) }

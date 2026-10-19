@@ -161,4 +161,8 @@ struct WindowActions {
     var moveToWindow: (Session) -> Void
     /// Starts the project lead for the repository holding this folder (or shows the running one).
     var startLead: (String) -> Void
+    /// Where Home's New Project… makes projects (Settings › General), as shown: "~/dev".
+    var projectsFolder: () -> String = { ProjectCreation.defaultLocation }
+    /// A project New Project… just made: listed on Home, then a session or the lead started in it, as asked.
+    var projectCreated: (_ folder: String, _ next: ProjectCreation.Next) -> Void = { _, _ in }
 }

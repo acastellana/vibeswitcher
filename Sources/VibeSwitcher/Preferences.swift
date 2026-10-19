@@ -49,6 +49,13 @@ final class Preferences: ObservableObject {
     @Published var aiSummaries: Bool { didSet { defaults.set(aiSummaries, forKey: "aiSummaries") } }
     /// Keep the Mac from idle sleep while a lead's team works (see `KeepAwake`).
     @Published var keepAwake: KeepAwakeMode { didSet { defaults.set(keepAwake.rawValue, forKey: "keepAwake") } }
+    /// Where Home's New Project… makes projects, as a tilde path ("~/dev").
+    @Published var projectsFolder: String { didSet { defaults.set(projectsFolder, forKey: "projectsFolder") } }
+    /// Projects made with New Project…, by when: Home lists them before an agent has run in them.
+    private(set) var createdProjects: [String: Date] {
+        get { defaults.dictionary(forKey: "createdProjects") as? [String: Date] ?? [:] }
+        set { defaults.set(newValue, forKey: "createdProjects") }
+    }
     /// The language the spoken briefing is written and read in (an ElevenLabs language code, see `BriefingLanguage`);
     /// the Mac's first preferred language until you pick one.
     @Published var briefingLanguage: String { didSet { defaults.set(briefingLanguage, forKey: "briefingLanguage") } }
@@ -58,7 +65,8 @@ final class Preferences: ObservableObject {
         self.defaults = defaults
         self.presetsFile = presetsFile
         defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true, "playSound": true, "notifyReminders": true, "minimizeOnPause": true, "sidebarAutoHide": true, "aiSummaries": true,
-                                     "claudeCommand": "claude", "codexCommand": "codex"])
+                                     "claudeCommand": "claude", "codexCommand": "codex",
+                                     "projectsFolder": ProjectCreation.defaultLocation])
         notifyNeedsInput = defaults.bool(forKey: "notifyNeedsInput")
         notifyDone = defaults.bool(forKey: "notifyDone")
         playSound = defaults.bool(forKey: "playSound")
@@ -84,6 +92,19 @@ final class Preferences: ObservableObject {
         aiSummaries = defaults.bool(forKey: "aiSummaries")
         keepAwake = KeepAwakeMode(rawValue: defaults.string(forKey: "keepAwake") ?? "") ?? .onPower
         briefingLanguage = defaults.string(forKey: "briefingLanguage").flatMap(BriefingLanguage.named)?.code ?? BriefingLanguage.preferred().code
+        projectsFolder = defaults.string(forKey: "projectsFolder") ?? ProjectCreation.defaultLocation
+    }
+
+    /// The projects folder as a full path ("~/dev" expanded); the default when the setting is blank.
+    var projectsFolderPath: String {
+        ProjectCreation.expand(projectsFolder.trimmingCharacters(in: .whitespaces).isEmpty ? ProjectCreation.defaultLocation : projectsFolder)
+    }
+
+    /// Notes a project New Project… made, keeping the 20 newest.
+    func noteCreatedProject(_ folder: String, at date: Date = Date()) {
+        var created = createdProjects
+        created[folder] = date
+        createdProjects = Dictionary(uniqueKeysWithValues: created.sorted { $0.value > $1.value }.prefix(20).map { ($0.key, $0.value) })
     }
 
     func command(for agent: Agent) -> String {

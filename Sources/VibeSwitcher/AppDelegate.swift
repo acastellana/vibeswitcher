@@ -52,7 +52,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         startLead: { [weak self] folder in
             self?.showMainWindow()
             self?.leadController.startLead(in: folder)
-        })
+        },
+        projectsFolder: { [weak self] in
+            ProjectCreation.tildePath(self?.preferences.projectsFolderPath ?? ProjectCreation.expand(ProjectCreation.defaultLocation))
+        },
+        projectCreated: { [weak self] folder, next in self?.projectCreated(folder, then: next) })
     private(set) lazy var leadController: LeadController = {
         let controller = LeadController(host: hostClient, store: store) { [weak self] root in
             let presets = self?.presets(for: root) ?? []
@@ -806,8 +810,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         }
     }
 
+    /// A project Home's New Project… made: on Home at once (and after a relaunch, before any agent ran in it), then a
+    /// session or the lead in it, as asked.
+    private func projectCreated(_ folder: String, then next: ProjectCreation.Next) {
+        preferences.noteCreatedProject(folder)
+        windowModel.recentProjects.removeAll { $0 == folder }
+        windowModel.recentProjects.insert(folder, at: 0)
+        loadRecentProjects()
+        switch next {
+        case .nothing: break
+        case .session(let preset): newSession(preset: preset, in: folder)
+        case .lead(let goal):
+            showMainWindow()
+            leadController.startLead(in: folder, goal: goal)
+        }
+    }
+
     private func loadRecentProjects() {
-        let observed = store.observedProjects
+        let observed = store.observedProjects.merging(preferences.createdProjects) { max($0, $1) }
         DispatchQueue.global(qos: .userInitiated).async {
             let recents = Launcher.recentProjects(observed: observed)
             DispatchQueue.main.async {

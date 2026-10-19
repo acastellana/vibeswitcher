@@ -5,6 +5,7 @@ import VibeCore
 struct StartPage: View {
     @ObservedObject var model: WindowModel
     let actions: WindowActions
+    @State private var newProject = false
 
     var body: some View {
         ScrollView {
@@ -22,12 +23,21 @@ struct StartPage: View {
                     }
                     .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.35)))
                 }
-                Button { actions.newSession(nil, nil) } label: { Label("Choose Folder…", systemImage: "folder.badge.plus") }
+                HStack(spacing: 10) {
+                    Button { actions.newSession(nil, nil) } label: { Label("Choose Folder…", systemImage: "folder.badge.plus") }
+                    Button { newProject = true } label: { Label("New Project…", systemImage: "plus.rectangle.on.folder") }
+                        .accessibilityLabel("New project")
+                        .help("Make a project in your projects folder (Settings › General), with git and a first commit")
+                }
                 Shortcuts()
             }
             .frame(maxWidth: 620, alignment: .leading)
             .padding(40)
             .frame(maxWidth: .infinity)
+        }
+        .sheet(isPresented: $newProject) {
+            NewProjectSheet(model: NewProjectModel(location: actions.projectsFolder(), presets: actions.presets(nil)),
+                            created: actions.projectCreated, close: { newProject = false })
         }
     }
 
