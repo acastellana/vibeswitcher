@@ -18,6 +18,28 @@ public struct RawSession: Sendable {
     public let inTerminalApp: Bool
 }
 
+/// The terminals of a process table's processes that couldn't be told (see `ProcInfo.identityUnknown`): whether an
+/// agent runs on one isn't known from that table, so a session there hasn't ended and none has started.
+public struct Undecided: Sendable, Equatable {
+    public var ttys: Set<String>
+    /// One whose terminal couldn't be read either: it could be on any.
+    public var anywhere: Bool
+
+    public init(ttys: Set<String> = [], anywhere: Bool = false) {
+        self.ttys = ttys
+        self.anywhere = anywhere
+    }
+
+    public init(_ table: [Int32: ProcInfo]) {
+        self.init()
+        for process in table.values where process.identityUnknown {
+            if let tty = process.tty { ttys.insert(tty) } else { anywhere = true }
+        }
+    }
+
+    public func contains(_ tty: String) -> Bool { anywhere || ttys.contains(tty) }
+}
+
 public final class SessionScanner {
     /// Keyed on pid and start time, so a reused pid isn't mistaken for the process that had it.
     private struct ProcessKey: Hashable { let pid: Int32; let start: Date }
@@ -32,6 +54,8 @@ public final class SessionScanner {
     /// A scan whose table couldn't be read hands on the sessions found then, so a session missing from them had no
     /// agent at this time, not now.
     public private(set) var readAt: Date?
+    /// The terminals that table couldn't tell an agent on or not (see `Undecided`).
+    public private(set) var undecided = Undecided()
 
     private let processes: () -> [Int32: ProcInfo]?
     private let stateDir: () -> URL
@@ -62,7 +86,8 @@ public final class SessionScanner {
             byTTY[tty, default: []].append(proc)
         }
 
-        let hooks = loadHookStates(liveTTYs: Set(byTTY.keys), now: now)
+        let undecided = Undecided(procs)
+        let hooks = loadHookStates(liveTTYs: Set(byTTY.keys), undecided: undecided, now: now)
         var sessions: [RawSession] = []
         for (tty, agentProcs) in byTTY {
             // Several agent processes can share a TTY (Codex spawns helpers, Claude may run
@@ -81,11 +106,16 @@ public final class SessionScanner {
                                            ? BackgroundJobs.jobs(forAgent: root.pid, in: procs, arguments: arguments) : [],
                                        inTerminalApp: Self.runsInTerminalApp(root.pid, in: procs)))
         }
-        let live = { (key: ProcessKey) in procs[key.pid]?.startTime == key.start }
+        // A session whose agent couldn't be told this time (mid-exec on a busy Mac) is as it was: not ended, and not
+        // another agent's.
+        let found = Set(sessions.map(\.tty))
+        sessions += last.filter { !found.contains($0.tty) && procs[$0.pid]?.identityUnknown == true }
+        let live = { (key: ProcessKey) in procs[key.pid]?.startTime == key.start || procs[key.pid]?.identityUnknown == true }
         cwdCache = cwdCache.filter { live($0.key) }
         projectCache = projectCache.filter { live($0.key) }
         last = sessions
         readAt = now
+        self.undecided = undecided
         return sessions
     }
 
@@ -126,8 +156,9 @@ public final class SessionScanner {
         return cwd
     }
 
-    /// Reads `~/.vibeswitcher/state/*.json`, deleting files for terminals that no longer run an agent.
-    private func loadHookStates(liveTTYs: Set<String>, now: Date) -> [String: HookState] {
+    /// Reads `~/.vibeswitcher/state/*.json`, deleting files for terminals that no longer run an agent (not those where
+    /// whether one runs is `undecided`).
+    private func loadHookStates(liveTTYs: Set<String>, undecided: Undecided, now: Date) -> [String: HookState] {
         let fm = FileManager.default
         guard let files = try? fm.contentsOfDirectory(at: stateDir(),
                                                       includingPropertiesForKeys: [.contentModificationDateKey])
@@ -136,6 +167,7 @@ public final class SessionScanner {
         for file in files where file.pathExtension == "json" {
             let tty = file.deletingPathExtension().lastPathComponent
             if !liveTTYs.contains(tty) {
+                guard !undecided.contains(tty) else { continue }
                 // Give a just-started process a moment to show up in the process table.
                 let modified = (try? file.resourceValues(forKeys: [.contentModificationDateKey]))?
                     .contentModificationDate ?? .distantPast

@@ -391,6 +391,62 @@ final class SessionScannerTests {
         #expect(scanner.readAt == Date(timeIntervalSince1970: 2000))
     }
 
+    /// A session whose agent's process couldn't be told in a table (mid-exec on a busy Mac) is as it was, hook state
+    /// and all: unknown, not ended. Once the process is gone from a table, the session has ended.
+    @Test func aSessionWhoseProcessCantBeToldIsKept() throws {
+        var state = HookState(agent: .claude, tty: "ttys001", lastEvent: "Stop", lastEventAt: 1500)
+        state.agentPid = 900
+        let stateURL = stateDir.appendingPathComponent("ttys001.json")
+        try state.save(to: stateURL)
+        var procs = table
+        let scanner = scanner { procs }
+        let before = scanner.scan(now: Date(timeIntervalSince1970: 2000)).first { $0.tty == "ttys001" }
+        #expect(before?.hook?.lastEvent == "Stop")
+        #expect(scanner.undecided == Undecided())
+        procs[900] = ProcInfo(pid: 900, ppid: 840, tty: "ttys001", comm: "2.1.302", startTime: Date(timeIntervalSince1970: 1000),
+                              agent: nil, identityUnknown: true)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)], ofItemAtPath: stateURL.path)
+        let unknown = scanner.scan(now: Date(timeIntervalSince1970: 2090))
+        #expect(Set(unknown.map(\.tty)) == ["ttys001", "ttys010", "ttys020"])
+        let kept = unknown.first { $0.tty == "ttys001" }
+        #expect(kept?.pid == 900 && kept?.agent == .claude && kept?.hook?.lastEvent == "Stop")
+        #expect(scanner.undecided.contains("ttys001") && !scanner.undecided.contains("ttys010"))
+        #expect(scanner.readAt == Date(timeIntervalSince1970: 2090))
+        #expect(FileManager.default.fileExists(atPath: stateURL.path))
+        procs[900] = nil
+        #expect(!scanner.scan().contains { $0.tty == "ttys001" })
+        #expect(scanner.undecided == Undecided())
+        #expect(!FileManager.default.fileExists(atPath: stateURL.path))
+    }
+
+    /// A process that couldn't be told is never a session of its own (no false agent); a terminal's hook state is
+    /// kept while one is on it, and goes once that terminal is known to have no agent.
+    @Test func aProcessThatCantBeToldIsNoSession() throws {
+        let stateURL = stateDir.appendingPathComponent("ttys030.json")
+        try HookState(agent: .codex, tty: "ttys030", lastEvent: "Stop", lastEventAt: 1500).save(to: stateURL)
+        try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSinceNow: -60)], ofItemAtPath: stateURL.path)
+        var procs = table
+        procs[970] = ProcInfo(pid: 970, ppid: 1, tty: "ttys030", comm: "codex", startTime: Date(timeIntervalSince1970: 1900),
+                              agent: nil, identityUnknown: true)
+        let scanner = scanner { procs }
+        #expect(!scanner.scan().contains { $0.tty == "ttys030" })
+        #expect(scanner.undecided.ttys == ["ttys030"])
+        #expect(FileManager.default.fileExists(atPath: stateURL.path))
+        procs[970] = proc(970, 1, "zsh", tty: "ttys030", start: 1900)
+        #expect(!scanner.scan().contains { $0.tty == "ttys030" })
+        #expect(!FileManager.default.fileExists(atPath: stateURL.path))
+    }
+
+    /// One whose terminal couldn't be read either could be on any terminal.
+    @Test func anUnknownTerminalIsAnyTerminal() {
+        var procs = table
+        procs[980] = ProcInfo(pid: 980, ppid: 0, tty: nil, comm: "", startTime: .distantPast, agent: nil, identityUnknown: true)
+        procs[981] = proc(981, 1, "launchd-helper")
+        let undecided = Undecided(procs)
+        #expect(undecided.anywhere && undecided.contains("ttys001"))
+        #expect(Undecided(table) == Undecided())
+    }
+
     /// 30 sessions, each with two background shells, among 1,500 processes (a loaded Mac's table): every session is
     /// found, with its own shells and no one else's.
     @Test func aFullTableHasEverySessionAndItsShells() {
