@@ -13,6 +13,8 @@ struct SteerOffMainTests {
     let temp = Scratch()
     let tty = "ttys900"
     let agentPid: Int32 = 4242
+    /// The composer's key: its own per test (drafts are saved under the scratch home).
+    let key = "host:\(UUID().uuidString)"
 
     /// A chat on a scratch inbox, and the file its inbox lock is on.
     func chat() throws -> (ChatModel, ChatSync, URL) {
@@ -50,7 +52,7 @@ struct SteerOffMainTests {
         let holder = try holdLock(file, for: 3)
         defer { holder.terminate() }
         let started = Date()
-        let accepted = sync.steer("use port 8080", key: "host:k", tty: tty, agentPid: agentPid)
+        let accepted = sync.steer("use port 8080", key: key, tty: tty, agentPid: agentPid)
         let returnedIn = Date().timeIntervalSince(started)
         #expect(accepted)
         #expect(returnedIn < 0.1, "the main-thread send took \(returnedIn) s")
@@ -101,7 +103,7 @@ struct SteerOffMainTests {
         let (chat, sync, file) = try chat()
         let holder = try holdLock(file, for: 1)
         defer { holder.terminate() }
-        #expect(sync.steer("stop after this", key: "host:k", tty: tty, agentPid: agentPid))
+        #expect(sync.steer("stop after this", key: key, tty: tty, agentPid: agentPid))
         let message = try #require(chat.steering.first)
         var taken: SteerMessage?
         chat.withdrawSteered(message) { taken = $0 }
@@ -112,13 +114,87 @@ struct SteerOffMainTests {
         #expect(SteerInbox.pending(tty: tty, root: chat.steerRoot).isEmpty)
     }
 
+    /// The composer's ↩ while the agent works: the message in the outbox, then steered (`ChatModel.deliver`).
+    @discardableResult
+    func send(_ text: String, attachments: [String] = [], chat: ChatModel, sync: ChatSync, tty: String? = nil) -> OutboxEntry {
+        let entry = OutboxEntry(key: key, message: text, text: text, attachments: attachments)
+        chat.outbox.add(entry)
+        let actions = ComposerActions(send: { _ in Issue.record("typed, not steered"); return false },
+                                      steer: { [tty = tty ?? self.tty, agentPid, key] in sync.steer($0, key: key, tty: tty, agentPid: agentPid) },
+                                      stop: {}, cycleMode: {})
+        #expect(chat.deliver(entry, steering: true, working: true, actions: actions))
+        return entry
+    }
+
+    /// The composer's outbox keeps a steer until it's in the inbox (never in the list of messages typed in), and
+    /// lets it go then.
+    @Test func theOutboxKeepsASteerUntilItsInTheInbox() async throws {
+        let (chat, sync, file) = try chat()
+        let holder = try holdLock(file, for: 1)
+        defer { holder.terminate() }
+        let entry = send("use port 8080", chat: chat, sync: sync)
+        #expect(chat.outbox.entry(entry.id)?.state == .sending)
+        #expect(chat.pending.isEmpty)
+        #expect(chat.steering.map(\.text) == ["use port 8080"])
+        #expect(await until(timeout: 10) { chat.steerSending.isEmpty })
+        #expect(chat.outbox.entry(entry.id) == nil)
+        #expect(chat.pending.isEmpty)
+        #expect(SteerInbox.pending(tty: tty, root: chat.steerRoot).map(\.text) == ["use port 8080"])
+    }
+
+    /// A crash while the post waits on the lock: the message is in the outbox on disk, and the next launch offers it
+    /// to send again or discard.
+    @Test func aCrashWhileTheLockHoldsTheSteerLeavesItInTheOutbox() async throws {
+        let home = temp.url("steer-crash")
+        let root = home.appendingPathComponent("vibeswitcher")
+        let folder = root.appendingPathComponent("steer")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        let outboxFile = home.appendingPathComponent("outbox.json")
+        let holder = try holdLock(folder.appendingPathComponent("\(tty).jsonl"), for: 3)
+        defer { holder.terminate() }
+        weak var gone: ChatModel?
+        let entry: OutboxEntry
+        do {
+            let chat = ChatModel(outbox: ComposerOutbox(url: outboxFile), home: home.path, steerRoot: root)
+            let sync = ChatSync(chat: chat, host: HostClient(socketPath: home.appendingPathComponent("no-host.sock").path, appKey: { nil }))
+            entry = send("deploy to staging", chat: chat, sync: sync)
+            #expect(chat.steerSending.count == 1)
+            gone = chat
+        }
+        #expect(gone == nil, "the first launch's model is still alive")
+        // The next launch, before the post got through.
+        #expect(SteerInbox.pending(tty: tty, root: root).isEmpty)
+        let relaunched = ChatModel(outbox: ComposerOutbox(url: outboxFile), home: home.path, steerRoot: root)
+        let restored = relaunched.outbox.outbox.needsYou(key: key)
+        #expect(restored.map(\.id) == [entry.id])
+        #expect(restored.map(\.message) == ["deploy to staging"])
+        #expect(restored.map(\.state) == [.sending])
+    }
+
     /// One that can't get into the inbox leaves the strip and goes back into the composer's box, said under it.
     @Test func aSendThatCantBePostedGoesBackInTheBox() async throws {
         let (chat, sync, _) = try chat()
-        #expect(sync.steer("use the staging database", key: "host:k", tty: "not/a/tty", agentPid: agentPid))
+        defer { chat.composer.drafts[key] = nil; chat.composer.attachments[key] = nil; chat.composer.save() }
+        #expect(sync.steer("use the staging database", key: key, tty: "not/a/tty", agentPid: agentPid))
         #expect(await until(timeout: 10) { chat.steering.isEmpty })
         #expect(chat.steerSending.isEmpty)
-        #expect(chat.composer.drafts["host:k"] == "use the staging database")
+        #expect(chat.composer.drafts[key] == "use the staging database")
+        #expect(chat.sendNotice != nil)
+    }
+}
+
+extension SteerOffMainTests {
+    /// From the composer: its outbox entry goes back into the box whole (images too), and leaves the outbox.
+    @Test func aComposerSendThatCantBePostedGoesBackInTheBoxWithItsImages() async throws {
+        let (chat, sync, _) = try chat()
+        defer { chat.composer.drafts[key] = nil; chat.composer.attachments[key] = nil; chat.composer.save() }
+        let entry = send("look at this /tmp/shot.png", attachments: ["/tmp/shot.png"], chat: chat, sync: sync, tty: "not/a/tty")
+        #expect(chat.outbox.entry(entry.id) != nil)
+        #expect(await until(timeout: 10) { chat.steering.isEmpty })
+        #expect(chat.outbox.entry(entry.id) == nil)
+        #expect(chat.pending.isEmpty)
+        #expect(chat.composer.drafts[key] == "look at this /tmp/shot.png")
+        #expect(chat.composer.attachments[key] == ["/tmp/shot.png"])
         #expect(chat.sendNotice != nil)
     }
 }

@@ -328,35 +328,54 @@ final class ChatModel: ObservableObject {
 
     /// Steered messages on their way into the inbox (`steer`): shown as sending until they're there.
     @Published private(set) var steerSending: Set<String> = []
-    /// Those messages and the terminal each goes to (they show only with that terminal's).
-    private var inFlight: [(tty: String, message: SteerMessage)] = []
+    /// Those messages, the terminal each goes to (they show only with that terminal's), and the composer's outbox
+    /// entry each came from: it stays in the outbox (on disk) until the message is in the inbox, so a crash while
+    /// the post waits on the lock leaves it there to send again, never lost.
+    private var inFlight: [(tty: String, message: SteerMessage, entry: UUID?)] = []
     /// Where the inbox is posted to and withdrawn from: off the main thread, since its lock can be held for seconds
     /// (a hook's delivery checks seals through the host), and in order (a withdraw waits for its post).
     var inbox: (@escaping () -> Void) -> Void = { ChatModel.inboxQueue.async(execute: $0) }
     var onMain: (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) }
     private static let inboxQueue = DispatchQueue(label: "vibeswitcher.steer-inbox", qos: .userInitiated)
 
-    /// Steers `message` into `tty`'s inbox: shown at once as sending, posted off the main thread; `done` (on the main
-    /// thread) says whether it's there. One that didn't get there leaves the strip.
-    func steer(_ message: SteerMessage, tty: String, done: @escaping (Bool) -> Void) {
+    /// Steers `message` from `key`'s composer into `tty`'s inbox: shown at once as sending, posted off the main
+    /// thread. Its outbox entry leaves once it's in the inbox; one that didn't get there leaves the strip and goes
+    /// back into the box (its images with it), said under it.
+    func steer(_ message: SteerMessage, tty: String, key: String) {
+        let taken = Set(inFlight.compactMap(\.entry))
+        let entry = outbox.outbox.entries.first {
+            $0.key == key && $0.message == message.text && $0.state == .sending && !outbox.outbox.restored.contains($0.id) && !taken.contains($0.id)
+        }
         steered(message, tty: tty)
         steerSending.insert(message.id)
-        inFlight.append((tty, message))
+        inFlight.append((tty, message, entry?.id))
         let root = steerRoot
-        inbox { [onMain] in
+        inbox { [weak self, onMain] in
             let posted = (try? SteerInbox.post(message, tty: tty, root: root)) != nil
-            onMain { [weak self] in
+            onMain {
                 guard let self else { return }
                 self.steerSending.remove(message.id)
                 self.inFlight.removeAll { $0.message.id == message.id }
-                if !posted {
-                    self.steering.removeAll { $0.id == message.id }
-                    if self.steering.isEmpty { self.steeringStranded = false }
+                if posted {
+                    if let entry { self.outbox.remove(entry.id) }
+                    return
                 }
-                done(posted)
+                Breadcrumbs.shared.note("composer: steer to \(tty) didn't reach its inbox, back in the box")
+                self.steering.removeAll { $0.id == message.id }
+                if self.steering.isEmpty { self.steeringStranded = false }
+                if let entry = entry.flatMap({ self.outbox.entry($0.id) }) {
+                    self.putBack(entry, rowID: key)
+                } else {
+                    self.putBack(PendingMessage(text: message.text, afterPrompts: 0), rowID: key)
+                }
+                self.sendNotice = "Not steered: its inbox stayed busy. It's back in the box to send again."
             }
         }
     }
+
+    /// Whether the outbox entry `id` is a steer on its way into the inbox (the steer strip shows it, not the list
+    /// of messages typed in).
+    private func steeringEntry(_ id: UUID) -> Bool { inFlight.contains { $0.entry == id } }
 
     /// The agent the steered messages wait for is idle: they won't arrive by themselves.
     @Published private(set) var steeringStranded = false
@@ -383,9 +402,9 @@ final class ChatModel: ObservableObject {
     func withdrawSteered(_ message: SteerMessage, taken: @escaping (SteerMessage) -> Void) {
         guard let tty = steeringTTY else { return }
         let root = steerRoot
-        inbox { [onMain] in
+        inbox { [weak self, onMain] in
             let withdrawn = SteerInbox.withdraw(id: message.id, tty: tty, root: root)
-            onMain { [weak self] in
+            onMain {
                 guard let self, let withdrawn else { return }
                 self.steering.removeAll { $0.id == message.id }
                 if self.steering.isEmpty { self.steeringStranded = false }
@@ -422,9 +441,9 @@ final class ChatModel: ObservableObject {
             outbox.remove(entry.id)
             return false
         }
-        // Typed in (a steer handed to the agent's inbox left the outbox: the steer strip shows it): shown until
+        // Typed in (a steer, in the outbox until it's in the agent's inbox, shows in the steer strip): shown until
         // the conversation has it (flagged if it doesn't arrive).
-        if let kept = outbox.entry(entry.id) {
+        if let kept = outbox.entry(entry.id), !steeringEntry(entry.id) {
             // Held (a question is open): not typed in yet, so not expected yet.
             sent(entry.message, expectsSoon: !working && kept.state != .held, id: entry.id, attachments: entry.attachments, sentAt: entry.sentAt)
         }
@@ -501,7 +520,7 @@ final class ChatModel: ObservableObject {
         if !pending.isEmpty { pending = PendingMessage.remaining(pending, prompts: prompts) }
         guard let key = outboxKey else { return }
         let shown = Set(pending.map(\.id))
-        let missing = outbox.outbox.onTheirWay(key: key).filter { !shown.contains($0.id) }
+        let missing = outbox.outbox.onTheirWay(key: key).filter { !shown.contains($0.id) && !steeringEntry($0.id) }
         guard !missing.isEmpty else { return }
         for entry in missing {
             var message = PendingMessage(text: entry.message, afterPrompts: 0, expectsSoon: entry.expectsSoon, sentAt: entry.sentAt,

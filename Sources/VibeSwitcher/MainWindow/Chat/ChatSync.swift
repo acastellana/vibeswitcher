@@ -304,18 +304,11 @@ final class ChatSync {
     }
 
     /// Hands `text` to the agent at its next step through its hook (Claude): into the steer inbox of its terminal,
-    /// shown in chat as steering until the hook takes it. `key`: the composer it came from (it leaves its outbox).
-    /// The inbox is written off the main thread (its lock can be held for seconds): the chat shows it as sending
-    /// meanwhile, and one that doesn't get there goes back into the composer's box, said under it.
+    /// shown in chat as steering until the hook takes it. `key`: the composer it came from (it leaves its outbox once
+    /// it's in the inbox). The inbox is written off the main thread (its lock can be held for seconds): the chat
+    /// shows it as sending meanwhile, and one that doesn't get there goes back into the box (`ChatModel.steer`).
     func steer(_ text: String, key: String, tty: String, agentPid: Int32) -> Bool {
-        let message = SteerMessage(text: text, from: .user, agentPid: agentPid)
-        chat.handedOff(key: key, message: text)
-        chat.steer(message, tty: tty) { [weak chat] posted in
-            guard let chat, !posted else { return }
-            Breadcrumbs.shared.note("composer: steer to \(tty) didn't reach its inbox, back in the box")
-            chat.putBack(PendingMessage(text: text, afterPrompts: 0), rowID: key)
-            chat.sendNotice = "Not steered: its inbox stayed busy. It's back in the box to send again."
-        }
+        chat.steer(SteerMessage(text: text, from: .user, agentPid: agentPid), tty: tty, key: key)
         chat.scrollToBottom()
         return true
     }
