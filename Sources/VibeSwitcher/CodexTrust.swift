@@ -100,9 +100,11 @@ enum CodexTrust {
         return String(cString: resolved)
     }
 
-    private static func isOurs(_ hook: [String: Any]) -> Bool {
-        guard let data = try? JSONSerialization.data(withJSONObject: hook) else { return false }
-        return String(decoding: data, as: UTF8.self).contains(HookInstaller.marker)
+    /// Ours: exactly the command handler `HookInstaller` writes for Codex (`hooks/list` gives a hook's `handlerType`
+    /// and `command`). One that only mentions our binary (`curl … | sh # vibeswitcher-hook`) or runs another binary
+    /// whose name starts the same (`vibeswitcher-hook-evil codex`) isn't, and is never trusted.
+    static func isOurs(_ hook: [String: Any], command: String = HookInstaller.command(for: .codex)) -> Bool {
+        hook["handlerType"] as? String == "command" && hook["command"] as? String == command
     }
 }
 
