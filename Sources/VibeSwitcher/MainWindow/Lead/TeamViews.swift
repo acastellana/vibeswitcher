@@ -230,6 +230,7 @@ struct TeamTaskList: View {
     let open: (String) -> Void
     @State var openRows: Set<String> = []
     @State var showFinished = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         let finished = rows.filter { $0.group == .finished }
@@ -259,7 +260,7 @@ struct TeamTaskList: View {
         guard let target = rows.first(where: { $0.id == id }) else { return }
         if target.group == .finished { showFinished = true }
         openRows.insert(id)
-        DispatchQueue.main.async { withAnimation { proxy.scrollTo(id, anchor: .top) } }
+        DispatchQueue.main.async { withAnimation(reduceMotion ? nil : .default) { proxy.scrollTo(id, anchor: .top) } }
     }
 }
 
