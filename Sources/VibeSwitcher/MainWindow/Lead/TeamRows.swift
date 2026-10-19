@@ -371,3 +371,20 @@ enum DecisionFeed {
         return first.lowercased() + text.dropFirst()
     }
 }
+
+/// The Team view's Mac-wide line: the load and every project's team sessions the host lists, against this lead's
+/// limits, so a lead's refusal to start workers (see `MacLoad`) is something the user can see.
+struct MacLine: Equatable {
+    /// "Mac: load 12.3, 5 team sessions across 2 projects".
+    let text: String
+    /// What VoiceOver reads: the numbers in words, who holds the sessions, and which limit holds the lead back.
+    let spoken: String
+    /// At or over a limit: the lead's start_worker and audit refuse now.
+    let isOver: Bool
+
+    static func make(_ sessions: [HostSession], load: Double?, workflow: LeadWorkflow) -> MacLine {
+        let mac = MacLoad.count(sessions.map { ($0.label, $0.cwd, $0.isLive) }, load: load)
+        return MacLine(text: mac.line, spoken: mac.spoken(threshold: workflow.loadLimit, max: workflow.macMaxSessions),
+                       isOver: mac.isBusy(threshold: workflow.loadLimit) || mac.isFull(max: workflow.macMaxSessions))
+    }
+}

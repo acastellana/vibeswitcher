@@ -289,13 +289,19 @@ struct LeadTeamPane: View {
     let answer: (LeadQuestion, String) -> Void
     let notices: [String: String]
     @ObservedObject var summaries: TeamSummaryModel
+    /// Every session the host lists, of every project (the Mac-wide line counts their teams).
+    var hosted: [HostSession] = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Counts 5-second ticks while it's on screen (a `.task`, so a re-render of the window doesn't restart it).
     @State private var tick = 0
+    /// The Mac's load and this lead's limits, read again with each tick.
+    @State private var load: Double?
+    @State private var workflow = LeadWorkflow()
 
     var body: some View {
         LeadTeamView(root: root, board: board, seen: seen, open: open, answer: answer, notices: notices, decisions: decisions,
-                     summary: { summaries.line($0) }, decisionSummary: { summaries.line($0) })
+                     summary: { summaries.line($0) }, decisionSummary: { summaries.line($0) },
+                     mac: MacLine.make(hosted, load: load, workflow: workflow))
             .onAppear(perform: request)
             .onChange(of: tick) { request() }
             .onChange(of: summaries.enabled) { request() }
@@ -308,6 +314,8 @@ struct LeadTeamPane: View {
     }
 
     private func request() {
+        load = MacLoad.oneMinute()
+        workflow = LeadWorkflow.load(from: (root as NSString).appendingPathComponent(".vibeswitcher/workflow.md"))
         let recent = DecisionFeed.split(decisions, now: Date().timeIntervalSince1970, reduceMotion: reduceMotion).recent.map(\.decision)
         summaries.request(rows: TeamRows.rows(board, seen: seen), decisions: recent)
     }

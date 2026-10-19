@@ -27,7 +27,7 @@ struct InspectorView: View {
                                  seen: TeamRows.seen(model.allRows, now: Date()), open: { session in
                         if let id = UUID(uuidString: session) { model.select(hostID: id) }
                     }, answer: { question, text in leads.answer(question, root: lead.root, with: text) }, notices: leads.answerNotices,
-                                 summaries: leads.summaries)
+                                 summaries: leads.summaries, hosted: host.sessions)
                 } else if tab == "activity" {
                     ActivityView(session: row.session).id(row.id)
                 } else {

@@ -472,6 +472,8 @@ struct LeadTeamView: View {
     var decisionSummary: (LeadDecision) -> String? = { _ in nil }
     /// Drawn as of this time instead of the clock's (pictures).
     var clock: Date?
+    /// The Mac-wide line (every project's team and the load); nil: not shown.
+    var mac: MacLine?
 
     var body: some View {
         let fading = !DecisionFeed.split(decisions, now: (clock ?? Date()).timeIntervalSince1970, reduceMotion: false).recent.isEmpty
@@ -497,6 +499,7 @@ struct LeadTeamView: View {
             DecisionFeedView(decisions: decisions, now: now, summary: decisionSummary, openDecisions: openDecisions, showEarlier: showEarlier)
                 .padding(.horizontal, -8)
             section("Tasks") {
+                if let mac { MacLineView(line: mac) }
                 if board.tasks.isEmpty {
                     Text("Nothing on the board yet. Tell the lead what to build.").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
@@ -539,6 +542,22 @@ struct LeadTeamView: View {
             Text(title.uppercased()).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.secondary)
             content()
         }
+    }
+}
+
+/// "Mac: load 12.3, 5 team sessions across 2 projects", orange while a limit holds the lead's new sessions back.
+struct MacLineView: View {
+    let line: MacLine
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: line.isOver ? "gauge.with.dots.needle.100percent" : "gauge.with.dots.needle.33percent")
+                .font(.system(size: 10)).accessibilityHidden(true)
+            Text(line.text).font(.system(size: 11).monospacedDigit())
+        }
+        .foregroundStyle(line.isOver ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.secondary))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(line.spoken)
     }
 }
 
