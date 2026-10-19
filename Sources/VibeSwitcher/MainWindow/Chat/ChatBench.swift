@@ -6,8 +6,9 @@ import VibeCore
 /// offscreen, on a real transcript, followed like the window does; prints the longest main-thread stall each
 /// second, how often the view was laid out and what heights its content took, then exits. By default it resizes
 /// and scrolls like a reader; OPEN, SEEN, AT and SWITCH instead open a conversation the way the window does and
-/// then leave it alone, and it must settle: status 3 when its content height still changed in the last 3 seconds,
-/// 2 when the main thread got stuck for 10 s.
+/// then leave it alone, and EARLIER pages back from there; it must settle: status 3 when its content height still
+/// changed in the last 3 seconds, 2 when the main thread got stuck for 10 s, 4 when a tick stalled over the limit
+/// (see `StallRule`).
 enum ChatBench {
     private static let env = ProcessInfo.processInfo.environment
 
@@ -69,14 +70,31 @@ enum ChatBench {
         // VIBESWITCHER_BENCH_SWITCH=PATH: at t=2 another session is selected, whose conversation is in PATH (the chat
         // goes straight from one conversation to the other).
         let other = env["VIBESWITCHER_BENCH_SWITCH"]
+        // VIBESWITCHER_BENCH_EARLIER=N: once the conversation watched (the one opened again, or with no OPEN, SEEN, AT
+        // or SWITCH the first) has settled, Show earlier is pressed N times, scrolled to the top first as you reach the
+        // button, each page left to settle before the next.
+        let earlier = max(0, env["VIBESWITCHER_BENCH_EARLIER"].flatMap(Int.init) ?? 0)
+        let scenario = other != nil || open != nil || seen != nil || at != nil
+        // VIBESWITCHER_BENCH_STALL=1: also checks the hang watchdog (the main thread blocks for 4 s at t=3).
+        let stall = env["VIBESWITCHER_BENCH_STALL"] == "1"
+        let rule = StallRule.fromEnvironment(env)
+        let startLoad = rule.load()
+        if !stall { print("  stall rule: \(rule.describe(load: startLoad))") }
         Self.setSeen(nil, path: path)
-        chat.show(path: path)
         var last = Date()
         var worst: TimeInterval = 0
+        let longest = LongestTicks()
+        var opened = false
         let beat = Timer(timeInterval: 0.02, repeats: true) { _ in
             let now = Date()
             worst = max(worst, now.timeIntervalSince(last))
+            longest.note(now.timeIntervalSince(last))
             last = now
+            // Opened on the first beat, so the ticks count its layout and not the app's launch.
+            if !opened {
+                opened = true
+                chat.show(path: path)
+            }
             if updates, chat.state == .ready { chat.objectWillChange.send() }
             probe.sample()
             probe.note(position: chat.atBottom ? "end" : ChatWindow.anchor(tops: chat.rowTops, visibleTop: chat.visibleTop) ?? "-")
@@ -96,23 +114,41 @@ enum ChatBench {
             }
             RunLoop.main.add(sweep, forMode: .common)
         }
-        // VIBESWITCHER_BENCH_STALL=1: also checks the hang watchdog (the main thread blocks for 4 s at t=3).
-        let stall = env["VIBESWITCHER_BENCH_STALL"] == "1"
         if stall {
             HangWatchdog.shared.describeState = { "chat bench, items=\(chat.items.count)" }
             HangWatchdog.shared.start()
         }
         var second = 0
-        var reopenedAt: Int?
+        // With EARLIER alone the conversation watched is the first one, opened at t=0.
+        var reopenedAt: Int? = earlier > 0 && !scenario ? 0 : nil
         // When the conversation opened again had loaded (a big transcript on a busy machine can take seconds): AT
         // scrolls then, and the run lasts long enough after it to tell settling from a slow load.
         var readyAt: Int?
+        let paging = Paging()
+        /// Ends the run with `status` (3: it never settled), or 4 when a tick stalled over the rule's limit.
+        func finish(_ status: Int32) -> Never {
+            var failed = false
+            if !stall {
+                let verdict = rule.verdict(longest, load: [startLoad, rule.load()].compactMap { $0 }.max())
+                print(verdict.text)
+                failed = verdict.failed
+            }
+            fflush(stdout)
+            exit(status != 0 ? status : failed ? 4 : 0)
+        }
         let tick = Timer(timeInterval: 1, repeats: true) { _ in
             second += 1
+            longest.second = second
             if stall, second == 3 { Breadcrumbs.shared.note("bench: blocking the main thread for 4 s"); sleep(4) }
             chat.poll()
             let justReady = reopenedAt != nil && readyAt == nil && chat.state == .ready && !chat.items.isEmpty
             if justReady { readyAt = second }
+            // The first open is over once its conversation shows and has kept its height for a second, or when the run
+            // moves on from it (t=2: resized, switched or left).
+            if longest.firstOpen == nil,
+               (chat.state == .ready && !chat.items.isEmpty && !probe.changedRecently(seconds: 1)) || (reopenedAt != 0 && second >= 2) || second > seconds {
+                longest.endFirstOpen()
+            }
             let sweeping = ProcessInfo.processInfo.environment["VIBESWITCHER_BENCH_SWEEP"] != nil
             if ticks, chat.state == .ready {
                 chat.runner.canRun = whole
@@ -138,7 +174,7 @@ enum ChatBench {
                     print("  reopened, anchor \(chat.restoreAnchor ?? "none")")
                 }
                 if justReady, let at, let scroll = Self.scrollView(in: host) { Self.scroll(scroll, to: at, host: host) }
-            } else if !sweeping {
+            } else if earlier == 0, !sweeping {
                 // A width change (sidebar or inspector toggled, the window dragged): every row is measured again.
                 if second % 2 == 0 {
                     let started = Date()
@@ -160,6 +196,55 @@ enum ChatBench {
             fflush(stdout)
             probe.nextSecond()
             worst = 0
+            if earlier > 0, let reopenedAt {
+                // Paging back: once the conversation watched has kept its height for 3 s, Show earlier; once that page
+                // has, the next. Each phase may take the run's length (and loading 30 s more).
+                guard let readyAt else {
+                    if second - reopenedAt >= seconds + 30 {
+                        print("FAIL: the conversation never loaded \(second - reopenedAt) s after opening")
+                        finish(3)
+                    }
+                    return
+                }
+                let since = paging.pressedSecond ?? readyAt
+                guard !probe.changedRecently(seconds: 3), !chat.loadingEarlier else {
+                    if second - since > seconds {
+                        let after = paging.pressedSecond == nil ? "it loaded" : "pressing Show earlier (page \(paging.settles.count + 1))"
+                        print("FAIL: the content height still changes \(second - since) s after \(after): height=\(probe.heights.last ?? 0) "
+                            + "heights=\(probe.heights.count) range=\(probe.range) \(paging.summary(pages: earlier)) longest tick=\(Self.seconds(longest.overall))")
+                        finish(3)
+                    }
+                    return
+                }
+                if let pressedAt = paging.pressedAt {
+                    paging.settled(max(0, probe.lastChange.timeIntervalSince(pressedAt)), longestTick: longest.page)
+                    print("  page \(paging.settles.count) settled in \(Self.seconds(paging.settles.last ?? 0)): shown=\(min(chat.items.count, chat.shownLimit)) "
+                        + "of \(chat.items.count) height=\(probe.heights.last ?? 0), longest tick \(Self.seconds(longest.page))")
+                } else {
+                    print("  settled \(second - readyAt) s after it loaded: height=\(probe.heights.last ?? 0)")
+                }
+                let shown = ChatWindow.shown(chat.items, limit: chat.shownLimit, including: nil)
+                if paging.settles.count < earlier, shown.hidden > 0 || chat.hasEarlier {
+                    // As you reach the button: at the top.
+                    if let scroll = Self.scrollView(in: host) { Self.scroll(scroll, to: "top", host: host) }
+                    longest.startPage(paging.settles.count + 1)
+                    paging.pressed(at: Date(), second: second)
+                    if shown.hidden > 0 {
+                        print("  page \(paging.settles.count + 1): Show \(min(shown.hidden, ChatWindow.page)) earlier at t=\(second)s")
+                        chat.showEarlier()
+                    } else {
+                        print("  page \(paging.settles.count + 1): Load earlier at t=\(second)s")
+                        chat.loadEarlier()
+                    }
+                    return
+                }
+                if paging.settles.count < earlier { print("  nothing earlier to show after \(paging.settles.count) pages") }
+                print("settled \(second - reopenedAt) s after opening (loaded after \(readyAt - reopenedAt) s): height=\(probe.heights.last ?? 0) "
+                    + "heights=\(probe.heights.count) range=\(probe.range) layouts=\(probe.layouts) last 3 s: \(probe.layoutsRecently) layouts "
+                    + "\(paging.summary(pages: earlier)) longest tick=\(Self.seconds(longest.overall))")
+                finish(0)
+            }
+            if earlier > 0 { return }
             // Opened again: the same time after it had loaded as after the reopen when it loads at once (at most 30 s more).
             if let reopenedAt, second >= seconds, second < seconds + 30, readyAt.map({ second - $0 < seconds - reopenedAt - 1 }) ?? true { return }
             if second >= seconds {
@@ -167,19 +252,139 @@ enum ChatBench {
                 if let reopenedAt {
                     guard let readyAt else {
                         print("FAIL: the conversation never loaded \(second - reopenedAt) s after opening")
-                        exit(3)
+                        finish(3)
                     }
                     let verdict = probe.changedRecently(seconds: 3) ? "FAIL: the content height still changes" : "settled"
                     print("\(verdict) \(second - reopenedAt) s after opening (loaded after \(readyAt - reopenedAt) s): height=\(probe.heights.last ?? 0) heights=\(probe.heights.count) "
-                        + "range=\(probe.range) layouts=\(probe.layouts) last 3 s: \(probe.layoutsRecently) layouts")
-                    exit(probe.changedRecently(seconds: 3) ? 3 : 0)
+                        + "range=\(probe.range) layouts=\(probe.layouts) last 3 s: \(probe.layoutsRecently) layouts longest tick=\(Self.seconds(longest.overall))")
+                    finish(probe.changedRecently(seconds: 3) ? 3 : 0)
                 }
-                exit(0)
+                finish(0)
             }
         }
         RunLoop.main.add(tick, forMode: .common)
         app.run()
         exit(0)
+    }
+
+    static func seconds(_ value: TimeInterval) -> String { String(format: "%.2fs", value) }
+
+    /// A tick is the main thread's longest gap between the bench's 20 ms beats. One over 0.25 s fails the bench. On a
+    /// Mac whose 1-minute load is over load_threshold (VIBESWITCHER_BENCH_WORKFLOW's workflow.md, else twice the cores,
+    /// as the lead's) stalls say how busy the Mac is rather than what the layout does: the first open's ticks are only
+    /// recorded, and later ones (paging back among them) fail over twice the first open's longest, never under 0.25 s.
+    /// So a loaded Mac gives no false failures and a quiet one is strict.
+    struct StallRule {
+        static let limit: TimeInterval = 0.25
+        static let loadedFactor = 2.0
+        let threshold: Double
+        /// Where the threshold comes from, for the output.
+        let source: String
+        /// VIBESWITCHER_BENCH_LOAD=L stands in for the Mac's 1-minute load (the tests).
+        let fakeLoad: Double?
+
+        static func fromEnvironment(_ env: [String: String]) -> StallRule {
+            let workflow = env["VIBESWITCHER_BENCH_WORKFLOW"].map(LeadWorkflow.load(from:)) ?? LeadWorkflow()
+            return StallRule(threshold: workflow.loadLimit,
+                             source: workflow.loadThreshold == nil ? "twice the \(MacLoad.processors) cores" : "workflow.md",
+                             fakeLoad: env["VIBESWITCHER_BENCH_LOAD"].flatMap(Double.init))
+        }
+
+        func load() -> Double? { fakeLoad ?? MacLoad.oneMinute() }
+
+        static func number(_ value: Double) -> String { String(format: "%g", (value * 10).rounded() / 10) }
+
+        /// Over load_threshold; an unknown load is judged as a quiet one.
+        func loaded(_ load: Double?) -> Bool { load.map { $0 > threshold } ?? false }
+
+        /// What a tick after the first open may take.
+        static func limit(loaded: Bool, firstOpen: TimeInterval?) -> TimeInterval {
+            loaded ? max(limit, loadedFactor * (firstOpen ?? 0)) : limit
+        }
+
+        func describe(load: Double?, firstOpen: TimeInterval? = nil) -> String {
+            guard let load else { return "the Mac's 1-minute load is unknown: any tick over \(ChatBench.seconds(Self.limit)) fails" }
+            let mac = "the Mac's 1-minute load \(Self.number(load)) is"
+            let line = "load_threshold \(Self.number(threshold)) (\(source))"
+            guard loaded(load) else { return "\(mac) not over \(line): any tick over \(ChatBench.seconds(Self.limit)) fails" }
+            let limit = firstOpen.map { " = \(ChatBench.seconds(Self.limit(loaded: true, firstOpen: $0)))" } ?? ""
+            return "\(mac) over \(line): the first open's ticks are only recorded, later ones fail over "
+                + "\(Self.number(Self.loadedFactor)) × its longest\(firstOpen.map { " (\(ChatBench.seconds($0)))" } ?? ""), "
+                + "never under \(ChatBench.seconds(Self.limit))\(limit)"
+        }
+
+        /// The run's ticks judged at `load`: whether one went over, and a line saying so with the rule.
+        func verdict(_ ticks: LongestTicks, load: Double?) -> (failed: Bool, text: String) {
+            let loaded = loaded(load)
+            let firstOpen = ticks.firstOpen ?? ticks.overall
+            let judged = loaded ? ticks.afterOpen : ticks.overall
+            let limit = Self.limit(loaded: loaded, firstOpen: firstOpen)
+            let place = loaded ? ticks.afterOpenPlace : ticks.overallPlace
+            let rule = "rule: " + describe(load: load, firstOpen: loaded ? firstOpen : nil)
+            return judged > limit
+                ? (true, "FAIL: a tick stalled \(ChatBench.seconds(judged)) (\(place)), over \(ChatBench.seconds(limit)); \(rule)")
+                : (false, "ticks: longest \(ChatBench.seconds(judged))\(place.isEmpty ? "" : " (\(place))"), not over \(ChatBench.seconds(limit)); \(rule)")
+        }
+    }
+
+    /// The longest ticks: in all (from the first beat, so not the app's launch), in the first open, after it, and in
+    /// the page being shown, with where each one was.
+    final class LongestTicks {
+        private var started = false
+        /// The tick timer's second, and what the run is doing, for where a tick was.
+        var second = 0
+        private var phase = "opening"
+        private(set) var overall: TimeInterval = 0
+        private(set) var overallPlace = ""
+        /// The first open's longest, once it's over.
+        private(set) var firstOpen: TimeInterval?
+        private(set) var afterOpen: TimeInterval = 0
+        private(set) var afterOpenPlace = ""
+        private(set) var page: TimeInterval = 0
+
+        func note(_ gap: TimeInterval) {
+            guard started else { started = true; return }
+            let place = "t=\(second + 1)s, \(phase)"
+            if gap > overall { overall = gap; overallPlace = place }
+            if firstOpen != nil, gap > afterOpen { afterOpen = gap; afterOpenPlace = place }
+            page = max(page, gap)
+        }
+
+        func endFirstOpen() {
+            firstOpen = overall
+            phase = "after the first open"
+        }
+
+        func startPage(_ number: Int) {
+            page = 0
+            phase = "page \(number)"
+        }
+    }
+
+    /// Show earlier pressed page by page: when the one pending was pressed, and how each settled.
+    private final class Paging {
+        private(set) var pressedAt: Date?
+        private(set) var pressedSecond: Int?
+        private(set) var settles: [TimeInterval] = []
+        private var longestTicks: [TimeInterval] = []
+
+        func pressed(at date: Date, second: Int) {
+            pressedAt = date
+            pressedSecond = second
+        }
+
+        func settled(_ settle: TimeInterval, longestTick: TimeInterval) {
+            settles.append(settle)
+            longestTicks.append(longestTick)
+            pressedAt = nil
+            pressedSecond = nil
+        }
+
+        /// "earlier=2 settled=[0.41s,0.38s] page ticks=[0.08s,0.07s]": the pages asked for, each one's settle (from
+        /// the press to its last height change) and longest tick.
+        func summary(pages: Int) -> String {
+            "earlier=\(pages) settled=[\(settles.map(ChatBench.seconds).joined(separator: ","))] page ticks=[\(longestTicks.map(ChatBench.seconds).joined(separator: ","))]"
+        }
     }
 
     private static func scroll(_ scroll: NSScrollView, to position: String, host: NSView) {
@@ -253,7 +458,7 @@ enum ChatBench {
         /// Where it showed (the first row on screen, or the end), each time that changed.
         private var positionsThisSecond: [String] = []
         private var position = ""
-        private var lastChange = Date()
+        private(set) var lastChange = Date()
         /// Layout counts at the last few seconds' ends.
         private var layoutsAt: [Int] = []
 
