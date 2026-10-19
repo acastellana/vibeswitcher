@@ -11,6 +11,8 @@ import VibeCore
 /// (see `StallRule`).
 enum ChatBench {
     private static let env = ProcessInfo.processInfo.environment
+    /// Held for the run: no App Nap.
+    nonisolated(unsafe) private static var activity: NSObjectProtocol?
 
     static func run(path: String) -> Never {
         // VIBESWITCHER_BENCH_SECONDS=N: how long it runs (default 15).
@@ -23,6 +25,9 @@ enum ChatBench {
         }
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
+        // Hidden and offscreen it could be napped (its timers coalesced, its threads held back), which the ticks would
+        // count as stalls.
+        activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .latencyCritical], reason: "chat bench timing its layouts")
         let chat = ChatModel()
         // VIBESWITCHER_BENCH_LIVE=1: as for a session that's working (its live line ticks every second).
         var row: WindowRow?
