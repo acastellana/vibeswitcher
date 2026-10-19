@@ -3,6 +3,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+SIGNING_DIR="$HOME/.vibeswitcher/signing"
+# Made by an earlier setup-signing.sh: don't sign with a key any process running as you could use.
+if [[ -f "$SIGNING_DIR/password" ]]; then
+    echo "The signing keychain's password is saved in $SIGNING_DIR/password, where any process running as you" >&2
+    echo "can read it and sign as VibeSwitcher. Run ./scripts/setup-signing.sh in Terminal to replace it." >&2
+    exit 1
+fi
+
 swift build -c release
 BIN="$(swift build -c release --show-bin-path)"
 APP="build/VibeSwitcher.app"
@@ -18,22 +26,24 @@ cp -R Web "$APP/Contents/Resources/Web"
 for bundle in "$BIN"/*.bundle; do [[ -e "$bundle" ]] && cp -R "$bundle" "$APP/Contents/Resources/"; done
 # Sign with the stable local identity if it exists (scripts/setup-signing.sh), so macOS keeps granted
 # permissions across rebuilds; otherwise ad-hoc, which changes identity on every build.
-SIGNING_DIR="$HOME/.vibeswitcher/signing"
 if [[ -f "$SIGNING_DIR/vibeswitcher.keychain-db" ]]; then
     KEYCHAIN="$SIGNING_DIR/vibeswitcher.keychain-db"
-    security unlock-keychain -p "$(cat "$SIGNING_DIR/password")" "$KEYCHAIN"
     # A self-signed certificate isn't "trusted", so codesign won't find it by name; its hash works.
+    # (Certificates are readable while the keychain is locked.)
     HASH="$(security find-identity -p codesigning "$KEYCHAIN" | awk '/VibeSwitcher Local Signing/ {print $2; exit}')"
     IDENTITY=(--sign "$HASH" --keychain "$KEYCHAIN")
     # codesign only finds the key while its keychain is in the search list: add it for the signing
-    # step and always put the user's list back.
+    # step and always put the user's list back. The keychain is locked again however the build ends.
     ORIGINAL_LIST=()
     while IFS= read -r line; do
         line="${line#"${line%%[![:space:]]*}"}"; line="${line%\"}"; line="${line#\"}"
         [[ -n "$line" ]] && ORIGINAL_LIST+=("$line")
     done < <(security list-keychains -d user)
-    trap 'security list-keychains -d user -s "${ORIGINAL_LIST[@]}"' EXIT
-    security list-keychains -d user -s "${ORIGINAL_LIST[@]}" "$KEYCHAIN"
+    trap 'security lock-keychain "$KEYCHAIN"; security list-keychains -d user -s ${ORIGINAL_LIST[@]+"${ORIGINAL_LIST[@]}"}' EXIT
+    security list-keychains -d user -s ${ORIGINAL_LIST[@]+"${ORIGINAL_LIST[@]}"} "$KEYCHAIN"
+    # The keychain is locked: codesign's first use of the key makes macOS ask you for its password (the
+    # one you chose in setup-signing.sh), so nothing signs as VibeSwitcher without you.
+    echo "Signing: macOS asks for the signing keychain's password."
 else
     IDENTITY=(--sign -)
 fi
