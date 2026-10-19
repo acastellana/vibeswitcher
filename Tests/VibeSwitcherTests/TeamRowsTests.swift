@@ -91,7 +91,13 @@ struct TeamRowsTests {
         task.audits = audits
         let reconsider = row(task, ["w-fix": Self.idle])
         #expect(reconsider.state == "Reconsider" && reconsider.mark == .failed && reconsider.group == .needsYou)
-        #expect(reconsider.line(summary: "ignored")?.hasPrefix("Reconsider the approach: 3 audits in a row left Important findings open") == true)
+        #expect(reconsider.line(summary: "ignored") == "Reconsider the approach: 1 Important finding left open across 3 rounds; the lead re-plans it or asks you.")
+
+        // Rounds whose verdict failed are counted as such.
+        var failed = LeadAuditLedger()
+        for commit in ["c1", "c2", "c3"] { try failed.record([], commit: commit, passes: false, changed: []) }
+        task.audits = failed
+        #expect(row(task, ["w-fix": Self.idle]).line(summary: "ignored") == "Reconsider the approach: 3 failed verdicts in a row; the lead re-plans it or asks you.")
     }
 
     @Test func theTaskViewShowsFindingsBySeverity() throws {

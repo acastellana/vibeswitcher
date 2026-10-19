@@ -135,6 +135,79 @@ struct LeadAuditLedgerTests {
         for commit in ["c1", "c2", "c3"] { try ledger.record([], commit: commit, passes: false, changed: []) }
         #expect(ledger.reconsider)
     }
+
+    /// What counted toward reconsidering is said: findings left open, failed verdicts, or both.
+    @Test func theReconsiderCauseNamesWhatCounted() throws {
+        var open = LeadAuditLedger()
+        try open.record([important(), important("Sources/B.swift", 3)], commit: "c1", passes: true)
+        for commit in ["c2", "c3"] { try open.record([important(id: "F1"), important(id: "F2")], commit: commit, passes: true, changed: ["Sources/A.swift"]) }
+        #expect(open.reconsiderCause == "2 Important findings left open across 3 rounds")
+
+        var failed = LeadAuditLedger()
+        for commit in ["c1", "c2", "c3"] { try failed.record([], commit: commit, passes: false, changed: []) }
+        #expect(failed.reconsiderCause == "3 failed verdicts in a row")
+
+        var both = LeadAuditLedger()
+        try both.record([important()], commit: "c1", passes: true)
+        try both.record([important(id: "F1")], commit: "c2", passes: false, changed: [])
+        try both.record([important(id: "F1")], commit: "c3", passes: true, changed: [])
+        #expect(both.reconsider)
+        #expect(both.reconsiderCause == "3 audits in a row: 1 failed verdict, and 2 that left Important findings open (1 open now)")
+
+        // A ledger recorded before failed verdicts were counted reads, and says it as before.
+        var old = try JSONDecoder().decode(LeadAuditLedger.self, from: Data(#"{"findings":[],"rounds":3,"failedRounds":3,"commit":"c3","passed":false}"#.utf8))
+        #expect(old.failedVerdicts == nil && old.reconsider)
+        #expect(old.reconsiderCause == "3 audits in a row left Important findings open or failed")
+        old.replan()
+        #expect(old.failedVerdicts == 0)
+    }
+
+    /// The lead dismissing the last Important finding on a passing round makes it a clean one: the rounds start over.
+    @Test func dismissingTheLastImportantFindingOnAPassStartsTheRoundsOver() throws {
+        var ledger = LeadAuditLedger()
+        try ledger.record([important()], commit: "c1", passes: true)
+        for commit in ["c2", "c3"] { try ledger.record([important(id: "F1")], commit: commit, passes: true, changed: ["Sources/A.swift"]) }
+        #expect(ledger.reconsider)
+        try ledger.dismiss("F1", reason: "the contract allows it")
+        #expect(ledger.failedRounds == 0 && ledger.failedVerdicts == 0 && !ledger.reconsider)
+
+        // On a failed verdict it doesn't: that round still failed.
+        var failing = LeadAuditLedger()
+        try failing.record([important()], commit: "c1", passes: false)
+        try failing.dismiss("F1", reason: "not a problem")
+        #expect(failing.failedRounds == 1)
+    }
+
+    /// Each re-audit scope names its own diff and the command that gives it.
+    @Test func eachReauditScopeSaysWhatItCovers() {
+        func prompt(_ scope: LeadPrompts.Reaudit.Scope, stat: String = "") -> String {
+            LeadPrompts.recheck(.init(round: 2, since: "aaaaaaaa1111", head: "bbbbbbbb2222", open: [], known: [], stat: stat, diff: nil, base: "dev", scope: scope))
+        }
+        #expect(prompt(.since).contains("the worker changed it since") && prompt(.since).contains("`git diff aaaaaaaa1111 bbbbbbbb2222`"))
+        #expect(prompt(.since).contains("(no file differs from aaaaaaaa)"))
+        let rewritten = prompt(.wholeBranch(sameCommit: false))
+        #expect(rewritten.contains("no longer in its history") && rewritten.contains("`git diff dev...bbbbbbbb2222`"), "\(rewritten)")
+        let same = prompt(.wholeBranch(sameCommit: true), stat: " b.txt | 1 +")
+        #expect(same.contains("this very commit, aaaaaaaa") && same.contains("The branch's whole change since its merge-base with dev:\n b.txt | 1 +"), "\(same)")
+        let own = prompt(.ownFiles(["Sources/A.swift", "docs/a b.md"]))
+        #expect(own.contains("`git diff dev...bbbbbbbb2222 -- Sources/A.swift 'docs/a b.md'`"), "\(own)")
+        #expect(prompt(.ownFiles([])).contains("(its own commits since aaaaaaaa change no file: only dev's came in)"))
+        for scope in [LeadPrompts.Reaudit.Scope.since, .ownFiles([]), .wholeBranch(sameCommit: true)] { #expect(!prompt(scope).contains("(nothing changed)")) }
+    }
+
+    /// A re-audit of the commit already audited covers the whole branch, and says so when it refuses a file.
+    @Test func aSameCommitReauditSaysItCoversTheWholeBranch() throws {
+        var ledger = LeadAuditLedger()
+        try ledger.record([], commit: "c1", passes: false)
+        do {
+            try ledger.record([important("Sources/Untouched.swift", 4)], commit: "c1", passes: false, changed: ["Sources/A.swift"])
+            Issue.record("refused")
+        } catch let refusal as LeadAuditLedger.Refusal {
+            #expect(refusal.description.contains("the branch's whole change only (it covers Sources/A.swift)"), "\(refusal)")
+        }
+        try ledger.record([important("Sources/A.swift", 4)], commit: "c1", passes: false, changed: ["Sources/A.swift"])
+        #expect(ledger.findings.map(\.place) == ["Sources/A.swift:4"])
+    }
 }
 
 /// The findings through the tools: a fake verifier's submit_audit, the merge gate, the lead's dismissals and tasks
@@ -377,10 +450,10 @@ struct LeadFindingsToolTests: LeadTeamFixture {
         try work(runtime, root: root, file: "c.txt", text: "2\n")
         #expect(!(try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "3", "findings": [still]])).isError)
         let told = try #require(runtime.steered.last?.text)
-        #expect(told.contains("Reconsider the approach"), "\(told)")
+        #expect(told.contains("Reconsider the approach: 1 Important finding left open across 3 rounds"), "\(told)")
         #expect(told.contains("re-plan add-b") && told.contains("ask the user"))
         let status = call(lead, "status").text
-        #expect(status.contains("add-b: Add b — reconsider the approach (3 audits left Important findings open)"), "\(status)")
+        #expect(status.contains("add-b: Add b — reconsider the approach (1 Important finding left open across 3 rounds)"), "\(status)")
         #expect(call(lead, "board", ["task": "add-b"]).text.contains("Reconsider the approach"))
         // The lead's own prompt says what to do then.
         #expect(LeadPrompts.lead(project: "p", root: root, workflow: LeadWorkflow()).contains("\"reconsider the approach\": don't send the worker back"))
@@ -427,5 +500,111 @@ struct LeadFindingsToolTests: LeadTeamFixture {
         #expect(vault.audits(root: root, task: "add-b")?.findings.count == 3)
         #expect(!call(lead, "cleanup", ["task": "add-b", "force": true]).isError)
         #expect(vault.audits(root: root, task: "add-b") == nil)
+    }
+
+    /// A re-audit of the very commit audited (after a 'blocked' verdict, say) covers the whole branch since its
+    /// merge-base: its prompt shows that diff, and new findings anywhere the branch changes are taken.
+    @Test func aReauditOfTheSameCommitCoversTheWholeBranch() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        let head = Git.run(["rev-parse", "agent/add-b"], in: root).output
+        #expect(!(try audit(lead, runtime, ["completion": "blocked", "integrity": "clean", "summary": "swift wasn't there"])).isError)
+        let again = call(lead, "audit", ["task": "add-b"])
+        #expect(again.text.contains("re-audit (round 2): the verifier checks the 0 open findings and the whole branch (the commit audited before, again)"), "\(again.text)")
+        let prompt = try verifierPrompt(runtime)
+        #expect(prompt.contains("this very commit, \(head.prefix(8))"), "\(prompt)")
+        #expect(prompt.contains("`git diff main...\(head)`"))
+        #expect(prompt.contains("+bee"), "the whole branch's diff")
+        #expect(!prompt.contains("(nothing changed)"))
+        let verifier = try seat("verify-add-b", runtime)
+        let verdict: [String: Any] = ["completion": "complete", "integrity": "clean", "summary": "built this time"]
+        let outside = call(verifier, "submit_audit", verdict.merging(["findings": [Self.threeKinds[2].merging(["severity": "Nit"]) { $1 }]]) { $1 })
+        #expect(outside.isError)
+        #expect(outside.text.contains("the branch's whole change only (it covers b.txt)"), "\(outside.text)")
+        let found = call(verifier, "submit_audit", verdict.merging(["findings": [Self.threeKinds[0]]]) { $1 })
+        #expect(!found.isError, "\(found.text)")
+        #expect(vault.audits(root: root, task: "add-b")?.finding("F1")?.place == "b.txt:1")
+    }
+
+    /// A branch that merged the base since its audit is re-audited on its own commits' files (a merge's where its
+    /// resolution changed them), against the base's merge-base: the base's own work isn't in it.
+    @Test func aReauditOfABranchThatMergedTheBaseCoversOnlyItsOwnFiles() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        #expect(!(try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "checked"])).isError)
+        // The base moves on: a file of its own, and b.txt too, which the worker's merge resolves.
+        try "mmm\n".write(toFile: root + "/m.txt", atomically: true, encoding: .utf8)
+        try "main bee\n".write(toFile: root + "/b.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "m.txt", "b.txt"], in: root)
+        Git.run(["commit", "-q", "-m", "the base's work"], in: root)
+        let worktree = Worktrees.path(root: root, slug: "add-b")
+        #expect(!Git.run(["merge", "-q", "main", "-m", "merge main"], in: worktree).ok, "b.txt conflicts")
+        try "bee and main bee\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "b.txt"], in: worktree)
+        #expect(Git.run(["commit", "-q", "--no-edit"], in: worktree).ok)
+        try work(runtime, root: root, file: "c.txt", text: "sea\n")
+        let head = Git.run(["rev-parse", "agent/add-b"], in: root).output
+
+        let again = call(lead, "audit", ["task": "add-b"])
+        #expect(again.text.contains("the branch's own files since"), "\(again.text)")
+        let prompt = try verifierPrompt(runtime)
+        #expect(prompt.contains("merged main in"), "\(prompt)")
+        #expect(prompt.contains("`git diff main...\(head) -- b.txt c.txt`"), "\(prompt)")
+        #expect(prompt.contains("+sea") && prompt.contains("+bee and main bee"))
+        #expect(!prompt.contains("+mmm") && !prompt.contains("m.txt"), "the base's own file isn't the branch's to review")
+        let verifier = try seat("verify-add-b", runtime)
+        let verdict: [String: Any] = ["completion": "complete", "integrity": "clean", "summary": "checked again"]
+        let base = call(verifier, "submit_audit", verdict.merging(["findings": [["severity": "Nit", "file": "m.txt", "line": 1, "evidence": "mmm"]]]) { $1 })
+        #expect(base.isError)
+        #expect(base.text.contains("new diff only (it covers b.txt, c.txt)"), "\(base.text)")
+        let own = call(verifier, "submit_audit", verdict.merging(["findings": [["severity": "Nit", "file": "b.txt", "line": 1, "evidence": "the merge kept both lines' words"]]]) { $1 })
+        #expect(!own.isError, "\(own.text)")
+    }
+
+    /// The last Important finding dismissed on a passing audit: the task is back in review, its setback gone, and
+    /// the lead is told merge can go ahead. Moved to a task of its own, the same.
+    @Test func dismissingTheLastImportantFindingOnAPassPutsTheTaskBackInReview() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        _ = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "checked", "findings": Self.threeKinds])
+        #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)
+        #expect(BoardStore(root: root).load().task("add-b")?.setback != nil)
+        let dismissed = call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "the contract only asks for the file"])
+        #expect(!dismissed.isError, "\(dismissed.text)")
+        #expect(dismissed.text.contains("add-b is back in review; merge(add-b) when you're ready"), "\(dismissed.text)")
+        let task = try #require(BoardStore(root: root).load().task("add-b"))
+        #expect(task.status == .review && task.setback == nil && task.evidence?.passes == true)
+        #expect(!call(lead, "merge", ["task": "add-b"]).isError)
+    }
+
+    @Test func movingTheLastImportantFindingToATaskPutsAPassBackInReview() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        _ = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "checked", "findings": [Self.threeKinds[0]]])
+        let moved = call(lead, "add_task", ["from_finding": "add-b:F1"])
+        #expect(moved.text.contains("it's back in review; merge(add-b) when you're ready"), "\(moved.text)")
+        #expect(BoardStore(root: root).load().task("add-b")?.status == .review)
+    }
+
+    /// On an audit that didn't pass, closing its Important findings leaves it failed: the verdict still fails.
+    @Test func dismissingOnAFailedAuditLeavesItFailed() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        _ = try audit(lead, runtime, ["completion": "incomplete", "integrity": "clean", "summary": "c.txt is missing", "findings": [Self.threeKinds[0]]])
+        let dismissed = call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "not a problem"])
+        #expect(!dismissed.isError, "\(dismissed.text)")
+        #expect(!dismissed.text.contains("merge("), "\(dismissed.text)")
+        let task = try #require(BoardStore(root: root).load().task("add-b"))
+        #expect(task.status == .failed && task.setback != nil)
     }
 }

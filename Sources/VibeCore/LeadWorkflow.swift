@@ -583,11 +583,25 @@ public enum LeadPrompts {
         """
     }
 
-    /// What a re-audit's verifier is handed: what the earlier rounds left open, what they closed, and the diff since
-    /// the commit the last one covered.
+    /// What a re-audit's verifier is handed: what the earlier rounds left open, what they closed, and the diff its
+    /// new findings come from (`scope`).
     public struct Reaudit: Equatable, Sendable {
         /// The diff is given whole up to this many characters; past it, its stat and the command.
         public static let diffLimit = 40_000
+
+        /// Where a re-audit's new findings come from.
+        public enum Scope: Equatable, Sendable {
+            /// The branch moved on from the audited commit with commits of its own only: the diff since it.
+            case since
+            /// The branch took in the base since the audited commit: the files its own commits touched since then
+            /// (a merge's only where it differs from both sides), against its merge-base with the base, so what
+            /// came from the base isn't reviewed again.
+            case ownFiles([String])
+            /// The audited commit again (after a blocked verdict, say), or a branch whose history no longer has it:
+            /// the whole branch since its merge-base with the base.
+            case wholeBranch(sameCommit: Bool)
+        }
+
         public var round: Int
         /// The commit the last audit covered, and the one this one checks.
         public var since: String
@@ -598,8 +612,12 @@ public enum LeadPrompts {
         public var known: [LeadFinding]
         public var stat: String
         public var diff: String?
+        /// The base branch, and what the diff covers.
+        public var base: String
+        public var scope: Scope
 
-        public init(round: Int, since: String, head: String, open: [LeadFinding], known: [LeadFinding], stat: String, diff: String?) {
+        public init(round: Int, since: String, head: String, open: [LeadFinding], known: [LeadFinding], stat: String, diff: String?,
+                    base: String = "main", scope: Scope = .since) {
             self.round = round
             self.since = since
             self.head = head
@@ -607,6 +625,21 @@ public enum LeadPrompts {
             self.known = known
             self.stat = stat
             self.diff = diff
+            self.base = base
+            self.scope = scope
+        }
+
+        /// The git command that gives the diff `scope` covers.
+        public var command: String {
+            switch scope {
+            case .since: return "git diff \(since) \(head)"
+            case .ownFiles(let files): return "git diff \(base)...\(head) -- " + files.map(Self.quoted).joined(separator: " ")
+            case .wholeBranch: return "git diff \(base)...\(head)"
+            }
+        }
+
+        static func quoted(_ path: String) -> String {
+            path.allSatisfy { $0.isLetter || $0.isNumber || "/._-+".contains($0) } ? path : "'" + path.replacingOccurrences(of: "'", with: #"'\''"#) + "'"
         }
     }
 
@@ -637,15 +670,45 @@ public enum LeadPrompts {
         """
     }
 
-    /// A re-audit's instructions: the open findings, the closed ones, and the diff since the last audited commit.
+    /// A re-audit's instructions: the open findings, the closed ones, and the diff its new findings come from.
     static func recheck(_ reaudit: Reaudit) -> String {
+        let since = reaudit.since.prefix(8), base = reaudit.base
+        let check: String, heading: String, empty: String, from: String
+        switch reaudit.scope {
+        case .since:
+            check = """
+            an earlier audit checked the branch at \(since), and the worker changed it since. Check the open findings \
+            below and the diff since then (`\(reaudit.command)`), and run every acceptance check again; don't re-review \
+            what the earlier audit covered.
+            """
+            heading = "The diff since \(since)"
+            empty = "(no file differs from \(since))"
+            from = "the new diff only, in files it changes"
+        case .ownFiles:
+            check = """
+            an earlier audit checked the branch at \(since); since then the worker made commits of its own and merged \
+            \(base) in. Check the open findings below and the branch's own changes since then: the files its own commits \
+            touched, against its merge-base with \(base) (`\(reaudit.command)`), and run every acceptance check again. \
+            What came from \(base) isn't the branch's to review, and don't re-review what the earlier audit covered.
+            """
+            heading = "The branch's own files since \(since), against its merge-base with \(base)"
+            empty = "(its own commits since \(since) change no file: only \(base)'s came in)"
+            from = "the branch's own files above only"
+        case .wholeBranch(let same):
+            check = (same
+                ? "an earlier audit checked the branch at this very commit, \(since), and it hasn't moved since."
+                : "an earlier audit checked the branch at \(since), which is no longer in its history.")
+                + " Check the open findings below and the whole change since the branch's merge-base with \(base) "
+                + "(`\(reaudit.command)`, `git log \(base)..\(reaudit.head)`), and run every acceptance check again."
+            heading = "The branch's whole change since its merge-base with \(base)"
+            empty = "(the branch changes no file against \(base))"
+            from = "the branch's whole change, in files it changes"
+        }
         var text = """
-        This is a re-audit (round \(reaudit.round)): an earlier audit checked the branch at \(reaudit.since.prefix(8)), and \
-        the worker changed it since. Check the open findings below and the diff since then (`git diff \(reaudit.since) \
-        \(reaudit.head)`), and run every acceptance check again; don't re-review what the earlier audit covered.
+        This is a re-audit (round \(reaudit.round)): \(check)
         In submit_audit's findings, give each open finding below by its id with status fixed (you checked it is), \
-        open (it still is: say what you saw) or dismissed (with a reason). New findings come from the new diff only, \
-        in files it changes. A closed finding below is never raised again, under its id or another.
+        open (it still is: say what you saw) or dismissed (with a reason). New findings come from \(from). A closed \
+        finding below is never raised again, under its id or another.
         """
         if !reaudit.open.isEmpty {
             text += "\n\nOpen findings:\n" + reaudit.open.map { "- \($0.id) [\($0.severity.rawValue)] \($0.place): \($0.evidence)" }.joined(separator: "\n")
@@ -654,7 +717,7 @@ public enum LeadPrompts {
             text += "\n\nClosed or pre-existing (not to raise again):\n"
                 + reaudit.known.map { "- \($0.id) [\($0.severity.rawValue), \($0.status.rawValue)] \($0.place): \($0.evidence)" }.joined(separator: "\n")
         }
-        text += "\n\nThe diff since \(reaudit.since.prefix(8)):\n" + (reaudit.stat.isEmpty ? "(nothing changed)" : reaudit.stat)
+        text += "\n\n\(heading):\n" + (reaudit.stat.isEmpty ? empty : reaudit.stat)
         if let diff = reaudit.diff, !diff.isEmpty { text += "\n\n```diff\n\(diff)\n```" }
         return text
     }

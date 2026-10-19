@@ -164,6 +164,8 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
     /// Audits in a row that left an Important finding open or didn't pass; a clean round, or the lead re-planning
     /// the task, starts it over.
     public var failedRounds = 0
+    /// Of those, the ones whose verdict didn't pass (optional: ledgers from before it was counted have none).
+    public var failedVerdicts: Int?
     /// The commit the last audit covered: a re-audit checks the diff since it.
     public var commit: String?
     /// The last audit's verdict passed.
@@ -184,6 +186,20 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
     /// `roundCap` audits in a row left Important findings open (or failed) and the last one still does.
     public var reconsider: Bool { failedRounds >= Self.roundCap && (!blocking.isEmpty || passed == false) }
 
+    /// What the failed rounds were: "2 Important findings left open across 3 rounds", "3 failed verdicts in a row",
+    /// or both kinds counted.
+    public var reconsiderCause: String {
+        let rounds = failedRounds, open = blocking.count
+        let findings = "\(open) Important finding\(open == 1 ? "" : "s") left open"
+        guard let counted = failedVerdicts else { return "\(rounds) audits in a row left Important findings open or failed" }
+        let failed = min(counted, rounds)
+        let verdicts = "\(failed) failed verdict\(failed == 1 ? "" : "s")"
+        if failed == 0 { return "\(findings) across \(rounds) rounds" }
+        if failed == rounds { return "\(verdicts) in a row" + (open == 0 ? "" : ", with \(findings)") }
+        let others = rounds - failed
+        return "\(rounds) audits in a row: \(verdicts), and \(others) that left Important findings open" + (open == 0 ? "" : " (\(open) open now)")
+    }
+
     public func finding(_ id: String) -> LeadFinding? { findings.first { $0.named(id) } }
 
     public struct Refusal: Error, CustomStringConvertible, Equatable {
@@ -192,8 +208,9 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
     }
 
     /// One audit's findings, on `commit`, with its verdict: each one an earlier round raised is marked as reported
-    /// (open, fixed or dismissed with a reason); each new one is added open. `changed`: the files changed since the
-    /// last audited commit, when known; a re-audit's new findings must be in them. Refused whole, leaving the ledger
+    /// (open, fixed or dismissed with a reason); each new one is added open. `changed`: the files the re-audit covers,
+    /// when known (the branch's own changes since the last audited commit, or its whole change when it's that commit
+    /// again); a re-audit's new findings must be in them. Refused whole, leaving the ledger
     /// as it was, when it raises again a finding already closed (by id, or at the same file:line), adds one at the
     /// place of one still open, skips an open one a re-audit must recheck, or brings a new one from outside the diff.
     public mutating func record(_ reports: [LeadFinding.Report], commit: String, passes: Bool, changed: Set<String>? = nil) throws {
@@ -227,7 +244,11 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
                         : Refusal("\(there.label) at \(there.place) was closed in round \(there.closed ?? 0) (\(there.status.rawValue)); a closed finding isn't raised again.")
                 }
                 if next.isReaudit, let changed, !changed.contains(report.file) {
-                    throw Refusal("\(report.file) isn't changed since the audited commit \(next.commit.map { String($0.prefix(8)) } ?? ""): a re-audit raises new findings from the new diff only (it changes \(changed.isEmpty ? "nothing" : changed.sorted().prefix(12).joined(separator: ", "))).")
+                    let audited = next.commit.map { String($0.prefix(8)) } ?? ""
+                    let covers = changed.isEmpty ? "no file" : changed.sorted().prefix(12).joined(separator: ", ") + (changed.count > 12 ? ", …" : "")
+                    throw Refusal(commit == next.commit
+                        ? "\(report.file) isn't changed by the branch: a re-audit of the audited commit \(audited) again raises new findings from the branch's whole change only (it covers \(covers))."
+                        : "\(report.file) isn't in what the branch changed since the audited commit \(audited): a re-audit raises new findings from the new diff only (it covers \(covers)).")
                 }
                 var id = report.id?.trimmingCharacters(in: .whitespaces) ?? ""
                 if id.isEmpty || next.finding(id) != nil {
@@ -249,7 +270,9 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
         next.rounds = round
         next.commit = commit
         next.passed = passes
-        next.failedRounds = passes && next.blocking.isEmpty ? 0 : failedRounds + 1
+        let clean = passes && next.blocking.isEmpty
+        next.failedRounds = clean ? 0 : failedRounds + 1
+        next.failedVerdicts = clean ? 0 : (failedVerdicts ?? 0) + (passes ? 0 : 1)
         self = next
     }
 
@@ -267,10 +290,15 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
         findings[index].closed = rounds
         findings[index].closedBy = "lead"
         findings[index].followUp = followUp
+        // The last Important one closed on a pass: that round is clean after all, and the rounds count from here.
+        if passed == true, blocking.isEmpty { replan() }
     }
 
     /// The lead re-planned the task: its rounds count from here.
-    public mutating func replan() { failedRounds = 0 }
+    public mutating func replan() {
+        failedRounds = 0
+        failedVerdicts = 0
+    }
 
     /// The findings by severity (Important, Nit, Pre-existing), each group's open ones first; empty groups left out.
     public var bySeverity: [(severity: LeadFinding.Severity, findings: [LeadFinding])] {

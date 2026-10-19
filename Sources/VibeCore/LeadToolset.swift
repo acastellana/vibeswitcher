@@ -471,6 +471,7 @@ public final class LeadToolset: MCPToolset {
                 let ledger = try vault.dismissFinding(root: root, task: origin.slug, id: origin.finding.id, reason: "moved to task \(task.slug)", followUp: task.slug)
                 mirror(ledger, on: origin.slug)
                 closed = " \(origin.slug):\(origin.finding.id) is closed on \(origin.slug) as moved to it."
+                if backToReview(origin.slug, ledger) { closed += " No Important finding is open on \(origin.slug) now and its audit passed: it's back in review; merge(\(origin.slug)) when you're ready." }
             } catch {
                 closed = " \(origin.slug):\(origin.finding.id) couldn't be closed on \(origin.slug) (\(error)): dismiss_finding it."
             }
@@ -516,7 +517,23 @@ public final class LeadToolset: MCPToolset {
         mirror(ledger, on: slug)
         try? store.appendProgress("Dismissed \(slug):\(id): \(reason)")
         let left = ledger?.blocking ?? []
-        return MCPToolResult(text: "Dismissed \(slug):\(id).\(left.isEmpty ? "" : " Still open and holding the merge back: \(left.map(\.label).joined(separator: ", ")).")")
+        let mergeable = backToReview(slug, ledger) ? " No Important finding is open now and its audit passed: \(slug) is back in review; merge(\(slug)) when you're ready." : ""
+        return MCPToolResult(text: "Dismissed \(slug):\(id).\(left.isEmpty ? "" : " Still open and holding the merge back: \(left.map(\.label).joined(separator: ", ")).")\(mergeable)")
+    }
+
+    /// A pass that only its open Important findings left failed goes back to review once the last one is closed,
+    /// its setback gone: the verdict stands on the branch's head, so merge can go ahead. Says whether it went back.
+    private func backToReview(_ slug: String, _ ledger: LeadAuditLedger?) -> Bool {
+        guard let ledger, ledger.blocking.isEmpty, ledger.passed == true, let verdict = vault.verdict(root: root, task: slug), verdict.passes,
+              verdict.commit == ledger.commit, verdict.commit == branchHead(Worktrees.branch(slug)) else { return false }
+        let moved = (try? store.update { board -> Bool in
+            guard let index = board.taskIndex(slug), board.tasks[index].status == .failed else { return false }
+            board.tasks[index].status = .review
+            board.tasks[index].setback = nil
+            return true
+        }) ?? false
+        if moved { try? store.appendProgress("\(slug) back in review: no Important finding open on its passing audit") }
+        return moved
     }
 
     /// Shows the vault's findings and rounds for `slug` on the board.
@@ -849,21 +866,89 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].evidence = nil
         }
         let flagged = config.isEmpty ? "" : " The branch changes Claude's settings or instructions (\(config.prefix(5).joined(separator: ", "))\(config.count > 5 ? ", …" : "")): the verifier runs with project settings off, and VibeSwitcher didn't answer its trust question; tell the user it waits for them to decide, and have the verifier look hard at those files."
-        let round = recheck.map { " It's a re-audit (round \($0.round)): the verifier checks the \($0.open.count) open finding\($0.open.count == 1 ? "" : "s") and the diff since \($0.since.prefix(8)) only." } ?? ""
+        let round = recheck.map { recheck in
+            let covers: String
+            switch recheck.scope {
+            case .since: covers = "the diff since \(recheck.since.prefix(8)) only"
+            case .ownFiles: covers = "the branch's own files since \(recheck.since.prefix(8)) only (it merged \(workflow.base) in since)"
+            case .wholeBranch(let same): covers = "the whole branch (\(same ? "the commit audited before, again" : "\(recheck.since.prefix(8)) is no longer in its history"))"
+            }
+            return " It's a re-audit (round \(recheck.round)): the verifier checks the \(recheck.open.count) open finding\(recheck.open.count == 1 ? "" : "s") and \(covers)."
+        } ?? ""
         let cap = ledger?.reconsider == true ? " " + Self.reconsiderText(ledger!, of: slug) : ""
         return MCPToolResult(text: putBack + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(round)\(flagged)\(cap)")
     }
 
-    /// What a re-audit's verifier is handed: the open findings, the closed ones (not to raise again) and the diff
-    /// since the commit the last audit covered (whole while it's short, else its stat and the command).
+    /// What a re-audit's verifier is handed: the open findings, the closed ones (not to raise again) and the diff its
+    /// new findings come from (whole while it's short, else its stat and the command; see `reauditScope`).
     private func reaudit(_ ledger: LeadAuditLedger, slug: String, head: String) -> LeadPrompts.Reaudit? {
         guard let since = ledger.commit else { return nil }
-        let stat = Git.run(["diff", "--stat", since, head], in: root)
-        let diff = Git.run(["diff", since, head], in: root)
+        let base = workflow.base
+        let scope = reauditScope(since: since, head: head, base: base)
+        let range = Self.diffArguments(scope, since: since, head: head, base: base)
+        // No file of its own to show: no diff to run (`git diff a...b --` alone would show everything).
+        let stat = range.map { Git.run(["diff", "--stat"] + $0, in: root) }
+        let diff = range.map { Git.run(["diff"] + $0, in: root) }
         return LeadPrompts.Reaudit(round: ledger.rounds + 1, since: since, head: head, open: ledger.toRecheck,
                                    known: ledger.findings.filter { !$0.isOpen || $0.severity == .preExisting },
-                                   stat: stat.ok ? stat.output : "(git diff --stat failed: \(stat.error))",
-                                   diff: diff.ok && diff.output.count <= LeadPrompts.Reaudit.diffLimit ? diff.output : nil)
+                                   stat: stat.map { $0.ok ? $0.output : "(git diff --stat failed: \($0.error))" } ?? "",
+                                   diff: diff.flatMap { $0.ok && $0.output.count <= LeadPrompts.Reaudit.diffLimit ? $0.output : nil },
+                                   base: base, scope: scope)
+    }
+
+    /// What a re-audit of `head` covers, the last audit having covered `since`: the same commit again (a 'blocked'
+    /// verdict, say) or a history without `since` is the whole branch since its merge-base with the base; a branch
+    /// that merged the base since is its own commits' files, against that merge-base (the base's commits aren't the
+    /// branch's to review); otherwise the diff since `since`.
+    private func reauditScope(since: String, head: String, base: String) -> LeadPrompts.Reaudit.Scope {
+        if since == head { return .wholeBranch(sameCommit: true) }
+        guard Git.run(["merge-base", "--is-ancestor", since, head], in: root).ok else { return .wholeBranch(sameCommit: false) }
+        let before = Git.run(["merge-base", base, since], in: root), now = Git.run(["merge-base", base, head], in: root)
+        guard before.ok, now.ok, before.output != now.output else { return .since }
+        return .ownFiles(ownFiles(since: since, head: head, base: base).sorted())
+    }
+
+    /// The files the branch's own commits since `since` touched, not the base's it took in: each commit's against
+    /// its parent, a merge's only where it differs from every parent (what resolving it changed).
+    private func ownFiles(since: String, head: String, base: String) -> Set<String> {
+        let commits = Git.run(["rev-list", "--parents", head, "^" + since, "^" + base], in: root)
+        guard commits.ok else { return [] }
+        var files: Set<String> = []
+        for line in commits.output.split(whereSeparator: \.isNewline) {
+            let ids = line.split(separator: " ").map(String.init)
+            guard let commit = ids.first else { continue }
+            let parents = ids.dropFirst()
+            guard let first = parents.first else {
+                files.formUnion(changedFiles(from: Self.emptyTree, to: commit) ?? [])
+                continue
+            }
+            var touched = changedFiles(from: first, to: commit) ?? []
+            for parent in parents.dropFirst() { touched.formIntersection(changedFiles(from: parent, to: commit) ?? []) }
+            files.formUnion(touched)
+        }
+        return files
+    }
+
+    /// git's empty tree, the parent of a root commit.
+    static let emptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+
+    /// `git diff`'s arguments for a re-audit's scope (nil: a branch's own files when there are none).
+    static func diffArguments(_ scope: LeadPrompts.Reaudit.Scope, since: String, head: String, base: String) -> [String]? {
+        switch scope {
+        case .since: return [since, head]
+        case .ownFiles(let files): return files.isEmpty ? nil : ["\(base)...\(head)", "--"] + files
+        case .wholeBranch: return ["\(base)...\(head)"]
+        }
+    }
+
+    /// The files a re-audit's new findings may be in (nil: git can't tell).
+    private func reauditFiles(since: String, head: String) -> Set<String>? {
+        let base = workflow.base
+        let scope = reauditScope(since: since, head: head, base: base)
+        if case .ownFiles(let files) = scope { return Set(files) }
+        guard let range = Self.diffArguments(scope, since: since, head: head, base: base) else { return [] }
+        let names = Git.run(["diff", "--name-only"] + range, in: root)
+        return names.ok ? Set(names.output.split(whereSeparator: \.isNewline).map(String.init)) : nil
     }
 
     /// A task's worktree on another branch (one its worker made for a review, a review flow's leftover) or a detached
@@ -1622,13 +1707,13 @@ public final class LeadToolset: MCPToolset {
         }
         let summary = arguments["summary"] as? String ?? ""
         let reports = try Self.findingReports(arguments["findings"])
-        // Checked here first against the diff since the last audited commit (the vault has no git), then by the vault.
+        // Checked here first against what a re-audit covers (the vault has no git; see reauditScope), then by the vault.
         let earlier = vault.audits(root: root, task: slug) ?? LeadAuditLedger()
         if let audited = member.auditing {
             var trial = earlier
             do {
                 try trial.record(reports, commit: audited, passes: completion == .complete && integrity == .clean,
-                                 changed: earlier.commit.flatMap { changedFiles(from: $0, to: audited) })
+                                 changed: earlier.commit.flatMap { reauditFiles(since: $0, head: audited) })
             } catch { throw Problem(text: "Not recorded: \(error) Nothing was recorded; call submit_audit again.") }
         }
         let verdict: LeadVault.Verdict
@@ -1733,7 +1818,7 @@ public final class LeadToolset: MCPToolset {
 
     /// What the lead is told once the rounds reached the cap.
     static func reconsiderText(_ ledger: LeadAuditLedger, of slug: String) -> String {
-        "Reconsider the approach: \(ledger.failedRounds) audits in a row left Important findings open (or failed), and a fourth round of the same rarely lands. "
+        "Reconsider the approach: \(ledger.reconsiderCause), and another round of the same rarely lands. "
             + "Don't send the worker back as it is: re-plan \(slug) (update_task with a sharper contract or a different approach, then status planned, which starts its rounds over) or ask the user (ask_user). "
             + "Dismiss a finding that isn't a real problem (dismiss_finding, with a reason), or make one a task of its own (add_task from_finding)."
     }
@@ -1852,7 +1937,7 @@ public final class LeadToolset: MCPToolset {
         var line = "- \(task.slug): \(Self.clip(task.title, 60))"
         if task.status == .kept { line += " — kept: \(Self.clip(task.keptBecause ?? "no reason recorded", 80))" }
         if let audits = task.audits, audits.reconsider, task.status != .done {
-            line += " — reconsider the approach (\(audits.failedRounds) audits left Important findings open)"
+            line += " — reconsider the approach (\(audits.reconsiderCause))"
         }
         if let audits = task.audits, !audits.open.isEmpty, task.status != .done {
             let blocking = audits.blocking
