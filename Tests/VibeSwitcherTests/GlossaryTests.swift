@@ -280,7 +280,8 @@ struct GlossarySnapshots {
         var sessions = [("Release notes", SessionStatus.needsInput), ("Menu shortcuts", .working), ("Nightly import", .background),
                         ("Docs pass", .done), ("Notes", .idle), ("Billing", .working), ("Scratch", .unknown)].map { name, status in
             var session = EndedFoldTests.agent(name, project: "acme", status: status)
-            session.statusSince = now - (status == .background ? 26 * 3_600 : status == .idle ? 3 * 3_600 + 300 : 420)
+            let ago: TimeInterval = status == .background ? 26 * 3_600 + 600 : status == .idle ? 3 * 3_600 + 300 : 420
+            session.statusSince = now - ago
             return session
         }
         sessions[5].pausedUntil = .distantFuture
@@ -301,11 +302,11 @@ struct GlossarySnapshots {
                                    inbox: scratch, home: scratch.path) { _ in "true" }
         let snapshots = EndedSnapshots()
         try snapshots.write(SessionListView(model: model, leads: leads, actions: EndedSnapshots.actions), name: "window-rows",
-                            folder: folder, size: NSSize(width: 300, height: 560))
+                            folder: folder, size: NSSize(width: 300, height: 650))
         let pills = VStack(alignment: .leading, spacing: 6) {
             ForEach(model.allRows, id: \.id) { row in StatusPill(row: row, now: now) }
         }
         .padding(12)
-        try snapshots.write(pills, name: "window-pills", folder: folder, size: NSSize(width: 200, height: 260))
+        try snapshots.write(pills, name: "window-pills", folder: folder, size: NSSize(width: 240, height: 260))
     }
 }
