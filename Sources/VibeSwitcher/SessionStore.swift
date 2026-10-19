@@ -24,7 +24,7 @@ final class SessionStore: ObservableObject {
     /// Called once per episode when a session has waited on you, or shown no progress, for too long.
     var onNudge: ((Session, Nudge) -> Void)?
     /// Where today's time went; republished at most every 15 s (the popover shows it).
-    @Published private(set) var today = ActivityLedger.load(day: ActivityLedger.dayKey(for: Date()))
+    @Published private(set) var today = ActivityLedger.load(day: ActivityLedger.dayKey(for: Date()), from: VibePaths.statsDir)
     /// Set from Preferences; changing it re-sorts on the next refresh.
     var order: SessionOrder = .screen { didSet { if order != oldValue { refresh() } } }
 
@@ -241,7 +241,7 @@ final class SessionStore: ObservableObject {
     private static func transcripts(for raw: [RawSession]) -> [String: String] {
         var paths: [String: String] = [:]
         for item in raw {
-            if let path = item.hook?.transcriptPath, let checked = TranscriptReader.checkedURL(path, home: NSHomeDirectory()) {
+            if let path = item.hook?.transcriptPath, let checked = TranscriptReader.checkedURL(path, home: VibePaths.home) {
                 paths[item.tty] = checked.0.path
             }
         }
@@ -401,8 +401,8 @@ final class SessionStore: ObservableObject {
     private func recordLedger(_ sessions: [Session], now: Date, userPresent: Bool) {
         let day = ActivityLedger.dayKey(for: now)
         if ledger.day != day {
-            ledger.save()
-            ledger = ActivityLedger.load(day: day)
+            ledger.save(in: VibePaths.statsDir)
+            ledger = ActivityLedger.load(day: day, from: VibePaths.statsDir)
         }
         // Longer gaps are sleep or a stuck scan: nobody was working or waiting in any meaningful sense.
         if let last = lastLedgerAt, now.timeIntervalSince(last) <= 30 {
@@ -415,7 +415,7 @@ final class SessionStore: ObservableObject {
         }
         lastLedgerAt = now
         if now.timeIntervalSince(lastLedgerSave) >= 60 {
-            ledger.save()
+            ledger.save(in: VibePaths.statsDir)
             lastLedgerSave = now
         }
         if now.timeIntervalSince(lastLedgerPublish) >= 15 || today.day != ledger.day {
@@ -424,7 +424,7 @@ final class SessionStore: ObservableObject {
         }
     }
 
-    func saveLedger() { ledger.save() }
+    func saveLedger() { ledger.save(in: VibePaths.statsDir) }
 
     private func detail(for status: SessionStatus, hook: HookState?, agent: Agent) -> String? {
         switch status {

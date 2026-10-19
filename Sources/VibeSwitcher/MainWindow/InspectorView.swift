@@ -159,7 +159,7 @@ struct ActivityView: View {
 
     /// Off the main actor (a View's statics are on it): seeking, reading and parsing the transcript's tail.
     nonisolated private static func read(_ path: String) -> [TranscriptEntry]? {
-        guard let (url, format) = TranscriptReader.checkedURL(path, home: NSHomeDirectory()),
+        guard let (url, format) = TranscriptReader.checkedURL(path, home: VibePaths.home),
               let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         guard let size = try? handle.seekToEnd() else { return nil }

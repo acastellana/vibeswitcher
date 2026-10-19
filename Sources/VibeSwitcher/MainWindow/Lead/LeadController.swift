@@ -225,7 +225,7 @@ final class LeadController: ObservableObject {
     var answersTrust = true
 
     init(host: HostClient, store: SessionStore, vault: LeadVault = .standard, inbox: URL = VibePaths.root,
-         home: String = NSHomeDirectory(), keepAwake: KeepAwake = KeepAwake(), claudeCommand: @escaping (String) -> String) {
+         home: String = VibePaths.home, keepAwake: KeepAwake = KeepAwake(), claudeCommand: @escaping (String) -> String) {
         self.host = host
         self.keepAwake = keepAwake
         self.store = store

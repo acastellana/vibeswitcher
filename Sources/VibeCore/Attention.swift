@@ -36,7 +36,7 @@ public enum Nudges {
 }
 
 /// Where the day went: per project, how long agents worked and how long they waited on you.
-/// Kept in `~/.vibeswitcher/stats/<yyyy-MM-dd>.json`.
+/// Kept in `<folder>/<yyyy-MM-dd>.json`; the app's folder is `~/.vibeswitcher/stats` (`VibePaths.statsDir`).
 public struct ActivityLedger: Codable, Equatable, Sendable {
     public enum Bucket: String, CaseIterable, Sendable {
         /// In a turn: thinking or running tools.
@@ -139,23 +139,24 @@ public struct ActivityLedger: Codable, Equatable, Sendable {
         return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
     }
 
-    public static func url(day: String) -> URL {
-        VibePaths.statsDir.appendingPathComponent("\(day).json")
+    /// `folder`: where the ledgers are kept (the app's is `VibePaths.statsDir`).
+    public static func url(day: String, in folder: URL) -> URL {
+        folder.appendingPathComponent("\(day).json")
     }
 
-    public static func load(day: String) -> ActivityLedger {
-        guard let data = try? Data(contentsOf: url(day: day)),
+    public static func load(day: String, from folder: URL) -> ActivityLedger {
+        guard let data = try? Data(contentsOf: url(day: day, in: folder)),
               let ledger = try? JSONDecoder().decode(ActivityLedger.self, from: data), ledger.day == day
         else { return ActivityLedger(day: day) }
         return ledger
     }
 
     /// Readable by you only: it names your projects.
-    public func save() {
+    public func save(in folder: URL) {
         let fm = FileManager.default
-        try? fm.createDirectory(at: VibePaths.statsDir, withIntermediateDirectories: true)
-        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: VibePaths.statsDir.path)
-        let url = Self.url(day: day)
+        try? fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        try? fm.setAttributes([.posixPermissions: 0o700], ofItemAtPath: folder.path)
+        let url = Self.url(day: day, in: folder)
         guard let data = try? JSONEncoder().encode(self), (try? data.write(to: url, options: .atomic)) != nil else { return }
         try? fm.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
     }

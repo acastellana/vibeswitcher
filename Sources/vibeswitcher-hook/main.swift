@@ -69,7 +69,7 @@ let lock = open(stateURL.path + ".lock", O_CREAT | O_RDWR, 0o600)
 if lock < 0 || HookLock.exclusive(lock, within: 1) {
     // Codex's async questions don't hold the turn: at its end, the rollout says whether one is still open.
     let rolloutQuestion = agent == .codex && payload["hook_event_name"] as? String == "Stop"
-        ? (payload["transcript_path"] as? String).flatMap { TranscriptReader.openAsyncQuestion(atPath: $0, home: NSHomeDirectory()) }
+        ? (payload["transcript_path"] as? String).flatMap { TranscriptReader.openAsyncQuestion(atPath: $0, home: VibePaths.home) }
         : nil
     let update = HookState.reduce(current: HookState.load(from: stateURL), payload: payload, agent: agent,
                                   tty: tty, agentPid: agentPid, now: Date().timeIntervalSince1970, rolloutQuestion: rolloutQuestion)

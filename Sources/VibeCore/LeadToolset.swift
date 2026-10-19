@@ -807,7 +807,7 @@ public final class LeadToolset: MCPToolset {
         do { found = try runtime.transcript(of: session) } catch {
             throw Problem(text: "The session host can't be read (\(error)), so \(slug)'s \(who) can't be found. Try again in a moment.")
         }
-        guard let path = found, let (url, format) = TranscriptReader.checkedURL(path, home: NSHomeDirectory()),
+        guard let path = found, let (url, format) = TranscriptReader.checkedURL(path, home: VibePaths.home),
               let data = try? Data(contentsOf: url) else {
             return MCPToolResult(text: "No conversation yet for \(slug)'s \(who).")
         }

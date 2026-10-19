@@ -78,7 +78,7 @@ public struct LeadObserver {
     public var home: String
     public var stateFile: (String) -> URL
 
-    public init(home: String = NSHomeDirectory(), stateFile: @escaping (String) -> URL = VibePaths.stateFile(tty:)) {
+    public init(home: String = VibePaths.home, stateFile: @escaping (String) -> URL = VibePaths.stateFile(tty:)) {
         self.home = home
         self.stateFile = stateFile
     }

@@ -20,7 +20,7 @@ public enum RecentProjects {
 
     /// Merges candidates from several sources: newest use wins per path, missing folders and
     /// bare home/root are dropped, most recent first.
-    public static func rank(_ candidates: [Candidate], home: String = NSHomeDirectory(), limit: Int = 12,
+    public static func rank(_ candidates: [Candidate], home: String = VibePaths.home, limit: Int = 12,
                             exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> [Candidate] {
         var newest: [String: Date] = [:]
         for candidate in candidates {

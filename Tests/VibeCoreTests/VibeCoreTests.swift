@@ -695,6 +695,23 @@ struct ActivityLedgerTests {
         #expect(ledger.waitingOnYou == 0)
     }
 
+    /// Saved in the folder it's given and read back from it, private to you.
+    @Test func savesAndLoadsInItsFolder() throws {
+        let temp = Scratch()
+        let folder = temp.url("stats")
+        var ledger = ActivityLedger(day: "2026-09-26")
+        ledger.record([entry("shop", .working)], seconds: 60, now: now)
+        ledger.save(in: folder)
+        let file = ActivityLedger.url(day: "2026-09-26", in: folder)
+        #expect(file.deletingLastPathComponent().path == folder.path)
+        #expect(ActivityLedger.load(day: "2026-09-26", from: folder) == ledger)
+        #expect(try FileManager.default.attributesOfItem(atPath: folder.path)[.posixPermissions] as? Int == 0o700)
+        #expect(try FileManager.default.attributesOfItem(atPath: file.path)[.posixPermissions] as? Int == 0o600)
+        // Another day, or another folder, starts empty.
+        #expect(ActivityLedger.load(day: "2026-09-27", from: folder) == ActivityLedger(day: "2026-09-27"))
+        #expect(ActivityLedger.load(day: "2026-09-26", from: temp.url("other")) == ActivityLedger(day: "2026-09-26"))
+    }
+
     @Test func dayKeyUsesTheLocalCalendar() {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = TimeZone(identifier: "Europe/Madrid")!

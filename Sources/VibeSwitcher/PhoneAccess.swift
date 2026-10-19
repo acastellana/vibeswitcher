@@ -671,7 +671,7 @@ final class PhoneAccess: ObservableObject {
         let phoneFile = request.query["file"]
         transcriptReads.async {
             // Checked again here (off the main thread): the file may have changed since the scan.
-            guard let (url, format) = TranscriptReader.checkedURL(path, home: NSHomeDirectory()) else {
+            guard let (url, format) = TranscriptReader.checkedURL(path, home: VibePaths.home) else {
                 return DispatchQueue.main.async { respond(.error(404, Self.noTranscript)) }
             }
             let file = Self.transcriptID(url)
@@ -704,7 +704,7 @@ final class PhoneAccess: ObservableObject {
         }
         if let mismatch = sessionMismatch(request, session) { return respond(mismatch) }
         transcriptReads.async {
-            guard let (url, format) = TranscriptReader.checkedURL(path, home: NSHomeDirectory()) else {
+            guard let (url, format) = TranscriptReader.checkedURL(path, home: VibePaths.home) else {
                 return DispatchQueue.main.async { respond(.error(404, "not found")) }
             }
             let data = (try? Data(contentsOf: url, options: .mappedIfSafe)) ?? Data()

@@ -643,7 +643,7 @@ public struct TranscriptTail: Equatable, Sendable {
 /// session's, so it's picked by the name the session was started with (`--name`, written into the transcript) and
 /// by time: written to since the session started.
 public enum TranscriptLocator {
-    public static func claude(cwd: String, name: String?, startedAt: Date, home: String = NSHomeDirectory()) -> String? {
+    public static func claude(cwd: String, name: String?, startedAt: Date, home: String = VibePaths.home) -> String? {
         let projects = URL(fileURLWithPath: home).appendingPathComponent(".claude/projects")
         // Claude names the folder after the path it was started in, as it resolves it.
         let paths = [cwd, (cwd as NSString).standardizingPath, URL(fileURLWithPath: cwd).resolvingSymlinksInPath().path]
@@ -755,7 +755,7 @@ public enum LastTurns {
 
     /// The last turns in a session's transcript (a Claude Code or Codex one, checked as `TranscriptReader.checkedURL`
     /// checks it), read from its end.
-    public static func read(transcript path: String, tty: String, home: String = NSHomeDirectory(), prompts: Int = prompts,
+    public static func read(transcript path: String, tty: String, home: String = VibePaths.home, prompts: Int = prompts,
                             limit: Int = limit) -> String? {
         guard let (url, format) = TranscriptReader.checkedURL(path, home: home),
               let handle = try? FileHandle(forReadingFrom: url) else { return nil }

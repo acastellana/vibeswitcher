@@ -4,20 +4,20 @@ import Foundation
 public enum SessionNaming {
     /// The project a session belongs to: the git repository containing the directory the agent was
     /// started in (so `cd`-ing into subfolders doesn't rename it), else that directory itself.
-    public static func project(forLaunchDirectory directory: String, home: String = NSHomeDirectory(),
+    public static func project(forLaunchDirectory directory: String, home: String = VibePaths.home,
                                fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> String {
         name(forProjectRoot: projectRoot(forLaunchDirectory: directory, home: home, fileExists: fileExists), home: home)
     }
 
     /// The git repository root containing `directory`, else `directory` itself.
-    public static func projectRoot(forLaunchDirectory directory: String, home: String = NSHomeDirectory(),
+    public static func projectRoot(forLaunchDirectory directory: String, home: String = VibePaths.home,
                                    fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> String {
         repositoryRoot(containing: directory, home: home, fileExists: fileExists) ?? (directory as NSString).standardizingPath
     }
 
     /// Like `projectRoot(forLaunchDirectory:)`, but a session started in a plain folder of repos
     /// (`~/dev`) and then working inside one of them (`~/dev/shop`) belongs to that repo.
-    public static func projectRoot(launchDirectory: String, workingDirectory: String?, home: String = NSHomeDirectory(),
+    public static func projectRoot(launchDirectory: String, workingDirectory: String?, home: String = VibePaths.home,
                                    fileExists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }) -> String {
         if let root = repositoryRoot(containing: launchDirectory, home: home, fileExists: fileExists) { return root }
         let launch = (launchDirectory as NSString).standardizingPath
@@ -37,7 +37,7 @@ public enum SessionNaming {
         return nil
     }
 
-    public static func name(forProjectRoot root: String, home: String = NSHomeDirectory()) -> String {
+    public static func name(forProjectRoot root: String, home: String = VibePaths.home) -> String {
         root == home ? "~ (home)" : (root as NSString).lastPathComponent
     }
 

@@ -82,7 +82,7 @@ final class ChatModel: ObservableObject {
     /// The clock a sent message is late by (moved on in tests).
     var now: () -> Date = Date.init
 
-    init(outbox: ComposerOutbox = ComposerOutbox(), home: String = NSHomeDirectory(), steerRoot: URL = VibePaths.root) {
+    init(outbox: ComposerOutbox = ComposerOutbox(), home: String = VibePaths.home, steerRoot: URL = VibePaths.root) {
         self.outbox = outbox
         self.home = home
         self.steerRoot = steerRoot
