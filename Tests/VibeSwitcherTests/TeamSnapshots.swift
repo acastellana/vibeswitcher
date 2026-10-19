@@ -101,12 +101,13 @@ struct TeamSnapshots {
         return team
     }
 
-    func view(_ team: Team, openRows: Set<String> = [], openDecisions: Set<String> = [], showEarlier: Bool = false, at: Date = now) -> some View {
+    func view(_ team: Team, openRows: Set<String> = [], openDecisions: Set<String> = [], showEarlier: Bool = false, keepingAwake: Bool = false,
+              at: Date = now) -> some View {
         LeadTeamView(root: "/Users/you/dev/vibeswitcher", board: team.board, seen: team.seen, open: { _ in }, openRows: openRows,
                      decisions: team.decisions, openDecisions: openDecisions, showEarlier: showEarlier,
                      summary: { team.summaries[$0.task.id] },
                      decisionSummary: { DecisionFeed.needsSummary($0) ? "Run overlapping tasks side by side; conflicts go back to their worker" : nil },
-                     clock: at)
+                     keepingAwake: keepingAwake, clock: at)
             .glance(now: at).padding(14)
     }
 
@@ -130,6 +131,7 @@ struct TeamSnapshots {
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         let busy = Self.busy()
         try write(view(busy), name: "busy-team", folder: folder)
+        try write(view(busy, keepingAwake: true), name: "busy-team-keeping-awake", folder: folder)
         try write(view(Self.quiet()), name: "quiet-team", folder: folder)
 
         // A decision just taken, alone with the tasks' top.

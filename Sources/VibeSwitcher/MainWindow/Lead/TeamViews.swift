@@ -289,6 +289,8 @@ struct LeadTeamPane: View {
     let answer: (LeadQuestion, String) -> Void
     let notices: [String: String]
     @ObservedObject var summaries: TeamSummaryModel
+    /// Whether the Mac is kept awake for this team (see `KeepAwake`).
+    @ObservedObject var keepAwake: KeepAwake
     /// Every session the host lists, of every project (the Mac-wide line counts their teams).
     var hosted: [HostSession] = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -300,7 +302,7 @@ struct LeadTeamPane: View {
 
     var body: some View {
         LeadTeamView(root: root, board: board, seen: seen, open: open, answer: answer, notices: notices, decisions: decisions,
-                     summary: { summaries.line($0) }, decisionSummary: { summaries.line($0) },
+                     summary: { summaries.line($0) }, decisionSummary: { summaries.line($0) }, keepingAwake: keepAwake.held.contains(root),
                      mac: MacLine.make(hosted, load: load, workflow: workflow))
             .onAppear(perform: request)
             .onChange(of: tick) { request() }

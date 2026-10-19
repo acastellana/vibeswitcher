@@ -444,6 +444,18 @@ private struct ClosedQuestionRow: View {
     }
 }
 
+/// The Team view's line while the Mac is kept awake for the team (see `KeepAwake`).
+struct KeepingAwakeLine: View {
+    static let text = "Keeping the Mac awake while the team works"
+
+    var body: some View {
+        Label(Self.text, systemImage: "cup.and.saucer.fill")
+            .font(.system(size: 11)).foregroundStyle(.secondary)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("VibeSwitcher is keeping the Mac awake while the team works. Settings, Project lead, says when.")
+    }
+}
+
 /// The inspector's Team tab for a lead, calm enough to glance at: the lead's questions, its recent decisions (fading
 /// out as they age), then each task in one line (see `TeamRows`) with what its agent is doing in plain words, the
 /// merged ones folded; below, your answers, the results, the files.
@@ -470,6 +482,8 @@ struct LeadTeamView: View {
     /// The plain-language lines written so far (see `TeamSummaryModel`).
     var summary: (TeamRow) -> String? = { _ in nil }
     var decisionSummary: (LeadDecision) -> String? = { _ in nil }
+    /// Whether the Mac is kept awake while this team works (see `KeepAwake`).
+    var keepingAwake = false
     /// Drawn as of this time instead of the clock's (pictures).
     var clock: Date?
     /// The Mac-wide line (every project's team and the load); nil: not shown.
@@ -500,6 +514,7 @@ struct LeadTeamView: View {
                 .padding(.horizontal, -8)
             section("Tasks") {
                 if let mac { MacLineView(line: mac) }
+                if keepingAwake { KeepingAwakeLine() }
                 if board.tasks.isEmpty {
                     Text("Nothing on the board yet. Tell the lead what to build.").font(.system(size: 12)).foregroundStyle(.secondary)
                 }

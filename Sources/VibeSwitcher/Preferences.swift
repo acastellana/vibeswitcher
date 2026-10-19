@@ -47,6 +47,8 @@ final class Preferences: ObservableObject {
     @Published var openWindowAtLaunch: Bool { didSet { defaults.set(openWindowAtLaunch, forKey: "openWindowAtLaunch") } }
     /// The Team view says what each agent is doing in plain words, written by a small model (headless `claude -p`).
     @Published var aiSummaries: Bool { didSet { defaults.set(aiSummaries, forKey: "aiSummaries") } }
+    /// Keep the Mac from idle sleep while a lead's team works (see `KeepAwake`).
+    @Published var keepAwake: KeepAwakeMode { didSet { defaults.set(keepAwake.rawValue, forKey: "keepAwake") } }
 
     /// `defaults` and `presetsFile` are for tests and offscreen renders; the app uses the standard ones.
     init(defaults: UserDefaults = .standard, presetsFile: URL = VibePaths.presetsFile) {
@@ -77,6 +79,7 @@ final class Preferences: ObservableObject {
             .flatMap { try? JSONDecoder().decode(TerminalAppearance.self, from: $0) } ?? TerminalAppearance()
         openWindowAtLaunch = defaults.bool(forKey: "openWindowAtLaunch")
         aiSummaries = defaults.bool(forKey: "aiSummaries")
+        keepAwake = KeepAwakeMode(rawValue: defaults.string(forKey: "keepAwake") ?? "") ?? .onPower
     }
 
     func command(for agent: Agent) -> String {

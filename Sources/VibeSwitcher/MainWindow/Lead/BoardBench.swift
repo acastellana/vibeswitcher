@@ -171,6 +171,7 @@ enum BoardBench {
     /// The lead's views as the window shows them: the team strip over its chat, and the Team tab.
     struct LeadPanes: View {
         @ObservedObject var leads: LeadController
+        @ObservedObject var host: HostClient
         let root: String
 
         var body: some View {
@@ -179,7 +180,7 @@ enum BoardBench {
                     TeamStrip(board: board) { _ in }
                     LeadTeamPane(root: root, board: board, decisions: leads.decisions[root] ?? [], seen: [:], open: { _ in },
                                  answer: { question, text in leads.answer(question, root: root, with: text) }, notices: leads.answerNotices,
-                                 summaries: leads.summaries)
+                                 summaries: leads.summaries, keepAwake: leads.keepAwake, hosted: host.sessions)
                 }
             } else {
                 Text("No lead")
@@ -362,7 +363,7 @@ enum BoardBench {
         /// Phase 2: the lead's views on screen, drawn whole once (switching to the lead isn't what's measured), then
         /// the same rounds; each must show its board.
         private func showLead() {
-            window?.contentView = NSHostingView(rootView: LeadPanes(leads: leads, root: root))
+            window?.contentView = NSHostingView(rootView: LeadPanes(leads: leads, host: host, root: root))
             window?.contentView?.layoutSubtreeIfNeeded()
             window?.contentView?.display()
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) {

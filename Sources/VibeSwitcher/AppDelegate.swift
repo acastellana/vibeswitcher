@@ -61,6 +61,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         }
         controller.notify = { [weak self] title, body in self?.notifier?.postInfo(title: title, body: body) }
         controller.select = { [weak self] id in self?.showMainWindow(select: id) }
+        controller.keepAwake.mode = { [weak self] in self?.preferences.keepAwake ?? .never }
         return controller
     }()
     private var statusItem: NSStatusItem!

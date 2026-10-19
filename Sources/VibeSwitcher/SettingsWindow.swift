@@ -108,10 +108,13 @@ struct GeneralSettings: View {
             }
             Section {
                 Toggle("Summarize what each agent is doing with AI", isOn: $preferences.aiSummaries)
+                Picker("Keep the Mac awake while the team works", selection: $preferences.keepAwake) {
+                    ForEach(KeepAwakeMode.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
             } header: {
                 Text("Project lead")
             } footer: {
-                SettingsFooter("The Team tab says in plain words what each task's agent is doing and what long decisions mean, written by a small Claude model (claude -p with haiku, no tools) from the task's title, checkpoints and last steps: at most every 3 minutes per task, while the tab is open. Off, it shows the latest checkpoint or activity.")
+                SettingsFooter("The Team tab says in plain words what each task's agent is doing and what long decisions mean, written by a small Claude model (claude -p with haiku, no tools) from the task's title, checkpoints and last steps: at most every 3 minutes per task, while the tab is open. Off, it shows the latest checkpoint or activity. While a worker, verifier or merge runs, the Mac doesn't go to sleep on its own (the display still does); on battery only if set to Always.")
             }
             Section("Notifications") {
                 LabeledContent("Permission") {

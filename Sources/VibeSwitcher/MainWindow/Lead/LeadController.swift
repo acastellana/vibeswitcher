@@ -157,6 +157,8 @@ final class LeadController: ObservableObject {
     let summaries = TeamSummaryModel()
     /// The leads' bases, when they moved other than through merges (see `BaseMoves`).
     let baseMoves: BaseMoves
+    /// The Mac kept awake while a team works.
+    let keepAwake: KeepAwake
 
     private let host: HostClient
     private let store: SessionStore
@@ -223,8 +225,9 @@ final class LeadController: ObservableObject {
     var answersTrust = true
 
     init(host: HostClient, store: SessionStore, vault: LeadVault = .standard, inbox: URL = VibePaths.root,
-         home: String = NSHomeDirectory(), claudeCommand: @escaping (String) -> String) {
+         home: String = NSHomeDirectory(), keepAwake: KeepAwake = KeepAwake(), claudeCommand: @escaping (String) -> String) {
         self.host = host
+        self.keepAwake = keepAwake
         self.store = store
         self.vault = vault
         self.inbox = inbox
@@ -820,6 +823,7 @@ final class LeadController: ObservableObject {
             witness(root: root, board: board, team: teams[root] ?? TeamReading())
         }
         forgetFinished(loaded)
+        keepAwake.update(working: KeepAwake.working(loaded, teams: teams))
         // A lead that ended, or another agent on its terminal now: its wake-ups and its waiting count go.
         let leads = Set(loaded.values.compactMap { board in board.leadTTY.flatMap { tty in board.leadPid.map { "\(tty)#\($0)" } } })
         wakes = wakes.filter { leads.contains($0.key) }
