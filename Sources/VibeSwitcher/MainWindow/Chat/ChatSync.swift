@@ -73,6 +73,8 @@ final class ChatSync {
     /// How often a Terminal tab is read while it needs you (each read is an AppleScript call to Terminal).
     static let terminalReadEvery: TimeInterval = 2
     private var terminalReading = false
+    /// An answer's keys are going into the Terminal tab: no reads (the cursor moves under them) and no other answer.
+    private var terminalTyping = false
     private var terminalReadAt: Date?
 
     init(chat: ChatModel, host: HostClient) {
@@ -145,7 +147,7 @@ final class ChatSync {
             setAnswering(nil)
             return
         }
-        guard !terminalReading, terminalReadAt.map({ now().timeIntervalSince($0) >= Self.terminalReadEvery }) ?? true else { return }
+        guard !terminalReading, !terminalTyping, terminalReadAt.map({ now().timeIntervalSince($0) >= Self.terminalReadEvery }) ?? true else { return }
         terminalReading = true
         terminalReadAt = now()
         let read = terminalScreen, main = onMain
@@ -208,8 +210,9 @@ final class ChatSync {
     /// question there isn't the one the card drew; every key through `RemoteInput.send`, each only while the tab
     /// still shows that question.
     private func chooseInTerminal(_ target: TerminalTarget, index: Int, typing: String?, drawn: ScreenMenu) {
-        guard answering == nil else { return }
+        guard answering == nil, !terminalTyping else { return }
         // The card waits while the keys go in.
+        terminalTyping = true
         setAnswering((drawn, .distantFuture))
         let read = terminalScreen, send = terminalSend, main = onMain
         background {
@@ -232,6 +235,7 @@ final class ChatSync {
             let refused = moved, stopped = failure
             main { [weak self] in
                 guard let self else { return }
+                self.terminalTyping = false
                 self.setAnswering(nil)
                 self.terminalReadAt = nil
                 if let refused {

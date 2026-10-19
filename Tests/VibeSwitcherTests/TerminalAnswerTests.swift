@@ -170,6 +170,27 @@ struct TerminalAnswerTests {
         #expect(typed.sent == [.init(key: .down), .init(key: .down), .init(text: "Teal"), .init(key: .enter)])
     }
 
+    @Test func noReadOrSecondAnswerWhileItsKeysGoIn() throws {
+        let fake = Fake()
+        fake.screen = Self.color
+        let sync = terminalSync(fake)
+        var later: [() -> Void] = []
+        // Typing runs off the main thread: held here until the test lets it finish.
+        sync.background = { later.append($0) }
+        sync.readScreen()
+        later.removeFirst()()
+        let drawn = try #require(sync.chat.menu)
+        sync.choose(0, drawn: drawn)
+        #expect(later.count == 1 && sync.chat.answering)
+        // The heartbeat reads meanwhile (the cursor moved under the keys), and a second click comes.
+        fake.clock += ChatSync.terminalReadEvery
+        sync.readScreen()
+        sync.choose(2, drawn: drawn)
+        #expect(later.count == 1 && sync.chat.answering)
+        later.removeFirst()()
+        #expect(fake.sent == [.init(key: .up), .init(key: .enter)])
+    }
+
     @Test func itsKeysAreTheWindowsKeys() throws {
         let menu = try #require(ChatSync.terminalMenu(Self.color))
         for index in 0..<menu.options.count {
