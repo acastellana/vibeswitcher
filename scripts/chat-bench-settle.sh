@@ -5,7 +5,7 @@
 # has it); each N times, with the window's chat timer and a busy model. Once settled, each run pages back: Show
 # earlier pressed PAGES times, each page left to settle (VIBESWITCHER_BENCH_EARLIER). A run fails when the content
 # height still changes 3 s before its end or a page's, when the main thread gets stuck, or when a tick stalls over
-# 0.25 s (over twice the first open's longest when the Mac's 1-minute load is over load_threshold: the bench prints the
+# 0.25 s (over 4 × the first open's longest when the Mac's 1-minute load is over load_threshold: the bench prints the
 # rule; see `ChatBench.StallRule`). Nothing touches the real ~/.vibeswitcher: the bench runs in a scratch home holding
 # copies of the transcripts.
 #

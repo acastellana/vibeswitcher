@@ -144,8 +144,9 @@ enum ChatBench {
             let justReady = reopenedAt != nil && readyAt == nil && chat.state == .ready && !chat.items.isEmpty
             if justReady { readyAt = second }
             // The first open is over once its conversation shows and has kept its height for a second, or when the run
-            // moves on from it (t=2: resized, switched or left).
-            if longest.firstOpen == nil,
+            // moves on from it (t=2: resized, switched or left). Paging back, it lasts until the first settle (the
+            // first page's press): that much longer a sample of how busy the Mac is.
+            if longest.firstOpen == nil, earlier == 0,
                (chat.state == .ready && !chat.items.isEmpty && !probe.changedRecently(seconds: 1)) || (reopenedAt != 0 && second >= 2) || second > seconds {
                 longest.endFirstOpen()
             }
@@ -227,6 +228,7 @@ enum ChatBench {
                 if paging.settles.count < earlier, shown.hidden > 0 || chat.hasEarlier {
                     // As you reach the button: at the top.
                     if let scroll = Self.scrollView(in: host) { Self.scroll(scroll, to: "top", host: host) }
+                    if longest.firstOpen == nil { longest.endFirstOpen() }
                     longest.startPage(paging.settles.count + 1)
                     paging.pressed(at: Date(), second: second)
                     if shown.hidden > 0 {
@@ -272,11 +274,14 @@ enum ChatBench {
     /// A tick is the main thread's longest gap between the bench's 20 ms beats. One over 0.25 s fails the bench. On a
     /// Mac whose 1-minute load is over load_threshold (VIBESWITCHER_BENCH_WORKFLOW's workflow.md, else twice the cores,
     /// as the lead's) stalls say how busy the Mac is rather than what the layout does: the first open's ticks are only
-    /// recorded, and later ones (paging back among them) fail over twice the first open's longest, never under 0.25 s.
-    /// So a loaded Mac gives no false failures and a quiet one is strict.
+    /// recorded (paging back: up to the first settle), and later ones fail over 4 × the first open's longest, never
+    /// under 0.25 s:
+    /// the second page lays out three times the rows the first open did, and at load 55-60 a page's longest tick was
+    /// up to 4.6 × the open's with nothing wrong. So a loaded Mac gives no false failures, a quiet one is strict, and a
+    /// layout that stalls for seconds still fails on both.
     struct StallRule {
         static let limit: TimeInterval = 0.25
-        static let loadedFactor = 2.0
+        static let loadedFactor = 4.0
         let threshold: Double
         /// Where the threshold comes from, for the output.
         let source: String

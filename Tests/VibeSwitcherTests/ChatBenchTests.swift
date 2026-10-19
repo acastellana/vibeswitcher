@@ -94,7 +94,7 @@ struct ChatBenchTests {
         let run = try bench(settings)
         print("chat bench at a made-up load of 100000: status \(run.status)\n\(run.output)")
         #expect(run.output.contains("stall rule: the Mac's 1-minute load 100000 is over load_threshold "), "\(run.output)")
-        #expect(run.output.contains("the first open's ticks are only recorded, later ones fail over 2 × its longest"), "\(run.output)")
+        #expect(run.output.contains("the first open's ticks are only recorded, later ones fail over 4 × its longest"), "\(run.output)")
         #expect(run.output.contains("never under 0.25s"), "\(run.output)")
     }
 
@@ -107,17 +107,17 @@ struct ChatBenchTests {
         ticks.endFirstOpen()
         ticks.second = 6
         ticks.startPage(1)
-        ticks.note(0.6)
-        #expect(ticks.overall == 0.6 && ticks.firstOpen == 0.4)
+        ticks.note(1.2)
+        #expect(ticks.overall == 1.2 && ticks.firstOpen == 0.4)
         let quiet = rule.verdict(ticks, load: 3)
         #expect(quiet.failed)
-        #expect(quiet.text == "FAIL: a tick stalled 0.60s (t=7s, page 1), over 0.25s; rule: the Mac's 1-minute load 3 is not over "
+        #expect(quiet.text == "FAIL: a tick stalled 1.20s (t=7s, page 1), over 0.25s; rule: the Mac's 1-minute load 3 is not over "
             + "load_threshold 24 (twice the 12 cores): any tick over 0.25s fails")
         let loaded = rule.verdict(ticks, load: 30.25)
         #expect(!loaded.failed, "\(loaded.text)")
         #expect(loaded.text.hasSuffix("rule: the Mac's 1-minute load 30.3 is over load_threshold 24 (twice the 12 cores): the first "
-            + "open's ticks are only recorded, later ones fail over 2 × its longest (0.40s), never under 0.25s = 0.80s"), "\(loaded.text)")
-        ticks.note(0.9)
+            + "open's ticks are only recorded, later ones fail over 4 × its longest (0.40s), never under 0.25s = 1.60s"), "\(loaded.text)")
+        ticks.note(1.7)
         #expect(rule.verdict(ticks, load: 30).failed)
         // A first open quicker than 0.25 s doesn't make a loaded Mac stricter than a quiet one.
         #expect(ChatBench.StallRule.limit(loaded: true, firstOpen: 0.05) == 0.25)

@@ -31,8 +31,9 @@ let package = Package(
         .testTarget(name: "VibeHostTests", dependencies: ["VibeHost", "VibeCore", "vibeswitcher-host"],
                     resources: [.copy("Fixtures")], swiftSettings: testSettings),
         // The app's menus and window commands. The host too: a scratch one runs the sessions of a test of the app's client.
+        // Fixtures: the chat bench's made-up transcript, read from the source tree (`ChatBenchTests`).
         .testTarget(name: "VibeSwitcherTests", dependencies: ["VibeSwitcher", "VibeCore", "VibeHost", "vibeswitcher-host"],
-                    swiftSettings: testSettings),
+                    exclude: ["Fixtures"], swiftSettings: testSettings),
     ],
     swiftLanguageModes: [.v5]
 )
