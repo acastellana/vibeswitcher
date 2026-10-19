@@ -71,6 +71,12 @@ if let build = environment["VIBESWITCHER_MCP_TEST_BUILD"], let installed = envir
 
 /// The real world behind the lead's tools.
 final class HostRuntime: LeadRuntime {
+    /// The session host its calls go to: the host's own socket unless `socketOverride` says another. The vault's
+    /// calls stay on the host's own (`LeadVault.standard`).
+    let socketOverride: String?
+    var socket: String { socketOverride ?? VibePaths.hostSocket.path }
+    init(socketOverride: String? = nil) { self.socketOverride = socketOverride }
+
     var server: String {
         Bundle.main.executablePath ?? URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.path
     }
@@ -88,18 +94,18 @@ final class HostRuntime: LeadRuntime {
 
     func spawn(cwd: String, command: String, label: String, agent: String, trust: Bool) throws -> String {
         let request = SpawnRequest(cwd: cwd, command: command, env: [:], cols: 120, rows: 40, keepShell: false, label: label, agent: agent)
-        switch try HostCall.request(.spawn(request)) {
+        switch try HostCall.request(.spawn(request), socket: socket) {
         case .spawned(let session):
             // A worktree is a new folder to Claude: answer its trust question for that folder (the user started
             // the lead in this repository), unless the lead says not to (a branch that brings its own settings).
             guard trust else { return session.id.uuidString }
             TrustPrompt.answer(folder: cwd, readScreen: {
-                if case .screenText(_, let text)? = try? HostCall.request(.screen(id: session.id)) { return text }
+                if case .screenText(_, let text)? = try? HostCall.request(.screen(id: session.id), socket: self.socket) { return text }
                 return nil
             }, send: { writes in
                 for write in writes {
                     if write.delay > 0 { usleep(useconds_t(write.delay * 1_000_000)) }
-                    try? HostCall.send(.input(id: session.id, bytes: Data(write.bytes), reply: false))
+                    try? HostCall.send(.input(id: session.id, bytes: Data(write.bytes), reply: false), socket: self.socket)
                 }
             })
             return session.id.uuidString
@@ -110,7 +116,7 @@ final class HostRuntime: LeadRuntime {
 
     func kill(_ session: String) throws {
         guard let id = UUID(uuidString: session) else { throw HostCall.Failure(description: "\(session) isn't a session of the host's.") }
-        switch try HostCall.request(.kill(id: id), timeout: 3) {
+        switch try HostCall.request(.kill(id: id), socket: socket, timeout: 3) {
         case .ok: return
         case .error(let message): throw HostCall.Failure(description: message)
         default: throw HostCall.Failure(description: "The session host answered something else; it may be older than the tool server.")
@@ -121,7 +127,7 @@ final class HostRuntime: LeadRuntime {
 
     func forget(_ session: String) {
         guard let id = UUID(uuidString: session) else { return }
-        _ = try? HostCall.request(.remove(id: id), timeout: 3)
+        _ = try? HostCall.request(.remove(id: id), socket: socket, timeout: 3)
     }
 
     /// Types `text` as the session's prompt; false when the keys didn't all go out.
@@ -130,7 +136,7 @@ final class HostRuntime: LeadRuntime {
         // Claude Code takes bracketed paste; Enter follows as its own write.
         for write in ComposerText.writes(text, bracketed: true) {
             if write.delay > 0 { usleep(useconds_t(write.delay * 1_000_000)) }
-            guard (try? HostCall.send(.input(id: id, bytes: Data(write.bytes), reply: false))) != nil else { return false }
+            guard (try? HostCall.send(.input(id: id, bytes: Data(write.bytes), reply: false), socket: socket)) != nil else { return false }
         }
         return true
     }
@@ -143,10 +149,10 @@ final class HostRuntime: LeadRuntime {
         switch target {
         case .agent(let known):
             // The lead, told of a report: its inbox takes the message even when the host doesn't answer.
-            hosted = (try? HostCall.sessions()) ?? []
+            hosted = (try? HostCall.sessions(socket: socket)) ?? []
             agent = known
         case .session(let id):
-            hosted = try HostCall.sessions()
+            hosted = try HostCall.sessions(socket: socket)
             guard let tty = hosted.first(where: { $0.id.uuidString == id && $0.isLive })?.tty, let pid = Self.agentPid(on: tty) else {
                 throw HostCall.Failure(description: "That session isn't running an agent.")
             }
@@ -159,12 +165,12 @@ final class HostRuntime: LeadRuntime {
         }
         let id = session.id
         return try LeadDelivery.deliver(text, from: sender, to: agent, activity: activity(of: session, agent: agent.pid),
-                                        styledScreen: { HostCall.styledScreen(id) },
+                                        styledScreen: { [socket] in HostCall.styledScreen(id, socket: socket) },
                                         typeInto: { [weak self] text in self?.type(id.uuidString, text: text) ?? false },
                                         clearDraft: clearDraft,
                                         clear: {
                                             // One ^C empties Claude's box (two in a row would quit it); then a moment to redraw.
-                                            let sent = (try? HostCall.send(.input(id: id, bytes: Data(HostInput.bytes(forKey: "interrupt") ?? []), reply: false))) != nil
+                                            let sent = (try? HostCall.send(.input(id: id, bytes: Data(HostInput.bytes(forKey: "interrupt") ?? []), reply: false), socket: self.socket)) != nil
                                             usleep(300_000)
                                             return sent
                                         })
@@ -173,7 +179,7 @@ final class HostRuntime: LeadRuntime {
     /// A host that can't be read is an error, never "no sessions": the tools that act on that answer (start a second
     /// worker in a live worktree, remove one) refuse with it.
     func sessions() throws -> [LeadSessionInfo] {
-        try HostCall.sessions().map { session in
+        try HostCall.sessions(socket: socket).map { session in
             LeadSessionInfo(id: session.id.uuidString, cwd: session.cwd, label: session.label, live: session.isLive,
                             status: session.isLive ? activity(of: session, agent: Self.agentPid(on: session.tty)).text : nil, tty: session.tty,
                             pid: session.childPID)
@@ -181,7 +187,7 @@ final class HostRuntime: LeadRuntime {
     }
 
     func transcript(of session: String) throws -> String? {
-        guard let hosted = try HostCall.sessions().first(where: { $0.id.uuidString == session }) else { return nil }
+        guard let hosted = try HostCall.sessions(socket: socket).first(where: { $0.id.uuidString == session }) else { return nil }
         // An ended session's terminal may hold another agent now: only its own hooks' record counts.
         let pid = hosted.isLive ? Self.agentPid(on: hosted.tty) : nil
         return observer.transcript(hosted, hook: hosted.isLive ? observer.hook(hosted, agentPid: pid) : nil)
@@ -203,7 +209,7 @@ final class HostRuntime: LeadRuntime {
 
     func currentAgent() -> LeadAgent? {
         guard let agent = ProcessTable.ancestors(of: getpid()).first(where: { $0.agent != nil }), let tty = agent.tty else { return nil }
-        let session = ((try? HostCall.sessions()) ?? []).first { $0.tty == tty && $0.isLive }?.id.uuidString
+        let session = ((try? HostCall.sessions(socket: socket)) ?? []).first { $0.tty == tty && $0.isLive }?.id.uuidString
         return LeadAgent(pid: agent.pid, tty: tty, session: session)
     }
 
@@ -218,7 +224,9 @@ final class HostRuntime: LeadRuntime {
     }
 }
 
-let runtime = HostRuntime()
+// For DroppedHostTests: VIBESWITCHER_MCP_TEST_RUNTIME_SOCKET is the host the runtime's calls go to (sessions, spawn,
+// kill, input), the vault's staying on the host's own socket.
+let runtime = HostRuntime(socketOverride: environment["VIBESWITCHER_MCP_TEST_RUNTIME_SOCKET"])
 let arguments = Array(CommandLine.arguments.dropFirst())
 // The repository, as `LeadToolset` reads it from the arguments.
 var root = FileManager.default.currentDirectoryPath
