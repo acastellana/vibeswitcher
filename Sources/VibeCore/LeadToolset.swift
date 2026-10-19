@@ -834,7 +834,8 @@ public final class LeadToolset: MCPToolset {
         // Exactly the audited commit, rebased and tested where no agent works.
         let tested: String
         switch Worktrees.rebaseAndTest(root: root, commit: verdict.commit, onto: current, setup: workflow.initCommand, test: workflow.testCommand,
-                                       scratch: vault.scratch(root: root, "merge-\(slug)"), timeout: workflow.testTimeout) {
+                                       scratch: vault.scratch(root: root, "merge-\(slug)"), home: vault.scratch(root: root, "merge-\(slug)-home"),
+                                       timeout: workflow.testTimeout) {
         case .passed(let commit): tested = commit
         case .cancelled:
             // Stopped by the caller: nothing is known about the work, and the task stays as it was.

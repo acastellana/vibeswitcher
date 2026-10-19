@@ -471,9 +471,13 @@ public enum Worktrees {
     /// a worker commits or edits meanwhile. The worktree is removed afterwards, also when the run is cancelled.
     /// A command that runs past `timeout` is stopped with everything it started (`hung`); a cancel stops it the same
     /// way (`cancelled`); a rebase that fails on something else than a conflict says what failed (`error`).
+    /// The commands run with HOME, CFFIXED_USER_HOME and TMPDIR in `home` (by default next to `scratch`), made empty
+    /// before and removed after, as workers and verifiers run the tests: never the user's own ~/.vibeswitcher,
+    /// Keychain or app.log. A failed or hung run's output starts by naming it.
     public static func rebaseAndTest(root: String, commit: String, onto base: String, setup: String? = nil, test: String?,
-                                     scratch: URL, timeout: TimeInterval = testTimeout) -> Check {
+                                     scratch: URL, home: URL? = nil, timeout: TimeInterval = testTimeout) -> Check {
         let path = scratch.path
+        let home = (home ?? scratch.deletingLastPathComponent().appendingPathComponent(scratch.lastPathComponent + "-home")).path
         let cancel = ShellCancel.current
         // Not stopped by the cancel: a worktree left half removed stays in git's list.
         let remove = {
@@ -481,9 +485,10 @@ public enum Worktrees {
                 Git.run(["worktree", "remove", "--force", path], in: root)
                 try? FileManager.default.removeItem(atPath: path)
                 Git.run(["worktree", "prune"], in: root)
+                try? FileManager.default.removeItem(atPath: home)
             }
         }
-        if FileManager.default.fileExists(atPath: path) { remove() }
+        if FileManager.default.fileExists(atPath: path) || FileManager.default.fileExists(atPath: home) { remove() }
         guard cancel?.isCancelled != true else { return .cancelled }
         try? FileManager.default.createDirectory(at: scratch.deletingLastPathComponent(), withIntermediateDirectories: true,
                                                  attributes: [.posixPermissions: 0o700])
@@ -509,14 +514,25 @@ public enum Worktrees {
         }
         guard cancel?.isCancelled != true else { return .cancelled }
         let tested = Git.run(["rev-parse", "HEAD"], in: path).output
+        let tmp = home + "/tmp"
+        do {
+            try FileManager.default.createDirectory(atPath: tmp, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        } catch {
+            return .error("Couldn't make the scratch home \(home) to run the tests in: \(error.localizedDescription)")
+        }
+        let header = "HOME, CFFIXED_USER_HOME and TMPDIR: \(home) (a scratch folder, removed afterwards)\n"
         for (name, command) in [("init_command", setup), ("test command", test)] {
             guard let command, !command.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
+            // HOME only once the login shell has read the user's own startup files (their PATH, from their home); the
+            // command and all it starts have the scratch one.
+            let script = "export HOME=\(RecentProjects.shellQuote(home))\n" + command
             // All of it, in order: what failed may be anywhere in it, and its tail is often a build's warnings.
-            let run = Shell.run(executable: "/bin/zsh", args: ["-lc", command], in: path, timeout: timeout, interleaved: true)
+            let run = Shell.run(executable: "/bin/zsh", args: ["-lc", script], in: path,
+                                env: ["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"], timeout: timeout, interleaved: true)
             if run.cancelled || cancel?.isCancelled == true { return .cancelled }
-            if run.timedOut { return .hung(command: name, after: timeout, output: run.output) }
+            if run.timedOut { return .hung(command: name, after: timeout, output: header + run.output) }
             guard run.ok else {
-                return .failed((name == "init_command" ? "init_command failed:\n" : "") + run.output)
+                return .failed((name == "init_command" ? "init_command failed:\n" : "") + header + run.output)
             }
         }
         return .passed(tested)

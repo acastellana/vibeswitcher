@@ -65,6 +65,55 @@ struct WorktreesTests {
         #expect(Git.run(["branch", "--list", "agent/add-b"], in: root).output.isEmpty)
     }
 
+    /// The merge's commands run with HOME, CFFIXED_USER_HOME and TMPDIR in a scratch folder of their own, made before
+    /// and removed after: never the user's own home (~/.vibeswitcher, the Keychain, app.log). A failure's output
+    /// starts by naming it.
+    @Test func theCommandsRunWithAScratchHomeRemovedAfterwards() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "h")
+        try commit("h.txt", "h\n", in: worktree)
+        let (main, tip) = heads(root, "h")
+        let home = temp.url("merge-home")
+        let marks = temp.url("home-marks").path
+        try FileManager.default.createDirectory(atPath: marks, withIntermediateDirectories: true)
+        // What each command sees, and what it leaves there (a log and a temporary file).
+        func seen(_ name: String) -> String {
+            "printf '%s\\n' \"$HOME\" \"$CFFIXED_USER_HOME\" \"$TMPDIR\" > \(marks)/\(name)"
+                + " && mkdir -p \"$HOME/.vibeswitcher\" && echo host >> \"$HOME/.vibeswitcher/app.log\" && touch \"$TMPDIR/left\""
+        }
+        let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, setup: seen("init"), test: seen("test"),
+                                              scratch: scratch(), home: home)
+        guard case .passed = checked else { Issue.record("\(checked)"); return }
+        let expected = [home.path, home.path, home.path + "/tmp/"]
+        for name in ["init", "test"] {
+            let lines = try String(contentsOfFile: "\(marks)/\(name)", encoding: .utf8).split(separator: "\n").map(String.init)
+            #expect(lines == expected, "\(name): \(lines)")
+        }
+        #expect(!FileManager.default.fileExists(atPath: home.path))
+        // A failed run: its output names the folder, and that goes too.
+        guard case .failed(let output) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: seen("failed") + " && false",
+                                                                 scratch: scratch(), home: home)
+        else { Issue.record("it passed"); return }
+        #expect(output.hasPrefix("HOME, CFFIXED_USER_HOME and TMPDIR: \(home.path) (a scratch folder, removed afterwards)\n"), "\(output)")
+        #expect(!FileManager.default.fileExists(atPath: home.path))
+        // A failed init_command says so first, as before.
+        guard case .failed(let setup) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, setup: "false", test: "true",
+                                                                scratch: scratch(), home: home)
+        else { Issue.record("it passed"); return }
+        #expect(setup.hasPrefix("init_command failed:\nHOME, CFFIXED_USER_HOME and TMPDIR: \(home.path)"), "\(setup)")
+        // One left by a run that died with its process: emptied before the next.
+        try FileManager.default.createDirectory(atPath: home.path + "/stale", withIntermediateDirectories: true)
+        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test ! -e \"$HOME/stale\"", scratch: scratch(), home: home)
+            == .passed(tip))
+        #expect(!FileManager.default.fileExists(atPath: home.path))
+        // Without one given, it's next to the scratch worktree.
+        let place = scratch()
+        let beside = place.deletingLastPathComponent().appendingPathComponent("merge-home").path
+        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test \"$HOME\" = \(beside)", scratch: place) == .passed(tip))
+        #expect(!FileManager.default.fileExists(atPath: beside))
+        #expect(listed(root).count == 2)
+    }
+
     @Test func failingTestsAndConflictsAreReported() throws {
         let root = try repo()
         let worktree = try Worktrees.create(root: root, slug: "x")
@@ -472,6 +521,8 @@ struct WorktreesTests {
         let left = try #require(child)
         #expect(eventually { kill(left, 0) != 0 })
         #expect(!FileManager.default.fileExists(atPath: scratch.path))
+        #expect(!FileManager.default.fileExists(atPath: scratch.path + "-home"))
+        #expect(output.hasPrefix("HOME, CFFIXED_USER_HOME and TMPDIR: \(scratch.path)-home "), "\(output)")
         #expect(listed(root).count == 2)
     }
 
@@ -501,6 +552,7 @@ struct WorktreesTests {
         let child = try #require(Int32(try String(contentsOfFile: marks + "/child", encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
         #expect(eventually { kill(child, 0) != 0 })
         #expect(!FileManager.default.fileExists(atPath: scratch.path))
+        #expect(!FileManager.default.fileExists(atPath: scratch.path + "-home"))
         #expect(listed(root).count == 2)
         // Cancelled before it began, nothing is set up.
         let early = ShellCancel()

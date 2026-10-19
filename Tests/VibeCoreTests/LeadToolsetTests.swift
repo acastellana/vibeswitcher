@@ -819,6 +819,10 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(lines.last == "Full output: \(log.path)")
         let saved = try String(contentsOf: log, encoding: .utf8)
         #expect(saved.contains("Test run with 5 tests failed") && saved.contains("captured var 'resumed'"))
+        // The log's first line names the scratch home the tests ran with, gone by now.
+        let home = vault.scratch(root: root, "merge-add-b-home").path
+        #expect(saved.hasPrefix("HOME, CFFIXED_USER_HOME and TMPDIR: \(home) (a scratch folder, removed afterwards)\n"), "\(saved.prefix(300))")
+        #expect(!FileManager.default.fileExists(atPath: home))
         #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)
     }
 }
