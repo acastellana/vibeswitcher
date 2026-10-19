@@ -46,17 +46,23 @@ struct ProcessTableTests {
         #expect(ProcessTable.trySnapshot().map { $0[pid] == nil } == true)
     }
 
-    /// Every core busy twice over (unless the Mac already is), a snapshot stays about as quick as on this Mac without
-    /// them: the median of five within 20 times the fastest of three taken before, and none near a hang (the whole-table
-    /// sysctl it replaced stalled 10 to 80 s). Relative, not a bare bound: a loaded Mac stalls any one read now and then
-    /// (0.741 s once at load 49), while a regression makes every one slow.
+    /// Every core busy twice over, a snapshot stays about as quick as on this Mac without them: each one whole, the
+    /// median of five within 20 times the fastest of three taken before, and none near a hang (the whole-table sysctl it
+    /// replaced stalled 10 to 80 s). Relative, not a bare bound: a loaded Mac stalls any one read now and then (0.741 s
+    /// once at load 49), while a regression makes every one slow.
+    ///
+    /// On a Mac already over scripts/test-under-load.sh's threshold (2 × ncpu: a merge's run beside other leads' teams,
+    /// 1.2 to 2.1 s a read at load 81.6) its speed is the other sessions', not this code's: no burners, and only what
+    /// holds at any load is checked, that a read that came back is whole. The numbers are printed with the load.
     @Test func aSnapshotIsQuickOnABusyMac() throws {
         let cores = ProcessInfo.processInfo.activeProcessorCount
+        let ambient = AmbientLoad()
+        var unread = 0
         let timed = { () -> TimeInterval in
             let started = Date()
             let table = ProcessTable.trySnapshot()
             let took = Date().timeIntervalSince(started)
-            #expect(table.map { $0.count > 2 * cores } == true)
+            if let table { expectWhole(table) } else { unread += 1 }
             return took
         }
         let quiet = (0..<3).map { _ in timed() }
@@ -65,10 +71,8 @@ struct ProcessTableTests {
             for burner in burners where burner.isRunning { kill(burner.processIdentifier, SIGKILL) }
             for burner in burners { burner.waitUntilExit() }
         }
-        var load = [Double](repeating: 0, count: 3)
-        getloadavg(&load, 3)
         // As scripts/test-under-load.sh would: 2 × ncpu at most, only on a Mac not already that loaded, killed by pid.
-        if load[0] < Double(2 * cores) {
+        if ambient.allows {
             for _ in 0..<(2 * cores) {
                 let burner = Process()
                 burner.executableURL = URL(fileURLWithPath: "/usr/bin/yes")
@@ -81,9 +85,72 @@ struct ProcessTableTests {
         let fastest = try #require(quiet.min())
         let median = times.sorted()[times.count / 2]
         let shown = { (times: [TimeInterval]) in times.map { String(format: "%.3f s", $0) } }
-        print("ProcessTableTests: load \(load[0]) on \(cores) cores, \(burners.count) burners added; snapshots took \(shown(quiet)) before, \(shown(times)) with them")
-        #expect(times.allSatisfy { $0 < 5 }, "snapshots took \(shown(times))")
+        print("ProcessTableTests: \(ambient) on \(cores) cores, \(burners.count) burners added; snapshots took \(shown(quiet)) before, \(shown(times)) with them; \(unread) of 8 not read within \(ProcessTable.snapshotLimit) s")
+        // No read waits past its limit, whatever the load (a caller is told nil then).
+        #expect(times.allSatisfy { $0 < ProcessTable.snapshotLimit + 1 }, "snapshots took \(shown(times))")
+        guard ambient.allows else { return }
+        #expect(unread == 0, "\(unread) of 8 snapshots not read at \(ambient)")
         #expect(median <= 20 * fastest, "median \(shown([median])[0]), fastest before the burners \(shown([fastest])[0])")
+    }
+
+    /// The 1-minute load when a test started and whether it's under scripts/test-under-load.sh's threshold (2 × ncpu),
+    /// so that a test's own load can be judged: over it, the Mac's speed is other sessions' (a merge's run beside other
+    /// leads' teams), and a test checks only what holds at any load.
+    private struct AmbientLoad: CustomStringConvertible {
+        let load: Double
+        let threshold = Double(2 * ProcessInfo.processInfo.processorCount)
+        init() {
+            var load = [Double](repeating: 0, count: 3)
+            getloadavg(&load, 3)
+            self.load = load[0]
+        }
+        var allows: Bool { load < threshold }
+        var description: String {
+            String(format: "load %.1f (%@ the threshold %.0f)", load, allows ? "under" : "over", threshold)
+        }
+    }
+
+    /// A table read is whole: this process, its parent and launchd in it, and more processes than cores twice over.
+    private func expectWhole(_ table: [Int32: ProcInfo]) {
+        let cores = ProcessInfo.processInfo.activeProcessorCount
+        #expect(table.count > 2 * cores, "a table of \(table.count) processes")
+        #expect(table[getpid()] != nil && table[getppid()] != nil && table[1] != nil, "this process, its parent or launchd missing")
+    }
+
+    /// A pseudo-terminal is named as devname() names it (without its scan of /dev). One closed before it was named
+    /// (some process still has it as its own) has no name, and that isn't kept: the next one opened on its number is
+    /// named.
+    @Test func aTerminalIsNamedByItsNumber() throws {
+        let open = try openPty()
+        defer { close(open.master) }
+        #expect(ProcessTable.ttyName(open.device) == open.name)
+        #expect(devname(open.device, S_IFCHR).map { String(cString: $0) } == open.name)
+        let (master, device, name) = try openPty()
+        close(master)
+        var node = stat()
+        #expect(eventually { stat("/dev/" + name, &node) != 0 })
+        #expect(ProcessTable.ttyName(device) == nil)
+        // Pseudo-terminals are numbered lowest free first: the next ones opened take its number again, unless another
+        // session on this Mac took it meanwhile.
+        var opened: [Int32] = []
+        defer { opened.forEach { close($0) } }
+        for _ in 0..<4 {
+            let again = try openPty()
+            opened.append(again.master)
+            #expect(ProcessTable.ttyName(again.device) == again.name)
+            if again.device == device { return }
+        }
+        print("ProcessTableTests: no pseudo-terminal opened on \(name) again (another session took it)")
+    }
+
+    /// A new pseudo-terminal: its master, and its terminal's device and name ("ttys012").
+    private func openPty() throws -> (master: Int32, device: dev_t, name: String) {
+        let master = posix_openpt(O_RDWR | O_NOCTTY)
+        try #require(master >= 0 && grantpt(master) == 0 && unlockpt(master) == 0)
+        let path = try #require(ptsname(master).map { String(cString: $0) })
+        var node = stat()
+        try #require(stat(path, &node) == 0)
+        return (master, node.st_rdev, (path as NSString).lastPathComponent)
     }
 
     /// A read past its time limit leaves its caller at the limit, told nil; while it's still stuck in the kernel the
@@ -160,14 +227,16 @@ struct ProcessTableTests {
     /// read yet doesn't cost the table. Fifty snapshots in a row while shells on a terminal fork and exec as fast as
     /// they can are all read, and each has a process that runs throughout.
     @Test func execsOnATerminalDontCostTheTable() throws {
+        let ambient = AmbientLoad()
         let one = "i=0; while [ $i -lt 100000 ] && kill -0 $PPID 2>/dev/null; do /bin/date >/dev/null; i=$((i+1)); done"
         let loop = try onATerminal((0..<4).map { _ in "(\(one)) &" }.joined(separator: " ") + " wait")
         defer { stop(loop) }
-        try snapshotsStayWhole(while: loop, pause: 0.01)
+        try snapshotsStayWhole(while: loop, pause: 0.01, ambient: ambient)
     }
 
     /// The same while a `swift build` of a tiny package runs on a terminal (its compilers and linkers exec there).
     @Test func aBuildOnATerminalDoesntCostTheTable() throws {
+        let ambient = AmbientLoad()
         let package = scratch.url("tiny-package")
         try FileManager.default.createDirectory(at: package.appendingPathComponent("Sources/Tiny"), withIntermediateDirectories: true)
         try """
@@ -178,7 +247,7 @@ struct ProcessTableTests {
         try "print(\"tiny\")\n".write(to: package.appendingPathComponent("Sources/Tiny/main.swift"), atomically: true, encoding: .utf8)
         let build = try onATerminal("swift build --package-path '\(package.path)'")
         defer { stop(build) }
-        try snapshotsStayWhole(while: build, pause: 0.1)
+        try snapshotsStayWhole(while: build, pause: 0.1, ambient: ambient)
     }
 
     /// An exec'd process on a terminal whose argv can't be read twice in a row (an exec in progress on a loaded Mac)
@@ -217,27 +286,38 @@ struct ProcessTableTests {
 
     private let scratch = Scratch()
 
-    /// 50 snapshots in a row, `pause` apart: every one read, with a `sleep` started before them in it.
-    private func snapshotsStayWhole(while load: Process, pause: TimeInterval) throws {
+    /// 50 snapshots in a row, `pause` apart: every one read, with a `sleep` started before them in it. A read that came
+    /// back never lacks it (never part of the table), at any load; every one comes back only when the Mac was under
+    /// scripts/test-under-load.sh's threshold when the test started (`ambient`, taken before its load): over it, those
+    /// not read in time are counted and printed, not failed.
+    private func snapshotsStayWhole(while load: Process, pause: TimeInterval, ambient: AmbientLoad) throws {
         let sleeper = Process()
         sleeper.executableURL = URL(fileURLWithPath: "/bin/sleep")
         sleeper.arguments = ["120"]
         try sleeper.run()
         defer { stop(sleeper) }
-        var missed = 0
+        var unread = 0
+        var partial = 0
         var onATerminal = false
         for _ in 0..<50 {
-            let table = ProcessTable.trySnapshot()
-            if table?[sleeper.processIdentifier]?.comm != "sleep" { missed += 1 }
+            guard let table = ProcessTable.trySnapshot() else {
+                unread += 1
+                Thread.sleep(forTimeInterval: pause)
+                continue
+            }
+            if table[sleeper.processIdentifier]?.comm != "sleep" { partial += 1 }
             // The load's shell is on its terminal (else its processes would never be in question).
-            if table?.values.contains(where: { $0.ppid == load.processIdentifier && $0.tty != nil }) == true { onATerminal = true }
+            if table.values.contains(where: { $0.ppid == load.processIdentifier && $0.tty != nil }) { onATerminal = true }
             Thread.sleep(forTimeInterval: pause)
         }
-        #expect(onATerminal)
         var load1 = [Double](repeating: 0, count: 3)
         getloadavg(&load1, 3)
-        print("ProcessTableTests: \(missed) of 50 snapshots not read at load \(load1[0]); load still running: \(load.isRunning)")
-        #expect(missed == 0, "\(missed) of 50 snapshots not read")
+        print("ProcessTableTests: \(unread) of 50 snapshots not read, \(partial) without the sleeper, started at \(ambient), load \(load1[0]) at the end; load still running: \(load.isRunning)")
+        #expect(partial == 0, "\(partial) of 50 snapshots without a process that ran throughout")
+        // Seen in at least one table read (all 50 unread is only possible over the threshold, checked below).
+        #expect(onATerminal || unread == 50)
+        guard ambient.allows else { return }
+        #expect(unread == 0, "\(unread) of 50 snapshots not read at \(ambient)")
     }
 
     /// `command` run by /bin/sh on a terminal of its own that is its controlling terminal, as a session's processes are

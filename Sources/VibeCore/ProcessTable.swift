@@ -31,31 +31,49 @@ public struct ProcInfo: Sendable {
 
 /// Reads the kernel process table directly via sysctl (no `ps` subprocess, so it is cheap to poll).
 public enum ProcessTable {
-    // Both lookups below are slow enough to dominate a snapshot of ~750 processes if repeated every
+    // Both lookups below are slow enough to dominate a snapshot of ~1,500 processes if repeated every
     // poll: devname() scans /dev on every call, and argv needs a sysctl per process. Their answers
     // never change for a given device / process, so they're cached.
     private static let cacheLock = NSLock()
     private static var ttyNames: [dev_t: String?] = [:]
+    /// Pseudo-terminals' major device number, once one has been named.
+    private static var ptyMajor: Int32?
     static let argumentCache = ArgumentCache(read: readArguments)
 
+    /// A terminal's name by its device. A pseudo-terminal's is its number's (`ttys` and three digits, as the kernel
+    /// names them), checked with one stat: devname() scans /dev, 1 to 54 ms a device at load 176 where 116 devices
+    /// cost a read 0.1 to 0.5 s, mostly closed terminals some process still has as its own, which scan all of /dev for
+    /// nothing. A closed one has no name, and that isn't kept: its number is the next one opened's.
     static func ttyName(_ device: dev_t) -> String? {
         guard device != -1 else { return nil }
         cacheLock.lock(); defer { cacheLock.unlock() }
         if let cached = ttyNames[device] { return cached }
+        let major = Int32(truncatingIfNeeded: UInt32(bitPattern: device) >> 24 & 0xff)
+        let pty = String(format: "ttys%03d", device & 0xffffff)
+        var node = stat()
+        if stat("/dev/" + pty, &node) == 0, node.st_mode & S_IFMT == S_IFCHR, node.st_rdev == device {
+            ptyMajor = major
+            ttyNames[device] = pty
+            return pty
+        }
+        if major == ptyMajor { return nil }
         var name: String?
         if let raw = devname(device, S_IFCHR) {
             let value = String(cString: raw)
             if value != "??" { name = value }
         }
-        ttyNames[device] = name
+        // Not a pseudo-terminal (or none named yet): kept only when named, as a closed pseudo-terminal's isn't.
+        if name != nil { ttyNames[device] = name }
         return name
     }
 
     public static func snapshot() -> [Int32: ProcInfo] { trySnapshot() ?? [:] }
 
-    /// How long a snapshot may take. It takes about 10 ms for 1,500 processes on a Mac running several test suites
-    /// (load 100+), where reading the whole table at once (sysctl KERN_PROC_ALL) stalled for 10 to 80 s.
-    public static let snapshotLimit: TimeInterval = 2
+    /// How long a snapshot may take. It takes about 10 ms of CPU for 1,500 processes, where reading the whole table at
+    /// once (sysctl KERN_PROC_ALL) stalled for 10 to 80 s; but on a Mac at load 80 to 180 (three leads' teams building
+    /// and testing) a thread gets a core a fraction of the time, and reads took 0.4 to 2.1 s (2026-10-19, load 81.6):
+    /// 2 s was missed. Its callers all wait off the main thread (the app's scan, the lead's witness and tools, a hook).
+    public static let snapshotLimit: TimeInterval = 5
 
     /// Every process, read whole within `limit`; nil when it couldn't be (past `limit`, or the pid list unread), not
     /// "no processes" and never part of the table: a process missing from a snapshot has ended (callers act on that,
