@@ -8,7 +8,8 @@ import VibeCore
 @Suite(.serialized)
 struct AppleScriptRunnerTests {
     private let standIn = """
-    on slow(secs)
+    on slow(started, secs)
+        mark(started)
         delay secs
         return {"late"}
     end slow
@@ -17,7 +18,8 @@ struct AppleScriptRunnerTests {
         return {a, (n as text)}
     end quick
 
-    on spin(secs)
+    on spin(started, secs)
+        mark(started)
         repeat
         end repeat
     end spin
@@ -29,6 +31,22 @@ struct AppleScriptRunnerTests {
     on fails()
         error "no" number -1743
     end fails
+
+    on mark(path)
+        close access (open for access (POSIX file path) with write permission)
+        return {"marked"}
+    end mark
+
+    on holdUntil(held, release)
+        mark(held)
+        repeat
+            try
+                POSIX file release as alias
+                return {"released"}
+            end try
+            delay 0.02
+        end repeat
+    end holdUntil
     """
 
     private func seconds(since start: Date) -> TimeInterval { Date().timeIntervalSince(start) }
@@ -54,14 +72,25 @@ struct AppleScriptRunnerTests {
     }
 
     /// A script that hangs (here: sleeps, or loops, for good) is cancelled at its timeout, and the next read runs at once,
-    /// not after it.
-    @Test func aHungScriptDoesntHoldUpTheNextRead() {
+    /// not after it. The deadline is counted from the call, on the caller's thread, so that's where it's timed from: a
+    /// cancel at the deadline comes in under the timeout and the grace, a run left to the caller's guard at both. The
+    /// hung one marks its start, so it's a running script that's cancelled, not one given up on in the queue.
+    @Test func aHungScriptDoesntHoldUpTheNextRead() throws {
         let runner = AppleScriptRunner(source: standIn)
-        #expect(runner.run("quick", [.string("warm"), .seconds(0)], timeout: 10) == .strings(["warm", "0"]))
+        let folder = scratchRoot.appendingPathComponent("applescript-runner-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        // Untimed, first: the compile, and the first file a script writes in this process (StandardAdditions' file
+        // commands load on first use, 1 s and more under load, and nothing cancels a run while they do).
+        #expect(runner.run("mark", [.string(folder.appendingPathComponent("warm").path)], timeout: 10) == .strings(["marked"]))
         for hang in ["slow", "spin"] {
+            let started = folder.appendingPathComponent(hang)
             var start = Date()
-            #expect(runner.run(hang, [.seconds(30)], timeout: 0.5) == .timedOut)
-            #expect(seconds(since: start) < 0.5 + AppleScriptRunner.cancelGrace)
+            #expect(runner.run(hang, [.string(started.path), .seconds(30)], timeout: 0.5) == .timedOut)
+            let took = seconds(since: start)
+            #expect(took < 0.5 + AppleScriptRunner.cancelGrace, "\(hang) came back in \(took) s")
+            let startedAt = try #require(FileManager.default.attributesOfItem(atPath: started.path)[.modificationDate] as? Date)
+            #expect(startedAt < start.addingTimeInterval(0.5), "\(hang) started \(startedAt.timeIntervalSince(start)) s in")
             start = Date()
             #expect(runner.run("quick", [.string("next"), .seconds(1)], timeout: 2) == .strings(["next", "1"]))
             // At once: the hung one would have gone on for 30 s.
@@ -71,19 +100,35 @@ struct AppleScriptRunnerTests {
         #expect(runner.compiles == 1)
     }
 
-    /// A read asked for while another hangs waits at most its own timeout, and isn't run once that's passed.
-    @Test func aReadBehindAHungOneWaitsNoLongerThanItsTimeout() async {
+    /// A read asked for while another hangs waits at most its own timeout, and isn't run once that's passed. The order
+    /// is set by events, not by how soon a loaded Mac starts each task: the hung one says when it has the queue (a mark
+    /// file) and holds it until the test lets it go, which is after the read behind it has given up, so that read
+    /// coming back at all means it didn't wait for the hung one. Its wait is timed on its own thread from its call, as
+    /// its deadline is, so the task's start isn't counted.
+    @Test func aReadBehindAHungOneWaitsNoLongerThanItsTimeout() async throws {
         let runner = AppleScriptRunner(source: standIn)
-        let hung = Task.detached { runner.run("slow", [.seconds(30)], timeout: 3) }
-        try? await Task.sleep(nanoseconds: 300_000_000)
-        let start = Date()
-        let behind = await Task.detached { runner.run("quick", [.string("behind"), .seconds(1)], timeout: 0.5) }.value
+        let folder = scratchRoot.appendingPathComponent("applescript-runner-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        let held = folder.appendingPathComponent("held"), release = folder.appendingPathComponent("release")
+        let ranBehind = folder.appendingPathComponent("ran-behind")
+        let hung = Task.detached { runner.run("holdUntil", [.string(held.path), .string(release.path)], timeout: 30) }
+        #expect(await until { FileManager.default.fileExists(atPath: held.path) })
+        let (behind, waited) = await Task.detached { () -> (AppleScriptRunner.Outcome, TimeInterval) in
+            let called = Date()
+            let outcome = runner.run("mark", [.string(ranBehind.path)], timeout: 0.5)
+            return (outcome, Date().timeIntervalSince(called))
+        }.value
         #expect(behind == .timedOut)
-        #expect(seconds(since: start) < 0.5 + AppleScriptRunner.cancelGrace + 1)
-        #expect(await hung.value == .timedOut)
+        // Its own timeout and the grace, on its own clock, and the semaphore's wake-up on a loaded Mac.
+        #expect(waited < 0.5 + AppleScriptRunner.cancelGrace + 0.5, "the read behind waited \(waited) s")
+        FileManager.default.createFile(atPath: release.path, contents: nil)
+        #expect(await hung.value == .strings(["released"]))
         let after = Date()
         #expect(runner.run("quick", [.string("after"), .seconds(1)], timeout: 2) == .strings(["after", "1"]))
         #expect(seconds(since: after) < 2)
+        // Queued before this one, and given up, it wasn't run once the queue was free.
+        #expect(!FileManager.default.fileExists(atPath: ranBehind.path))
     }
 
     /// The real reads compile. Only a handler they don't have is called, so nothing runs and Terminal is never asked.
