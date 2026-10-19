@@ -18,8 +18,9 @@ public struct SteerMessage: Codable, Equatable, Sendable, Identifiable {
     /// The agent process it's for: a later agent on the same terminal doesn't get it.
     public var agentPid: Int32
     public var at: Double
-    /// For a message from the user: VibeSwitcher's seal (see `SteerInbox.post`). A `user` message without a valid
-    /// one wasn't posted by the app (anyone can append a line to the file) and is delivered as not the user's.
+    /// The session host's seal, for whoever sent it (see `SteerInbox.post`). A message without a valid one wasn't
+    /// posted by the sender it names (anyone can append a line to the file): a `user` one is delivered as not the
+    /// user's, a `lead` or `system` one as from an unverified sender.
     public var seal: String?
     /// How many characters of `text` its agent already has: a message longer than one delivery holds goes in parts
     /// (see `SteerReply.nextPart`). Outside the seal, so the text it's sealed with stays as sent.
@@ -49,10 +50,12 @@ public enum SteerInbox {
         return folder(root).appendingPathComponent("\(tty).\(suffix)")
     }
 
-    /// Posts a message. Only VibeSwitcher posts as the user (the app's composer and the lead's question cards): a
-    /// user message is sealed by whoever holds the key (`SteerSeal`: the session host, which seals for the app
-    /// only), so a line someone appended by hand, or sealed themselves, isn't taken for the user's. The project
-    /// lead's tool server sends as `.lead` or `.system`.
+    /// Posts a message, sealed by whoever holds the key (`SteerSeal`: the session host, which seals each sender for
+    /// its own callers only, see `LeadVault`), so a line someone appended by hand, or sealed themselves, isn't taken
+    /// for its sender's. Only VibeSwitcher posts as the user (the app's composer and the lead's question cards); the
+    /// project lead's tool server sends as `.lead`; the app, and a worker's or verifier's tool server about itself,
+    /// as `.system`. A `.lead` or `.system` message the host won't seal (it doesn't answer) goes in unsealed, and
+    /// arrives as from an unverified sender; a user message that isn't sealed doesn't go.
     public static func post(_ message: SteerMessage, tty: String, root: URL = VibePaths.root) throws {
         try post(message, tty: tty, root: root, sealer: .for(root))
     }
@@ -62,7 +65,7 @@ public enum SteerInbox {
         try FileManager.default.createDirectory(at: folder(root), withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         var message = message
         message.seal = nil
-        if message.from == .user { message.seal = try sealer.seal(message) }
+        if message.from == .user { message.seal = try sealer.seal(message) } else { message.seal = try? sealer.seal(message) }
         try locked(url) { handle in
             var line = try JSONEncoder().encode(message)
             line.append(0x0A)
@@ -75,7 +78,8 @@ public enum SteerInbox {
 
     /// Takes the messages for `agentPid` (dropping any left for an earlier agent) and records them as delivered: as
     /// many as one delivery holds (`SteerReply.contextLimit`), in order; the rest wait for the agent's next step.
-    /// A user message without VibeSwitcher's seal comes out as from `.system`, never as the user's.
+    /// A message without the host's seal for its sender comes out as from `.system`, never as the user's, and (a
+    /// lead's or VibeSwitcher's) as from an unverified sender (see `unverified`).
     public static func take(tty: String, agentPid: Int32, root: URL = VibePaths.root) -> [SteerMessage] {
         deliver(tty: tty, agentPid: agentPid, root: root) { $0.count }
     }
@@ -84,7 +88,7 @@ public enum SteerInbox {
     /// messages there (prints the hook's reply, types a prompt) and returns how many of them, from the first, went
     /// in. Only those are recorded as delivered; the rest stay first in line. Runs under the inbox's lock, so
     /// `hand` must not post to this inbox; killed midway, the inbox is as it was (delivered again, never lost).
-    /// A user message whose seal can't be checked now (the session host doesn't answer) waits, with what follows it.
+    /// While the seals can't be checked (the session host doesn't answer) the messages wait.
     /// `hand` takes each message whole (`remainingText`: what its agent doesn't have yet).
     ///
     /// Recording them takes a write. When the disk is full that write fails, and messages handed over would be handed
@@ -201,28 +205,40 @@ public enum SteerInbox {
         return Set(text.split(separator: "\n").map(String.init))
     }
 
-    /// The messages as they may be delivered, in order: a user message keeps its sender only with a valid seal.
-    /// When the seals can't be checked now, only those before the first user message.
+    /// The messages as they may be delivered, in order: each keeps its sender only with a valid seal (a worker's
+    /// Bash can append a line saying it's from the user, the lead or VibeSwitcher). When the seals can't be checked
+    /// now, none.
     static func verified(_ messages: [SteerMessage], sealer: SteerSeal) -> [SteerMessage] {
-        let users = messages.filter { $0.from == .user }
-        guard !users.isEmpty else { return messages }
-        guard let valid = sealer.verify(users), valid.count == users.count else {
-            return Array(messages.prefix { $0.from != .user })
-        }
-        var verdicts = valid.makeIterator()
-        return messages.map { message in
-            guard message.from == .user else { return message }
-            if verdicts.next() == true { return message }
-            var demoted = message
-            demoted.from = .system("a message marked as the user's that VibeSwitcher didn't send")
-            demoted.seal = nil
-            return demoted
-        }
+        guard !messages.isEmpty else { return [] }
+        guard let valid = sealer.verify(messages), valid.count == messages.count else { return [] }
+        return zip(messages, valid).map { message, valid in valid ? message : unverified(message) }
     }
 
-    /// The seal: an HMAC of the message's id, agent, time and text.
+    /// `message` as delivered without a valid seal: never from the user, and never from the lead or VibeSwitcher
+    /// either, but from an unverified sender that says it's them.
+    public static func unverified(_ message: SteerMessage, user: String = "a message marked as the user's that VibeSwitcher didn't send") -> SteerMessage {
+        var demoted = message
+        demoted.seal = nil
+        switch message.from {
+        case .user: demoted.from = .system(user)
+        case .lead(let name): demoted.from = .system(unverifiedSender + ", marked as from \(SteerReply.flat(name).prefix(40)); not your lead's word")
+        case .system(let about): demoted.from = .system(unverifiedSender + ", marked as VibeSwitcher's (\(SteerReply.flat(about).prefix(40))); not its word")
+        }
+        return demoted
+    }
+
+    /// What a delivery's sender line says of a message that isn't sealed for the sender it names.
+    public static let unverifiedSender = "unverified sender"
+
+    /// The seal: an HMAC of the message's id, agent, time and text, and (anyone's but the user's, whose seals are
+    /// made as before) who sent it, so a seal made for one sender doesn't hold for another.
     static func seal(_ message: SteerMessage, key: SymmetricKey) -> String {
-        let fields = [message.id, String(message.agentPid), String(message.at), message.text]
+        var fields = [message.id, String(message.agentPid), String(message.at), message.text]
+        switch message.from {
+        case .user: break
+        case .lead(let name): fields += ["lead", name]
+        case .system(let about): fields += ["system", about]
+        }
         let body = (try? JSONEncoder().encode(fields)) ?? Data()
         return Data(HMAC<SHA256>.authenticationCode(for: body, using: key)).base64EncodedString()
     }

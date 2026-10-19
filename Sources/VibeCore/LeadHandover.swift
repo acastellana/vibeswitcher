@@ -45,20 +45,15 @@ public enum LeadHandover {
     }
 
     /// Takes everything waiting for `lead` out of its inbox, in order, none marked delivered (the replaced lead never
-    /// got them). A message marked as the user's keeps that only with a valid seal (it's sealed again when posted to
-    /// the new lead); when the seals can't be checked now, none does.
+    /// got them). A message keeps its sender only with a valid seal (it's sealed again when posted to the new lead,
+    /// so one a worker appended would come out vouched for); when the seals can't be checked now, none does.
     public static func takeWaiting(for lead: LeadAgent, root: URL = VibePaths.root) -> [SteerMessage] {
         let taken = SteerInbox.pending(tty: lead.tty, root: root).filter { $0.agentPid == lead.pid }
             .compactMap { SteerInbox.withdraw(id: $0.id, tty: lead.tty, root: root) }
-        let users = taken.filter { $0.from == .user }
-        guard !users.isEmpty else { return taken }
-        var verdicts = (SteerSeal.for(root).verify(users) ?? users.map { _ in false }).makeIterator()
-        return taken.map { message in
-            guard message.from == .user, verdicts.next() != true else { return message }
-            var demoted = message
-            demoted.from = .system("a message for the lead this one replaced, marked as the user's but not vouched for")
-            demoted.seal = nil
-            return demoted
+        guard !taken.isEmpty else { return taken }
+        let valid = SteerSeal.for(root).verify(taken).flatMap { $0.count == taken.count ? $0 : nil } ?? taken.map { _ in false }
+        return zip(taken, valid).map { message, valid in
+            valid ? message : SteerInbox.unverified(message, user: "a message for the lead this one replaced, marked as the user's but not vouched for")
         }
     }
 }

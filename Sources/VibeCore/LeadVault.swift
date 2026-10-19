@@ -84,7 +84,8 @@ public struct LeadVault: Sendable {
         case head(root: String, branch: String)
         /// The app, or the repository's lead.
         case setHead(root: String, branch: String, commit: String)
-        /// The user's message sealed (the app only).
+        /// A message sealed for its sender (see `Book.maySeal`): the user's for the app only, the lead's for the app or
+        /// a lead, VibeSwitcher's for the app, or a worker's or verifier's tool server about itself.
         case seal(SteerMessage)
         /// Which of these carry a valid seal.
         case verify([SteerMessage])
@@ -626,7 +627,7 @@ extension LeadVault {
                 change(root, &changed) { $0.heads[branch] = commit }
                 return .ok
             case .seal(let message):
-                guard caller == .app else { return .refused("Only VibeSwitcher seals a message as the user's.") }
+                if let refusal = maySeal(message.from, caller: caller) { return .refused(refusal) }
                 return .seal(SteerInbox.seal(message, key: SymmetricKey(data: state.senderKey)))
             case .verify(let messages):
                 let key = SymmetricKey(data: state.senderKey)
@@ -689,6 +690,31 @@ extension LeadVault {
         }
 
         private func team(_ root: String) -> Team? { state.teams[LeadVault.key(root)] }
+
+        /// Why `caller` may not seal a message as `sender`'s (nil: it may). The user's words are the app's to seal;
+        /// a lead's, a lead's (or the app's, passing them on); VibeSwitcher's, the app's, but for the reports a
+        /// worker's or verifier's tool server sends its lead (`worker <task>`, `verifier <task>`), which the
+        /// session holding that role seals about itself. So a worker's Bash can't seal a line as its lead's, the
+        /// witness's or another worker's (it can only say, as itself, what its report tool says).
+        private func maySeal(_ sender: SteerMessage.Sender, caller: Caller) -> String? {
+            if caller == .app { return nil }
+            switch sender {
+            case .user:
+                return "Only VibeSwitcher seals a message as the user's."
+            case .lead:
+                guard case .session(let session) = caller,
+                      state.teams.values.contains(where: { $0.members.contains { $0.role == .lead && $0.session == session } })
+                else { return "Only VibeSwitcher or a project lead seals a message as a lead's." }
+                return nil
+            case .system(let about):
+                let words = about.split(separator: " ", maxSplits: 1).map(String.init)
+                guard case .session(let session) = caller, words.count == 2,
+                      let role = LeadLaunch.Role(rawValue: words[0]), role != .lead,
+                      state.teams.values.contains(where: { $0.members.contains { $0.role == role && $0.task == words[1] && $0.session == session } })
+                else { return "Only VibeSwitcher seals a message as its own (a worker or verifier, only its report about its own task)." }
+                return nil
+            }
+        }
 
         private func isLead(_ caller: Caller, _ root: String) -> Bool {
             guard case .session(let session) = caller else { return false }
