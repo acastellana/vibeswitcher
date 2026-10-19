@@ -31,29 +31,27 @@ public struct RowState: Equatable, Sendable {
 
 /// How a window session ended, as every row and bar says it: the hangup or terminate that ending a session sends
 /// (exit 129, 143: VibeSwitcher ended it, or a signal did) reads "ended", 0 "finished", any other code "exit N", a
-/// failure (orange, with a warning glyph).
+/// failure (orange, with a warning glyph). No real exit status (below 0: the app marks a session -1 when its host goes
+/// away) reads "ended" too.
 public struct SessionEnd: Equatable, Sendable {
     public var status: Int32
 
     public init(status: Int32) { self.status = status }
 
-    public var isFailure: Bool { ![0, 129, 143].contains(status) }
+    /// Ended by VibeSwitcher or a signal, or with no exit status of its own.
+    var isEnded: Bool { status < 0 || status == 129 || status == 143 }
+
+    public var isFailure: Bool { status != 0 && !isEnded }
 
     public var text: String {
-        switch status {
-        case 0: return "finished"
-        case 129, 143: return "ended"
-        default: return "exit \(status)"
-        }
+        if status == 0 { return "finished" }
+        return isEnded ? "ended" : "exit \(status)"
     }
 
     /// The glyph beside it: a warning for a failure, else a neutral one.
     public var symbol: String {
-        switch status {
-        case 0: return "checkmark.circle"
-        case 129, 143: return "stop.circle"
-        default: return "exclamationmark.circle"
-        }
+        if status == 0 { return "checkmark.circle" }
+        return isEnded ? "stop.circle" : "exclamationmark.circle"
     }
 }
 

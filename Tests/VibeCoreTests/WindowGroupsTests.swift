@@ -167,7 +167,9 @@ struct WindowGroupsTests {
     /// exit 0; any other code is a failure, said as its code.
     @Test func howASessionEndedReadsTheSameEverywhere() {
         let cases: [(Int32, String, Bool, String)] = [(0, "finished", false, "checkmark.circle"), (129, "ended", false, "stop.circle"),
-                                                      (143, "ended", false, "stop.circle"), (1, "exit 1", true, "exclamationmark.circle")]
+                                                      (143, "ended", false, "stop.circle"), (1, "exit 1", true, "exclamationmark.circle"),
+                                                      // No exit status of its own: its host went away.
+                                                      (-1, "ended", false, "stop.circle")]
         for (status, text, failure, symbol) in cases {
             let end = SessionEnd(status: status)
             #expect(end.text == text, "\(status)")
@@ -180,6 +182,7 @@ struct WindowGroupsTests {
             #expect(row.state(now: now).since == Date(timeIntervalSince1970: 9_000))
         }
         #expect(SessionEnd(status: 2).isFailure && SessionEnd(status: 137).text == "exit 137")
+        #expect(!SessionEnd(status: -9).isFailure && SessionEnd(status: -9).text == "ended")
         #expect(hosted().end == nil && agent("t").end == nil)
     }
 
