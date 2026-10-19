@@ -574,6 +574,7 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "Say what keeps it from merging (reason): a decision, the user's word. merge names it when it refuses. Nothing was changed.")
         }
         let appended = (arguments["append_context"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let note = appended.isEmpty ? nil : leadNote(.context, appended, on: slug)
         var changed: [String] = []
         try boardChange { board in
             guard let index = board.taskIndex(slug) else { return }
@@ -591,6 +592,7 @@ public final class LeadToolset: MCPToolset {
             if !appended.isEmpty {
                 let context = board.tasks[index].contract.context.trimmingCharacters(in: .whitespacesAndNewlines)
                 board.tasks[index].contract.context = context.isEmpty ? appended : context + "\n\n" + appended
+                if let note { board.tasks[index].keep(note) }
                 changed.append("context (added to)")
             }
             if let status {
@@ -761,8 +763,12 @@ public final class LeadToolset: MCPToolset {
         guard let worker = store.load().task(slug)?.worker else { throw Problem(text: "\(slug) has no worker.") }
         let clear = arguments["clear_draft"] as? Bool ?? false
         let delivered = try runtime.steer(.session(worker), from: .lead("lead of \(project)"), text: text, clearDraft: clear)
+        // Kept for the verifier: what the lead accepts here (an edit outside the contract's files) is in scope.
+        let note = leadNote(.message, text, on: slug)
         try store.update { board in
-            guard let index = board.taskIndex(slug), board.tasks[index].worker == worker else { return }
+            guard let index = board.taskIndex(slug) else { return }
+            board.tasks[index].keep(note)
+            guard board.tasks[index].worker == worker else { return }
             board.tasks[index].leadQuestionAt = nil
         }
         // Telling a failed or blocked task's live worker what to do sends it back to work: a failed one starts a
@@ -880,7 +886,7 @@ public final class LeadToolset: MCPToolset {
         } else {
             session = try launch(.verifier, task: slug, name: "verify-\(slug)", in: Worktrees.path(root: root, slug: slug),
                                  label: "Verifier: \(task.title)", trust: config.isEmpty,
-                                 prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck),
+                                 prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, notes: leadNotes(task)),
                                  start: "Verify the task now, then call submit_audit.", model: workflow.verifierModel, auditing: head)
         }
         try store.update { board in
@@ -937,6 +943,7 @@ public final class LeadToolset: MCPToolset {
         let changed = Git.run(["diff", "--name-only", "\(workflow.base)...\(head)"], in: root).output.split(whereSeparator: \.isNewline).map(String.init)
         let sensitive = changed.filter { path in workflow.sensitiveGlobs.contains { LeadWorkflow.matches(path, glob: $0) } }
         let focuses = LeadPrompts.Focus.panel(count, sensitive: !sensitive.isEmpty)
+        let notes = leadNotes(task)
         let id = UUID().uuidString
         var sessions: [String] = []
         for (offset, focus) in focuses.enumerated() {
@@ -946,7 +953,7 @@ public final class LeadToolset: MCPToolset {
             do {
                 sessions.append(try launch(.verifier, task: slug, name: index == 1 ? "verify-\(slug)" : "finder\(index)-\(slug)",
                                            in: Worktrees.path(root: root, slug: slug), label: "Verifier: \(task.title) (finder \(index)/\(count): \(focus.rawValue))",
-                                           trust: trust, prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, finder: finder),
+                                           trust: trust, prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, finder: finder, notes: notes),
                                            start: "Look for findings in your focus now, then call submit_audit.", model: workflow.verifierModel, auditing: head,
                                            finder: LeadVault.Finder(panel: id, index: index, size: count, focus: focus.rawValue, nitCap: workflow.auditNitCap)))
             } catch {
@@ -1074,6 +1081,26 @@ public final class LeadToolset: MCPToolset {
                           + "(\(commits)), and a verifier would check \(branch) without them. The worker should run `\(off.mergeCommand)` in its worktree, then report; audit again then. " + told)
         }
         return "\(slug)'s worktree was on \(was), not on \(branch); it's back on \(branch) (nothing there that \(branch) lacks). "
+    }
+
+    /// The lead's note on `slug`, sealed by the session host as the lead's (unsealed when the host doesn't answer: the
+    /// verifier is then told it isn't the lead's word, see `leadNotes`).
+    private func leadNote(_ kind: LeadNote.Kind, _ text: String, on slug: String) -> LeadNote {
+        var note = LeadNote(kind: kind, text: text, by: "lead of \(project)")
+        note.seal = try? vault.seal(note.sealed(task: slug))
+        return note
+    }
+
+    /// The task's notes for its verifier: those whose seal holds as the lead's for this task, and how many don't (a
+    /// line written onto the board by hand, a note copied from another task) or couldn't be checked now.
+    func leadNotes(_ task: LeadTask) -> LeadPrompts.Notes {
+        let notes = task.notes ?? []
+        guard !notes.isEmpty else { return LeadPrompts.Notes() }
+        guard let valid = try? vault.verify(notes.map { $0.sealed(task: task.slug) }), valid.count == notes.count else {
+            return LeadPrompts.Notes(unverified: notes.count, unchecked: true)
+        }
+        let held = zip(notes, valid).filter(\.1).map(\.0)
+        return LeadPrompts.Notes(lead: held, unverified: notes.count - held.count)
     }
 
     /// Sends `text` to the task's worker when it runs; what the lead's result says about it.

@@ -52,6 +52,44 @@ public struct LeadCheckpoint: Codable, Equatable, Sendable {
     }
 }
 
+/// The lead's word on a task after its contract: what it appended to the task's context (update_task's
+/// append_context) or a message it sent the worker. The verifier reads them: an edit outside the contract's files that
+/// the lead accepted here is in scope (twice on 2026-10-19 a branch was marked suspect for wiring the lead had approved
+/// by message, and audited again in full on the same commit). Sealed by the session host as the lead's when written
+/// (see `SteerInbox.seal`; the board is a file anyone's Bash can write): only a note whose seal holds is the lead's.
+public struct LeadNote: Codable, Equatable, Sendable {
+    public enum Kind: String, Codable, Sendable {
+        /// Appended to the task's context.
+        case context
+        /// A message to the task's worker.
+        case message
+    }
+
+    public var id: String
+    public var kind: Kind
+    public var text: String
+    /// Who sealed it: the lead's name as its messages carry it ("lead of <project>").
+    public var by: String
+    public var at: Double
+    public var seal: String?
+
+    public init(id: String = UUID().uuidString, kind: Kind, text: String, by: String, at: Double = Date().timeIntervalSince1970) {
+        self.id = id
+        self.kind = kind
+        self.text = text
+        self.by = by
+        self.at = at
+    }
+
+    /// The message its seal is made for: the task and the kind are in its id, so a note sealed for one task (or as a
+    /// message) doesn't hold copied onto another (or as appended context).
+    public func sealed(task: String) -> SteerMessage {
+        var message = SteerMessage(id: "note \(task) \(kind.rawValue) \(id)", text: text, from: .lead(by), agentPid: 0, at: at)
+        message.seal = seal
+        return message
+    }
+}
+
 /// Why a task last failed: an audit that didn't pass, or a merge that conflicted or failed its tests. Kept when the
 /// task goes back to work, so what's being reworked stays in view.
 public struct LeadSetback: Codable, Equatable, Sendable {
@@ -445,8 +483,12 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var audits: LeadAuditLedger?
     /// The finders its audit runs, while it runs more than one (for showing; the vault holds their reports).
     public var panel: LeadAuditPanel?
+    /// The lead's notes on it since its contract (appended context, messages to its worker), oldest first.
+    public var notes: [LeadNote]?
 
     public static let keptCheckpoints = 40
+    /// Notes kept per task, the newest: an approval is rarely more than a few dozen messages back.
+    public static let keptNotes = 100
 
     /// The verifiers whose word the task waits on: with several finders, those that haven't submitted yet (one that
     /// has may end while the others work); else its verifier.
@@ -460,6 +502,11 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public func awaitedVerifier(ended: (String) -> Bool = { _ in false }) -> String? {
         let waiting = awaitedVerifiers
         return waiting.first(where: ended) ?? waiting.first
+    }
+
+    /// Adds the lead's note, keeping the newest `keptNotes`.
+    public mutating func keep(_ note: LeadNote) {
+        notes = Array(((notes ?? []) + [note]).suffix(Self.keptNotes))
     }
 
     /// Rework rounds so far (0 on the first attempt).
