@@ -22,19 +22,13 @@ struct SessionListView: View {
 
     var body: some View {
         let arranged = model.arranged
-        let sections = WindowGroups.filter(arranged.sections, query: model.filter)
+        let (sections, ended) = model.folded(arranged)
         List(selection: $selection) {
             ForEach(sections) { section in
                 Section {
                     // Ended sessions of finished tasks leave with them (WL-1).
                     ForEach(section.rows.filter { !arranged.nested.contains($0.id) || !TeamRows.isHistory($0, boards: leads.boards, now: Date()) }) { row in
-                        WindowRowView(row: row, showProject: model.grouping == .attention, role: model.role(of: row),
-                                      team: arranged.teams[row.id], board: arranged.teams[row.id] == nil ? nil : leads.lead(for: row)?.board,
-                                      questions: model.role(of: row) == .lead ? leads.lead(for: row).map { ($0.board.openQuestions.count, $0.board.blockingQuestions) } : nil,
-                                      label: model.label(of:), replaced: model.replaced(row), nested: arranged.nested.contains(row.id),
-                                      teamOpen: model.expandedTeams.contains(row.id)) { model.toggleTeam(row.id) }
-                            .tag(row.id as String?)
-                            .contextMenu { RowMenu(row: row, actions: actions) }
+                        rowView(row, arranged: arranged)
                     }
                 } header: {
                     HStack(spacing: 6) {
@@ -47,10 +41,20 @@ struct SessionListView: View {
                     }
                 }
             }
+            // Ended sessions fold away at the end (WL-1); Resume and Remove are in their menu, as anywhere.
+            if !ended.isEmpty {
+                Section {
+                    if model.endedOpen {
+                        ForEach(ended) { row in rowView(row, arranged: arranged, showProject: true) }  // from any project
+                    }
+                } header: {
+                    EndedHeader(count: ended.count, open: $model.endedOpen)
+                }
+            }
         }
         .listStyle(.sidebar)
         .overlay {
-            if sections.isEmpty {
+            if sections.isEmpty, ended.isEmpty {
                 if model.sections.isEmpty {
                     VStack(spacing: 8) {
                         Text("No sessions").foregroundStyle(.secondary)
@@ -102,9 +106,58 @@ struct SessionListView: View {
         .onChange(of: model.selectedID) { if selection != model.selectedID { selection = model.selectedID } }
     }
 
+    private func rowView(_ row: WindowRow, arranged: LeadTeams.Arranged, showProject: Bool? = nil) -> some View {
+        WindowRowView(row: row, showProject: showProject ?? (model.grouping == .attention), role: model.role(of: row),
+                      team: arranged.teams[row.id], board: arranged.teams[row.id] == nil ? nil : leads.lead(for: row)?.board,
+                      questions: model.role(of: row) == .lead ? leads.lead(for: row).map { ($0.board.openQuestions.count, $0.board.blockingQuestions) } : nil,
+                      label: model.label(of:), replaced: model.replaced(row), nested: arranged.nested.contains(row.id),
+                      teamOpen: model.expandedTeams.contains(row.id)) { model.toggleTeam(row.id) }
+            .tag(row.id as String?)
+            .contextMenu { RowMenu(row: row, actions: actions) }
+    }
+
     private var countText: String {
         let count = model.allRows.count
         return count == 1 ? "1 session" : "\(count) sessions"
+    }
+}
+
+extension SessionEnd {
+    /// A failed end's orange: the status palette's, at least 4.5:1 in light and dark (the system orange isn't on a
+    /// light sidebar).
+    static var failureColor: Color { SessionStatus.working.color }
+    var color: Color { isFailure ? Self.failureColor : .secondary }
+}
+
+/// "› Ended 3": the header of the fold that holds ended sessions, in the sidebar and on Home.
+struct EndedHeader: View {
+    let count: Int
+    @Binding var open: Bool
+    var font: Font = .system(size: 11, weight: .semibold)
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        Button {
+            withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { open.toggle() }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold)).rotationEffect(.degrees(open ? 90 : 0))
+                    .accessibilityHidden(true)
+                Text("Ended")
+                Text("\(count)").foregroundStyle(.tertiary).monospacedDigit()
+                Spacer(minLength: 0)
+            }
+            .font(font)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundStyle(.secondary)
+        .help(open ? "Hide the ended sessions" : "Show the ended sessions")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(count == 1 ? "Ended, 1 session" : "Ended, \(count) sessions")
+        .accessibilityValue(open ? "expanded" : "collapsed")
+        .accessibilityHint(open ? "Hides the ended sessions" : "Shows the ended sessions")
+        .accessibilityAddTraits([.isHeader, .isButton])
     }
 }
 
@@ -130,8 +183,8 @@ struct WindowRowView: View {
 
     var body: some View {
         TimelineView(.ticking(every: 30)) { context in
-            // A worker's or verifier's normal end doesn't read as a failure.
-            let state = replaced?.rowState ?? (nested ? LeadTeams.state(of: row, now: context.date) : row.state(now: context.date))
+            // A normal end (VibeSwitcher's, or exit 0) doesn't read as a failure (`SessionEnd`).
+            let state = replaced?.rowState ?? row.state(now: context.date)
             HStack(spacing: 9) {
                 if nested {
                     Image(systemName: role == .verifier ? "checkmark.seal" : "hammer").font(.system(size: 10)).foregroundStyle(.tertiary)
@@ -162,7 +215,13 @@ struct WindowRowView: View {
                             // A shape as well as the colour; the words beside it say "replaced".
                             Image(systemName: "arrow.turn.up.right").foregroundStyle(ReplacedLead.color).accessibilityHidden(true)
                         }
+                        let failed = replaced == nil && row.end?.isFailure == true
+                        if failed, let end = row.end {
+                            // A shape as well as the colour; the words beside it say the exit code.
+                            Image(systemName: end.symbol).foregroundStyle(SessionEnd.failureColor).accessibilityHidden(true)
+                        }
                         Text(state.text).foregroundStyle(replaced != nil ? AnyShapeStyle(ReplacedLead.color)
+                            : failed ? AnyShapeStyle(SessionEnd.failureColor)
                             : state.group == .needsYou ? AnyShapeStyle(SessionStatus.needsInput.color) : AnyShapeStyle(.secondary))
                         if let questions, questions.open > 0 {
                             Text("·").foregroundStyle(.tertiary)
@@ -196,7 +255,8 @@ struct WindowRowView: View {
                 }
             }
             .padding(.vertical, 3)
-            .opacity(row.isDimmed ? 0.55 : 1)
+            // A failed end stays at full strength: it's worth a look.
+            .opacity(row.isDimmed && row.end?.isFailure != true ? 0.55 : 1)
         }
     }
 }

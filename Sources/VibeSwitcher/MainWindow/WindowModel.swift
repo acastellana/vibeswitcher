@@ -30,6 +30,15 @@ final class WindowModel: ObservableObject {
         didSet { UserDefaults.standard.set(showsChat, forKey: Self.showsChatKey) }
     }
     private static let showsChatKey = "middleShowsChat"
+    /// The sidebar's "Ended (n)" fold is open, and Home's; each remembered on this Mac, folded at first.
+    @Published var endedOpen: Bool {
+        didSet { UserDefaults.standard.set(endedOpen, forKey: Self.endedOpenKey) }
+    }
+    @Published var homeEndedOpen: Bool {
+        didSet { UserDefaults.standard.set(homeEndedOpen, forKey: Self.homeEndedOpenKey) }
+    }
+    static let endedOpenKey = "sidebarEndedOpen"
+    static let homeEndedOpenKey = "homeEndedOpen"
     /// Selected to show the start page instead of a session.
     static let homeID = "home"
     var showsHome: Bool { selectedID == Self.homeID }
@@ -41,13 +50,21 @@ final class WindowModel: ObservableObject {
         selectedID = UserDefaults.standard.string(forKey: Self.selectionKey)
         grouping = UserDefaults.standard.string(forKey: Self.groupingKey).flatMap(WindowGrouping.init(rawValue:)) ?? .attention
         showsChat = UserDefaults.standard.object(forKey: Self.showsChatKey) as? Bool ?? true
+        endedOpen = UserDefaults.standard.bool(forKey: Self.endedOpenKey)
+        homeEndedOpen = UserDefaults.standard.bool(forKey: Self.homeEndedOpenKey)
     }
 
     /// Every row, whatever the grouping and filter.
     var allRows: [WindowRow] { sections.flatMap(\.rows) }
-    /// The sections as the sidebar shows them: grouped, then filtered.
-    var displayedSections: [WindowSection] {
-        WindowGroups.filter(arranged.sections, query: filter)
+    /// The sections as the sidebar shows them (grouped, ended rows folded away, then filtered) and, apart, its
+    /// "Ended (n)" fold's rows, filtered; a team member stays under its lead.
+    func folded(_ arranged: LeadTeams.Arranged) -> (sections: [WindowSection], ended: [WindowRow]) {
+        WindowGroups.foldEnded(WindowGroups.filter(arranged.sections, query: filter), keep: arranged.nested)
+    }
+
+    /// Every ended row but a lead's team's, whatever the filter (Home's fold).
+    var endedRows: [WindowRow] {
+        WindowGroups.foldEnded(LeadTeams.arrange(sections, label: label(of:), expanded: []).sections).ended
     }
 
     /// The list with each lead's team folded under it (the grunt work stays out of sight unless you open it).
@@ -71,7 +88,10 @@ final class WindowModel: ObservableObject {
         if expandedTeams.contains(lead) { expandedTeams.remove(lead) } else { expandedTeams.insert(lead) }
     }
     /// The rows in the order shown; what ⌘1–9 and ⌥⌘↑/↓ follow.
-    var rows: [WindowRow] { displayedSections.flatMap(\.rows) }
+    var rows: [WindowRow] {
+        let folded = folded(arranged)
+        return folded.sections.flatMap(\.rows) + (endedOpen ? folded.ended : [])
+    }
     /// Stays selected while filtered out of view.
     var selectedRow: WindowRow? { allRows.first { $0.id == selectedID } }
 

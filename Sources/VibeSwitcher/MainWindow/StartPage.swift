@@ -29,6 +29,10 @@ struct StartPage: View {
                         .accessibilityLabel("New project")
                         .help("Make a project in your projects folder (Settings › General), with git and a first commit")
                 }
+                let ended = model.endedRows
+                if !ended.isEmpty {
+                    EndedSessions(rows: ended, open: $model.homeEndedOpen, model: model, actions: actions)
+                }
                 Shortcuts()
             }
             .frame(maxWidth: 620, alignment: .leading)
@@ -106,12 +110,16 @@ struct EndedBar: View {
 
     var body: some View {
         if let row = model.selectedRow, let info = row.hosted, let exit = info.exit {
+            let end = SessionEnd(status: exit.status)
+            let at = exit.at.formatted(date: .omitted, time: .shortened)
             HStack(spacing: 10) {
-                Image(systemName: exit.status == 0 ? "checkmark.circle" : "exclamationmark.circle")
-                    .foregroundStyle(exit.status == 0 ? Color.secondary : Color.orange)
+                Image(systemName: end.symbol)
+                    .foregroundStyle(end.color)
                     .accessibilityHidden(true)  // the line next to it says how it ended
-                Text("Ended \(exit.at.formatted(date: .omitted, time: .shortened)) · exit \(exit.status)")
-                    .font(.system(size: 12)).foregroundStyle(.secondary)
+                // "Ended 14:02", "Finished 14:02", "Ended 14:02 · exit 1" (orange).
+                (Text("\(end.isFailure ? "Ended" : end.text.capitalized) \(at)").foregroundStyle(.secondary)
+                    + (end.isFailure ? Text(" · \(end.text)").foregroundStyle(SessionEnd.failureColor) : Text("")))
+                    .font(.system(size: 12))
                 Spacer()
                 if actions.canResume(row) {
                     Button { actions.resume(row) } label: { Label("Resume", systemImage: "arrow.clockwise") }
@@ -123,5 +131,72 @@ struct EndedBar: View {
             .frame(maxWidth: .infinity, minHeight: 40)
             .background(.bar)
         }
+    }
+}
+
+/// Home's "Ended (n)": the ended window sessions (a lead's team's aside), folded until opened; each opens on a click,
+/// with Resume and Remove beside it.
+struct EndedSessions: View {
+    let rows: [WindowRow]
+    @Binding var open: Bool
+    @ObservedObject var model: WindowModel
+    let actions: WindowActions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            EndedHeader(count: rows.count, open: $open, font: .system(size: 13, weight: .semibold))
+            if open {
+                VStack(spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        if index > 0 { Divider().padding(.leading, 44) }
+                        EndedSessionRow(row: row, select: { model.selectedID = row.id }, actions: actions)
+                    }
+                }
+                .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.35)))
+            }
+        }
+    }
+}
+
+struct EndedSessionRow: View {
+    let row: WindowRow
+    let select: () -> Void
+    let actions: WindowActions
+
+    var body: some View {
+        HStack(spacing: 12) {
+            AgentMark(kind: row.markKind, size: 20)
+            Button(action: select) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(row.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    HStack(spacing: 4) {
+                        Text(row.project).foregroundStyle(.secondary)
+                        if let end = row.end {
+                            Text("·").foregroundStyle(.tertiary)
+                            Image(systemName: end.symbol).foregroundStyle(end.color)
+                                .accessibilityHidden(true)  // the words beside it say how it ended
+                            Text(end.text).foregroundStyle(end.color)
+                        }
+                        if let at = row.hosted?.exit?.at {
+                            Text("·").foregroundStyle(.tertiary)
+                            Text(at.formatted(date: .omitted, time: .shortened)).foregroundStyle(.secondary)
+                        }
+                    }
+                    .font(.system(size: 11)).lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Show this session")
+            .accessibilityElement(children: .combine)
+            Spacer(minLength: 8)
+            if actions.canResume(row) {
+                Button { actions.resume(row) } label: { Label("Resume", systemImage: "arrow.clockwise") }.controlSize(.small)
+            }
+            Button("Remove") { actions.remove(row) }.controlSize(.small)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 9)
     }
 }
