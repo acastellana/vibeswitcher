@@ -27,29 +27,53 @@ public enum AppProof {
 
     public static let keychainService = "dev.vibeswitcher.app-proof"
 
-    /// The app's key from the login Keychain, made the first time. The app may ask you (it has a window to ask from):
-    /// a rebuild without the stable signing identity (scripts/setup-signing.sh) is another program to the Keychain.
-    /// Nil when there's none to be had (you said no): the app then isn't the app to the host.
-    /// `keychain`: another keychain than the login one (tests).
-    public static func keychainKey(service: String = keychainService, account: String = "app", keychain: SecKeychain? = nil) -> SymmetricKey? {
-        let item: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
-                                   kSecAttrAccount as String: account]
-        var found: CFTypeRef?
-        var query = item
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        if let keychain { query[kSecMatchSearchList as String] = [keychain] }
-        let status = SecItemCopyMatching(query as CFDictionary, &found)
-        if status == errSecSuccess, let data = found as? Data, data.count == keySize { return SymmetricKey(data: data) }
-        // Only when there's none: one you refused stays yours (a new key would never match the host's).
-        guard status == errSecItemNotFound, let access = appOnlyAccess() else { return nil }
-        let data = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
-        var add = item
-        add[kSecValueData as String] = data
-        add[kSecAttrLabel as String] = "VibeSwitcher app key"
-        add[kSecAttrAccess as String] = access
-        if let keychain { add[kSecUseKeychain as String] = keychain }
-        return SecItemAdd(add as CFDictionary, nil) == errSecSuccess ? SymmetricKey(data: data) : nil
+    /// The app's key in the login Keychain, made the first time (see `AppKeyStore`). The app may ask you (it has a
+    /// window to ask from): a rebuild without the stable signing identity (scripts/setup-signing.sh) is another
+    /// program to the Keychain. Nil when there's none to be had (you said no): the app then isn't the app to the host.
+    /// Only the app makes one (AppDelegate), and besides it only the live test, run when asked for (KeychainLiveTests).
+    public struct KeychainStore: AppKeyStore {
+        public let service: String
+        public let account: String
+
+        public init(service: String = keychainService, account: String = "app") {
+            self.service = service
+            self.account = account
+        }
+
+        public func key() -> SymmetricKey? {
+            let item: [String: Any] = [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service,
+                                       kSecAttrAccount as String: account]
+            var found: CFTypeRef?
+            var query = item
+            query[kSecReturnData as String] = true
+            query[kSecMatchLimit as String] = kSecMatchLimitOne
+            let status = SecItemCopyMatching(query as CFDictionary, &found)
+            if status == errSecSuccess, let data = found as? Data, data.count == keySize { return SymmetricKey(data: data) }
+            // Only when there's none: one you refused stays yours (a new key would never match the host's).
+            guard status == errSecItemNotFound, let access = appOnlyAccess() else { return nil }
+            let data = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
+            var add = item
+            add[kSecValueData as String] = data
+            add[kSecAttrLabel as String] = "VibeSwitcher app key"
+            add[kSecAttrAccess as String] = access
+            return SecItemAdd(add as CFDictionary, nil) == errSecSuccess ? SymmetricKey(data: data) : nil
+        }
+    }
+
+    /// The app's key in memory, made the first time as the Keychain makes it (or the one given): the store every
+    /// test uses in place of `KeychainStore`.
+    public final class MemoryStore: AppKeyStore, @unchecked Sendable {
+        private let lock = NSLock()
+        private var held: SymmetricKey?
+
+        public init(key: SymmetricKey? = nil) { held = key }
+
+        public func key() -> SymmetricKey? {
+            lock.withLock {
+                if held == nil { held = SymmetricKey(size: .bits256) }
+                return held
+            }
+        }
     }
 
     /// Who reads the item without macOS asking you: this program's code only (never "any application"); anything
@@ -61,6 +85,14 @@ public enum AppProof {
               SecAccessCreate("VibeSwitcher app key" as CFString, [me] as CFArray, &access) == errSecSuccess else { return nil }
         return access
     }
+}
+
+/// Where the app keeps the key it proves itself with (see `AppProof`): the login Keychain in the app
+/// (`AppProof.KeychainStore`), memory in tests (`AppProof.MemoryStore`). No test reaches the Keychain: under a scratch
+/// HOME (every worker's and verifier's `swift test`) there's no login keychain, and macOS answers a SecItem call for
+/// one with a "Keychain Not Found" dialog in your face, not an error.
+public protocol AppKeyStore: Sendable {
+    func key() -> SymmetricKey?
 }
 
 extension SymmetricKey {

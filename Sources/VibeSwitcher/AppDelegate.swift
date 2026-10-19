@@ -6,8 +6,8 @@ import VibeCore
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NSPopoverDelegate {
     private let store = SessionStore()
-    /// The session host that runs the window's sessions.
-    let hostClient = HostClient()
+    /// The session host that runs the window's sessions; the app proves itself to it with its key in the login Keychain.
+    let hostClient = HostClient(appKey: HostClient.appKey(from: AppProof.KeychainStore()))
     private let popoverState = PopoverState()
     private let preferences = Preferences()
     /// Notifications need an app bundle; `swift run` (no bundle) runs without them instead of crashing.

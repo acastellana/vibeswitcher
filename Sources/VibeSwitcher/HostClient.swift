@@ -69,14 +69,21 @@ final class HostClient: ObservableObject {
     /// requests in order: a reply to a later request means these went in).
     private var sentInput: [Int: (id: UUID, count: Int)] = [:]
 
-    /// The key the app proves itself with to the host (see `AppProof`), from the login Keychain; every connection
-    /// the app makes answers its challenge with it (the lead's vault calls too).
-    static let appKey: SymmetricKey? = {
-        let key = AppProof.keychainKey()
-        if key == nil { Breadcrumbs.shared.note("host: no app key from the Keychain; the host won't take this app as VibeSwitcher") }
-        HostConnection.appKey = key
-        return key
-    }()
+    /// The key the app proves itself with to the host (see `AppProof`), from `store`, read once: the app's own client
+    /// reads it from the login Keychain (AppDelegate passes `AppProof.KeychainStore()`), and every connection the app
+    /// makes answers its challenge with it (the lead's vault calls too). Every other client (tests, benches) has its
+    /// own key or none, so none reaches the Keychain (see `AppKeyStore`).
+    static func appKey(from store: AppKeyStore) -> () -> SymmetricKey? {
+        var read: SymmetricKey??
+        return {
+            if let read { return read }
+            let key = store.key()
+            if key == nil { Breadcrumbs.shared.note("host: no app key from the Keychain; the host won't take this app as VibeSwitcher") }
+            HostConnection.appKey = key
+            read = .some(key)
+            return key
+        }
+    }
 
     /// What this client does, for app.log (a test's own list instead).
     private let note: (String) -> Void
@@ -88,7 +95,7 @@ final class HostClient: ObservableObject {
     /// The reply every request still waiting gets when the connection drops.
     static let wentAway = "The session host went away."
 
-    init(socketPath: String = VibePaths.hostSocket.path, appKey: @escaping () -> SymmetricKey? = { HostClient.appKey },
+    init(socketPath: String = VibePaths.hostSocket.path, appKey: @escaping () -> SymmetricKey? = { nil },
          bundledBuild: @escaping () -> Int = { HostBuild.id(ofExecutableAt: HostClient.hostExecutable.path) },
          reconnectDelays: [TimeInterval] = [0.2, 0.5, 1, 2, 3, 5], note: @escaping (String) -> Void = { Breadcrumbs.shared.note($0) }) {
         self.socketPath = socketPath
@@ -166,7 +173,7 @@ final class HostClient: ObservableObject {
 
     private func proofRefused(_ reason: String) {
         note("host: proof refused: \(reason)")
-        guard !offeredKeyReset, let key = Self.appKey else { return }
+        guard !offeredKeyReset, let key = proofKey() else { return }
         offeredKeyReset = true
         let live = sessions.filter(\.isLive).count
         let alert = NSAlert()
@@ -202,7 +209,7 @@ final class HostClient: ObservableObject {
         defer { posix_spawn_file_actions_destroy(&actions) }
         // Stdin: the app's key, then nothing (see `HostStart`); the pipe holds it, so it's written before the spawn.
         var keyPipe: [Int32] = [-1, -1]
-        if let key = Self.appKey, pipe(&keyPipe) == 0 {
+        if let key = proofKey(), pipe(&keyPipe) == 0 {
             _ = key.data.withUnsafeBytes { write(keyPipe[1], $0.baseAddress, $0.count) }
             close(keyPipe[1])
             posix_spawn_file_actions_adddup2(&actions, keyPipe[0], 0)

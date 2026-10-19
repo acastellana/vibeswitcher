@@ -444,6 +444,15 @@ It also fails when a run leaves anything in its TMPDIR. Tests put scratch files 
 (`$TMPDIR`, which Foundation's `temporaryDirectory` ignores) and remove them: a suite keeps a `Scratch`
 (`let temp = Scratch()`, then `temp.url("name")`), which removes what its test made when the test ends.
 
+Tests never touch your Keychain. Workers and verifiers run `swift test` with HOME and CFFIXED_USER_HOME
+on a scratch folder, where there's no login keychain, and macOS answers a Keychain call there with a
+"Keychain Not Found" dialog rather than an error. So the app's key store is injected (`AppKeyStore`:
+the app passes `AppProof.KeychainStore()`, tests hold their key in memory), and `KeychainLintTests` fails
+if Keychain code is reachable from a test some other way. The one test of the real Keychain runs in your
+own HOME, only when you ask for it: `VIBESWITCHER_KEYCHAIN_LIVE=1 swift test --filter KeychainLiveTests`.
+It makes an item under a test service of its own (never the app's) and deletes it. The load harness and
+the lead's worker and verifier prompts never set that variable.
+
 Run `./scripts/setup-signing.sh` once: it creates a self-signed signing identity in its own keychain
 file (`~/.vibeswitcher/signing`, your login keychain is untouched) so every rebuild keeps the same code
 identity, and trusts that certificate for code signing (your user only; macOS asks for your password).
