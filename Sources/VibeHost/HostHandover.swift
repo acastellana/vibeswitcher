@@ -144,9 +144,15 @@ public enum HostHandover {
         }
     }
 
+    /// How long the probe may take to answer. On a loaded Mac most of it is the system's check of the new build's first
+    /// exec (amfid, one new binary at a time for the whole Mac), before any of its code runs: on 2026-10-19 amfid
+    /// answered nothing for 108 s at load 200, and the 15 s once given here refused good builds. The sessions carry on
+    /// meanwhile (the probe runs off the server's queue); this only ends a build that hangs.
+    static let probeLimit: TimeInterval = 180
+
     /// Runs `executable --handover-probe path` and waits (up to `timeout`) for it to say it can take over. Blocks: not on
     /// the server's queue.
-    static func probe(_ executable: String, statePath: String, timeout: TimeInterval = 15) throws {
+    static func probe(_ executable: String, statePath: String, timeout: TimeInterval = probeLimit) throws {
         var pipe: [Int32] = [-1, -1]
         guard Darwin.pipe(&pipe) == 0 else { throw Failure.probe("no pipe") }
         defer { Darwin.close(pipe[0]) }
