@@ -147,7 +147,7 @@ struct ProgramStatusInAppTests {
         }
         #expect(state(program(.working)) == RowState(text: "working", since: now, group: .working))
         #expect(state(program(.working, title: "Indexing")) == RowState(text: "Indexing", since: now, group: .working))
-        #expect(state(program(.blocked, kind: "permission")) == RowState(text: "waiting", since: now, group: .needsYou))
+        #expect(state(program(.blocked, kind: "permission")) == RowState(text: "needs you", since: now, group: .needsYou))
         #expect(state(program(.done)) == RowState(text: "done", since: now, group: .ready))
         #expect(state(program(.error)) == RowState(text: "error", since: now, group: .ready))
         #expect(state(program(.idle)) == RowState(text: "idle", since: now, group: .idle))
