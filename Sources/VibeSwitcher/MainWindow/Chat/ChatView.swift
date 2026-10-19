@@ -567,7 +567,7 @@ struct TerminalReplyHint: View {
 /// A question on the session's screen (AskUserQuestion, a permission prompt, a picker), as buttons. What the
 /// screen shows decides the options; the question's own input adds headers and descriptions. One click answers it
 /// in the terminal, the way you would with the keys.
-private struct AnswerCard: View {
+struct AnswerCard: View {
     let menu: ScreenMenu
     /// The AskUserQuestion still waiting, when that's what's on screen.
     let pending: [ChatQuestion]?
