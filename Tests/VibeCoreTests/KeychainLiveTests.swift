@@ -5,7 +5,8 @@ import Testing
 @testable import VibeCore
 
 /// The one test of the real Keychain (`AppProof.KeychainStore`), in your own HOME's login keychain, run only when you
-/// ask for it: `VIBESWITCHER_KEYCHAIN_LIVE=1 swift test --filter KeychainLiveTests`. Every other run skips it: under a
+/// ask for it: `VIBESWITCHER_HOME=$(mktemp -d) VIBESWITCHER_KEYCHAIN_LIVE=1 swift test --filter KeychainLiveTests` (a
+/// scratch VIBESWITCHER_HOME: the tests refuse your own ~/.vibeswitcher). Every other run skips it: under a
 /// scratch HOME (every worker's and verifier's `swift test`, the load harness) there's no login keychain, and macOS
 /// answers a SecItem call for one with a "Keychain Not Found" dialog, not an error. It makes an item of its own
 /// service (never the app's), and deletes it.

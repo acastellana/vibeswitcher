@@ -513,9 +513,23 @@ VibeSwitcher --capture-window /tmp/w.png # debug aid: the running app draws its 
 Requires macOS 14+ and a Swift 6 toolchain (Xcode or just the Command Line Tools).
 
 ```sh
-swift build && swift test      # Swift Testing; works with Command Line Tools only
+scripts/test.sh                # swift build && swift test on a scratch home; works with Command Line Tools only
 ./scripts/build-app.sh --install
 ```
+
+Run the tests with `scripts/test.sh` (it passes its arguments on to `swift test`, e.g. `scripts/test.sh --filter
+HookBoundsTests`). It points HOME, CFFIXED_USER_HOME, VIBESWITCHER_HOME and TMPDIR at a fresh folder under /tmp and
+removes it after, so nothing a test writes reaches your `~/.vibeswitcher`, `~/.claude` or login Keychain. A plain
+`swift test` on your own home refuses to start, with one message and no test run: each test target checks, as it
+loads, that VibeSwitcher's folder isn't your own `~/.vibeswitcher`. To run `swift test` yourself, set
+`VIBESWITCHER_HOME` (the folder VibeSwitcher keeps its files in) or HOME and CFFIXED_USER_HOME (`NSHomeDirectory()`
+follows CFFIXED_USER_HOME, not HOME) to a scratch folder; one anywhere but your own `~/.vibeswitcher` will do, a
+worktree's `.build/scratchhome` included.
+
+VibeSwitcher's folder is `$VIBESWITCHER_HOME` when that's an absolute path, else `$HOME/.vibeswitcher`, else
+`~/.vibeswitcher` (`NSHomeDirectory()`), for the app, the hook and the host alike. Under a normal login that's your
+`~/.vibeswitcher` as ever; with a scratch HOME (a debug run of Claude Code, a debug mode) the hook and the app write
+there instead.
 
 When you add or change a host, timing or concurrency test, run `scripts/test-under-load.sh`: the whole
 suite 3 times at once beside a busy loop per core, as on a Mac running several sessions. It fails naming
@@ -549,7 +563,8 @@ on a scratch folder, where there's no login keychain, and macOS answers a Keycha
 "Keychain Not Found" dialog rather than an error. So the app's key store is injected (`AppKeyStore`:
 the app passes `AppProof.KeychainStore()`, tests hold their key in memory), and `KeychainLintTests` fails
 if Keychain code is reachable from a test some other way. The one test of the real Keychain runs in your
-own HOME, only when you ask for it: `VIBESWITCHER_KEYCHAIN_LIVE=1 swift test --filter KeychainLiveTests`.
+own HOME, only when you ask for it: `VIBESWITCHER_HOME=$(mktemp -d) VIBESWITCHER_KEYCHAIN_LIVE=1 swift test --filter
+KeychainLiveTests` (VIBESWITCHER_HOME keeps the run off your `~/.vibeswitcher`, so the tests' guard lets it start).
 It makes an item under a test service of its own (never the app's) and deletes it. The load harness and
 the lead's worker and verifier prompts never set that variable.
 
