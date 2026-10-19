@@ -5,11 +5,11 @@ import SwiftUI
 import VibeCore
 
 /// Debug aid (`CFFIXED_USER_HOME=<scratch> VibeSwitcher --idle-bench [SECONDS] [--transcript PATH] [--sidebar]
-/// [--churn MINUTES [--churn-speed X]]`): what the app costs while nothing changes. In this process, on a scratch home:
-/// the session store scanning made-up agent sessions (one with a background shell, whose age is in its detail), a
-/// private session host running a few quiet shells, the hang watchdog and the lead controller's timer, and the main
-/// window off screen. Each phase settles, then runs SECONDS (default 20) and prints its CPU, wakeups, how often the
-/// session list was published, memory (resident and phys_footprint, from task_vm_info) and, in debug builds, the
+/// [--churn MINUTES [--churn-speed X] [--dump FOLDER]]`): what the app costs while nothing changes. In this process, on
+/// a scratch home: the session store scanning made-up agent sessions (one with a background shell, whose age is in its
+/// detail), a private session host running a few quiet shells, the hang watchdog and the lead controller's timer, and
+/// the main window off screen. Each phase settles, then runs SECONDS (default 20) and prints its CPU, wakeups, how often
+/// the session list was published, memory (resident and phys_footprint, from task_vm_info) and, in debug builds, the
 /// terminal views and chat models alive: the window on the chat (with `--transcript`, copied into the scratch home), on
 /// a terminal, then closed, then closed with the sidebar docked on screen, drawing the popover's rows (`--sidebar`).
 ///
@@ -19,7 +19,9 @@ import VibeCore
 /// compresses it: a cycle takes 15/X s, so 10 minutes run in 60 s. Then everything churn started has ended, and the
 /// window-closed phase is measured again and compared with the first (`RESULT` lines; the growth by vmmap's region
 /// categories, the top growers first; then what malloc gives back when asked, which the phases after it start from).
-/// Without `--transcript` it writes a made-up one.
+/// Without `--transcript` it writes a made-up one. Every 10 cycles a line gives the footprint and malloc's bytes in use
+/// and held so far. `--dump FOLDER` also writes vmmap, heap and leaks in full (and a memgraph) at both closed snapshots,
+/// as FOLDER/before-* and FOLDER/after-*, to diff what grew.
 enum IdleBench {
     static func run(arguments: [String]) -> Never {
         let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? ""
@@ -35,7 +37,8 @@ enum IdleBench {
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
         VibePaths.ensurePrivateDirectories()
-        let bench = Bench(seconds: seconds, transcript: transcript, sidebar: arguments.contains("--sidebar"), churn: churn)
+        let bench = Bench(seconds: seconds, transcript: transcript, sidebar: arguments.contains("--sidebar"), churn: churn,
+                          dump: value("--dump"))
         bench.start()
         app.run()
         exit(0)
@@ -155,6 +158,8 @@ enum IdleBench {
         let transcriptSource: String?
         let sidebarPhase: Bool
         let churn: Churn?
+        /// `--dump FOLDER`: vmmap, heap and leaks in full at the snapshots before and after churn.
+        let dumpFolder: String?
         let churned: ChurnedAgents
         let started = Date()
         let store: SessionStore
@@ -177,8 +182,9 @@ enum IdleBench {
         /// The window-closed phase before churn.
         var baseline: Snapshot?
 
-        init(seconds: TimeInterval, transcript: String?, sidebar: Bool, churn: Churn?) {
+        init(seconds: TimeInterval, transcript: String?, sidebar: Bool, churn: Churn?, dump: String?) {
             self.seconds = seconds
+            dumpFolder = dump
             transcriptSource = transcript
             sidebarPhase = sidebar
             self.churn = churn
@@ -377,6 +383,7 @@ enum IdleBench {
             guard index < count, let controller = window else {
                 return endChurned { DispatchQueue.main.asyncAfter(deadline: .now() + interval, execute: done) }
             }
+            if index % 10 == 0 { Self.printCurve(index) }
             let chatTTY = churnAgents.last?.tty ?? IdleBench.agents[0].tty
             startAgent(index)
             startShell(index) { [weak self] id in
@@ -403,6 +410,16 @@ enum IdleBench {
         }
 
         private static let churnLive = 3
+
+        /// Growth so far, without vmmap: a rise that levels off is malloc's high water, one that keeps climbing a leak.
+        private static func printCurve(_ cycle: Int) {
+            var stats = malloc_statistics_t()
+            malloc_zone_statistics(nil, &stats)
+            print(String(format: "  cycle %3d  footprint %5.1f MB  malloc in use %5.1f MB, held %5.1f MB  live views %@ chats %@", cycle,
+                         Double(Usage.now().footprint) / 1_048_576, Double(stats.size_in_use) / 1_048_576,
+                         Double(stats.size_allocated) / 1_048_576, Live.views.map(String.init) ?? "n/a", Live.chats.map(String.init) ?? "n/a"))
+            fflush(stdout)
+        }
 
         /// A new shell, and the oldest past `churnLive` ended (its row stays a cycle, then is removed, as when you close it).
         private func startShell(_ index: Int, then shown: @escaping (UUID?) -> Void) {
@@ -484,7 +501,9 @@ enum IdleBench {
             let footprint = Usage.now().footprint
             let (views, chats) = (Live.views, Live.chats)
             let pid = getpid()
+            let dump = dumpFolder.map { ($0 as NSString).appendingPathComponent(baseline == nil ? "before" : "after") }
             DispatchQueue.global().async {
+                if let dump { VMMap.dump(pid: pid, to: dump) }
                 let (regions, allocated) = VMMap.summary(pid: pid)
                 DispatchQueue.main.async {
                     done(Snapshot(footprint: footprint, views: views, chats: chats, regions: regions, mallocAllocated: allocated))
@@ -563,6 +582,21 @@ enum IdleBench {
 
     /// `vmmap -summary` of a process: its region categories' dirty + swapped bytes, and the malloc zones' bytes allocated.
     enum VMMap {
+        /// `--dump FOLDER`: vmmap, heap and leaks of the process in full, as PREFIX-vmmap.txt and so on, to diff the
+        /// two snapshots (run with MallocStackLogging=lite for leaks' stacks).
+        static func dump(pid: Int32, to prefix: String) {
+            for (tool, arguments) in [("vmmap", [String(pid)]), ("heap", ["-s", String(pid)]), ("leaks", [String(pid), "--outputGraph=\(prefix).memgraph"])] {
+                let process = Process()
+                process.executableURL = URL(fileURLWithPath: "/usr/bin/\(tool)")
+                process.arguments = arguments
+                FileManager.default.createFile(atPath: "\(prefix)-\(tool).txt", contents: nil)
+                process.standardOutput = FileHandle(forWritingAtPath: "\(prefix)-\(tool).txt")
+                process.standardError = FileHandle.nullDevice
+                guard (try? process.run()) != nil else { continue }
+                process.waitUntilExit()
+            }
+        }
+
         static func summary(pid: Int32) -> (regions: [String: Double], mallocAllocated: Double?) {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/vmmap")
