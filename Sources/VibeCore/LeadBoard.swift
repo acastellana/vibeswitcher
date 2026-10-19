@@ -440,9 +440,12 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
         /// Deliberately not merged (a decision, a note or the user holds it back, e.g. a prototype the user hasn't
         /// looked at): its work stays, merge refuses it, and nothing counts it as failed.
         case kept
+        /// Folded into another task (`foldedInto`), which carries its work: finished like a merged task, counted with
+        /// the merged ones, never as failed or blocked; nothing more starts, audits or merges on it.
+        case folded
 
         /// The order the board lists the states in: what needs the lead first. Holds every case (a test checks).
-        public static let attentionOrder: [Status] = [.running, .review, .blocked, .failed, .kept, .planned, .done]
+        public static let attentionOrder: [Status] = [.running, .review, .blocked, .failed, .kept, .planned, .done, .folded]
         /// Where the state sits in `attentionOrder`.
         public var attentionRank: Int { Self.attentionOrder.firstIndex(of: self) ?? Self.attentionOrder.count }
     }
@@ -489,6 +492,8 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var stall: LeadStall?
     /// Why the lead keeps it unmerged (status kept).
     public var keptBecause: String?
+    /// The slug of the task it's folded into (status folded).
+    public var foldedInto: String?
     /// Its audits' findings and rounds, as the vault last had them (for showing; merge goes by the vault's).
     public var audits: LeadAuditLedger?
     /// The finders its audit runs, while it runs more than one (for showing; the vault holds their reports).

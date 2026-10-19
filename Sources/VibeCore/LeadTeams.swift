@@ -37,9 +37,9 @@ public enum LeadTeams {
         return path[range.upperBound...].split(separator: "/").first.map(String.init)
     }
 
-    /// Merged, or cleaned up without merging (abandoned): nothing more happens on the task.
+    /// Merged, folded into another task, or cleaned up without merging (abandoned): nothing more happens on the task.
     public static func isFinished(_ task: LeadTask) -> Bool {
-        task.status == .done || (task.status == .failed && task.worktree == nil)
+        task.status == .done || task.status == .folded || (task.status == .failed && task.worktree == nil)
     }
 
     /// The ended workers and verifiers of `root`'s finished tasks: the lead's history, not the list's, so the app

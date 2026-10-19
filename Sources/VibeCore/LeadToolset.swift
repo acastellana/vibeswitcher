@@ -285,14 +285,15 @@ public final class LeadToolset: MCPToolset {
                             properties: ["task": task, "id": P(type: "string", description: "The finding's id (F2), or <task>:<id>"),
                                          "reason": P(type: "string", description: "Why, in one line (it's kept with the finding)")],
                             required: ["task", "id", "reason"]),
-                MCPToolInfo(name: "update_task", description: "Change a task: its contract, or its state (planned, blocked, failed, or kept: deliberately not merged, which merge then refuses).",
+                MCPToolInfo(name: "update_task", description: "Change a task: its contract, or its state (planned, blocked, failed; kept: deliberately not merged, which merge then refuses; or folded into another task that carries its work, for a task overtaken or batched into another: it counts with the merged ones, never as failed, and cleanup removes its worktree and branch).",
                             properties: ["task": task, "title": P(type: "string", description: "New title"), "goal": P(type: "string", description: "New goal"),
                                          "acceptance": P(type: "array", description: "New checks (replaces them all)", items: "string"),
                                          "boundaries": P(type: "array", description: "New boundaries (replaces them all)", items: "string"),
                                          "context": P(type: "string", description: "Replaces the whole context; to add to it, use append_context"),
                                          "append_context": P(type: "string", description: "Added at the end of the context, which keeps what it had"),
                                          "status": P(type: "string", description: "New state", options: Self.settableStates.map(\.rawValue)),
-                                         "reason": P(type: "string", description: "With status kept: what holds it back (a decision, the user's word); merge names it when it refuses")],
+                                         "reason": P(type: "string", description: "With status kept: what holds it back (a decision, the user's word); merge names it when it refuses"),
+                                         "into": P(type: "string", description: "With status folded: the task (its slug) that carries this one's work")],
                             required: ["task"]),
                 MCPToolInfo(name: "start_worker", description: "Start a worker on a task: a fresh Claude session in its own worktree on branch agent/<slug>, given the contract. A worktree stopped partway through a rebase or merge is described, not started; recover aborts it first. One left on another branch or a detached HEAD is put back on agent/<slug>, its uncommitted files carried along.",
                             properties: ["task": task,
@@ -448,7 +449,7 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// The states update_task sets (the rest come from the tools that do the work: start_worker, audit, merge).
-    static let settableStates: [LeadTask.Status] = [.planned, .blocked, .failed, .kept]
+    static let settableStates: [LeadTask.Status] = [.planned, .blocked, .failed, .kept, .folded]
 
     // MARK: Lead
 
@@ -561,7 +562,7 @@ public final class LeadToolset: MCPToolset {
         + "evidence: what you ran and what it gave, or what the code at file:line does. status: open; in a re-audit, each open finding you were given "
         + "by its id: fixed, open (still), or dismissed with a reason. id: leave it out for a new finding. Empty or left out: you found nothing."
 
-    static let updateKeys: Set<String> = ["task", "title", "goal", "acceptance", "boundaries", "context", "append_context", "status", "reason"]
+    static let updateKeys: Set<String> = ["task", "title", "goal", "acceptance", "boundaries", "context", "append_context", "status", "reason", "into"]
 
     private func updateTask(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
@@ -581,6 +582,15 @@ public final class LeadToolset: MCPToolset {
         if status == .kept, reason.isEmpty {
             throw Problem(text: "Say what keeps it from merging (reason): a decision, the user's word. merge names it when it refuses. Nothing was changed.")
         }
+        let into = (arguments["into"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if status == .folded {
+            guard !into.isEmpty else {
+                throw Problem(text: "Say which task carries its work (into: that task's slug). Nothing was changed.")
+            }
+            try checkFoldable(slug)
+        } else if !into.isEmpty {
+            throw Problem(text: "into goes with status folded (the task that carries this one's work). Nothing was changed.")
+        }
         let appended = (arguments["append_context"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let note = appended.isEmpty ? nil : leadNote(.context, appended, on: slug)
         var changed: [String] = []
@@ -591,6 +601,20 @@ public final class LeadToolset: MCPToolset {
             }
             if !reason.isEmpty, (status ?? board.tasks[index].status) != .kept {
                 throw BoardError(text: "reason goes with status kept (what holds the task back); \(slug) isn't being kept. Nothing was changed.")
+            }
+            var target: LeadTask?
+            if status == .folded {
+                guard let found = board.task(into) else {
+                    throw BoardError(text: "No task \(into) on the board to fold \(slug) into. Nothing was changed.")
+                }
+                guard found.id != board.tasks[index].id else {
+                    throw BoardError(text: "\(slug) can't be folded into itself: name the task that carries its work. Nothing was changed.")
+                }
+                // One step: a task folded into a folded one would point at a task that carries nothing.
+                if found.status == .folded {
+                    throw BoardError(text: "\(found.slug) is itself folded into \(found.foldedInto ?? "another task"); fold \(slug) into that one. Nothing was changed.")
+                }
+                target = found
             }
             if let title = arguments["title"] as? String { board.tasks[index].title = title; changed.append("title") }
             if let goal = arguments["goal"] as? String { board.tasks[index].contract.goal = goal; changed.append("goal") }
@@ -606,18 +630,41 @@ public final class LeadToolset: MCPToolset {
             if let status {
                 board.tasks[index].status = status
                 board.tasks[index].keptBecause = status == .kept ? reason : nil
-                changed.append("state \(status.rawValue)")
+                board.tasks[index].foldedInto = target?.slug
+                changed.append("state \(status.rawValue)" + (target.map { " into \($0.slug)" } ?? ""))
             } else if !reason.isEmpty {
                 board.tasks[index].keptBecause = reason
                 changed.append("why it's kept")
             }
         }
         if status == .kept { try? store.appendProgress("Kept \(slug) unmerged: \(reason)") }
+        if status == .folded, let target = store.load().task(slug)?.foldedInto {
+            try? store.appendProgress("Folded \(slug) into \(target): that task carries its work")
+        }
         // Planned again: re-planned, so its failed audit rounds count from here (its findings stay).
         if status == .planned, let ledger = vault.audits(root: root, task: slug), ledger.failedRounds > 0 {
             if let replanned = try? vault.replan(root: root, task: slug) { mirror(replanned, on: slug) }
         }
         return MCPToolResult(text: changed.isEmpty ? "Nothing to change on \(slug)." : "Updated \(slug): \(changed.joined(separator: ", ")).")
+    }
+
+    /// A task may be folded once nothing works on it: refused while its worker runs or a merge of it is under way.
+    private func checkFoldable(_ slug: String) throws {
+        guard let task = store.load().task(slug) else { return }
+        let sessions = try hostSessions("whether \(slug)'s worker still runs isn't known; it wasn't folded")
+        if let worker = task.worker, sessions.contains(where: { $0.id == worker && $0.live }) {
+            throw Problem(text: "\(slug)'s worker is still running: stop_worker first, then fold it. Nothing was changed.")
+        }
+        guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/merge-\(slug).lock")) else {
+            throw Problem(text: "A merge of \(slug) is under way: wait for its result before folding it. Nothing was changed.")
+        }
+        lock.release()
+    }
+
+    /// The refusal for a folded task: nothing more happens on it (`what`: what was refused).
+    private static func foldedRefusal(_ task: LeadTask, _ what: String) -> Problem {
+        let target = task.foldedInto ?? "another task"
+        return Problem(text: "\(what): \(task.slug) is folded into \(target), which carries its work. Work on \(target); if \(task.slug) has to go on by itself after all, update_task(\(task.slug), status: planned) first.")
     }
 
     /// One start at a time, in this server and any other: each counts the workers running and starts its own before
@@ -645,6 +692,7 @@ public final class LeadToolset: MCPToolset {
     private func startWorkerAlone(_ slug: String, recover: Bool) throws -> MCPToolResult {
         let board = try store.read()
         guard let task = board.task(slug) else { throw Problem(text: "No task \(slug).") }
+        if task.status == .folded { throw Self.foldedRefusal(task, "No worker started") }
         // One worker per worktree: two sessions editing the same files would undo each other.
         let sessions = try hostSessions("whether \(slug)'s worker still runs isn't known; no worker was started")
         if let worker = task.worker, sessions.contains(where: { $0.id == worker && $0.live }) {
@@ -852,6 +900,7 @@ public final class LeadToolset: MCPToolset {
     }
 
     private func audit(_ slug: String) throws -> MCPToolResult {
+        if let task = store.load().task(slug), task.status == .folded { throw Self.foldedRefusal(task, "Not audited") }
         // A worktree that left its branch goes back on it first (see putBackForAudit).
         let putBack = try store.load().task(slug).map { try putBackForAudit(slug, $0) } ?? ""
         // The task's own worktree (not whatever folder the board names) on the commit the branch is at now: that
@@ -902,7 +951,7 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].verifier = session
             board.tasks[index].panel = panel
             // A kept task stays kept through a new audit: what holds it back hasn't changed.
-            if board.tasks[index].status != .kept { board.tasks[index].status = .review }
+            if ![.kept, .folded].contains(board.tasks[index].status) { board.tasks[index].status = .review }
             board.tasks[index].evidence = nil
         }
         let flagged = config.isEmpty ? "" : " The branch changes Claude's settings or instructions (\(config.prefix(5).joined(separator: ", "))\(config.count > 5 ? ", …" : "")): the verifier runs with project settings off, and VibeSwitcher didn't answer its trust question; tell the user it waits for them to decide, and have the verifier look hard at those files."
@@ -1157,6 +1206,7 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "\(slug) is already merged" + (task.merged.map { " at \($0.commit.prefix(8)) (\(LeadBoard.clock($0.at)))" } ?? "")
                           + ". Nothing to do but cleanup, if it isn't done yet.")
         }
+        if task.status == .folded { throw Self.foldedRefusal(task, "Not merged") }
         // Held back on purpose (a decision, the user's word): only the lead setting it back lets it merge.
         if task.status == .kept {
             throw Problem(text: "Not merged: \(slug) is kept unmerged (\(task.keptBecause ?? "no reason recorded")). If that no longer holds (the user said so, a newer decision), update_task(\(slug), status: planned) first, and say why with record_decision.")
@@ -1359,7 +1409,8 @@ public final class LeadToolset: MCPToolset {
     private func cleanup(_ slug: String, force: Bool) throws -> MCPToolResult {
         let board = store.load()
         guard let task = board.task(slug) else { throw Problem(text: "No task \(slug).") }
-        guard task.status == .done || force else {
+        // A folded task's work is carried by another task: it goes like an abandoned one, without force.
+        guard [.done, .folded].contains(task.status) || force else {
             throw Problem(text: "\(slug) isn't merged. Use force: true to abandon its work.")
         }
         // Only the ones still running are ended: a session that's gone (lost with a replaced host) has nothing to kill.
@@ -1393,7 +1444,7 @@ public final class LeadToolset: MCPToolset {
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].worktree = nil
-            if board.tasks[index].status != .done { board.tasks[index].status = .failed }
+            if ![.done, .folded].contains(board.tasks[index].status) { board.tasks[index].status = .failed }
         }
         // Its workers and verifiers, this one and any before it, are history now: off the session list.
         for session in (try? listed()) ?? [] where !session.live && Self.isTeamSession(session, in: folder) {
@@ -1496,7 +1547,7 @@ public final class LeadToolset: MCPToolset {
         guard let sessions = try? listed() else { return 0 }
         let live = Set(sessions.filter(\.live).map { ($0.cwd as NSString).standardizingPath })
         var freed: Int64 = 0
-        for task in board.tasks where task.slug != slug && task.worktree == nil && [.done, .failed].contains(task.status) {
+        for task in board.tasks where task.slug != slug && task.worktree == nil && [.done, .failed, .folded].contains(task.status) {
             let worktree = Worktrees.path(root: root, slug: task.slug)
             guard !FileManager.default.fileExists(atPath: worktree), !live.contains((worktree as NSString).standardizingPath) else { continue }
             freed += ClaudeScratch.folders(for: worktree, in: scratchRoot).reduce(0) { $0 + removeFolder($1.path) }
@@ -1829,7 +1880,8 @@ public final class LeadToolset: MCPToolset {
         let blocking = standing == nil ? [] : vault.audits(root: root, task: slug)?.blocking ?? []
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
-            if board.tasks[index].status != .kept {
+            // Kept or folded by the lead: a late report doesn't change that.
+            if ![.kept, .folded].contains(board.tasks[index].status) {
                 board.tasks[index].status = !done ? .blocked : standing.map { $0.passes && blocking.isEmpty ? .review : .failed } ?? .review
             }
             if let standing {
@@ -1940,7 +1992,7 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].audits = ledger
             if let size = board.tasks[index].panel?.size { board.tasks[index].panel?.reported = Array(1...size) }
             // A pass that leaves an Important finding open isn't mergeable yet: the lead decides, as on a failure.
-            if board.tasks[index].status != .kept { board.tasks[index].status = evidence.passes && blocking.isEmpty ? .review : .failed }
+            if ![.kept, .folded].contains(board.tasks[index].status) { board.tasks[index].status = evidence.passes && blocking.isEmpty ? .review : .failed }
             if !evidence.passes {
                 board.tasks[index].setback = LeadSetback(stage: .review, reason: evidence.summary.isEmpty ? "The audit didn't pass (\(evidence.completion.rawValue), \(evidence.integrity.rawValue))." : evidence.summary,
                                                          evidence: evidence)
@@ -2085,8 +2137,8 @@ public final class LeadToolset: MCPToolset {
             var tasks = board.tasks.filter { $0.status == state && !endedIDs.contains($0.id) }
             guard !tasks.isEmpty else { continue }
             switch state {
-            case .done:
-                lines.append("\ndone (\(tasks.count)): " + Self.clip(tasks.map(\.slug).joined(separator: ", "), 600))
+            case .done, .folded:
+                // Merged and folded tasks are said together below: a folded task's work merges with another task.
                 continue
             case .failed:
                 let abandoned = tasks.filter { $0.worktree == nil && $0.worker != nil }
@@ -2105,6 +2157,7 @@ public final class LeadToolset: MCPToolset {
                 lines.append(Self.clip("- … and \(tasks.count - shown.count) more: " + tasks.dropFirst(shown.count).map(\.slug).joined(separator: ", "), 600))
             }
         }
+        if let merged = Self.mergedLine(board.tasks.filter { !endedIDs.contains($0.id) }) { lines.append("\n" + merged) }
         if !ended.isEmpty {
             lines.append("\nworker ended (\(ended.count)), not running:")
             lines += ended.prefix(Self.statusTasks).map { task, who in
@@ -2177,11 +2230,26 @@ public final class LeadToolset: MCPToolset {
         return found.sorted { $0.key < $1.key }.map { (slug: $0.key, commit: $0.value) }
     }
 
+    /// "done (5, 2 folded): add-a, add-b, add-c; folded: old-a → add-a, old-b → add-c": the merged tasks and those folded
+    /// into another, counted together (bounded); nil when there are none.
+    static func mergedLine(_ tasks: [LeadTask]) -> String? {
+        let done = tasks.filter { $0.status == .done }
+        let folded = tasks.filter { $0.status == .folded }
+        guard !done.isEmpty || !folded.isEmpty else { return nil }
+        let count = "\(done.count + folded.count)" + (folded.isEmpty ? "" : ", \(folded.count) folded")
+        var names = done.map(\.slug).joined(separator: ", ")
+        if !folded.isEmpty {
+            names += (done.isEmpty ? "" : "; ") + "folded: " + folded.map { "\($0.slug) → \($0.foldedInto ?? "?")" }.joined(separator: ", ")
+        }
+        return "done (\(count)): " + clip(names, 600)
+    }
+
     /// A task in one line (bounded): its title, what its worker does, its audit, rework, why it's kept, its last
     /// progress. `sessions` nil: the host can't be read.
     private func taskLine(_ task: LeadTask, _ sessions: [String: LeadSessionInfo]?) -> String {
         var line = "- \(task.slug): \(Self.clip(task.title, 60))"
         if task.status == .kept { line += " — kept: \(Self.clip(task.keptBecause ?? "no reason recorded", 80))" }
+        if task.status == .folded { line += " — folded into \(task.foldedInto ?? "another task")" }
         if let audits = task.audits, audits.reconsider, task.status != .done {
             line += " — reconsider the approach (\(audits.reconsiderCause))"
         }
@@ -2368,8 +2436,12 @@ public final class LeadToolset: MCPToolset {
             return lines.joined(separator: "\n")
         }
         var counts: [LeadTask.Status: Int] = [:]
-        for task in board.tasks { counts[task.status, default: 0] += 1 }
-        let tally = LeadTask.Status.allCases.compactMap { state in counts[state].map { "\($0) \(state.rawValue)" } }.joined(separator: ", ")
+        // Folded tasks count with the merged ones: "12 done (3 folded)".
+        for task in board.tasks { counts[task.status == .folded ? .done : task.status, default: 0] += 1 }
+        let folded = board.tasks.filter { $0.status == .folded }.count
+        let tally = LeadTask.Status.allCases.compactMap { state in
+            counts[state].map { "\($0) \(state.rawValue)" + (state == .done && folded > 0 ? " (\(folded) folded)" : "") }
+        }.joined(separator: ", ")
         var lines = ["Board of \(project) (base \(workflow.base)): \(board.tasks.count) task(s)\(tally.isEmpty ? "" : ": \(tally)"). board(task) shows one in full, with its score."]
         let scorecard = LeadScorecard(board)
         if scorecard.merged > 0 { lines.append(scorecard.line) }

@@ -60,12 +60,14 @@ public struct LeadTaskScore: Codable, Equatable, Sendable {
         // Merged: its last audit passed it (merge takes nothing less). Else passed once its last audit passed and no
         // Important finding is open.
         let passed = task.merged != nil || (audits?.passed == true && audits?.blocking.isEmpty == true)
+        // Folded into another task: its work merges there, so nothing here passes or merges (with tests or without).
+        let folded = task.status == .folded
         let asked = questions.filter { $0.task == task.slug }
-        self.init(roundsToPass: passed && rounds > 0 ? rounds : nil, rounds: rounds,
+        self.init(roundsToPass: passed && rounds > 0 && !folded ? rounds : nil, rounds: rounds,
                   importantFindings: audits?.findings.filter { $0.severity == .important && $0.status != .unconfirmed }.count ?? 0,
                   questions: asked.count, answers: asked.filter { $0.answer != nil }.count,
                   waitingOnUser: asked.reduce(0) { $0 + $1.waitingOnUser(now: now) },
-                  mergedWithoutTests: task.merged.map { !$0.tested }, revertedBy: task.merged?.revertedBy, asOf: now)
+                  mergedWithoutTests: folded ? nil : task.merged.map { !$0.tested }, revertedBy: folded ? nil : task.merged?.revertedBy, asOf: now)
     }
 }
 
@@ -89,7 +91,8 @@ extension LeadBoard {
 
 /// The lead's scorecard over the board: mean audit rounds to pass and the share passing on the first audit (of the
 /// merged tasks whose audits were counted), the user's minutes per merged task (every question's wait on the user,
-/// about a task or not, over the merged tasks), merges the base later reverted, and merges without tests. The Team
+/// about a task or not, over the merged tasks), merges the base later reverted, and merges without tests; tasks folded
+/// into another count nowhere in it. The Team
 /// tab shows it; the lead's board tool says it in a line.
 public struct LeadScorecard: Equatable, Sendable {
     public var merged: Int
@@ -105,7 +108,8 @@ public struct LeadScorecard: Equatable, Sendable {
     public var mergedWithoutTests: Int
 
     public init(_ board: LeadBoard, now: Double = Date().timeIntervalSince1970) {
-        let merged = board.tasks.filter { $0.merged != nil }
+        // A folded task isn't counted: its work merged with the task that carried it (that one's rounds count).
+        let merged = board.tasks.filter { $0.merged != nil && $0.status != .folded }
         let scores = merged.map { LeadTaskScore($0, questions: board.questions, now: now) }
         let rounds = scores.compactMap(\.roundsToPass)
         self.merged = merged.count
