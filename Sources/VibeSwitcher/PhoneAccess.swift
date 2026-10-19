@@ -80,6 +80,9 @@ final class PhoneAccess: ObservableObject {
     private var failedAuth = FailureThrottle()
     /// Whether the Mac's screen is locked; replaceable so the lock rule can be exercised without locking.
     var screenLocked: () -> Bool = { RemoteInput.isScreenLocked }
+    /// A Terminal tab's screen, read through the bridge's own queue (nil: couldn't be read); called off the main thread
+    /// only, so a slow or hung read holds up the request that asked, never the window. Replaceable for tests.
+    var readTerminalScreen: (String) -> String? = { tty in TerminalBridge.screens(for: [tty])[tty] }
     private lazy var previews = DevPreviews(control: control)
     /// Reading Chrome's tabs: its own queue, so a slow Chrome (or a pending Automation prompt) never holds
     /// up Terminal screen reads.
@@ -563,8 +566,8 @@ final class PhoneAccess: ObservableObject {
         if let hostID = session.hostID, let hostClient {
             hostClient.screen(hostID) { raw in self.reads.async { completion(raw) } }
         } else {
-            let tty = session.tty
-            reads.async { completion(TerminalBridge.screens(for: [tty])[tty]) }
+            let tty = session.tty, readTab = readTerminalScreen
+            reads.async { completion(readTab(tty)) }
         }
     }
 
@@ -617,9 +620,9 @@ final class PhoneAccess: ObservableObject {
         if let hostID = session.hostID, let hostClient {
             hostClient.screen(hostID) { raw in self.reads.async { finish(raw) } }
         } else {
-            reads.async { finish(TerminalBridge.screens(for: [tty])[tty]) }
+            let readTab = readTerminalScreen
+            reads.async { finish(readTab(tty)) }
         }
-
     }
 
     /// The tab's scrollback above the visible screen, a page at a time (the phone prepends pages as you
@@ -959,6 +962,7 @@ final class PhoneAccess: ObservableObject {
             return
         }
 
+        let readTab = readTerminalScreen
         work.async {
             // The same checks as a typed reply, right before each key (after any jump in progress).
             let stillAllowed = {
@@ -967,7 +971,10 @@ final class PhoneAccess: ObservableObject {
                         && self.store.sessions.first(where: { $0.tty == tty })?.identity == sid
                 }
             }
-            let tap = DispatchQueue.main.sync { decide(TerminalBridge.screens(for: [tty])[tty]) }
+            // Read here, not on the main thread: a slow or hung Terminal read holds up this tap, never the window.
+            // The main thread is asked only for the store's state, with the screen already read.
+            let raw = readTab(tty)
+            let tap = DispatchQueue.main.sync { decide(raw) }
             let writes: [HostInput.Write], label: String
             switch tap {
             case .refuse(let refusal): return DispatchQueue.main.async { respond(refusal) }
@@ -980,7 +987,7 @@ final class PhoneAccess: ObservableObject {
                 if position > 0, position == writes.count - 1 {
                     // Before Enter: the cursor is on the option tapped, and the question is still that one.
                     usleep(useconds_t(max(write.delay, 0.08) * 1_000_000))
-                    let menu = TerminalBridge.screens(for: [tty])[tty].flatMap { PhoneMenu.detect(screen: $0, needsInput: true) }
+                    let menu = readTab(tty).flatMap { PhoneMenu.detect(screen: $0, needsInput: true) }
                     guard let menu, PhoneMenu.fingerprint(menu, sid: sid) == fingerprint, menu.selected == index else {
                         moved = true
                         break
