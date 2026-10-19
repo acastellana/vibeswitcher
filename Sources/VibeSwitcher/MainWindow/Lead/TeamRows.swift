@@ -31,7 +31,7 @@ struct TeamRow: Identifiable, Equatable {
 
     /// The status mark: each has its own color and its own shape, so it reads without color too.
     enum Mark: CaseIterable {
-        case needsYou, failed, blocked, stalled, ended, working, rework, review, merge, queued, merged, kept, abandoned
+        case needsYou, failed, blocked, stalled, ended, working, rework, review, merge, queued, merged, folded, kept, abandoned
 
         var symbol: String {
             switch self {
@@ -46,6 +46,7 @@ struct TeamRow: Identifiable, Equatable {
             case .merge: return "checkmark.diamond.fill"
             case .queued: return "circle"
             case .merged: return "checkmark.circle.fill"
+            case .folded: return "arrow.turn.down.right"
             case .kept: return "archivebox.fill"
             case .abandoned: return "minus.circle"
             }
@@ -59,7 +60,7 @@ struct TeamRow: Identifiable, Equatable {
     var group: Group
     var mark: Mark
     /// In words: "Working", "Rework 1", "In review", "Ready to merge", "Needs you", "Failed", "Blocked", "Stalled",
-    /// "Queued", "Merged", "Abandoned".
+    /// "Queued", "Merged", "Folded", "Abandoned".
     var state: String
     /// When the current stage began; nil when there's no clock to show (or nothing says when it began).
     var since: Date?
@@ -71,9 +72,17 @@ struct TeamRow: Identifiable, Equatable {
     var problem: String?
     /// The session whose agent is at work on it now: the worker, or the verifier in review.
     var agent: String?
+    /// The task it's folded into (status folded): the row links to it. Nil when that task isn't on the board.
+    var foldedInto: LeadTask?
 
     /// It has an agent at work: the line under it says what that agent is doing.
     var isLive: Bool { (group == .working || group == .review) && mark != .merge }
+
+    /// "Folded into <title>": the dim line of a folded task, its target's title a link.
+    var foldedText: String? {
+        guard mark == .folded else { return nil }
+        return "Folded into " + (foldedInto?.title ?? task.foldedInto ?? "another task")
+    }
 
     /// "Working 12m", "Rework 1 · 22m", "In review 3m", "Needs you", "Queued".
     func stateText(now: Date) -> String {
@@ -86,6 +95,7 @@ struct TeamRow: Identifiable, Equatable {
     /// the latest checkpoint, else the live activity); for a red one, what it asks or why.
     func line(summary: String?) -> String? {
         if mark.isRed || mark == .blocked || mark == .kept { return problem }
+        if let foldedText { return foldedText }
         guard isLive else { return nil }
         return summary ?? checkpoint?.text ?? activity
     }
@@ -145,7 +155,7 @@ enum TeamRows {
     /// them then is gone (a replaced host takes its sessions with it).
     static func rows(_ board: LeadBoard, seen: [String: MemberSeen]) -> [TeamRow] {
         let position = Dictionary(board.tasks.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
-        return board.tasks.map { row($0, seen: seen, listed: !seen.isEmpty) }.sorted { a, b in
+        return board.tasks.map { row($0, seen: seen, listed: !seen.isEmpty, board: board) }.sorted { a, b in
             if a.group != b.group { return a.group < b.group }
             switch a.group {
             case .needsYou:
@@ -170,8 +180,8 @@ enum TeamRows {
     }
 
     /// One task's row. `listed`: `seen` holds every session the host has, so a worker or verifier missing from it is
-    /// gone (false: nothing is known of the missing ones).
-    static func row(_ task: LeadTask, seen: [String: MemberSeen], listed: Bool = false) -> TeamRow {
+    /// gone (false: nothing is known of the missing ones). `board`: where a folded task's target is found.
+    static func row(_ task: LeadTask, seen: [String: MemberSeen], listed: Bool = false, board: LeadBoard? = nil) -> TeamRow {
         let worker = task.worker.flatMap { seen[$0] }
         // With several finders, the first that hasn't submitted (one that has may end while the others work).
         let awaited = task.awaitedVerifier { seen[$0].map { !$0.live } ?? listed }
@@ -189,8 +199,8 @@ enum TeamRows {
             row.since = since
         }
 
-        // A session waiting on an answer needs you, whatever the board says.
-        if task.status != .done, let worker, worker.needsYou {
+        // A session waiting on an answer needs you, whatever the board says (a finished task's is history).
+        if ![.done, .folded].contains(task.status), let worker, worker.needsYou {
             red(.needsYou, StateWord.needsYou.label, worker.detail.flatMap { $0.isEmpty ? nil : $0 } ?? "The worker is waiting for an answer.", since: nil)
             row.agent = task.worker
             return row
@@ -213,6 +223,12 @@ enum TeamRows {
             row.group = .finished
             row.mark = .merged
             row.state = "Merged"
+        case .folded:
+            // Its work merges with the task it's folded into: finished with the merged ones, never failed.
+            row.group = .finished
+            row.mark = .folded
+            row.state = "Folded"
+            row.foldedInto = task.foldedInto.flatMap { board?.task($0) }
         case .failed where task.worktree == nil && task.worker != nil:
             // Cleaned up without merging.
             row.group = .finished
@@ -306,12 +322,15 @@ enum TeamRows {
         return parts.isEmpty ? "team: none running" : "team: " + parts.joined(separator: " · ")
     }
 
-    /// "Merged (4)", "Merged (4) · Kept (1) · Abandoned (1)".
+    /// "Merged (4)", "Merged (44, 3 folded) · Kept (1) · Abandoned (1)": a task folded into another counts with the
+    /// merged ones (its work merges there), the number saying how many of them were folded.
     static func finishedTitle(_ finished: [TeamRow]) -> String {
         let merged = finished.filter { $0.mark == .merged }.count
+        let folded = finished.filter { $0.mark == .folded }.count
         let kept = finished.filter { $0.mark == .kept }.count
-        let abandoned = finished.count - merged - kept
-        return "Merged (\(merged))" + (kept > 0 ? " · Kept (\(kept))" : "") + (abandoned > 0 ? " · Abandoned (\(abandoned))" : "")
+        let abandoned = finished.count - merged - folded - kept
+        return "Merged (\(merged + folded)\(folded > 0 ? ", \(folded) folded" : ""))" + (kept > 0 ? " · Kept (\(kept))" : "")
+            + (abandoned > 0 ? " · Abandoned (\(abandoned))" : "")
     }
 }
 

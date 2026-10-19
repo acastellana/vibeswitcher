@@ -105,7 +105,13 @@ workers start from it. Then the lead
 removes the worktree and branch, and tells you what landed in a few lines. Before merging it checks that nothing
 holds the task back (a recorded decision, the task's notes, your word, e.g. "prototype: never merge until I've
 looked"): such a task it sets to **kept** with the reason, which keeps its branch and worktree, and `merge` refuses a
-kept task, naming why, until the lead sets it back. A new lead reads `decisions.md` and `progress.md`, not just the
+kept task, naming why, until the lead sets it back. A task that won't merge by itself is never marked failed for
+it: overtaken or batched into another (that task carries its work), the lead sets it to **folded** into that task
+(`update_task(task, status: folded, into: other)`, refused while its worker runs or a merge of it is under way, and for
+an unknown task or itself); it then counts with the merged ones, reads "Folded into <title>" with a link to that task,
+never counts as failed or blocked or in the scorecard, `start_worker`, `audit` and `merge` refuse it naming that task,
+and `cleanup` removes its worktree and branch, keeping the record. A task nothing will carry is abandoned instead:
+`cleanup(force: true)` discards its work. A new lead reads `decisions.md` and `progress.md`, not just the
 board, before it acts. Those two logs live in the repository, in `records_dir:` (`docs/lead` by default; empty keeps
 them in `.vibeswitcher`, uncommitted, as before), so the plan's reasoning survives a deleted `.vibeswitcher`, another
 Mac or a new lead; the board stays local. The lead can't commit, so its tool server does, to the lead's branch: after
@@ -152,7 +158,7 @@ out over the next minute and folds into "Earlier decisions (n)" (with Reduce Mot
 whole decision and why. Then each task in one line, a status mark with its own color and shape, the title and its
 state with how long it's been there ("Working 12m", "Rework 1 · 22m", "In review 3m", "Needs you", "Queued"), counted
 from when that stage began; ordered by what needs you, then work under way, review, the queue in planned order, and
-the merged and kept ones folded into "Merged (n) · Kept (k)". A task whose worker or verifier session is gone (a
+the merged, folded and kept ones folded into "Merged (n, f folded) · Kept (k)". A task whose worker or verifier session is gone (a
 replaced session host takes its sessions with it) or ended without a word reads "Worker ended", not working. Under each task at work, one dim line says in plain words what its agent is
 doing, written by a small model through headless Claude Code (`claude -p` with haiku and no tools) from the task's
 title, its checkpoints (workers note milestones with a `progress` tool) and its agent's last steps, at most every three

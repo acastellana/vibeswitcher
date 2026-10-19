@@ -8,7 +8,7 @@ extension TeamRow.Mark {
         case .blocked: return .purple
         case .working, .rework: return .orange
         case .review: return .blue
-        case .merge, .merged: return .green
+        case .merge, .merged, .folded: return .green
         case .kept: return .teal
         case .queued, .abandoned: return .secondary
         }
@@ -29,7 +29,8 @@ struct TeamMark: View {
 }
 
 /// A task in one line: its mark, its title, its state and time; under it, dim, what its agent is doing (or what it
-/// asks, or why it's red). Clicking it shows its details.
+/// asks, or why it's red; for a folded task, the task it's folded into, a link that opens that task's row). Clicking it
+/// shows its details.
 struct TeamRowView: View {
     let row: TeamRow
     let now: Date
@@ -37,6 +38,8 @@ struct TeamRowView: View {
     let isOpen: Bool
     let canOpen: (String) -> Bool
     let open: (String) -> Void
+    /// Opens another task's row (its id): a folded task's link.
+    var openTask: (String) -> Void = { _ in }
     let toggle: () -> Void
 
     var body: some View {
@@ -60,7 +63,13 @@ struct TeamRowView: View {
                 Text(row.stateText(now: now)).font(.system(size: 11, weight: .medium).monospacedDigit())
                     .foregroundStyle(row.mark.isRed ? Color.red : Color.secondary).lineLimit(1).fixedSize()
             }
-            if let line = row.line(summary: summary) {
+            if let target = row.foldedInto, let line = row.foldedText {
+                Button { openTask(target.id) } label: {
+                    Text(line).font(.system(size: 11)).lineLimit(1).truncationMode(.tail)
+                }
+                .buttonStyle(.plain).foregroundStyle(Color.accentColor).padding(.leading, 18)
+                .help("Opens \(target.title), which carries this task's work")
+            } else if let line = row.line(summary: summary) {
                 Text(line).font(.system(size: 11)).foregroundStyle(row.mark.isRed ? AnyShapeStyle(Color.red.opacity(0.85)) : AnyShapeStyle(.secondary))
                     .lineLimit(1).truncationMode(.tail).padding(.leading, 18)
             }
@@ -75,6 +84,7 @@ struct TeamRowView: View {
         .accessibilityActions {
             if let worker = row.task.worker, canOpen(worker) { Button("Open the worker") { open(worker) } }
             if let verifier = row.task.verifier, canOpen(verifier) { Button("Open the verifier") { open(verifier) } }
+            if let target = row.foldedInto { Button("Open \(target.title)") { openTask(target.id) } }
         }
     }
 }
@@ -223,21 +233,33 @@ struct TeamTaskList: View {
 
     var body: some View {
         let finished = rows.filter { $0.group == .finished }
-        VStack(alignment: .leading, spacing: 1) {
-            ForEach(rows.filter { $0.group != .finished }) { row in line(row) }
-            if !finished.isEmpty {
-                Fold(title: TeamRows.finishedTitle(finished), isOpen: $showFinished, hint: "the finished tasks").padding(.top, 3)
-                if showFinished {
-                    ForEach(finished) { row in line(row) }
+        ScrollViewReader { proxy in
+            VStack(alignment: .leading, spacing: 1) {
+                ForEach(rows.filter { $0.group != .finished }) { row in line(row, proxy) }
+                if !finished.isEmpty {
+                    Fold(title: TeamRows.finishedTitle(finished), isOpen: $showFinished, hint: "the finished tasks").padding(.top, 3)
+                    if showFinished {
+                        ForEach(finished) { row in line(row, proxy) }
+                    }
                 }
             }
         }
     }
 
-    private func line(_ row: TeamRow) -> some View {
-        TeamRowView(row: row, now: now, summary: summary(row), isOpen: openRows.contains(row.id), canOpen: canOpen, open: open) {
+    private func line(_ row: TeamRow, _ proxy: ScrollViewProxy) -> some View {
+        TeamRowView(row: row, now: now, summary: summary(row), isOpen: openRows.contains(row.id), canOpen: canOpen, open: open,
+                    openTask: { reveal($0, proxy) }) {
             if openRows.contains(row.id) { openRows.remove(row.id) } else { openRows.insert(row.id) }
         }
+        .id(row.id)
+    }
+
+    /// Opens task `id`'s row (unfolding the finished ones when it's there) and scrolls to it.
+    private func reveal(_ id: String, _ proxy: ScrollViewProxy) {
+        guard let target = rows.first(where: { $0.id == id }) else { return }
+        if target.group == .finished { showFinished = true }
+        openRows.insert(id)
+        DispatchQueue.main.async { withAnimation { proxy.scrollTo(id, anchor: .top) } }
     }
 }
 

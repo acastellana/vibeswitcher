@@ -12,6 +12,7 @@ extension LeadTask.Status {
         case .failed: return .red
         case .blocked: return .purple
         case .kept: return .teal
+        case .folded: return .green
         }
     }
 
@@ -24,6 +25,7 @@ extension LeadTask.Status {
         case .failed: return "Failed"
         case .blocked: return "Blocked"
         case .kept: return "Kept"
+        case .folded: return "Folded"
         }
     }
 }
@@ -41,10 +43,12 @@ struct TeamStrip: View {
             HStack(spacing: 10) {
                 Image(systemName: "person.3.fill").foregroundStyle(Color.accentColor).accessibilityHidden(true)
                 Text("Team").font(.system(size: 12, weight: .semibold))
-                ForEach(order, id: \.self) { status in
-                    let count = board.tasks.filter { $0.status == status }.count
+                // Folded tasks count with the done ones ("12 done (3 folded)"), never apart.
+                let folded = board.tasks.filter { $0.status == .folded }.count
+                ForEach(order.filter { $0 != .folded }, id: \.self) { status in
+                    let count = board.tasks.filter { $0.status == status }.count + (status == .done ? folded : 0)
                     if count > 0 {
-                        Label("\(count) \(status.label.lowercased())", systemImage: "circle.fill")
+                        Label("\(count) \(status.label.lowercased())" + (status == .done && folded > 0 ? " (\(folded) folded)" : ""), systemImage: "circle.fill")
                             .labelStyle(StatusDotLabelStyle(color: status.color))
                             .font(.system(size: 11.5)).foregroundStyle(.secondary)
                     }
