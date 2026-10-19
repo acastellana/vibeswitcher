@@ -54,6 +54,28 @@ struct SteerTests {
         #expect(throws: (any Error).self) { try SteerInbox.post(message("x"), tty: "../evil", root: root) }
     }
 
+    /// The user's answer that arrived mid-turn, as the Stop hook hands it over: added context whose text is the v2
+    /// delivery (header first, then the sender line, then the quote). With STOP_HOOK_REPLAY_FILE set, the exact bytes
+    /// are written there for docs/eval/stop-hook-shapes to replay to a scratch Claude.
+    @Test func aStopHandsOverTheUsersAnswerAsAddedContext() throws {
+        let root = try root()
+        try SteerInbox.post(message("done VSTEST-replay", id: "u1"), tty: "ttys001", root: root)
+        let output = try #require(SteerReply.answer(["hook_event_name": "Stop", "stop_hook_active": false], tty: "ttys001",
+                                                    agentPid: 42, root: root, check: { _, _ in true }, write: { _ in true }))
+        let object = try #require(try JSONSerialization.jsonObject(with: output) as? [String: Any])
+        #expect(Set(object.keys) == ["hookSpecificOutput"])
+        let specific = try #require(object["hookSpecificOutput"] as? [String: Any])
+        #expect(specific["hookEventName"] as? String == "Stop")
+        let context = try #require(specific["additionalContext"] as? String)
+        #expect(context.hasPrefix(SteerReply.header + SteerReply.separator + SteerReply.userMarker))
+        #expect(context.hasSuffix("\n\n> done VSTEST-replay"))
+        #expect(TeamMessage.messages(inContext: context) == [TeamMessage(sender: .user, body: "done VSTEST-replay")])
+        #expect(SteerInbox.delivered(tty: "ttys001", root: root) == ["u1"])
+        if let path = ProcessInfo.processInfo.environment["STOP_HOOK_REPLAY_FILE"] {
+            try output.write(to: URL(fileURLWithPath: path))
+        }
+    }
+
     @Test func repliesAddContextOrKeepTheTurnGoing() throws {
         let messages = [message("use port 8080"), message("and skip the docs", from: .lead("lead"))]
         let post = try #require(SteerReply.output(event: "PostToolUse", messages: messages))
@@ -66,10 +88,16 @@ struct SteerTests {
         #expect(context.contains("not the user"))
         #expect(context.contains("and skip the docs"))
 
+        // At the turn's end too: Claude Code 2.1.302 takes the Stop hook's added context, goes on with the turn and
+        // shows it as "Stop hook feedback", where a block (or exit 2) shows "Stop hook error" (docs/eval/stop-hook-shapes).
         let stop = try #require(SteerReply.output(event: "Stop", messages: messages))
         let stopObject = try #require(try JSONSerialization.jsonObject(with: stop) as? [String: Any])
-        #expect(stopObject["decision"] as? String == "block")
-        #expect((stopObject["reason"] as? String)?.contains("use port 8080") == true)
+        #expect(stopObject["decision"] == nil)
+        #expect(stopObject["reason"] == nil)
+        #expect(Set(stopObject.keys) == ["hookSpecificOutput"])
+        let stopSpecific = try #require(stopObject["hookSpecificOutput"] as? [String: Any])
+        #expect(stopSpecific["hookEventName"] as? String == "Stop")
+        #expect(stopSpecific["additionalContext"] as? String == context)
 
         #expect(SteerReply.output(event: "UserPromptSubmit", messages: messages) != nil)
         #expect(SteerReply.output(event: "PreToolUse", messages: messages) == nil)
@@ -159,8 +187,7 @@ struct SteerTests {
             guard let data = SteerReply.answer(["hook_event_name": event], tty: tty, agentPid: 42, root: root, check: { _, _ in true },
                                                write: { _ in true }) else { break }
             let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
-            let context = event == "Stop" ? object["reason"] as? String ?? ""
-                : (object["hookSpecificOutput"] as? [String: Any])?["additionalContext"] as? String ?? ""
+            let context = (object["hookSpecificOutput"] as? [String: Any])?["additionalContext"] as? String ?? ""
             #expect(context.count <= SteerReply.contextLimit)
             replies.append(SteerReply.messages(inContext: context))
         }
@@ -249,6 +276,23 @@ struct SteeredInTranscriptTests {
         var log = ChatLog()
         log.append(ChatReader.read(data, format: .claude).events)
         #expect(log.entries.map(\.kind) == [.steered(text: "use port 8080", fromLead: false)])
+        #expect(log.prompts.isEmpty)
+    }
+
+    /// A Stop delivery as Claude Code 2.1.302 records it (a scratch run's line, trimmed): read like any other, under
+    /// its sender. (A blocking Stop was recorded as a hook_blocking_error, which the chat never showed.)
+    @Test func aDeliveryAtTheTurnsEndShowsUnderItsSender() throws {
+        let context = SteerReply.context([SteerMessage(text: "done", from: .user, agentPid: 1)])
+        let line: [String: Any] = ["type": "attachment", "uuid": "11991ca3-685f-45bd-a43a-ea11cc4357cf", "isSidechain": false,
+                                   "timestamp": "2026-10-19T08:06:25.757Z",
+                                   "attachment": ["type": "hook_additional_context", "content": [context], "hookName": "Stop",
+                                                  "toolUseID": "af101912-6490-42b0-af6c-a43bb85c4b32", "hookEvent": "Stop"]]
+        var data = try JSONSerialization.data(withJSONObject: line)
+        data.append(0x0A)
+        var log = ChatLog()
+        log.append(ChatReader.read(data, format: .claude).events)
+        #expect(log.entries.map(\.kind) == [.steered(text: "done", fromLead: false)])
+        #expect(log.entries.first?.team == TeamMessage(sender: .user, body: "done"))
         #expect(log.prompts.isEmpty)
     }
 }

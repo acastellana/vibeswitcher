@@ -65,7 +65,9 @@ struct SteerSubagentTests {
         try SteerInbox.post(report("r1"), tty: "ttys001", root: root)
         let output = try #require(SteerReply.answer(try Self.payload("main stop"), tty: "ttys001", agentPid: 42, root: root) { _ in true })
         let object = try #require(try JSONSerialization.jsonObject(with: output) as? [String: Any])
-        #expect(object["decision"] as? String == "block")
+        let specific = try #require(object["hookSpecificOutput"] as? [String: Any])
+        #expect(specific["hookEventName"] as? String == "Stop")
+        #expect(SteerReply.messages(inContext: specific["additionalContext"] as? String ?? "").count == 1)
         #expect(SteerInbox.delivered(tty: "ttys001", root: root) == ["r1"])
     }
 

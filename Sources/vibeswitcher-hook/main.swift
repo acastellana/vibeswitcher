@@ -2,7 +2,8 @@
 //
 // Contract with the agents: print nothing (stdout from some hooks is fed back to the model) and
 // always exit 0 (a non-zero exit can block the agent). Every failure path just exits quietly. The one
-// exception is a steered message (see `SteerInbox`): handed to Claude as JSON on the events that take it.
+// exception is a steered message (see `SteerInbox`): handed to Claude as JSON on the events that take it, as added
+// context on each, Stop included (a Stop block would show in its window as "Stop hook error"; see `SteerReply.output`).
 import Darwin
 import Foundation
 import VibeCore

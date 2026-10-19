@@ -332,15 +332,12 @@ public enum SteerReply {
         return written
     }
 
+    /// Added context, on every event. At the turn's end Claude Code (2.1.302) takes it as the Stop hook's feedback
+    /// and goes on with the turn, showing "Stop hook feedback: …"; a block (`decision: block`, or exit 2) would show
+    /// "Stop hook error: …", which reads as a failure (docs/eval/stop-hook-shapes).
     public static func output(event: String, messages: [SteerMessage]) -> Data? {
         guard takesMessages(event: event), !messages.isEmpty else { return nil }
-        let text = context(messages)
-        let object: [String: Any]
-        if event == "Stop" {
-            object = ["decision": "block", "reason": text]
-        } else {
-            object = ["hookSpecificOutput": ["hookEventName": event, "additionalContext": text]]
-        }
+        let object = ["hookSpecificOutput": ["hookEventName": event, "additionalContext": context(messages)]]
         return try? JSONSerialization.data(withJSONObject: object)
     }
 
