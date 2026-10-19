@@ -83,15 +83,18 @@ enum ChatBench {
         Self.setSeen(nil, path: path)
         var last = Date()
         var worst: TimeInterval = 0
+        // The main thread's CPU time in this second's worst stall.
+        var worstCPU: TimeInterval?
         let longest = LongestTicks()
         var opened = false
         let mainThread = mach_thread_self()
         var lastCPU: TimeInterval?
         let beat = Timer(timeInterval: 0.02, repeats: true) { _ in
             let now = Date()
-            worst = max(worst, now.timeIntervalSince(last))
             let cpu = Self.cpuTime(of: mainThread)
-            longest.note(now.timeIntervalSince(last), cpu: cpu.flatMap { now in lastCPU.map { now - $0 } })
+            let used = cpu.flatMap { now in lastCPU.map { now - $0 } }
+            if now.timeIntervalSince(last) > worst { worst = now.timeIntervalSince(last); worstCPU = used }
+            longest.note(now.timeIntervalSince(last), cpu: used)
             lastCPU = cpu
             last = now
             // Opened on the first beat, so the ticks count its layout and not the app's launch.
@@ -197,10 +200,11 @@ enum ChatBench {
             let cpu = Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1e6 + Double(usage.ru_stime.tv_sec) + Double(usage.ru_stime.tv_usec) / 1e6
             print("t=\(second)s cpu=\(String(format: "%.1f", cpu))s state=\(chat.state) entries=\(chat.log.entries.count) items=\(chat.items.count) "
                 + "shown=\(min(chat.items.count, chat.shownLimit)) atBottom=\(chat.atBottom) top=\(Int(chat.visibleTop)) rows=\(chat.rowTops.count) "
-                + "anchor=\(ChatWindow.anchor(tops: chat.rowTops, visibleTop: chat.visibleTop) ?? "-") worst stall=\(String(format: "%.2f", worst))s \(probe.summary())")
+                + "anchor=\(ChatWindow.anchor(tops: chat.rowTops, visibleTop: chat.visibleTop) ?? "-") worst stall=\(String(format: "%.2f", worst))s\(worstCPU.map { " (cpu \(Self.seconds($0)))" } ?? "") \(probe.summary())")
             fflush(stdout)
             probe.nextSecond()
             worst = 0
+            worstCPU = nil
             if earlier > 0, let reopenedAt {
                 // Paging back: once the conversation watched has kept its height for 3 s, Show earlier; once that page
                 // has, the next. Each phase may take the run's length (and loading 30 s more).
