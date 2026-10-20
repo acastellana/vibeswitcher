@@ -587,11 +587,14 @@ public enum LeadPrompts {
         """
     }
 
-    /// What the lead does on battery (the witness tells each switch, status says it while it lasts), in one sentence.
+    /// What the lead does on battery (the witness tells a hold under the user's limit and the resume after it, status
+    /// says it while it lasts), in one sentence.
     static let onBattery = """
-        On battery (VibeSwitcher tells you when the Mac switches, and status says "on battery" while it lasts), start \
-        no new workers or audits and merge nothing, let work in flight finish, and resume when it tells you AC power \
-        is back.
+        On battery, hold new starts, audits and merges only while the witness says the battery is under the user's \
+        limit; otherwise work as on power: the limit is the user's "On battery, pause lead work below N %" in \
+        VibeSwitcher's Settings (0 never pauses), the witness tells you once when the charge is under it and once when \
+        to resume (AC power back, or the limit lowered), status says "under your N % limit" while the hold lasts, and \
+        work in flight finishes either way.
         """
 
     /// The lead's merge policy section: the one-time question while the owner hasn't chosen, then the policy to

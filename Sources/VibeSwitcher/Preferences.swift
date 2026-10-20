@@ -53,6 +53,23 @@ final class Preferences: ObservableObject {
     @Published var aiSummaries: Bool { didSet { defaults.set(aiSummaries, forKey: "aiSummaries") } }
     /// Keep the Mac from idle sleep while a lead's team works (see `KeepAwake`).
     @Published var keepAwake: KeepAwakeMode { didSet { defaults.set(keepAwake.rawValue, forKey: "keepAwake") } }
+    /// On battery, the lead's witness tells it to hold new starts, audits and merges only below this charge, in %
+    /// (10–90; 0 never, see `PowerWatch`).
+    @Published var batteryHoldBelow: Int {
+        didSet {
+            let kept = PowerWatch.clamp(batteryHoldBelow)
+            // Setting it here doesn't run didSet again.
+            if kept != batteryHoldBelow { batteryHoldBelow = kept }
+            defaults.set(kept, forKey: "batteryHoldBelow")
+        }
+    }
+    /// The stepper's next limit: 5 at a time within 10–90, below 10 off (0) and up from off 10.
+    static func batteryHoldStep(_ limit: Int, up: Bool) -> Int {
+        let range = PowerWatch.limits
+        if limit == 0 { return up ? range.lowerBound : 0 }
+        if !up && limit <= range.lowerBound { return 0 }
+        return PowerWatch.clamp(limit + (up ? 5 : -5))
+    }
     /// Where Home's New Project… makes projects, as a tilde path ("~/dev").
     @Published var projectsFolder: String { didSet { defaults.set(projectsFolder, forKey: "projectsFolder") } }
     /// Projects made with New Project…, by when: Home lists them before an agent has run in them.
@@ -73,7 +90,7 @@ final class Preferences: ObservableObject {
             defaults.set(Self.flashOnSwitchByDefault(reduceMotion: reduceMotion), forKey: "sidebarFlashOnSwitch")
         }
         defaults.register(defaults: ["notifyNeedsInput": true, "notifyDone": true, "playSound": true, "notifyReminders": true, "minimizeOnPause": true, "sidebarAutoHide": true, "aiSummaries": true,
-                                     "claudeCommand": "claude", "codexCommand": "codex",
+                                     "claudeCommand": "claude", "codexCommand": "codex", "batteryHoldBelow": PowerWatch.defaultLimit,
                                      "projectsFolder": ProjectCreation.defaultLocation])
         notifyNeedsInput = defaults.bool(forKey: "notifyNeedsInput")
         notifyDone = defaults.bool(forKey: "notifyDone")
@@ -100,6 +117,7 @@ final class Preferences: ObservableObject {
         openWindowAtLaunch = defaults.bool(forKey: "openWindowAtLaunch")
         aiSummaries = defaults.bool(forKey: "aiSummaries")
         keepAwake = KeepAwakeMode(rawValue: defaults.string(forKey: "keepAwake") ?? "") ?? .onPower
+        batteryHoldBelow = PowerWatch.clamp(defaults.integer(forKey: "batteryHoldBelow"))
         briefingLanguage = defaults.string(forKey: "briefingLanguage").flatMap(BriefingLanguage.named)?.code ?? BriefingLanguage.preferred().code
         projectsFolder = defaults.string(forKey: "projectsFolder") ?? ProjectCreation.defaultLocation
     }

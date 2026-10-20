@@ -176,8 +176,9 @@ final class LeadController: ObservableObject {
     private var told: Set<String> = []
     /// Each project's free disk space, watched (see `LeadWitness.Disk`), by root.
     private var disks: [String: LeadWitness.Disk] = [:]
-    /// The Mac's power source, read once a minute: each switch to battery or back is told to every running lead (see
-    /// `LeadWitness.Power`). None until the app gives it the reader (`watchPower`): benches and tests read nothing.
+    /// The Mac's power source, read once a minute: a hold under the battery limit in Settings, and the resume after
+    /// it, is told to every running lead (see `LeadWitness.Power`). None until the app gives it the reader
+    /// (`watchPower`): benches and tests read nothing.
     private var power: LeadWitness.Power?
     private var powerTimer: Heartbeat.Subscription?
     /// Ended team sessions the host has been asked to drop.
@@ -886,13 +887,13 @@ final class LeadController: ObservableObject {
     }
 
     /// Reads the power source with `read` once a minute from now on (the first a minute in: the host has said which
-    /// leads run by then).
-    func watchPower(_ read: @escaping () -> PowerState?) {
-        power = LeadWitness.Power(read: read)
+    /// leads run by then), holding work below `limit` (the setting, read at each look).
+    func watchPower(limit: @escaping () -> Int, _ read: @escaping () -> PowerState?) {
+        power = LeadWitness.Power(read: read, limit: limit)
         powerTimer = Heartbeat.shared.every(60) { [weak self] in self?.lookAtPower() }
     }
 
-    /// A switch to battery or back to AC power: to each running lead, as the witness.
+    /// A hold on battery, or the resume after one: to each running lead, as the witness.
     func lookAtPower() {
         guard let text = power?.look() else { return }
         for root in leadSessions.keys { deliver(text, from: .system("witness"), root: root) }

@@ -2230,7 +2230,7 @@ public final class LeadToolset: MCPToolset {
         let listing = try? listed()
         let sessions = listing.map { Dictionary($0.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) }
         let workflow = self.workflow
-        let power = self.power()?.statusText.map { "; \($0) (no new starts or merges until AC power returns)" } ?? ""
+        let power = self.power()?.statusText.map { "; \($0)" } ?? ""
         var lines = ["Project \(project) on branch \(workflow.base) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once\(power)."]
         lines += workflowWarnings(workflow)
         lines += diskWarning(workflow, board: board)

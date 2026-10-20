@@ -77,6 +77,27 @@ struct SettingsView: View {
     }
 }
 
+/// "On battery, pause lead work below 50 %": a field and a stepper (5 at a time, 10–90; below 10 is 0, never).
+struct BatteryHoldRow: View {
+    @ObservedObject var preferences: Preferences
+
+    var body: some View {
+        LabeledContent("On battery, pause lead work below") {
+            HStack(spacing: 4) {
+                TextField("Battery limit", value: $preferences.batteryHoldBelow, format: .number)
+                    .labelsHidden().accessibilityLabel("On battery, pause lead work below, in percent")
+                    .multilineTextAlignment(.trailing).frame(width: 44)
+                Text("%")
+                Stepper("Battery limit",
+                        onIncrement: { preferences.batteryHoldBelow = Preferences.batteryHoldStep(preferences.batteryHoldBelow, up: true) },
+                        onDecrement: { preferences.batteryHoldBelow = Preferences.batteryHoldStep(preferences.batteryHoldBelow, up: false) })
+                    .labelsHidden()
+                if preferences.batteryHoldBelow == 0 { Text("(never)").foregroundStyle(.secondary) }
+            }
+        }
+    }
+}
+
 struct GeneralSettings: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var setup: SetupModel
@@ -135,10 +156,11 @@ struct GeneralSettings: View {
                 Picker("Keep the Mac awake while the team works", selection: $preferences.keepAwake) {
                     ForEach(KeepAwakeMode.allCases, id: \.self) { Text($0.label).tag($0) }
                 }
+                BatteryHoldRow(preferences: preferences)
             } header: {
                 Text("Project lead")
             } footer: {
-                SettingsFooter("The Team tab says in plain words what each task's agent is doing and what long decisions mean, written by a small Claude model (claude -p with haiku, no tools) from the task's title, checkpoints and last steps: at most every 3 minutes per task, while the tab is open. Off, it shows the latest checkpoint or activity. While a worker, verifier or merge runs, the Mac doesn't go to sleep on its own (the display still does); on battery only if set to Always.")
+                SettingsFooter("The Team tab says in plain words what each task's agent is doing and what long decisions mean, written by a small Claude model (claude -p with haiku, no tools) from the task's title, checkpoints and last steps: at most every 3 minutes per task, while the tab is open. Off, it shows the latest checkpoint or activity. While a worker, verifier or merge runs, the Mac doesn't go to sleep on its own (the display still does); on battery only if set to Always. On battery, the lead starts no workers or audits and merges nothing only while the charge is under the level set here (work in flight finishes); above it, it works as on power. 0 never pauses.")
             }
             if let briefing { BriefingSettings(preferences: preferences, briefing: briefing) }
             Section("Notifications") {

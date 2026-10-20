@@ -239,31 +239,50 @@ public enum LeadWitness {
         }
     }
 
-    /// Watches the Mac's power source (the app looks once a minute): each switch to battery or back to AC power is
-    /// told to every running lead once (see `PowerWatch`), and each reading is kept in `file` for status.
+    /// Watches the Mac's power source (the app looks once a minute): a hold when the charge is under the user's limit
+    /// on battery, and the resume after one, told to every running lead once (see `PowerWatch`); each reading is kept
+    /// in `file` for status, with the hold while it lasts.
     public struct Power {
         let read: () -> PowerState?
+        /// The limit in Settings, read at each look (0: never hold).
+        let limit: () -> Int
         let file: URL
         public private(set) var watch = PowerWatch()
 
-        public init(read: @escaping () -> PowerState?, file: URL = PowerState.file) {
+        public init(read: @escaping () -> PowerState?, limit: @escaping () -> Int = { PowerWatch.defaultLimit },
+                    file: URL = PowerState.file) {
             self.read = read
+            self.limit = limit
             self.file = file
         }
 
         /// Reads the power source: what to tell the leads now, if anything.
         public mutating func look() -> String? {
             let state = read()
-            state?.save(to: file)
-            return watch.check(state).map(LeadWitness.powerText)
+            let event = watch.check(state, limit: PowerWatch.clamp(limit()))
+            if var state {
+                state.heldUnder = state.onBattery ? watch.heldUnder : nil
+                state.save(to: file)
+            }
+            return event.map(LeadWitness.powerText)
         }
     }
 
-    /// "On battery: 74 %, about 3:12 left. …" with what the lead does now; "On AC power: 80 %, charging. …".
-    public static func powerText(_ state: PowerState) -> String {
-        state.text + (state.onBattery
-            ? ". Start no workers or audits and merge nothing until AC power returns; work in flight finishes."
-            : ". Resume starts and merges.")
+    /// "On battery: 45 %, under your 50 % limit: start no workers or audits …"; "On AC power: resume starts and merges
+    /// (80 %, charging)."; on battery after the limit was lowered or turned off, "On battery: 45 %, no longer under your
+    /// limit (now 40 %): resume starts and merges.".
+    public static func powerText(_ event: PowerWatch.Event) -> String {
+        switch event {
+        case let .hold(state, limit):
+            return "On battery: \(state.percent) %, under your \(limit) % limit: start no workers or audits and merge nothing "
+                + "until AC power returns; work in flight finishes."
+                + (state.minutesLeft.map { " About \(PowerState.clock($0)) left." } ?? "")
+        case let .resume(state, limit):
+            guard state.onBattery else {
+                return "On AC power: resume starts and merges (\(state.percent) %, \(state.charging ? "charging" : "not charging"))."
+            }
+            return "On battery: \(state.percent) %, no longer under your limit (now \(limit == 0 ? "off" : "\(limit) %")): resume starts and merges."
+        }
     }
 
     /// "Disk space is low: 7.4 GB free … Biggest task folders: …".
