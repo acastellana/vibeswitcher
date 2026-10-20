@@ -113,6 +113,26 @@ public struct LeadObserver {
         return (LeadActivity.resolve(hook: hook, transcript: tail, background: background), tail)
     }
 
+    /// What it's doing, and the prompt it waits on in full when it waits on one (see `PendingPrompt`), for sessions,
+    /// status and read_session.
+    public func waiting(_ session: HostSession, agentPid: Int32?, background: String? = nil) -> (activity: LeadActivity, waiting: PendingPrompt?) {
+        let hook = hook(session, agentPid: agentPid)
+        let tail = transcript(session, hook: hook).flatMap { TranscriptTail.read(url: URL(fileURLWithPath: $0)) }
+        let activity = LeadActivity.resolve(hook: hook, transcript: tail, background: background)
+        return (activity, Self.waiting(activity, hook: hook, tail: tail, program: session.liveProgramStatus))
+    }
+
+    /// The prompt it waits on: when its hooks (with its transcript) say it needs input, since their event; with no
+    /// hooks, when its program's own status (OSC 7501) says it's blocked, since that report. Its text is the
+    /// transcript's pending call in full, else what the hooks or the program said.
+    static func waiting(_ activity: LeadActivity, hook: HookState?, tail: TranscriptTail?, program: ProgramStatus?) -> PendingPrompt? {
+        if case .needsInput(let asked) = activity {
+            return PendingPrompt.waiting(asked: asked, pending: tail?.pending, since: hook?.lastEventAt)
+        }
+        guard hook == nil, let program, program.state == .blocked else { return nil }
+        return PendingPrompt.waiting(asked: StatusRules.detail(for: program), pending: tail?.pending, since: program.since.timeIntervalSince1970)
+    }
+
     /// What the witness reads: the activity and the tail, with what the transcript says about progress (when it was
     /// last written to, whether it ends at a compaction; see `TranscriptProgress`).
     public func watching(_ session: HostSession, agentPid: Int32?, background: String? = nil)

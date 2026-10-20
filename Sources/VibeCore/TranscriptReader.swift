@@ -461,6 +461,9 @@ public struct TranscriptTail: Equatable, Sendable {
     public var at: Double?
     /// Its background work still running, oldest first (only what the read window shows started).
     public var background: [Background] = []
+    /// Mid-turn, the last call of the turn with no result yet, in full (see `PendingPrompt`): when the session waits
+    /// for input, what it waits for; `since` is when the call was written.
+    public var pending: PendingPrompt?
 
     public var midTurn: Bool { if case .turnOver = state { return false } else { return true } }
 
@@ -511,7 +514,32 @@ public struct TranscriptTail: Equatable, Sendable {
         if data.last != 0x0A, !lines.isEmpty { lines.removeLast() }
         guard var tail = state(lines) else { return nil }
         tail.background = background(lines)
+        if tail.midTurn { tail.pending = pending(lines) }
         return tail
+    }
+
+    /// The turn's last tool call with no result yet, back to where the turn started.
+    private static func pending(_ lines: [Data.SubSequence]) -> PendingPrompt? {
+        var answered = Set<String>()
+        for line in lines.reversed() where !TranscriptReader.skippable(line) {
+            guard let object = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
+                  object["isSidechain"] as? Bool != true, object["isMeta"] as? Bool != true,
+                  object["isCompactSummary"] as? Bool != true, let kind = step(object) else { continue }
+            let blocks = ((object["message"] as? [String: Any])?["content"] as? [[String: Any]]) ?? []
+            switch (object["type"] as? String, kind) {
+            case ("user", .state(.thinking)) where blocks.contains(where: { $0["type"] as? String == "tool_result" }):
+                answered.formUnion(blocks.compactMap { $0["tool_use_id"] as? String })
+            case ("assistant", .state):
+                guard let call = blocks.last(where: { $0["type"] as? String == "tool_use" && !answered.contains($0["id"] as? String ?? "") }),
+                      let name = call["name"] as? String else { continue }
+                return PendingPrompt(text: PendingPrompt.text(toolName: name, input: call["input"] as? [String: Any] ?? [:]),
+                                     since: ChatReader.date(object["timestamp"])?.timeIntervalSince1970)
+            default:
+                // A prompt, a reply, a turn's end: the turn starts after it.
+                return nil
+            }
+        }
+        return nil
     }
 
     private static func state(_ lines: [Data.SubSequence]) -> TranscriptTail? {

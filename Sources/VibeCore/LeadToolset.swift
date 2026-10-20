@@ -29,8 +29,11 @@ public struct LeadSessionInfo: Equatable, Sendable {
     public var tty: String?
     /// Its program's process (the agent), when the host says.
     public var pid: Int32?
+    /// The prompt it waits on (a permission, a question), in full, and since when; nil when it waits on none.
+    public var waiting: PendingPrompt?
 
-    public init(id: String, cwd: String, label: String, live: Bool, status: String?, tty: String?, pid: Int32? = nil) {
+    public init(id: String, cwd: String, label: String, live: Bool, status: String?, tty: String?, pid: Int32? = nil,
+                waiting: PendingPrompt? = nil) {
         self.id = id
         self.cwd = cwd
         self.label = label
@@ -38,6 +41,15 @@ public struct LeadSessionInfo: Equatable, Sendable {
         self.status = status
         self.tty = tty
         self.pid = pid
+        self.waiting = waiting
+    }
+
+    /// What it's doing, in a few words, for sessions and status: "waiting for input (6 min): “Run: ls …”" while it
+    /// waits on a prompt (read_session has the prompt in full), its status otherwise.
+    public func state(now: Date = Date(), prompt limit: Int = 80) -> String {
+        guard live else { return "ended" }
+        guard let waiting else { return status ?? "running" }
+        return waiting.marker(now: now) + ": “\(waiting.line(limit))”"
     }
 }
 
@@ -914,22 +926,30 @@ public final class LeadToolset: MCPToolset {
 
     private func readSession(_ slug: String, who: String) throws -> MCPToolResult {
         // Several finders: the first that ended without submitting, else the first still at work.
-        let live = Dictionary(((try? listed()) ?? []).map { ($0.id, $0.live) }, uniquingKeysWith: { a, _ in a })
+        let sessions = (try? listed()) ?? []
+        let live = Dictionary(sessions.map { ($0.id, $0.live) }, uniquingKeysWith: { a, _ in a })
         guard let task = store.load().task(slug), let session = who == "verifier" ? task.awaitedVerifier(ended: { live[$0] != true }) : task.worker else {
             throw Problem(text: "\(slug) has no \(who).")
         }
+        // While it waits on a prompt: that prompt in full, after the conversation.
+        let waiting = sessions.first { $0.id == session && $0.live }?.waiting
         let found: String?
         do { found = try runtime.transcript(of: session) } catch {
             throw Problem(text: "The session host can't be read (\(error)), so \(slug)'s \(who) can't be found. Try again in a moment.")
         }
         guard let path = found, let (url, format) = TranscriptReader.checkedURL(path, home: VibePaths.home),
               let data = try? Data(contentsOf: url) else {
-            return MCPToolResult(text: "No conversation yet for \(slug)'s \(who).")
+            return MCPToolResult(text: "No conversation yet for \(slug)'s \(who)." + (waiting.map { "\n\n" + Self.waitingSection($0) } ?? ""))
         }
         var log = ChatLog()
         let tail = data.count > 2_000_000 ? data.suffix(2_000_000) : data
         log.append(ChatReader.read(Data(tail), format: format).events)
-        return MCPToolResult(text: SessionDigest.text(log, limit: 12_000))
+        return MCPToolResult(text: SessionDigest.text(log, limit: 12_000) + (waiting.map { "\n\n" + Self.waitingSection($0) } ?? ""))
+    }
+
+    /// read_session's last section: "Waiting on: since 09:52 (6 min), the prompt it shows:" and that prompt in full.
+    static func waitingSection(_ prompt: PendingPrompt, now: Date = Date()) -> String {
+        "Waiting on:" + (prompt.waited(now: now).map { " \($0)," } ?? "") + " the prompt it shows:\n" + prompt.quoted
     }
 
     /// Starts a worker or a verifier with a new grant (it replaces the role's earlier one), bound to its session once
@@ -2327,7 +2347,7 @@ public final class LeadToolset: MCPToolset {
                 + Self.findingsTally(audits)
         }
         if let worker = task.worker, let info = sessions?[worker] {
-            line += " — worker \(info.live ? (info.status ?? "running") : task.stopped == worker ? "stopped" : "ended")"
+            line += " — worker \(info.live ? info.state(prompt: 40) : task.stopped == worker ? "stopped" : "ended")"
         }
         if let evidence = task.evidence ?? task.outdatedEvidence { line += " — " + auditText(evidence, of: task) }
         if let panel = task.panel, task.evidence == nil, task.status == .review, panel.reported.count < panel.size { line += " — audit by \(panel.progress)" }
@@ -2537,9 +2557,10 @@ public final class LeadToolset: MCPToolset {
         let mine = all.filter { $0.cwd == root || $0.cwd.hasPrefix(root + "/") }
         guard !mine.isEmpty else { return "No window sessions in this project." }
         let board = store.load()
-        let now = Date().timeIntervalSince1970
+        let date = Date()
+        let now = date.timeIntervalSince1970
         return mine.map { session in
-            "- \(session.id): \(session.label) — \(session.live ? (session.status ?? "running") : "ended") — \(session.cwd)"
+            "- \(session.id): \(session.label) — \(session.state(now: date)) — \(session.cwd)"
                 + (Self.strandedSince(session, root: root, board: board, now: now).map { " — stranded (task finished \(LeadTeams.hours(now - $0)) ago)" } ?? "")
         }.joined(separator: "\n")
     }

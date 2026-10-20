@@ -32,6 +32,8 @@ final class FakeRuntime: LeadRuntime {
     var others: [LeadSessionInfo] = []
     /// What each session's agent is doing, as the host's sessions say it ("working" unless set).
     var statuses: [String: String] = [:]
+    /// The prompt each session waits on, as the host's reading of it says.
+    var waiting: [String: PendingPrompt] = [:]
 
     let server = "/App/vibeswitcher-mcp"
     func claudeCommand(root: String) -> String { "claude --dangerously-skip-permissions" }
@@ -58,7 +60,7 @@ final class FakeRuntime: LeadRuntime {
     }
     func sessions() throws -> [LeadSessionInfo] {
         if let hostDown { throw BoardError(text: hostDown) }
-        return spawned.filter { !forgotten.contains($0.id) }.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: statuses[$0.id] ?? "working", tty: nil, pid: pids[$0.id] ?? getpid()) } + others
+        return spawned.filter { !forgotten.contains($0.id) }.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: statuses[$0.id] ?? "working", tty: nil, pid: pids[$0.id] ?? getpid(), waiting: waiting[$0.id]) } + others
     }
     func loadAverage() -> Double? {
         loadReads += 1

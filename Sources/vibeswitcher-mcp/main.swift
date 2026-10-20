@@ -180,9 +180,9 @@ final class HostRuntime: LeadRuntime {
     /// worker in a live worktree, remove one) refuse with it.
     func sessions() throws -> [LeadSessionInfo] {
         try HostCall.sessions(socket: socket).map { session in
-            LeadSessionInfo(id: session.id.uuidString, cwd: session.cwd, label: session.label, live: session.isLive,
-                            status: session.isLive ? activity(of: session, agent: Self.agentPid(on: session.tty)).text : nil, tty: session.tty,
-                            pid: session.childPID)
+            let reading = session.isLive ? waiting(session, agent: Self.agentPid(on: session.tty)) : nil
+            return LeadSessionInfo(id: session.id.uuidString, cwd: session.cwd, label: session.label, live: session.isLive,
+                                   status: reading?.activity.text, tty: session.tty, pid: session.childPID, waiting: reading?.waiting)
         }
     }
 
@@ -195,6 +195,16 @@ final class HostRuntime: LeadRuntime {
 
     /// What the session's agent is doing, with the background shells it still waits on.
     private func activity(of session: HostSession, agent pid: Int32?) -> LeadActivity {
+        observer.activity(session, agentPid: pid, background: background(of: pid))
+    }
+
+    /// As `activity`, with the prompt it waits on in full (see `PendingPrompt`).
+    private func waiting(_ session: HostSession, agent pid: Int32?) -> (activity: LeadActivity, waiting: PendingPrompt?) {
+        observer.waiting(session, agentPid: pid, background: background(of: pid))
+    }
+
+    /// The background shells of its own the agent still waits on, in words.
+    private func background(of pid: Int32?) -> String? {
         var background: String?
         if let pid, let processes = ProcessTable.trySnapshot() {
             let jobs = BackgroundJobs.jobs(forAgent: pid, in: processes, arguments: {
@@ -204,7 +214,7 @@ final class HostRuntime: LeadRuntime {
                 background = jobs.count == 1 ? "1 shell: \(first.command.prefix(80))" : "\(jobs.count) shells"
             }
         }
-        return observer.activity(session, agentPid: pid, background: background)
+        return background
     }
 
     func currentAgent() -> LeadAgent? {

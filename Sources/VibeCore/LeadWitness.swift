@@ -14,6 +14,9 @@ public enum LeadWitness {
         public var status: SessionStatus?
         public var since: Date?
         public var detail: String?
+        /// Mid-turn, the call its transcript shows with no result yet, in full (`TranscriptTail.pending`): while it
+        /// waits for input, what it waits for, where `detail` has it cut to a line.
+        public var pending: PendingPrompt?
         /// The session lives on as a shell, its agent gone (see `HostSession.agentQuit`).
         public var agentQuit: Bool
         /// Its last turn ended on this API error (see `TranscriptTail`), and it's between turns; `apiErrorAt` is when
@@ -53,7 +56,7 @@ public enum LeadWitness {
         }
 
         public init(live: Bool, exit: Int32? = nil, cause: String? = nil, status: SessionStatus? = nil, since: Date? = nil, detail: String? = nil,
-                    agentQuit: Bool = false, apiError: String? = nil, apiErrorAt: Double? = nil, activity: LeadActivity? = nil,
+                    pending: PendingPrompt? = nil, agentQuit: Bool = false, apiError: String? = nil, apiErrorAt: Double? = nil, activity: LeadActivity? = nil,
                     lastActivity: Double? = nil, compactedAt: Double? = nil, shellRunning: Bool = false, shells: [BackgroundJob] = [],
                     heldSince: Double? = nil, heldFrom: String? = nil, started: Double? = nil, submittedAt: Double? = nil) {
             self.live = live
@@ -74,6 +77,12 @@ public enum LeadWitness {
             self.status = status
             self.since = since
             self.detail = detail
+            self.pending = pending
+        }
+
+        /// While it waits for input, what it waits for and since when (its status's since).
+        public var prompt: PendingPrompt {
+            PendingPrompt.waiting(asked: detail, pending: pending, since: since?.timeIntervalSince1970)
         }
     }
 
@@ -92,7 +101,7 @@ public enum LeadWitness {
                 } else if info.live, !info.agentQuit, let error = info.apiError, [.running, .failed].contains(task.status) {
                     events.append(("\(worker)|api-error-\(Int(info.apiErrorAt ?? 0))", "The worker on \(task.slug) stopped mid-task: its turn ended on an API error (\(error)). Tell it to go on with message(\(task.slug), …); it picks up where it was."))
                 } else if info.live, !info.agentQuit, let event = waiting(info, session: worker, now: now,
-                                                         input: "The worker on \(task.slug) is waiting for input: \(info.detail ?? "a question or a permission"). Answer it with message, or ask the user if it's theirs to decide.",
+                                                         input: waitingText("The worker on \(task.slug)", info, now: now, advice: "Answer it with message, or ask the user if it's theirs to decide."),
                                                          stopped: task.status == .running ? "The worker on \(task.slug) stopped without calling report. read_session to see where it is, then message it." : nil) {
                     events.append(event)
                 }
@@ -110,7 +119,7 @@ public enum LeadWitness {
                 } else if !info.live || info.agentQuit {
                     events.append(("\(verifier)|ended", "The verifier on \(task.slug) ended without a verdict (\(info.live ? "its agent quit; the session's shell is still open" : info.ending)). read_session(\(task.slug), who: verifier) to see why, then audit again."))
                 } else if let event = waiting(info, session: verifier, now: now,
-                                              input: "The verifier on \(task.slug) is waiting for input: \(info.detail ?? "a question or a permission"). Tell the user if it's theirs, or audit again.",
+                                              input: waitingText("The verifier on \(task.slug)", info, now: now, advice: "Tell the user if it's theirs, or audit again."),
                                               stopped: "The verifier on \(task.slug) stopped without calling submit_audit. read_session(\(task.slug), who: verifier) to see why, then audit again.") {
                     events.append(event)
                 }
@@ -240,6 +249,15 @@ public enum LeadWitness {
                : "Biggest task folders: \(biggest.joined(separator: "; ")). "
                + (finished ? "cleanup the finished tasks to free theirs; " : "")
                + "tell the user if it stays low.")
+    }
+
+    /// "The worker on a is waiting for input since 09:52 (6 min): “Run: ls”. <advice>", what it waits for quoted in
+    /// full (a long or several-line one in a fenced block, see `PendingPrompt.quoted`).
+    static func waitingText(_ who: String, _ info: Seen, now: Date, advice: String) -> String {
+        let prompt = info.prompt
+        let quoted = prompt.quoted
+        let head = "\(who) is waiting for input" + (prompt.waited(now: now).map { " \($0)" } ?? "")
+        return quoted.hasPrefix("“") ? "\(head): \(quoted). \(advice)" : "\(head). It waits on:\n\(quoted)\n\(advice)"
     }
 
     private static func waiting(_ info: Seen, session: String, now: Date, input: String, stopped: String?) -> (key: String, text: String)? {

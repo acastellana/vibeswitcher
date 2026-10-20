@@ -932,7 +932,7 @@ final class LeadController: ObservableObject {
             // (a loaded Mac), or its process there couldn't be told (mid-exec), it's unknown, not ended.
             let quit = session == nil && store.agentQuit(info)
             seen[id] = LeadWitness.Seen(live: info.isLive, exit: info.exit?.status, cause: info.exit?.cause, status: session?.status,
-                                        since: session?.statusSince, detail: session?.detail,
+                                        since: session?.statusSince, detail: session?.detail, pending: watched?.tail?.pending,
                                         agentQuit: quit, apiError: apiError?.text,
                                         apiErrorAt: apiError?.at, activity: watched?.activity,
                                         lastActivity: watched?.progress?.lastWritten, compactedAt: watched?.progress?.compactedAt,
