@@ -353,6 +353,16 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         #expect(audit.text.contains(".scratch/home-A/.claude/settings.json"))
     }
 
+    @Test func workersAreToldWhereScratchGoesAndVerifiersStillLookForLeftovers() {
+        let task = LeadTask(slug: "t", title: "T", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))
+        let worker = LeadPrompts.worker(task: task, root: "/r", workflow: LeadWorkflow())
+        #expect(worker.contains("goes in your session's TMPDIR or your scratchpad, never inside the worktree"))
+        #expect(worker.contains("the worktree is clean (`git status` lists nothing untracked: remove your leftovers)"))
+        #expect(LeadPrompts.verifier(task: task, root: "/r", workflow: LeadWorkflow()).contains("leftovers"))
+        let finder = LeadPrompts.Finder(index: 1, size: 2, focus: .contract, commit: "abc", logs: [], run: "passed", sensitive: [], nitCap: 5)
+        #expect(LeadPrompts.verifier(task: task, root: "/r", workflow: LeadWorkflow(), finder: finder).contains("leftovers"))
+    }
+
     @Test func untrackedSettingsClaudeReadsAtTheWorktreesRootStillKeepSettingsOff() throws {
         let root = try repo()
         let runtime = FakeRuntime()

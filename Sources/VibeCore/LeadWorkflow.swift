@@ -634,8 +634,10 @@ public enum LeadPrompts {
         While working: stay inside the boundaries. Commit small, descriptive commits as you go. Don't switch to \(workflow.base), \
         don't push, don't delete branches; the lead merges. At each milestone (a part working, checks \
         passing, what's next), call progress with one line: the lead and the user see it on your task's lane. \
-        Keep your temporary folder small: build or download into the worktree, not your scratchpad, and delete big \
-        scratch files once you're done with them (a full disk stops every session).
+        Keep your temporary folder small: build or download into the worktree's git-ignored build folders, not your \
+        scratchpad, and delete big scratch files once you're done with them (a full disk stops every session). Any \
+        other scratch (test homes, bench output, notes) goes in your session's TMPDIR or your scratchpad, never inside \
+        the worktree: an untracked file there is a leftover the lead has you remove.
         Processes: stop one you started by its pid (`kill <pid>`; `$!` or `pgrep -f <your worktree path>` finds it). \
         pkill and killall are refused: their patterns match the other sessions on this Mac too.
         \(loadTests)
@@ -647,7 +649,7 @@ public enum LeadPrompts {
         or ; after it, no 2>&1. git opens no editor here (the merge's commit keeps its message), and anything else \
         around a git command is refused. git log, diff, status and show are always open to you.
         Done: every acceptance check passes\(workflow.testCommand.map { " and `\($0)` passes" } ?? ""), everything is \
-        committed. Then reply with a short report: what changed, how you checked it, anything left or doubtful. A \
+        committed, and the worktree is clean (`git status` lists nothing untracked: remove your leftovers). Then reply with a short report: what changed, how you checked it, anything left or doubtful. A \
         verifier will check your branch independently.
         Stuck: say exactly what you need and stop. Don't fake a pass: never weaken or delete tests.
 

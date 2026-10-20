@@ -249,8 +249,11 @@ as it is (anything can ask for that, `vibeswitcher --lead` included); starting i
 shown you the move and you said you made it. `merge` rebases exactly the audited commit in a worktree no agent works in (squashing it into one commit when the
 worker merged the base in, so the lead's history stays a line), runs the test command there and
 fast-forwards to exactly what was tested. Verifiers start without the branch's project settings, hooks and MCP servers, and
-VibeSwitcher doesn't answer Claude's trust question for a branch that changes them (a git-ignored file counts only
-when Claude reads it, like `settings.local.json`, not its own `.claude/scheduled_tasks.lock`). Messages reach the lead quoted
+VibeSwitcher doesn't answer Claude's trust question for a branch whose commits change them (what would merge), or whose
+worktree holds uncommitted ones Claude reads when it starts there, at its root (a git-ignored file counts only
+when Claude reads it, like `settings.local.json`, not its own `.claude/scheduled_tasks.lock`). Any other untracked file in
+the worktree, a bench's scratch home with its `.claude/` folder included, is no settings change: `audit` starts the
+verifier as usual and lists those files to the lead as leftovers for the worker to remove, each with its size. Messages reach the lead quoted
 under a line naming their sender, so a worker's report can't pass for the user's words, and only the app sends as
 the user. They reach the lead's own conversation, never a subagent it started (a subagent's tool calls fire the same
 hooks; the message waits for the lead's next step), and count as delivered only once they're in it; `status` also
@@ -262,7 +265,8 @@ the lead's branch or another `agent/` branch, and rebasing any branch but their 
 up to date by merging: `git merge <base>`, resolve, `git add`, then `git commit` (`git merge --abort` starts over), each
 typed on its own with no pipes or `&&`, the one form Claude Code's auto mode doesn't refuse as destructive (it refuses
 a rebase and an amend). Its session runs with `GIT_EDITOR=true`, so those bare commands never wait on an editor and
-need nothing in front. When `merge` finds a branch conflicting it asks the lead to have that worker merge the base in. Every session reads git (log, diff,
+need nothing in front. Workers keep scratch (test homes, bench output, notes) in their session's TMPDIR or scratchpad,
+never inside the worktree, and report only with the worktree clean (`git status` lists nothing untracked). When `merge` finds a branch conflicting it asks the lead to have that worker merge the base in. Every session reads git (log, diff,
 status, show) without asking, after a denied command too.
 Their tools come from `vibeswitcher-mcp`, a tool server bundled with the app. A text given under a name workers often
 use instead (`progress`/`report`/`message` with `message`, `text` or `summary`; several lines are joined) is taken; a
