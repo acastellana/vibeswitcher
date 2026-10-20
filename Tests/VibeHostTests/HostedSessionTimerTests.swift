@@ -49,7 +49,7 @@ final class FakeTimers {
 /// Real PTYs and parsers, scratch programs only.
 struct HostedSessionTimerTests {
     func start(_ command: String, probe: SessionProbe, timers: FakeTimers) throws -> HostedSession {
-        let request = SpawnRequest(cwd: "/tmp", command: command, env: [:], cols: 80, rows: 24, keepShell: false, label: "Test", agent: nil)
+        let request = SpawnRequest(cwd: scratchRoot.path, command: command, env: [:], cols: 80, rows: 24, keepShell: false, label: "Test", agent: nil)
         return try probe.queue.sync {
             let session = try HostedSession.spawn(request, shell: "/bin/sh", launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin"],
                                                   ringCapacity: 1 << 20, queue: probe.queue, parser: ParserOptions(), timers: timers.timers)
