@@ -61,8 +61,13 @@ public final class HostedSession {
     private var writeSource: DispatchSourceWrite?
     private var exitSource: DispatchSourceProcess?
     /// Backs up `exitSource`, which misses a program that exits before it's registered (it's registered
-    /// asynchronously, and a process that already exited can't be watched).
+    /// asynchronously, and a process that already exited can't be watched): a look 50 ms in, then less and less often
+    /// (see `exitPollDelays`), not every second for the session's life (30 sessions woke the host 30 times a second).
     private var exitPoll: DispatchSourceTimer?
+    /// The looks' spacing, the last one repeated: a program the source missed is seen ended within 30 s at worst, and
+    /// one ending once the source is registered (all but those that end in their first moments) at once.
+    static let exitPollDelays: [TimeInterval] = [0.05, 1, 5, 30]
+    private var exitPolls = 0
     private var pendingInput = Data()
     /// The client that asked to end it (see `terminate`): its process id and name.
     private var killer: (pid: pid_t, name: String?)?
@@ -194,6 +199,10 @@ public final class HostedSession {
             self?.programStatus(report)
         }
         link.onParsed = { [weak self] in self?.resumeReadingIfCaughtUp() }
+        link.onBusy = { [weak self, weak link] in
+            guard let self, let link, self.parser === link else { return }
+            self.startWatchdog()
+        }
         link.onGone = { [weak self, weak link] status in
             guard let self, let link, self.parser === link else { return }
             self.replaceParser(link, because: "ended (\(HostLog.waitStatus(status)))")
@@ -226,6 +235,9 @@ public final class HostedSession {
         nudgeRedraw()
     }
 
+    /// Runs while the parser has work (output it hasn't parsed, a view it hasn't given): a parser with none can't be
+    /// stalled, and 30 idle sessions would otherwise wake the host 30 times a second for nothing. It stops at the
+    /// first look that finds the parser idle; the parser's next work starts it again (`ParserLink.onBusy`).
     private func startWatchdog() {
         guard watchdog == nil else { return }
         let interval = max(0.05, min(1, parserOptions.stallLimit / 4))
@@ -236,13 +248,25 @@ public final class HostedSession {
         watchdog = timer
     }
 
+    /// Whether the stall watchdog runs now (for tests).
+    var watchdogRunning: Bool { watchdog != nil }
+
     /// Output or a request waiting on the parser for longer than `ParserOptions.stallLimit`, with no progress: it's
-    /// stalled.
+    /// stalled. A parser with nothing to do: the watchdog stops until it has.
     private func checkParser() {
-        guard let parser else { return }
+        guard let parser, parser.busy.0 else {
+            watchdog?.cancel()
+            watchdog = nil
+            return
+        }
         let (busy, since) = parser.busy
+        guard busy else {
+            watchdog?.cancel()
+            watchdog = nil
+            return
+        }
         let waited = Date().timeIntervalSince(since)
-        guard busy, waited > parserOptions.stallLimit else { return }
+        guard waited > parserOptions.stallLimit else { return }
         replaceParser(parser, because: "stalled for \(String(format: "%.1f", waited)) s")
     }
 
@@ -277,8 +301,15 @@ public final class HostedSession {
         exitSource = exit
 
         let poll = DispatchSource.makeTimerSource(queue: queue)
-        poll.schedule(deadline: .now() + 0.05, repeating: 1, leeway: .milliseconds(200))
-        poll.setEventHandler { [weak self] in self?.reap() }
+        poll.schedule(deadline: .now() + Self.exitPollDelays[0], leeway: .milliseconds(20))
+        poll.setEventHandler { [weak self, weak poll] in
+            guard let self else { return }
+            self.reap()
+            guard let poll, self.exitPoll === poll else { return }
+            self.exitPolls += 1
+            let delay = Self.exitPollDelays[min(self.exitPolls, Self.exitPollDelays.count - 1)]
+            poll.schedule(deadline: .now() + delay, leeway: .milliseconds(Int(delay * 100)))
+        }
         poll.resume()
         exitPoll = poll
     }

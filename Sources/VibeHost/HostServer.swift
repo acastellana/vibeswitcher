@@ -19,6 +19,9 @@ public final class HostServer {
         /// Ended sessions are forgotten after this long.
         public var keepEnded: TimeInterval = 24 * 3600
         public var housekeepingInterval: TimeInterval = 30
+        /// The tool server (vibeswitcher-mcp) beside this host: one whose agent ended under it is ended at each
+        /// housekeeping (see `endOrphans`). Nil: none looked for.
+        public var toolServer: String?
         /// The project lead's vault (see `LeadVault`): the teams' roles, verdicts and the user's sealing key, kept in
         /// this process. Nil: this host keeps none (it refuses vault requests).
         public var vault: LeadVault.Book?
@@ -673,6 +676,7 @@ public final class HostServer {
     private func tidy() {
         let now = Date()
         endSubmitted(now: now)
+        endOrphans()
         for session in sessions.values {
             if let exit = session.info.exit, now.timeIntervalSince(exit.at) > config.keepEnded { forget(session.id) }
         }
@@ -682,6 +686,57 @@ public final class HostServer {
             log.note("host: idle \(Int(idle)) s with no session and no app, exiting")
             stop(terminateSessions: false)
             onExit?()
+        }
+    }
+
+    /// What outlived what it served, ended at each housekeeping: a parser of this host's that no session holds, and a
+    /// tool server (`Config.toolServer`) whose agent ended under it. An MCP server's one client is the agent that
+    /// started it, which is its parent: with launchd its parent now, it serves no one. It's asked to end (SIGTERM),
+    /// as its agent's end would have; nothing but that build's own tool servers is touched.
+    private func endOrphans() {
+        // A session's program or a parser it holds is known; only another child's arguments are read.
+        let known = Set(sessions.values.compactMap(\.parserPID) + sessions.values.map { $0.info.childPID })
+        for child in HostProcesses.children(of: getpid()) where !known.contains(child) && HostProcesses.isParser(child) {
+            log.note("host: ended parser pid \(child), which no session holds")
+            kill(child, SIGKILL)
+            var status: Int32 = 0
+            while waitpid(child, &status, 0) < 0, errno == EINTR {}
+        }
+        guard let toolServer = config.toolServer else { return }
+        for orphan in HostProcesses.orphans(running: toolServer) {
+            log.note("host: ended tool server pid \(orphan), whose agent ended")
+            kill(orphan, SIGTERM)
+        }
+    }
+}
+
+/// The processes the host's housekeeping looks at (see `HostServer.endOrphans`).
+enum HostProcesses {
+    /// The processes `pid` started that run now.
+    static func children(of pid: pid_t) -> [pid_t] {
+        let count = proc_listchildpids(pid, nil, 0)
+        guard count > 0 else { return [] }
+        var pids = [pid_t](repeating: 0, count: Int(count) + 16)
+        let listed = pids.withUnsafeMutableBytes { proc_listchildpids(pid, $0.baseAddress, Int32($0.count)) }
+        return Array(pids.prefix(Int(max(0, listed)))).filter { $0 > 0 }
+    }
+
+    /// Whether `pid` is a session's parser (`launcher --parse-session`, see `SessionParser`).
+    static func isParser(_ pid: pid_t) -> Bool {
+        let arguments = ProcessTable.commandLine(pid: pid)
+        return arguments.count >= 2 && arguments[1] == "--parse-session"
+    }
+
+    /// The user's processes running `executable` whose parent is launchd: their own parent ended. Only launchd's
+    /// children are looked at (a few hundred, not the whole table), each one's path only when it's the user's.
+    static func orphans(running executable: String) -> [pid_t] {
+        let target = URL(fileURLWithPath: executable).resolvingSymlinksInPath().path
+        return children(of: 1).filter { pid in
+            var short = proc_bsdshortinfo()
+            let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
+            guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, size) == size, short.pbsi_ppid == 1,
+                  short.pbsi_uid == geteuid(), let path = HostServer.executable(of: pid) else { return false }
+            return URL(fileURLWithPath: path).resolvingSymlinksInPath().path == target
         }
     }
 }

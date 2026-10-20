@@ -197,6 +197,8 @@ final class ParserLink {
     var onProgramStatus: ((String) -> Void)?
     /// It parsed more (see `unparsed`).
     var onParsed: (() -> Void)?
+    /// It was idle and has work again (output or a request): on the session's queue, after the work was handed over.
+    var onBusy: (() -> Void)?
     /// The parser ended without being told to (a trap): its wait status.
     var onGone: ((Int32) -> Void)?
 
@@ -393,12 +395,15 @@ final class ParserLink {
         send(.view, SessionParser.Wire.number(number) + SessionParser.Wire.number(Int32(historyLines.map { max(0, $0) } ?? -1)))
     }
 
-    /// Work starting while none was waiting: the stall clock starts now.
+    /// Work starting while none was waiting: the stall clock starts now, and the session hears it's busy (any thread).
     private func beginWork<T>(_ body: () -> T) -> T {
-        locked {
-            if sent == parsed && pending.isEmpty { lastProgress = Date() }
-            return body()
+        let (result, idle) = locked { () -> (T, Bool) in
+            let idle = sent == parsed && pending.isEmpty
+            if idle { lastProgress = Date() }
+            return (body(), idle)
         }
+        if idle { queue.async { [weak self] in self?.onBusy?() } }
+        return result
     }
 
     private func send(_ kind: SessionParser.ToParser, _ payload: Data) {

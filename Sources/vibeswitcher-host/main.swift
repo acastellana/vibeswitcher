@@ -54,6 +54,13 @@ var config = HostServer.Config(
     baseEnvironment: environment.filter { inherited.contains($0.key) },
     hostBuild: build)
 config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600
+if let interval = value(after: "--housekeeping").flatMap(TimeInterval.init), interval > 0 { config.housekeepingInterval = interval }
+// The tool servers of this build's sessions sit beside it: one whose agent ended is ended (see `HostServer.endOrphans`).
+// By the user's host only (a scratch host beside a build folder would end that folder's, a test's or another run's),
+// or a scratch host told to (OrphanSweepTests).
+if ownsLaunchers || arguments.contains("--end-orphaned-tool-servers") {
+    config.toolServer = URL(fileURLWithPath: executable).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
+}
 // A scratch host's parsers can be told to stall or trap (tests), and watched more closely.
 config.parser.testHooks = !ownsLaunchers && arguments.contains("--parser-test-hooks")
 if let limit = value(after: "--parser-stall-limit").flatMap(TimeInterval.init), limit > 0 { config.parser.stallLimit = limit }

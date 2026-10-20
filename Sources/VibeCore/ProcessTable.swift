@@ -107,22 +107,22 @@ public enum ProcessTable {
     /// info is as it would be in the table if it stays so (`identityUnknown`).
     enum Record { case found(ProcInfo), gone, undecided(ProcInfo) }
 
-    /// A process's record: its parent, owner and state from its short record (any user's); name, terminal and start
-    /// time from its full one (only the user's own processes give it), or else the kernel's record of that one process
-    /// (sysctl KERN_PROC_PID); which agent it is from its name or argv. A zombie, or one on its way out, has ended.
+    /// A process's record: from its full record (only the user's own processes give it: most of the table, one call
+    /// each), else its parent, owner and state from its short record (any user's) and its name, terminal and start time
+    /// from the kernel's record of that one process (sysctl KERN_PROC_PID); which agent it is from its name or argv. A
+    /// zombie, or one on its way out, has ended.
     static func record(_ pid: pid_t, arguments: ArgumentCache) -> Record {
-        var short = proc_bsdshortinfo()
-        let shortSize = Int32(MemoryLayout<proc_bsdshortinfo>.size)
-        guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, shortSize) == shortSize else {
-            return errno == ESRCH ? .gone : kernelRecord(pid)
-        }
-        if short.pbsi_status == SZOMB || short.pbsi_flags & UInt32(PROC_FLAG_INEXIT) != 0 { return .gone }
+        let ppid: Int32
+        let uid: uid_t
         let comm: String
         let device: dev_t
         let start: timeval
         var full = proc_bsdinfo()
         let fullSize = Int32(MemoryLayout<proc_bsdinfo>.size)
         if proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &full, fullSize) == fullSize {
+            if full.pbi_status == SZOMB || full.pbi_flags & UInt32(PROC_FLAG_INEXIT) != 0 { return .gone }
+            ppid = Int32(full.pbi_ppid)
+            uid = full.pbi_uid
             // Its records' `comm` are cut at 15 characters; the kernel's is its name (`p_name`, cut at 31) cut at 16.
             let name = text(full.pbi_name)
             comm = name.isEmpty ? String(decoding: text(full.pbi_comm), as: UTF8.self) : String(decoding: name.prefix(Int(MAXCOMLEN)), as: UTF8.self)
@@ -131,11 +131,19 @@ public enum ProcessTable {
         } else if errno == ESRCH {
             return .gone
         } else {
+            var short = proc_bsdshortinfo()
+            let shortSize = Int32(MemoryLayout<proc_bsdshortinfo>.size)
+            guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, shortSize) == shortSize else {
+                return errno == ESRCH ? .gone : kernelRecord(pid)
+            }
+            if short.pbsi_status == SZOMB || short.pbsi_flags & UInt32(PROC_FLAG_INEXIT) != 0 { return .gone }
+            ppid = Int32(short.pbsi_ppid)
+            uid = short.pbsi_uid
             var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, pid]
             var kinfo = kinfo_proc()
             var size = MemoryLayout<kinfo_proc>.stride
             guard sysctl(&mib, 4, &kinfo, &size, nil, 0) == 0 else {
-                return errno == ESRCH ? .gone : .found(unread(pid, ppid: Int32(short.pbsi_ppid), comm: String(decoding: text(short.pbsi_comm), as: UTF8.self)))
+                return errno == ESRCH ? .gone : .found(unread(pid, ppid: ppid, comm: String(decoding: text(short.pbsi_comm), as: UTF8.self)))
             }
             guard size > 0 else { return .gone }
             comm = String(decoding: text(kinfo.kp_proc.p_comm), as: UTF8.self)
@@ -144,9 +152,9 @@ public enum ProcessTable {
         }
         let tty = ttyName(device)
         // Only the user's own processes' argv can be read (another user's isn't an agent of theirs unless named one).
-        let readable = short.pbsi_uid == geteuid() ? arguments : nil
+        let readable = uid == geteuid() ? arguments : nil
         let info = { (agent: Agent?, unknown: Bool) in
-            ProcInfo(pid: pid, ppid: Int32(short.pbsi_ppid), tty: tty, comm: comm, startTime: date(start), agent: agent,
+            ProcInfo(pid: pid, ppid: ppid, tty: tty, comm: comm, startTime: date(start), agent: agent,
                      identityUnknown: unknown)
         }
         switch identify(pid: pid, start: start.tv_sec, comm: comm, tty: tty, arguments: readable) {
@@ -342,6 +350,9 @@ public enum ProcessTable {
     public static func arguments(pid: Int32, start: Int, comm: String) -> [String] {
         argumentCache.arguments(pid: pid, start: start, comm: comm)
     }
+
+    /// A process's argv as it is now, read each time (no cache): empty when it can't be read.
+    public static func commandLine(pid: Int32) -> [String] { readArguments(pid: pid) }
 
     static func readArguments(pid: Int32) -> [String] {
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
