@@ -773,15 +773,16 @@ public enum Worktrees {
             .split(separator: "\0").map(String.init).filter { isAgentConfig($0) }.sorted()
     }
 
-    /// Settings or instructions files changed or new in the worktree, not committed, that Claude reads when it starts
-    /// there: under the root's `.claude/`, or `.mcp.json` and `CLAUDE*.md` at the root. Ignored ones ("!! path")
-    /// count only when Claude reads them, not its own lock and state files. One deeper down (a scratch home's
-    /// `.claude/` a bench left) is no setting of this worktree's: it's a leftover (`leftovers`).
+    /// Settings or instructions files changed or new in the worktree, not committed, that Claude reads in a session
+    /// started there: under the root's `.claude/`, `.mcp.json` at the root, and `CLAUDE*.md` in any folder (read when
+    /// it works on files there). Ignored ones ("!! path") count only when Claude reads them, not its own lock and state
+    /// files. A `.claude/` deeper down (a scratch home a bench left) is no setting of this worktree's: it's a leftover
+    /// (`leftovers`).
     public static func localAgentConfig(root: String, slug: String) -> [String] {
         status(in: path(root: root, slug: slug), ignored: true).filter { entry in
             let parts = entry.path.split(separator: "/")
-            let atStart = parts.first == ".claude" || parts.count == 1 && [".mcp.json", "CLAUDE.md", "CLAUDE.local.md"].contains(entry.path)
-            return atStart && isAgentConfig(entry.path, ignored: entry.code == "!!")
+            let read = parts.first == ".claude" || entry.path == ".mcp.json" || ["CLAUDE.md", "CLAUDE.local.md"].contains(parts.last ?? "")
+            return read && isAgentConfig(entry.path, ignored: entry.code == "!!")
         }.map(\.path).sorted()
     }
 

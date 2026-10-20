@@ -1008,7 +1008,7 @@ public final class LeadToolset: MCPToolset {
         }
         // Settings, hooks or MCP servers the branch brings would run in the verifier: it starts with project settings
         // off (see LeadLaunch), and VibeSwitcher doesn't say yes to Claude's trust question for that folder. What the
-        // branch's commits change counts (what would merge), and what Claude reads at the worktree's root uncommitted;
+        // branch's commits change counts (what would merge), and what Claude reads there uncommitted (see localAgentConfig);
         // any other untracked file (a bench's scratch home, .claude/ and all) is a leftover for the worker to remove.
         let committed = Worktrees.committedAgentConfig(root: root, slug: slug, base: workflow.base)
         let local = Worktrees.localAgentConfig(root: root, slug: slug)

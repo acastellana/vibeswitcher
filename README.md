@@ -250,7 +250,7 @@ shown you the move and you said you made it. `merge` rebases exactly the audited
 worker merged the base in, so the lead's history stays a line), runs the test command there and
 fast-forwards to exactly what was tested. Verifiers start without the branch's project settings, hooks and MCP servers, and
 VibeSwitcher doesn't answer Claude's trust question for a branch whose commits change them (what would merge), or whose
-worktree holds uncommitted ones Claude reads when it starts there, at its root (a git-ignored file counts only
+worktree holds uncommitted ones Claude reads in a session started there (under the root's `.claude/`, a root `.mcp.json`, a `CLAUDE.md` in any folder; a git-ignored file counts only
 when Claude reads it, like `settings.local.json`, not its own `.claude/scheduled_tasks.lock`). Any other untracked file in
 the worktree, a bench's scratch home with its `.claude/` folder included, is no settings change: `audit` starts the
 verifier as usual and lists those files to the lead as leftovers for the worker to remove, each with its size. Messages reach the lead quoted
