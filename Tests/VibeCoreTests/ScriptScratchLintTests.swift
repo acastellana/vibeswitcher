@@ -172,15 +172,19 @@ struct ScriptScratchLintTests {
             scratch_tmpdir vs-lint
             on_exit 'echo "hook $tool_scratch"'
             echo "$TMPDIR"
+            [[ ${1:-} == cue ]] && read -r _
             [[ ${1:-} == wait ]] && { sleep 30 & sleeper=$!; on_exit 'kill $sleeper'; wait $sleeper; }
             exit 3
             """.write(to: script, atomically: true, encoding: .utf8)
         for signal in [nil, SIGINT, SIGTERM] {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/bash")
-            process.arguments = [script.path] + (signal == nil ? [] : ["wait"])
-            let pipe = Pipe()
+            // Each holds its scratch until told: an exit waits on its cue (its input closing), so the folder's modes are
+            // read while it's there, not after a quick script already removed it (under load it once had).
+            process.arguments = [script.path, signal == nil ? "cue" : "wait"]
+            let pipe = Pipe(), cue = Pipe()
             process.standardOutput = pipe
+            process.standardInput = cue
             try process.run()
             var output = Data()
             // The first line is TMPDIR: once it's there, the scratch is made.
@@ -194,7 +198,7 @@ struct ScriptScratchLintTests {
             let scratch = (tmpdir as NSString).deletingLastPathComponent
             #expect(try FileManager.default.attributesOfItem(atPath: scratch)[.posixPermissions] as? Int == 0o700)
             #expect(try FileManager.default.attributesOfItem(atPath: tmpdir)[.posixPermissions] as? Int == 0o700)
-            if let signal { kill(process.processIdentifier, signal) }
+            if let signal { kill(process.processIdentifier, signal) } else { try cue.fileHandleForWriting.close() }
             output += pipe.fileHandleForReading.readDataToEndOfFile()
             process.waitUntilExit()
             #expect(!FileManager.default.fileExists(atPath: scratch), "\(signal.map { "signal \($0)" } ?? "exit"): \(scratch) is still there")
