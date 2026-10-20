@@ -149,7 +149,14 @@ whatever its screen says: it reads as working but its transcript hasn't grown fo
 running, it's been between turns for 10 minutes without reporting or asking the lead anything (45 minutes while it
 waits on a background task of its own, such as a long test run, which its status then names), its transcript ends at
 a context-compaction summary made mid-turn with nothing after it for 5 minutes, or a message has waited in its inbox
-for 5 minutes. A compaction Claude makes while a worker is idle is neither work nor a stall of its own. Each stall is told once, `status` lists stalled workers first, and their rows read "Stalled 2h". Reports (a
+for 5 minutes. A compaction Claude makes while a worker is idle is neither work nor a stall of its own. Each stall is told once, `status` lists stalled workers first, and their rows read "Stalled 2h". Role
+sessions end themselves when their job is done: the session host ends a verifier 20 s after `submit_audit` stored its
+verdict (its transcript stays, so `read_session` still reads it, and its end is no news to the witness), and
+VibeSwitcher ends every worker and verifier session of a merged, folded, abandoned or cleaned-up task, in every
+project, from the vault's roster (each one the team had, not only the newest; never a lead or a session of yours). One
+it couldn't end that sits idle over an hour is named, a line each across all projects (role, task, project, idle
+time, pid, memory), at most once an hour, to every running lead and to you; the lead's `sessions` marks it "stranded
+(task finished N h ago)". Reports (a
 worker done or blocked, a verdict, the witness's news) wake a lead that's between turns, in any project: a few
 seconds after they come in (several close together count as one), VibeSwitcher types one short prompt into its
 empty box ("2 new reports (verifier x passed; worker y blocked). Call status.") and the reports themselves reach it
