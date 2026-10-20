@@ -26,6 +26,9 @@ import VibeCore
 /// Without `--transcript` it writes a made-up one. Every 10 cycles a line gives the footprint and malloc's bytes in use
 /// and held so far. `--dump FOLDER` also writes vmmap, heap and leaks in full (and a memgraph) at the closed snapshots,
 /// as FOLDER/cold-*, FOLDER/before-* (the warm baseline) and FOLDER/after-*, to diff what grew.
+///
+/// `--power`: the battery's measure instead, CPU per minute and wakeups with no window, idle and while a lead's team
+/// works (see `PowerBench`; SECONDS per phase, default 60).
 enum IdleBench {
     static func run(arguments: [String]) -> Never {
         let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? ""
@@ -34,6 +37,8 @@ enum IdleBench {
                   + "to one other than your ~/.vibeswitcher).")
             exit(1)
         }
+        // `--power`: CPU per minute and wakeups, idle and under a lead's work (see `PowerBench`).
+        if arguments.contains("--power") { PowerBench.run(seconds: arguments.first.flatMap(TimeInterval.init) ?? 60) }
         let seconds = arguments.first.flatMap(TimeInterval.init) ?? 20
         let value = { (name: String) in arguments.firstIndex(of: name).flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil } }
         let transcript = value("--transcript")
