@@ -44,6 +44,11 @@ final class HostClient: ObservableObject {
     private let proofKey: () -> SymmetricKey?
     private var replies: [Int: (HostEvent) -> Void] = [:]
     private var sinks: [UUID: (sink: Sink, cols: Int, rows: Int)] = [:]
+    /// When each session's last resize line went to app.log, and the newest one since, held (see `logResize`).
+    private var resizeLogs: [UUID: (logged: Date, held: (line: String, count: Int)?)] = [:]
+    /// The resize log's clock, and how it writes a held line later; a test's own instead.
+    var resizeClock: () -> Date = Date.init
+    var resizeLater: (TimeInterval, @escaping () -> Void) -> Void = { DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1) }
     private var whenReady: [(String?) -> Void] = []
     private var replacing = false
     /// A handover asked of the running host: its pid then (the host re-executes itself, so the new build keeps it) and
@@ -585,6 +590,7 @@ final class HostClient: ObservableObject {
     func attach(_ id: UUID, cols: Int, rows: Int, sink: Sink) {
         sinks[id] = (sink, cols, rows)
         sendAttach(id, cols: cols, rows: rows)
+        logResize(id, cols: cols, rows: rows, reason: .initial)
     }
 
     private func sendAttach(_ id: UUID, cols: Int, rows: Int) {
@@ -594,6 +600,7 @@ final class HostClient: ObservableObject {
     }
 
     func detach(_ id: UUID) {
+        resizeLogs[id] = nil
         guard sinks.removeValue(forKey: id) != nil else { return }
         request(.detach(id: id))
     }
@@ -773,9 +780,45 @@ final class HostClient: ObservableObject {
         }
     }
 
-    func resize(_ id: UUID, cols: Int, rows: Int) {
+    /// Why a view's size changed, for app.log.
+    enum ResizeReason: String {
+        /// A view attached at its size.
+        case initial
+        /// A view shown again, after the window changed size while it was hidden.
+        case shown
+        case windowResize = "window resize"
+        /// The sidebar or the inspector shown, hidden or dragged.
+        case paneSplit = "pane split"
+        case focusMode = "focus mode"
+        case fontSize = "font size"
+    }
+
+    func resize(_ id: UUID, cols: Int, rows: Int, reason: ResizeReason) {
+        let changed = sinks[id].map { $0.cols != cols || $0.rows != rows } ?? true
         if sinks[id] != nil { sinks[id]?.cols = cols; sinks[id]?.rows = rows }
         request(.resize(id: id, cols: cols, rows: rows))
+        if changed { logResize(id, cols: cols, rows: rows, reason: reason) }
+    }
+
+    /// "host: resize 1A2B3C4D to 110×40 (window resize)": the same id and clock as host.log's line for the PTY (which
+    /// knows only "initial" or "client"), so a grep on the id lines them up. One a second at most per session, as
+    /// there: what comes within a second of a line is held, and the newest written a second after it.
+    private func logResize(_ id: UUID, cols: Int, rows: Int, reason: ResizeReason) {
+        let line = "host: resize \(id.uuidString.prefix(8)) to \(cols)×\(rows) (\(reason.rawValue))"
+        let wait = 1 - resizeClock().timeIntervalSince(resizeLogs[id]?.logged ?? .distantPast)
+        guard wait > 0 else {
+            resizeLogs[id] = (resizeClock(), nil)
+            return note(line)
+        }
+        let held = resizeLogs[id]?.held
+        if held == nil {
+            resizeLater(wait) { [weak self] in
+                guard let self, let held = self.resizeLogs[id]?.held else { return }
+                self.resizeLogs[id] = (self.resizeClock(), nil)
+                self.note(held.count > 1 ? "\(held.line), the last of \(held.count) within a second" : held.line)
+            }
+        }
+        resizeLogs[id]?.held = (line, (held?.count ?? 0) + 1)
     }
 
     func screen(_ id: UUID, completion: @escaping (String?) -> Void) {

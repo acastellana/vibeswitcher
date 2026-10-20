@@ -95,6 +95,8 @@ enum MainMenu {
             .separator(),
             item("Toggle Sidebar", #selector(NSSplitViewController.toggleSidebar(_:)), "s", [.command, .control]),
             item("Toggle Inspector", #selector(MainWindowController.toggleInspectorAction(_:)), "0", [.command, .option]),
+            // ⇧⌘↩, as Xcode's editor-only: the terminal takes the whole window.
+            item("Focus Terminal", #selector(MainWindowController.focusTerminalAction(_:)), "\r", [.command, .shift]),
             .separator(),
             item("Bigger", #selector(MainWindowController.biggerFont(_:)), "="),
             item("Smaller", #selector(MainWindowController.smallerFont(_:)), "-"),

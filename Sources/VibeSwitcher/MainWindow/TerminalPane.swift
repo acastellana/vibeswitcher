@@ -104,7 +104,7 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         // Hidden views don't resize their sessions (each would redraw on every step of a window drag): the one on
         // screen catches up now.
         let screen = terminal.getTerminal()
-        host.resize(hostID, cols: screen.cols, rows: screen.rows)
+        host.resize(hostID, cols: screen.cols, rows: screen.rows, reason: .shown)
         recent.removeAll { $0 == hostID }
         recent.insert(hostID, at: 0)
         for evicted in recent.dropFirst(Self.keepAttached) { forget(evicted) }
@@ -166,12 +166,13 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         view.window?.makeFirstResponder(terminal)
     }
 
-    /// The session's screen as text lines (wide characters kept whole), for reading menus and modes off it.
+    /// The session's screen as text lines (wide characters and clusters kept whole: each cell is read through the
+    /// terminal, as a cell alone reads an emoji with VS16 as a space), for reading menus and modes off it.
     /// Blank lines at the bottom are dropped: a fresh program draws from the top of a tall screen.
     func screenLines(_ id: UUID) -> [String] {
         guard let terminal = views[id]?.getTerminal() else { return [] }
         var lines = (0..<terminal.rows).compactMap { row in
-            terminal.getLine(row: row)?.translateToString(trimRight: false, skipNullCellsFollowingWide: true)
+            terminal.getLine(row: row)?.translateToString(trimRight: false, skipNullCellsFollowingWide: true, characterProvider: terminal.getCharacter(for:))
                 .replacingOccurrences(of: "\u{0}", with: " ")
                 .trimmingCharacters(in: .whitespaces)
         }
@@ -186,7 +187,7 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         var read = ScreenRead()
         for row in 0..<terminal.rows {
             guard let line = terminal.getLine(row: row) else { continue }
-            read.lines.append(line.translateToString(trimRight: false, skipNullCellsFollowingWide: true)
+            read.lines.append(line.translateToString(trimRight: false, skipNullCellsFollowingWide: true, characterProvider: terminal.getCharacter(for:))
                 .replacingOccurrences(of: "\u{0}", with: " ").trimmingCharacters(in: .whitespaces))
             var spans: [String] = []
             var span = ""
@@ -195,7 +196,7 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
                 var marked = attribute.style.contains(.inverse)
                 if case .defaultColor = attribute.bg {} else { marked = true }
                 if marked {
-                    let character = line[column].getCharacter()
+                    let character = terminal.getCharacter(for: line[column])
                     if character != "\u{0}" { span.append(character) }
                 } else if !span.isEmpty {
                     spans.append(span)
@@ -263,7 +264,27 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
 
     func sizeChanged(source: TerminalView, newCols: Int, newRows: Int) {
         guard let id = id(of: source), id == current else { return }
-        host.resize(id, cols: newCols, rows: newRows)
+        let windowSize = view.window?.frame.size
+        let windowResized = view.window?.inLiveResize == true || windowSize != lastWindowSize
+        lastWindowSize = windowSize
+        host.resize(id, cols: newCols, rows: newRows, reason: resizeCause ?? (windowResized ? .windowResize : .paneSplit))
+    }
+
+    /// What the terminal's size changes come from while the window changes something itself (focus mode, the font
+    /// size); otherwise a window resize, or the split between the panes when the window kept its size.
+    private var resizeCause: HostClient.ResizeReason?
+    private var resizeCauses = 0
+    private var lastWindowSize: NSSize?
+
+    /// The size changes in the next `seconds` (an animation, a font applied on the next turn) come from `reason`.
+    func attributeResizes(to reason: HostClient.ResizeReason, for seconds: TimeInterval = 1) {
+        resizeCause = reason
+        resizeCauses += 1
+        let mine = resizeCauses
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in
+            guard let self, self.resizeCauses == mine else { return }
+            self.resizeCause = nil
+        }
     }
 
     func bell(source: TerminalView) {

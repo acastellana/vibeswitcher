@@ -15,7 +15,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     private let host: HostClient
     private let actions: WindowActions
     private let split = NSSplitViewController()
+    private var sidebarItem: NSSplitViewItem!
     private var inspectorItem: NSSplitViewItem!
+    /// The session bar and the line under it: hidden in focus mode.
+    private var headerSlot: NSView!
+    private var headerDivider: NSView!
     private let palette = CommandPaletteController()
     /// What the middle shows for a Terminal session: its mirror (with or without Move to Window), or nothing while
     /// the chat covers it (the mirror reads Terminal every few seconds). Rebuilt when that changes.
@@ -117,6 +121,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         window.delegate = self
 
         let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarHost)
+        sidebarItem = sidebar
         sidebar.minimumThickness = 260
         sidebar.maximumThickness = 380
         let middle = NSViewController()
@@ -141,6 +146,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         window.toolbarStyle = .unified
         if !window.setFrameUsingName("MainWindow") { window.center() }
         window.setFrameAutosaveName("MainWindow")
+        if let layout = FocusLayout.saved { focusTerminal(keeping: layout, animated: false) }
 
         chat.runner.run = { [weak self] prompt in
             guard let self else { return false }
@@ -204,6 +210,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         header.addSubview(headerHost)
         let divider = NSBox()
         divider.boxType = .separator
+        headerSlot = header
+        headerDivider = divider
         endedBar.isHidden = true
         // Their size comes from the stack. Left to their content, an empty bar asks to be zero wide, which
         // pins the whole middle pane (and so the window) at its minimum width.
@@ -562,6 +570,62 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     @objc func nextNeedingYou(_ sender: Any?) { model.selectNextNeedingYou() }
     @objc func selectSessionByTag(_ sender: NSMenuItem) { model.select(index: sender.tag - 1) }
 
+    /// The layout Focus Terminal hides, brought back when it's used again; kept (in the defaults) while focus mode is on,
+    /// so it outlives a closed window and a relaunch.
+    struct FocusLayout: Codable, Equatable {
+        var sidebarCollapsed: Bool
+        var inspectorCollapsed: Bool
+        var showsChat: Bool
+
+        static let key = "focusTerminal"
+
+        static var saved: FocusLayout? {
+            get { UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode(FocusLayout.self, from: $0) } }
+            set { UserDefaults.standard.set(newValue.flatMap { try? JSONEncoder().encode($0) }, forKey: key) }
+        }
+    }
+
+    /// While focus mode is on: what it hid.
+    private(set) var focusedFrom: FocusLayout?
+
+    /// View › Focus Terminal: the terminal takes the whole window (no sidebar, inspector or session bar, the chat
+    /// off; the window's title names the session); used again, the layout before comes back.
+    @objc func focusTerminalAction(_ sender: Any?) {
+        if let layout = focusedFrom {
+            Breadcrumbs.shared.note("window: focus terminal off")
+            focusedFrom = nil
+            FocusLayout.saved = nil
+            setLayout(sidebarCollapsed: layout.sidebarCollapsed, inspectorCollapsed: layout.inspectorCollapsed, bars: true)
+            model.showsChat = layout.showsChat
+        } else {
+            Breadcrumbs.shared.note("window: focus terminal on")
+            focusTerminal(keeping: FocusLayout(sidebarCollapsed: sidebarItem.isCollapsed, inspectorCollapsed: inspectorItem.isCollapsed,
+                                               showsChat: model.showsChat), animated: true)
+        }
+    }
+
+    private func focusTerminal(keeping layout: FocusLayout, animated: Bool) {
+        focusedFrom = layout
+        FocusLayout.saved = layout
+        model.showsChat = false
+        setLayout(sidebarCollapsed: true, inspectorCollapsed: true, bars: false, animated: animated)
+    }
+
+    private func setLayout(sidebarCollapsed: Bool, inspectorCollapsed: Bool, bars: Bool, animated: Bool = true) {
+        // The terminal's size changes it makes are logged as focus mode's (see `TerminalPaneController`).
+        pane.attributeResizes(to: .focusMode)
+        headerSlot.isHidden = !bars
+        headerDivider.isHidden = !bars
+        window?.titleVisibility = bars ? .hidden : .visible
+        if animated && !Motion.isReduced {
+            sidebarItem.animator().isCollapsed = sidebarCollapsed
+            inspectorItem.animator().isCollapsed = inspectorCollapsed
+        } else {
+            sidebarItem.isCollapsed = sidebarCollapsed
+            inspectorItem.isCollapsed = inspectorCollapsed
+        }
+    }
+
     @objc func toggleInspectorAction(_ sender: Any?) {
         if Motion.isReduced { inspectorItem.isCollapsed.toggle() } else { inspectorItem.animator().isCollapsed.toggle() }
         // The animator proxy already reports the new value.
@@ -570,6 +634,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
 
     func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
         switch menuItem.action {
+        case #selector(focusTerminalAction(_:)): menuItem.state = focusedFrom != nil ? .on : .off
         case #selector(groupByAttention(_:)): menuItem.state = model.grouping == .attention ? .on : .off
         case #selector(groupByProjects(_:)): menuItem.state = model.grouping == .projects ? .on : .off
         case #selector(showTerminalAction(_:)): menuItem.state = model.chatShown ? .off : .on
@@ -642,6 +707,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             command("Filter Sessions", "line.3.horizontal.decrease", "⌥⌘F", #selector(focusFilterAction(_:))),
             command("Toggle Inspector", "sidebar.right", "⌥⌘0", #selector(toggleInspectorAction(_:))),
             command("Toggle Sidebar", "sidebar.left", "⌃⌘S", #selector(NSSplitViewController.toggleSidebar(_:))),
+            command("Focus Terminal", "rectangle.expand.vertical", "⇧⌘↩", #selector(focusTerminalAction(_:))),
         ]
         if model.selectedRow?.session?.inTerminalApp == true {
             commands.insert(command("Open in Terminal", "arrow.up.forward.app", "⌘O", #selector(openInTerminalAction(_:))), at: 1)
@@ -678,9 +744,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     /// ⌘+ / ⌘− / ⌘0 size the chat's text while it's shown, the terminal's otherwise.
-    @objc func biggerFont(_ sender: Any?) { model.chatShown ? ChatFont.step(1) : onFontSize(1) }
-    @objc func smallerFont(_ sender: Any?) { model.chatShown ? ChatFont.step(-1) : onFontSize(-1) }
-    @objc func actualSizeFont(_ sender: Any?) { model.chatShown ? ChatFont.step(0) : onFontSize(0) }
+    @objc func biggerFont(_ sender: Any?) { model.chatShown ? ChatFont.step(1) : terminalFontSize(1) }
+    @objc func smallerFont(_ sender: Any?) { model.chatShown ? ChatFont.step(-1) : terminalFontSize(-1) }
+    @objc func actualSizeFont(_ sender: Any?) { model.chatShown ? ChatFont.step(0) : terminalFontSize(0) }
+
+    private func terminalFontSize(_ step: Int) {
+        pane.attributeResizes(to: .fontSize)
+        onFontSize(step)
+    }
 
     @objc func stopAction(_ sender: Any?) {
         guard let row = model.selectedRow, row.hostID != nil, actions.isLive(row) else { return NSSound.beep() }

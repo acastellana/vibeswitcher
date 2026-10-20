@@ -166,13 +166,13 @@ struct StyledScreenTests {
         let e = ClaudeScreens.e
         let screen = ClaudeScreens.shown(ClaudeScreens.idle(box: "日本🙂\(e)[2m bring the branch up to date\(e)[22m"))
         let line = Array(screen.text.components(separatedBy: "\n").last { $0.hasPrefix("❯") }!)
-        #expect(Array(line[2...5]) == ["日", "\u{0}", "本", "\u{0}"] && line[7] == "\u{0}")
+        #expect(Array(line[2...7]) == ["日", "\u{0}", "本", "\u{0}", "🙂", "\u{0}"])
         let faint = screen.runs!.filter(\.faint)
         #expect(faint.map(\.column) == [8] && faint.map(\.length) == [28])
         #expect(String(line[8..<36]) == " bring the branch up to date")
-        // The empty cell after a wide character reads as a space, as on the plain screen (and SwiftTerm gives an
-        // emoji's cell as a space).
-        #expect(LeadDelivery.box(in: screen) == .draft("日 本"))
+        // The empty cell after a wide character reads as a space, as on the plain screen; the emoji reads as itself
+        // (a cell alone gives any character above U+FFFF, or a cluster, as a space; `styledScreen` asks the terminal).
+        #expect(LeadDelivery.box(in: screen) == .draft("日 本 🙂"))
         #expect(LeadDelivery.box(in: ClaudeScreens.shown(ClaudeScreens.idle(box: "\(e)[2m日本 bring the branch\(e)[22m"))) == .empty)
     }
 

@@ -43,7 +43,9 @@ cockpit for all your sessions. The list on the left puts first what needs you (N
 with how long each has been in that state), or groups by project; filter it with ⌥⌘F. The middle shows the
 selected session's live terminal, or for a session running in Terminal, a read-only mirror of its screen with
 Open in Terminal (⌘O). The right shows its Overview (status, folder and branch, times, session id) or its
-Activity: your prompts, the agent's replies and the tools it ran, from its transcript. ⌘K jumps to any session
+Activity: your prompts, the agent's replies and the tools it ran, from its transcript. View › Focus Terminal
+(⇧⌘↩) gives the terminal the whole window (no list, inspector or session bar; the title names the session) until
+you use it again, across a closed window and a relaunch. ⌘K jumps to any session
 or command, or starts a preset in a recent project; ⌘J goes to the next session needing you, ⌘1–9 to a session,
 ⇧⌘H to the start page (recent projects with their presets). The Dock badge counts sessions waiting on you.
 ⌘W closes the window (or the ⌘K palette) and never ends a session: they keep running. End Session… (⇧⌘⌫, the
@@ -313,6 +315,11 @@ with 324 bytes unparsed: started another (pid 4250) without those bytes` (or `en
 reaches views, but its screen, title and status stay as last shown (`…: no parser now, its screen stays the last one
 shown`). A parser ends with its host, and a handover ends them all before the exec; the new build starts its own.
 Each parser costs about 3–4 MB (macOS footprint) on top of its scrollback.
+Each change of a session's terminal size is logged too, at most a line a second per session (a burst's newest size a
+second after the line before): host.log's `resize 1A2B3C4D to 110×40 (initial)` (or `(client)`) when the PTY
+changes, and `debug/app.log`'s `host: resize 1A2B3C4D to 110×40 (window resize)` saying why (initial, shown, window
+resize, pane split, focus mode, font size); both carry the same 8-character id and the same `HH:mm:ss.SSS` clock
+(host.log adds the date), so a grep on the id lines the two logs up.
 
 **Today** (at the bottom of the list): how long agents were working today (in a turn; background jobs are
 listed per project, since a leftover dev server isn't work), and how long sessions were waiting on you:

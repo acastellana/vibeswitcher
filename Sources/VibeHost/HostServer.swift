@@ -340,7 +340,7 @@ public final class HostServer {
                 return reply(.resync(id: id))
             }
             reply(.attached(id: id))
-            session.resize(cols: cols, rows: rows)
+            session.resize(cols: cols, rows: rows, reason: "initial")
             session.nudgeRedraw()
         case .detach(let id):
             client.attached.remove(id)
@@ -607,6 +607,7 @@ public final class HostServer {
             self?.log.note("watchdog: session \(Self.short(id))'s \(text)")
             self?.log("session \(id.uuidString)'s \(text)")
         }
+        session.onResized = { [weak self] line in self?.log.note(line) }
         session.onEnd = { [weak self, weak session] status in
             guard let self, let info = session?.info else { return }
             let asked = info.exit?.killedBy.map { ", after a kill from peer pid \($0)" } ?? ""

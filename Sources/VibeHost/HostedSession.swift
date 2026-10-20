@@ -24,6 +24,14 @@ public final class HostedSession {
     public var clientsAttached = false
     /// The session's parser stalled or ended, and what was done about it: a line for the host's log.
     public var onParserTrouble: ((String) -> Void)?
+    /// Its PTY changed size: a line for the host's log (see `resize`).
+    public var onResized: ((String) -> Void)?
+    /// When `onResized` last had a line, and the newest resize since, held until a second after it (see `logResize`).
+    private var resizeLogged = Date.distantPast
+    private var heldResize: (line: String, count: Int)?
+    /// The resize log's clock, and how it writes a held line later (nil: on `queue`); a test's own instead.
+    var resizeClock: () -> Date = Date.init
+    var resizeLater: ((TimeInterval, @escaping () -> Void) -> Void)?
 
     private let masterFD: Int32
     private let queue: DispatchQueue
@@ -476,7 +484,9 @@ public final class HostedSession {
         }
     }
 
-    public func resize(cols: Int, rows: Int) {
+    /// `reason`: for the log line, "initial" (a view attached at its size) or "client" (a view's resize; the app's log
+    /// says why).
+    public func resize(cols: Int, rows: Int, reason: String = "client") {
         let cols = max(2, min(cols, 1000)), rows = max(2, min(rows, 500))
         guard ended == nil, cols != info.cols || rows != info.rows else { return }
         setWindowSize(cols: cols, rows: rows)
@@ -484,6 +494,28 @@ public final class HostedSession {
         info.cols = cols
         info.rows = rows
         onChange?(info)
+        logResize("resize \(id.uuidString.prefix(8)) to \(cols)×\(rows) (\(reason))")
+    }
+
+    /// One line a second at most: a resize within a second of the last line is held, and only the newest held one is
+    /// written, a second after that line, with how many it stands for.
+    private func logResize(_ line: String) {
+        let wait = 1 - resizeClock().timeIntervalSince(resizeLogged)
+        guard wait > 0 else {
+            resizeLogged = resizeClock()
+            onResized?(line)
+            return
+        }
+        if heldResize == nil {
+            let later = resizeLater ?? { [queue] wait, write in queue.asyncAfter(deadline: .now() + wait, execute: write) }
+            later(wait) { [weak self] in
+                guard let self, let held = self.heldResize else { return }
+                self.heldResize = nil
+                self.resizeLogged = self.resizeClock()
+                self.onResized?(held.count > 1 ? "\(held.line), the last of \(held.count) within a second" : held.line)
+            }
+        }
+        heldResize = (line, (heldResize?.count ?? 0) + 1)
     }
 
     /// Makes the program repaint: one row smaller, then back (two SIGWINCHes). Claude Code and Codex redraw
@@ -560,7 +592,8 @@ public final class HostedSession {
             var text = ""
             var column = -1
             for cell in 0..<min(line.count, line.getTrimmedLength()) {
-                let character = line[cell].getCharacter()
+                // The terminal's: a cell's own `getCharacter()` reads a cluster (an emoji with VS16, ⏱️) as a space.
+                let character = terminal.getCharacter(for: line[cell])
                 text.append(character)
                 // Else it joined the character before it.
                 if text.last == character { column += 1 }
