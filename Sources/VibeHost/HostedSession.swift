@@ -48,7 +48,9 @@ public final class HostedSession {
     private var parserFailures: [Date] = []
     static let maxParserFailures = 5
     /// Ends a stalled parser (see `checkParser`).
-    private var watchdog: DispatchSourceTimer?
+    private var watchdog: SessionTimer?
+    /// Makes the exit poll's and the watchdog's timers: dispatch's on `queue`, a test's on a clock of its own.
+    private let timers: SessionTimers
     /// Reading the PTY waits while the parser is this far behind, as the program used to wait on the parse.
     static let maxUnparsed = 4 << 20
     private var readingPaused = false
@@ -63,7 +65,7 @@ public final class HostedSession {
     /// Backs up `exitSource`, which misses a program that exits before it's registered (it's registered
     /// asynchronously, and a process that already exited can't be watched): a look 50 ms in, then less and less often
     /// (see `exitPollDelays`), not every second for the session's life (30 sessions woke the host 30 times a second).
-    private var exitPoll: DispatchSourceTimer?
+    private var exitPoll: SessionTimer?
     /// The looks' spacing, the last one repeated: a program the source missed is seen ended within 30 s at worst, and
     /// one ending once the source is registered (all but those that end in their first moments) at once.
     static let exitPollDelays: [TimeInterval] = [0.05, 1, 5, 30]
@@ -76,12 +78,14 @@ public final class HostedSession {
     private var closed = false
     static let maxPendingInput = 1 << 20
 
-    private init(info: HostSession, masterFD: Int32, queue: DispatchQueue, ringCapacity: Int, launcher: String, parser: ParserOptions) {
+    private init(info: HostSession, masterFD: Int32, queue: DispatchQueue, ringCapacity: Int, launcher: String, parser: ParserOptions,
+                 timers: SessionTimers = .dispatch) {
         self.info = info
         self.masterFD = masterFD
         self.queue = queue
         self.launcher = launcher
         parserOptions = parser
+        self.timers = timers
         ring = OutputRing(capacity: ringCapacity)
     }
 
@@ -108,6 +112,13 @@ public final class HostedSession {
     /// normally the host itself.
     public static func spawn(_ request: SpawnRequest, shell: String, launcher: String, baseEnvironment: [String: String],
                              ringCapacity: Int, queue: DispatchQueue, parser: ParserOptions = ParserOptions()) throws -> HostedSession {
+        try spawn(request, shell: shell, launcher: launcher, baseEnvironment: baseEnvironment, ringCapacity: ringCapacity, queue: queue,
+                  parser: parser, timers: .dispatch)
+    }
+
+    /// `timers`: a test's, on its own clock (see `SessionTimers`).
+    static func spawn(_ request: SpawnRequest, shell: String, launcher: String, baseEnvironment: [String: String],
+                      ringCapacity: Int, queue: DispatchQueue, parser: ParserOptions, timers: SessionTimers) throws -> HostedSession {
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: request.cwd, isDirectory: &isDirectory), isDirectory.boolValue else {
             throw Failure.noSuchFolder(request.cwd)
@@ -131,7 +142,7 @@ public final class HostedSession {
                                label: request.label, agent: request.agent, title: "", startedAt: Date(),
                                cols: cols, rows: rows, exit: nil)
         let session = HostedSession(info: info, masterFD: child.masterFD, queue: queue, ringCapacity: ringCapacity, launcher: launcher,
-                                    parser: parser)
+                                    parser: parser, timers: timers)
         session.startParser(replay: Data())
         session.start()
         return session
@@ -241,26 +252,15 @@ public final class HostedSession {
     private func startWatchdog() {
         guard watchdog == nil else { return }
         let interval = max(0.05, min(1, parserOptions.stallLimit / 4))
-        let timer = DispatchSource.makeTimerSource(queue: queue)
-        timer.schedule(deadline: .now() + interval, repeating: interval, leeway: .milliseconds(Int(interval * 250)))
-        timer.setEventHandler { [weak self] in self?.checkParser() }
-        timer.resume()
+        let timer = timers.make(.parserWatchdog, queue) { [weak self] in self?.checkParser() }
+        timer.schedule(after: interval, repeating: interval, leeway: .milliseconds(Int(interval * 250)))
         watchdog = timer
     }
-
-    /// Whether the stall watchdog runs now (for tests).
-    var watchdogRunning: Bool { watchdog != nil }
 
     /// Output or a request waiting on the parser for longer than `ParserOptions.stallLimit`, with no progress: it's
     /// stalled. A parser with nothing to do: the watchdog stops until it has.
     private func checkParser() {
-        guard let parser, parser.busy.0 else {
-            watchdog?.cancel()
-            watchdog = nil
-            return
-        }
-        let (busy, since) = parser.busy
-        guard busy else {
+        guard let parser, case (true, let since) = parser.busy else {
             watchdog?.cancel()
             watchdog = nil
             return
@@ -300,17 +300,15 @@ public final class HostedSession {
         exit.resume()
         exitSource = exit
 
-        let poll = DispatchSource.makeTimerSource(queue: queue)
-        poll.schedule(deadline: .now() + Self.exitPollDelays[0], leeway: .milliseconds(20))
-        poll.setEventHandler { [weak self, weak poll] in
+        let poll = timers.make(.exitPoll, queue) { [weak self] in
             guard let self else { return }
             self.reap()
-            guard let poll, self.exitPoll === poll else { return }
+            guard let poll = self.exitPoll else { return }
             self.exitPolls += 1
             let delay = Self.exitPollDelays[min(self.exitPolls, Self.exitPollDelays.count - 1)]
-            poll.schedule(deadline: .now() + delay, leeway: .milliseconds(Int(delay * 100)))
+            poll.schedule(after: delay, repeating: nil, leeway: .milliseconds(Int(delay * 100)))
         }
-        poll.resume()
+        poll.schedule(after: Self.exitPollDelays[0], repeating: nil, leeway: .milliseconds(20))
         exitPoll = poll
     }
 
@@ -710,4 +708,46 @@ final class HeadlessDelegate: TerminalDelegate {
     func send(source: Terminal, data: ArraySlice<UInt8>) { onReply?(Data(data)) }
     func setTerminalTitle(source: Terminal, title: String) { onTitle?(title) }
     func bell(source: Terminal) { onBell?() }
+}
+
+/// A timer of a session's (its exit poll, its parser's watchdog): scheduled again at will, on the session's queue.
+protocol SessionTimer: AnyObject {
+    /// Fires `after` from now, then every `repeating` (nil: once).
+    func schedule(after delay: TimeInterval, repeating: TimeInterval?, leeway: DispatchTimeInterval)
+    func cancel()
+}
+
+/// How a session makes its timers: dispatch's, or a test's whose clock it moves itself (HostedSessionTimerTests).
+struct SessionTimers {
+    enum Purpose { case exitPoll, parserWatchdog }
+    /// A timer for `purpose` firing its handler on the queue.
+    var make: (Purpose, DispatchQueue, @escaping () -> Void) -> SessionTimer
+
+    static let dispatch = SessionTimers { _, queue, fire in DispatchSessionTimer(queue: queue, fire: fire) }
+}
+
+private final class DispatchSessionTimer: SessionTimer {
+    private let source: DispatchSourceTimer
+    private var resumed = false
+
+    init(queue: DispatchQueue, fire: @escaping () -> Void) {
+        source = DispatchSource.makeTimerSource(queue: queue)
+        source.setEventHandler(handler: fire)
+    }
+
+    func schedule(after delay: TimeInterval, repeating: TimeInterval?, leeway: DispatchTimeInterval) {
+        if let repeating {
+            source.schedule(deadline: .now() + delay, repeating: repeating, leeway: leeway)
+        } else {
+            source.schedule(deadline: .now() + delay, leeway: leeway)
+        }
+        guard !resumed else { return }
+        resumed = true
+        source.resume()
+    }
+
+    func cancel() { source.cancel() }
+
+    // A source released while never resumed is a crash in dispatch.
+    deinit { if !resumed { source.resume() } }
 }
