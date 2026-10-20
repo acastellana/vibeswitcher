@@ -62,6 +62,37 @@ public struct LeadVault: Sendable {
         public var voted = false
     }
 
+    /// A worker or verifier as a team's roster has it (`Request.roster`): holding its role now, or a `former` one
+    /// (its grant went while it may still run). Never a lead.
+    public struct RosterEntry: Codable, Equatable, Sendable {
+        /// The repository (as the vault keeps it, standardized).
+        public var root: String
+        /// The session host's id of its session.
+        public var session: String
+        public var role: LeadLaunch.Role
+        /// Its task; nil for a former session an older vault kept without one (its worktree tells which).
+        public var task: String?
+        /// It holds its role now (else it's a former one).
+        public var holds: Bool
+        /// A verifier that gave its verdict (or cast its ballot): when. Its job is done.
+        public var submittedAt: Double?
+
+        public init(root: String, session: String, role: LeadLaunch.Role, task: String?, holds: Bool, submittedAt: Double? = nil) {
+            self.root = root
+            self.session = session
+            self.role = role
+            self.task = task
+            self.holds = holds
+            self.submittedAt = submittedAt
+        }
+    }
+
+    /// The role and task a former session held.
+    struct Former: Codable, Equatable {
+        var role: LeadLaunch.Role
+        var task: String?
+    }
+
     /// What a verifier's submission came to: its verdict, or (one of several finders) its ballot counted, with the
     /// verdict once the last finder's ballot made the vote.
     public struct Submission: Equatable, Sendable {
@@ -149,6 +180,9 @@ public struct LeadVault: Sendable {
         case approve(root: String, task: String, commit: String)
         /// Whether you approved merging the task at exactly this commit.
         case approved(root: String, task: String, commit: String)
+        /// The workers and verifiers the vault knows of (`RosterEntry`), never a lead: the app's of every team (nil),
+        /// or a repository's lead's of its own.
+        case roster(root: String?)
     }
 
     public enum Reply: Codable, Equatable, Sendable {
@@ -168,6 +202,7 @@ public struct LeadVault: Sendable {
         case move(BaseMove)
         case guarded([String: String]?)
         case approved(Bool)
+        case roster([RosterEntry])
     }
 
     /// The host said no, or couldn't be asked.
@@ -260,6 +295,13 @@ public struct LeadVault: Sendable {
     }
 
     /// The role's current member (the lead, or a task's worker or verifier).
+    /// The workers and verifiers the vault knows of (see `Request.roster`): `root`'s, or (nil, the app) every team's.
+    /// Throws when the host refuses (an older host doesn't know the request) or can't be asked: never "none" then.
+    public func roster(root: String? = nil) throws -> [RosterEntry] {
+        guard case .roster(let entries) = try call(.roster(root: root)) else { throw Self.unexpected }
+        return entries
+    }
+
     public func current(_ role: LeadLaunch.Role, root: String, task: String?) -> Member? {
         guard case .member(let member)? = try? call(.current(role: role, root: root, task: task)) else { return nil }
         return member
@@ -413,14 +455,41 @@ extension LeadVault {
             var approvals: [String: [String]]?
             /// Each task's audit by several finders: their ballots until the vote (optional: older vaults have none).
             var ballots: [String: Ballots]?
+            /// The role and task each `former` session held (optional: older vaults have none; a former session kept
+            /// before has no entry, and its worktree tells its task).
+            var formerRoles: [String: Former]?
+            /// The verifiers that gave their verdict or cast their ballot, by session: when. The host ends each a
+            /// little later (its job is done: see `HostServer`). Newest 200 (optional: older vaults have none).
+            var submitted: [String: Double]?
 
             /// Takes the members `drop` picks out; the sessions the workers and verifiers among them were bound to
-            /// become `former`.
+            /// become `former`, with the role and task each held.
             mutating func remove(where drop: (Member) -> Bool) {
-                let gone = members.filter { drop($0) && $0.role != .lead }.compactMap(\.session)
+                let leaving = members.filter { drop($0) && $0.role != .lead }
+                let gone = leaving.compactMap(\.session)
                 members.removeAll(where: drop)
                 guard !gone.isEmpty else { return }
                 former = Array(((former ?? []).filter { !gone.contains($0) } + gone).suffix(200))
+                var roles = formerRoles ?? [:]
+                for member in leaving { if let session = member.session { roles[session] = Former(role: member.role, task: member.task) } }
+                let kept = Set(former ?? [])
+                formerRoles = roles.filter { kept.contains($0.key) }
+            }
+
+            /// Its workers and verifiers, holding their role or former (a session in both is listed as holding it).
+            func roster() -> [RosterEntry] {
+                let holding = members.filter { $0.role != .lead }.compactMap { member in
+                    member.session.map { RosterEntry(root: root, session: $0, role: member.role, task: member.task, holds: true,
+                                                     submittedAt: submitted?[$0]) }
+                }
+                let held = Set(holding.map(\.session))
+                let formers = (former ?? []).filter { !held.contains($0) }.map { session in
+                    // A former session an older vault kept without its role: a worker's or a verifier's, told apart
+                    // by its label (the role here is a placeholder the app reads only with the task).
+                    RosterEntry(root: root, session: session, role: formerRoles?[session]?.role ?? .worker, task: formerRoles?[session]?.task,
+                                holds: false, submittedAt: submitted?[session])
+                }
+                return holding + formers
             }
         }
 
@@ -650,9 +719,11 @@ extension LeadVault {
                     return .refused("Only the verifier VibeSwitcher's lead started on a task gives its verdict, from its own session.")
                 }
                 if let finder = member.finder {
-                    return castBallot(finder, root: root, task: task, commit: commit, session: session, changed: &changed,
-                                      LeadAuditVote.Ballot(finder: finder.index, focus: finder.focus, completion: completion, integrity: integrity,
-                                                           summary: summary, findings: findings ?? []))
+                    let reply = castBallot(finder, root: root, task: task, commit: commit, session: session, changed: &changed,
+                                           LeadAuditVote.Ballot(finder: finder.index, focus: finder.focus, completion: completion, integrity: integrity,
+                                                                summary: summary, findings: findings ?? []))
+                    if case .ballot = reply { noteSubmitted(session, root: root, changed: &changed) }
+                    return reply
                 }
                 let verdict = Verdict(task: task, completion: completion, integrity: integrity, summary: summary, commit: commit,
                                       verifier: member.id, session: session, at: Date().timeIntervalSince1970)
@@ -663,6 +734,7 @@ extension LeadVault {
                     team.verdicts[task] = verdict
                     team.audits = (team.audits ?? [:]).merging([task: ledger]) { $1 }
                 }
+                noteSubmitted(session, root: root, changed: &changed)
                 return .verdict(verdict)
             case .verdict(let root, let task):
                 return .verdict(team(root)?.verdicts[task])
@@ -757,7 +829,37 @@ extension LeadVault {
                 return .ok
             case .approved(let root, let task, let commit):
                 return .approved(team(root)?.approvals?[task]?.contains(commit.lowercased()) == true)
+            case .roster(let root):
+                if let root {
+                    guard caller == .app || isLead(caller, root) else { return .refused("Only VibeSwitcher or the repository's lead reads its roster.") }
+                    return .roster(team(root)?.roster() ?? [])
+                }
+                guard caller == .app else { return .refused("Only VibeSwitcher reads every team's roster.") }
+                return .roster(state.teams.values.sorted { $0.root < $1.root }.flatMap { $0.roster() })
             }
+        }
+
+        /// The verifier on `session` gave its verdict or cast its ballot just now.
+        private func noteSubmitted(_ session: String, root: String, changed: inout Bool) {
+            let now = Date().timeIntervalSince1970
+            change(root, &changed) { team in
+                var submitted = team.submitted ?? [:]
+                submitted[session] = now
+                if submitted.count > 200 {
+                    submitted = Dictionary(uniqueKeysWithValues: submitted.sorted { $0.value > $1.value }.prefix(200).map { ($0.key, $0.value) })
+                }
+                team.submitted = submitted
+            }
+        }
+
+        // MARK: The host's own
+
+        /// Every verifier that gave its verdict or cast its ballot (`Team.submitted`), by session: when. The host ends
+        /// each once its grace is over (see `HostServer`).
+        public func submittedSessions() -> [String: Double] {
+            lock.lock()
+            defer { lock.unlock() }
+            return state.teams.values.reduce(into: [:]) { all, team in all.merge(team.submitted ?? [:]) { max($0, $1) } }
         }
 
         private func team(_ root: String) -> Team? { state.teams[LeadVault.key(root)] }

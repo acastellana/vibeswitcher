@@ -37,6 +37,9 @@ public final class HostServer {
         public var fallback: String?
         /// Each session's output is parsed in a process of its own (see `SessionParser`), watched for stalls.
         public var parser = ParserOptions()
+        /// How long after a verifier gave its verdict (or cast its ballot) the host ends its session: its job is done,
+        /// and this leaves its tool server the time to record the verdict on the board and hand the lead its message.
+        public var submittedGrace: TimeInterval = HostServer.submittedGrace
 
         /// Where a handover leaves the sessions for the next build: beside the lock, so a scratch host's stays its own.
         public var handoverPath: String { lockPath + ".handover" }
@@ -56,6 +59,9 @@ public final class HostServer {
         case alreadyRunning
         case lock(Int32)
     }
+
+    /// See `Config.submittedGrace`: within the minute a submitted verifier may run on, with the housekeeping's 30 s.
+    public static let submittedGrace: TimeInterval = 20
 
     public let queue = DispatchQueue(label: "vibeswitcher.host")
     /// Called (on `queue`) after an idle exit or an accepted `shutdown`, once everything is closed.
@@ -407,6 +413,15 @@ public final class HostServer {
                 return isYours(id)
             }()
             var answer = vault.answer(request, from: from, userOpened: opened)
+            // A verifier that gave its verdict has no job left: it ends once its grace is over (see `endSubmitted`).
+            if case .submitVerdict = request, case .session(let id) = from {
+                switch answer {
+                case .verdict, .ballot:
+                    log.note("vault: verifier \(id.prefix(8)) submitted its audit; it ends in \(Int(config.submittedGrace)) s, \(HostLog.peer(client.peerPID))")
+                    queue.asyncAfter(deadline: .now() + config.submittedGrace + 0.05) { [weak self] in self?.endSubmitted() }
+                default: break
+                }
+            }
             if case .move(var move) = answer, move.from != move.to {
                 move.labels = move.sessions.map { id in UUID(uuidString: id).flatMap { sessions[$0]?.info.label } ?? String(id.prefix(8)) }
                 log.note(move.accepted ? "vault: \(move.acceptedLine) (\(move.from.prefix(8)) → \(move.to.prefix(8))), \(HostLog.peer(client.peerPID))"
@@ -640,8 +655,23 @@ public final class HostServer {
         broadcast(.sessionRemoved(id: id))
     }
 
+    /// Ends each verifier session that gave its verdict or cast its ballot (the vault records when) `submittedGrace`
+    /// ago and still runs: its job is done (the lead reads its verdict from the vault and its transcript with
+    /// read_session, both kept). The host's own end, logged as a kill is; ended like any session (hung up, then
+    /// killed 5 s on), so the window shows it as any ended one. Run after each submission's grace and at housekeeping
+    /// (a handover in between carries the vault's record over).
+    private func endSubmitted(now: Date = Date()) {
+        guard let vault = config.vault else { return }
+        for (id, at) in vault.submittedSessions() where now.timeIntervalSince1970 - at >= config.submittedGrace {
+            guard let uuid = UUID(uuidString: id), let session = sessions[uuid], session.info.isLive else { continue }
+            log.note("kill \(Self.short(uuid)) pid \(session.info.childPID) label '\(session.info.label)': its verifier submitted its audit \(Int(now.timeIntervalSince1970 - at)) s ago, by the host")
+            session.terminate(by: getpid())
+        }
+    }
+
     private func tidy() {
         let now = Date()
+        endSubmitted(now: now)
         for session in sessions.values {
             if let exit = session.info.exit, now.timeIntervalSince(exit.at) > config.keepEnded { forget(session.id) }
         }
