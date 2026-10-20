@@ -24,7 +24,14 @@
 #
 # --no-trust: don't trust the certificate, or untrust a replaced one (scripts/test-signing.sh, on a scratch HOME).
 #
-# Your login keychain and keychain search list are left as they are.
+# The keychain search list is the list of keychains macOS apps look in for their passwords, and store new ones in (Chrome
+# its Safe Storage key, for one); `security list-keychains -d user` shows it. create-keychain adds the new keychain to
+# it, and nothing here needs it there, so the list read at the start is put back the moment the keychain is made, and
+# again on any exit (an error, Ctrl-C) while it's changed. The login keychain is never removed from it: the script
+# stops before changing anything if the list can't be read or doesn't hold ~/Library/Keychains/login.keychain-db, and
+# the list it writes back always holds it (an empty list is what makes Chrome say "Keychain Not Found").
+#
+# Your login keychain is left as it is.
 # Undo: security remove-trusted-cert <(security find-certificate -c "VibeSwitcher Local Signing" -p \
 #           ~/.vibeswitcher/signing/vibeswitcher.keychain-db)
 #       security delete-keychain ~/.vibeswitcher/signing/vibeswitcher.keychain-db
@@ -48,12 +55,77 @@ DONE=0
 MADE=0
 WORK=""
 
+# --- The keychain search list (this block is the same in setup-signing.sh and build-app.sh; test-signing.sh checks) ---
+LOGIN_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
+SEARCH_LIST=()
+RESTORE_LIST=()
+# 1 from just before the script changes the search list until it has put it back: the exit hook restores it then.
+SEARCH_LIST_CHANGED=0
+
+# Whether $1 names the login keychain (security names one under /tmp or /var by its /private path).
+is_login_keychain() {
+    [[ "$1" == "$LOGIN_KEYCHAIN" || "$1" == "$(cd "$HOME/Library/Keychains" 2>/dev/null && pwd -P)/login.keychain-db" ]]
+}
+
+# Reads the user's search list into SEARCH_LIST. Stops the script, before it has changed anything, when security
+# can't read it or the login keychain isn't in it: that list, written back, would leave apps nowhere to keep passwords.
+read_search_list() {
+    local listed line entry list=() login=0
+    if ! listed="$(security list-keychains -d user)"; then
+        echo "Couldn't read your keychain search list (security list-keychains -d user failed). Nothing was changed." >&2
+        exit 1
+    fi
+    while IFS= read -r line; do
+        line="${line#"${line%%[![:space:]]*}"}"; line="${line%\"}"; line="${line#\"}"
+        [[ -n "$line" ]] && list+=("$line")
+    done <<<"$listed"
+    for entry in ${list[@]+"${list[@]}"}; do is_login_keychain "$entry" && login=1; done
+    if [[ "$login" != 1 ]]; then
+        echo "Your keychain search list doesn't have your login keychain ($LOGIN_KEYCHAIN) in it. Nothing was changed." >&2
+        echo "security list-keychains -d user listed:" >&2
+        if [[ ${#list[@]} -gt 0 ]]; then printf '    %s\n' "${list[@]}" >&2; else echo "    (nothing)" >&2; fi
+        echo "Put it back with: security list-keychains -d user -s ~/Library/Keychains/login.keychain-db, followed by" >&2
+        echo "any other keychain listed above you want kept. Then run this again." >&2
+        exit 1
+    fi
+    SEARCH_LIST=("${list[@]}")
+}
+
+# RESTORE_LIST: the list read, without the signing keychain (one an interrupted run left goes too), and always with the
+# login keychain: first when the list read is empty or lost.
+search_list_to_restore() {
+    local entry login=0
+    RESTORE_LIST=()
+    for entry in ${SEARCH_LIST[@]+"${SEARCH_LIST[@]}"}; do
+        [[ "$entry" == */.vibeswitcher/signing/vibeswitcher.keychain-db ]] && continue
+        is_login_keychain "$entry" && login=1
+        RESTORE_LIST+=("$entry")
+    done
+    [[ "$login" == 1 ]] || RESTORE_LIST=("$LOGIN_KEYCHAIN" ${RESTORE_LIST[@]+"${RESTORE_LIST[@]}"})
+}
+
+restore_search_list() {
+    search_list_to_restore
+    if security list-keychains -d user -s "${RESTORE_LIST[@]}"; then
+        SEARCH_LIST_CHANGED=0
+    else
+        echo "Couldn't put your keychain search list back. Run: security list-keychains -d user -s $(printf "%q " "${RESTORE_LIST[@]}")" >&2
+        return 1
+    fi
+}
+
+# The exit hook (normal exit, error, Ctrl-C): puts the list back if the script changed it and hasn't yet.
+restore_search_list_on_exit() {
+    [[ "$SEARCH_LIST_CHANGED" != 1 ]] || restore_search_list || true
+}
+# --- end of the keychain search list ---
+
+read_search_list
+
 finish() {
     if [[ -n "$WORK" ]]; then
         rm -f "$WORK/cert.cnf" "$WORK/key.pem" "$WORK/cert.pem"
         rmdir "$WORK" 2>/dev/null || true
-        # Keep the user's keychain search list exactly as it was (create-keychain adds to it).
-        security list-keychains -d user -s ${SEARCH_LIST[@]+"${SEARCH_LIST[@]}"}
         if [[ "$MADE" != 1 ]]; then
             # Don't leave a half-made keychain behind (the build script would try to use it).
             if [[ -f "$KEYCHAIN" ]]; then
@@ -63,6 +135,7 @@ finish() {
             rmdir "$DIR" 2>/dev/null || true
         fi
     fi
+    restore_search_list_on_exit
     [[ "$DONE" == 1 ]] && return
     cat >&2 <<EOF
 
@@ -156,11 +229,6 @@ fi
 
 mkdir -p "$DIR"
 chmod 700 "$DIR"
-SEARCH_LIST=()
-while IFS= read -r line; do
-    line="${line#"${line%%[![:space:]]*}"}"; line="${line%\"}"; line="${line#\"}"
-    [[ -n "$line" ]] && SEARCH_LIST+=("$line")
-done < <(security list-keychains -d user)
 WORK="$(mktemp -d)"
 
 cat > "$WORK/cert.cnf" <<EOF
@@ -180,8 +248,11 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -config "$WORK/cert.cnf" \
 
 echo "Choose a NEW password for the signing keychain and type it twice; it is never saved; each build after login or wake asks for it once."
 # No -p: security asks for it (on the terminal; read from stdin when there's none), so it never sits in
-# argv, where any process can read it with ps, or in a file.
+# argv, where any process can read it with ps, or in a file. It adds the keychain to the search list, which is put
+# back at once: the steps below name the keychain.
+SEARCH_LIST_CHANGED=1
 security create-keychain "$KEYCHAIN"
+restore_search_list
 # Lock on sleep (and at logout), with no inactivity timeout: once you've unlocked it at a build, later
 # builds sign without asking until the Mac sleeps.
 security set-keychain-settings -l "$KEYCHAIN"
