@@ -246,11 +246,11 @@ EOF
 openssl req -x509 -newkey rsa:2048 -nodes -days 3650 -config "$WORK/cert.cnf" \
     -keyout "$WORK/key.pem" -out "$WORK/cert.pem" </dev/null 2>/dev/null
 
+# create-keychain adds the keychain to the search list, which is put back at once: the steps below name the keychain.
+SEARCH_LIST_CHANGED=1
 echo "Choose a NEW password for the signing keychain and type it twice; it is never saved; each build after login or wake asks for it once."
 # No -p: security asks for it (on the terminal; read from stdin when there's none), so it never sits in
-# argv, where any process can read it with ps, or in a file. It adds the keychain to the search list, which is put
-# back at once: the steps below name the keychain.
-SEARCH_LIST_CHANGED=1
+# argv, where any process can read it with ps, or in a file.
 security create-keychain "$KEYCHAIN"
 restore_search_list
 # Lock on sleep (and at logout), with no inactivity timeout: once you've unlocked it at a build, later
