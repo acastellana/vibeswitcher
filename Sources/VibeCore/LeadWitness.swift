@@ -239,6 +239,33 @@ public enum LeadWitness {
         }
     }
 
+    /// Watches the Mac's power source (the app looks once a minute): each switch to battery or back to AC power is
+    /// told to every running lead once (see `PowerWatch`), and each reading is kept in `file` for status.
+    public struct Power {
+        let read: () -> PowerState?
+        let file: URL
+        public private(set) var watch = PowerWatch()
+
+        public init(read: @escaping () -> PowerState?, file: URL = PowerState.file) {
+            self.read = read
+            self.file = file
+        }
+
+        /// Reads the power source: what to tell the leads now, if anything.
+        public mutating func look() -> String? {
+            let state = read()
+            state?.save(to: file)
+            return watch.check(state).map(LeadWitness.powerText)
+        }
+    }
+
+    /// "On battery: 74 %, about 3:12 left. …" with what the lead does now; "On AC power: 80 %, charging. …".
+    public static func powerText(_ state: PowerState) -> String {
+        state.text + (state.onBattery
+            ? ". Start no workers or audits and merge nothing until AC power returns; work in flight finishes."
+            : ". Resume starts and merges.")
+    }
+
     /// "Disk space is low: 7.4 GB free … Biggest task folders: …".
     public static func diskText(free: Int64, workflow: LeadWorkflow, folders: [TaskFolder]) -> String {
         let biggest = folders.prefix(5).map(\.text)

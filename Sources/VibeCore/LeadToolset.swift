@@ -110,6 +110,8 @@ public final class LeadToolset: MCPToolset {
     var scratchRoot = ClaudeScratch.root
     /// Where its workers' and verifiers' TMPDIRs are made (see `SessionTemp`).
     var sessionTempRoot = SessionTemp.root
+    /// The Mac's power source as the app last read it (see `PowerState.load`). Faked in tests.
+    var power: () -> PowerState? = { PowerState.load() }
     /// How often merge reads the load again while it waits for it to drop below load_threshold.
     var loadPoll: TimeInterval = 15
 
@@ -2184,7 +2186,8 @@ public final class LeadToolset: MCPToolset {
         let listing = try? listed()
         let sessions = listing.map { Dictionary($0.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) }
         let workflow = self.workflow
-        var lines = ["Project \(project) on branch \(workflow.base) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once."]
+        let power = self.power()?.statusText.map { "; \($0) (no new starts or merges until AC power returns)" } ?? ""
+        var lines = ["Project \(project) on branch \(workflow.base) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once\(power)."]
         lines += workflowWarnings(workflow)
         lines += diskWarning(workflow, board: board)
         if let line = records.statusLine { lines.append(line) }

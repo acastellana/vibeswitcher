@@ -176,6 +176,10 @@ final class LeadController: ObservableObject {
     private var told: Set<String> = []
     /// Each project's free disk space, watched (see `LeadWitness.Disk`), by root.
     private var disks: [String: LeadWitness.Disk] = [:]
+    /// The Mac's power source, read once a minute: each switch to battery or back is told to every running lead (see
+    /// `LeadWitness.Power`). None until the app gives it the reader (`watchPower`): benches and tests read nothing.
+    private var power: LeadWitness.Power?
+    private var powerTimer: Heartbeat.Subscription?
     /// Ended team sessions the host has been asked to drop.
     private var forgetting: Set<UUID> = []
     /// Ends the sessions of finished tasks from the vault's roster, in every project (see `RoleSweep`); nil in tests
@@ -876,6 +880,19 @@ final class LeadController: ObservableObject {
             })
             DispatchQueue.main.async { self?.sweeping = false }
         }
+    }
+
+    /// Reads the power source with `read` once a minute from now on (the first a minute in: the host has said which
+    /// leads run by then).
+    func watchPower(_ read: @escaping () -> PowerState?) {
+        power = LeadWitness.Power(read: read)
+        powerTimer = Heartbeat.shared.every(60) { [weak self] in self?.lookAtPower() }
+    }
+
+    /// A switch to battery or back to AC power: to each running lead, as the witness.
+    func lookAtPower() {
+        guard let text = power?.look() else { return }
+        for root in leadSessions.keys { deliver(text, from: .system("witness"), root: root) }
     }
 
     /// The stranded role sessions, in every project: to each running lead, as the witness, and to the user.

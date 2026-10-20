@@ -583,8 +583,16 @@ public enum LeadPrompts {
         sessions: plan around them. When it's busy, start fewer workers, merge and cleanup finished tasks first \
         (cleanup ends their sessions), and don't retry a refusal at once: try again in about \(MacLoad.retryMinutes) \
         minutes, since other projects' sessions ending send you no message.
+        \(onBattery)
         """
     }
+
+    /// What the lead does on battery (the witness tells each switch, status says it while it lasts), in one sentence.
+    static let onBattery = """
+        On battery (VibeSwitcher tells you when the Mac switches, and status says "on battery" while it lasts), start \
+        no new workers or audits and merge nothing, let work in flight finish, and resume when it tells you AC power \
+        is back.
+        """
 
     /// The lead's merge policy section: the one-time question while the owner hasn't chosen, then the policy to
     /// follow without asking again.
