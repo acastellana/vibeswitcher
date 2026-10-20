@@ -361,13 +361,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             chat.focusComposer()
         }
         if shown, chatTimer == nil {
-            chatTimer = Heartbeat.shared.every(1) { [weak self] in
-                guard let self, self.window?.isVisible == true, !self.chatHost.isHidden else { return }
-                self.chat.poll()
-                self.chat.refreshSteering()
-                self.readScreen()
-                if self.window?.isKeyWindow == true { self.chat.markSeen() }
-            }
+            chatTimer = Heartbeat.shared.every(1) { [weak self] in self?.followChat() }
         } else if !shown {
             chatTimer?.cancel()
             chatTimer = nil
@@ -477,6 +471,22 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     }
 
     func windowDidResignKey(_ notification: Notification) { updateViewing() }
+
+    /// Back in sight (another window moved off it, its Space shown again): the chat catches up at once.
+    func windowDidChangeOcclusionState(_ notification: Notification) {
+        if window?.occlusionState.contains(.visible) == true { followChat() }
+    }
+
+    /// Each second while the chat is shown and in sight: the transcript, the steering line and the terminal's screen.
+    /// A window behind others or on another Space (still `isVisible`) reads nothing: 2026-10-20, the user's window
+    /// sat behind others for a day re-reading a terminal screen every second.
+    private func followChat() {
+        guard let window, window.isVisible, window.occlusionState.contains(.visible), !chatHost.isHidden else { return }
+        chat.poll()
+        chat.refreshSteering()
+        readScreen()
+        if window.isKeyWindow { chat.markSeen() }
+    }
 
     func windowWillClose(_ notification: Notification) {
         Breadcrumbs.shared.note("window: close")

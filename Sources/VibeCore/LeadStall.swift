@@ -144,13 +144,8 @@ public struct TranscriptProgress: Equatable, Sendable {
     /// they were last written to.
     public static func read(url: URL) -> TranscriptProgress? {
         TranscriptTail.noteRead()
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
-        defer { try? handle.close() }
-        guard let size = try? handle.seekToEnd() else { return nil }
-        let start = size > UInt64(TranscriptTail.window) ? size - UInt64(TranscriptTail.window) : 0
-        guard (try? handle.seek(toOffset: start)) != nil, var data = try? handle.readToEnd() else { return nil }
-        if start > 0 { data = data.subdata(in: (data.startIndex + TranscriptReader.tailStart(data))..<data.endIndex) }
-        var progress = read(data)
+        // The file's own part read again only once it changed (see `UnchangedFiles`); its subagents' looked at each time.
+        guard var progress = mains.value(at: url.path, read: { readFile(url) }) else { return nil }
         let subagents = url.deletingPathExtension().appendingPathComponent("subagents")
         let files = (try? FileManager.default.contentsOfDirectory(at: subagents, includingPropertiesForKeys: [.contentModificationDateKey])) ?? []
         let latest = files.filter { $0.pathExtension == "jsonl" }
@@ -159,9 +154,22 @@ public struct TranscriptProgress: Equatable, Sendable {
         return progress
     }
 
+    /// What each transcript's own lines said, while the file is the same.
+    static let mains = UnchangedFiles<TranscriptProgress?>()
+
+    private static func readFile(_ url: URL) -> TranscriptProgress? {
+        guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+        defer { try? handle.close() }
+        guard let size = try? handle.seekToEnd() else { return nil }
+        let start = size > UInt64(TranscriptTail.window) ? size - UInt64(TranscriptTail.window) : 0
+        guard (try? handle.seek(toOffset: start)) != nil, var data = try? handle.readToEnd() else { return nil }
+        if start > 0 { data = data.subdata(in: (data.startIndex + TranscriptReader.tailStart(data))..<data.endIndex) }
+        return read(data)
+    }
+
     /// From complete transcript lines (a partial last line is skipped).
     public static func read(_ data: Data) -> TranscriptProgress {
-        var lines = data.split(separator: 0x0A)
+        var lines = TranscriptReader.lines(data)
         if data.last != 0x0A, !lines.isEmpty { lines.removeLast() }
         var lastWritten: Double?
         // While the conversation ends at a compaction: when it was, and the latest entry written before it.

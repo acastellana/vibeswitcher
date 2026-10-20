@@ -59,7 +59,22 @@ public enum TranscriptReader {
     /// Codex compresses cold rollouts in place (`rollout-….jsonl` → `rollout-….jsonl.zst`, and back when one is
     /// resumed), so either name finds whichever exists. A compressed one is read through a decompressed copy in
     /// `~/.vibeswitcher/transcripts` (made once per version of the file): callers keep reading plain JSONL by offset.
+    ///
+    /// The answer for a file is kept while `path` leads to the same file, unchanged (see `UnchangedFiles`): each
+    /// session's transcript is checked at every scan and every look of the witness, each check a walk of every folder
+    /// on the way (2026-10-20: 15 % of the app's CPU while a lead's team worked). A link that leads elsewhere now leads to
+    /// another file, checked again. A compressed rollout's isn't kept: its decompressed copy can go.
     public static func checkedURL(_ path: String, home: String) -> (URL, Format)? {
+        guard !path.hasSuffix(".zst") else { return check(path, home: home) }
+        let found = checked.value(at: path, key: home + "\u{0}" + path) { check(path, home: home) }
+        if let found, found.0.pathExtension != "jsonl" || found.0.path.contains("/" + decompressedFolder + "/") { return check(path, home: home) }
+        return found
+    }
+
+    /// The checks' answers, while each file is the same.
+    static let checked = UnchangedFiles<(URL, Format)?>()
+
+    private static func check(_ path: String, home: String) -> (URL, Format)? {
         let resolved = URL(fileURLWithPath: path).standardizedFileURL.resolvingSymlinksInPath()
         var candidates = [resolved]
         if resolved.pathExtension == "jsonl" {
@@ -67,8 +82,10 @@ public enum TranscriptReader {
         } else if isCompressed(resolved) {
             candidates.append(resolved.deletingPathExtension())
         }
-        for candidate in candidates {
-            if let found = checkedFile(candidate.resolvingSymlinksInPath(), home: home) { return found }
+        // The first is resolved already (each resolution is a look at every folder on the way, for every session at
+        // every scan).
+        for (index, candidate) in candidates.enumerated() {
+            if let found = checkedFile(index == 0 ? candidate : candidate.resolvingSymlinksInPath(), home: home) { return found }
         }
         return nil
     }
@@ -204,6 +221,29 @@ public enum TranscriptReader {
     }
 
     /// For a read that starts in the middle of a file: the offset of the first complete line.
+    /// `data.split(separator: 0x0A)`, empty lines left out, the newlines found with memchr: `Collection.split` walks a
+    /// Data a byte at a time through generic calls, and splitting a 256 KB tail at every look of the witness was its
+    /// biggest single cost (2026-10-20).
+    public static func lines(_ data: Data) -> [Data] {
+        var ranges: [Range<Int>] = []
+        data.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in
+            guard let base = raw.baseAddress else { return }
+            let count = raw.count
+            var offset = 0
+            while offset < count {
+                guard let hit = memchr(base + offset, 0x0A, count - offset) else {
+                    ranges.append(offset..<count)
+                    break
+                }
+                let end = UnsafeRawPointer(hit) - base
+                if end > offset { ranges.append(offset..<end) }
+                offset = end + 1
+            }
+        }
+        let start = data.startIndex
+        return ranges.map { data[(start + $0.lowerBound)..<(start + $0.upperBound)] }
+    }
+
     public static func tailStart(_ data: Data) -> Int {
         guard let newline = data.firstIndex(of: 0x0A) else { return data.count }
         return newline - data.startIndex + 1
@@ -476,9 +516,17 @@ public struct TranscriptTail: Equatable, Sendable {
     /// How much of the file's end is read: the last few steps, whatever their size (a tool's result can be big).
     public static let window = 256 * 1024
 
-    /// The tail of a Claude Code transcript, or nil when it has no main-thread step yet.
+    /// The tail of a Claude Code transcript, or nil when it has no main-thread step yet. Read again only once the file
+    /// changed (see `UnchangedFiles`).
     public static func read(url: URL) -> TranscriptTail? {
         noteRead()
+        return tails.value(at: url.path) { readFile(url) }
+    }
+
+    /// What each transcript's tail said, while the file is the same.
+    static let tails = UnchangedFiles<TranscriptTail?>()
+
+    private static func readFile(_ url: URL) -> TranscriptTail? {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
         guard let size = try? handle.seekToEnd() else { return nil }
@@ -510,7 +558,7 @@ public struct TranscriptTail: Equatable, Sendable {
 
     /// From complete transcript lines (a partial last line is skipped).
     public static func read(_ data: Data) -> TranscriptTail? {
-        var lines = data.split(separator: 0x0A)
+        var lines = TranscriptReader.lines(data)
         if data.last != 0x0A, !lines.isEmpty { lines.removeLast() }
         guard var tail = state(lines) else { return nil }
         tail.background = background(lines)
@@ -795,5 +843,54 @@ public enum LastTurns {
         if data.last != 0x0A { data.append(0x0A) }
         let entries = TranscriptReader.read(data, format: format).entries
         return text(turns(entries, prompts: prompts), tty: tty, limit: limit)
+    }
+}
+
+/// What a file said, kept while it's the same file with the same size and modification time (an append changes both;
+/// a rewrite renamed into place is another inode). The lead's witness reads every team member's transcript end every
+/// 3 s, 256 KB each to parse (2026-10-20: 1.3 % of a core of the app's 8 % with three leads' teams), and most of them
+/// haven't written a line since the last look. Any thread.
+final class UnchangedFiles<Value>: @unchecked Sendable {
+    struct Stamp: Equatable {
+        let inode: UInt64
+        let size: Int64
+        let seconds: Int
+        let nanoseconds: Int
+
+        init?(_ path: String) {
+            var info = stat()
+            guard stat(path, &info) == 0 else { return nil }
+            inode = info.st_ino
+            size = info.st_size
+            seconds = info.st_mtimespec.tv_sec
+            nanoseconds = info.st_mtimespec.tv_nsec
+        }
+    }
+
+    private let lock = NSLock()
+    private var entries: [String: (stamp: Stamp, value: Value)] = [:]
+    /// At most this many files are kept; past it, all are let go (a day's sessions are a few dozen).
+    static var limit: Int { 512 }
+    /// How many times `read` ran (for tests).
+    private(set) var reads = 0
+
+    /// `read`'s answer for the file at `path` (kept under `key`, else the path), read again only when the file changed
+    /// since. The stamp is taken before the read: what's appended meanwhile changes the next stamp, so it's read then.
+    func value(at path: String, key: String? = nil, read: () -> Value) -> Value {
+        guard let stamp = Stamp(path) else { return read() }
+        let key = key ?? path
+        lock.lock()
+        if let kept = entries[key], kept.stamp == stamp {
+            lock.unlock()
+            return kept.value
+        }
+        lock.unlock()
+        let value = read()
+        lock.lock()
+        reads += 1
+        if entries.count >= Self.limit { entries.removeAll() }
+        entries[key] = (stamp, value)
+        lock.unlock()
+        return value
     }
 }

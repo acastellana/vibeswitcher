@@ -5,7 +5,11 @@ public enum VibePaths {
     /// Looked up at each read (see `root(environment:fallbackHome:)`), so a scratch HOME or VIBESWITCHER_HOME given to
     /// this process (a test run, a debug mode, the hook under an agent started on a scratch HOME) is the one it uses.
     public static var root: URL {
-        root(environment: ProcessInfo.processInfo.environment, fallbackHome: NSHomeDirectory())
+        // As `root(environment:fallbackHome:)`, reading only the variables it needs: the whole environment as a
+        // dictionary, and NSHomeDirectory(), at every call were a tenth of the app's CPU while a lead's team worked
+        // (every hook state, inbox and transcript path asks; 2026-10-20).
+        if let own = absolute(variable("VIBESWITCHER_HOME")) { return URL(fileURLWithPath: own, isDirectory: true) }
+        return URL(fileURLWithPath: home).appendingPathComponent(".vibeswitcher")
     }
 
     /// Where VibeSwitcher keeps its files, first of: `VIBESWITCHER_HOME` (the folder itself), `.vibeswitcher` in the
@@ -20,8 +24,11 @@ public enum VibePaths {
     /// The home folder this process was given: where the agents' own files are looked for (`~/.claude`, `~/.codex`),
     /// Claude Code and Codex following HOME too.
     public static var home: String {
-        home(environment: ProcessInfo.processInfo.environment, fallbackHome: NSHomeDirectory())
+        absolute(variable("CFFIXED_USER_HOME")) ?? absolute(variable("HOME")) ?? NSHomeDirectory()
     }
+
+    /// One environment variable, as the environment has it now.
+    private static func variable(_ name: String) -> String? { getenv(name).map { String(cString: $0) } }
 
     /// First of: CFFIXED_USER_HOME, `$HOME`, `fallbackHome` (`NSHomeDirectory()`). CFFIXED_USER_HOME is the one way to
     /// move `NSHomeDirectory()`, so when it's set it was set on purpose, and comes before HOME: the debug modes and the

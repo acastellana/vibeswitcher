@@ -335,12 +335,28 @@ struct ProcessTableTests {
         return process
     }
 
-    /// Stops `process` and, when it's a terminal's `script`, everything on that terminal (its shell's process group).
+    /// Stops `process` and everything under it: a terminal's `script`, its shell's process group, and what runs in groups
+    /// of their own (a `swift build`'s compilers: scripts/test.sh found them still compiling after the run). Everything
+    /// found is stopped first (SIGSTOP: a stopped process starts nothing), then found again and ended.
     private func stop(_ process: Process) {
         let pid = process.processIdentifier
-        var children = [pid_t](repeating: 0, count: 16)
-        let count = children.withUnsafeMutableBytes { proc_listchildpids(pid, $0.baseAddress, Int32($0.count)) }
-        for child in children.prefix(Int(max(0, count))) where child > 0 && getpgid(child) == child { kill(-child, SIGKILL) }
+        func descendants() -> [pid_t] {
+            var found: [pid_t] = []
+            var next = [pid]
+            while let parent = next.popLast() {
+                var children = [pid_t](repeating: 0, count: 256)
+                let count = children.withUnsafeMutableBytes { proc_listchildpids(parent, $0.baseAddress, Int32($0.count)) }
+                let live = children.prefix(Int(max(0, count))).filter { $0 > 0 }
+                found += live
+                next += live
+            }
+            return found
+        }
+        for child in descendants() { kill(child, SIGSTOP) }
+        for child in descendants() {
+            if getpgid(child) == child { kill(-child, SIGKILL) }
+            kill(child, SIGKILL)
+        }
         if process.isRunning { kill(pid, SIGKILL) }
         process.waitUntilExit()
     }

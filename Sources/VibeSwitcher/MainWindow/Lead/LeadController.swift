@@ -587,11 +587,14 @@ final class LeadController: ObservableObject {
     }
 
     /// Runs out the timers of the leads' questions (see `BoardStore.runTimers`; on the boards' queue, it reads the
-    /// board): the lead is told to go ahead with each proposal no one answered, once.
-    private static func runTimers(_ roots: Set<String>) -> [String: [(question: LeadQuestion, message: String)]] {
+    /// board): the lead is told to go ahead with each proposal no one answered, once. Asked of the board as last read
+    /// first (`files`): decoding a day's board every 3 s to find no timer due was most of the app's CPU while its
+    /// teams worked (2026-10-20: 0.9 % of a core of 8 %, with three leads).
+    private static func runTimers(_ roots: Set<String>, files: inout LeadFiles,
+                                  now: Double = Date().timeIntervalSince1970) -> [String: [(question: LeadQuestion, message: String)]] {
         var fired: [String: [(question: LeadQuestion, message: String)]] = [:]
-        for root in roots {
-            if let expired = try? BoardStore(root: root).runTimers(), !expired.isEmpty { fired[root] = expired }
+        for root in roots where files.board(root).hasExpired(now: now) {
+            if let expired = try? BoardStore(root: root).runTimers(now: now), !expired.isEmpty { fired[root] = expired }
         }
         return fired
     }
@@ -818,7 +821,7 @@ final class LeadController: ObservableObject {
                                   uniquingKeysWith: { first, _ in first })
         let observer = observer
         reads.async({ files in
-            let fired = Self.runTimers(roots)
+            let fired = Self.runTimers(roots, files: &files)
             var loaded: [String: LeadBoard] = [:]
             for root in roots { loaded[root] = files.board(root) }
             let decisions = Dictionary(uniqueKeysWithValues: roots.map { ($0, files.decisions($0)) })
