@@ -89,6 +89,10 @@ struct ChatBenchTests {
         let tick = verdict.firstMatch(of: #/longest tick=([\d.]+)s/#).flatMap { Double($0.1) }
         #expect(tick != nil && tick! <= ChatBench.StallRule.limit, "longest tick: \(tick.map { "\($0)" } ?? "none") s")
         #expect(run.output.contains("\nticks: longest "), "\(run.output)")
+        // And the tick the main thread worked the most in, which a longer one it waited through mustn't hide: one at least
+        // carried a CPU reading (it has a place).
+        let cpu = run.output.firstMatch(of: #/\nticks: longest .*, most CPU ([\d.]+)s \(t=\d+s, /#).flatMap { Double($0.1) }
+        #expect(cpu != nil && cpu! <= ChatBench.StallRule.limit, "most CPU in a tick: \(cpu.map { "\($0)" } ?? "none") s\n\(run.output)")
         // Opened out of sight 20 rows a turn, then shown (twice: opened, left, opened again).
         #expect(run.output.matches(of: #/laid out out of sight in (\d+) turns, then shown/#).compactMap { Int($0.1) } == [3, 3], "\(run.output)")
         guard earlier > 0 else { return }
@@ -106,6 +110,33 @@ struct ChatBenchTests {
             #expect(Set(page.fillingIn.map(\.top)).count == 1, "page \(page.number) moved\n\(run.output)")
             #expect(page.fillingIn.map(\.height) == page.fillingIn.map(\.height).sorted(), "page \(page.number)\n\(run.output)")
         }
+    }
+
+    /// As scripts/chat-bench-settle.sh's top and middle scenarios: read there once opened, left, opened again where it
+    /// was read and scrolled there. The bench reads only once the open is laid out and the view has put it where it
+    /// opens: scrolled while the open was still out of sight, the view's initial scroll moved it back to the end, the
+    /// reopen restored a place never read at and the runs settled at two heights (2026-10-20, middle at 1200: 15716 and
+    /// 15558). Whatever the Mac's load, the rows the first open showed take the same height opened again: from the first
+    /// one's top to the end. Read at the top, the reopen shows 5 rows more above it (`ChatWindow.shown`'s context); in
+    /// the middle the same rows, so the same height.
+    @Test(arguments: ["top", "middle"])
+    func aReopenSettlesAtTheFirstOpensHeight(position: String) throws {
+        var settings = Self.settle
+        settings["VIBESWITCHER_BENCH_OPEN"] = position
+        settings["VIBESWITCHER_BENCH_AT"] = position
+        settings["VIBESWITCHER_BENCH_SIZE"] = Self.panes["no inspector"]
+        let run = try bench(settings)
+        print("chat bench, read at the \(position): status \(run.status)\n\(run.output)")
+        let lines = run.output.split(separator: "\n").map(String.init)
+        // Read once shown, not before.
+        let shown = lines.firstIndex { $0.contains("laid out out of sight in ") }
+        let read = lines.firstIndex { $0.hasPrefix("  read at t=") }
+        #expect(shown != nil && read != nil && shown! < read!, "\(run.output)")
+        #expect(lines.last { $0.hasPrefix("settled ") } != nil, "\(run.output)")
+        let left = run.output.firstMatch(of: #/left at height=(\d+) below (\S+)=(\d+)/#)
+        let again = run.output.firstMatch(of: #/opened again at height=(\d+) below (\S+)=(\d+)/#)
+        #expect(left != nil && left?.2 == again?.2 && left?.3 == again?.3, "\(run.output)")
+        if position == "middle" { #expect(left != nil && left?.1 == again?.1, "\(run.output)") }
     }
 
     /// Each page of a run: the bench's "filling in" lines between Show earlier and its settle, the row at the top once
@@ -145,9 +176,11 @@ struct ChatBenchTests {
     }
 
     /// A run failed on a stall whose tick the main thread spent mostly waiting for a core (under half of it on the
-    /// CPU): the Mac's load, however low its 1-minute average, rather than the layout, which works on the CPU.
+    /// CPU): the Mac's load, however low its 1-minute average, rather than the layout, which works on the CPU. Not when a
+    /// tick also worked over the limit on the CPU (the bench's "a tick worked" line): the starved one doesn't hide it.
     static func starved(_ run: (status: Int32, output: String)) -> Bool {
-        guard run.status == 4, let tick = run.output.firstMatch(of: #/FAIL: a tick stalled ([\d.]+)s \(.*, ([\d.]+)s of it on the CPU\)/#),
+        guard run.status == 4, !run.output.contains("FAIL: a tick worked "), !run.output.contains("FAIL: no tick carried a CPU reading"),
+              let tick = run.output.firstMatch(of: #/FAIL: a tick stalled ([\d.]+)s \(.*, ([\d.]+)s of it on the CPU\)/#),
               let wall = Double(tick.1), let cpu = Double(tick.2) else { return false }
         return cpu < wall / 2
     }
@@ -162,6 +195,11 @@ struct ChatBenchTests {
         // 0.50 s, half of it on the CPU): it fails.
         #expect(!Self.starved((4, "FAIL: a tick stalled 0.50s (t=1s, opening, 0.25s of it on the CPU), over 0.25s")))
         #expect(!Self.starved((4, "FAIL: a tick stalled 0.33s (t=12s, page 2, 0.31s of it on the CPU), over 0.25s")))
+        // A starved long tick beside one the layout worked through for 0.30 s: the layout fails.
+        #expect(!Self.starved((4, """
+            FAIL: a tick stalled 1.00s (t=12s, page 2, 0.10s of it on the CPU), over 0.25s; rule: the Mac's 1-minute load 9 is not over
+            FAIL: a tick worked 0.30s on the CPU (t=8s, page 1, a tick of 0.40s), over 0.25s; rule: the Mac's 1-minute load 9 is not over
+            """)))
     }
 
     @Test func aLoadedMacJudgesTicksAgainstTheFirstOpen() throws {
@@ -180,15 +218,15 @@ struct ChatBenchTests {
         let ticks = ChatBench.LongestTicks()
         ticks.note(5)  // up to the first beat: the app's launch, not a tick
         ticks.second = 1
-        ticks.note(0.4)
+        ticks.note(0.4, cpu: 0.05)
         ticks.endFirstOpen()
         ticks.second = 6
         ticks.startPage(1)
-        ticks.note(1.2)
+        ticks.note(1.2, cpu: 0.1)
         #expect(ticks.overall == 1.2 && ticks.firstOpen == 0.4)
         let quiet = rule.verdict(ticks, load: 3)
         #expect(quiet.failed)
-        #expect(quiet.text == "FAIL: a tick stalled 1.20s (t=7s, page 1), over 0.25s; rule: the Mac's 1-minute load 3 is not over "
+        #expect(quiet.text == "FAIL: a tick stalled 1.20s (t=7s, page 1, 0.10s of it on the CPU), over 0.25s; rule: the Mac's 1-minute load 3 is not over "
             + "load_threshold 24 (twice the 12 cores): any tick over 0.25s fails")
         let loaded = rule.verdict(ticks, load: 30.25)
         #expect(!loaded.failed, "\(loaded.text)")
@@ -200,6 +238,52 @@ struct ChatBenchTests {
         #expect(starved.failed)
         #expect(starved.text.hasPrefix("FAIL: a tick stalled 1.70s (t=7s, page 1, 0.30s of it on the CPU), over 1.60s;"), "\(starved.text)")
         #expect(ChatBench.LongestTicks.text(ticks.page, cpu: ticks.pageCPU) == "1.70s (cpu 0.30s)")
+        // The longest tick isn't the only one judged: one the main thread worked through for longer than the limit fails
+        // beside a longer one it mostly waited through, on its own line.
+        let cpuHeavy = ChatBench.LongestTicks()
+        cpuHeavy.note(0)
+        cpuHeavy.second = 7
+        cpuHeavy.note(0.4, cpu: 0.3)
+        cpuHeavy.note(1.0, cpu: 0.1)
+        #expect(cpuHeavy.overall == 1.0 && cpuHeavy.mostCPU == 0.3)
+        let both = rule.verdict(cpuHeavy, load: 3).text.split(separator: "\n").map(String.init)
+        #expect(both.count == 2, "\(both)")
+        #expect(both.first?.hasPrefix("FAIL: a tick stalled 1.00s (t=8s, opening, 0.10s of it on the CPU), over 0.25s;") == true, "\(both)")
+        #expect(both.last?.hasPrefix("FAIL: a tick worked 0.30s on the CPU (t=8s, opening, a tick of 0.40s), over 0.25s;") == true, "\(both)")
+        #expect(!Self.starved((4, both.joined(separator: "\n"))))
+        // One tick both the longest and the most worked: both lines. Under the limit it's in the ticks line.
+        let worked = ChatBench.LongestTicks()
+        worked.note(0)
+        worked.note(0.26, cpu: 0.26)
+        #expect(rule.verdict(worked, load: 3).text.split(separator: "\n").map { String($0.prefix(26)) }
+            == ["FAIL: a tick stalled 0.26s", "FAIL: a tick worked 0.26s "])
+        let fine = ChatBench.LongestTicks()
+        fine.note(0)
+        fine.note(0.24, cpu: 0.2)
+        let passed = rule.verdict(fine, load: 3)
+        #expect(!passed.failed && passed.text.hasPrefix("ticks: longest 0.24s (t=1s, opening, 0.20s of it on the CPU), most CPU 0.20s (t=1s, opening, a tick of 0.24s), not over 0.25s;"),
+                "\(passed.text)")
+        // No tick carried a CPU reading (none at all, or the main thread's CPU time unread): nothing was judged on the CPU,
+        // so the run fails on its own line, quiet or loaded, and isn't starved. A first reading of 0 is a reading.
+        let none = ChatBench.LongestTicks()
+        let empty = rule.verdict(none, load: 3)
+        #expect(empty.failed && empty.text.hasPrefix("FAIL: no tick carried a CPU reading, so none was judged on the CPU;"), "\(empty.text)")
+        let unread = ChatBench.LongestTicks()
+        unread.note(0)
+        unread.note(0.1)
+        unread.endFirstOpen()
+        unread.note(0.2, cpu: nil)
+        #expect(unread.mostCPUPlace.isEmpty)
+        for load in [3.0, 30] {
+            let verdict = rule.verdict(unread, load: load)
+            #expect(verdict.failed && verdict.text.hasPrefix("FAIL: no tick carried a CPU reading, so none was judged on the CPU;")
+                && !verdict.text.contains("\n"), "\(verdict.text)")
+            #expect(!Self.starved((4, "FAIL: a tick stalled 1.00s (t=12s, page 2, 0.10s of it on the CPU), over 0.25s\n\(verdict.text)")))
+        }
+        let idle = ChatBench.LongestTicks()
+        idle.note(0)
+        idle.note(0.02, cpu: 0)
+        #expect(!rule.verdict(idle, load: 3).failed && idle.mostCPUPlace == "t=1s, opening, a tick of 0.02s")
         // A first open quicker than 0.25 s doesn't make a loaded Mac stricter than a quiet one.
         #expect(ChatBench.StallRule.limit(loaded: true, firstOpen: 0.05) == 0.25)
         #expect(rule.describe(load: nil) == "the Mac's 1-minute load is unknown: any tick over 0.25s fails")
@@ -207,3 +291,76 @@ struct ChatBenchTests {
 }
 
 private final class Anchor {}
+
+/// scripts/chat-bench-settle.sh's verdict, on a fake build that prints what `--chat-bench` prints when a tick stalls: a
+/// starved longest tick is run once more and passes as starved when that one starves too, but never beside a tick the
+/// main thread worked through over the limit on the CPU.
+struct ChatBenchSettleScriptTests {
+    let scratch = Scratch()
+
+    /// A fake build: counts its runs in `runs`, prints a settle and a starved longest tick, and after it `also` (another of
+    /// the verdict's FAIL lines); exits 4 as the bench does.
+    func fakeBuild(also: String? = nil, runs: URL) throws -> URL {
+        let url = scratch.url("fake-chat-bench")
+        let rule = "rule: the Mac's 1-minute load 3 is not over load_threshold 24 (workflow.md): any tick over 0.25s fails"
+        try """
+        #!/bin/bash
+        echo run >> '\(runs.path)'
+        echo "  stall \(rule)"
+        echo 'settled 9 s after opening (loaded after 1 s): height=15526 heights=3 range=- layouts=1 last 3 s: 0 layouts longest tick=1.00s (cpu 0.10s)'
+        echo "FAIL: a tick stalled 1.00s (t=12s, page 2, 0.10s of it on the CPU), over 0.25s; \(rule)"
+        \(also.map { "echo \"\($0); \(rule)\"" } ?? "")
+        exit 4
+        """.write(to: url, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        return url
+    }
+
+    func settle(_ build: URL) throws -> (status: Int32, output: String) {
+        let transcript = scratch.url("t.jsonl")
+        FileManager.default.createFile(atPath: transcript.path, contents: Data("{}\n".utf8))
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = [ChatBenchTests.repo.appendingPathComponent("scripts/chat-bench-settle.sh").path, "-n", "1", "-j", "1", "-b", build.path,
+                             "-o", scratch.url("outputs").path, "-w", "700", "-s", "top", "-v", "plain", transcript.path, transcript.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        let output = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        return (process.terminationStatus, String(decoding: output, as: UTF8.self))
+    }
+
+    func runs(_ url: URL) -> Int { ((try? String(contentsOf: url, encoding: .utf8)) ?? "").split(separator: "\n").count }
+
+    @Test func aStarvedLongestTickIsRunAgainAndPassesStarved() throws {
+        let runs = scratch.url("runs")
+        let run = try settle(try fakeBuild(runs: runs))
+        #expect(run.status == 0, "\(run.output)")
+        #expect(self.runs(runs) == 2)
+        #expect(run.output.contains("status=starved"), "\(run.output)")
+        #expect(run.output.contains(" 1/1 "), "\(run.output)")
+    }
+
+    @Test func aTickWorkedOverTheLimitFailsBesideAStarvedLongestOne() throws {
+        let runs = scratch.url("runs")
+        let run = try settle(try fakeBuild(also: "FAIL: a tick worked 0.30s on the CPU (t=8s, page 1, a tick of 0.40s), over 0.25s", runs: runs))
+        #expect(run.status == 1, "\(run.output)")
+        // Not run again: nothing starved hides it.
+        #expect(self.runs(runs) == 1)
+        #expect(run.output.contains("status=4 FAIL: a tick worked 0.30s on the CPU"), "\(run.output)")
+        #expect(run.output.contains(" 0/1 "), "\(run.output)")
+        #expect(run.output.contains("longest tick 1.00s, most CPU 0.30s"), "\(run.output)")
+    }
+
+    @Test func aRunNoTickOfWhichCarriedACPUReadingFails() throws {
+        let runs = scratch.url("runs")
+        let run = try settle(try fakeBuild(also: "FAIL: no tick carried a CPU reading, so none was judged on the CPU", runs: runs))
+        #expect(run.status == 1, "\(run.output)")
+        // Not run again as starved: nothing was judged on the CPU.
+        #expect(self.runs(runs) == 1)
+        #expect(run.output.contains("status=4 FAIL: no tick carried a CPU reading"), "\(run.output)")
+        #expect(run.output.contains(" 0/1 "), "\(run.output)")
+    }
+}

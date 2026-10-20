@@ -83,6 +83,8 @@ enum ChatBench {
         // button, each page left to settle before the next.
         let earlier = max(0, env["VIBESWITCHER_BENCH_EARLIER"].flatMap(Int.init) ?? 0)
         let scenario = other != nil || open != nil || seen != nil || at != nil
+        // Opened, left and opened again.
+        let reopens = other == nil && scenario
         // VIBESWITCHER_BENCH_STALL=1: also checks the hang watchdog (the main thread blocks for 4 s at t=3).
         let stall = env["VIBESWITCHER_BENCH_STALL"] == "1"
         let rule = StallRule.fromEnvironment(env)
@@ -98,6 +100,8 @@ enum ChatBench {
         let mainThread = mach_thread_self()
         var lastCPU: TimeInterval?
         var assembling = false
+        // Beats in a row the conversation has shown (`placed`).
+        var shownBeats = 0
         let paging = Paging()
         let beat = Timer(timeInterval: 0.02, repeats: true) { _ in
             let now = Date()
@@ -122,6 +126,7 @@ enum ChatBench {
             }
             if assembling, !chat.assembling { print("  laid out out of sight in \(chat.stagingTurns) turns, then shown") }
             assembling = chat.assembling
+            shownBeats = chat.state == .ready && !chat.items.isEmpty && !chat.assembling ? shownBeats + 1 : 0
             probe.note(position: chat.atBottom ? "end" : ChatWindow.anchor(tops: chat.rowTops, visibleTop: chat.visibleTop) ?? "-")
             Watchdog.beat(layouts: host.layouts)
         }
@@ -149,6 +154,23 @@ enum ChatBench {
         // When the conversation opened again had loaded (a big transcript on a busy machine can take seconds): AT
         // scrolls then, and the run lasts long enough after it to tell settling from a slow load.
         var readyAt: Int?
+        /// The conversation opened is laid out and the view has put it where it opens: assembled (`ChatModel.assembling`)
+        /// on the last 5 beats, each a run loop turn of its own, so the view's initial scroll (the turn after the one the
+        /// open's last rows were laid out in) is behind it. A scroll before that is undone by it: the reader is put back
+        /// where it opens, and a reopen restores a place the bench never read at.
+        var placed: Bool { shownBeats >= 5 }
+        // OPEN, SEEN, AT: when the first open was read at its position (OPEN's scroll), once placed; left a second later,
+        // opened again a second after that.
+        var readAt: Int?
+        // The first open's first row: the reopen shows a few rows more above where it was read (`ChatWindow.shown`), so
+        // the two are compared by what that row and the rows after it take.
+        var firstRow: String?
+        /// "height=5582 below u60=5149": the content's height, and from `firstRow`'s top to the content's end.
+        func heights() -> String {
+            let height = probe.heights.last ?? 0
+            let below = firstRow.flatMap { chat.rowTops[$0] }.map { "\(height - Int($0.rounded()))" } ?? "-"
+            return "height=\(height) below \(firstRow ?? "-")=\(below)"
+        }
         /// The first open is over: its longest tick, and the most the main thread worked in one (its layout's cost).
         func endFirstOpen() {
             longest.endFirstOpen()
@@ -170,14 +192,16 @@ enum ChatBench {
             longest.second = second
             if stall, second == 3 { Breadcrumbs.shared.note("bench: blocking the main thread for 4 s"); sleep(4) }
             chat.poll()
-            // Loaded and laid out (an opened conversation shows once all its rows are: `ChatModel.assembling`).
-            let justReady = reopenedAt != nil && readyAt == nil && chat.state == .ready && !chat.items.isEmpty && !chat.assembling
+            // Loaded, laid out (an opened conversation shows once all its rows are: `ChatModel.assembling`) and placed.
+            let justReady = reopenedAt != nil && readyAt == nil && placed
             if justReady { readyAt = second }
             // The first open is over once its conversation shows and has kept its height for a second, or when the run
-            // moves on from it (t=2: resized, switched or left). Paging back, it lasts until the first settle (the
-            // first page's press): that much longer a sample of how busy the Mac is.
+            // moves on from it (t=2: resized or switched; OPEN, SEEN, AT: left a second after it was read). Paging back, it
+            // lasts until the first settle (the first page's press): that much longer a sample of how busy the Mac is.
+            let movesOn = reopens ? readAt.map { $0 + 1 } : 2
             if longest.firstOpen == nil, earlier == 0,
-               (chat.state == .ready && !chat.items.isEmpty && !probe.changedRecently(seconds: 1)) || (reopenedAt != 0 && second >= 2) || second > seconds {
+               (chat.state == .ready && !chat.items.isEmpty && !probe.changedRecently(seconds: 1))
+                || (reopenedAt != 0 && movesOn.map { second >= $0 } ?? false) || second > seconds {
                 endFirstOpen()
             }
             let sweeping = ProcessInfo.processInfo.environment["VIBESWITCHER_BENCH_SWEEP"] != nil
@@ -194,11 +218,19 @@ enum ChatBench {
                     print("  switched to \((other as NSString).lastPathComponent)")
                 }
             } else if open != nil || seen != nil || at != nil {
-                // t=1: read at that position; t=2: leave it; t=3: come back to it.
-                if second == 1, let open, let scroll = Self.scrollView(in: host) { Self.scroll(scroll, to: open, host: host) }
-                if second == 1, let seen { Self.setSeen(chat.log.entries[min(seen, chat.log.entries.count) - 1].id, path: path) }
-                if second == 2 { chat.show(path: nil) }
-                if second == 3 {
+                // From t=1, once placed: read at that position; a second later: leave it; a second after: come back to it.
+                if readAt == nil, reopenedAt == nil, placed {
+                    readAt = second
+                    if let open, let scroll = Self.scrollView(in: host) { Self.scroll(scroll, to: open, host: host) }
+                    if let seen { Self.setSeen(chat.log.entries[min(seen, chat.log.entries.count) - 1].id, path: path) }
+                    print("  read at t=\(second)s")
+                }
+                if let readAt, second == readAt + 1 {
+                    firstRow = chat.rowTops.min { $0.value < $1.value }?.key
+                    print("  left at \(heights())")
+                    chat.show(path: nil)
+                }
+                if let readAt, second == readAt + 2 {
                     chat.show(path: path)
                     probe.reset()
                     reopenedAt = second
@@ -228,6 +260,10 @@ enum ChatBench {
             probe.nextSecond()
             worst = 0
             worstCPU = nil
+            if reopens, readAt == nil, second >= seconds + 30 {
+                print("FAIL: the conversation first opened never showed \(second) s after opening")
+                finish(3)
+            }
             if earlier > 0, let reopenedAt {
                 // Paging back: once the conversation watched has kept its height for 3 s, Show earlier; once that page
                 // has, the next. Each phase may take the run's length (and loading 30 s more).
@@ -254,7 +290,7 @@ enum ChatBench {
                         + "of \(chat.items.count) height=\(probe.heights.last ?? 0), longest tick \(LongestTicks.text(longest.page, cpu: longest.pageCPU)), "
                         + "most CPU in a tick \(Self.seconds(longest.pageMostCPU)), filled in over \(chat.stagingTurns) turns")
                 } else {
-                    print("  settled \(second - readyAt) s after it loaded: height=\(probe.heights.last ?? 0)")
+                    print("  settled \(second - readyAt) s after it loaded: \(heights())")
                 }
                 let shown = ChatWindow.shown(chat.items, limit: chat.shownLimit, including: nil)
                 if paging.settles.count < earlier, shown.hidden > 0 || chat.hasEarlier {
@@ -279,6 +315,8 @@ enum ChatBench {
                 finish(0)
             }
             if earlier > 0 { return }
+            // Not opened again yet: the first open is slow to show (at most 30 s more).
+            if reopens, reopenedAt == nil { return }
             // Opened again: the same time after it had loaded as after the reopen when it loads at once (at most 30 s more).
             if let reopenedAt, second >= seconds, second < seconds + 30, readyAt.map({ second - $0 < seconds - reopenedAt - 1 }) ?? true { return }
             if second >= seconds {
@@ -288,6 +326,7 @@ enum ChatBench {
                         print("FAIL: the conversation never loaded \(second - reopenedAt) s after opening")
                         finish(3)
                     }
+                    if firstRow != nil { print("  opened again at \(heights())") }
                     let verdict = probe.changedRecently(seconds: 3) ? "FAIL: the content height still changes" : "settled"
                     print("\(verdict) \(second - reopenedAt) s after opening (loaded after \(readyAt - reopenedAt) s): height=\(probe.heights.last ?? 0) heights=\(probe.heights.count) "
                         + "range=\(probe.range) layouts=\(probe.layouts) last 3 s: \(probe.layoutsRecently) layouts longest tick=\(LongestTicks.text(longest.overall, cpu: longest.overallCPU))")
@@ -361,17 +400,28 @@ enum ChatBench {
                 + "never under \(ChatBench.seconds(Self.limit))\(limit)"
         }
 
-        /// The run's ticks judged at `load`: whether one went over, and a line saying so with the rule.
+        /// The run's ticks judged at `load`: whether one went over, and a line saying so with the rule. Both the longest
+        /// tick and the one the main thread spent the most CPU time in: a tick the Mac kept the thread from a core for
+        /// (scripts/chat-bench-settle.sh and ChatBenchTests let a starved run pass) mustn't hide one the layout worked
+        /// through for longer than the limit. A failing CPU tick is a line of its own, after the longest's. So is a run
+        /// none of whose ticks carried a CPU reading (none at all, or `cpuTime` failing): nothing was judged on the CPU.
         func verdict(_ ticks: LongestTicks, load: Double?) -> (failed: Bool, text: String) {
             let loaded = loaded(load)
             let firstOpen = ticks.firstOpen ?? ticks.overall
             let judged = loaded ? ticks.afterOpen : ticks.overall
             let limit = Self.limit(loaded: loaded, firstOpen: firstOpen)
             let place = loaded ? ticks.afterOpenPlace : ticks.overallPlace
+            let cpu = loaded ? ticks.mostCPUAfterOpen : ticks.mostCPU
+            let cpuPlace = loaded ? ticks.mostCPUAfterOpenPlace : ticks.mostCPUPlace
             let rule = "rule: " + describe(load: load, firstOpen: loaded ? firstOpen : nil)
-            return judged > limit
-                ? (true, "FAIL: a tick stalled \(ChatBench.seconds(judged)) (\(place)), over \(ChatBench.seconds(limit)); \(rule)")
-                : (false, "ticks: longest \(ChatBench.seconds(judged))\(place.isEmpty ? "" : " (\(place))"), not over \(ChatBench.seconds(limit)); \(rule)")
+            let failures = [
+                judged > limit ? "FAIL: a tick stalled \(ChatBench.seconds(judged)) (\(place)), over \(ChatBench.seconds(limit)); \(rule)" : nil,
+                cpu > limit ? "FAIL: a tick worked \(ChatBench.seconds(cpu)) on the CPU (\(cpuPlace)), over \(ChatBench.seconds(limit)); \(rule)" : nil,
+                ticks.mostCPUPlace.isEmpty ? "FAIL: no tick carried a CPU reading, so none was judged on the CPU; \(rule)" : nil,
+            ].compactMap { $0 }
+            if !failures.isEmpty { return (true, failures.joined(separator: "\n")) }
+            return (false, "ticks: longest \(ChatBench.seconds(judged))\(place.isEmpty ? "" : " (\(place))"), most CPU \(ChatBench.seconds(cpu))"
+                + "\(cpuPlace.isEmpty ? "" : " (\(cpuPlace))"), not over \(ChatBench.seconds(limit)); \(rule)")
         }
     }
 
@@ -397,6 +447,12 @@ enum ChatBench {
         /// layout costs, however long the Mac kept the thread from a core (the longest tick can be a starved one).
         private(set) var firstOpenMostCPU: TimeInterval?
         private(set) var pageMostCPU: TimeInterval = 0
+        /// The tick the main thread spent the most CPU time in, in all and after the first open, and where it was: judged
+        /// beside the longest, which can be a starved one hiding it.
+        private(set) var mostCPU: TimeInterval = 0
+        private(set) var mostCPUPlace = ""
+        private(set) var mostCPUAfterOpen: TimeInterval = 0
+        private(set) var mostCPUAfterOpenPlace = ""
 
         /// A tick of `gap` seconds, `cpu` of them on the main thread's CPU.
         func note(_ gap: TimeInterval, cpu: TimeInterval? = nil) {
@@ -406,6 +462,13 @@ enum ChatBench {
             if firstOpen != nil, gap > afterOpen { afterOpen = gap; afterOpenPlace = place }
             if gap > page { page = gap; pageCPU = cpu }
             if let cpu, cpu > pageMostCPU { pageMostCPU = cpu }
+            // The first reading counts even at 0: a place says some tick carried one.
+            let most = cpu.map { $0 > mostCPU || mostCPUPlace.isEmpty } ?? false
+            let mostAfterOpen = cpu.map { firstOpen != nil && ($0 > mostCPUAfterOpen || mostCPUAfterOpenPlace.isEmpty) } ?? false
+            guard let cpu, most || mostAfterOpen else { return }
+            let cpuPlace = "t=\(second + 1)s, \(phase), a tick of \(ChatBench.seconds(gap))"
+            if most { mostCPU = cpu; mostCPUPlace = cpuPlace }
+            if mostAfterOpen { mostCPUAfterOpen = cpu; mostCPUAfterOpenPlace = cpuPlace }
         }
 
         /// "0.66s (cpu 0.61s)".
