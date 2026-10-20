@@ -1007,8 +1007,13 @@ public final class LeadToolset: MCPToolset {
                           + "Try again in about \(MacLoad.retryMinutes) minutes, when sessions have ended, or set audit_finders lower with configure (1 is one verifier).")
         }
         // Settings, hooks or MCP servers the branch brings would run in the verifier: it starts with project settings
-        // off (see LeadLaunch), and VibeSwitcher doesn't say yes to Claude's trust question for that folder.
-        let config = Worktrees.agentConfigChanges(root: root, slug: slug, base: workflow.base)
+        // off (see LeadLaunch), and VibeSwitcher doesn't say yes to Claude's trust question for that folder. What the
+        // branch's commits change counts (what would merge), and what Claude reads at the worktree's root uncommitted;
+        // any other untracked file (a bench's scratch home, .claude/ and all) is a leftover for the worker to remove.
+        let committed = Worktrees.committedAgentConfig(root: root, slug: slug, base: workflow.base)
+        let local = Worktrees.localAgentConfig(root: root, slug: slug)
+        let config = Array(Set(committed + local)).sorted()
+        let leftovers = Worktrees.leftovers(root: root, slug: slug)
         // A re-audit checks the open findings and the diff since the commit the last audit covered, not everything again.
         let ledger = vault.audits(root: root, task: slug)
         let recheck = ledger.flatMap { ledger in ledger.isReaudit ? reaudit(ledger, slug: slug, head: head) : nil }
@@ -1031,7 +1036,14 @@ public final class LeadToolset: MCPToolset {
             if ![.kept, .folded, .abandoned].contains(board.tasks[index].status) { board.tasks[index].status = .review }
             board.tasks[index].evidence = nil
         }
-        let flagged = config.isEmpty ? "" : " The branch changes Claude's settings or instructions (\(config.prefix(5).joined(separator: ", "))\(config.count > 5 ? ", …" : "")): the verifier runs with project settings off, and VibeSwitcher didn't answer its trust question; tell the user it waits for them to decide, and have the verifier look hard at those files."
+        let flagged: String
+        if !committed.isEmpty {
+            flagged = " The branch changes Claude's settings or instructions (\(config.prefix(5).joined(separator: ", "))\(config.count > 5 ? ", …" : "")): the verifier runs with project settings off, and VibeSwitcher didn't answer its trust question; tell the user it waits for them to decide, and have the verifier look hard at those files."
+        } else if !local.isEmpty {
+            flagged = " The worktree holds Claude settings or instructions that aren't committed (\(local.prefix(5).joined(separator: ", "))\(local.count > 5 ? ", …" : "")), which Claude reads when it starts there: the verifier runs with project settings off, and VibeSwitcher didn't answer its trust question; tell the user it waits for them to decide, and have the worker remove them."
+        } else {
+            flagged = ""
+        }
         let round = recheck.map { recheck in
             let covers: String
             switch recheck.scope {
@@ -1045,9 +1057,18 @@ public final class LeadToolset: MCPToolset {
         if let panel {
             return MCPToolResult(text: putBack + behind + "\(panel.size) finders started on \(slug) (checking \(head.prefix(8))): " + Self.focusesText(panel.focuses) + ". "
                                  + "One build and test run came first, and every finder reads its logs (\(panel.run)): \(panel.logs.joined(separator: ", ")). "
-                                 + "Their findings are voted into one verdict, which arrives as a message once all \(panel.size) have submitted.\(round)\(flagged)\(cap)")
+                                 + "Their findings are voted into one verdict, which arrives as a message once all \(panel.size) have submitted.\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
         }
-        return MCPToolResult(text: putBack + behind + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(round)\(flagged)\(cap)")
+        return MCPToolResult(text: putBack + behind + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
+    }
+
+    /// " The worktree has 3 untracked files (12.0 KB), leftovers …: path (size), …", or "" for none.
+    static func leftoversText(_ leftovers: [Worktrees.Leftover]) -> String {
+        guard !leftovers.isEmpty else { return "" }
+        let shown = 10, total = leftovers.reduce(Int64(0)) { $0 + $1.bytes }
+        let list = leftovers.prefix(shown).map(\.text).joined(separator: ", ") + (leftovers.count > shown ? ", and \(leftovers.count - shown) more" : "")
+        return " The worktree has \(leftovers.count) untracked file\(leftovers.count == 1 ? "" : "s") (\(Worktrees.Leftover.size(total))), leftovers that don't merge: "
+            + "\(list). Tell the worker to remove them (scratch goes in its session's TMPDIR, never the worktree) so the worktree is clean; they don't change the audit."
     }
 
     /// "finder 1: contract and acceptance, finder 2: bugs and regressions".

@@ -760,19 +760,77 @@ public enum Worktrees {
     }
 
     /// Files Claude Code reads as settings or instructions (project settings and hooks under `.claude/`, `.mcp.json`,
-    /// `CLAUDE.md`) that the task's branch changes from `base`, or that sit changed or new in its worktree, ignored
-    /// ones included: a session started there runs what the worker put in them.
+    /// `CLAUDE.md`) that the task's branch changes from `base` (`committedAgentConfig`), or that sit changed or new at
+    /// its worktree's root, ignored ones included (`localAgentConfig`): a session started there runs what the worker
+    /// put in them.
     public static func agentConfigChanges(root: String, slug: String, base: String) -> [String] {
-        let committed = Git.run(["diff", "--name-only", "-z", "\(base)...\(branch(slug))"], in: root).output
-            .split(separator: "\0").map(String.init)
-        // Status lines are "XY path" (a rename's old path follows on its own): both readings are checked. Ignored
-        // ones ("!! path") count only when Claude reads them as settings or instructions, not its own lock and state
-        // files.
-        let local = Git.run(["status", "--porcelain", "-z", "--untracked-files=all", "--ignored"], in: path(root: root, slug: slug)).output
-            .split(separator: "\0").flatMap { entry in
-                [String(entry), String(entry.dropFirst(3))].filter { isAgentConfig($0, ignored: entry.hasPrefix("!! ")) }
+        Array(Set(committedAgentConfig(root: root, slug: slug, base: base) + localAgentConfig(root: root, slug: slug))).sorted()
+    }
+
+    /// The settings or instructions files the branch's commits change from `base`: what would merge.
+    public static func committedAgentConfig(root: String, slug: String, base: String) -> [String] {
+        Git.run(["diff", "--name-only", "-z", "\(base)...\(branch(slug))"], in: root).output
+            .split(separator: "\0").map(String.init).filter { isAgentConfig($0) }.sorted()
+    }
+
+    /// Settings or instructions files changed or new in the worktree, not committed, that Claude reads when it starts
+    /// there: under the root's `.claude/`, or `.mcp.json` and `CLAUDE*.md` at the root. Ignored ones ("!! path")
+    /// count only when Claude reads them, not its own lock and state files. One deeper down (a scratch home's
+    /// `.claude/` a bench left) is no setting of this worktree's: it's a leftover (`leftovers`).
+    public static func localAgentConfig(root: String, slug: String) -> [String] {
+        status(in: path(root: root, slug: slug), ignored: true).filter { entry in
+            let parts = entry.path.split(separator: "/")
+            let atStart = parts.first == ".claude" || parts.count == 1 && [".mcp.json", "CLAUDE.md", "CLAUDE.local.md"].contains(entry.path)
+            return atStart && isAgentConfig(entry.path, ignored: entry.code == "!!")
+        }.map(\.path).sorted()
+    }
+
+    /// An untracked file in a worktree: nothing of it merges, and the worker should have removed it.
+    public struct Leftover: Equatable, Sendable {
+        public var path: String
+        public var bytes: Int64
+        /// "path (2.0 KB)".
+        public var text: String { "\(path) (\(Leftover.size(bytes)))" }
+
+        /// "512 B", "2.0 KB", "3.4 MB", "1.2 GB".
+        public static func size(_ bytes: Int64) -> String {
+            let units = ["KB", "MB", "GB"]
+            guard bytes >= 1024 else { return "\(max(0, bytes)) B" }
+            var value = Double(bytes) / 1024, unit = 0
+            while value >= 1024, unit < units.count - 1 { value /= 1024; unit += 1 }
+            return String(format: "%.1f %@", value, units[unit])
+        }
+    }
+
+    /// The untracked files in the task's worktree (git-ignored ones, like build output, aren't), by path, each with its
+    /// size.
+    public static func leftovers(root: String, slug: String) -> [Leftover] {
+        let folder = path(root: root, slug: slug)
+        return status(in: folder, ignored: false).filter { $0.code == "??" }.map { entry in
+            let size = (try? FileManager.default.attributesOfItem(atPath: folder + "/" + entry.path))?[.size] as? NSNumber
+            return Leftover(path: entry.path, bytes: size?.int64Value ?? 0)
+        }.sorted { $0.path < $1.path }
+    }
+
+    /// `git status` in `folder`, every untracked file listed (and ignored ones with `ignored`): each entry's code
+    /// ("??", "!!", " M", "R ") and path, a rename's or copy's old path as an entry of its own with the same code.
+    static func status(in folder: String, ignored: Bool) -> [(code: String, path: String)] {
+        let fields = Git.run(["status", "--porcelain", "-z", "--untracked-files=all"] + (ignored ? ["--ignored"] : []), in: folder).output
+            .split(separator: "\0", omittingEmptySubsequences: true).map(String.init)
+        var entries: [(code: String, path: String)] = []
+        var index = 0
+        while index < fields.count {
+            let field = fields[index]
+            index += 1
+            guard field.count > 3 else { continue }
+            let code = String(field.prefix(2))
+            entries.append((code, String(field.dropFirst(3))))
+            if code.contains("R") || code.contains("C"), index < fields.count {
+                entries.append((code, fields[index]))
+                index += 1
             }
-        return Array(Set(committed.filter { isAgentConfig($0) } + local)).sorted()
+        }
+        return entries
     }
 
     /// What `base` brought since `commit` (a task's branch) last took it in: the commits since their merge-base, each

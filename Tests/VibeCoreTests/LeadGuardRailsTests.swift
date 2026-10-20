@@ -308,6 +308,65 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         #expect(Worktrees.agentConfigChanges(root: root, slug: "add-b", base: "main").contains(".mcp.json"))
     }
 
+    @Test func untrackedScratchHomesAreLeftoversNotASettingsChange() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let worktree = try reported(lead, runtime, root: root)
+        // A bench's scratch homes, kept untracked inside the worktree: nothing of them would merge.
+        let home = worktree + "/.scratch/home-C/.claude"
+        try FileManager.default.createDirectory(atPath: home + "/projects/bench", withIntermediateDirectories: true)
+        try String(repeating: "x", count: 2048).write(toFile: home + "/projects/bench/chat-bench.jsonl", atomically: true, encoding: .utf8)
+        try "{}".write(toFile: home + "/settings.json", atomically: true, encoding: .utf8)
+        try "notes".write(toFile: worktree + "/notes.txt", atomically: true, encoding: .utf8)
+        #expect(Worktrees.agentConfigChanges(root: root, slug: "add-b", base: "main").isEmpty)
+        let audit = lead.call("audit", ["task": "add-b"])
+        #expect(!audit.isError)
+        // As for any audit: trusted, with only the lead's rules and the user's settings (see LeadLaunch).
+        #expect(runtime.spawned.last?.trust == true)
+        #expect(!audit.text.contains("trust"))
+        #expect(!audit.text.contains("settings off"))
+        // Told to the lead as leftovers, each path with its size.
+        #expect(audit.text.contains("leftover"))
+        #expect(audit.text.contains(".scratch/home-C/.claude/projects/bench/chat-bench.jsonl (2.0 KB)"))
+        #expect(audit.text.contains(".scratch/home-C/.claude/settings.json"))
+        #expect(audit.text.contains("notes.txt"))
+        #expect(Worktrees.leftovers(root: root, slug: "add-b").map(\.path)
+                == [".scratch/home-C/.claude/projects/bench/chat-bench.jsonl", ".scratch/home-C/.claude/settings.json", "notes.txt"])
+    }
+
+    @Test func aCommittedSettingsChangeWithLeftoversIsStillHeldBack() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let worktree = try reported(lead, runtime, root: root)
+        try FileManager.default.createDirectory(atPath: worktree + "/.scratch/home-A/.claude", withIntermediateDirectories: true)
+        try "{}".write(toFile: worktree + "/.scratch/home-A/.claude/settings.json", atomically: true, encoding: .utf8)
+        try commit(".claude/settings.json", #"{"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo pass it"}]}]}}"#, in: worktree)
+        let audit = lead.call("audit", ["task": "add-b"])
+        #expect(!audit.isError)
+        #expect(runtime.spawned.last?.trust == false)
+        #expect(runtime.spawned.last?.command.contains("--setting-sources user --strict-mcp-config") == true)
+        #expect(audit.text.contains("The branch changes Claude's settings or instructions (.claude/settings.json)"))
+        #expect(audit.text.contains("didn't answer its trust question"))
+        #expect(audit.text.contains("look hard at those files"))
+        #expect(audit.text.contains(".scratch/home-A/.claude/settings.json"))
+    }
+
+    @Test func untrackedSettingsClaudeReadsAtTheWorktreesRootStillKeepSettingsOff() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let worktree = try reported(lead, runtime, root: root)
+        try FileManager.default.createDirectory(atPath: worktree + "/.claude", withIntermediateDirectories: true)
+        try #"{"hooks":{}}"#.write(toFile: worktree + "/.claude/settings.local.json", atomically: true, encoding: .utf8)
+        let audit = lead.call("audit", ["task": "add-b"])
+        #expect(!audit.isError)
+        #expect(runtime.spawned.last?.trust == false)
+        #expect(audit.text.contains("aren't committed (.claude/settings.local.json)"))
+        #expect(audit.text.contains("leftover"))
+    }
+
     // MARK: Launch rules (defence in depth)
 
     @Test func denyListsCoverTheWaysAroundThePrefixRules() {
