@@ -55,6 +55,8 @@ var config = HostServer.Config(
     hostBuild: build)
 config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600
 if let interval = value(after: "--housekeeping").flatMap(TimeInterval.init), interval > 0 { config.housekeepingInterval = interval }
+// This process's children are its own sessions' programs and parsers: a parser none holds is ended.
+config.endsStrayParsers = true
 // The tool servers of this build's sessions sit beside it: one whose agent ended is ended (see `HostServer.endOrphans`).
 // By the user's host only (a scratch host beside a build folder would end that folder's, a test's or another run's),
 // or a scratch host told to (OrphanSweepTests).

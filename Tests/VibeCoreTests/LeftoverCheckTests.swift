@@ -29,7 +29,7 @@ struct LeftoverCheckTests {
     static func leftover(_ mark: String) throws -> (shell: Process, input: Pipe) {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sh")
-        process.arguments = ["-c", "sleep 600 & read line", "/tmp/\(mark)/vibeswitcher-host"]
+        process.arguments = ["-c", "sleep 600 & read line", "\(mark)/vibeswitcher-host"]
         process.environment = ["PATH": "/usr/bin:/bin"]
         let input = Pipe()
         process.standardInput = input

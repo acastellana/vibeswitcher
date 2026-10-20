@@ -22,6 +22,10 @@ public final class HostServer {
         /// The tool server (vibeswitcher-mcp) beside this host: one whose agent ended under it is ended at each
         /// housekeeping (see `endOrphans`). Nil: none looked for.
         public var toolServer: String?
+        /// Whether a parser of this process's no session holds is ended at each housekeeping (see `endOrphans`): only
+        /// for a host that's a process of its own (vibeswitcher-host). One inside a test runner isn't: the runner's
+        /// children are every test host's, and ending another's parsers broke its sessions.
+        public var endsStrayParsers = false
         /// The project lead's vault (see `LeadVault`): the teams' roles, verdicts and the user's sealing key, kept in
         /// this process. Nil: this host keeps none (it refuses vault requests).
         public var vault: LeadVault.Book?
@@ -696,7 +700,8 @@ public final class HostServer {
     private func endOrphans() {
         // A session's program or a parser it holds is known; only another child's arguments are read.
         let known = Set(sessions.values.compactMap(\.parserPID) + sessions.values.map { $0.info.childPID })
-        for child in HostProcesses.children(of: getpid()) where !known.contains(child) && HostProcesses.isParser(child) {
+        for child in config.endsStrayParsers ? HostProcesses.children(of: getpid()) : []
+        where !known.contains(child) && HostProcesses.isParser(child) {
             log.note("host: ended parser pid \(child), which no session holds")
             kill(child, SIGKILL)
             var status: Int32 = 0

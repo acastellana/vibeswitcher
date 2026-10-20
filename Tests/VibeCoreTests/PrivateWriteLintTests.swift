@@ -41,6 +41,7 @@ struct PrivateWriteLintTests {
         "Sources/VibeSwitcher/IdleBench.swift": (2, "a bench's scratch home"),
         "Sources/VibeSwitcher/UIBench.swift": (2, "a bench's scratch home"),
         "Sources/VibeSwitcher/MainWindow/Lead/BoardBench.swift": (2, "a bench's scratch home"),
+        "Sources/VibeSwitcher/PowerBench.swift": (4, "a bench's scratch home"),
     ]
 
     static let raw = try! Regex(#"\.write\(to(File)?:|createFile\(|createDirectory\("#)
