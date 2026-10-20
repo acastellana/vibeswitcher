@@ -37,7 +37,7 @@ struct HookBoundsTests {
         "word", "the ", " ", "  ", "\n", "\n\n", "**", "`", "```", "\t", "é", "日本語", "👍🏽", "e\u{301}", "\u{2028}",
         "token=abc123def", "ghp_" + String(repeating: "Ab1", count: 12), "sk-ant-api03-" + String(repeating: "xY9_", count: 10),
         "Bearer abcdefgh12345678", "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----",
-        "<task-notification>", "<system-reminder>", "PASSWORD=\"two words\"", "https://user:pa55@host/x", "AKIAIOSFODNN7EXAMPLE",
+        "<task-notification>", "<system-reminder>", "PASSWORD=\"two words\"", "https://user:pa55@host/x", "AKIA" + "IOSFODNN7EXAMPLE",
         "Another Claude session sent a message:", "<cross-session-message from=\"lead\">", ">", "[",
     ]
 

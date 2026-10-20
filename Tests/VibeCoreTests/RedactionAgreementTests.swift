@@ -90,16 +90,21 @@ struct RedactionAgreementTests {
         func fake(_ prefix: String, _ count: Int) -> String {
             prefix + String(String(repeating: letters + "0123456789", count: 3).prefix(count))
         }
+        // RedactionLeakTests' fake credentials, assembled the same way: no literal holds a whole one (SecretShapeLintTests).
+        let gitlab = fake("gl" + "pat-", 20), google = "AIza" + "SyA-EXAMPLE-0123456789abcdefghijkl"
+        let pypi = "pypi-" + "AgEIcHlwaS5vcmcCJGFiY2RlZmdoLWlqa2wtbW5vcC1xcnN0", sendGrid = "SG" + ".AbCdEfGhIjKlMnOpQr.StUvWxYz0123456789abcd"
+        let age = "AGE-SECRET-KEY-" + "1QQPQZRG3Y5Z4P8VVAA2KV4Y3D9X5Z7C6M0N2WQ8E"
+        let slack = "https://hooks.slack.com/" + "services/" + "T0123ABCD/B0456EFGH/" + fake("", 24)
+        let discord = "https://discord.com/api/webhooks/" + "123456789012345678/" + "AbCdEf-GhIjKl_MnOpQrStUvWxYz0123456789"
+        let awsSecret = "wJalrXUtnFEMI/K7MDENG/" + "bPxRfiCYEXAMPLEKEY"
         let inputs = [
             "STRIPE=\(fake("sk" + "_live_", 24))", "key \(fake("sk" + "_live_", 24)) here", "use \(fake("rk" + "_live_", 24))",
-            "git push https://oauth2@gitlab.com # glpat-AbCdEfGhIjKlMnOpQrSt", "maps?key=AIzaSyA-EXAMPLE-0123456789abcdefghijkl&q=x",
-            "echo \(fake("npm" + "_", 36))", "twine upload -p pypi-AgEIcHlwaS5vcmcCJGFiY2RlZmdoLWlqa2wtbW5vcC1xcnN0",
-            "HF said \(fake("hf" + "_", 34)).", "mail SG.AbCdEfGhIjKlMnOpQr.StUvWxYz0123456789abcd",
-            "identity: AGE-SECRET-KEY-1QQPQZRG3Y5Z4P8VVAA2KV4Y3D9X5Z7C6M0N2WQ8E",
-            "curl -X POST https://hooks.slack.com/services/T0123ABCD/B0456EFGH/AbCdEfGhIjKlMnOpQrStUvWx",
-            "hook: https://discord.com/api/webhooks/123456789012345678/AbCdEf-GhIjKl_MnOpQrStUvWxYz0123456789",
-            "aws_secret = x\nwJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n", "secret is wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY.",
-            "commit 3f786850e387550fdab836ed7e6dc881de23001b", "blob wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEYA",
+            "git push https://oauth2@gitlab.com # \(gitlab)", "maps?key=\(google)&q=x",
+            "echo \(fake("npm" + "_", 36))", "twine upload -p \(pypi)",
+            "HF said \(fake("hf" + "_", 34)).", "mail \(sendGrid)",
+            "identity: \(age)", "curl -X POST \(slack)", "hook: \(discord)",
+            "aws_secret = x\n\(awsSecret)\n", "secret is \(awsSecret).",
+            "commit 3f786850e387550fdab836ed7e6dc881de23001b", "blob \(awsSecret)A",
             "Cookie: session=s3cr3tvalue; csrf=abc", #"curl -H "Cookie: session=s3cr3tvalue" https://x"#,
             "Set-Cookie: sid=s3cr3tvalue; HttpOnly", "X-Auth: Bearer abc123def456", #"{"authorization": "Bearer abc123def456"}"#,
             "curl -u admin:hunter2 https://api.example.com", "curl --user admin:hunter2 https://x", "mysql -u root -phunter2 shop",

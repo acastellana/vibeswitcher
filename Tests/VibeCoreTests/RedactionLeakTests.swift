@@ -3,8 +3,9 @@ import Testing
 @testable import VibeCore
 
 /// F-R1: every credential shape that leaked in the security review (docs/eval/security.md, the Redaction
-/// table), and the masking staying fast on hostile input. Fake tokens are assembled at runtime so secret
-/// scanners don't flag this file.
+/// table), and the masking staying fast on hostile input. Fake tokens are assembled at runtime, a prefix in one
+/// literal and the rest in others or from `fake`, so no literal holds a whole one: GitHub push protection matches the
+/// shapes whatever they say and refuses the push (SecretShapeLintTests).
 struct RedactionLeakTests {
     let letters = "AbCdEfGhIjKlMnOpQrStUvWxYz"
     func fake(_ prefix: String, _ count: Int) -> String {
@@ -24,7 +25,7 @@ struct RedactionLeakTests {
         expectMasked("key \(stripe) here", hiding: stripe, as: "key ••• here")
         let restricted = fake("rk" + "_live_", 24)
         expectMasked("use \(restricted)", hiding: restricted, as: "use •••")
-        let gitlab = "glpat-" + "AbCdEfGhIjKlMnOpQrSt"
+        let gitlab = fake("gl" + "pat-", 20)
         expectMasked("git push https://oauth2@gitlab.com # \(gitlab)", hiding: gitlab)
         let google = "AIza" + "SyA-EXAMPLE-0123456789abcdefghijkl"
         expectMasked("maps?key=\(google)&q=x", hiding: google)
@@ -41,7 +42,7 @@ struct RedactionLeakTests {
     }
 
     @Test func webhookURLsAreMasked() {
-        let slack = "https://hooks.slack.com/services/" + "T0123ABCD/B0456EFGH/" + "AbCdEfGhIjKlMnOpQrStUvWx"
+        let slack = "https://hooks.slack.com/" + "services/" + "T0123ABCD/B0456EFGH/" + fake("", 24)
         expectMasked("curl -X POST \(slack)", hiding: "AbCdEfGhIjKlMnOpQrStUvWx", as: "curl -X POST https://•••")
         let discord = "https://discord.com/api/webhooks/" + "123456789012345678/" + "AbCdEf-GhIjKl_MnOpQrStUvWxYz0123456789"
         expectMasked("hook: \(discord)", hiding: "AbCdEf-GhIjKl_MnOpQrStUvWxYz0123456789")
@@ -139,7 +140,7 @@ struct RedactionLeakTests {
         "glpat-", "xoxb-", "AKIA", "AIza", "AGE-SECRET-KEY-1", "npm_", "pypi-AgE", "hf_", "SG.", "eyJ",
         "eyJaaaaaaaa.", "hooks.slack.com/services/", "discord.com/api/webhooks/1/", "Aa1/",
         String(repeating: "a", count: 39) + "A1 ", "ghp_" + String(repeating: "a", count: 36) + "\n",
-        String(repeating: "a", count: 40) + "\n", "ppasswordprivatepwdpk-pypi-", "eyJ-", "SG.a", "AKIAAKIAAKIAAKIAAKIA",
+        String(repeating: "a", count: 40) + "\n", "ppasswordprivatepwdpk-pypi-", "eyJ-", "SG.a", String(repeating: "AKIA", count: 5),
         "p password private pwd pk- pypi- ", "s secret sk- sshpass ", "a api auth access age- aiza akia ",
     ].map(flood) + [
         "token=\"" + flood("a"), "--" + flood("a"), "-----BEGIN RSA PRIVATE KEY-----\n" + flood("A"),

@@ -350,12 +350,12 @@ I ran the real `Redaction.swift` against made-up samples (in a scratch folder, n
 | Leaks unchanged | Masked |
 | --- | --- |
 | `sk_live_51AbCdEf…` (Stripe secret, underscore), `rk_live_…` | `sk-ant-api03-…`, `sk-proj-…` |
-| `glpat-AbCdEfGhIjKlMnOpQrSt` (GitLab) | `ghp_…`, `github_pat_…` |
-| `AIzaSyA-EXAMPLE-0123456789abcdefghijkl` (Google API key) | `xoxb-…` |
+| `glpat-AbCd…` (GitLab) | `ghp_…`, `github_pat_…` |
+| `AIzaSyA…` (Google API key) | `xoxb-…` |
 | `npm_AbCd…` bare (masked only after `_authToken=`) | `//registry.npmjs.org/:_authToken=npm_…` |
-| `pypi-AgEIcHlwaS5vcmc…`, `hf_AbCd…`, `SG.xxx.yyy` (SendGrid) | `AKIAIOSFODNN7EXAMPLE` |
+| `pypi-AgEIcHlwaS5vcmc…`, `hf_AbCd…`, `SG.xxx.yyy` (SendGrid) | `AKIA…` |
 | `https://hooks.slack.com/services/T…/B…/XXXX`, `https://discord.com/api/webhooks/…/…` | `AWS_SECRET_ACCESS_KEY=…`, `AWS_SESSION_TOKEN=…` |
-| `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` (bare AWS secret) | JWTs (`eyJ….….…`) |
+| `wJalrXUtnFEMI/K7MDENG/…` (bare AWS secret, 40 characters) | JWTs (`eyJ….….…`) |
 | `Cookie: session=s3cr3t…` | `Authorization: Bearer …` |
 | `X-Auth: Bearer abc123def456` (Bearer without `Authorization:`) | `x-api-key: …`, `{"apiKey": "…"}` |
 | `curl -u admin:hunter2 …`, `mysql -phunter2`, `sshpass -p hunter2`, `tool --pass hunter2` | `--password hunter2`, `PGPASSWORD=…` |
