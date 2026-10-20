@@ -482,7 +482,7 @@ final class LeadController: ObservableObject {
                     role: .lead, root: root, task: nil, base: base,
                     prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow),
                     start: LeadPrompts.leadStart(root: root, goal: goal, note: Self.commandLineNote, replaced: handed),
-                    server: Self.serverPath, name: name, folder: vault.runFolder(root: root, name: name))
+                    server: Self.serverPath, name: name, folder: vault.runFolder(root: root, name: name), cwd: root)
                 return (grant, launch)
             }
             if case .failure = prepared, let issued { try? vault.revoke(issued, root: root) }
@@ -503,7 +503,7 @@ final class LeadController: ObservableObject {
     private func spawnLead(root: String, project: String, grant: String, launch: LeadLaunch.Prepared, show: Bool) {
         let boardStore = BoardStore(root: root)
         let vault = self.vault
-        host.spawn(SpawnRequest(cwd: root, command: launch.command, env: [:], cols: 120, rows: 40, keepShell: false,
+        host.spawn(SpawnRequest(cwd: root, command: launch.command, env: launch.environment, cols: 120, rows: 40, keepShell: false,
                                 label: "Lead · \(project)", agent: "claude")) { [weak self] result in
             switch result {
             case .success(let session):

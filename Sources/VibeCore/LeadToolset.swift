@@ -47,8 +47,8 @@ public protocol LeadRuntime: AnyObject {
     var server: String { get }
     /// The project's Claude command (from its launch presets), flags included.
     func claudeCommand(root: String) -> String
-    /// Starts a window session; with `trust`, answers Claude's trust question for `cwd` in it.
-    func spawn(cwd: String, command: String, label: String, agent: String, trust: Bool) throws -> String
+    /// Starts a window session, `env` added to its environment; with `trust`, answers Claude's trust question for `cwd` in it.
+    func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String, trust: Bool) throws -> String
     /// Asks the host to end a session; throws what the host answered when it refused (or couldn't be asked).
     func kill(_ session: String) throws
     /// Has the host drop an ended session's record (it leaves the session list).
@@ -96,6 +96,8 @@ public final class LeadToolset: MCPToolset {
     /// temporary folders (see `ClaudeScratch`). Faked in tests.
     var freeSpace: (String) -> Int64? = DiskSpace.free(at:)
     var scratchRoot = ClaudeScratch.root
+    /// Where its workers' and verifiers' TMPDIRs are made (see `SessionTemp`).
+    var sessionTempRoot = SessionTemp.root
     /// How often merge reads the load again while it waits for it to drop below load_threshold.
     var loadPoll: TimeInterval = 15
 
@@ -940,8 +942,10 @@ public final class LeadToolset: MCPToolset {
         do {
             let launch = try LeadLaunch.prepare(role: role, root: root, task: slug, base: runtime.claudeCommand(root: root), prompt: prompt,
                                                 start: start, server: runtime.server, name: name, model: model, branch: branch,
-                                                records: workflow.recordsDir, folder: vault.runFolder(root: root, name: name))
-            let session = try runtime.spawn(cwd: folder, command: launch.command, label: label, agent: "claude", trust: trust)
+                                                records: workflow.recordsDir, folder: vault.runFolder(root: root, name: name),
+                                                cwd: folder, temporary: sessionTempRoot)
+            let session = try runtime.spawn(cwd: folder, command: launch.command, env: launch.environment, label: label,
+                                            agent: "claude", trust: trust)
             try vault.bind(grant, root: root, session: session)
             return session
         } catch {
@@ -1478,9 +1482,9 @@ public final class LeadToolset: MCPToolset {
         guard failed.isEmpty else {
             throw Problem(text: "Not cleaned up: \(failed.map(\.said).joined(separator: "; ")). Its worktree stays while a session may still write there. If the host refuses, tell the user (they can end it in VibeSwitcher), then cleanup again.")
         }
-        // Its sessions' temporary folders, found by the worktree's path while it's still there to resolve.
+        // Its sessions' temporary folders and TMPDIRs, found by the worktree's path while it's still there to resolve.
         let worktree = Worktrees.path(root: root, slug: slug)
-        let temporary = ClaudeScratch.folders(for: worktree, in: scratchRoot)
+        let temporary = ClaudeScratch.folders(for: worktree, in: scratchRoot) + SessionTemp.folders(for: worktree, in: sessionTempRoot)
         // Merged work is in main; leftovers in the worktree (build output) can go. Abandoned work goes only on request.
         // The build folder goes first and whatever git makes of the rest: it's most of the space.
         var freed = removeFolder((worktree as NSString).appendingPathComponent(".build"))
@@ -1591,7 +1595,7 @@ public final class LeadToolset: MCPToolset {
         return (try? FileManager.default.removeItem(atPath: path)) == nil ? 0 : bytes
     }
 
-    /// The temporary folders other finished tasks left behind (cleaned up before cleanup removed them): only a task
+    /// The temporary folders and TMPDIRs other finished tasks left behind (cleaned up before cleanup removed them): only a task
     /// merged or abandoned whose worktree is gone, with no session running there.
     private func sweepFinished(_ board: LeadBoard, except slug: String) -> Int64 {
         // Which folders sessions still run in isn't known: nothing goes.
@@ -1601,7 +1605,8 @@ public final class LeadToolset: MCPToolset {
         for task in board.tasks where task.slug != slug && task.worktree == nil && [.done, .failed, .folded, .abandoned].contains(task.status) {
             let worktree = Worktrees.path(root: root, slug: task.slug)
             guard !FileManager.default.fileExists(atPath: worktree), !live.contains((worktree as NSString).standardizingPath) else { continue }
-            freed += ClaudeScratch.folders(for: worktree, in: scratchRoot).reduce(0) { $0 + removeFolder($1.path) }
+            freed += (ClaudeScratch.folders(for: worktree, in: scratchRoot) + SessionTemp.folders(for: worktree, in: sessionTempRoot))
+                .reduce(0) { $0 + removeFolder($1.path) }
         }
         return freed
     }
@@ -1615,7 +1620,8 @@ public final class LeadToolset: MCPToolset {
     /// Low disk space, with what takes it (status says it while it lasts; the witness tells it once).
     func diskWarning(_ workflow: LeadWorkflow, board: LeadBoard) -> [String] {
         guard let free = freeSpace(worktreesFolder), free < workflow.diskWarning else { return [] }
-        return [LeadWitness.diskText(free: free, workflow: workflow, folders: TaskFolder.all(root: root, board: board, scratch: scratchRoot))]
+        return [LeadWitness.diskText(free: free, workflow: workflow, folders: TaskFolder.all(root: root, board: board, scratch: scratchRoot,
+                                                                                                 sessions: sessionTempRoot))]
     }
 
     private func askUser(_ arguments: [String: Any]) throws -> MCPToolResult {

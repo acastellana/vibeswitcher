@@ -555,7 +555,7 @@ final class NoAgent: LeadRuntime {
     init(_ shared: FakeRuntime) { self.shared = shared }
     var server: String { shared.server }
     func claudeCommand(root: String) -> String { "claude" }
-    func spawn(cwd: String, command: String, label: String, agent: String, trust: Bool) throws -> String { "" }
+    func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String, trust: Bool) throws -> String { "" }
     func kill(_ session: String) {}
     func forget(_ session: String) {}
     func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String, clearDraft: Bool) throws -> LeadDelivery.Delivered { .steered }

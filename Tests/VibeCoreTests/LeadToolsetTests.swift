@@ -4,6 +4,8 @@ import Testing
 
 final class FakeRuntime: LeadRuntime {
     var spawned: [(id: String, cwd: String, command: String, label: String, trust: Bool)] = []
+    /// What each session's environment added (its TMPDIR), by session.
+    var environments: [String: [String: String]] = [:]
     var killed: [String] = []
     /// Sessions the host was told to drop.
     var forgotten: [String] = []
@@ -33,9 +35,10 @@ final class FakeRuntime: LeadRuntime {
 
     let server = "/App/vibeswitcher-mcp"
     func claudeCommand(root: String) -> String { "claude --dangerously-skip-permissions" }
-    func spawn(cwd: String, command: String, label: String, agent: String, trust: Bool) throws -> String {
+    func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String, trust: Bool) throws -> String {
         let id = "session-\(spawned.count + 1)"
         spawned.append((id, cwd, command, label, trust))
+        environments[id] = env
         return id
     }
     func kill(_ session: String) throws {
@@ -79,8 +82,8 @@ final class FakeSeat: LeadRuntime {
     }
     var server: String { shared.server }
     func claudeCommand(root: String) -> String { shared.claudeCommand(root: root) }
-    func spawn(cwd: String, command: String, label: String, agent: String, trust: Bool) throws -> String {
-        try shared.spawn(cwd: cwd, command: command, label: label, agent: agent, trust: trust)
+    func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String, trust: Bool) throws -> String {
+        try shared.spawn(cwd: cwd, command: command, env: env, label: label, agent: agent, trust: trust)
     }
     func kill(_ session: String) throws { try shared.kill(session) }
     func forget(_ session: String) { shared.forget(session) }

@@ -96,3 +96,5 @@ allow: Tests/VibeCoreTests/WorktreesTests.swift | home.path + "/tmp/" | a tmp fo
 #
 # The lint's own examples, which its test writes to a scratch file of another name.
 allow: Tests/VibeCoreTests/TemporaryFolderLintTests.swift | // the lint's example | examples written to a scratch test file the lint must flag
+# SessionTemp: the user's sessions' TMPDIR root, compared and never made (the test's own go under a Scratch).
+allow: Tests/VibeCoreTests/SessionTempTests.swift | #expect(root.path == "/private/tmp/vibeswitcher- | the path SessionTemp.root names for the user's own VibeSwitcher, compared as a string; nothing is made there

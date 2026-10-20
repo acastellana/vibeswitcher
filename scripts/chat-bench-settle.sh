@@ -17,6 +17,7 @@
 #   the one whose worktree this is; none: twice the cores).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/lib/scratch.sh
 # Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
 unset VIBESWITCHER_HOME
 
@@ -39,7 +40,7 @@ shift $((OPTIND - 1))
 # The scratch home goes when the bench ends (Ctrl-C too): copies of the transcripts filled the disk otherwise. What
 # the runs printed stays in .build/chat-bench-settle (replaced by the next run).
 home=$(mktemp -d "${TMPDIR:-/tmp}/chat-bench-settle.XXXXXX")
-trap 'rm -r "$home" < /dev/null' EXIT
+on_exit 'rm -r "$home" < /dev/null'
 trap 'exit 130' INT TERM
 outputs=.build/chat-bench-settle
 [[ -d $outputs ]] && rm -r "$outputs" < /dev/null

@@ -19,6 +19,7 @@
 #   Logs: .build/ui-bench/{base,branch}-N.log (UI_BENCH_LOGS: another folder).
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/lib/scratch.sh
 # Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
 unset VIBESWITCHER_HOME
 
@@ -62,6 +63,7 @@ if [[ -n $base && ! ( -f $base && -x $base ) ]]; then
         mkdir -p "$folder"
         echo "building the base, $base ($commit), in $folder"
         git archive "$commit" | tar -x -C "$folder"
+        scratch_tmpdir vs-uibench
         swift build --package-path "$folder" > "$folder.build.log" 2>&1 || { echo "the base didn't build: $folder.build.log"; exit 1; }
     fi
     base=$folder/.build/debug/VibeSwitcher

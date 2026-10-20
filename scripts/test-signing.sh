@@ -21,6 +21,7 @@
 # (pipefail: a check reads its pipe to the end, `grep >/dev/null` rather than `grep -q`, or the writer's SIGPIPE fails it.)
 set -uo pipefail
 cd "$(dirname "$0")/.."
+source scripts/lib/scratch.sh
 
 work=$(mktemp -d "${TMPDIR:-/tmp}/vs-signing-check.XXXXXX")
 cleanup() {
@@ -31,7 +32,7 @@ cleanup() {
     done
     rm -r "$work"
 }
-trap cleanup EXIT
+on_exit cleanup
 
 failures=0
 check() {

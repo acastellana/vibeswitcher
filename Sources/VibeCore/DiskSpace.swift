@@ -89,9 +89,96 @@ public enum ClaudeScratch {
     }
 }
 
+/// The TMPDIR each lead, worker and verifier session starts with (`LeadLaunch.prepare`), one folder per session (0700)
+/// under `root`: `<hash of its folder>-<hash of its name>`. SwiftPM leaves empty `TemporaryDirectory.XXXXXX` folders in
+/// TMPDIR at every swift build and swift test and never removes them (7 a no-op build, 5 a `swift test --skip-build`;
+/// 32,871 had piled up in the user's /var/folders/…/T/ by 2026-10-20), so a session's go with it: cleanup removes its
+/// task's (found by the worktree, as the witness counts them), the app an ended session's (`removable`).
+public enum SessionTemp {
+    /// `/private/tmp/vibeswitcher-<uid>` for the user's own VibeSwitcher; in a scratch one's folder otherwise (a test
+    /// run, a bench), which goes with it. Short: a session's sockets (the session host's tests, SwiftPM's) are made
+    /// under its TMPDIR, and a socket's path is limited to 104 bytes.
+    public static var root: URL { root(vibeRoot: VibePaths.root, accountHome: VibePaths.accountHome) }
+
+    static func root(vibeRoot: URL, accountHome: String) -> URL {
+        VibePaths.isAccountRoot(vibeRoot, accountHome: accountHome)
+            ? URL(fileURLWithPath: "/private/tmp/vibeswitcher-\(getuid())", isDirectory: true)
+            : vibeRoot.appendingPathComponent("tmp", isDirectory: true)
+    }
+
+    /// The folder of the session named `name` (its `--name`) started in `cwd`: under the user's root at most 43
+    /// characters for uid 501, 50 for a 10-digit one (each hash is at most 6, "zik0zk").
+    public static func folder(cwd: String, name: String, in root: URL = root) -> URL {
+        root.appendingPathComponent("\(prefix(cwd))\(ClaudeScratch.hash(name))", isDirectory: true)
+    }
+
+    /// Makes the folder and `root` private to you (0700), its time now: a session that's about to start in it is fresh
+    /// (see `removable`). Nil when it can't be made, or `root` isn't a folder of yours (anyone may make one in /tmp).
+    public static func make(cwd: String, name: String, in root: URL = root) -> URL? {
+        let folder = folder(cwd: cwd, name: name, in: root)
+        // Before anything is made or changed through a link in its place.
+        var info = stat()
+        if lstat(root.path, &info) == 0, info.st_uid != getuid() || (info.st_mode & S_IFMT) != S_IFDIR { return nil }
+        guard (try? VibePaths.ensurePrivate(folder, within: root)) != nil, isPrivate(root), isPrivate(folder) else { return nil }
+        utimes(folder.path, nil)
+        return folder
+    }
+
+    /// A real folder (not a link), yours, 0700: what `make` leaves `root` and each folder as, and what `folders` and
+    /// `removable` read only when `root` is. /tmp is anyone's: another account could put a link to one of your folders
+    /// in the root's place (it's cleared at each restart), and cleanup or the app would then remove what's there.
+    /// What's left is that account swapping the root between this check and the removal.
+    static func isPrivate(_ url: URL) -> Bool {
+        var info = stat()
+        return lstat(url.path, &info) == 0 && info.st_uid == getuid() && (info.st_mode & S_IFMT) == S_IFDIR && info.st_mode & 0o777 == 0o700
+    }
+
+    /// The folders of the sessions started in `cwd` (a task's worktree), by the path as given and as it resolves; none
+    /// when `root` isn't private (`isPrivate`).
+    public static func folders(for cwd: String, in root: URL = root) -> [URL] {
+        var paths = [cwd]
+        if let resolved = realpath(cwd, nil) {
+            paths.append(String(cString: resolved))
+            free(resolved)
+        }
+        let prefixes = Set(paths.map(prefix))
+        guard isPrivate(root) else { return [] }
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
+        return entries.filter { name in prefixes.contains { name.hasPrefix($0) } }.map { root.appendingPathComponent($0, isDirectory: true) }
+            .filter(isDirectory).sorted { $0.path < $1.path }
+    }
+
+    /// How long a folder no live session uses stays after its last change: a session being started in it isn't listed
+    /// yet (`make` touches it), and an ended one's last build may still be writing there.
+    public static let settle: TimeInterval = 60
+
+    /// The folders under `root` no live session in `sessions` (the session host's whole list) uses, untouched for
+    /// `settle`: an ended session's, and any a host that's gone left. Each is a session's TMPDIR: removing it takes
+    /// only what SwiftPM and the session's own commands left there. Nothing when `root` isn't private (`isPrivate`).
+    public static func removable(in root: URL = root, sessions: [HostSession], now: Date = Date()) -> [URL] {
+        guard isPrivate(root) else { return [] }
+        let live = Set(sessions.filter(\.isLive).compactMap { session in
+            LeadLaunch.name(inCommand: session.command ?? "").map { folder(cwd: session.cwd, name: $0, in: root).lastPathComponent }
+        })
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
+        return entries.filter { name in
+            guard !live.contains(name), name.wholeMatch(of: #/[0-9a-z]+-[0-9a-z]+/#) != nil else { return false }
+            let modified = (try? FileManager.default.attributesOfItem(atPath: root.appendingPathComponent(name).path))?[.modificationDate] as? Date
+            return modified.map { now.timeIntervalSince($0) >= settle } ?? false
+        }.map { root.appendingPathComponent($0, isDirectory: true) }.filter(isDirectory).sorted { $0.path < $1.path }
+    }
+
+    private static func prefix(_ cwd: String) -> String { ClaudeScratch.hash((cwd as NSString).standardizingPath) + "-" }
+
+    private static func isDirectory(_ url: URL) -> Bool {
+        var info = stat()
+        return lstat(url.path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFDIR
+    }
+}
+
 /// What a project's tasks keep on disk: each task's worktree and its sessions' temporary folders.
 public struct TaskFolder: Equatable, Sendable {
-    public enum Kind: String, Sendable { case worktree, temporary = "temporary folder" }
+    public enum Kind: String, Sendable { case worktree, temporary = "temporary folder", tmpdir = "TMPDIR" }
     public var task: String
     public var kind: Kind
     public var path: String
@@ -107,8 +194,8 @@ public struct TaskFolder: Equatable, Sendable {
         self.finished = finished
     }
 
-    /// Every task's folders on the board, biggest first.
-    public static func all(root: String, board: LeadBoard, scratch: URL = ClaudeScratch.root,
+    /// Every task's folders on the board, biggest first. `sessions`: where its sessions' TMPDIRs are (`SessionTemp`).
+    public static func all(root: String, board: LeadBoard, scratch: URL = ClaudeScratch.root, sessions: URL = SessionTemp.root,
                            size: (String) -> Int64 = DiskSpace.size(of:)) -> [TaskFolder] {
         var folders: [TaskFolder] = []
         for task in board.tasks {
@@ -119,6 +206,9 @@ public struct TaskFolder: Equatable, Sendable {
             }
             for url in ClaudeScratch.folders(for: worktree, in: scratch) {
                 folders.append(TaskFolder(task: task.slug, kind: .temporary, path: url.path, bytes: size(url.path), finished: finished))
+            }
+            for url in SessionTemp.folders(for: worktree, in: sessions) {
+                folders.append(TaskFolder(task: task.slug, kind: .tmpdir, path: url.path, bytes: size(url.path), finished: finished))
             }
         }
         return folders.sorted { $0.bytes > $1.bytes }

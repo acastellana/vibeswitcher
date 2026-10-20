@@ -30,6 +30,7 @@
 #       security delete-keychain ~/.vibeswitcher/signing/vibeswitcher.keychain-db
 #       rmdir ~/.vibeswitcher/signing
 set -euo pipefail
+source "$(dirname "$0")/lib/scratch.sh"
 
 DIR="$HOME/.vibeswitcher/signing"
 KEYCHAIN="$DIR/vibeswitcher.keychain-db"
@@ -47,7 +48,7 @@ DONE=0
 MADE=0
 WORK=""
 
-on_exit() {
+finish() {
     if [[ -n "$WORK" ]]; then
         rm -f "$WORK/cert.cnf" "$WORK/key.pem" "$WORK/cert.pem"
         rmdir "$WORK" 2>/dev/null || true
@@ -73,7 +74,7 @@ Setup stopped before it finished. What was done:
 Running ./scripts/setup-signing.sh again is safe: it continues from there.
 EOF
 }
-trap on_exit EXIT
+on_exit finish
 
 trust_dialog() {
     echo "macOS now asks for your Mac login password (the one you log in with) to change certificate trust. $1"

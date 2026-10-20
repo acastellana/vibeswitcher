@@ -9,6 +9,7 @@
 #   e.g. scripts/chat-bench-perf.sh base=/tmp/base/.build/debug/VibeSwitcher head=.build/debug/VibeSwitcher -- t1.jsonl t2.jsonl
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/lib/scratch.sh
 # Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
 unset VIBESWITCHER_HOME
 
@@ -28,7 +29,7 @@ shift
 # The scratch home goes when the bench ends (Ctrl-C too): copies of the transcripts filled the disk otherwise. What
 # the runs printed stays in .build/chat-bench-perf (replaced by the next run).
 home=$(mktemp -d "${TMPDIR:-/tmp}/chat-bench-perf.XXXXXX")
-trap 'rm -r "$home" < /dev/null' EXIT
+on_exit 'rm -r "$home" < /dev/null'
 trap 'exit 130' INT TERM
 outputs=.build/chat-bench-perf
 [[ -d $outputs ]] && rm -r "$outputs" < /dev/null

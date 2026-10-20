@@ -199,11 +199,14 @@ public enum LeadWitness {
     public struct Disk {
         let free: (String) -> Int64?
         let scratch: URL
+        let sessions: URL
         public private(set) var watch = DiskWatch()
 
-        public init(free: @escaping (String) -> Int64? = DiskSpace.free(at:), scratch: URL = ClaudeScratch.root) {
+        public init(free: @escaping (String) -> Int64? = DiskSpace.free(at:), scratch: URL = ClaudeScratch.root,
+                    sessions: URL = SessionTemp.root) {
             self.free = free
             self.scratch = scratch
+            self.sessions = sessions
         }
 
         /// The free space to tell the lead about now (once per episode); nil otherwise. Cheap: sizing the folders
@@ -216,7 +219,8 @@ public enum LeadWitness {
         /// What to tell the lead: the space left, and the biggest task folders (sized now: it takes a while).
         public func text(free: Int64, root: String, board: LeadBoard, workflow: LeadWorkflow,
                          size: (String) -> Int64 = DiskSpace.size(of:)) -> String {
-            LeadWitness.diskText(free: free, workflow: workflow, folders: TaskFolder.all(root: root, board: board, scratch: scratch, size: size))
+            LeadWitness.diskText(free: free, workflow: workflow, folders: TaskFolder.all(root: root, board: board, scratch: scratch, sessions: sessions,
+                                                                                            size: size))
         }
 
         /// Both at once.

@@ -18,7 +18,7 @@ struct LeadRelaunchTests {
         init(_ list: @escaping () -> [HostSession]) { self.list = list }
         let server = "/App/vibeswitcher-mcp"
         func claudeCommand(root: String) -> String { "claude" }
-        func spawn(cwd: String, command: String, label: String, agent: String, trust: Bool) throws -> String { throw CancellationError() }
+        func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String, trust: Bool) throws -> String { throw CancellationError() }
         func kill(_ session: String) {}
         func forget(_ session: String) {}
         func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String, clearDraft: Bool) throws -> LeadDelivery.Delivered {

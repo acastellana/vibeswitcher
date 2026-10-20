@@ -7,6 +7,7 @@
 # scripts/test-under-load-selfcheck.sh
 set -uo pipefail
 cd "$(dirname "$0")/.."
+source scripts/lib/scratch.sh
 
 harness=scripts/test-under-load.sh
 cores=$(sysctl -n hw.ncpu)
@@ -18,7 +19,7 @@ cleanup() {
     kill -9 "${started[@]}" $(cat "$work"/*.pids 2>/dev/null) 2>/dev/null
     rm -r "$work"
 }
-trap cleanup EXIT
+on_exit cleanup
 # Ctrl-C reaches the whole process group, as from a terminal: each harness gets its own (job control).
 set -m
 

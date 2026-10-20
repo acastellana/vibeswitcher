@@ -336,6 +336,8 @@ final class HostClient: ObservableObject {
                 handoverWaitedOut = false
             }
             sessions = list
+            // What ended while the app was away, or went with a host that's gone.
+            removeSessionTemporaryFolders()
             canHandOver = hostCapabilities.contains(HostProtocol.Capability.handover)
             let live = list.filter(\.isLive).count
             let bundled = bundledBuild()
@@ -388,9 +390,24 @@ final class HostClient: ObservableObject {
         } else {
             sessions.append(session)
         }
-        if !session.isLive { screens[session.tty] = nil }
+        if !session.isLive {
+            screens[session.tty] = nil
+            removeSessionTemporaryFolders(after: SessionTemp.settle + 1)
+        }
         if case .outdated = state, sessions.isEmpty { replaceHost() }
         else if restartWhenEnded, !sessions.contains(where: \.isLive) { restartWhenEnded = false; replaceHost() }
+    }
+
+    /// The TMPDIRs of the lead's, workers' and verifiers' sessions (see `SessionTemp`) that no live session uses and that
+    /// have settled, after `delay`: judged by the host's whole list then, so only while connected to it.
+    private func removeSessionTemporaryFolders(after delay: TimeInterval = 0) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
+            guard let self, self.connection != nil, ![.connecting, .notRunning].contains(self.state) else { return }
+            let sessions = self.sessions
+            DispatchQueue.global(qos: .utility).async {
+                for folder in SessionTemp.removable(sessions: sessions) { try? FileManager.default.removeItem(at: folder) }
+            }
+        }
     }
 
     enum Plan: Equatable {

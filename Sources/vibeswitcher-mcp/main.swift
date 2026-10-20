@@ -92,8 +92,8 @@ final class HostRuntime: LeadRuntime {
         return preset.flatMap(LaunchPlan.command(for:)) ?? "claude"
     }
 
-    func spawn(cwd: String, command: String, label: String, agent: String, trust: Bool) throws -> String {
-        let request = SpawnRequest(cwd: cwd, command: command, env: [:], cols: 120, rows: 40, keepShell: false, label: label, agent: agent)
+    func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String, trust: Bool) throws -> String {
+        let request = SpawnRequest(cwd: cwd, command: command, env: env, cols: 120, rows: 40, keepShell: false, label: label, agent: agent)
         switch try HostCall.request(.spawn(request), socket: socket) {
         case .spawned(let session):
             // A worktree is a new folder to Claude: answer its trust question for that folder (the user started

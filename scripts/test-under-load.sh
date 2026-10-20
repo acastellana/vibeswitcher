@@ -29,6 +29,7 @@
 #   -r RUNS: suites at once (3).  -f FILTER: only the tests matching FILTER (as `swift test --filter`), for a quick look.
 set -uo pipefail
 cd "$(dirname "$0")/.."
+source scripts/lib/scratch.sh
 # Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
 unset VIBESWITCHER_HOME
 
@@ -168,7 +169,7 @@ stop() {
 }
 
 cleanup() {
-    trap - EXIT INT TERM
+    trap - INT TERM
     # /bin/bash 3.2 calls an empty array unbound.
     set +u
     [[ -n $watchdog ]] && kill "$watchdog" 2>/dev/null
@@ -190,7 +191,9 @@ stopped() {
     fi
     exit 130
 }
-trap cleanup EXIT
+# The build, and a COMMAND's swift test, leave SwiftPM's empty folders in TMPDIR: a scratch one, gone on exit.
+scratch_tmpdir vs-loadtmp
+on_exit cleanup
 trap stopped INT TERM
 
 if [[ ${#command[@]} -eq 0 ]]; then
@@ -221,13 +224,13 @@ pid_file=${pid_file:-$scratch/load.pids}
 
 # When this script ends without its trap (SIGKILL), nothing it started stays: the busy loops stop once its pid is gone,
 # and this watchdog then stops them and the test runs (their pids in $pid_file and $scratch/pids) and removes the
-# scratch. Meanwhile, every second: when an owner is gone or --max-time is up it stops this script (whose trap ends the
-# rest); the lowest free disk goes in $scratch/disk-min (MB), and under $stop_mb it stops the load and the runs before
-# the disk fills ($scratch/disk-low says so); free memory under half the floor does the same ($scratch/memory-low).
+# scratch folders. Meanwhile, every second: when an owner is gone or --max-time is up it stops this script (whose trap
+# ends the rest); the lowest free disk goes in $scratch/disk-min (MB), and under $stop_mb it stops the load and the runs
+# before the disk fills ($scratch/disk-low says so); free memory under half the floor does the same ($scratch/memory-low).
 stop_mb=5120
 memory_stop=$((memory_floor / 2))
 (
-    trap - EXIT INT TERM
+    trap - INT TERM
     lowest="" deadline=$((SECONDS + max_time))
     while kill -0 "$script" 2>/dev/null; do
         for pid in "${owners[@]}"; do
@@ -258,7 +261,7 @@ memory_stop=$((memory_floor / 2))
     # Stopped by this script's trap, which ends the rest; or the script is gone, so end it here.
     while kill -0 "$script" 2>/dev/null; do sleep 0.2; done
     stop $(cat "$pid_file" "$scratch/pids" 2>/dev/null)
-    rm -r "$scratch" < /dev/null 2>/dev/null
+    rm -r "$scratch" "$tool_scratch" < /dev/null 2>/dev/null
 ) &
 watchdog=$!
 
@@ -305,7 +308,7 @@ else
         mkdir -p "$(tmpdir "$run")" "$(home "$run")"
         args=(--test-bundle-path "$bundle")
         [[ -n $filter ]] && args+=(--filter "$filter")
-        HOME="$(home "$run")" CFFIXED_USER_HOME="$(home "$run")" TMPDIR="$(tmpdir "$run")/" "$helper" "${args[@]}" "$bundle" --testing-library swift-testing > "$logs/run-$run.log" 2>&1 &
+        HOME="$(home "$run")" CFFIXED_USER_HOME="$(home "$run")" with_tmpdir "$(tmpdir "$run")/" "$helper" "${args[@]}" "$bundle" --testing-library swift-testing > "$logs/run-$run.log" 2>&1 &
         tests+=($!)
         echo $! >> "$scratch/pids"
     done

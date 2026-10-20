@@ -11,6 +11,8 @@ public enum LeadLaunch {
         public var promptFile: String
         public var mcpFile: String
         public var settingsFile: String
+        /// What the session's environment adds (`SpawnRequest.env`): its TMPDIR, a folder of its own (see `SessionTemp`).
+        public var environment: [String: String] = [:]
     }
 
     static let readOnly = ["Edit", "Write", "NotebookEdit"]
@@ -102,9 +104,12 @@ public enum LeadLaunch {
 
     /// Writes the role's files (0600) and returns the command line to run. They go in `folder`: the vault's run folder
     /// for the role (`LeadVault.runFolder`, outside the repository); `<root>/.vibeswitcher/run/<name>/` when none is given.
+    /// The session's TMPDIR is made under `temporary` for `cwd`, where it's started (the task's worktree, else `root`):
+    /// what its swift builds and tests leave there goes with it (see `SessionTemp`).
     public static func prepare(role: Role, root: String, task: String?, base: String, prompt: String, start: String,
                                server: String, name: String, model: String? = nil, branch: String? = nil,
-                               records: String? = nil, folder: URL? = nil) throws -> Prepared {
+                               records: String? = nil, folder: URL? = nil, cwd: String? = nil,
+                               temporary: URL = SessionTemp.root) throws -> Prepared {
         let folder = folder?.path ?? (root as NSString).appendingPathComponent(".vibeswitcher/run/\(name)")
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
         let promptFile = (folder as NSString).appendingPathComponent("prompt.md")
@@ -135,7 +140,11 @@ public enum LeadLaunch {
         parts.append("--name \(quote(name))")
         if let model { parts.append("--model \(quote(model))") }
         parts.append("-- \(quote(start))")
-        return Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: mcpFile, settingsFile: settingsFile)
+        var prepared = Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: mcpFile, settingsFile: settingsFile)
+        // Not made (another user's folder in its place): the session keeps the TMPDIR it would have had.
+        let cwd = cwd ?? task.map { Worktrees.path(root: root, slug: $0) } ?? root
+        if let temporary = SessionTemp.make(cwd: cwd, name: name, in: temporary) { prepared.environment["TMPDIR"] = temporary.path + "/" }
+        return prepared
     }
 
     /// Where a new lead finds the last turns of the lead it replaces: in the project's `.vibeswitcher` folder (kept out

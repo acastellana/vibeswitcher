@@ -131,6 +131,61 @@ struct DiskSpaceTests: LeadTeamFixture {
         #expect(!exists(again))
     }
 
+    // MARK: Sessions' TMPDIRs
+
+    /// A worker's and a verifier's session each start with a TMPDIR of their own (SwiftPM's empty folders pile up in
+    /// it); the witness counts them under the task, and cleanup takes them with the rest. Another task's stays.
+    @Test func cleanupRemovesTheTasksSessionTMPDIRs() throws {
+        let root = try repo()
+        let sessions = try folder("tmpdirs")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        lead.scratchRoot = try folder("scratch")
+        lead.sessionTempRoot = sessions
+        lead.freeSpace = { _ in 100 * Self.gb }
+        for title in ["One", "Two"] { _ = lead.call("add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
+        #expect(!lead.call("start_worker", ["task": "one"]).isError)
+        #expect(!lead.call("start_worker", ["task": "two"]).isError)
+        let worktree = Worktrees.path(root: root, slug: "one")
+        let tmpdir = try #require(runtime.environments["session-1"]?["TMPDIR"])
+        #expect(runtime.environments["session-1"] == ["TMPDIR": SessionTemp.folder(cwd: worktree, name: "worker-one", in: sessions).path + "/"])
+        #expect((try FileManager.default.attributesOfItem(atPath: tmpdir)[.posixPermissions] as? Int) == 0o700)
+        let other = try #require(runtime.environments["session-2"]?["TMPDIR"])
+        #expect(other != tmpdir)
+        // What a swift build leaves, and a verifier's own.
+        try fill(URL(fileURLWithPath: tmpdir).appendingPathComponent("TemporaryDirectory.abc123"), bytes: 300_000)
+        let verifier = try #require(SessionTemp.make(cwd: worktree, name: "verify-one", in: sessions))
+        #expect(SessionTemp.folders(for: worktree, in: sessions).map(\.path) == [String(tmpdir.dropLast()), verifier.path].sorted())
+
+        lead.freeSpace = { _ in 6 * Self.gb }
+        #expect(lead.call("status", [:]).text.contains("one's TMPDIR"))
+        #expect(!lead.call("cleanup", ["task": "one", "force": true]).isError)
+        #expect(!FileManager.default.fileExists(atPath: tmpdir))
+        #expect(!exists(verifier))
+        #expect(FileManager.default.fileExists(atPath: other))
+    }
+
+    /// The sessions' root replaced by a link to a folder of the user's (anyone can put one in /tmp): cleanup removes
+    /// nothing there, even what's named like the task's sessions' TMPDIRs.
+    @Test func cleanupRemovesNothingThroughALinkInTheRootsPlace() throws {
+        let root = try repo()
+        let target = try folder("users-folder")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        lead.scratchRoot = try folder("scratch")
+        lead.freeSpace = { _ in 100 * Self.gb }
+        _ = lead.call("add_task", ["title": "One", "goal": "g", "acceptance": ["a"]])
+        #expect(!lead.call("start_worker", ["task": "one"]).isError)
+        let named = SessionTemp.folder(cwd: Worktrees.path(root: root, slug: "one"), name: "worker-one", in: target)
+        try fill(named)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: target.path)
+        let link = temp.url("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
+        lead.sessionTempRoot = link
+        #expect(!lead.call("cleanup", ["task": "one", "force": true]).isError)
+        #expect(exists(named))
+    }
+
     // MARK: Low disk space
 
     @Test func theWitnessTellsTheLeadOncePerEpisode() throws {

@@ -2,6 +2,7 @@
 # Builds build/VibeSwitcher.app. Pass --install to copy it to /Applications and launch it.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+source scripts/lib/scratch.sh
 
 SIGNING_DIR="$HOME/.vibeswitcher/signing"
 # Made by an earlier setup-signing.sh: don't sign with a key any process running as you could use.
@@ -18,6 +19,7 @@ if [[ -f "$SIGNING_DIR/password" ]]; then
     exit 1
 fi
 
+scratch_tmpdir vs-build
 swift build -c release
 BIN="$(swift build -c release --show-bin-path)"
 APP="build/VibeSwitcher.app"
@@ -46,7 +48,7 @@ if [[ -f "$SIGNING_DIR/vibeswitcher.keychain-db" ]]; then
         line="${line#"${line%%[![:space:]]*}"}"; line="${line%\"}"; line="${line#\"}"
         [[ -n "$line" ]] && ORIGINAL_LIST+=("$line")
     done < <(security list-keychains -d user)
-    trap 'security list-keychains -d user -s ${ORIGINAL_LIST[@]+"${ORIGINAL_LIST[@]}"}' EXIT
+    on_exit 'security list-keychains -d user -s ${ORIGINAL_LIST[@]+"${ORIGINAL_LIST[@]}"}'
     security list-keychains -d user -s ${ORIGINAL_LIST[@]+"${ORIGINAL_LIST[@]}"} "$KEYCHAIN"
     # The keychain locks when the Mac sleeps and when you log out, and stays unlocked otherwise. While it's
     # locked, codesign's first use of the key makes macOS ask you for its password (the one you chose in
