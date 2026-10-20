@@ -986,7 +986,7 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "\(slug) has no worktree to check.")
         }
         let workflow = self.workflow
-        try checkUpToDate(slug, head: head, base: workflow.base)
+        let behind = try checkUpToDate(slug, head: head, base: workflow.base)
         // Not on a Mac every project's teams already load: the task's own worker (done) and earlier verifier aren't
         // counted, the verifier takes their place.
         let sessions = try hostSessions("whether the Mac has room for a verifier isn't known; no verifier was started")
@@ -1043,11 +1043,11 @@ public final class LeadToolset: MCPToolset {
         } ?? ""
         let cap = ledger?.reconsider == true ? " " + Self.reconsiderText(ledger!, of: slug) : ""
         if let panel {
-            return MCPToolResult(text: putBack + "\(panel.size) finders started on \(slug) (checking \(head.prefix(8))): " + Self.focusesText(panel.focuses) + ". "
+            return MCPToolResult(text: putBack + behind + "\(panel.size) finders started on \(slug) (checking \(head.prefix(8))): " + Self.focusesText(panel.focuses) + ". "
                                  + "One build and test run came first, and every finder reads its logs (\(panel.run)): \(panel.logs.joined(separator: ", ")). "
                                  + "Their findings are voted into one verdict, which arrives as a message once all \(panel.size) have submitted.\(round)\(flagged)\(cap)")
         }
-        return MCPToolResult(text: putBack + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(round)\(flagged)\(cap)")
+        return MCPToolResult(text: putBack + behind + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(round)\(flagged)\(cap)")
     }
 
     /// "finder 1: contract and acceptance, finder 2: bugs and regressions".
@@ -1253,14 +1253,37 @@ public final class LeadToolset: MCPToolset {
     /// A branch that hasn't taken in what the base did since to files it changes too breaks or conflicts once it's
     /// rebased at merge: refused before a verifier spends its runs on it (2026-10-19, twice: base commits that came
     /// after a worker's last `git merge` changed the test file it changed, and the merge's build failed).
-    private func checkUpToDate(_ slug: String, head: String, base: String) throws {
+    /// First a trial merge onto the base: a branch that conflicts can't land, and its worker is the one to resolve it
+    /// (2026-10-20: a-role-session-s passed its audit, then its verifier found by hand that it conflicted with work
+    /// merged meanwhile; one more audit and verifier for the resolution). What this returns says how far behind the
+    /// base a branch that merges cleanly is.
+    private func checkUpToDate(_ slug: String, head: String, base: String) throws -> String {
         let since: Worktrees.BaseSince
         switch Worktrees.baseSince(root: root, base: base, commit: head) {
         case .success(let found): since = found
         case .failure(let error): throw Problem(text: "No verifier started: whether agent/\(slug) is up to date with \(base) can't be told (\(error)).")
         }
+        let conflicts: [String]
+        switch Worktrees.trialMerge(root: root, base: base, commit: head) {
+        case .success(let found): conflicts = found
+        case .failure(let error): throw Problem(text: "No verifier started: whether agent/\(slug) merges cleanly onto \(base) can't be told (\(error)).")
+        }
+        if !conflicts.isEmpty {
+            let commits = since.commits(touching: conflicts)
+            let listed = commits.prefix(8).map { commit in
+                "\(commit.line) (\(commit.files.filter(conflicts.contains).joined(separator: ", ")))"
+            }
+            let files = conflicts.prefix(12).joined(separator: ", ") + (conflicts.count > 12 ? ", …" : "")
+            throw Problem(text: "Not audited, no verifier started: a trial merge of agent/\(slug) (\(head.prefix(8))) onto \(base) (git merge-tree) conflicts, so it can't land as it is. "
+                          + "Files: \(files). "
+                          + "\(base)'s commits that touched them since agent/\(slug) last took it in (at \(since.mergeBase.prefix(8))): "
+                          + (listed.isEmpty ? "none found" : listed.joined(separator: "; ") + (commits.count > 8 ? "; …" : "")) + ". "
+                          + "Message its worker this: \"Your branch conflicts with \(base) in \(files). In your worktree run `git merge \(base)`, resolve the conflicts in those files, `git add` them, then `git commit`, each command on its own (no pipes, && or 2>&1); "
+                          + "then run the test suite once and report.\" (start_worker again if it has stopped). Then audit again: a verifier only checks a branch that merges cleanly.")
+        }
+        let behind = since.commits.isEmpty ? "" : "agent/\(slug) is \(since.commits.count) commit\(since.commits.count == 1 ? "" : "s") behind \(base); a trial merge onto it is clean. "
         let files = since.overlap
-        guard !files.isEmpty else { return }
+        guard !files.isEmpty else { return behind }
         let commits = since.commits(touching: files)
         let listed = commits.prefix(8).map { commit in
             "\(commit.line) (\(commit.files.filter(files.contains).joined(separator: ", ")))"

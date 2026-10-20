@@ -831,6 +831,19 @@ public enum Worktrees {
         }
     }
 
+    /// The files a merge of `commit` into `base` conflicts in (empty: it merges cleanly), from a trial merge that
+    /// touches no worktree, index or ref (`git merge-tree --write-tree`); what git said when it can't be told.
+    public static func trialMerge(root: String, base: String, commit: String) -> Swift.Result<[String], Failure> {
+        let merged = Git.run(["merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", base, commit], in: root)
+        // "tree\0file\0file\0": status 0 clean, 1 conflicted; 1 is also what a ref it can't merge gives, with no tree.
+        let parts = merged.output.split(separator: "\0").map(String.init)
+        guard merged.status == 0 || merged.status == 1, !merged.timedOut, !merged.cancelled,
+              let tree = parts.first, tree.count >= 40, tree.allSatisfy(\.isHexDigit) else {
+            return .failure(Failure(description: "git merge-tree \(base) \(commit.prefix(8)) failed: \(said(merged))"))
+        }
+        return .success(merged.status == 0 ? [] : Array(parts.dropFirst()))
+    }
+
     /// Under `.claude/`, what Claude Code reads as settings or instructions (the rest there is its own state: locks,
     /// scheduled-task bookkeeping).
     static let agentConfigFolders: Set<String> = ["commands", "agents", "skills", "hooks", "output-styles", "rules"]
