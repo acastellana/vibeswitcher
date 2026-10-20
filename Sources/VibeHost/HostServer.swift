@@ -739,9 +739,15 @@ enum HostProcesses {
         return children(of: 1).filter { pid in
             var short = proc_bsdshortinfo()
             let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
-            guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, size) == size, short.pbsi_ppid == 1,
-                  short.pbsi_uid == geteuid(), let path = HostServer.executable(of: pid) else { return false }
-            return URL(fileURLWithPath: path).resolvingSymlinksInPath().path == target
+            guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, size) == size else { return false }
+            return isOrphan(parent: pid_t(short.pbsi_ppid), uid: short.pbsi_uid, running: target) { HostServer.executable(of: pid) }
         }
+    }
+
+    /// Whether a process with this parent and uid, running what `path` says (asked last), is an orphan of `target`'s
+    /// (a resolved path): launchd its parent, the user's, and exactly that file.
+    static func isOrphan(parent: pid_t, uid: uid_t, running target: String, user: uid_t = geteuid(), path: () -> String?) -> Bool {
+        guard parent == 1, uid == user, let path = path() else { return false }
+        return URL(fileURLWithPath: path).resolvingSymlinksInPath().path == target
     }
 }
