@@ -132,18 +132,22 @@ struct HomeIsolationTests {
     }
 
     /// The built hook, given only HOME (no CFFIXED_USER_HOME, no VIBESWITCHER_HOME), writes its state under that home and
-    /// adds nothing to the user's own ~/.vibeswitcher (looked at, never written).
+    /// adds nothing to the user's own ~/.vibeswitcher (looked at, never written). That folder is live (the installed app,
+    /// its host and every session write there all the time), so only what the hook could write there is compared:
+    /// `hookWrites`.
     @Test func theHookOnAScratchHomeWritesThereAndNotInTheUsersFolder() throws {
         let hook = Bundle(for: TestBundleAnchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-hook").path
         try #require(FileManager.default.isExecutableFile(atPath: hook), "build it first: swift build")
         let home = temp.url("home")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         let real = URL(fileURLWithPath: VibePaths.accountHome).appendingPathComponent(".vibeswitcher")
-        let before = Self.listing(real)
+        let before = Self.snapshot(real)
+        // This run's own, so a state file holding it can only be this hook's.
+        let session = "home-isolation-" + UUID().uuidString
 
         // Under `script` the hook has a terminal of its own; started in the background of a shell that exits at once,
         // it has no agent above it (a test run inside a Claude session would otherwise give it that session's TTY).
-        let event = #"{"hook_event_name":"UserPromptSubmit","session_id":"home-isolation","cwd":"/tmp","prompt":"hi"}"#
+        let event = #"{"hook_event_name":"UserPromptSubmit","session_id":"\#(session)","cwd":"/tmp","prompt":"hi"}"#
         let script = #"/usr/bin/script -q /dev/null /bin/sh -c 'printf %s "$1" | "$2" claude' sh "$EVENT" "$HOOK" </dev/null >/dev/null 2>&1 &"#
         let (status, output) = try Self.run("/bin/sh", ["-c", script],
                                             environment: ["HOME": home.path, "PATH": "/usr/bin:/bin", "EVENT": event, "HOOK": hook])
@@ -157,12 +161,58 @@ struct HomeIsolationTests {
         }, "no state file under \(state.path)")
         let file = try #require(written.first)
         let saved = try #require(HookState.load(from: state.appendingPathComponent(file)))
-        #expect(saved.sessionId == "home-isolation")
+        #expect(saved.sessionId == session)
 
-        let after = Self.listing(real)
-        #expect(after.names == before.names, "new under \(real.path): \(after.names.subtracting(before.names).sorted())")
-        // The hook's own file, if the user's folder has one by that name (a terminal of theirs, long closed), is untouched.
-        #expect(after.modified["state/" + file] == before.modified["state/" + file])
+        let writes = Self.hookWrites(before: before, after: Self.snapshot(real), tty: String(file.dropLast(".json".count)),
+                                     session: session)
+        if !writes.ignored.isEmpty { print("HomeIsolationTests: ignored under \(real.path): \(writes.ignored.joined(separator: "; "))") }
+        #expect(writes.unexpected.isEmpty, "the hook wrote under \(real.path): \(writes.unexpected.joined(separator: "; "))")
+    }
+
+    /// The real-folder check: the live app's own changes pass (said as ignored, with why), the hook's are named.
+    @Test func theRealFolderCheckIgnoresTheLiveAppsWritesAndNamesTheHooks() {
+        let then = Date(timeIntervalSince1970: 1_000), now = then.addingTimeInterval(5)
+        let ours = "home-isolation-test", tty = "ttys012"
+        let before: Snapshot = ["": Entry(modified: then), "state": Entry(modified: then), "debug/app.log": Entry(modified: then),
+                                "state/.dat.nosync3f2a.Qx81Tb": Entry(modified: then),
+                                "state/ttys007.json": Entry(modified: then, session: "theirs")]
+        // The live app's: a temp file of an atomic save gone, a line more in app.log, a new terminal's session.
+        var live = before
+        live["state/.dat.nosync3f2a.Qx81Tb"] = nil
+        live["debug/app.log"] = Entry(modified: now)
+        live["state/ttys030.json"] = Entry(modified: now, session: "a new one")
+        live["state/ttys030.json.lock"] = Entry(modified: now)
+        let quiet = Self.hookWrites(before: before, after: live, tty: tty, session: ours)
+        #expect(quiet.unexpected.isEmpty, "\(quiet.unexpected)")
+        #expect(quiet.ignored.count == 4, "\(quiet.ignored)")
+        #expect(quiet.ignored.contains { $0.hasPrefix("state/.dat.nosync3f2a.Qx81Tb (gone): a temp file") }, "\(quiet.ignored)")
+        #expect(quiet.ignored.contains { $0.hasPrefix("debug/app.log (changed): the live app's log") }, "\(quiet.ignored)")
+
+        // The hook's: its state file for this session, and its lock.
+        var written = live
+        written["state/\(tty).json"] = Entry(modified: now, session: ours)
+        written["state/\(tty).json.lock"] = Entry(modified: now)
+        let caught = Self.hookWrites(before: before, after: written, tty: tty, session: ours)
+        #expect(caught.unexpected.contains { $0.hasPrefix("state/\(tty).json (new") && $0.contains(ours) }, "\(caught.unexpected)")
+        #expect(caught.unexpected.contains { $0.hasPrefix("state/\(tty).json.lock (new)") }, "\(caught.unexpected)")
+        #expect(caught.ignored == quiet.ignored)
+
+        // This session in another terminal's file, or the folders made where there were none, are the hook's too.
+        var elsewhere = live
+        elsewhere["state/ttys007.json"] = Entry(modified: now, session: ours)
+        #expect(Self.hookWrites(before: before, after: elsewhere, tty: tty, session: ours).unexpected
+                .contains { $0.hasPrefix("state/ttys007.json (changed") })
+        let made = Self.hookWrites(before: [:], after: ["": Entry(modified: now), "state": Entry(modified: now)], tty: tty, session: ours)
+        #expect(made.unexpected.count == 2 && made.unexpected.allSatisfy { $0.contains("(new)") }, "\(made.unexpected)")
+        // Its terminal, once closed, taken by a session of the user's: that session's file and lock are theirs.
+        var reused = live
+        reused["state/\(tty).json"] = Entry(modified: now, session: "theirs, on the freed terminal")
+        reused["state/\(tty).json.lock"] = Entry(modified: now)
+        #expect(Self.hookWrites(before: before, after: reused, tty: tty, session: ours).unexpected.isEmpty)
+        // A state file of its terminal that can't be read (a session's is never left half-written) isn't passed.
+        var unreadable = live
+        unreadable["state/\(tty).json"] = Entry(modified: now)
+        #expect(!Self.hookWrites(before: before, after: unreadable, tty: tty, session: ours).unexpected.isEmpty)
     }
 
     /// The installer's default home is the one this process was given: an explicit one is used as it is.
@@ -253,19 +303,79 @@ struct HomeIsolationTests {
         return listing
     }
 
-    /// The names in `root` and its state and stats folders, and when each was last changed. Read-only.
-    static func listing(_ root: URL) -> (names: Set<String>, modified: [String: Date]) {
-        var names: Set<String> = []
-        var modified: [String: Date] = [:]
-        for folder in ["", "state", "stats"] {
+    /// An entry in a snapshot of a ~/.vibeswitcher: when it last changed and, for a state file, the session it holds.
+    struct Entry: Equatable {
+        var modified: Date?
+        var session: String?
+    }
+
+    /// A ~/.vibeswitcher's entries by path in it: "" is the folder itself, then what's in it, its state, stats and debug
+    /// folders. Read-only.
+    typealias Snapshot = [String: Entry]
+
+    static func snapshot(_ root: URL) -> Snapshot {
+        let fm = FileManager.default
+        func modified(_ url: URL) -> Date? { (try? fm.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date }
+        var snapshot: Snapshot = [:]
+        guard fm.fileExists(atPath: root.path) else { return snapshot }
+        snapshot[""] = Entry(modified: modified(root))
+        for folder in ["", "state", "stats", "debug"] {
             let url = folder.isEmpty ? root : root.appendingPathComponent(folder)
-            for name in (try? FileManager.default.contentsOfDirectory(atPath: url.path)) ?? [] {
-                let key = folder.isEmpty ? name : folder + "/" + name
-                names.insert(key)
-                modified[key] = (try? FileManager.default.attributesOfItem(atPath: url.appendingPathComponent(name).path))?[.modificationDate] as? Date
+            for name in (try? fm.contentsOfDirectory(atPath: url.path)) ?? [] {
+                let file = url.appendingPathComponent(name)
+                let session = folder == "state" && name.hasSuffix(".json") ? HookState.load(from: file)?.sessionId : nil
+                snapshot[folder.isEmpty ? name : folder + "/" + name] = Entry(modified: modified(file), session: session)
             }
         }
-        return (names, modified)
+        return snapshot
+    }
+
+    /// Whose the changes the live app makes in the user's ~/.vibeswitcher are, by name, for the report: the first that
+    /// matches. None is ever the hook's; it writes only what `hookWrites` looks at.
+    static let liveWriters: [(matches: @Sendable (String) -> Bool, whose: String)] = [
+        ({ ["", "state", "stats", "debug"].contains($0) }, "a folder, changed as what's in it is"),
+        ({ ($0.split(separator: "/").last ?? "").hasPrefix(".dat.nosync") },
+         "a temp file of an atomic save (Foundation's), the app's, its host's or a session's hook's: it comes and goes"),
+        ({ $0 == "debug/app.log" || $0 == "host.log" }, "the live app's log, or its host's"),
+        ({ $0.hasPrefix("debug") }, "the live app's debug files"),
+        ({ $0.hasPrefix("stats") }, "the app's usage counts, written as sessions work"),
+        ({ $0.hasPrefix("state/") }, "another terminal's session, written by its own hook, or cleared by the app"),
+        ({ ["lead", "steer", "attachments", "host", "remote", "headless"].contains($0) },
+         "the lead's runs and scratch folders, steered messages, attachments, the host's and remote's folders"),
+        ({ _ in true }, "the live app's or its host's own file; no name the hook writes"),
+    ]
+
+    /// What the hook, run for `session` on `tty`, wrote in the user's folder going by snapshots of it before and after,
+    /// each named with how it changed; and what else changed there, ignored, each with whose it is (`liveWriters`). The
+    /// hook writes (Sources/vibeswitcher-hook): the folder and its state folder where there are none, `state/<tty>.json`
+    /// and `state/<tty>.json.lock` (and the temp file of that state file's atomic save, there for an instant). So the
+    /// hook's are those two folders made, any state file holding `session` (this run's alone), and its terminal's state
+    /// file or lock new or changed, unless that state file holds a session of the user's (one on that terminal once
+    /// the hook's closed); the folders, files and temp files the live app, its host and other sessions keep writing
+    /// are not compared.
+    static func hookWrites(before: Snapshot, after: Snapshot, tty: String, session: String)
+        -> (unexpected: [String], ignored: [String]) {
+        let state = "state/\(tty).json", lock = state + ".lock"
+        let theirs = after[state]?.session.map { $0 != session } ?? false
+        var unexpected: [String] = []
+        var ignored: [String] = []
+        for path in Set(before.keys).union(after.keys).sorted() where before[path] != after[path] {
+            let change = before[path] == nil ? "new" : after[path] == nil ? "gone" : "changed"
+            let name = (path.isEmpty ? "the folder itself" : path) + " (\(change))"
+            let hooks: Bool
+            switch path {
+            case "", "state": hooks = change == "new"
+            case state: hooks = after[path]?.session == session || (change != "gone" && !theirs)
+            case lock: hooks = change == "new" && !theirs
+            default: hooks = after[path]?.session == session
+            }
+            if hooks {
+                unexpected.append(name + (after[path]?.session.map { ", holds session \($0)" } ?? ""))
+            } else {
+                ignored.append(name + ": " + (liveWriters.first { $0.matches(path) }?.whose ?? ""))
+            }
+        }
+        return (unexpected, ignored)
     }
 
     /// What `swift test` starts the test bundle with: this process when it is that, else the toolchain's.
