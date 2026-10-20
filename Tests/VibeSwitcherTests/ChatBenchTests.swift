@@ -7,10 +7,9 @@ import VibeCore
 /// work on this process's main thread is counted, on a small made-up transcript (Fixtures/chat-bench.jsonl: 80
 /// exchanges, 240 items, 4 pages). Opened, left and opened again at the end, with and without paging back (Show earlier
 /// twice), at the chat pane's width with the inspector showing and hidden, while the model
-/// publishes every 20 ms and the window's chat timer ticks. On a Mac whose 1-minute load is under its cores before and
-/// after a run, the run must settle with no tick over 0.25 s, save the known issue below (up to 0.5 s of wall time or of
-/// main-thread CPU); with more (over load_threshold, or until chat-paging-main-thread lands between the cores and it) a
-/// run is only recorded (its stalls say how busy the Mac is).
+/// publishes every 20 ms and the window's chat timer ticks. On a Mac whose 1-minute load is not over load_threshold
+/// each run must settle with no tick over 0.25 s, its pages filling in below the fold without moving what's on screen;
+/// over it a run is only recorded (its stalls say how busy the Mac is).
 /// One run at a time: five at once made each other's load.
 @Suite(.serialized)
 struct ChatBenchTests {
@@ -72,45 +71,26 @@ struct ChatBenchTests {
         var settings = Self.settle
         settings["VIBESWITCHER_BENCH_SIZE"] = Self.panes[pane]
         if earlier > 0 { settings["VIBESWITCHER_BENCH_EARLIER"] = "\(earlier)" }
-        var loads = [MacLoad.oneMinute()]
         var run = try bench(settings)
-        loads.append(MacLoad.oneMinute())
         print("chat bench, \(earlier) pages back, \(pane): status \(run.status)\n\(run.output)")
         #expect(run.output.contains("stall rule: "), "\(run.output)")
         // Over load_threshold at the start or the end: recorded only.
         guard !run.output.contains("is over load_threshold") else { return }
-        // Until chat-paging-main-thread lands (its contract restores judging up to load_threshold), task
-        // chatbenchtests-records judges a run only on a Mac under its cores before and after it: at load 18-19 on 12
-        // cores (under the 24 line) the open's or a page's cost reached 0.64 s with 0.34 s of it on the CPU. The bench's
-        // own rule and exit code are unchanged.
-        guard Self.judged(loads) else { print(Self.recorded(loads)); return }
         // Under it the Mac can still keep the bench off a core for a while (2026-10-19 at load 17 on 12 cores: a 0.94 s
         // tick, 0.25 s of it on the CPU): one more run, and if the Mac starves that one too it's recorded only.
         if Self.starved(run) {
-            loads = [MacLoad.oneMinute()]
             run = try bench(settings)
-            loads.append(MacLoad.oneMinute())
             print("chat bench again, the first run starved: status \(run.status)\n\(run.output)")
             guard !run.output.contains("is over load_threshold"), !Self.starved(run) else { return }
-            guard Self.judged(loads) else { print(Self.recorded(loads)); return }
         }
         let verdict = run.output.split(separator: "\n").last { $0.hasPrefix("settled ") }.map(String.init) ?? ""
         #expect(!verdict.isEmpty, "\(run.output)")
-        if let cost = Self.knownCost(run) {
-            // Until chat-paging-main-thread lands (its contract restores the hard 0.25 s here), a tick over 0.25 s is the
-            // layout's known cost when its wall time or its main-thread CPU is not over twice that (task
-            // chatbenchtests-records: a merge's suite at load 17.9 failed on the first open's 0.50 s tick, 0.25 s of it on
-            // the CPU; under the cores, pages took 0.68 s with 0.36 s and 0.64 s with 0.34 s). The bench's own rule and
-            // exit code are unchanged; a tick with more CPU, a run that doesn't settle or a HANG fails below.
-            withKnownIssue("chat paging main-thread cost", isIntermittent: true) {
-                Issue.record("a tick of \(cost.tick) s (\(cost.place)), over \(ChatBench.StallRule.limit) s:\n\(run.output)")
-            }
-        } else {
-            #expect(run.status == 0, "\(run.output)")
-            let tick = verdict.firstMatch(of: #/longest tick=([\d.]+)s/#).flatMap { Double($0.1) }
-            #expect(tick != nil && tick! <= ChatBench.StallRule.limit, "longest tick: \(tick.map { "\($0)" } ?? "none") s")
-            #expect(run.output.contains("\nticks: longest "), "\(run.output)")
-        }
+        #expect(run.status == 0, "\(run.output)")
+        let tick = verdict.firstMatch(of: #/longest tick=([\d.]+)s/#).flatMap { Double($0.1) }
+        #expect(tick != nil && tick! <= ChatBench.StallRule.limit, "longest tick: \(tick.map { "\($0)" } ?? "none") s")
+        #expect(run.output.contains("\nticks: longest "), "\(run.output)")
+        // Opened out of sight 20 rows a turn, then shown (twice: opened, left, opened again).
+        #expect(run.output.matches(of: #/laid out out of sight in (\d+) turns, then shown/#).compactMap { Int($0.1) } == [3, 3], "\(run.output)")
         guard earlier > 0 else { return }
         let settles = verdict.firstMatch(of: #/earlier=(\d+) settled=\[([^\]]*)\]/#)
         #expect(settles?.1 == "\(earlier)", "\(verdict)")
@@ -118,26 +98,50 @@ struct ChatBenchTests {
         // Each page laid out 60 more rows: the content grew.
         let shown = run.output.matches(of: #/page \d settled in [\d.]+s: shown=(\d+) of (\d+)/#).compactMap { Int($0.1) }
         #expect(shown == [120, 180], "\(run.output)")
+        for page in Self.pages(run.output) {
+            #expect(page.turns == 3, "page \(page.number): \(page.turns) turns\n\(run.output)")
+            // Filling in below the fold: what's at the top of the view and where the view is don't move.
+            #expect(!page.fillingIn.isEmpty, "page \(page.number)\n\(run.output)")
+            #expect(Set(page.fillingIn.map(\.first)) == [page.first], "page \(page.number) moved\n\(run.output)")
+            #expect(Set(page.fillingIn.map(\.top)).count == 1, "page \(page.number) moved\n\(run.output)")
+            #expect(page.fillingIn.map(\.height) == page.fillingIn.map(\.height).sorted(), "page \(page.number)\n\(run.output)")
+        }
     }
 
-    /// Whether a run is judged: the Mac's 1-minute load before and after it under its cores (an unknown load is judged
-    /// as a quiet one, as the bench does).
-    static func judged(_ loads: [Double?], cores: Int = MacLoad.processors) -> Bool {
-        loads.allSatisfy { $0.map { $0 < Double(cores) } ?? true }
+    /// Each page of a run: the bench's "filling in" lines between Show earlier and its settle, the row at the top once
+    /// it had (the bench's position notes), and how many turns it took.
+    static func pages(_ output: String) -> [(number: Int, fillingIn: [(height: Int, top: Int, first: String)], first: String, turns: Int)] {
+        var pages: [(number: Int, fillingIn: [(height: Int, top: Int, first: String)], first: String, turns: Int)] = []
+        var fillingIn: [(height: Int, top: Int, first: String)] = []
+        for line in output.split(separator: "\n") {
+            if line.contains(": Show "), line.contains(" earlier at t=") { fillingIn = [] }
+            if let fill = line.firstMatch(of: #/filling in: height=(\d+) top=(-?\d+) first=(\S+)/#) {
+                fillingIn.append((Int(fill.1) ?? 0, Int(fill.2) ?? 0, String(fill.3)))
+            }
+            if let settled = line.firstMatch(of: #/page (\d) settled in .* filled in over (\d+) turns/#) {
+                pages.append((Int(settled.1) ?? 0, fillingIn, fillingIn.last?.first ?? "-", Int(settled.2) ?? 0))
+            }
+        }
+        return pages
     }
 
-    /// What a run not judged is recorded with.
-    static func recorded(_ loads: [Double?], cores: Int = MacLoad.processors) -> String {
-        let numbers = loads.map { $0.map(ChatBench.StallRule.number) ?? "unknown" }
-        return "recorded only: the Mac's 1-minute load \(numbers.joined(separator: " before, ")) after the run is not under its \(cores) cores"
-    }
-
-    @Test func aRunIsJudgedOnlyUnderTheCores() {
-        #expect(Self.judged([3, 11.9], cores: 12))
-        #expect(!Self.judged([3, 12], cores: 12))
-        #expect(!Self.judged([18.4, 9], cores: 12))
-        #expect(Self.judged([nil, 4], cores: 12))
-        #expect(Self.recorded([18.44, 19], cores: 12) == "recorded only: the Mac's 1-minute load 18.4 before, 19 after the run is not under its 12 cores")
+    @Test func aPageFillingInIsReadFromTheBenchsLines() {
+        let output = """
+          page 1: Show 60 earlier at t=7s
+          filling in: height=6025 top=-16 first=u40 cpu=0.05s
+          filling in: height=6870 top=-16 first=u40 cpu=0.04s
+          page 1 settled in 0.22s: shown=120 of 240 height=10347, longest tick 0.05s (cpu 0.05s), most CPU in a tick 0.05s, filled in over 3 turns
+          page 2: Show 60 earlier at t=11s
+          filling in: height=11223 top=-16 first=u20 cpu=0.05s
+          filling in: height=12087 top=-40 first=u19 cpu=0.05s
+          page 2 settled in 0.25s: shown=180 of 240 height=15526, longest tick 0.05s (cpu 0.05s), most CPU in a tick 0.05s, filled in over 1 turns
+        """
+        let pages = Self.pages(output)
+        #expect(pages.map(\.number) == [1, 2])
+        #expect(pages[0].fillingIn.map(\.height) == [6025, 6870] && pages[0].first == "u40" && pages[0].turns == 3)
+        #expect(Set(pages[0].fillingIn.map(\.first)) == ["u40"])
+        // A page whose top moved as it filled in: two rows and two places.
+        #expect(Set(pages[1].fillingIn.map(\.first)).count == 2 && Set(pages[1].fillingIn.map(\.top)).count == 2 && pages[1].turns == 1)
     }
 
     /// A run failed on a stall whose tick the main thread spent mostly waiting for a core (under half of it on the
@@ -148,47 +152,16 @@ struct ChatBenchTests {
         return cpu < wall / 2
     }
 
-    /// The tick that failed the run on the stall rule alone (it settled), and where it was, when its wall time is not
-    /// over twice the limit, or the main thread's CPU time in it isn't: the chat's layout cost as it is today. Failing,
-    /// it was over the limit (printed to 0.01 s, 0.2504 s reads 0.25s).
-    static func knownCost(_ run: (status: Int32, output: String)) -> (tick: Double, place: String)? {
-        guard run.status == 4, let fail = run.output.firstMatch(of: #/FAIL: a tick stalled ([\d.]+)s \(([^)]*)\)/#),
-              let tick = Double(fail.1) else { return nil }
-        let cpu = fail.2.firstMatch(of: #/([\d.]+)s of it on the CPU/#).flatMap { Double($0.1) }
-        let bound = 2 * ChatBench.StallRule.limit
-        guard tick <= bound || cpu.map({ $0 <= bound }) == true else { return nil }
-        return (tick, String(fail.2))
-    }
-
     @Test func aStallTheMainThreadSpentWaitingForACoreIsStarvation() {
         let fail = "FAIL: a tick stalled 0.94s (t=12s, page 2, 0.25s of it on the CPU), over 0.25s; rule: the Mac's 1-minute load 17.2 is not over"
         #expect(Self.starved((4, "settled 13 s after opening\n\(fail)")))
         #expect(!Self.starved((4, fail.replacingOccurrences(of: "0.25s of it", with: "0.90s of it"))))
         #expect(!Self.starved((0, "ticks: longest 0.20s (t=1s, opening, 0.02s of it on the CPU), not over 0.25s")))
         #expect(!Self.starved((3, "FAIL: the content height still changes")))
-        // A tick past the limit is the layout's known cost when its wall time or its CPU is up to twice it; more is a
-        // regression.
-        let working = fail.replacingOccurrences(of: "0.25s of it", with: "0.31s of it").replacingOccurrences(of: "0.94s", with: "0.33s")
-        #expect(Self.knownCost((4, working)).map { "\($0.tick) \($0.place)" } == "0.33 t=12s, page 2, 0.31s of it on the CPU")
-        // The merge gate's failure (2026-10-19, load 17.9): the first open's 0.50 s, half of it on the CPU.
-        let opening = "FAIL: a tick stalled 0.50s (t=1s, opening, 0.25s of it on the CPU), over 0.25s; rule: the Mac's 1-minute load 17.9 is not over"
-        #expect(!Self.starved((4, opening)))
-        #expect(Self.knownCost((4, opening)).map { "\($0.tick) \($0.place)" } == "0.5 t=1s, opening, 0.25s of it on the CPU")
-        // Mostly waiting, or with no CPU time measured: still the known window by its wall time.
-        #expect(Self.knownCost((4, opening.replacingOccurrences(of: "0.25s of it", with: "0.05s of it"))) != nil)
-        #expect(Self.knownCost((4, "FAIL: a tick stalled 0.40s (t=7s, page 1), over 0.25s; rule: …")).map(\.tick) == 0.4)
-        // Longer, with up to twice the limit on the CPU: known by its CPU (under the cores, 2026-10-19: pages).
-        #expect(Self.knownCost((4, fail)).map(\.tick) == 0.94)
-        #expect(Self.knownCost((4, opening.replacingOccurrences(of: "0.50s", with: "0.51s"))).map(\.tick) == 0.51)
-        #expect(Self.knownCost((4, "FAIL: a tick stalled 0.68s (t=12s, page 2, 0.36s of it on the CPU), over 0.25s")).map(\.tick) == 0.68)
-        #expect(Self.knownCost((4, "FAIL: a tick stalled 0.64s (t=12s, page 2, 0.34s of it on the CPU), over 0.25s")).map(\.tick) == 0.64)
-        // More than twice the limit on the CPU fails, as a longer tick whose CPU wasn't measured does.
-        #expect(Self.knownCost((4, "FAIL: a tick stalled 0.60s (t=12s, page 2, 0.51s of it on the CPU), over 0.25s")) == nil)
-        #expect(Self.knownCost((4, "FAIL: a tick stalled 0.51s (t=7s, page 1), over 0.25s")) == nil)
-        #expect(Self.knownCost((4, opening.replacingOccurrences(of: "0.50s", with: "0.25s"))).map(\.tick) == 0.25)
-        #expect(Self.knownCost((0, working)) == nil)
-        #expect(Self.knownCost((3, "FAIL: the content height still changes\n\(working)")) == nil)
-        #expect(Self.knownCost((2, "HANG: the main thread is stuck for 10 s\n\(working)")) == nil)
+        // The layout working through the tick, or most of it, is not starvation (2026-10-19, load 17.9: the first open's
+        // 0.50 s, half of it on the CPU): it fails.
+        #expect(!Self.starved((4, "FAIL: a tick stalled 0.50s (t=1s, opening, 0.25s of it on the CPU), over 0.25s")))
+        #expect(!Self.starved((4, "FAIL: a tick stalled 0.33s (t=12s, page 2, 0.31s of it on the CPU), over 0.25s")))
     }
 
     @Test func aLoadedMacJudgesTicksAgainstTheFirstOpen() throws {

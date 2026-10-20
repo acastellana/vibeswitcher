@@ -52,6 +52,18 @@ final class ChatModel: ObservableObject {
     @Published private(set) var items: [ChatItem] = []
     /// How many of the newest items are laid out (see `ChatWindow`); Show Earlier adds a page.
     @Published private(set) var shownLimit = ChatWindow.page
+    /// The window's rows not laid out yet: an open or an earlier page arrives a few rows a turn (`ChatStaging`).
+    @Published private(set) var staging: ChatStaging?
+    /// The staging is an open's: the view keeps the conversation out of sight until all its rows are laid out, then
+    /// shows it where it opens.
+    private var stagingOpens = false
+    private var stagingTimer: Timer?
+
+    /// How many turns the last staging's rows took to lay out (the chat bench reports it).
+    private(set) var stagingTurns = 0
+
+    /// An opened conversation is being laid out, out of sight (`staging`).
+    var assembling: Bool { staging != nil && stagingOpens }
     @Published private(set) var state = State.none
     /// Part of the file before what's loaded.
     @Published private(set) var hasEarlier = false
@@ -139,6 +151,8 @@ final class ChatModel: ObservableObject {
     private func updateItems() {
         let new = ChatTimeline.items(log.entries, newAfter: markerAfter)
         guard new != items else { return }
+        // Its indices are the old items': whatever was still to come is shown now.
+        stopStaging()
         // Reading further up: what arrives grows the window, so nothing you're looking at moves out of it.
         if !atBottom, new.count > items.count, !items.isEmpty { shownLimit += new.count - items.count }
         items = new
@@ -171,7 +185,8 @@ final class ChatModel: ObservableObject {
         }
         guard path != self.path else { return }
         if let old = self.path {
-            let anchor = atBottom ? nil : ChatWindow.anchor(tops: rowTops, visibleTop: visibleTop)
+            // Left before it was shown: where it was to open.
+            let anchor = assembling ? restoreAnchor : atBottom ? nil : ChatWindow.anchor(tops: rowTops, visibleTop: visibleTop)
             kept[old] = Kept(expanded: expanded, searchActive: searchActive, searchQuery: searchQuery, searchIndex: searchIndex, anchor: anchor)
         }
         generation += 1
@@ -187,6 +202,7 @@ final class ChatModel: ObservableObject {
         visibleTop = 0
         atBottom = true
         shownLimit = ChatWindow.page
+        stopStaging()
         hasEarlier = false
         loadingEarlier = false
         pending = []
@@ -228,6 +244,7 @@ final class ChatModel: ObservableObject {
                 // Lay out enough to reach where you were reading, or what's new if it isn't far back.
                 self.widen(toInclude: self.restoreAnchor)
                 self.widen(toInclude: "new-marker", atMost: 3 * ChatWindow.page)
+                self.stageOpen()
                 self.state = .ready
                 self.syncOutbox()
             }
@@ -312,8 +329,51 @@ final class ChatModel: ObservableObject {
     func focusComposer() { focusComposerRequests += 1 }
 
     func showEarlier() {
+        let previous = max(0, items.count - shownLimit)
+        stopStaging()
         shownLimit += ChatWindow.page
+        stage(.page(start: max(0, items.count - shownLimit), previous: previous), opens: false)
         Breadcrumbs.shared.note("chat: show earlier (\(shownLimit) of \(items.count))")
+    }
+
+    /// An opened conversation's rows a few at a time, out of sight: the newest first (the order doesn't show).
+    private func stageOpen() {
+        stage(.open(start: max(0, items.count - shownLimit), end: items.count), opens: true)
+    }
+
+    /// The rows come one batch a turn, each once the view has laid out the last (`stagingShown`): queued sooner, SwiftUI
+    /// could lay out two batches in one turn. With no view saying so (the chat not on screen), a batch a tenth of a second.
+    private func stage(_ new: ChatStaging, opens: Bool) {
+        guard !new.isDone else { return }
+        staging = new
+        stagingOpens = opens
+        stagingTurns = 1
+        nextStagingTurn(after: 0.1)
+    }
+
+    /// The view has laid out the rows staged so far: the next batch, next turn.
+    func stagingShown() {
+        guard staging != nil else { return }
+        nextStagingTurn(after: 0.001)
+    }
+
+    /// A timer, not the main queue: a block queued now could run before this turn's layout.
+    private func nextStagingTurn(after delay: TimeInterval) {
+        stagingTimer?.invalidate()
+        let timer = Timer(timeInterval: delay, repeats: false) { [weak self] _ in
+            guard let self, var staging = self.staging else { return }
+            staging.step()
+            self.stagingTurns += 1
+            if staging.isDone { self.stopStaging() } else { self.staging = staging; self.nextStagingTurn(after: 0.1) }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        stagingTimer = timer
+    }
+
+    private func stopStaging() {
+        stagingTimer?.invalidate()
+        stagingTimer = nil
+        if staging != nil { staging = nil }
     }
 
     private func widen(toInclude id: String?, atMost: Int = .max) {

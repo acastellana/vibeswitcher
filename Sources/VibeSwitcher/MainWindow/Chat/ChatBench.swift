@@ -58,6 +58,9 @@ enum ChatBench {
         // VIBESWITCHER_BENCH_SIZE=WxH: the chat pane's size (default 900x900); e.g. 1100x950 for a 1728x1014 window
         // with the list and the inspector showing.
         let size = env["VIBESWITCHER_BENCH_SIZE"].map { $0.split(separator: "x").compactMap { Double($0) } }.flatMap { $0.count == 2 ? $0 : nil } ?? [900, 900]
+        // As the window's chat pane (MainWindowController): its size comes from the window, so SwiftUI doesn't also work
+        // out the conversation's own ideal size on every update (a second measure of every row).
+        host.sizingOptions = []
         let window = NSWindow(contentRect: NSRect(x: -30000, y: -30000, width: size[0], height: size[1]), styleMask: [.borderless],
                               backing: .buffered, defer: false)
         window.contentView = host
@@ -94,6 +97,8 @@ enum ChatBench {
         var opened = false
         let mainThread = mach_thread_self()
         var lastCPU: TimeInterval?
+        var assembling = false
+        let paging = Paging()
         let beat = Timer(timeInterval: 0.02, repeats: true) { _ in
             let now = Date()
             let cpu = Self.cpuTime(of: mainThread)
@@ -109,6 +114,14 @@ enum ChatBench {
             }
             if updates, chat.state == .ready { chat.objectWillChange.send() }
             probe.sample()
+            // An earlier page filling in, once its first rows are laid out: where the view is and the row at its top, which
+            // mustn't move as the rest arrive.
+            if chat.staging != nil, !chat.assembling, let height = probe.heights.last, height != paging.heightAtPress {
+                print("  filling in: height=\(height) top=\(Int(chat.visibleTop)) "
+                    + "first=\(ChatWindow.anchor(tops: chat.rowTops, visibleTop: chat.visibleTop) ?? "-") cpu=\(used.map(Self.seconds) ?? "-")")
+            }
+            if assembling, !chat.assembling { print("  laid out out of sight in \(chat.stagingTurns) turns, then shown") }
+            assembling = chat.assembling
             probe.note(position: chat.atBottom ? "end" : ChatWindow.anchor(tops: chat.rowTops, visibleTop: chat.visibleTop) ?? "-")
             Watchdog.beat(layouts: host.layouts)
         }
@@ -136,7 +149,11 @@ enum ChatBench {
         // When the conversation opened again had loaded (a big transcript on a busy machine can take seconds): AT
         // scrolls then, and the run lasts long enough after it to tell settling from a slow load.
         var readyAt: Int?
-        let paging = Paging()
+        /// The first open is over: its longest tick, and the most the main thread worked in one (its layout's cost).
+        func endFirstOpen() {
+            longest.endFirstOpen()
+            print("  first open: longest tick \(LongestTicks.text(longest.overall, cpu: longest.overallCPU)), most CPU in a tick \(Self.seconds(longest.firstOpenMostCPU ?? 0))")
+        }
         /// Ends the run with `status` (3: it never settled), or 4 when a tick stalled over the rule's limit.
         func finish(_ status: Int32) -> Never {
             var failed = false
@@ -153,14 +170,15 @@ enum ChatBench {
             longest.second = second
             if stall, second == 3 { Breadcrumbs.shared.note("bench: blocking the main thread for 4 s"); sleep(4) }
             chat.poll()
-            let justReady = reopenedAt != nil && readyAt == nil && chat.state == .ready && !chat.items.isEmpty
+            // Loaded and laid out (an opened conversation shows once all its rows are: `ChatModel.assembling`).
+            let justReady = reopenedAt != nil && readyAt == nil && chat.state == .ready && !chat.items.isEmpty && !chat.assembling
             if justReady { readyAt = second }
             // The first open is over once its conversation shows and has kept its height for a second, or when the run
             // moves on from it (t=2: resized, switched or left). Paging back, it lasts until the first settle (the
             // first page's press): that much longer a sample of how busy the Mac is.
             if longest.firstOpen == nil, earlier == 0,
                (chat.state == .ready && !chat.items.isEmpty && !probe.changedRecently(seconds: 1)) || (reopenedAt != 0 && second >= 2) || second > seconds {
-                longest.endFirstOpen()
+                endFirstOpen()
             }
             let sweeping = ProcessInfo.processInfo.environment["VIBESWITCHER_BENCH_SWEEP"] != nil
             if ticks, chat.state == .ready {
@@ -233,7 +251,8 @@ enum ChatBench {
                 if let pressedAt = paging.pressedAt {
                     paging.settled(max(0, probe.lastChange.timeIntervalSince(pressedAt)), longestTick: LongestTicks.text(longest.page, cpu: longest.pageCPU))
                     print("  page \(paging.settles.count) settled in \(Self.seconds(paging.settles.last ?? 0)): shown=\(min(chat.items.count, chat.shownLimit)) "
-                        + "of \(chat.items.count) height=\(probe.heights.last ?? 0), longest tick \(LongestTicks.text(longest.page, cpu: longest.pageCPU))")
+                        + "of \(chat.items.count) height=\(probe.heights.last ?? 0), longest tick \(LongestTicks.text(longest.page, cpu: longest.pageCPU)), "
+                        + "most CPU in a tick \(Self.seconds(longest.pageMostCPU)), filled in over \(chat.stagingTurns) turns")
                 } else {
                     print("  settled \(second - readyAt) s after it loaded: height=\(probe.heights.last ?? 0)")
                 }
@@ -241,9 +260,9 @@ enum ChatBench {
                 if paging.settles.count < earlier, shown.hidden > 0 || chat.hasEarlier {
                     // As you reach the button: at the top.
                     if let scroll = Self.scrollView(in: host) { Self.scroll(scroll, to: "top", host: host) }
-                    if longest.firstOpen == nil { longest.endFirstOpen() }
+                    if longest.firstOpen == nil { endFirstOpen() }
                     longest.startPage(paging.settles.count + 1)
-                    paging.pressed(at: Date(), second: second)
+                    paging.pressed(at: Date(), second: second, height: probe.heights.last)
                     if shown.hidden > 0 {
                         print("  page \(paging.settles.count + 1): Show \(min(shown.hidden, ChatWindow.page)) earlier at t=\(second)s")
                         chat.showEarlier()
@@ -374,6 +393,10 @@ enum ChatBench {
         /// (a layout); far under it, it waited for a core (the Mac's load).
         private(set) var overallCPU: TimeInterval?
         private(set) var pageCPU: TimeInterval?
+        /// The most CPU time the main thread spent in one tick of the first open, and of the page being shown: what the
+        /// layout costs, however long the Mac kept the thread from a core (the longest tick can be a starved one).
+        private(set) var firstOpenMostCPU: TimeInterval?
+        private(set) var pageMostCPU: TimeInterval = 0
 
         /// A tick of `gap` seconds, `cpu` of them on the main thread's CPU.
         func note(_ gap: TimeInterval, cpu: TimeInterval? = nil) {
@@ -382,6 +405,7 @@ enum ChatBench {
             if gap > overall { overall = gap; overallPlace = place; overallCPU = cpu }
             if firstOpen != nil, gap > afterOpen { afterOpen = gap; afterOpenPlace = place }
             if gap > page { page = gap; pageCPU = cpu }
+            if let cpu, cpu > pageMostCPU { pageMostCPU = cpu }
         }
 
         /// "0.66s (cpu 0.61s)".
@@ -391,12 +415,14 @@ enum ChatBench {
 
         func endFirstOpen() {
             firstOpen = overall
+            firstOpenMostCPU = pageMostCPU
             phase = "after the first open"
         }
 
         func startPage(_ number: Int) {
             page = 0
             pageCPU = nil
+            pageMostCPU = 0
             phase = "page \(number)"
         }
     }
@@ -405,12 +431,15 @@ enum ChatBench {
     private final class Paging {
         private(set) var pressedAt: Date?
         private(set) var pressedSecond: Int?
+        /// The content's height when Show earlier was pressed.
+        private(set) var heightAtPress: Int?
         private(set) var settles: [TimeInterval] = []
         private var longestTicks: [String] = []
 
-        func pressed(at date: Date, second: Int) {
+        func pressed(at date: Date, second: Int, height: Int?) {
             pressedAt = date
             pressedSecond = second
+            heightAtPress = height
         }
 
         func settled(_ settle: TimeInterval, longestTick: String) {

@@ -164,6 +164,35 @@ public enum ChatWindow {
         return (items[start...], start)
     }
 
+    /// The window's items without the rows `staging` still holds back.
+    public static func visible(_ window: ArraySlice<ChatItem>, staging: ChatStaging?) -> [ChatItem] {
+        chunks(window, staging: staging).flatMap(\.items)
+    }
+
+    /// A run of the window's items in one block of `size` (by index, counted from the conversation's first: a block
+    /// keeps its number as the window grows earlier or later).
+    public struct Chunk: Equatable, Sendable, Identifiable {
+        public let id: Int
+        public let items: [ChatItem]
+    }
+
+    /// The window's items shown, `staging` holding some back, in blocks of `size` (see `Chunk`): the chat lays out each
+    /// block as a unit, so a page filling in or a line arriving redoes one block, not every row shown.
+    public static func chunks(_ window: ArraySlice<ChatItem>, staging: ChatStaging?, size: Int = page) -> [Chunk] {
+        var chunks: [Chunk] = []
+        var current: (id: Int, items: [ChatItem])?
+        for index in window.indices where staging.map({ !$0.holds(index) }) ?? true {
+            let id = index / size
+            if current?.id != id {
+                if let current { chunks.append(Chunk(id: current.id, items: current.items)) }
+                current = (id, [])
+            }
+            current?.items.append(window[index])
+        }
+        if let current { chunks.append(Chunk(id: current.id, items: current.items)) }
+        return chunks
+    }
+
     /// The item at the top of the view: the last one starting at or above `visibleTop` (positions from the top of
     /// the content).
     public static func anchor(tops: [String: Double], visibleTop: Double) -> String? {
@@ -174,5 +203,47 @@ public enum ChatWindow {
     /// Whether the end of the content is on screen (within a few points).
     public static func atEnd(contentHeight: Double, visibleBottom: Double) -> Bool {
         visibleBottom >= contentHeight - 24
+    }
+}
+
+/// The rows of the chat's window still to be laid out: a few more each turn of the run loop, so that opening a
+/// conversation or showing an earlier page doesn't hold the main thread for all of its rows at once (60 new rows took
+/// it 0.1-0.15 s, ~1.7 ms a row however simple). A page shown earlier fills in under its first rows, which are where the
+/// view is (at the top) and don't move: the rest arrive below the fold. An opened conversation is laid out out of sight
+/// and shown once all of it is, where it opens (`ChatModel.assembling`). Item indices.
+public struct ChatStaging: Equatable, Sendable {
+    /// How many rows a turn adds: on the chat bench's rows ~0.04 s of the main thread's time a turn (in 10s, 0.03 s, but
+    /// each turn's own update of the window cost a page 20-40% more in all; in 20s it costs what one turn did).
+    public static let batch = 20
+
+    /// Still to come under the rows shown, added from the top down.
+    public private(set) var below: Range<Int>
+    /// Still to come over the rows shown, added from the bottom up.
+    public private(set) var above: Range<Int>
+
+    public var isDone: Bool { below.isEmpty && above.isEmpty }
+
+    /// Whether item `index` is held back.
+    public func holds(_ index: Int) -> Bool { below.contains(index) || above.contains(index) }
+
+    /// The next turn: up to `count` more rows, those below first.
+    public mutating func step(_ count: Int = batch) {
+        if !below.isEmpty {
+            below = min(below.upperBound, below.lowerBound + count)..<below.upperBound
+        } else if !above.isEmpty {
+            above = above.lowerBound..<max(above.lowerBound, above.upperBound - count)
+        }
+    }
+
+    /// An earlier page: the window now starts at `start` and started at `previous`. Its first rows come at once (they
+    /// are where the view is, at the top), the rest of it under them.
+    public static func page(start: Int, previous: Int, batch: Int = batch) -> ChatStaging {
+        let first = min(previous, start + batch)
+        return ChatStaging(below: first..<max(first, previous), above: 0..<0)
+    }
+
+    /// A conversation opened on the window `start..<end`: the newest rows at once, then those over them.
+    public static func open(start: Int, end: Int, batch: Int = batch) -> ChatStaging {
+        ChatStaging(below: end..<end, above: start..<max(start, end - batch))
     }
 }

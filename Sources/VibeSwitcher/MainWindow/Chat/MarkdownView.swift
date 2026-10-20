@@ -16,6 +16,7 @@ enum ChatFont {
 
 private struct ChatFolderKey: EnvironmentKey { static let defaultValue: String? = nil }
 private struct ChatRunnerKey: EnvironmentKey { static let defaultValue: ChatRunner? = nil }
+private struct ChatTextSelectableKey: EnvironmentKey { static let defaultValue = true }
 
 /// Runs a command from a code block in the selected session (Run, next to Copy). One object for the chat's
 /// lifetime: what changes is only whether the session takes it now.
@@ -37,6 +38,28 @@ extension EnvironmentValues {
         get { self[ChatRunnerKey.self] }
         set { self[ChatRunnerKey.self] = newValue }
     }
+
+    /// Whether the chat's text can be selected yet (see `ChatTextSelection`).
+    var chatTextSelectable: Bool {
+        get { self[ChatTextSelectableKey.self] }
+        set { self[ChatTextSelectableKey.self] = newValue }
+    }
+}
+
+/// Selectable text, once `chatTextSelectable` says so. On the Mac a selectable Text is an AppKit text field of its own,
+/// and making one for every paragraph of a page was about a quarter of what opening a conversation or showing an earlier
+/// page cost the main thread (2026-10-20, the chat bench's fixture: 0.035 s of 0.155 s a page). A row's text becomes
+/// selectable when the pointer first reaches it, before any click or drag can start there (`ChatItemView`).
+struct ChatTextSelection: ViewModifier {
+    @Environment(\.chatTextSelectable) private var selectable
+
+    func body(content: Content) -> some View {
+        if selectable { content.textSelection(.enabled) } else { content }
+    }
+}
+
+extension View {
+    func chatTextSelection() -> some View { modifier(ChatTextSelection()) }
 }
 
 /// A reply rendered as markdown blocks.
@@ -54,7 +77,7 @@ struct MarkdownView: View {
                 BlockView(block: block, fontSize: size, folder: folder)
             }
         }
-        .textSelection(.enabled)
+        .chatTextSelection()
     }
 }
 
@@ -127,7 +150,7 @@ private struct BlockView: View {
         case .list(let ordered, let start, let items):
             VStack(alignment: .leading, spacing: 5) {
                 ForEach(Array(items.enumerated()), id: \.offset) { index, item in
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    MarkerRow(spacing: 7) {
                         marker(ordered: ordered, number: start + index, item: item)
                         Text(inline(item.text)).font(.system(size: fontSize)).lineSpacing(2)
                             .fixedSize(horizontal: false, vertical: true)
@@ -162,6 +185,44 @@ private struct BlockView: View {
         } else {
             Text(item.depth == 0 ? "•" : "◦").font(.system(size: fontSize)).foregroundStyle(.secondary)
         }
+    }
+}
+
+/// A list item: its marker at its own size, the text in the rest of the width, their first baselines lined up. What
+/// `HStack(alignment: .firstTextBaseline, spacing:)` lays out, without the HStack's sharing out of the width: that measures
+/// the text again at no width and at any width (one word a line, then one line), every item of every page shown.
+struct MarkerRow: Layout {
+    let spacing: CGFloat
+
+    private struct Placed {
+        var marker: ViewDimensions
+        var text: ViewDimensions
+        var markerY: CGFloat
+        var textY: CGFloat
+    }
+
+    private func place(_ proposal: ProposedViewSize, _ subviews: Subviews) -> Placed? {
+        guard subviews.count == 2 else { return nil }
+        let marker = subviews[0].dimensions(in: .unspecified)
+        let width = proposal.width.map { max(0, $0 - marker.width - spacing) }
+        let text = subviews[1].dimensions(in: ProposedViewSize(width: width, height: proposal.height))
+        let baseline = max(marker[.firstTextBaseline], text[.firstTextBaseline])
+        return Placed(marker: marker, text: text, markerY: baseline - marker[.firstTextBaseline], textY: baseline - text[.firstTextBaseline])
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let placed = place(proposal, subviews) else { return .zero }
+        let top = min(placed.markerY, placed.textY)
+        let bottom = max(placed.markerY + placed.marker.height, placed.textY + placed.text.height)
+        return CGSize(width: placed.marker.width + spacing + placed.text.width, height: bottom - top)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard let placed = place(proposal, subviews) else { return }
+        let top = bounds.minY - min(placed.markerY, placed.textY)
+        subviews[0].place(at: CGPoint(x: bounds.minX, y: top + placed.markerY), proposal: .unspecified)
+        subviews[1].place(at: CGPoint(x: bounds.minX + placed.marker.width + spacing, y: top + placed.textY),
+                          proposal: ProposedViewSize(width: placed.text.width, height: placed.text.height))
     }
 }
 
@@ -300,7 +361,7 @@ struct CodeBlockView: View {
                     .lineSpacing(2)
                     .fixedSize()
                     .padding(10)
-                    .textSelection(.enabled)
+                    .chatTextSelection()
             }
             if limited {
                 Button("Show all \(lines.count) lines") { showAll = true }

@@ -102,6 +102,73 @@ struct ChatWindowTests {
     }
 }
 
+struct ChatStagingTests {
+    func items(_ count: Int) -> [ChatItem] {
+        (0..<count).map { ChatItem.tools(id: "t\($0)", []) }
+    }
+
+    func ids(_ items: [ChatItem]) -> [String] { items.map(\.id) }
+
+    @Test func anEarlierPageFillsInUnderItsFirstRows() {
+        // 240 items, 60 shown (180...239); Show earlier: the window starts at 120.
+        let all = items(240)
+        let window = ChatWindow.shown(all, limit: 120, including: nil).items
+        var staging = ChatStaging.page(start: 120, previous: 180)
+        var turns = [ids(ChatWindow.visible(window, staging: staging))]
+        while !staging.isDone {
+            staging.step()
+            turns.append(ids(ChatWindow.visible(window, staging: staging)))
+        }
+        #expect(turns.count == 3)
+        // At once: the page's first rows, at the top where the view is, then the rows that were shown.
+        #expect(turns[0] == (120..<140).map { "t\($0)" } + (180..<240).map { "t\($0)" })
+        // Each turn adds the next rows under those, never anything above them: the first rows never move.
+        for (before, after) in zip(turns, turns.dropFirst()) {
+            #expect(Array(after.prefix(20)) == Array(before.prefix(20)))
+            #expect(Array(after.suffix(60)) == Array(before.suffix(60)))
+            #expect(after.count == before.count + 20)
+        }
+        #expect(turns.last == ids(Array(window)))
+        // A short page (the conversation's first rows): all of it at once.
+        #expect(ChatStaging.page(start: 0, previous: 18).isDone)
+        #expect(ChatStaging.page(start: 0, previous: 40).below == 20..<40)
+    }
+
+    @Test func theRowsComeInBlocksThatKeepTheirNumber() {
+        let all = items(247)
+        // 120 shown: 127...246, in blocks 2 (127...179), 3 (180...239) and 4 (240...246).
+        let window = ChatWindow.shown(all, limit: 120, including: nil).items
+        let chunks = ChatWindow.chunks(window, staging: nil)
+        #expect(chunks.map(\.id) == [2, 3, 4])
+        #expect(chunks.map(\.items.count) == [53, 60, 7])
+        #expect(chunks.flatMap(\.items) == Array(window))
+        // A page filling in changes only the block it fills in: the others are the same values.
+        var staging = ChatStaging.page(start: 127, previous: 187)
+        let before = ChatWindow.chunks(window, staging: staging)
+        staging.step()
+        let after = ChatWindow.chunks(window, staging: staging)
+        #expect(before.map(\.id) == [2, 3, 4] && after.map(\.id) == [2, 3, 4])
+        #expect(before[0] != after[0] && before[1] == after[1] && before[2] == after[2])
+        #expect(ChatWindow.visible(window, staging: staging) == after.flatMap(\.items))
+    }
+
+    @Test func anOpenComesNewestFirst() {
+        let all = items(240)
+        let window = ChatWindow.shown(all, limit: 60, including: nil).items
+        var staging = ChatStaging.open(start: 180, end: 240)
+        #expect(ids(ChatWindow.visible(window, staging: staging)) == (220..<240).map { "t\($0)" })
+        staging.step()
+        #expect(ids(ChatWindow.visible(window, staging: staging)) == (200..<240).map { "t\($0)" })
+        var turns = 1
+        while !staging.isDone { staging.step(); turns += 1 }
+        #expect(turns == 2)
+        #expect(ChatWindow.visible(window, staging: staging).count == 60)
+        // Fewer rows than a turn adds: all at once.
+        #expect(ChatStaging.open(start: 222, end: 240).isDone)
+        #expect(ChatWindow.visible(window, staging: nil).count == 60)
+    }
+}
+
 struct ChatScrollPlaceTests {
     @Test func theAnchorIsTheItemAtTheTopOfTheView() {
         let tops: [String: Double] = ["a": 0, "b": 120, "c": 400, "d": 900]

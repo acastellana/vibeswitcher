@@ -103,6 +103,8 @@ struct ChatView: View {
     @State private var bottom = BottomTracker()
     @State private var viewing: ChatImage?
     @State private var didInitialScroll = false
+    /// Scrolled to where it opens, shown the turn after (once that scroll is laid out).
+    @State private var placing = false
     /// With Reduce Motion, scrolls jump instead of gliding.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -113,6 +115,8 @@ struct ChatView: View {
         let current = matchList.isEmpty ? nil : matchList[min(chat.searchIndex, matchList.count - 1)]
         // Only the newest part is laid out (a search match further back widens it).
         let window = ChatWindow.shown(items, limit: chat.shownLimit, including: current)
+        // A search shows its match at once.
+        let chunks = ChatWindow.chunks(window.items, staging: chat.searchActive ? nil : chat.staging)
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -131,18 +135,14 @@ struct ChatView: View {
                             Button(chat.loadingEarlier ? "Loading…" : "Load earlier") { chat.loadEarlier() }
                                 .buttonStyle(.borderless).frame(maxWidth: .infinity).disabled(chat.loadingEarlier)
                         }
-                        ForEach(window.items) { item in
-                            ChatItemView(item: item, chat: chat, expanded: item.opens ? chat.expanded : [],
-                                         agent: row?.markKind ?? .agent(.claude), rowID: row?.draftKey,
-                                         canSend: live, resend: resend) { viewing = $0 }
+                        // A block of rows at a time (`ChatWindow.Chunk`), each drawn again only when its own inputs change.
+                        ForEach(chunks) { chunk in
+                            ChatRows(items: chunk.items, chat: chat, expanded: chat.expanded,
+                                     current: chunk.items.contains { $0.id == current } ? current : nil,
+                                     matches: matches.isEmpty ? [] : matches.intersection(chunk.items.map(\.id)),
+                                     agent: row?.markKind ?? .agent(.claude), rowID: row?.draftKey, canSend: live,
+                                     resend: resend) { viewing = $0 }
                                 .equatable()
-                                .id(item.id)
-                                .padding(6)
-                                .background(RoundedRectangle(cornerRadius: 10).fill(
-                                    item.id == current ? Color.yellow.opacity(0.18) : matches.contains(item.id) ? Color.yellow.opacity(0.07) : .clear))
-                                .background(GeometryReader { geometry in
-                                    Color.clear.preference(key: RowTops.self, value: [item.id: geometry.frame(in: .named(RowTops.space)).minY])
-                                })
                         }
                         ForEach(chat.steering) { message in
                             VStack(alignment: .trailing, spacing: 4) {
@@ -221,26 +221,22 @@ struct ChatView: View {
                 .padding(.horizontal, 22).padding(.vertical, 16)
                 .frame(maxWidth: 900)
                 .frame(maxWidth: .infinity)
+                // An opened conversation out of sight until all of it is laid out and it's scrolled to where it opens.
+                .opacity(hidden ? 0 : 1)
+                .accessibilityHidden(hidden)
+            }
+            .overlay(alignment: .top) {
+                // Where the loading spinner was, until then.
+                if hidden { ProgressView().frame(maxWidth: .infinity).padding(40).padding(.vertical, 16) }
             }
             .overlay(alignment: .bottomTrailing) {
-                if chat.state == .ready {
+                if chat.state == .ready, !hidden {
                     LatestButton(bottom: bottom) { withAnimation(reduceMotion ? nil : .default) { proxy.scrollTo("bottom", anchor: .bottom) } }
                 }
             }
-            .onChange(of: chat.state) { _, state in
-                guard state == .ready, !didInitialScroll else { return }
-                didInitialScroll = true
-                // Open where you were reading, else at what's new since you looked, else at the end.
-                DispatchQueue.main.async {
-                    if let anchor = chat.restoreAnchor, chat.items.contains(where: { $0.id == anchor }) {
-                        proxy.scrollTo(anchor, anchor: .top)
-                    } else if chat.items.contains(where: { $0.id == "new-marker" }) {
-                        proxy.scrollTo("new-marker", anchor: .top)
-                    } else {
-                        proxy.scrollTo("bottom", anchor: .bottom)
-                    }
-                }
-            }
+            .onChange(of: chat.state) { _, _ in initialScroll(proxy) }
+            .onChange(of: chat.assembling) { _, _ in initialScroll(proxy) }
+            .onChange(of: chat.staging) { _, _ in chat.stagingShown() }
             .onChange(of: chat.log.entries.count) { _, _ in
                 if bottom.atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
             }
@@ -251,13 +247,79 @@ struct ChatView: View {
                 if let id { withAnimation(reduceMotion ? nil : .default) { proxy.scrollTo(id, anchor: .center) } }
             }
             .onAppear {
-                if chat.state == .ready, !didInitialScroll {
+                if chat.state == .ready, !chat.assembling, !didInitialScroll {
                     didInitialScroll = true
                     proxy.scrollTo(chat.markerAfter != nil ? "new-marker" : "bottom", anchor: chat.markerAfter != nil ? .top : .bottom)
                 }
             }
         }
         .sheet(item: $viewing) { image in ImageViewer(image: image) { viewing = nil } }
+    }
+
+    /// The conversation out of sight: being laid out, or just scrolled to where it opens.
+    private var hidden: Bool { chat.state == .ready && (chat.assembling || placing) }
+
+    /// Once the conversation is laid out: where it opens, where you were reading, else at what's new since you looked,
+    /// else at the end.
+    private func initialScroll(_ proxy: ScrollViewProxy) {
+        guard chat.state == .ready, !chat.assembling, !didInitialScroll else { return }
+        didInitialScroll = true
+        placing = true
+        DispatchQueue.main.async {
+            if let anchor = chat.restoreAnchor, chat.items.contains(where: { $0.id == anchor }) {
+                proxy.scrollTo(anchor, anchor: .top)
+            } else if chat.items.contains(where: { $0.id == "new-marker" }) {
+                proxy.scrollTo("new-marker", anchor: .top)
+            } else {
+                proxy.scrollTo("bottom", anchor: .bottom)
+            }
+            // A timer fires after the turn's layout, the scroll in it.
+            RunLoop.main.add(Timer(timeInterval: 0.001, repeats: false) { _ in placing = false }, forMode: .common)
+        }
+    }
+}
+
+/// A block of the conversation's rows, laid out as one: a page filling in or a line arriving draws again only its own
+/// block (`.equatable()`), and the blocks under it move as a whole. Its stack has the conversation's spacing, so the
+/// rows sit as they would in one stack.
+private struct ChatRows: View, Equatable {
+    let items: [ChatItem]
+    /// For actions only.
+    let chat: ChatModel
+    let expanded: Set<String>
+    /// The search match shown, and the block's other matches.
+    let current: String?
+    let matches: Set<String>
+    let agent: MarkKind
+    let rowID: String?
+    let canSend: Bool
+    let resend: (String) -> Void
+    let openImage: (ChatImage) -> Void
+
+    static func == (a: ChatRows, b: ChatRows) -> Bool {
+        a.items == b.items && a.expanded == b.expanded && a.current == b.current && a.matches == b.matches && a.agent == b.agent
+            && a.rowID == b.rowID && a.canSend == b.canSend
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            ForEach(items) { item in
+                ChatItemView(item: item, chat: chat, expanded: item.opens ? expanded : [], agent: agent, rowID: rowID,
+                             canSend: canSend, resend: resend, openImage: openImage)
+                    .equatable()
+                    .id(item.id)
+                    .padding(6)
+                    .background {
+                        // Only on a search match: a shape on every row is that much more to lay out.
+                        if item.id == current || matches.contains(item.id) {
+                            RoundedRectangle(cornerRadius: 10).fill(Color.yellow.opacity(item.id == current ? 0.18 : 0.07))
+                        }
+                    }
+                    .background(GeometryReader { geometry in
+                        Color.clear.preference(key: RowTops.self, value: [item.id: geometry.frame(in: .named(RowTops.space)).minY])
+                    })
+            }
+        }
     }
 }
 
@@ -334,6 +396,10 @@ private struct LatestButton: View {
 /// (`.equatable()`), not on every keystroke in the composer or every line the transcript gains.
 private struct ChatItemView: View, Equatable {
     @AppStorage(ChatFont.key) private var chatFontSize = ChatFont.standard
+    /// The pointer has been over this row: its text is selectable from then on (see `ChatTextSelection`). With
+    /// VoiceOver on it always is.
+    @State private var reached = false
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     let item: ChatItem
     /// For actions only (toggling, editing a draft).
     let chat: ChatModel
@@ -350,11 +416,17 @@ private struct ChatItemView: View, Equatable {
     }
 
     var body: some View {
+        content
+            .environment(\.chatTextSelectable, reached || voiceOver)
+            .onHover { inside in if inside, !reached { reached = true } }
+    }
+
+    @ViewBuilder private var content: some View {
         switch item {
         case .prompt(let entry):
             if case .steered(let text, let fromLead) = entry.kind {
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text(text).font(.system(size: CGFloat(chatFontSize))).lineSpacing(2).textSelection(.enabled)
+                    Text(text).font(.system(size: CGFloat(chatFontSize))).lineSpacing(2).chatTextSelection()
                         .fixedSize(horizontal: false, vertical: true)
                         .padding(.horizontal, 13).padding(.vertical, 9)
                         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.orange.opacity(0.13)))
@@ -376,7 +448,7 @@ private struct ChatItemView: View, Equatable {
                             }
                         }
                         if !text.isEmpty {
-                            Text(text).font(.system(size: CGFloat(chatFontSize))).lineSpacing(2).textSelection(.enabled)
+                            Text(text).font(.system(size: CGFloat(chatFontSize))).lineSpacing(2).chatTextSelection()
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
@@ -388,7 +460,7 @@ private struct ChatItemView: View, Equatable {
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.leading, 60)
-                .contextMenu {
+                .onceReached(reached || voiceOver) {
                     Button("Copy") { Pasteboard.copy(text) }
                     if canSend, let rowID {
                         Button("Edit in Composer") {
@@ -401,12 +473,14 @@ private struct ChatItemView: View, Equatable {
             }
         case .reply(let entry):
             if case .reply(let text) = entry.kind {
-                HStack(alignment: .top, spacing: 10) {
-                    AgentMark(kind: agent, size: 20).padding(.top, 1)
-                    MarkdownView(text: text).frame(maxWidth: .infinity, alignment: .leading)
+                // The mark beside the text, as an HStack would place it, without the HStack's sizing: it measures the reply
+                // at no width and at any width to share the row out, every paragraph's text again each time.
+                MarkdownView(text: text).frame(maxWidth: .infinity, minHeight: 21, alignment: .topLeading)
+                    .padding(.leading, 30)
+                    .overlay(alignment: .topLeading) { AgentMark(kind: agent, size: 20).padding(.top, 1) }
+                .onceReached(reached || voiceOver, help: entry.at.map { $0.formatted(date: .abbreviated, time: .shortened) }) {
+                    Button("Copy as Markdown") { Pasteboard.copy(text) }
                 }
-                .help(entry.at.map { $0.formatted(date: .abbreviated, time: .shortened) } ?? "")
-                .contextMenu { Button("Copy as Markdown") { Pasteboard.copy(text) } }
             }
         case .team(let entry, let message):
             TeamMessageCard(entry: entry, message: message, chat: chat, expanded: expanded).padding(.trailing, 40)
@@ -423,6 +497,20 @@ private struct ChatItemView: View, Equatable {
                 Rectangle().fill(Color.accentColor).frame(height: 1)
             }
             .padding(.vertical, 4)
+        }
+    }
+}
+
+private extension View {
+    /// The row's context menu and tooltip, from when the pointer has reached the row (with VoiceOver, always): neither
+    /// can show before, and a page shown earlier needn't build them for each of its rows (as `ChatTextSelection`).
+    @ViewBuilder func onceReached<Menu: View>(_ reached: Bool, help: String? = nil, @ViewBuilder menu: () -> Menu) -> some View {
+        if !reached {
+            self
+        } else if let help {
+            self.help(help).contextMenu(menuItems: menu)
+        } else {
+            contextMenu(menuItems: menu)
         }
     }
 }

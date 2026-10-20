@@ -6,8 +6,10 @@
 # earlier pressed PAGES times, each page left to settle (VIBESWITCHER_BENCH_EARLIER). A run fails when the content
 # height still changes 3 s before its end or a page's, when the main thread gets stuck, or when a tick stalls over
 # 0.25 s (over 4 × the first open's longest when the Mac's 1-minute load is over load_threshold: the bench prints the
-# rule; see `ChatBench.StallRule`). Nothing touches the real ~/.vibeswitcher: the bench runs in a scratch home holding
-# copies of the transcripts.
+# rule; see `ChatBench.StallRule`). A tick the main thread spent mostly waiting for a core (under half of it on the CPU)
+# is the Mac's load, not a stall, as in ChatBenchTests: that run goes once more, and if that one is starved too it's
+# recorded (status=starved) and passes. Nothing touches the real ~/.vibeswitcher: the bench runs in a scratch home
+# holding copies of the transcripts.
 #
 # scripts/chat-bench-settle.sh [-n RUNS] [-j JOBS] [-b BINARY] [-B REPO] [-q] [-e PAGES] [-W WORKFLOW] [-w "700 900"] [-s "switch top"] [-v "plain LIVE"] A.jsonl B.jsonl
 #   -B REPO: the WINDOW variant shows REPO/.vibeswitcher/board.json's team strip and open questions.
@@ -49,6 +51,16 @@ cp -c "$1" "$home/.claude/projects/bench/a.jsonl" 2>/dev/null || cp "$1" "$home/
 cp -c "$2" "$home/.claude/projects/bench/b.jsonl" 2>/dev/null || cp "$2" "$home/.claude/projects/bench/b.jsonl"
 a="$home/.claude/projects/bench/a.jsonl" b="$home/.claude/projects/bench/b.jsonl"
 
+# Whether the run in $1 failed on a tick its main thread spent mostly waiting for a core.
+starved() {
+    local line wall cpu
+    line=$(grep -oE "FAIL: a tick stalled [0-9.]+s \(.*, [0-9.]+s of it on the CPU\)" "$1" | tail -1)
+    [[ -n $line ]] || return 1
+    wall=$(sed -E 's/FAIL: a tick stalled ([0-9.]+)s.*/\1/' <<< "$line")
+    cpu=$(sed -E 's/.*, ([0-9.]+)s of it on the CPU\)/\1/' <<< "$line")
+    awk -v wall="$wall" -v cpu="$cpu" 'BEGIN { exit !(cpu < wall / 2) }'
+}
+
 one() {
     local scenario=$1 width=$2 variant=$3 run=$4
     local out="$outputs/out/$scenario-$width-$variant-$run.txt"
@@ -67,11 +79,17 @@ one() {
     fi
     local status=0
     env "${settings[@]}" "$binary" --chat-bench "$path" > "$out" 2>&1 || status=$?
+    if [[ $status -eq 4 ]] && starved "$out"; then
+        mv "$out" "$out.starved"
+        status=0
+        env "${settings[@]}" "$binary" --chat-bench "$path" > "$out" 2>&1 || status=$?
+        [[ $status -eq 4 ]] && starved "$out" && status=starved
+    fi
     local verdict
     verdict=$(grep -E '^(settled|FAIL|HANG)' "$out" | tail -1)
     printf '%-7s %5s %-7s #%-2s status=%s %s\n' "$scenario" "$width" "$variant" "$run" "$status" "${verdict:-no verdict}"
 }
-export -f one
+export -f one starved
 export home outputs a b binary board updates earlier workflow
 
 for scenario in $scenarios; do for width in $widths; do for variant in $variants; do for run in $(seq 1 "$runs"); do
@@ -80,11 +98,12 @@ done; done; done; done | xargs -P "$jobs" -L 1 bash -c 'one "$@"' _ | tee "$outp
 
 echo
 echo "per case: passing runs, and the content heights the runs settled at"
-[[ -n $workflow ]] && echo "load_threshold from $workflow"
+# As the bench read it: workflow.md's load_threshold, or twice the cores when it has none.
+echo "$(grep -ohE "load_threshold [0-9.]+ \([^)]*\)" "$outputs"/out/*.txt 2>/dev/null | sort | uniq -c | sort -rn | head -1 | sed -E 's/^ *[0-9]+ //')${workflow:+, workflow.md: $workflow}"
 failed=0
 for scenario in $scenarios; do for width in $widths; do for variant in $variants; do
     lines=$(grep -E "^$scenario +$width $variant " "$outputs/results.txt" || true)
-    passed=$(grep -c "status=0 settled" <<< "$lines" || true)
+    passed=$(grep -cE "status=(0 settled|starved)" <<< "$lines" || true)
     heights=$(grep -oE "settled.* height=[0-9]+" <<< "$lines" | grep -oE "[0-9]+$" | sort -u | tr '\n' ' ' || true)
     printf '%-7s %5s %-7s %2s/%s  %s\n' "$scenario" "$width" "$variant" "$passed" "$runs" "$heights"
     [[ $passed -eq $runs ]] || failed=1
