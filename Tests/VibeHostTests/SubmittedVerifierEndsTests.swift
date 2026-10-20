@@ -7,7 +7,7 @@ import Testing
 /// the host ends its session `submittedGrace` after the vault stored its verdict, through its own logged end, as any
 /// kill. Sessions here are scratch shells, never Claude.
 struct SubmittedVerifierEndsTests {
-    let root = "/tmp/submitted-verifier-repo"
+    let root = "/Users/you/dev/submitted-verifier-repo"
     let temp = Scratch()
 
     /// The host's default leaves the verifier within the minute, with the housekeeping's 30 s on top.

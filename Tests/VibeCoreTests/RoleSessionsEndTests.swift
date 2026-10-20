@@ -12,8 +12,8 @@ struct RoleSessionsEndTests: LeadTeamFixture {
     let vault: LeadVault
     init() { vault = Self.newVault(in: temp) }
 
-    let root = "/tmp/role-sessions-end-repo"
-    let other = "/tmp/role-sessions-end-other"
+    let root = "/Users/you/dev/role-sessions-end-repo"
+    let other = "/Users/you/dev/role-sessions-end-other"
 
     /// A grant for `role` on `task` bound to `session`, issued by the app (a lead) or `lead`.
     @discardableResult
