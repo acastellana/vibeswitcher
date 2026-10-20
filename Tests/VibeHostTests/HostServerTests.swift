@@ -18,8 +18,9 @@ final class TestHost {
     /// `appExecutable`: by default this test process's own binary, so its clients are the app (they answer the
     /// challenge too).
     /// `holdsKey: false`: a host that holds no app key yet (one handed over from a build before keys).
+    /// `submittedGrace`, `housekeeping`: the config's (see `HostServer.Config`).
     init(build: Int = 42, vault: LeadVault.Book? = nil, appExecutable: String? = HostServer.executable(of: getpid()), log: String? = nil,
-         holdsKey: Bool = true) throws {
+         holdsKey: Bool = true, submittedGrace: TimeInterval = HostServer.submittedGrace, housekeeping: TimeInterval? = nil) throws {
         lock = socket + ".lock"
         var config = HostServer.Config(socketPath: socket, lockPath: lock, shell: "/bin/sh",
                                        launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: build)
@@ -32,6 +33,8 @@ final class TestHost {
         config.appExecutable = appExecutable
         config.ringCapacity = 1 << 20
         config.logPath = log
+        config.submittedGrace = submittedGrace
+        if let housekeeping { config.housekeepingInterval = housekeeping }
         server = HostServer(config: config)
         try server.start()
         readyAt = Date()
