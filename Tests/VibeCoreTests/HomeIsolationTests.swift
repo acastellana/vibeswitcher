@@ -42,7 +42,8 @@ struct HomeIsolationTests {
     /// This process's root is the one worked out from its own environment.
     @Test func theRootIsWorkedOutFromThisProcesssEnvironment() {
         #expect(VibePaths.root == VibePaths.root(environment: ProcessInfo.processInfo.environment, fallbackHome: NSHomeDirectory()))
-        #expect(VibePaths.statsDir.deletingLastPathComponent() == VibePaths.root)
+        // By path: a URL ends in "/" or not by whether its folder was there when it was made, and this one's parent always does.
+        #expect(VibePaths.statsDir.deletingLastPathComponent().path == VibePaths.root.path)
     }
 
     /// VibeSwitcher's folder and its state folder (each session's prompts and tool calls) are the user's alone (E-32):
