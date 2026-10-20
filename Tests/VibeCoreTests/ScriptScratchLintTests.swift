@@ -171,23 +171,26 @@ struct ScriptScratchLintTests {
             source '\(Self.repo.appendingPathComponent(Self.helper).path)'
             scratch_tmpdir vs-lint
             on_exit 'echo "hook $tool_scratch"'
-            echo "$TMPDIR"
-            [[ ${1:-} == cue ]] && read -r _
-            [[ ${1:-} == wait ]] && { sleep 30 & sleeper=$!; on_exit 'kill $sleeper'; wait $sleeper; }
+            case $1 in
+                cue) echo "$TMPDIR"; read -r _;;
+                wait) sleep 30 & sleeper=$!; on_exit 'kill $sleeper'; echo "$TMPDIR"; wait $sleeper;;
+            esac
             exit 3
             """.write(to: script, atomically: true, encoding: .utf8)
         for signal in [nil, SIGINT, SIGTERM] {
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/bin/bash")
-            // Each holds its scratch until told: an exit waits on its cue (its input closing), so the folder's modes are
-            // read while it's there, not after a quick script already removed it (under load it once had).
+            // Each holds its scratch until told, and says TMPDIR only then: an exit waits on its cue (its input
+            // closing), so the folder's modes are read while it's there, not after a quick script already removed it
+            // (under load it once had); a signal's wait has its sleeper's end hooked first, or the sleeper, not
+            // ended, kept the output open 30 s.
             process.arguments = [script.path, signal == nil ? "cue" : "wait"]
             let pipe = Pipe(), cue = Pipe()
             process.standardOutput = pipe
             process.standardInput = cue
             try process.run()
             var output = Data()
-            // The first line is TMPDIR: once it's there, the scratch is made.
+            // The first line is TMPDIR: once it's there, the scratch is made and held.
             while !output.contains(UInt8(ascii: "\n")) {
                 let chunk = pipe.fileHandleForReading.availableData
                 if chunk.isEmpty { break }
