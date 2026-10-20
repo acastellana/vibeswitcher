@@ -2530,7 +2530,23 @@ public final class LeadToolset: MCPToolset {
         do { all = try listed() } catch { return "The session host can't be read: \(error)" }
         let mine = all.filter { $0.cwd == root || $0.cwd.hasPrefix(root + "/") }
         guard !mine.isEmpty else { return "No window sessions in this project." }
-        return mine.map { "- \($0.id): \($0.label) — \($0.live ? ($0.status ?? "running") : "ended") — \($0.cwd)" }.joined(separator: "\n")
+        let board = store.load()
+        let now = Date().timeIntervalSince1970
+        return mine.map { session in
+            "- \(session.id): \(session.label) — \(session.live ? (session.status ?? "running") : "ended") — \(session.cwd)"
+                + (Self.strandedSince(session, root: root, board: board, now: now).map { " — stranded (task finished \(LeadTeams.hours(now - $0)) ago)" } ?? "")
+        }.joined(separator: "\n")
+    }
+
+    /// When the task of a worker's or verifier's session that still runs, not working, finished, if over
+    /// `LeadTeams.strandedAfter` ago: it has had no job since (VibeSwitcher ends such sessions; this one it couldn't).
+    static func strandedSince(_ session: LeadSessionInfo, root: String, board: LeadBoard, now: Double) -> Double? {
+        guard session.live, session.status.map({ !$0.hasPrefix("working") }) ?? true,
+              [.worker, .verifier].contains(LeadTeams.role(label: session.label)),
+              let owner = LeadTeams.root(ofWorktree: session.cwd), (owner as NSString).standardizingPath == (root as NSString).standardizingPath,
+              let slug = LeadTeams.task(ofWorktree: session.cwd), let task = board.task(slug), LeadTeams.isFinished(task) else { return nil }
+        let finished = LeadTeams.finishedAt(task)
+        return now - finished >= LeadTeams.strandedAfter ? finished : nil
     }
 }
 

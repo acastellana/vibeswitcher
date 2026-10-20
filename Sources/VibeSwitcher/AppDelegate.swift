@@ -58,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         },
         projectCreated: { [weak self] folder, next in self?.projectCreated(folder, then: next) })
     private(set) lazy var leadController: LeadController = {
-        let controller = LeadController(host: hostClient, store: store) { [weak self] root in
+        let controller = LeadController(host: hostClient, store: store, sweepsRoles: true) { [weak self] root in
             let presets = self?.presets(for: root) ?? []
             let preset = presets.first { $0.agent == .claude && $0.place == .window } ?? presets.first { $0.agent == .claude }
             return preset.flatMap(LaunchPlan.command(for:)) ?? "claude"

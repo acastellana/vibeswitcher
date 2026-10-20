@@ -246,6 +246,14 @@ public enum ProcessTable {
         return makeInfo(proc)
     }
 
+    /// Resident memory of a process we own, in bytes.
+    public static func residentBytes(pid: Int32) -> Int64? {
+        var info = proc_taskinfo()
+        let size = Int32(MemoryLayout<proc_taskinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &info, size) == size else { return nil }
+        return Int64(info.pti_resident_size)
+    }
+
     /// Current working directory of a process we own.
     public static func cwd(pid: Int32) -> String? {
         var info = proc_vnodepathinfo()

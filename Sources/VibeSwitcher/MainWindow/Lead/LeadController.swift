@@ -178,6 +178,14 @@ final class LeadController: ObservableObject {
     private var disks: [String: LeadWitness.Disk] = [:]
     /// Ended team sessions the host has been asked to drop.
     private var forgetting: Set<UUID> = []
+    /// Ends the sessions of finished tasks from the vault's roster, in every project (see `RoleSweep`); nil in tests
+    /// that don't give it a vault of their own.
+    private var roleSweep: RoleSweep?
+    /// A look of `roleSweep` under way, and when the last began.
+    private var sweeping = false
+    private var sweptAt = Date.distantPast
+    /// What the roster said each verifier submitted, by session: its end is expected (see `LeadWitness.Seen`).
+    private var submitted: [String: Double] = [:]
     /// Terminals being flushed, and when a message was last typed into each (its hooks need a moment to say it's
     /// working again; until then another flush would type a second prompt).
     private var flushing: Set<String> = []
@@ -225,7 +233,7 @@ final class LeadController: ObservableObject {
     var answersTrust = true
 
     init(host: HostClient, store: SessionStore, vault: LeadVault = .standard, inbox: URL = VibePaths.root,
-         home: String = VibePaths.home, keepAwake: KeepAwake = KeepAwake(), claudeCommand: @escaping (String) -> String) {
+         home: String = VibePaths.home, keepAwake: KeepAwake = KeepAwake(), sweepsRoles: Bool = false, claudeCommand: @escaping (String) -> String) {
         self.host = host
         self.keepAwake = keepAwake
         self.store = store
@@ -238,6 +246,14 @@ final class LeadController: ObservableObject {
         self.claudeCommand = claudeCommand
         summaries.lookup = { [weak host, weak store] id in
             (host?.sessions.first { $0.id.uuidString == id }, store?.sessions.first { $0.hostID?.uuidString == id }?.transcriptPath)
+        }
+        roleSweep = sweepsRoles ? RoleSweep(roster: { try vault.roster() }, end: { [weak host] session in
+            DispatchQueue.main.async { host?.kill(session.id) }
+        }, tell: { [weak self] text in
+            DispatchQueue.main.async { self?.tellStranded(text) }
+        }) : nil
+        roleSweep?.submitted = { [weak self] submitted in
+            DispatchQueue.main.async { self?.submitted = submitted }
         }
         timer = Heartbeat.shared.every(3) { [weak self] in self?.refresh() }
         // Whatever is typed into a replaced lead (its terminal, the composer, the phone) comes here, never to it.
@@ -785,6 +801,7 @@ final class LeadController: ObservableObject {
         startPending()
         keepRunningLeads()
         markReplaced()
+        sweepRoles()
         guard !refreshing else {
             refreshAgain = true
             return
@@ -841,6 +858,33 @@ final class LeadController: ObservableObject {
         ReportsWaiting.shared.keep(Set(loaded.values.compactMap(\.leadTTY)))
     }
 
+    /// Every 6 s at most, off the main thread: the finished tasks' role sessions end, in every project (see `RoleSweep`).
+    private func sweepRoles(now: Date = Date()) {
+        guard let roleSweep, !sweeping, now.timeIntervalSince(sweptAt) >= 6 else { return }
+        sweeping = true
+        sweptAt = now
+        let hosted = host.sessions
+        let agents = Dictionary(store.sessions.compactMap { session in session.hostID.map { ($0, session) } }, uniquingKeysWith: { first, _ in first })
+        roleSweep.queue.async { [weak self] in
+            roleSweep.look(hosted: hosted, idleSince: { hosted in
+                // Idle since its turn ended; with no agent known on it (its shell left), since it started.
+                guard let agent = agents[hosted.id] else { return hosted.startedAt.timeIntervalSince1970 }
+                return agent.status == .working ? nil : agent.statusSince.timeIntervalSince1970
+            }, agent: { hosted in
+                let pid = agents[hosted.id]?.pid ?? hosted.childPID
+                return (pid, ProcessTable.residentBytes(pid: pid))
+            })
+            DispatchQueue.main.async { self?.sweeping = false }
+        }
+    }
+
+    /// The stranded role sessions, in every project: to each running lead, as the witness, and to the user.
+    private func tellStranded(_ text: String) {
+        for root in leadSessions.keys { deliver(text, from: .system("witness"), root: root) }
+        let first = text.split(separator: "\n").first.map(String.init) ?? text
+        notify("Role sessions of finished tasks still run", first)
+    }
+
     /// A task merged or abandoned: its ended workers and verifiers leave the session list (everywhere it's shown:
     /// the host drops them). The lead's cleanup does this too; this catches tasks finished some other way.
     private func forgetFinished(_ boards: [String: LeadBoard]) {
@@ -893,7 +937,7 @@ final class LeadController: ObservableObject {
                                         apiErrorAt: apiError?.at, activity: watched?.activity,
                                         lastActivity: watched?.progress?.lastWritten, compactedAt: watched?.progress?.compactedAt,
                                         shellRunning: shellRunning, shells: shells, heldSince: held?.at, heldFrom: held.map { Self.sender($0.from) },
-                                        started: info.startedAt.timeIntervalSince1970)
+                                        started: info.startedAt.timeIntervalSince1970, submittedAt: submitted[id])
             if info.isLive, let session { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
         }
         // Sessions that ended together (a stray kill, the app relaunched over them) are told in one message.

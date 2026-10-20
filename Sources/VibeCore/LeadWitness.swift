@@ -36,6 +36,9 @@ public enum LeadWitness {
         /// When this session was started (the host spawned it): a status or quiet from before then is another
         /// session's (the terminal it reuses, or none read yet).
         public var started: Double?
+        /// A verifier that gave its verdict (or cast its ballot), by the vault's roster: when. The host ends it
+        /// shortly after (its job is done), so its end is expected, never news.
+        public var submittedAt: Double?
 
         /// How it ended, in words; its exit code when that wasn't said.
         var ending: String { cause ?? "exit \(exit ?? 0)" }
@@ -52,9 +55,10 @@ public enum LeadWitness {
         public init(live: Bool, exit: Int32? = nil, cause: String? = nil, status: SessionStatus? = nil, since: Date? = nil, detail: String? = nil,
                     agentQuit: Bool = false, apiError: String? = nil, apiErrorAt: Double? = nil, activity: LeadActivity? = nil,
                     lastActivity: Double? = nil, compactedAt: Double? = nil, shellRunning: Bool = false, shells: [BackgroundJob] = [],
-                    heldSince: Double? = nil, heldFrom: String? = nil, started: Double? = nil) {
+                    heldSince: Double? = nil, heldFrom: String? = nil, started: Double? = nil, submittedAt: Double? = nil) {
             self.live = live
             self.started = started
+            self.submittedAt = submittedAt
             self.activity = activity
             self.lastActivity = lastActivity
             self.compactedAt = compactedAt
@@ -136,10 +140,12 @@ public enum LeadWitness {
 
     private enum Restart { case worker, stopFirst, verifier }
 
-    /// The verifier gave the verdict the board keeps for an older commit (it, or its panel, was at work before that
-    /// verdict came): its audit is done, and the worker committed again since (report told the lead to audit that).
-    /// A verifier the lead starts for the new commit starts after that verdict, and is watched as any other.
+    /// The verifier submitted its audit (the vault says so: the host ends it shortly after), or gave the verdict the
+    /// board keeps for an older commit (it, or its panel, was at work before that verdict came): its audit is done,
+    /// and the worker committed again since (report told the lead to audit that). A verifier the lead starts for the
+    /// new commit starts after that verdict, and is watched as any other.
     private static func gaveVerdict(_ info: Seen, on task: LeadTask) -> Bool {
+        if info.submittedAt != nil { return true }
         guard let earlier = task.outdatedEvidence, let started = info.started else { return false }
         return earlier.at >= started
     }
@@ -172,6 +178,20 @@ public enum LeadWitness {
             found[task.id] = stall
         }
         return found
+    }
+
+    /// How often the stranded sessions are told at most (see `strandedText`).
+    public static let strandedEvery: TimeInterval = 3600
+
+    /// The workers and verifiers of finished tasks that still run, idle over an hour (see `LeadTeams.stranded`), in
+    /// every project, as one message, a line each: VibeSwitcher ends a finished task's sessions itself, so these are
+    /// ones it couldn't. Nil when there are none.
+    public static func strandedText(_ stranded: [LeadTeams.Stranded], now: Date = Date()) -> String? {
+        guard !stranded.isEmpty else { return nil }
+        let count = stranded.count == 1 ? "1 role session still runs" : "\(stranded.count) role sessions still run"
+        return "\(count) though its task is finished, idle over \(LeadTeams.hours(LeadTeams.strandedAfter)) (VibeSwitcher couldn't end \(stranded.count == 1 ? "it" : "them")):\n"
+            + stranded.map { "- The \($0.line(now: now))" }.joined(separator: "\n")
+            + "\ncleanup(<task>) ends your own project's; tell the user about the others (they can end them in VibeSwitcher's window)."
     }
 
     /// Watches the free space on the volume holding a project's worktrees: when it drops below the workflow's

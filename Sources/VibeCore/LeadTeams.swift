@@ -42,6 +42,9 @@ public enum LeadTeams {
         [.done, .folded, .abandoned].contains(task.status) || (task.status == .failed && task.worktree == nil)
     }
 
+    /// When a finished task finished: when it took its status (stamped on every change), else when it merged.
+    public static func finishedAt(_ task: LeadTask) -> Double { task.since ?? task.merged?.at ?? task.createdAt }
+
     /// The ended workers and verifiers of `root`'s finished tasks: the lead's history, not the list's, so the app
     /// has the host forget them. Ended sessions of tasks still under way stay (why one died is worth a look).
     public static func finished(_ sessions: [HostSession], root: String, board: LeadBoard) -> [UUID] {
@@ -53,6 +56,101 @@ public enum LeadTeams {
             return isFinished(task)
         }.map(\.id)
     }
+
+    /// A worker or verifier of the vault's roster (see `LeadVault.RosterEntry`) whose session the host still runs:
+    /// its task, and whether that task is finished (`isFinished`).
+    public struct RoleSession: Equatable, Sendable {
+        public var entry: LeadVault.RosterEntry
+        public var session: HostSession
+        public var task: LeadTask
+
+        /// worker or verifier: what the roster says it held, or (a former one an older vault kept without it) its label.
+        public var role: LeadLaunch.Role {
+            entry.task == nil ? (LeadTeams.role(label: session.label) ?? entry.role) : entry.role
+        }
+
+        /// The project's folder name: "genswap".
+        public var project: String { (entry.root as NSString).lastPathComponent }
+        public var finishedAt: Double { LeadTeams.finishedAt(task) }
+    }
+
+    /// The live sessions of the vault's `roster` whose task, on its root's board in `boards` (by the vault's root), is
+    /// finished: merged, folded, abandoned or cleaned up. Only what the vault binds to a worker's or verifier's role
+    /// (now, or a `former` one) in that team, never a lead, nor a session the roster doesn't name (the user's own, or
+    /// another project's): the app ends these (see `LeadController`). A former session an older vault kept without
+    /// its task is matched by its worktree, in that team's repository, and its label (a worker's or a verifier's).
+    public static func finishedRoles(_ roster: [LeadVault.RosterEntry], hosted: [HostSession], boards: [String: LeadBoard]) -> [RoleSession] {
+        let byID = Dictionary(hosted.map { ($0.id.uuidString, $0) }, uniquingKeysWith: { first, _ in first })
+        var seen = Set<String>()
+        return roster.compactMap { entry in
+            guard entry.role != .lead, seen.insert(entry.session).inserted, let session = byID[entry.session], session.isLive,
+                  let board = boards[entry.root] ?? boards[(entry.root as NSString).standardizingPath] else { return nil }
+            // Whatever the roster says, never a session that runs as a lead (its label), nor the board's lead.
+            guard role(label: session.label) != .lead, board.leadSession != entry.session else { return nil }
+            let slug: String
+            if let task = entry.task {
+                slug = task
+            } else {
+                guard [.worker, .verifier].contains(role(label: session.label)),
+                      let owner = root(ofWorktree: session.cwd), (owner as NSString).standardizingPath == (entry.root as NSString).standardizingPath,
+                      let task = task(ofWorktree: session.cwd) else { return nil }
+                slug = task
+            }
+            guard let task = board.task(slug), isFinished(task) else { return nil }
+            return RoleSession(entry: entry, session: session, task: task)
+        }
+    }
+
+    /// A role session of a finished task still running, idle over `strandedAfter` (see `LeadWitness.strandedText`).
+    public struct Stranded: Equatable, Sendable {
+        public var role: LeadLaunch.Role
+        public var task: String
+        public var project: String
+        public var session: String
+        public var idle: TimeInterval
+        public var pid: Int32?
+        /// Its agent's resident memory, in bytes.
+        public var memory: Int64?
+        public var finishedAt: Double
+
+        public init(role: LeadLaunch.Role, task: String, project: String, session: String, idle: TimeInterval, pid: Int32?, memory: Int64?, finishedAt: Double) {
+            self.role = role
+            self.task = task
+            self.project = project
+            self.session = session
+            self.idle = idle
+            self.pid = pid
+            self.memory = memory
+            self.finishedAt = finishedAt
+        }
+
+        /// "verifier on contract-plan-task-8 (genswap): idle 14.7 h, pid 51234, 412 MB, task finished 15.0 h ago".
+        public func line(now: Date) -> String {
+            var parts = ["idle \(LeadTeams.hours(idle))"]
+            if let pid { parts.append("pid \(pid)") }
+            if let memory { parts.append(DiskSpace.text(memory)) }
+            parts.append("task finished \(LeadTeams.hours(now.timeIntervalSince1970 - finishedAt)) ago")
+            return "\(role.rawValue) on \(task) (\(project)): " + parts.joined(separator: ", ")
+        }
+    }
+
+    /// How long a role session of a finished task may sit idle before the witness names it.
+    public static let strandedAfter: TimeInterval = 3600
+
+    /// The `finished` role sessions idle over `strandedAfter`: `idleSince` says since when each (by host session id)
+    /// has been idle, nil while it's working or not known; `agent` its agent's pid and resident memory.
+    public static func stranded(_ finished: [RoleSession], idleSince: (HostSession) -> Double?, agent: (HostSession) -> (pid: Int32?, memory: Int64?),
+                                now: Date = Date()) -> [Stranded] {
+        finished.compactMap { role in
+            guard let since = idleSince(role.session), now.timeIntervalSince1970 - since >= strandedAfter else { return nil }
+            let process = agent(role.session)
+            return Stranded(role: role.role, task: role.task.slug, project: role.project, session: role.entry.session,
+                            idle: now.timeIntervalSince1970 - since, pid: process.pid, memory: process.memory, finishedAt: role.finishedAt)
+        }.sorted { ($0.project, $0.task, $0.session) < ($1.project, $1.task, $1.session) }
+    }
+
+    /// 52_920 s → "14.7 h".
+    public static func hours(_ seconds: TimeInterval) -> String { String(format: "%.1f h", max(0, seconds) / 3600) }
 
     /// A team member is still at it: its session runs and so does its agent (or the agent is still starting, or not
     /// known to have quit: see `WindowRow.agentQuit`).
