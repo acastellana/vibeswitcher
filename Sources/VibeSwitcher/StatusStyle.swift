@@ -8,30 +8,108 @@ extension StatusPalette.RGB {
 
 extension NSAppearance {
     var isDark: Bool { bestMatch(from: [.aqua, .darkAqua]) == .darkAqua }
+    /// Increase Contrast, for colours resolved in this appearance.
+    var isHighContrast: Bool { Contrast.isIncreased(self) }
+}
+
+/// System Settings › Accessibility › Display › Increase contrast. With it on, the popover, sidebar and pill are drawn
+/// on a solid background instead of a material, in the 7:1 inks (`StatusPalette`'s `highContrast`). AppKit colours
+/// read it when they resolve, so they follow the setting without a relaunch; SwiftUI views read
+/// `\.colorSchemeContrast` through `@IncreasedContrast`.
+enum Contrast {
+    /// Forces it on or off, for snapshots and tests; nil follows the system.
+    nonisolated(unsafe) static var override: Bool?
+
+    static var isIncreased: Bool { override ?? NSWorkspace.shared.accessibilityDisplayShouldIncreaseContrast }
+
+    static func isIncreased(_ appearance: NSAppearance) -> Bool {
+        if let override { return override }
+        let match = appearance.bestMatch(from: [.aqua, .darkAqua, .accessibilityHighContrastAqua, .accessibilityHighContrastDarkAqua])
+        return isIncreased || match == .accessibilityHighContrastAqua || match == .accessibilityHighContrastDarkAqua
+    }
+}
+
+extension EnvironmentValues {
+    /// Forces Increase Contrast on or off for SwiftUI views, as `Contrast.override` does for colours (snapshots set
+    /// both). An input SwiftUI tracks, so a view drawn both ways is drawn again, not reused.
+    var contrastOverride: Bool? {
+        get { self[ContrastOverrideKey.self] }
+        set { self[ContrastOverrideKey.self] = newValue }
+    }
+}
+
+private struct ContrastOverrideKey: EnvironmentKey {
+    static let defaultValue: Bool? = nil
+}
+
+/// Increase Contrast, in a SwiftUI view: `\.colorSchemeContrast`, unless a snapshot forces it.
+@propertyWrapper
+struct IncreasedContrast: DynamicProperty {
+    @Environment(\.colorSchemeContrast) private var contrast
+    @Environment(\.contrastOverride) private var override
+
+    var wrappedValue: Bool { override ?? Contrast.override ?? (contrast == .increased) }
+}
+
+extension ShapeStyle where Self == Color {
+    /// Captions, durations and the footer (`StatusPalette.secondaryText`): AA, and 7:1 with Increase Contrast on.
+    /// Instead of `.secondary` and `.tertiary`, which are neither on the popover's background.
+    static var secondaryInk: Color { Contrast.secondaryInk }
+    /// What the popover, sidebar and pill are drawn on with Increase Contrast on.
+    static var solidBackground: Color { Contrast.solidBackground }
+}
+
+extension Contrast {
+    fileprivate static let secondaryInk = Color(nsColor: NSColor(name: nil) {
+        StatusPalette.secondaryText(dark: $0.isDark, highContrast: $0.isHighContrast).nsColor
+    })
+    fileprivate static let solidBackground = Color(nsColor: NSColor(name: nil) { StatusPalette.solidBackground(dark: $0.isDark).nsColor })
+}
+
+extension View {
+    /// `material` normally; with Increase Contrast on, the solid background and a firmer edge.
+    func contrastBackground<S: InsettableShape>(_ shape: S, material: Material = .regularMaterial, edge: Double) -> some View {
+        modifier(ContrastBackground(shape: shape, material: material, edge: edge))
+    }
+}
+
+private struct ContrastBackground<S: InsettableShape>: ViewModifier {
+    let shape: S
+    let material: Material
+    let edge: Double
+    @IncreasedContrast private var increased
+
+    func body(content: Content) -> some View {
+        content
+            .background {
+                if increased { shape.fill(.solidBackground) } else { shape.fill(material) }
+            }
+            .overlay(shape.stroke(Color.primary.opacity(increased ? 0.6 : edge)).allowsHitTesting(false))
+    }
 }
 
 extension SessionStatus {
-    /// Text, marks and badge fills (`StatusPalette`: at least 4.5:1 in light and dark). Resolves when drawn, so it
-    /// follows the menu bar's and the window's appearance.
+    /// Text, marks and badge fills (`StatusPalette`: at least 4.5:1 in light and dark, 7:1 with Increase Contrast).
+    /// Resolves when drawn, so it follows the menu bar's and the window's appearance and the contrast setting.
     var nsColor: NSColor { Self.inks[self]! }
 
     var color: Color { Self.colors[self]! }
 
     /// Made once, so a status's colour is always the same object (and compares equal).
     private static let inks: [SessionStatus: NSColor] = Dictionary(uniqueKeysWithValues: all.map { status in
-        (status, NSColor(name: nil) { StatusPalette.ink(status, dark: $0.isDark).nsColor })
+        (status, NSColor(name: nil) { StatusPalette.ink(status, dark: $0.isDark, highContrast: $0.isHighContrast).nsColor })
     })
     private static let colors = inks.mapValues { Color(nsColor: $0) }
     static let all: [SessionStatus] = [.needsInput, .working, .background, .done, .idle, .unknown]
 
     /// A number or glyph drawn on a status fill: white in light mode, near-black in dark.
-    static let onInkNSColor = NSColor(name: nil) { StatusPalette.onInk(dark: $0.isDark).nsColor }
+    static let onInkNSColor = NSColor(name: nil) { StatusPalette.onInk(dark: $0.isDark, highContrast: $0.isHighContrast).nsColor }
     static var onInk: Color { Color(nsColor: onInkNSColor) }
 }
 
 extension ReplacedLead {
     /// A replaced lead's purple, at least 5:1 on the window in light and dark (`StatusPalette.replaced`).
-    static let color = Color(nsColor: NSColor(name: nil) { StatusPalette.replaced(dark: $0.isDark).nsColor })
+    static let color = Color(nsColor: NSColor(name: nil) { StatusPalette.replaced(dark: $0.isDark, highContrast: $0.isHighContrast).nsColor })
 }
 
 extension Session {
@@ -130,6 +208,8 @@ enum StatusIcon {
             return true
         }
         image.isTemplate = false
+        // Drawn again whenever the bar is, so the dots follow Increase Contrast as well as the bar's appearance.
+        image.cacheMode = .never
         return image
     }
 
@@ -159,6 +239,7 @@ enum StatusIcon {
             return true
         }
         image.isTemplate = false
+        image.cacheMode = .never
         return image
     }
 }

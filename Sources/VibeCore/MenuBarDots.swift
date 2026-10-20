@@ -208,6 +208,8 @@ public enum StatusMark: Equatable, Sendable {
 /// Status colours that meet WCAG AA: text in them is at least 4.5:1 on the app's backgrounds, and the number or glyph
 /// inside a filled badge at least 4.5:1 on the fill, in light and in dark. Light mode needs darker inks than the
 /// system colours (systemOrange text on a light popover is 1.9:1); dark mode keeps them bright, with near-black inside.
+/// With Increase Contrast on (`highContrast`), every one of them is at least 7:1 (AAA) on the solid backgrounds the
+/// popover, sidebar and pill draw then, and on their selected-row and banner tints.
 public enum StatusPalette {
     public struct RGB: Equatable, Sendable {
         public let red: Double, green: Double, blue: Double
@@ -231,31 +233,73 @@ public enum StatusPalette {
     }
 
     /// The colour of a status's text, mark and badge fill.
-    public static func ink(_ status: SessionStatus, dark: Bool) -> RGB {
-        switch (status, dark) {
-        case (.needsInput, false): return RGB(hex: 0xC4001A)
-        case (.needsInput, true): return RGB(hex: 0xFF7A72)
-        case (.working, false): return RGB(hex: 0x9C4400)
-        case (.working, true): return RGB(hex: 0xFF9F0A)
-        case (.background, false): return RGB(hex: 0x0058B8)
-        case (.background, true): return RGB(hex: 0x5EB0FF)
-        case (.done, false): return RGB(hex: 0x1A7330)
-        case (.done, true): return RGB(hex: 0x30D158)
-        case (.idle, false), (.unknown, false): return RGB(hex: 0x636366)
-        case (.idle, true), (.unknown, true): return RGB(hex: 0xAEAEB2)
+    public static func ink(_ status: SessionStatus, dark: Bool, highContrast: Bool = false) -> RGB {
+        switch (status, dark, highContrast) {
+        case (.needsInput, false, false): return RGB(hex: 0xC4001A)
+        case (.needsInput, true, false): return RGB(hex: 0xFF7A72)
+        case (.working, false, false): return RGB(hex: 0x9C4400)
+        case (.working, true, false): return RGB(hex: 0xFF9F0A)
+        case (.background, false, false): return RGB(hex: 0x0058B8)
+        case (.background, true, false): return RGB(hex: 0x5EB0FF)
+        case (.done, false, false): return RGB(hex: 0x1A7330)
+        case (.done, true, false): return RGB(hex: 0x30D158)
+        case (.idle, false, false), (.unknown, false, false): return RGB(hex: 0x636366)
+        case (.idle, true, false), (.unknown, true, false): return RGB(hex: 0xAEAEB2)
+        // Increase Contrast: the same hues, darker in light mode and lighter in dark.
+        case (.needsInput, false, true): return RGB(hex: 0x990014)
+        case (.needsInput, true, true): return RGB(hex: 0xFF9F99)
+        case (.working, false, true): return RGB(hex: 0x7A3500)
+        case (.working, true, true): return RGB(hex: 0xFFA519)
+        case (.background, false, true): return RGB(hex: 0x004795)
+        case (.background, true, true): return RGB(hex: 0x7BBEFF)
+        case (.done, false, true): return RGB(hex: 0x135524)
+        case (.done, true, true): return RGB(hex: 0x38D35F)
+        case (.idle, false, true), (.unknown, false, true): return RGB(hex: 0x49494B)
+        case (.idle, true, true), (.unknown, true, true): return RGB(hex: 0xB9B9BC)
         }
     }
 
     /// A lead another session replaced (`ReplacedLead`): purple, text-safe like the inks.
-    public static func replaced(dark: Bool) -> RGB { RGB(hex: dark ? 0xC98BFF : 0x8E3BBF) }
+    public static func replaced(dark: Bool, highContrast: Bool = false) -> RGB {
+        highContrast ? RGB(hex: dark ? 0xD5A5FF : 0x692C8D) : RGB(hex: dark ? 0xC98BFF : 0x8E3BBF)
+    }
+
+    /// The Claude agent badge's terracotta, text-safe like the inks.
+    public static func claude(dark: Bool, highContrast: Bool = false) -> RGB {
+        highContrast ? RGB(hex: dark ? 0xEEA994 : 0x77361F) : RGB(hex: dark ? 0xE8876A : 0xA34A2A)
+    }
+
+    /// Secondary text (captions, durations, the footer): the quietest text the popover, sidebar and pill draw. There
+    /// is no tertiary: everything in those views is text the user must read.
+    public static func secondaryText(dark: Bool, highContrast: Bool = false) -> RGB {
+        highContrast ? RGB(hex: dark ? 0xB9B9BC : 0x49494C) : RGB(hex: dark ? 0xB8B8BC : 0x5E5E62)
+    }
 
     /// The colour of a number or glyph drawn on an `ink` fill.
-    public static func onInk(dark: Bool) -> RGB { RGB(hex: dark ? 0x1F1F1F : 0xFFFFFF) }
+    public static func onInk(dark: Bool, highContrast: Bool = false) -> RGB {
+        highContrast ? RGB(hex: dark ? 0x000000 : 0xFFFFFF) : RGB(hex: dark ? 0x1F1F1F : 0xFFFFFF)
+    }
+
+    /// With Increase Contrast on, the popover, sidebar and pill are drawn on this instead of a material.
+    public static func solidBackground(dark: Bool) -> RGB { RGB(hex: dark ? 0x121212 : 0xFFFFFF) }
 
     /// Backgrounds status text is drawn on: popover, sidebar and window (light ≈ #ECECEC, dark ≈ #323232), and white
     /// or near-black cards.
     public static let lightBackgrounds = [RGB(hex: 0xECECEC), RGB(hex: 0xFFFFFF), RGB(hex: 0xF4F4F6)]
     public static let darkBackgrounds = [RGB(hex: 0x323232), RGB(hex: 0x1E1E1E), RGB(hex: 0x1C1E22), RGB(hex: 0x111214)]
+    /// With Increase Contrast on: the solid background, a selected row on it (accent at 15 %) and a banner (yellow at
+    /// 12 %).
+    public static let highContrastLightBackgrounds = [solidBackground(dark: false), RGB(hex: 0xD9EBFF), RGB(hex: 0xFFF9E0)]
+    public static let highContrastDarkBackgrounds = [solidBackground(dark: true), RGB(hex: 0x112336), RGB(hex: 0x2E2A11)]
+
+    public static func backgrounds(dark: Bool, highContrast: Bool) -> [RGB] {
+        switch (dark, highContrast) {
+        case (false, false): return lightBackgrounds
+        case (true, false): return darkBackgrounds
+        case (false, true): return highContrastLightBackgrounds
+        case (true, true): return highContrastDarkBackgrounds
+        }
+    }
 }
 
 /// What VoiceOver says for the sessions: "VibeSwitcher: 2 need you, 3 working".

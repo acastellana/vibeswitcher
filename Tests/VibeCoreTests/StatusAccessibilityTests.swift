@@ -77,6 +77,64 @@ struct StatusAccessibilityTests {
         #expect(abs(StatusPalette.contrast(.init(hex: 0xFF9500), .init(hex: 0xFFFFFF)) - 2.20) < 0.01)
     }
 
+    /// With Increase Contrast on, every text/background pair in the popover, sidebar, pill and menu bar dots is at
+    /// least 7:1 (AAA) on their solid backgrounds and tints; without it, the same text stays AA.
+    @Test func increaseContrastGivesSevenToOneAndAAWithout() {
+        for highContrast in [false, true] {
+            let floor = highContrast ? 7.0 : 4.5
+            for dark in [false, true] {
+                let mode = "\(dark ? "dark" : "light")\(highContrast ? " high contrast" : "")"
+                let backgrounds = StatusPalette.backgrounds(dark: dark, highContrast: highContrast)
+                var texts: [(String, StatusPalette.RGB)] = [
+                    ("replaced lead", StatusPalette.replaced(dark: dark, highContrast: highContrast)),
+                    ("Claude badge", StatusPalette.claude(dark: dark, highContrast: highContrast)),
+                    ("secondary text", StatusPalette.secondaryText(dark: dark, highContrast: highContrast)),
+                ]
+                for status in [SessionStatus.needsInput, .working, .background, .done, .idle, .unknown] {
+                    let ink = StatusPalette.ink(status, dark: dark, highContrast: highContrast)
+                    texts.append(("\(status)", ink))
+                    let inside = StatusPalette.contrast(StatusPalette.onInk(dark: dark, highContrast: highContrast), ink)
+                    #expect(inside >= floor, "\(status) \(mode) badge number is \(inside):1")
+                }
+                for (name, text) in texts {
+                    for background in backgrounds {
+                        let ratio = StatusPalette.contrast(text, background)
+                        #expect(ratio >= floor, "\(name) \(mode) text is \(ratio):1")
+                    }
+                }
+            }
+        }
+        // The solid background is what the high-contrast pairs were measured on.
+        #expect(StatusPalette.highContrastLightBackgrounds.first == StatusPalette.solidBackground(dark: false))
+        #expect(StatusPalette.highContrastDarkBackgrounds.first == StatusPalette.solidBackground(dark: true))
+    }
+
+    static let views = web.deletingLastPathComponent().appendingPathComponent("Sources/VibeSwitcher")
+
+    /// The footer, durations and status text are text the user must read: secondary at the quietest, and the
+    /// measured secondary (`.secondaryInk`), never `.tertiary` or the system's `.secondary` (3.8:1 on the popover).
+    /// The material gives way to a solid background with Increase Contrast on.
+    @Test func whatYouMustReadIsNeverTertiary() throws {
+        for file in ["PopoverView.swift", "FloatingPanel.swift", "Sidebar.swift"] {
+            let text = try String(contentsOf: Self.views.appendingPathComponent(file), encoding: .utf8)
+            for (index, line) in text.components(separatedBy: "\n").enumerated() {
+                let code = line.components(separatedBy: "//").first ?? line
+                for quiet in [".tertiary", ".quaternary", "foregroundStyle(.secondary)", "AnyShapeStyle(.secondary)",
+                              "Color.secondary", ".regularMaterial"] {
+                    let use = try Regex(NSRegularExpression.escapedPattern(for: quiet) + "(?!Ink)")
+                    #expect(!code.contains(use), "\(file):\(index + 1) uses \(quiet): \(line.trimmingCharacters(in: .whitespaces))")
+                }
+            }
+        }
+        let popover = try String(contentsOf: Self.views.appendingPathComponent("PopoverView.swift"), encoding: .utf8)
+        let pill = try String(contentsOf: Self.views.appendingPathComponent("FloatingPanel.swift"), encoding: .utf8)
+        let style = try String(contentsOf: Self.views.appendingPathComponent("StatusStyle.swift"), encoding: .utf8)
+        #expect(popover.contains(".contrastBackground(") && popover.contains(".fill(.solidBackground)"))
+        #expect(pill.contains(".contrastBackground("))
+        // AppKit reads the setting when a colour resolves; SwiftUI from the environment.
+        #expect(style.contains("accessibilityDisplayShouldIncreaseContrast") && style.contains("colorSchemeContrast"))
+    }
+
     // MARK: The phone app
 
     static let web = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()

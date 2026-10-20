@@ -31,6 +31,7 @@ struct PopoverView: View {
     var onAllowNotifications: () -> Void = { Notifier.openSettings() }
     /// Brief me, in the header, and its panel under it (none in the sidebar and the snapshots).
     var briefing: BriefingModel? = nil
+    @IncreasedContrast private var increased
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -39,7 +40,7 @@ struct PopoverView: View {
             if let briefing { BriefingStrip(model: briefing) }
             if store.sessions.isEmpty {
                 Text("No Claude Code or Codex sessions running in a terminal.")
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.callout).foregroundStyle(.secondaryInk)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(24)
             } else {
@@ -94,8 +95,10 @@ struct PopoverView: View {
         .frame(maxWidth: isSidebar ? .infinity : nil, maxHeight: isSidebar ? .infinity : nil, alignment: .top)
         .background {
             if isSidebar {
-                RoundedRectangle(cornerRadius: 12).fill(.regularMaterial)
-                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.primary.opacity(0.1)))
+                Color.clear.contrastBackground(RoundedRectangle(cornerRadius: 12), edge: 0.1)
+            } else if increased {
+                // Increase Contrast: solid, not the popover's material.
+                Rectangle().fill(.solidBackground)
             }
         }
     }
@@ -127,7 +130,7 @@ struct PopoverView: View {
                     HStack(spacing: 4) {
                         StatusMarkView(StatusMark(status: status), color: status.color, size: 9)
                         Text(words ? status.word.counted(count) : "\(count)")
-                            .font(.caption).foregroundStyle(.secondary).fixedSize()
+                            .font(.caption).foregroundStyle(.secondaryInk).fixedSize()
                     }
                     .help(status.word.counted(count))
                     .accessibilityElement(children: .ignore)
@@ -140,7 +143,7 @@ struct PopoverView: View {
                     Image(systemName: "pause.circle").imageScale(.small).accessibilityHidden(true)
                     Text(words ? StateWord.paused.counted(paused) : "\(paused)").fixedSize()
                 }
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(.secondaryInk)
                 .help("\(StateWord.paused.counted(paused)): no notifications until you resume them")
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(StateWord.paused.counted(paused))
@@ -194,7 +197,7 @@ struct PopoverView: View {
         if !preferences.notificationsAllowed {
             HStack {
                 Text("Notifications are off, so you won't get a banner when a session needs you.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondaryInk)
                 Spacer()
                 Button("Turn on…", action: onAllowNotifications).controlSize(.small)
             }
@@ -203,7 +206,7 @@ struct PopoverView: View {
         if store.tabOrderUnavailable {
             HStack {
                 Text("Some sessions are tabs of one window. Allow Accessibility so the list follows your tab order. Already on in Settings? Remove VibeSwitcher there (−) and add it again: macOS forgot it after an update.")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondaryInk)
                     .fixedSize(horizontal: false, vertical: true)
                 Spacer()
                 Button("Allow…") { TabOrder.requestTrust() }.controlSize(.small)
@@ -214,7 +217,7 @@ struct PopoverView: View {
         if !missing.isEmpty {
             HStack {
                 Text("Live status needs hooks for \(missing.map(\.displayName).joined(separator: " & ")).")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.secondaryInk)
                 Spacer()
                 Button("Install hooks", action: onInstallHooks).controlSize(.small)
             }
@@ -228,7 +231,7 @@ struct PopoverView: View {
                 Button("Exit Sidebar Mode") { preferences.sidebarMode = false }
                     .buttonStyle(.borderless).controlSize(.small)
             } else {
-                Text("Click a dot to switch · ⌃⌥V for this list · 1–9 · P pauses").font(.caption2).foregroundStyle(.tertiary)
+                Text("Click a dot to switch · ⌃⌥V for this list · 1–9 · P pauses").font(.caption2).foregroundStyle(.secondaryInk)
             }
             Spacer()
             Menu {
@@ -261,7 +264,7 @@ private struct TodaySummary: View {
             Button { expanded.toggle() } label: {
                 HStack(spacing: 6) {
                     Image(systemName: expanded ? "chevron.down" : "chevron.right").imageScale(.small)
-                        .foregroundStyle(.tertiary).frame(width: 10).accessibilityHidden(true)
+                        .foregroundStyle(.secondaryInk).frame(width: 10).accessibilityHidden(true)
                     Text("Today").font(.caption.weight(.semibold))
                     Spacer()
                     stat(SessionStatus.working.color, ledger.agentsWorking, "agents working")
@@ -277,20 +280,20 @@ private struct TodaySummary: View {
             if expanded {
                 if ledger.waitedWhileAway >= 60 {
                     Text("Plus \(Durations.short(ledger.waitedWhileAway)) of waiting while you were away")
-                        .font(.caption).foregroundStyle(.tertiary).padding(.leading, 16)
+                        .font(.caption).foregroundStyle(.secondaryInk).padding(.leading, 16)
                 }
                 ForEach(ledger.byProject().prefix(8), id: \.project) { row in
                     HStack {
                         Text(row.project).lineLimit(1).truncationMode(.middle)
                         Spacer()
                         if row.background >= 60 {
-                            Text("bg \(Durations.short(row.background))").foregroundStyle(.tertiary)
+                            Text("bg \(Durations.short(row.background))").foregroundStyle(.secondaryInk)
                                 .help("Background jobs running after the turn ended")
                         }
-                        Text("worked \(Durations.short(row.working))").foregroundStyle(.secondary)
+                        Text("worked \(Durations.short(row.working))").foregroundStyle(.secondaryInk)
                         Text("waited \(Durations.short(row.waiting))")
                             .foregroundStyle(row.waiting > row.working ? AnyShapeStyle(SessionStatus.needsInput.color)
-                                                                       : AnyShapeStyle(.secondary))
+                                                                       : AnyShapeStyle(.secondaryInk))
                             .frame(minWidth: 84, alignment: .trailing)
                     }
                     .font(.caption)
@@ -304,7 +307,7 @@ private struct TodaySummary: View {
     private func stat(_ color: Color, _ seconds: Double, _ label: String) -> some View {
         HStack(spacing: 4) {
             Circle().fill(color).frame(width: 6, height: 6)
-            Text("\(Durations.short(seconds)) \(label)").font(.caption).foregroundStyle(.secondary)
+            Text("\(Durations.short(seconds)) \(label)").font(.caption).foregroundStyle(.secondaryInk)
         }
     }
 }
@@ -312,7 +315,7 @@ private struct TodaySummary: View {
 private struct Banner: View {
     let text: String
     var body: some View {
-        Text(text).font(.caption).foregroundStyle(.secondary)
+        Text(text).font(.caption).foregroundStyle(.secondaryInk)
             .padding(.horizontal, 12).padding(.vertical, 8)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.yellow.opacity(0.12))
@@ -327,6 +330,8 @@ struct SessionRow: View {
     var compact = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
+    /// Increase Contrast: the task in full primary and paused rows undimmed, so their text keeps its 7:1.
+    @IncreasedContrast private var increased
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
@@ -340,10 +345,10 @@ struct SessionRow: View {
                         .lineLimit(1).truncationMode(.middle)
                     if !compact { AgentBadge(agent: session.agent) }
                     if session.customName != nil, !compact {
-                        Text(session.project).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Text(session.project).font(.caption).foregroundStyle(.secondaryInk).lineLimit(1)
                     }
                     if !compact, let desktop = session.screenPosition?.desktop {
-                        Text("Desktop \(desktop)").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Text("Desktop \(desktop)").font(.caption).foregroundStyle(.secondaryInk).lineLimit(1)
                             .help("Mission Control desktop this session's Terminal window is on")
                     }
                     if session.isCurrent, !compact {
@@ -367,12 +372,12 @@ struct SessionRow: View {
                         // The status as a shape and a word, not just the badge's colour.
                         StatusMarkView(session: session, size: 9).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
                         Text(session.status.label)
-                            .foregroundStyle(session.isPaused ? Color.secondary : session.status.color)
+                            .foregroundStyle(session.isPaused ? Color.secondaryInk : session.status.color)
                             .lineLimit(1).fixedSize()
                         if session.statusSince > Date.distantPast.addingTimeInterval(1) {
                             TimelineView(.elapsed(since: session.statusSince, reduceMotion: reduceMotion, voiceOver: voiceOver)) { context in
                                 Text(Durations.short(context.date.timeIntervalSince(session.statusSince)))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(.secondaryInk)
                             }
                         }
                     }
@@ -381,11 +386,11 @@ struct SessionRow: View {
                 if compact {
                     HStack(spacing: 5) {
                         AgentBadge(agent: session.agent)
-                        Text(session.task ?? session.project).font(.system(size: 12)).foregroundStyle(.primary.opacity(0.85))
+                        Text(session.task ?? session.project).font(.system(size: 12)).foregroundStyle(.primary.opacity(increased ? 1 : 0.85))
                             .lineLimit(1)
                     }
                 } else if let task = session.task {
-                    Text(task).font(.system(size: 12.5)).foregroundStyle(.primary.opacity(0.85)).lineLimit(1)
+                    Text(task).font(.system(size: 12.5)).foregroundStyle(.primary.opacity(increased ? 1 : 0.85)).lineLimit(1)
                 }
                 if let activity = session.activity, let since = session.activitySince {
                     // Live: what it's running and for how long; long calls turn orange so a hung one stands out.
@@ -395,17 +400,17 @@ struct SessionRow: View {
                             Image(systemName: "gearshape.2").imageScale(.small).accessibilityHidden(true)
                             Text(activity).lineLimit(1).truncationMode(.middle)
                             Text("· " + Durations.short(context.date.timeIntervalSince(since)))
-                                .foregroundStyle(seconds > 600 ? AnyShapeStyle(SessionStatus.working.color) : AnyShapeStyle(.secondary))
+                                .foregroundStyle(seconds > 600 ? AnyShapeStyle(SessionStatus.working.color) : AnyShapeStyle(.secondaryInk))
                         }
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(.secondaryInk)
                     }
                 } else if let detail = session.detail {
-                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                    Text(detail).font(.caption).foregroundStyle(.secondaryInk)
                         .lineLimit(session.status == .needsInput ? 2 : 1)
                 }
             }
             // Paused: still readable, clearly set aside.
-            .opacity(session.isPaused ? 0.5 : 1)
+            .opacity(session.isPaused && !increased ? 0.5 : 1)
         }
         .padding(.horizontal, 8).padding(.vertical, 7)
         .background(RoundedRectangle(cornerRadius: 6).fill(isSelected ? Color.accentColor.opacity(0.15) : .clear))
@@ -446,7 +451,8 @@ private struct NumberBadge: View {
             } else {
                 Circle().fill(status.color)
             }
-            // White on light-mode fills, near-black on dark-mode ones: at least 4.5:1 (StatusPalette).
+            // White on light-mode fills, near-black on dark-mode ones: at least 4.5:1, and 7:1 with Increase
+            // Contrast (StatusPalette).
             Text("\(number)")
                 .font(.system(size: 11, weight: .bold, design: .rounded))
                 .foregroundStyle(status == .unknown && !isPaused ? Color.primary : SessionStatus.onInk)
@@ -480,8 +486,11 @@ private struct PausedLabelStyle: LabelStyle {
 
 struct AgentBadge: View {
     let agent: Agent
-    /// Claude's orange, darker in light mode and lighter in dark so the 9 pt name reads (5:1 on the popover).
-    static let claude = Color(nsColor: NSColor(name: nil) { StatusPalette.RGB(hex: $0.isDark ? 0xE8876A : 0xA34A2A).nsColor })
+    /// Claude's orange, darker in light mode and lighter in dark so the 9 pt name reads (5:1 on the popover, 7:1 with
+    /// Increase Contrast).
+    static let claude = Color(nsColor: NSColor(name: nil) {
+        StatusPalette.claude(dark: $0.isDark, highContrast: $0.isHighContrast).nsColor
+    })
     var body: some View {
         Text(agent == .claude ? "Claude" : "Codex")
             .font(.system(size: 9, weight: .bold))

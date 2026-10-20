@@ -86,11 +86,12 @@ struct FloatingDots: View {
     let sessions: [Session]
     let onOpen: (Session) -> Void
     let onShowList: () -> Void
+    @IncreasedContrast private var increased
 
     var body: some View {
         HStack(spacing: 7) {
             if sessions.isEmpty {
-                Image(systemName: "terminal").foregroundStyle(.secondary).accessibilityLabel("No sessions")
+                Image(systemName: "terminal").foregroundStyle(.secondaryInk).accessibilityLabel("No sessions")
             }
             ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
                 Button { onOpen(session) } label: {
@@ -100,7 +101,8 @@ struct FloatingDots: View {
                         } else {
                             Circle().fill(session.dotColor)
                         }
-                        // White on light-mode fills, near-black on dark-mode ones: at least 4.5:1 (StatusPalette).
+                        // White on light-mode fills, near-black on dark-mode ones: at least 4.5:1, and 7:1 with Increase
+                        // Contrast (StatusPalette).
                         Text("\(index + 1)")
                             .font(.system(size: 10, weight: .bold, design: .rounded))
                             .foregroundStyle(session.dotIsHollow ? Color.primary : SessionStatus.onInk)
@@ -114,7 +116,8 @@ struct FloatingDots: View {
                     .overlay(alignment: .bottomTrailing) {
                         StatusMarkView(session: session, size: 8)
                             .padding(1)
-                            .background(Circle().fill(Color(nsColor: .windowBackgroundColor)))
+                            .background(Circle().fill(increased ? .solidBackground
+                                                                                     : Color(nsColor: .windowBackgroundColor)))
                             .offset(x: 2, y: 2)
                     }
                 }
@@ -124,15 +127,14 @@ struct FloatingDots: View {
                                                          paused: session.isPaused))
             }
             Button(action: onShowList) {
-                Image(systemName: "list.bullet").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
+                Image(systemName: "list.bullet").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondaryInk)
                     .accessibilityLabel("Show all sessions")
             }
             .buttonStyle(.plain)
             .help("Show all sessions")
         }
         .padding(.horizontal, 9).padding(.vertical, 6)
-        .background(Capsule().fill(.regularMaterial))
-        .overlay(Capsule().stroke(Color.primary.opacity(0.12)))
+        .contrastBackground(Capsule(), edge: 0.12)
         .fixedSize()
     }
 }
