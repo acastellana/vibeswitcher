@@ -34,6 +34,9 @@ struct WorktreesTests {
 
     func scratch() -> URL { temp.url("wt-scratch").appendingPathComponent("merge") }
 
+    /// The test and build lock a merge's tests take: a scratch one, never the Mac-wide one other runs hold.
+    var lock: TestLock { TestLock(directory: temp.url("wt-lock").path) }
+
     /// The heads of `main` and of `slug`'s branch.
     func heads(_ root: String, _ slug: String) -> (main: String, tip: String) {
         (Git.run(["rev-parse", "main"], in: root).output, Git.run(["rev-parse", Worktrees.branch(slug)], in: root).output)
@@ -53,7 +56,7 @@ struct WorktreesTests {
         try commit("c.txt", "sea\n", in: root)
         let (main, tip) = heads(root, "add-b")
         let scratch = scratch()
-        let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test -f b.txt && test -f c.txt", scratch: scratch)
+        let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test -f b.txt && test -f c.txt", scratch: scratch, lock: lock)
         guard case .passed(let tested) = checked else { Issue.record("\(checked)"); return }
         #expect(Worktrees.fastForward(root: root, base: "main", to: tested, from: main) == .merged)
         #expect(FileManager.default.fileExists(atPath: root + "/b.txt"))
@@ -82,7 +85,7 @@ struct WorktreesTests {
                 + " && mkdir -p \"$HOME/.vibeswitcher\" && echo host >> \"$HOME/.vibeswitcher/app.log\" && touch \"$TMPDIR/left\""
         }
         let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, setup: seen("init"), test: seen("test"),
-                                              scratch: scratch(), home: home)
+                                              scratch: scratch(), home: home, lock: lock)
         guard case .passed = checked else { Issue.record("\(checked)"); return }
         let expected = [home.path, home.path, home.path + "/tmp/"]
         for name in ["init", "test"] {
@@ -92,24 +95,24 @@ struct WorktreesTests {
         #expect(!FileManager.default.fileExists(atPath: home.path))
         // A failed run: its output names the folder, and that goes too.
         guard case .failed(let output) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: seen("failed") + " && false",
-                                                                 scratch: scratch(), home: home)
+                                                                 scratch: scratch(), home: home, lock: lock)
         else { Issue.record("it passed"); return }
         #expect(output.hasPrefix("HOME, CFFIXED_USER_HOME and TMPDIR: \(home.path) (a scratch folder, removed afterwards)\n"), "\(output)")
         #expect(!FileManager.default.fileExists(atPath: home.path))
         // A failed init_command says so first, as before.
         guard case .failed(let setup) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, setup: "false", test: "true",
-                                                                scratch: scratch(), home: home)
+                                                                scratch: scratch(), home: home, lock: lock)
         else { Issue.record("it passed"); return }
         #expect(setup.hasPrefix("init_command failed:\nHOME, CFFIXED_USER_HOME and TMPDIR: \(home.path)"), "\(setup)")
         // One left by a run that died with its process: emptied before the next.
         try FileManager.default.createDirectory(atPath: home.path + "/stale", withIntermediateDirectories: true)
-        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test ! -e \"$HOME/stale\"", scratch: scratch(), home: home)
+        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test ! -e \"$HOME/stale\"", scratch: scratch(), home: home, lock: lock)
             == .passed(tip))
         #expect(!FileManager.default.fileExists(atPath: home.path))
         // Without one given, it's next to the scratch worktree.
         let place = scratch()
         let beside = place.deletingLastPathComponent().appendingPathComponent("merge-home").path
-        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test \"$HOME\" = \(beside)", scratch: place) == .passed(tip))
+        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test \"$HOME\" = \(beside)", scratch: place, lock: lock) == .passed(tip))
         #expect(!FileManager.default.fileExists(atPath: beside))
         #expect(listed(root).count == 2)
     }
@@ -119,10 +122,10 @@ struct WorktreesTests {
         let worktree = try Worktrees.create(root: root, slug: "x")
         try commit("a.txt", "worker\n", in: worktree)
         var (main, tip) = heads(root, "x")
-        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "false", scratch: scratch()).isFailure)
+        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "false", scratch: scratch(), lock: lock).isFailure)
         try commit("a.txt", "main\n", in: root)
         (main, tip) = heads(root, "x")
-        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch()) == .conflict)
+        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch(), lock: lock) == .conflict)
         // The branch and its worktree are left as they were.
         #expect(try String(contentsOfFile: worktree + "/a.txt", encoding: .utf8) == "worker\n")
         #expect(heads(root, "x").tip == tip)
@@ -136,7 +139,7 @@ struct WorktreesTests {
         try commit("c.txt", "c\n", in: root)
         let main = Git.run(["rev-parse", "main"], in: root).output
         let tip = Git.run(["rev-parse", "HEAD"], in: worktree).output
-        guard case .passed(let tested) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test -f l.txt", scratch: scratch())
+        guard case .passed(let tested) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test -f l.txt", scratch: scratch(), lock: lock)
         else { Issue.record("not passed"); return }
         #expect(Git.run(["log", "--format=%s", "\(main)..\(tested)"], in: root).output == "change m.txt\nchange l.txt")
         #expect(Git.run(["rev-parse", "\(tested)~2"], in: root).output == main)
@@ -158,7 +161,7 @@ struct WorktreesTests {
         let tip = Git.run(["rev-parse", "HEAD"], in: worktree).output
         // A rebase would replay the first commit onto main and conflict again; the branch is squashed instead.
         guard case .passed(let tested) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test -f c.txt && test -f s.txt",
-                                                                 scratch: scratch())
+                                                                 scratch: scratch(), lock: lock)
         else { Issue.record("not passed"); return }
         #expect(Git.run(["rev-parse", "\(tested)~1"], in: root).output == main)
         #expect(Git.run(["rev-list", "--merges", tested], in: root).output.isEmpty)
@@ -167,7 +170,7 @@ struct WorktreesTests {
         // A merge whose changes conflict with the base is still a conflict.
         try commit("s.txt", "main's s\n", in: root)
         let moved = Git.run(["rev-parse", "main"], in: root).output
-        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: moved, test: "true", scratch: scratch()) == .conflict)
+        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: moved, test: "true", scratch: scratch(), lock: lock) == .conflict)
     }
 
     /// The user's own work in progress in the main checkout, on files the merge doesn't change, doesn't stop it,
@@ -294,7 +297,7 @@ struct WorktreesTests {
         let worktree = try Worktrees.create(root: root, slug: "t")
         try commit("t.txt", "t\n", in: worktree)
         let (main, tip) = heads(root, "t")
-        guard case .passed(let tested) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch())
+        guard case .passed(let tested) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch(), lock: lock)
         else { Issue.record("not passed"); return }
         // The worker commits again while the tests run: that commit was never tested.
         try commit("late.txt", "late\n", in: worktree)
@@ -310,7 +313,7 @@ struct WorktreesTests {
         try "editing\n".write(toFile: worktree + "/d.txt", atomically: true, encoding: .utf8)
         // The commit is tested where no one works: the worker's edit is neither a conflict nor tested, and stays.
         let (main, tip) = heads(root, "d")
-        let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test \"$(cat d.txt)\" = d", scratch: scratch())
+        let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test \"$(cat d.txt)\" = d", scratch: scratch(), lock: lock)
         guard case .passed = checked else { Issue.record("\(checked)"); return }
         #expect(try String(contentsOfFile: worktree + "/d.txt", encoding: .utf8) == "editing\n")
     }
@@ -536,13 +539,13 @@ struct WorktreesTests {
         try commit("c.txt", "c\n", in: root)
         let (main, tip) = heads(root, "h")
         // A base that isn't there.
-        guard case .error(let missing) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: "no-such-branch", test: "true", scratch: scratch())
+        guard case .error(let missing) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: "no-such-branch", test: "true", scratch: scratch(), lock: lock)
         else { Issue.record("not an error"); return }
         #expect(missing.contains("not on a conflict") && missing.contains("no-such-branch"), "\(missing)")
         // A hook that refuses the rebase.
         try failingHook("pre-rebase", saying: "pre-rebase hook says no", in: root)
         let scratch = scratch()
-        guard case .error(let hooked) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch)
+        guard case .error(let hooked) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch, lock: lock)
         else { Issue.record("not an error"); return }
         #expect(hooked.contains("pre-rebase hook says no") && !hooked.lowercased().contains("conflicts"), "\(hooked)")
         #expect(!FileManager.default.fileExists(atPath: scratch.path))
@@ -559,7 +562,7 @@ struct WorktreesTests {
         try commit("d.txt", "d\n", in: root)
         try failingHook("pre-commit", saying: "pre-commit hook says no", in: root)
         let (main, tip) = heads(root, "q")
-        let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch())
+        let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch(), lock: lock)
         guard case .error(let text) = checked else { Issue.record("\(checked)"); return }
         #expect(text.contains("pre-commit hook says no"), "\(text)")
     }
@@ -581,7 +584,7 @@ struct WorktreesTests {
         // On a busy Mac the shell may not have started the child in time: given twice as long, until it has.
         while child == nil, timeout < hangGuard {
             let started = Date()
-            checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: test, scratch: scratch, timeout: timeout)
+            checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: test, scratch: scratch, timeout: timeout, lock: lock)
             took = Date().timeIntervalSince(started)
             child = (try? String(contentsOfFile: marks + "/child", encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
             if child == nil { timeout *= 2 }
@@ -612,7 +615,7 @@ struct WorktreesTests {
         Thread.detachNewThread {
             let checked = ShellCancel.with(token) {
                 Worktrees.rebaseAndTest(root: root, commit: tip, onto: main,
-                                        test: "sleep \(ShellTests.childRuns) & echo $! > \(marks)/child; wait", scratch: scratch)
+                                        test: "sleep \(ShellTests.childRuns) & echo $! > \(marks)/child; wait", scratch: scratch, lock: lock)
             }
             result.set(checked)
         }
@@ -628,7 +631,7 @@ struct WorktreesTests {
         // Cancelled before it began, nothing is set up.
         let early = ShellCancel()
         early.cancel()
-        #expect(ShellCancel.with(early) { Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch) } == .cancelled)
+        #expect(ShellCancel.with(early) { Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch, lock: lock) } == .cancelled)
         #expect(listed(root).count == 2)
     }
 

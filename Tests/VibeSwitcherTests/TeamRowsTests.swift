@@ -195,6 +195,11 @@ struct TeamRowsTests {
         var audited = Self.task("v", .review, since: 60)
         audited.verifier = "v-v"
         #expect(row(audited, ["v-v": Self.working]).state == "In review")
+        // Review none, but its branch touches sensitive_paths: merge refuses it until an audit passes, and the row says so.
+        var sensitive = Self.task("s", .review, since: 60)
+        sensitive.auditNeeded = "It touches sensitive_paths (.github/ci.yml), so it's treated as audit whatever its review says."
+        #expect(row(sensitive).state == "Needs audit" && row(sensitive).mark == .review)
+        #expect(row(sensitive).activity?.contains(".github/ci.yml") == true)
     }
 
     @Test func theScorecardSaysHowManyMergedWithNoAudit() {

@@ -563,10 +563,11 @@ public enum Worktrees {
     /// The commands run with HOME, CFFIXED_USER_HOME and TMPDIR in `home` (by default next to `scratch`), made empty
     /// before and removed after, as workers and verifiers run the tests: never the user's own ~/.vibeswitcher,
     /// Keychain or app.log. A failed or hung run's output starts by naming it.
-    /// The commands hold the Mac-wide test and build lock (`lock`; nil: none) while they run.
+    /// The commands hold the test and build lock `lock` while they run (nil: none): the app's merge gives the Mac-wide
+    /// one (`TestLock.standard()`), tests a scratch one.
     public static func rebaseAndTest(root: String, commit: String, onto base: String, setup: String? = nil, test: String?,
                                      scratch: URL, home: URL? = nil, timeout: TimeInterval = testTimeout,
-                                     lock: TestLock? = TestLock.standard()) -> Check {
+                                     lock: TestLock?) -> Check {
         let path = scratch.path
         let home = (home ?? scratch.deletingLastPathComponent().appendingPathComponent(scratch.lastPathComponent + "-home")).path
         let cancel = ShellCancel.current
@@ -666,7 +667,7 @@ public enum Worktrees {
     /// command's whole output goes to `<logs>/init.log` and `<logs>/test.log` for the finders to read, with
     /// `<logs>/run.txt` saying how it went (written last: a folder without it holds no finished run).
     public static func auditRun(root: String, commit: String, setup: String?, test: String?, scratch: URL, home: URL,
-                                logs: URL, timeout: TimeInterval = testTimeout, lock: TestLock? = TestLock.standard()) -> AuditRun {
+                                logs: URL, timeout: TimeInterval = testTimeout, lock: TestLock?) -> AuditRun {
         let path = scratch.path, homePath = home.path
         let remove = {
             ShellCancel.with(nil) {

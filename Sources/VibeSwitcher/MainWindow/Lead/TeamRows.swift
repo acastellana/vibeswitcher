@@ -59,8 +59,8 @@ struct TeamRow: Identifiable, Equatable {
     var id: String { task.id }
     var group: Group
     var mark: Mark
-    /// In words: "Working", "Rework 1", "In review", "Ready to merge", "Needs you", "Failed", "Blocked", "Stalled",
-    /// "Queued", "Merged", "Folded", "Abandoned".
+    /// In words: "Working", "Rework 1", "In review", "Needs audit", "Ready to merge", "Needs you", "Failed", "Blocked",
+    /// "Stalled", "Queued", "Merged", "Folded", "Abandoned".
     var state: String
     /// When the current stage began; nil when there's no clock to show (or nothing says when it began).
     var since: Date?
@@ -271,6 +271,11 @@ enum TeamRows {
             if task.evidence?.passes == true {
                 row.mark = .merge
                 row.state = "Ready to merge"
+            } else if task.reviewLevel == .none, task.verifier == nil, task.evidence == nil, let why = task.auditNeeded {
+                // Review none, but its branch touches sensitive_paths (say): merge refuses it until an audit passes.
+                row.mark = .review
+                row.state = "Needs audit"
+                row.activity = why
             } else if task.reviewLevel == .none, task.verifier == nil, task.evidence == nil {
                 // Review none: its worker's done report is what merge takes, with the merge's own test run.
                 row.mark = .merge

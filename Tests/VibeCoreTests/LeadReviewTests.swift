@@ -200,6 +200,8 @@ struct LeadReviewTests: LeadTeamFixture {
         let (root, runtime, lead) = try team(test: "true")
         try reported(lead, runtime, root: root, file: ".github/workflows/ci.yml")
         #expect(BoardStore(root: root).load().reports?.last?.text.contains("treated as audit") == true)
+        // The board says why, so the Team view shows it needs an audit rather than "Ready to merge".
+        #expect(BoardStore(root: root).load().task("add-b")?.auditNeeded?.contains(".github/workflows/ci.yml") == true)
         let refused = lead.call("merge", ["task": "add-b"])
         #expect(refused.isError, "\(refused.text)")
         #expect(refused.text.contains("touches sensitive_paths (.github/workflows/ci.yml), so it's treated as audit whatever its review says"), "\(refused.text)")

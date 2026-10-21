@@ -136,8 +136,14 @@ extension LeadTeamFixture {
     func lead(_ root: String, _ runtime: FakeRuntime) throws -> LeadToolset {
         let grant = try vault.startLead(root: root, branch: Worktrees.currentBranch(root: root) ?? "main")
         try vault.bind(grant, root: root, session: try #require(runtime.me.session))
-        return LeadToolset(root: root, runtime: runtime, vault: vault(for: runtime))
+        let lead = LeadToolset(root: root, runtime: runtime, vault: vault(for: runtime))
+        lead.testLock = testLock
+        return lead
     }
+
+    /// The test and build lock this fixture's merges and audits take: a scratch one in its vault's folder (removed
+    /// with it), never the Mac-wide one (other workers' suites and builds hold that).
+    var testLock: TestLock { TestLock(directory: vault.folder.appendingPathComponent("test-lock").path) }
 
     /// What the lead last started as `name` (worker-<slug>, verify-<slug>): its session and its tool server's arguments.
     func launched(_ name: String, _ runtime: FakeRuntime) throws -> (session: String, args: [String]) {
@@ -174,7 +180,9 @@ extension LeadTeamFixture {
         let grant = try issuer.issue(role: role, root: root, task: task)
         try issuer.bind(grant, root: root, session: session)
         let seat = FakeSeat(runtime, agent: LeadAgent(pid: 6000, tty: "ttys080", session: session))
-        return LeadToolset(root: root, runtime: seat, vault: vault(for: seat))
+        let toolset = LeadToolset(root: root, runtime: seat, vault: vault(for: seat))
+        toolset.testLock = testLock
+        return toolset
     }
 }
 

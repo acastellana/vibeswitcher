@@ -114,6 +114,9 @@ public final class LeadToolset: MCPToolset {
     var power: () -> PowerState? = { PowerState.load() }
     /// How often merge reads the load again while it waits for it to drop below load_threshold.
     var loadPoll: TimeInterval = 15
+    /// The lock merge's and an audit's test runs hold (see `TestLock`): the tool server sets the Mac-wide one, every
+    /// project's merges sharing it with `vs-heavy`; nil (tests that don't give a scratch one): none.
+    public var testLock: TestLock?
 
     /// The server for the session it runs in. `expected` and `expectedTask` are what it was started as (`--role`,
     /// `--task`): when they don't match the session's role, it serves nothing. `wait`: how long to wait for the
@@ -1130,7 +1133,7 @@ public final class LeadToolset: MCPToolset {
         let run = Self.sharedRun(at: logs) ?? {
             Worktrees.auditRun(root: root, commit: head, setup: workflow.initCommand, test: workflow.testCommand,
                                scratch: vault.scratch(root: root, "audit-\(slug)"), home: vault.scratch(root: root, "audit-\(slug)-home"),
-                               logs: logs, timeout: workflow.testTimeout)
+                               logs: logs, timeout: workflow.testTimeout, lock: testLock)
         }()
         if case .cancelled = run.outcome {
             throw Problem(text: "The audit of \(slug) was cancelled during its build and test run; no finder started.")
@@ -1452,7 +1455,7 @@ public final class LeadToolset: MCPToolset {
         let tested: String
         switch Worktrees.rebaseAndTest(root: root, commit: commit, onto: current, setup: workflow.initCommand, test: workflow.mergeChecks,
                                        scratch: vault.scratch(root: root, "merge-\(slug)"), home: vault.scratch(root: root, "merge-\(slug)-home"),
-                                       timeout: workflow.testTimeout) {
+                                       timeout: workflow.testTimeout, lock: testLock) {
         case .passed(let commit): tested = commit
         case .cancelled:
             // Stopped by the caller: nothing is known about the work, and the task stays as it was.
@@ -2102,6 +2105,8 @@ public final class LeadToolset: MCPToolset {
         let recorded = Result { try vault.reportDone(root: root, task: slug, commit: done ? head : nil) }
         // A pass that left Important findings open still isn't mergeable.
         let blocking = standing == nil ? [] : vault.audits(root: root, task: slug)?.blocking ?? []
+        // Why it's audited; with neither that nor a standing verdict, the merge's own test run is its check.
+        let needed = standing == nil && done ? reviewNeeded(slug, commit: head) : nil
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             // Kept, folded or abandoned by the lead: a late report doesn't change that.
@@ -2121,6 +2126,7 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].evidence = nil
             }
             if done { board.tasks[index].report = summary }
+            board.tasks[index].auditNeeded = needed
             board.tasks[index].blocker = done ? nil : (summary.isEmpty ? "The worker is blocked." : summary)
         }
         let stands = standing.map { verdict in
@@ -2131,8 +2137,6 @@ public final class LeadToolset: MCPToolset {
                     : ", with Important findings open (\(blocking.map { "\(slug):\($0.id)" }.joined(separator: ", "))) that merge refuses: dismiss_finding them, or have the worker fix them and commit, then audit(\(slug)).")
         }
         // No audit asked for: the merge's own test run is the check.
-        // Why it's audited; with neither that nor a standing verdict, the merge's own test run is its check.
-        let needed = standing == nil ? reviewNeeded(slug, commit: head) : nil
         let unaudited = standing == nil && needed == nil
         var next: String?
         if let needed {

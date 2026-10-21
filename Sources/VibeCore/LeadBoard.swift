@@ -535,6 +535,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// Its review level as the lead set it (for showing, and never lowering: merge goes by the stricter of this and
     /// the vault's copy, which only the lead writes). nil: none, the default.
     public var review: Review?
+    /// Why its worker's last done report needs an audit before merge though its review is none (its branch touches
+    /// sensitive_paths, say), as report found it; nil when it needs none (for showing: merge checks again).
+    public var auditNeeded: String?
 
     /// Its review level: none unless the lead set audit.
     public var reviewLevel: Review { review ?? .none }

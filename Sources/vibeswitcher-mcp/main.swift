@@ -266,12 +266,18 @@ func hostAnswers(_ vault: LeadVault) -> Bool {
 let toolset = MCPHostedToolset(attempt: {
     guard hostAnswers(.standard) else { return nil }
     let toolset = LeadToolset(arguments: arguments, runtime: runtime, wait: 3)
+    // Merges and audits hold the Mac-wide test and build lock around their tests, as `vs-heavy` does.
+    toolset.testLock = TestLock.standard()
     // No tools: that's the host's answer, unless it couldn't be asked by then either.
     if toolset.tools.isEmpty && !hostAnswers(.standard) { return nil }
     // The lead's decision and progress logs go into the repository every few minutes (and after each merge).
     toolset.keepRecords()
     return toolset
-}, giveUp: { LeadToolset(arguments: arguments, runtime: runtime) })
+}, giveUp: {
+    let toolset = LeadToolset(arguments: arguments, runtime: runtime)
+    toolset.testLock = TestLock.standard()
+    return toolset
+})
 // This binary as it is now: when an app update replaces it, the server switches to the new one between requests,
 // once the session host answers (the new build asks it first thing).
 let watch = BinaryWatch(path: runtime.server, running: handover?.binary)
