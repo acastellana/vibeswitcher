@@ -3,9 +3,9 @@ import VibeCore
 
 /// The Brief me button's state: pressing it writes a thirty-second briefing of what happened lately across the
 /// projects VibeSwitcher leads (`Briefing`), shows it, and reads it aloud, through ElevenLabs when there's a key (saved
-/// in Settings, or found in your shell: `BriefingKey`), else with the Mac's voice. Pressing it again stops it. Nothing leaves the Mac but on a press (Brief me,
-/// Play, Test voice): the briefing's notes go to headless Claude, its text to ElevenLabs when there's a key.
-/// Used on the main thread; the writing, the Keychain and ElevenLabs run off it.
+/// in Settings, or found in your shell: `BriefingKey`), else with the Mac's voice. Pressing it again stops it. Nothing
+/// leaves the Mac but on a press (Brief me, Play, Test voice): the briefing's notes go to headless Claude, its text to
+/// ElevenLabs when there's a key. Used on the main thread; the writing, the key's lookup and ElevenLabs run off it.
 ///
 /// The global model (`.all`) also hands out one per led project (`project(_:)`, Brief me on <project>): the same
 /// inputs, key, language and voice, its briefing written from that project alone, and its own 'since' stamp. They
@@ -249,8 +249,9 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
     /// the shell takes a moment).
     func checkKey() {
         let keyStore = keyStore
-        keyStore.refresh()
         DispatchQueue.global(qos: .userInitiated).async {
+            // Off the main thread too: a briefing may be reading the shell, and this waits for it.
+            keyStore.refresh()
             let source = keyStore.resolve().source
             DispatchQueue.main.async { self.keySource = source }
         }

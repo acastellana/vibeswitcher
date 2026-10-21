@@ -38,7 +38,10 @@ enum BriefingKeySource: Equatable, Sendable {
 /// value is held in memory only: never in the defaults, a log, the phone or a file.
 final class BriefingKey: SecretStore, @unchecked Sendable {
     static let variable = "ELEVENLABS_API_KEY"
-    static let filePath = "~/.config/elevenlabs/key.env"
+    /// The key file, from the home folder (looked up where it's read: a test's is its scratch home).
+    static let fileInHome = ".config/elevenlabs/key.env"
+    /// As Settings names it.
+    static var filePath: String { "~/" + fileInHome }
     /// Bigger than this, it's not a key file: not read.
     static let fileLimit = 64 * 1024
 
@@ -72,7 +75,7 @@ final class BriefingKey: SecretStore, @unchecked Sendable {
                 return nil
             }
         }, file: {
-            readFile(NSHomeDirectory() + filePath.dropFirst())
+            readFile(NSHomeDirectory() + "/" + fileInHome)
         })
     }
 

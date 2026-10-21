@@ -53,10 +53,11 @@ struct LoginShellVariableTests {
     /// A .zshrc that waits (on a prompt, a network mount): stopped after the timeout, with what it started.
     @Test func aShellThatWaitsIsStopped() throws {
         let pidFile = scratch.url("shell-pid").path
-        let shell = try shell("echo starting; echo $$ > '\(pidFile)'; /bin/sleep 30; \(Self.name)=late; export \(Self.name)")
+        let shell = try shell("echo $$ > '\(pidFile)'; echo starting; /bin/sleep 60; \(Self.name)=late; export \(Self.name)")
         let started = Date()
-        #expect(LoginShellVariable.read(Self.name, shell: shell, timeout: 0.5) == .timedOut)
-        #expect(Date().timeIntervalSince(started) < 10)
+        // Long enough for the fake shell to start on a loaded Mac (a full run: 0.5 s wasn't), far under its sleep.
+        #expect(LoginShellVariable.read(Self.name, shell: shell, timeout: 5) == .timedOut)
+        #expect(Date().timeIntervalSince(started) < 30)
         // The shell and its sleep are gone.
         let pid = try #require(Int32(String(contentsOfFile: pidFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
         #expect(kill(pid, 0) != 0)
