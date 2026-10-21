@@ -11,8 +11,6 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
-# One build or test run at a time on this Mac (scripts/lib/test-lock.sh): the build waits while another holds it.
-source scripts/lib/test-lock.sh
 
 # --- The keychain search list (this block is the same in setup-signing.sh and build-app.sh; test-signing.sh checks) ---
 LOGIN_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
@@ -95,11 +93,10 @@ if [[ -f "$SIGNING_DIR/password" ]]; then
 fi
 
 scratch_tmpdir vs-build
-test_lock scripts/build-app.sh
-# Without fd 9: nothing they leave running holds the lock.
-swift build -c release 9>&-
-BIN="$(swift build -c release --show-bin-path 9>&-)"
-test_unlock
+# One build or test run at a time on this Mac, every project's included (Resources/bin/vs-heavy): the build waits while
+# another holds the lock, saying for whom.
+Resources/bin/vs-heavy --as scripts/build-app.sh swift build -c release
+BIN="$(swift build -c release --show-bin-path)"
 APP="build/VibeSwitcher.app"
 
 rm -rf "$APP"
@@ -109,6 +106,9 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 # The phone web app (Phone Access), served by the app itself.
 mkdir -p "$APP/Contents/Resources"
 cp -R Web "$APP/Contents/Resources/Web"
+# vs-heavy, on PATH in every session the app starts (the session host puts this folder first).
+mkdir -p "$APP/Contents/Resources/bin"
+cp Resources/bin/vs-heavy "$APP/Contents/Resources/bin/vs-heavy"
 # SwiftPM resource bundles (SwiftTerm's Metal shaders); found through Bundle.main.resourceURL.
 for bundle in "$BIN"/*.bundle; do [[ -e "$bundle" ]] && cp -R "$bundle" "$APP/Contents/Resources/"; done
 # Sign with the stable local identity if it exists (scripts/setup-signing.sh), so macOS keeps granted

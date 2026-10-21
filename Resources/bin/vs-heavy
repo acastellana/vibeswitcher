@@ -1,0 +1,68 @@
+#!/bin/bash
+# vs-heavy [--as WHAT] COMMAND [ARGS...]: runs COMMAND under the Mac-wide lock for heavy work (a full test suite, a
+# release build), so that every project's workers, merges and audits run one at a time on this Mac. Two suites side by
+# side starved each other and the benches (3–4 min each at load 30–50, measured 2026-10-21). While another run holds
+# the lock, this one waits, saying who holds it (again each time that changes), then runs COMMAND and exits with its
+# status. VibeSwitcher puts it on PATH in every session it starts (the app bundle's Contents/Resources/bin); merge and an
+# audit's shared run take the same lock around their test command (`TestLock` in VibeCore).
+#
+# The lock is a flock on $VIBESWITCHER_TEST_LOCK_DIR/test-build.lock (default /private/tmp/vibeswitcher-<uid>/), held on
+# this script's fd 9: the kernel lets go of it when the script exits, Ctrl-C and kill -9 too, so a run that died leaves
+# no lock behind (its .holder note says who held it last; the next holder writes its own). macOS has no flock(1):
+# /usr/bin/perl takes it on fd 9 and exits, and the lock stays with the script's fd. COMMAND runs without fd 9, so
+# nothing it leaves running keeps the lock.
+#
+# COMMAND gets VIBESWITCHER_TEST_LOCK naming the lock: a vs-heavy under one that holds it (a test script the merge's
+# test command runs, a suite under a wrapped build) runs its command at once rather than wait for its own ancestor.
+# --as WHAT: who the holder note names (default: the command line).
+set -uo pipefail
+
+what=""
+if [[ ${1:-} == --as ]]; then
+    what=${2:?vs-heavy --as WHAT COMMAND [ARGS...]}
+    shift 2
+fi
+[[ ${1:-} == -- ]] && shift
+if (( $# == 0 )); then
+    echo "usage: vs-heavy [--as WHAT] COMMAND [ARGS...]: runs COMMAND under the Mac-wide lock for heavy work" >&2
+    exit 2
+fi
+[[ -n $what ]] || what=$(printf '%s' "$*" | tr '\n' ' ' | cut -c 1-120)
+
+lock_dir=${VIBESWITCHER_TEST_LOCK_DIR:-/private/tmp/vibeswitcher-$(id -u)}
+# As TestLock names it (no trailing slash), so a run under a holder of the Swift side's lock knows it.
+while [[ $lock_dir == */ && $lock_dir != / ]]; do lock_dir=${lock_dir%/}; done
+lock_file=$lock_dir/test-build.lock
+
+# Under a holder of this very lock: it's ours already.
+[[ ${VIBESWITCHER_TEST_LOCK:-} == "$lock_file" ]] && exec "$@"
+
+mkdir -p -m 700 "$lock_dir" || { echo "vs-heavy: can't make $lock_dir for the heavy-work lock" >&2; exit 1; }
+# /private/tmp is everyone's: a folder someone else made there (or a link) isn't taken as this user's.
+[[ -O $lock_dir && ! -L $lock_dir ]] || { echo "vs-heavy: $lock_dir isn't a folder of yours: the heavy-work lock can't be kept there" >&2; exit 1; }
+exec 9>> "$lock_file" || { echo "vs-heavy: can't open $lock_file" >&2; exit 1; }
+
+# Takes the flock on fd 9, waiting as long as it takes; while it waits, says who holds it (from the .holder note), and
+# again whenever that changes.
+/usr/bin/perl -MFcntl=:flock -e '
+    my ($file, $what) = @ARGV;
+    open(my $fh, ">&=", 9) or exit 2;
+    exit 0 if flock($fh, LOCK_EX | LOCK_NB);
+    my ($start, $said) = (time, "");
+    $| = 1;
+    until (flock($fh, LOCK_EX | LOCK_NB)) {
+        my $holder = "a run that did not say who it is";
+        if (open(my $note, "<", "$file.holder")) { my $line = <$note>; chomp $line if defined $line; $holder = $line if defined $line && length $line; }
+        if ($holder ne $said) {
+            print STDERR ($said eq "" ? "vs-heavy: $what: waiting for the Mac-wide test and build lock ($file), held by $holder.\n"
+                                      : "vs-heavy: $what: still waiting; now held by $holder.\n");
+            $said = $holder;
+        }
+        select(undef, undef, undef, 0.5);
+    }
+    printf STDERR "vs-heavy: %s: took the test and build lock after %d s.\n", $what, time - $start;
+' "$lock_file" "$what" || { echo "vs-heavy: couldn't take the test and build lock" >&2; exit 1; }
+
+echo "pid $$, $what in $PWD, since $(date +%H:%M:%S)" > "$lock_file.holder"
+export VIBESWITCHER_TEST_LOCK=$lock_file
+"$@" 9>&-

@@ -1,14 +1,15 @@
 import Darwin
 import Foundation
 
-/// One build or test run at a time on this Mac: the lock scripts/test.sh and scripts/build-app.sh take around swift
-/// build and swift test (scripts/lib/test-lock.sh), which merge and an audit's shared run take around their commands
-/// too. Two suites side by side starved each other and the benches (3–4 min each at load 30–50, measured 2026-10-21).
+/// One build or test run at a time on this Mac, for every project: the lock `vs-heavy` takes around the command it's
+/// given (scripts/test.sh and scripts/build-app.sh around swift build and swift test, workers around a full suite or a
+/// release build), which merge and an audit's shared run take around their commands too. Two suites side by side
+/// starved each other and the benches (3–4 min each at load 30–50, measured 2026-10-21).
 /// A flock on `<directory>/test-build.lock`: the kernel lets go of it when its holder exits, however it ends, so no
 /// stale lock outlives a run. `<lock>.holder` says who holds it, for the one waiting.
 public struct TestLock: Sendable {
     /// Set to the lock's path for the commands run under its holder: a script among them doesn't wait for its own
-    /// ancestor (scripts/lib/test-lock.sh reads it).
+    /// ancestor (`vs-heavy` reads it).
     public static let heldVariable = "VIBESWITCHER_TEST_LOCK"
     /// Where the lock is kept instead of /private/tmp/vibeswitcher-<uid> (tests).
     public static let directoryVariable = "VIBESWITCHER_TEST_LOCK_DIR"
@@ -18,6 +19,28 @@ public struct TestLock: Sendable {
 
     public init(directory: String) {
         path = (directory as NSString).appendingPathComponent("test-build.lock")
+    }
+
+    /// `vs-heavy`, the command that runs its arguments under this lock, for any project (Resources/bin/vs-heavy in the
+    /// repository): in the app bundle's Contents/Resources/bin, which every session the app starts has on its PATH.
+    public static let command = "vs-heavy"
+
+    /// The folder holding `vs-heavy` for a program at `executable` in the app bundle's Contents/MacOS (the session
+    /// host); nil when there's none there (a `swift build`'s binaries).
+    public static func commandFolder(besideExecutable executable: String) -> String? {
+        let contents = URL(fileURLWithPath: executable).resolvingSymlinksInPath().deletingLastPathComponent().deletingLastPathComponent()
+        let folder = contents.appendingPathComponent("Resources/bin").path
+        return FileManager.default.isExecutableFile(atPath: (folder as NSString).appendingPathComponent(command)) ? folder : nil
+    }
+
+    /// The sessions' environment `base` with `folder` first on its PATH (once): the login shell's path_helper keeps
+    /// what PATH had after the system's folders, and the user's own startup files add to it.
+    public static func sessionEnvironment(_ base: [String: String], adding folder: String?) -> [String: String] {
+        guard let folder else { return base }
+        var environment = base
+        let rest = (base["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin").split(separator: ":").map(String.init).filter { $0 != folder }
+        environment["PATH"] = ([folder] + rest).joined(separator: ":")
+        return environment
     }
 
     /// The Mac-wide lock; nil when this process runs under its holder already (`heldVariable` names it).

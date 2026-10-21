@@ -3,12 +3,39 @@ import Foundation
 import Testing
 @testable import VibeCore
 
-/// One build or test run at a time on this Mac: scripts/test.sh and scripts/build-app.sh take a flock around swift
-/// build and swift test (scripts/lib/test-lock.sh), and merge's and an audit's test runs take the same one (`TestLock`).
-/// The second run waits, saying who holds it; the kernel lets go of it when its holder exits, however it ends. Here
-/// every lock is in a scratch folder (VIBESWITCHER_TEST_LOCK_DIR), never the Mac-wide one this suite's own run holds.
+/// One build or test run at a time on this Mac, for every project: `vs-heavy` runs its command under a flock (every
+/// session the app starts has it on PATH; scripts/test.sh and scripts/build-app.sh run swift build and swift test under
+/// it), and merge's and an audit's test runs take the same one (`TestLock`). The second run waits, saying who holds it;
+/// the kernel lets go of it when its holder exits, however it ends. Here every lock is in a scratch folder
+/// (VIBESWITCHER_TEST_LOCK_DIR), never the Mac-wide one other runs hold.
 struct TestLockTests {
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    static let vsHeavyScript = repo.appendingPathComponent("Resources/bin/vs-heavy")
+
+    /// `vs-heavy arguments` on the lock in `lockDirectory`, in a process group of its own (as a terminal runs it, so
+    /// Ctrl-C reaches all of it), its output (both streams) to `output`.
+    static func runVsHeavy(_ arguments: [String], lockDirectory: String, output: String, environment extra: [String: String] = [:]) throws -> Process {
+        try FileManager.default.createDirectory(atPath: (output as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: output, contents: nil)
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        process.arguments = ["-e", "setpgrp(0, 0); exec @ARGV or die", vsHeavyScript.path] + arguments
+        var environment = ProcessInfo.processInfo.environment
+        environment[TestLock.directoryVariable] = lockDirectory
+        environment[TestLock.heldVariable] = nil
+        environment.merge(extra) { $1 }
+        process.environment = environment
+        let handle = try #require(FileHandle(forWritingAtPath: output))
+        process.standardOutput = handle
+        process.standardError = handle
+        process.standardInput = FileHandle.nullDevice
+        try process.run()
+        return process
+    }
+
+    static func lines(_ path: String) -> [String] {
+        ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
+    }
     let temp = Scratch()
     /// This test's folder: every path below is in it (`Scratch.url` gives a new one each call).
     let root: URL
@@ -113,6 +140,85 @@ struct TestLockTests {
         #expect(TestLock.standard([TestLock.heldVariable: path])?.path.hasSuffix("tmp/vibeswitcher-\(getuid())/test-build.lock") == true)
     }
 
+    // MARK: vs-heavy (any project's heavy work)
+
+    /// `vs-heavy --as name sh -c '<log start>; sleep; <log end>'` on this test's scratch lock; its output in `<name>.out`.
+    func heavy(_ name: String, sleep: Int = 1, log: String, extra: [String: String] = [:]) throws -> (process: Process, output: String) {
+        let output = url("\(name).out").path
+        let q = RecentProjects.shellQuote
+        let script = "echo \(name) start >> \(q(log)); sleep \(sleep); echo \(name) end >> \(q(log))"
+        return (try Self.runVsHeavy(["--as", name, "/bin/sh", "-c", script], lockDirectory: url("heavy-locks").path, output: output, environment: extra), output)
+    }
+
+    @Test func twoVsHeavyRunsGoOneAfterTheOtherTheSecondSayingWhoHoldsIt() throws {
+        let log = url("heavy.log").path
+        let a = try heavy("genswap-suite", log: log)
+        #expect(eventually { lines(log) == ["genswap-suite start"] })
+        let b = try heavy("tge-build", log: log)
+        a.process.waitUntilExit()
+        b.process.waitUntilExit()
+        #expect(a.process.terminationStatus == 0 && b.process.terminationStatus == 0, "\(lines(a.output)) \(lines(b.output))")
+        #expect(lines(log) == ["genswap-suite start", "genswap-suite end", "tge-build start", "tge-build end"])
+        let said = lines(b.output).joined(separator: "\n")
+        #expect(said.contains("vs-heavy: tge-build: waiting for the Mac-wide test and build lock"), "\(said)")
+        #expect(said.contains("held by pid ") && said.contains(", genswap-suite in "), "\(said)")
+        #expect(said.contains("vs-heavy: tge-build: took the test and build lock after"), "\(said)")
+        #expect(lines(a.output).isEmpty, "\(lines(a.output))")
+        // The command's status is vs-heavy's.
+        let failing = try Self.runVsHeavy(["/bin/sh", "-c", "exit 7"], lockDirectory: url("heavy-locks").path, output: url("failing.out").path)
+        failing.waitUntilExit()
+        #expect(failing.terminationStatus == 7)
+    }
+
+    @Test func ctrlCOnVsHeavyLetsGoOfTheLock() throws {
+        let log = url("heavy.log").path
+        let a = try heavy("a", sleep: 60, log: log)
+        #expect(eventually { lines(log) == ["a start"] })
+        let b = try heavy("b", log: log)
+        #expect(eventually { lines(b.output).joined().contains("waiting for") })
+        let interrupted = Date()
+        kill(-a.process.processIdentifier, SIGINT)
+        a.process.waitUntilExit()
+        b.process.waitUntilExit()
+        #expect(a.process.terminationStatus != 0)
+        #expect(b.process.terminationStatus == 0, "\(lines(b.output))")
+        #expect(Date().timeIntervalSince(interrupted) < 30, "b waited for a's sleep instead")
+        #expect(lines(log) == ["a start", "b start", "b end"])
+    }
+
+    @Test func aVsHeavyRunKilledOutrightLeavesNoStaleLock() throws {
+        let log = url("heavy.log").path
+        let a = try heavy("a", sleep: 60, log: log)
+        #expect(eventually { lines(log) == ["a start"] })
+        kill(-a.process.processIdentifier, SIGKILL)
+        a.process.waitUntilExit()
+        let note = url("heavy-locks/test-build.lock.holder").path
+        #expect(lines(note).first?.contains(", a in ") == true)
+        let b = try heavy("b", log: log)
+        b.process.waitUntilExit()
+        #expect(b.process.terminationStatus == 0 && !lines(b.output).joined().contains("waiting for"), "\(lines(b.output))")
+        #expect(lines(note).first?.contains(", b in ") == true)
+    }
+
+    @Test func underAHolderOfTheSameLockVsHeavyRunsAtOnce() throws {
+        let log = url("heavy.log").path
+        let a = try heavy("outer", sleep: 2, log: log)
+        #expect(eventually { lines(log) == ["outer start"] })
+        // A test script the merge's test command runs (or a suite under a wrapped build): its own ancestor holds it.
+        let lock = TestLock(directory: url("heavy-locks").path)
+        let inner = try heavy("inner", sleep: 0, log: log, extra: [TestLock.heldVariable: lock.path])
+        inner.process.waitUntilExit()
+        #expect(inner.process.terminationStatus == 0 && lines(inner.output).isEmpty, "\(lines(inner.output))")
+        #expect(lines(log) == ["outer start", "inner start", "inner end"])
+        a.process.waitUntilExit()
+        // The lock the Swift side takes is the one vs-heavy takes: merge waits for it too.
+        let held = try heavy("held", sleep: 2, log: log)
+        #expect(eventually { lines(log).last == "held start" })
+        guard case .busy(let holder) = lock.acquire(as: "merge", timeout: 0.5) else { Issue.record("taken beside vs-heavy"); return }
+        #expect(holder?.contains(", held in ") == true)
+        held.process.waitUntilExit()
+    }
+
     // MARK: scripts/test.sh
 
     /// A folder with a fake `swift` (it logs "<RUN> <verb> start|end" around a sleep of SWIFT_SLEEP seconds) and a
@@ -159,9 +265,7 @@ struct TestLockTests {
         return (process, output)
     }
 
-    func lines(_ path: String) -> [String] {
-        ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "").split(separator: "\n").map(String.init)
-    }
+    func lines(_ path: String) -> [String] { Self.lines(path) }
 
     @Test func twoRunsOfTheScriptRunOneAfterTheOtherTheSecondSayingWhoHoldsTheLock() throws {
         let (bin, log) = try fakes()
@@ -174,9 +278,9 @@ struct TestLockTests {
         // Never side by side: all of A's swift, then all of B's.
         #expect(lines(log) == ["A build start", "A build end", "A test start", "A test end", "B build start", "B build end", "B test start", "B test end"])
         let said = lines(b.output).joined(separator: "\n")
-        #expect(said.contains("scripts/test.sh: waiting for the Mac-wide test and build lock"), "\(said)")
-        #expect(said.contains("held by pid \(a.process.processIdentifier), scripts/test.sh in \(Self.repo.path)"), "\(said)")
-        #expect(said.contains("scripts/test.sh: took the test and build lock after"), "\(said)")
+        #expect(said.contains("vs-heavy: scripts/test.sh: waiting for the Mac-wide test and build lock"), "\(said)")
+        #expect(said.contains(", scripts/test.sh in \(Self.repo.path), since"), "\(said)")
+        #expect(said.contains("vs-heavy: scripts/test.sh: took the test and build lock after"), "\(said)")
         #expect(!lines(a.output).joined().contains("waiting for"))
     }
 
@@ -208,11 +312,12 @@ struct TestLockTests {
         }
         // Its note still names it; the lock went with it.
         let note = url("script-locks/test-build.lock.holder").path
-        #expect(lines(note).first?.hasPrefix("pid \(a.process.processIdentifier), scripts/test.sh") == true)
+        #expect(lines(note).first?.contains(", scripts/test.sh in \(Self.repo.path)") == true)
+        let killed = lines(note).first
         let b = try start("B", bin: bin)
         b.process.waitUntilExit()
         #expect(b.process.terminationStatus == 0, "\(lines(b.output))")
         #expect(!lines(b.output).joined().contains("waiting for"), "\(lines(b.output))")
-        #expect(lines(note).first?.hasPrefix("pid \(b.process.processIdentifier), scripts/test.sh") == true)
+        #expect(lines(note).first != killed && lines(note).first?.contains(", scripts/test.sh in \(Self.repo.path)") == true)
     }
 }

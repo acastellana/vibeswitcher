@@ -51,7 +51,9 @@ var config = HostServer.Config(
     lockPath: lockPath,
     shell: shell,
     launcher: ensureLauncher(),
-    baseEnvironment: environment.filter { inherited.contains($0.key) },
+    // With vs-heavy on PATH (Mac-wide one-at-a-time heavy work, for every project's sessions).
+    baseEnvironment: TestLock.sessionEnvironment(environment.filter { inherited.contains($0.key) },
+                                                 adding: TestLock.commandFolder(besideExecutable: executable)),
     hostBuild: build)
 config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600
 if let interval = value(after: "--housekeeping").flatMap(TimeInterval.init), interval > 0 { config.housekeepingInterval = interval }
