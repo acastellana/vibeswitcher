@@ -8,6 +8,8 @@ enum MainMenu {
     /// Retitled while the menu is open with what the restart does (`HostClient.RestartPlan.title`); off unless the
     /// host is outdated.
     static let restartHostTitle = "Restart Session Host"
+    /// Retitled while the menu is open with the selected lead's project; off when no lead is selected.
+    static let briefProjectTitle = "Brief Me on Project"
 
     /// Sets the menu bar, and the menus AppKit fills in itself (the window list, the help search).
     static func install() {
@@ -114,6 +116,10 @@ enum MainMenu {
             item("Stop", #selector(MainWindowController.stopAction(_:)), "."),
             item("Export Chat…", #selector(MainWindowController.exportChatAction(_:)), "e", [.command, .shift]),
             item("Start Page", #selector(MainWindowController.showHomeAction(_:)), "h", [.command, .shift]),
+            .separator(),
+            // The briefings: across every led project (the toolbar's), then the selected lead's project alone.
+            item("Brief Me", #selector(MainWindowController.briefMeAction(_:)), "b", [.command, .shift]),
+            item(briefProjectTitle, #selector(MainWindowController.briefProjectAction(_:)), "b", [.command, .option, .shift]),
             .separator(),
         ] + (1...9).map { item("Session \($0)", #selector(MainWindowController.selectSessionByTag(_:)), "\($0)", tag: $0) })
         submenu("Window", [

@@ -6,6 +6,8 @@ struct InspectorView: View {
     @ObservedObject var model: WindowModel
     @ObservedObject var host: HostClient
     @ObservedObject var leads: LeadController
+    /// Brief me on the lead's project, over its Team tab (none in the benches).
+    var briefing: BriefingModel? = nil
     @AppStorage("inspectorTab") private var tab = "overview"
 
     var body: some View {
@@ -23,6 +25,10 @@ struct InspectorView: View {
             Divider()
             if let row = model.selectedRow {
                 if tab == "team", let lead {
+                    if let briefing {
+                        ProjectBriefingBar(model: briefing.project(lead.root))
+                        Divider()
+                    }
                     LeadTeamPane(root: lead.root, board: lead.board, decisions: leads.decisions[lead.root] ?? [],
                                  seen: TeamRows.seen(model.allRows, now: Date()), open: { session in
                         if let id = UUID(uuidString: session) { model.select(hostID: id) }

@@ -7,26 +7,13 @@ struct BriefMeButton: View {
     @ObservedObject var model: BriefingModel
     /// Pressed (whatever it did): the window's toolbar opens its panel.
     var pressed: () -> Void = {}
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         Button {
             model.press()
             pressed()
         } label: {
-            switch model.phase {
-            case .writing:
-                // A static hourglass with Reduce Motion: the spinner turns.
-                if reduceMotion {
-                    Image(systemName: "hourglass").accessibilityHidden(true)
-                } else {
-                    ProgressView().controlSize(.small).frame(width: 16, height: 16)
-                }
-            case .speaking:
-                Image(systemName: "stop.fill").accessibilityHidden(true)
-            case .idle:
-                Image(systemName: "text.bubble").accessibilityHidden(true)
-            }
+            BriefingPhaseIcon(phase: model.phase)
         }
         .buttonStyle(.borderless)
         .accessibilityLabel("Brief me")
@@ -51,6 +38,68 @@ struct BriefMeButton: View {
     }
 }
 
+/// What Brief me shows for its phase: a speech bubble, a spinner while it's written (a static hourglass with Reduce
+/// Motion), a stop square while it's read.
+struct BriefingPhaseIcon: View {
+    let phase: BriefingModel.Phase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        switch phase {
+        case .writing:
+            if reduceMotion {
+                Image(systemName: "hourglass").accessibilityHidden(true)
+            } else {
+                ProgressView().controlSize(.small).frame(width: 16, height: 16)
+            }
+        case .speaking:
+            Image(systemName: "stop.fill").accessibilityHidden(true)
+        case .idle:
+            Image(systemName: "text.bubble").accessibilityHidden(true)
+        }
+    }
+}
+
+/// The lead's Team tab header: Brief me on <project> (pressing it again cancels or stops it, as the toolbar's does),
+/// and the briefing's panel under it, from the press until it's closed.
+struct ProjectBriefingBar: View {
+    @ObservedObject var model: BriefingModel
+
+    var body: some View {
+        let name = model.projectName ?? "this project"
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Button {
+                    model.press()
+                } label: {
+                    HStack(spacing: 6) {
+                        BriefingPhaseIcon(phase: model.phase).frame(width: 16, height: 16)
+                        Text("Brief me on \(name)").lineLimit(1).truncationMode(.middle)
+                    }
+                }
+                .controlSize(.small)
+                .accessibilityLabel("Brief me on \(name)")
+                .accessibilityValue(BriefMeButton.state(model.phase))
+                .help(Self.help(model.phase, name: name))
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            if !model.panelHidden, model.phase == .writing || model.briefing != nil {
+                Divider()
+                BriefingPanel(model: model) { model.panelHidden = true }
+            }
+        }
+    }
+
+    static func help(_ phase: BriefingModel.Phase, name: String) -> String {
+        switch phase {
+        case .idle: return "Brief me on \(name): 30 seconds, spoken, on what landed, what's running, what's blocked and its questions for you"
+        case .writing: return "Writing the briefing… click to cancel"
+        case .speaking: return "Stop reading the briefing"
+        }
+    }
+}
+
 /// The briefing's text (selectable), when it was written, and Play / Stop.
 struct BriefingPanel: View {
     @ObservedObject var model: BriefingModel
@@ -60,7 +109,7 @@ struct BriefingPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Text("Briefing").font(.headline)
+                Text(model.projectName.map { "Briefing on \($0)" } ?? "Briefing").font(.headline).lineLimit(1)
                 if let briefing = model.briefing {
                     Text(Self.written(briefing)).font(.caption).foregroundStyle(.secondary)
                 }
@@ -81,7 +130,8 @@ struct BriefingPanel: View {
                 }
             }
             if model.phase == .writing {
-                Text("Writing what happened lately…").font(.callout).foregroundStyle(.secondary)
+                Text(model.projectName.map { "Writing what happened in \($0)…" } ?? "Writing what happened lately…")
+                    .font(.callout).foregroundStyle(.secondary)
             } else if let briefing = model.briefing {
                 Text(briefing.text)
                     .font(.callout)
@@ -112,5 +162,7 @@ struct BriefMeToolbarItem: View {
             .popover(isPresented: $shown, arrowEdge: .bottom) {
                 BriefingPanel(model: model).frame(width: 380)
             }
+            // Brief Me from the window's menu opens the panel too.
+            .onChange(of: model.revealed) { shown = model.phase != .idle || model.briefing != nil }
     }
 }

@@ -6,8 +6,18 @@ import VibeCore
 /// Settings, else with the Mac's voice. Pressing it again stops it. Nothing leaves the Mac but on a press (Brief me,
 /// Play, Test voice): the briefing's notes go to headless Claude, its text to ElevenLabs when there's a key.
 /// Used on the main thread; the writing, the Keychain and ElevenLabs run off it.
+///
+/// The global model (`.all`) also hands out one per led project (`project(_:)`, Brief me on <project>): the same
+/// inputs, key, language and voice, its briefing written from that project alone, and its own 'since' stamp. They
+/// share one voice: a briefing that starts stops the one under way, whichever it was.
 final class BriefingModel: ObservableObject, @unchecked Sendable {
     enum Phase: Equatable { case idle, writing, speaking }
+
+    /// What it briefs on: every led project, or the one at a root.
+    enum Scope: Hashable {
+        case all
+        case project(root: String)
+    }
 
     @Published private(set) var phase: Phase = .idle
     /// The last briefing written (this launch).
@@ -16,6 +26,8 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
     @Published private(set) var voiceNotice: String?
     /// The menu bar's panel closed until the next briefing.
     @Published var panelHidden = false
+    /// Counts the window menu's presses: the views that hold the panel open it (`reveal()`).
+    @Published private(set) var revealed = 0
     /// Whether an ElevenLabs key is saved (nil: not looked yet), and what the last save said.
     @Published private(set) var keySaved: Bool?
     @Published private(set) var keyNotice: String?
@@ -26,14 +38,25 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
         var sessions: [Session]
     }
 
+    let scope: Scope
     private let snapshot: () -> Snapshot
     private let language: () -> BriefingLanguage
     private let generate: @Sendable (String) -> String?
     private let keyStore: SecretStore
     private let client: ElevenLabs
-    private let voice: BriefingVoice
+    private let shared: Shared
+    private var voice: BriefingVoice { shared.voice }
     private let defaults: UserDefaults
     private let now: () -> Double
+
+    /// What the global model and its projects' share: the voice, which of them it speaks for, and the projects' models.
+    private final class Shared {
+        let voice: BriefingVoice
+        weak var owner: BriefingModel?
+        var projects: [String: BriefingModel] = [:]
+
+        init(voice: BriefingVoice) { self.voice = voice }
+    }
     /// ElevenLabs' audio for the last text it read: Play reads it again without another request.
     private var audio: (text: String, data: Data)?
     /// Each press's number: what an earlier one finds when it comes back late is dropped.
@@ -41,25 +64,71 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
 
     static let lastKey = "briefingLastAt"
 
-    init(snapshot: @escaping () -> Snapshot, language: @escaping () -> BriefingLanguage, keyStore: SecretStore,
-         generate: @escaping @Sendable (String) -> String? = { ClaudeHeadless.brief($0) }, client: ElevenLabs = ElevenLabs(),
-         voice: BriefingVoice? = nil, defaults: UserDefaults = .standard, now: @escaping () -> Double = { Date().timeIntervalSince1970 }) {
+    /// Where a scope's last briefing time is kept: the global one's as it always was, each project's apart (by its
+    /// root), so neither moves the other's 'since'.
+    static func lastKey(_ scope: Scope) -> String {
+        switch scope {
+        case .all: return lastKey
+        case .project(let root): return "briefingLastAt.project:" + root
+        }
+    }
+
+    convenience init(snapshot: @escaping () -> Snapshot, language: @escaping () -> BriefingLanguage, keyStore: SecretStore,
+                     generate: @escaping @Sendable (String) -> String? = { ClaudeHeadless.brief($0) }, client: ElevenLabs = ElevenLabs(),
+                     voice: BriefingVoice? = nil, defaults: UserDefaults = .standard, now: @escaping () -> Double = { Date().timeIntervalSince1970 }) {
+        self.init(scope: .all, snapshot: snapshot, language: language, keyStore: keyStore, generate: generate, client: client,
+                  shared: Shared(voice: voice ?? BriefingSpeaker()), defaults: defaults, now: now)
+        let shared = shared
+        shared.voice.finished = { [weak shared] in
+            guard let owner = shared?.owner, owner.phase == .speaking else { return }
+            owner.phase = .idle
+        }
+    }
+
+    private init(scope: Scope, snapshot: @escaping () -> Snapshot, language: @escaping () -> BriefingLanguage, keyStore: SecretStore,
+                 generate: @escaping @Sendable (String) -> String?, client: ElevenLabs, shared: Shared, defaults: UserDefaults,
+                 now: @escaping () -> Double) {
+        self.scope = scope
         self.snapshot = snapshot
         self.language = language
         self.keyStore = keyStore
         self.generate = generate
         self.client = client
-        self.voice = voice ?? BriefingSpeaker()
+        self.shared = shared
         self.defaults = defaults
         self.now = now
-        self.voice.finished = { [weak self] in
-            guard let self, self.phase == .speaking else { return }
-            self.phase = .idle
-        }
     }
 
-    /// When the last briefing was written: the next one covers what's new since (or the last 3 hours, if longer).
-    var lastBriefed: Double? { defaults.object(forKey: Self.lastKey) as? Double }
+    /// Brief me on the project at `root`: the same one each time it's asked for (the global model's; a project's
+    /// answers for its own root).
+    func project(_ root: String) -> BriefingModel {
+        if case .project(root) = scope { return self }
+        if let model = shared.projects[root] { return model }
+        let model = BriefingModel(scope: .project(root: root), snapshot: snapshot, language: language, keyStore: keyStore,
+                                  generate: generate, client: client, shared: shared, defaults: defaults, now: now)
+        shared.projects[root] = model
+        return model
+    }
+
+    /// The project's name (its folder's), for a project's model.
+    var projectName: String? {
+        guard case .project(let root) = scope else { return nil }
+        return (root as NSString).lastPathComponent
+    }
+
+    /// When this scope's last briefing was written: the next one covers what's new since (or the last 3 hours, if
+    /// longer).
+    var lastBriefed: Double? { defaults.object(forKey: Self.lastKey(scope)) as? Double }
+
+    /// Takes the shared voice for this model: the one it spoke for (writing or reading) stops.
+    private func claimVoice() {
+        if let owner = shared.owner, owner !== self, owner.phase != .idle {
+            owner.run += 1
+            owner.phase = .idle
+            voice.stop()
+        }
+        shared.owner = self
+    }
 
     // MARK: The button
 
@@ -81,13 +150,21 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
         speak(briefing.text, language: briefing.language.code)
     }
 
+    /// Brief Me from the window's menu: presses it, and has the panel shown.
+    func pressFromMenu() {
+        press()
+        panelHidden = false
+        revealed += 1
+    }
+
     func stop() {
         run += 1
-        voice.stop()
+        if shared.owner === self { voice.stop() }
         phase = .idle
     }
 
     private func brief() {
+        claimVoice()
         run += 1
         let id = run
         phase = .writing
@@ -97,10 +174,9 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
         let language = language()
         let since = lastBriefed
         let at = now()
-        let generate = generate
-        let keyStore = keyStore
+        let (scope, generate, keyStore) = (scope, generate, keyStore)
         DispatchQueue.global(qos: .userInitiated).async {
-            let input = Briefing.compose(Self.sources(taken.boards), sessions: taken.sessions, lastBriefed: since, now: at)
+            let input = Self.input(taken, scope: scope, lastBriefed: since, now: at)
             let written = Briefing.write(input, language: language, generate: generate, now: at)
             let key = keyStore.read()
             DispatchQueue.main.async { self.written(written, key: key, run: id) }
@@ -110,12 +186,13 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
     private func written(_ text: BriefingText, key: String?, run id: Int) {
         guard id == run, phase == .writing else { return }
         briefing = text
-        defaults.set(text.at, forKey: Self.lastKey)
+        defaults.set(text.at, forKey: Self.lastKey(scope))
         start(text.text, language: text.language.code, key: key, run: id)
     }
 
     /// Reads `text` aloud: the key is read off the main thread first.
     private func speak(_ text: String, language: String) {
+        claimVoice()
         run += 1
         let id = run
         voiceNotice = nil
@@ -128,7 +205,7 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
     }
 
     private func start(_ text: String, language: String, key: String?, run id: Int) {
-        guard id == run else { return }
+        guard id == run, shared.owner === self else { return }
         phase = .speaking
         guard let key, !key.isEmpty else { return voice.say(text, language: language) }
         if let audio, audio.text == text, voice.play(audio.data) { return }
@@ -144,7 +221,7 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
 
     /// ElevenLabs answered: its audio plays, or the Mac's voice reads it with a one-line notice why.
     private func spoken(_ result: Result<Data, ElevenLabs.Failure>, text: String, language: String, run id: Int) {
-        guard id == run, phase == .speaking else { return }
+        guard id == run, phase == .speaking, shared.owner === self else { return }
         switch result {
         case .success(let data):
             audio = (text, data)
@@ -190,6 +267,18 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
     }
 
     // MARK: Inputs
+
+    /// What a briefing of `scope` is written from: every led project, or the one at a root (its board when it's led
+    /// now, else an empty one: its log still says what happened).
+    static func input(_ snapshot: Snapshot, scope: Scope, lastBriefed: Double?, now: Double) -> BriefingInput {
+        switch scope {
+        case .all:
+            return Briefing.compose(sources(snapshot.boards), sessions: snapshot.sessions, lastBriefed: lastBriefed, now: now)
+        case .project(let root):
+            let source = sources([root: snapshot.boards[root] ?? LeadBoard()])[0]
+            return Briefing.compose(project: source, sessions: snapshot.sessions, lastBriefed: lastBriefed, now: now)
+        }
+    }
 
     /// The newest part of a progress log read (a day's log is a few KB; a long-lived one is cut here).
     static let logTail = 256 * 1024

@@ -58,7 +58,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         guard !mounted else { return }
         mounted = true
         sidebarHost.rootView = AnyView(SessionListView(model: model, leads: leads, actions: actions))
-        inspectorHost.rootView = AnyView(InspectorView(model: model, host: host, leads: leads)
+        inspectorHost.rootView = AnyView(InspectorView(model: model, host: host, leads: leads, briefing: briefing)
             .environment(\.holdLeadQuestion) { [weak leads] question in leads?.hold(question) })
         headerHost.rootView = AnyView(SessionHeaderView(model: model, host: host, actions: actions))
         endedHost.rootView = AnyView(EndedBar(model: model, actions: actions))
@@ -657,12 +657,28 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return model.selectedRow != nil && (model.chatShown || pane.currentView != nil)
         case #selector(endSessionAction(_:)):
             return model.selectedRow.map { $0.hostID != nil && actions.isLive($0) } == true
+        case #selector(briefMeAction(_:)): return briefing != nil
+        case #selector(briefProjectAction(_:)):
+            let lead = model.selectedRow.flatMap(leads.lead(for:))
+            menuItem.title = lead.map { "Brief Me on \(($0.root as NSString).lastPathComponent)" } ?? MainMenu.briefProjectTitle
+            return briefing != nil && lead != nil
         default: break
         }
         return true
     }
 
     @objc func showHomeAction(_ sender: Any?) { model.showHome() }
+
+    /// Session › Brief Me: the toolbar's, its panel opened.
+    @objc func briefMeAction(_ sender: Any?) { briefing?.pressFromMenu() }
+
+    /// Session › Brief Me on <project>: the selected lead's project, in the Team tab (shown, the inspector opened).
+    @objc func briefProjectAction(_ sender: Any?) {
+        guard let briefing, let lead = model.selectedRow.flatMap(leads.lead(for:)) else { return NSSound.beep() }
+        UserDefaults.standard.set("team", forKey: "inspectorTab")
+        if inspectorItem.isCollapsed { toggleInspectorAction(sender) }
+        briefing.project(lead.root).pressFromMenu()
+    }
     @objc func showTerminalAction(_ sender: Any?) { model.showsChat = false }
     @objc func showChatAction(_ sender: Any?) { model.showsChat = true }
 
