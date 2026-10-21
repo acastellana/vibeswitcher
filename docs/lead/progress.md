@@ -881,3 +881,5 @@
 - 2026-10-21 14:48 Planned the-picker-card-never: The picker card never reads a half-drawn screen
 - 2026-10-21 14:55 Audit of the-briefing-uses: complete, clean, round 2: 1 Important closed, 1 Pre-existing open
 - 2026-10-21 15:01 Merged the-briefing-uses: The briefing uses ELEVENLABS_API_KEY from the user's shell when no key is saved
+- 2026-10-21 15:01 Update: Merged: the briefing uses ELEVENLABS_API_KEY from your shell — **Merged** the-briefing-uses (head 3b716e7).
+- 2026-10-21 15:01 Started a worker on the-picker-card-never
