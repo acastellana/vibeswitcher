@@ -79,17 +79,20 @@ public struct BriefingInput: Equatable, Sendable {
     public var projects: [Project]
     public var waiting: [Waiting]
     public var waitingCount: Int
+    /// The one project a project briefing is about (`Briefing.compose(project:…)`); nil: every led project.
+    public var project: String? = nil
 
     public var isEmpty: Bool { projects.isEmpty && waiting.isEmpty }
 
     /// The lines the model reads: a project with nothing new is one line; one with news is a line, its entries, and
-    /// its open questions.
+    /// its open questions. A project briefing names its questions even when it's quiet: they're what it's for.
     public var lines: [String] {
         var lines: [String] = []
         for project in projects {
             let counts = Briefing.counts(project)
             if project.isQuiet {
                 lines.append("\(project.name): nothing new" + (counts.isEmpty ? "." : "; \(counts)."))
+                if self.project != nil { lines += project.questions.map { "  - Question for the user: \($0)" } }
                 continue
             }
             lines.append("\(project.name): \(project.newsCount) new in its log" + (counts.isEmpty ? "." : "; \(counts)."))
@@ -173,6 +176,15 @@ public enum Briefing {
                              waitingCount: waiting.count)
     }
 
+    /// The input for a briefing of one project at `now`: `source` alone, as `compose` takes it, since that project's
+    /// own last briefing (`lastBriefed`, kept apart from the global one's), and only the sessions of that project
+    /// that wait on the user.
+    public static func compose(project source: Source, sessions: [Session], lastBriefed: Double?, now: Double) -> BriefingInput {
+        var input = compose([source], sessions: sessions.filter { $0.project == source.name }, lastBriefed: lastBriefed, now: now)
+        input.project = input.projects.first?.name
+        return input
+    }
+
     /// A progress log's entries, oldest first, with their times ("- 2026-10-19 11:05 …", local time); entries
     /// without one are left out.
     static func entries(_ log: String) -> [(at: Double, text: String)] {
@@ -252,6 +264,7 @@ public enum Briefing {
 
     /// The briefing without a model, in English, from the same input: a sentence per project, then who waits.
     public static func template(_ input: BriefingInput) -> String {
+        if input.project != nil { return projectTemplate(input) }
         guard !input.isEmpty else { return "No project lead is running and no session needs you." }
         var sentences: [String] = []
         let quiet = input.projects.filter { $0.isQuiet && counts($0).isEmpty }
@@ -274,6 +287,28 @@ public enum Briefing {
         }
         return sentences.joined(separator: " ").replacingOccurrences(of: "..", with: ".")
     }
+
+    /// A project briefing without a model, in English: what's new and counted, the latest entry, the questions for
+    /// the user, and who waits.
+    static func projectTemplate(_ input: BriefingInput) -> String {
+        guard let project = input.projects.first else { return "No project lead is running there." }
+        var sentences: [String] = []
+        let counted = counts(project)
+        if project.isQuiet {
+            sentences.append("Nothing new in \(project.name)" + (counted.isEmpty ? "." : "; \(counted)."))
+        } else {
+            sentences.append("In \(project.name), \(project.newsCount) update\(project.newsCount == 1 ? "" : "s")" + (counted.isEmpty ? "." : "; \(counted)."))
+            if let latest = project.news.first { sentences.append("Latest: \(Summarizer.clip(latest, 120)).") }
+        }
+        if !project.questions.isEmpty {
+            sentences.append("For you: \(project.questions.map { Summarizer.clip($0, 120) }.joined(separator: " Also: ")).")
+        }
+        if input.waitingCount > 0 {
+            let names = input.waiting.map(\.name).joined(separator: ", ")
+            sentences.append("\(input.waitingCount) session\(input.waitingCount == 1 ? " needs" : "s need") you: \(names).")
+        }
+        return sentences.joined(separator: " ").replacingOccurrences(of: "..", with: ".").replacingOccurrences(of: "?.", with: "?")
+    }
 }
 
 /// The prompt a briefing is written from.
@@ -290,6 +325,7 @@ public enum BriefingPrompts {
 
     public static func prompt(_ input: BriefingInput, language: BriefingLanguage) -> String {
         let hours = max(1, Int(((input.now - input.since) / 3600).rounded()))
+        if let project = input.project { return prompt(input, project: project, hours: hours, language: language) }
         return """
             Write a spoken briefing of \(words.lowerBound) to \(words.upperBound) words (about 30 seconds aloud), \
             in \(language.name) (language code \(language.code)), of what happened in the last \(hours) hour\(hours == 1 ? "" : "s") \
@@ -301,6 +337,21 @@ public enum BriefingPrompts {
             Notes, newest first:
             \(Redaction.secrets(in: input.text))
             """
+    }
+
+    /// A project briefing's: the same budget and rules, about one project, ending with its questions for the user.
+    static func prompt(_ input: BriefingInput, project: String, hours: Int, language: BriefingLanguage) -> String {
+        """
+        Write a spoken briefing of \(words.lowerBound) to \(words.upperBound) words (about 30 seconds aloud), \
+        in \(language.name) (language code \(language.code)), of what happened in the project \(project) in the last \
+        \(hours) hour\(hours == 1 ? "" : "s"): what landed, what's running, what's blocked, and the questions waiting \
+        on the user. A few short sentences; if nothing is new, say so in one. End with the questions for the user, \
+        each in a few words, and which sessions need them, if any. Numbers as words a listener follows (e.g. "nine \
+        fixes landed"). Write the whole briefing in \(language.name), whatever language the notes are in.
+
+        Notes, newest first:
+        \(Redaction.secrets(in: input.text))
+        """
     }
 }
 
