@@ -915,3 +915,5 @@
 - 2026-10-21 23:27 Started a worker on a-new-worktree-builds
 - 2026-10-21 23:33 Audit of one-agent-owns-a: complete, clean, round 1: 3 Nit open
 - 2026-10-21 23:42 Merged one-agent-owns-a: One agent owns a change: audits only where risk calls for them, tests run once and one at a time
+- 2026-10-21 23:42 Update: Merged: the working policy is built into the tools (review levels, test once, one build at a time) — **Merged** one-agent-owns-a (22e0a72; audited, since it changes the guard rails).
+- 2026-10-21 23:44 Started a worker on every-lead-and-worker
