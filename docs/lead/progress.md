@@ -1,0 +1,868 @@
+# Progress
+
+- 2026-10-17 12:15 Planned evaluate-engineering: Evaluate engineering health (build, tests, code risks)
+- 2026-10-17 12:15 Planned evaluate-runtime: Evaluate runtime reliability and performance
+- 2026-10-17 12:15 Planned evaluate-ux-and-visual: Evaluate UX and visual quality (all surfaces)
+- 2026-10-17 12:15 Planned evaluate-security-and: Evaluate security and safety (phone, proxy, hooks, lead)
+- 2026-10-17 13:28 Planned lead-can-set-up: Lead can set up its own workflow (test command, base, setup)
+- 2026-10-17 13:28 Planned a-running-lead-notices: A running lead notices when its tool server is out of date
+- 2026-10-17 16:13 Started a worker on evaluate-engineering
+- 2026-10-17 16:13 Started a worker on evaluate-runtime
+- 2026-10-17 16:13 Started a worker on evaluate-ux-and-visual
+- 2026-10-17 16:20 Planned lead-sees-a-busy: Lead sees a busy worker as idle (status, read_session, message)
+- 2026-10-17 16:40 Started a worker on evaluate-security-and
+- 2026-10-17 16:40 Planned fix-the-chat-layout: Fix the chat layout storm that hangs the app
+- 2026-10-17 16:41 Started a worker on fix-the-chat-layout
+- 2026-10-17 16:41 Audit of evaluate-runtime: complete, clean
+- 2026-10-17 16:42 Audit of evaluate-engineering: complete, clean
+- 2026-10-17 16:49 Merged evaluate-runtime: Evaluate runtime reliability and performance
+- 2026-10-17 16:49 Planned the-lead-can-withdraw: The lead can withdraw a question that no longer applies
+- 2026-10-17 16:49 Merged evaluate-engineering: Evaluate engineering health (build, tests, code risks)
+- 2026-10-17 16:49 Started a worker on lead-can-set-up
+- 2026-10-17 16:50 Planned session-detection-never: Session detection never misses or misreads a session
+- 2026-10-17 16:51 Audit of evaluate-ux-and-visual: complete, clean
+- 2026-10-17 16:51 Merged evaluate-ux-and-visual: Evaluate UX and visual quality (all surfaces)
+- 2026-10-17 16:51 Planned standard-mac-window-and: Standard Mac window and edit keys (⌘W, Undo/Redo/Cut)
+- 2026-10-17 16:51 Planned first-run-and-one: First run and one Settings window
+- 2026-10-17 16:51 Planned accessibility-labels: Accessibility: labels, status beyond colour, contrast, motion
+- 2026-10-17 17:06 Planned a-message-sent-from: A message sent from the composer is never lost
+- 2026-10-17 17:06 Audit of evaluate-security-and: complete, clean
+- 2026-10-17 17:07 Audit of lead-can-set-up: complete, clean
+- 2026-10-17 17:09 Merged evaluate-security-and: Evaluate security and safety (phone, proxy, hooks, lead)
+- 2026-10-17 17:09 Merged lead-can-set-up: Lead can set up its own workflow (test command, base, setup)
+- 2026-10-17 17:10 Started a worker on session-detection-never
+- 2026-10-17 17:10 Planned lead-guard-rails-that: Lead guard rails that hold (roles, verdicts, steer, branch protection)
+- 2026-10-17 17:10 Planned phone-and-remote: Phone and remote hardening (lock check, Host check, previews, redaction)
+- 2026-10-17 17:10 Started a worker on lead-guard-rails-that
+- 2026-10-17 17:23 Planned verifier-2-0-parallel: Verifier 2.0: parallel finders, voting, tagged findings that must be resolved
+- 2026-10-17 17:23 Planned risk-tiers-the-user: Risk tiers: the user approves sensitive merges, docs merge alone
+- 2026-10-17 17:23 Planned lead-scorecard-and: Lead scorecard and incidents that become regression checks
+- 2026-10-17 17:23 Started a worker on standard-mac-window-and
+- 2026-10-17 17:27 Audit of session-detection-never: complete, clean
+- 2026-10-17 17:28 Merged session-detection-never: Session detection never misses or misreads a session
+- 2026-10-17 17:34 Planned task-progress-at-a: Task progress at a glance in the Team view
+- 2026-10-17 17:36 Audit of standard-mac-window-and: complete, clean
+- 2026-10-17 17:39 Merged standard-mac-window-and: Standard Mac window and edit keys (⌘W, Undo/Redo/Cut)
+- 2026-10-17 17:39 Started a worker on phone-and-remote
+- 2026-10-17 17:39 Planned keep-up-with-claude: Keep up with Claude Code 2.1.26x–2.1.30x
+- 2026-10-17 17:39 Planned codex-0-157-background: Codex 0.157+ (background daemon) still tracked
+- 2026-10-17 17:39 Planned lead-messages-reach-the: Lead messages reach the lead, never its subagents
+- 2026-10-17 17:45 Planned the-lead-s-decisions: The lead's decisions and progress are committed to the repo
+- 2026-10-17 17:49 Started a worker on phone-and-remote
+- 2026-10-17 17:49 Planned ended-sessions-of: Ended sessions of finished tasks leave the session list
+- 2026-10-17 17:51 Audit of lead-guard-rails-that: complete, clean
+- 2026-10-17 17:54 Planned lead-secrets-out-of: Lead secrets out of the workers' reach
+- 2026-10-17 17:56 Merged lead-guard-rails-that: Lead guard rails that hold (roles, verdicts, steer, branch protection)
+- 2026-10-17 17:56 Started a worker on ended-sessions-of
+- 2026-10-17 18:09 Audit of ended-sessions-of: complete, clean
+- 2026-10-17 18:09 Merged ended-sessions-of: Ended sessions of finished tasks leave the session list
+- 2026-10-17 18:09 Started a worker on lead-messages-reach-the
+- 2026-10-17 18:22 Audit of lead-messages-reach-the: complete, clean
+- 2026-10-17 18:22 Merged lead-messages-reach-the: Lead messages reach the lead, never its subagents
+- 2026-10-17 18:22 Started a worker on codex-0-157-background
+- 2026-10-17 18:23 Planned idle-cpu-and-memory: Idle CPU and memory: an AAA menu bar footprint
+- 2026-10-17 18:32 Audit of phone-and-remote: incomplete, clean
+- 2026-10-17 18:33 Started a worker on phone-and-remote
+- 2026-10-17 19:18 Audit of fix-the-chat-layout: incomplete, clean
+- 2026-10-17 19:33 Workflow: test_command = `swift build && swift test`
+- 2026-10-17 19:43 Audit of codex-0-157-background: complete, suspect
+- 2026-10-17 19:51 Workflow: max_workers = `5`
+- 2026-10-17 19:51 Started a worker on lead-sees-a-busy
+- 2026-10-17 19:51 Started a worker on first-run-and-one
+- 2026-10-17 19:55 Audit of codex-0-157-background: complete, clean
+- 2026-10-17 20:23 Merged codex-0-157-background: Codex 0.157+ (background daemon) still tracked
+- 2026-10-17 20:25 Audit of first-run-and-one: complete, clean
+- 2026-10-17 20:25 Audit of lead-sees-a-busy: complete, clean
+- 2026-10-17 20:31 Merged lead-sees-a-busy: Lead sees a busy worker as idle (status, read_session, message)
+- 2026-10-17 20:33 Started a worker on task-progress-at-a
+- 2026-10-17 20:44 Started a worker on first-run-and-one
+- 2026-10-17 20:55 Merged first-run-and-one: First run and one Settings window
+- 2026-10-17 20:56 Planned merges-name-the-failing: Merges name the failing test; flaky tests found and fixed
+- 2026-10-17 20:57 Started a worker on a-message-sent-from
+- 2026-10-17 20:58 Audit of task-progress-at-a: complete, clean
+- 2026-10-17 20:58 Started a worker on merges-name-the-failing
+- 2026-10-17 21:02 Merged task-progress-at-a: Task pipeline lanes in the Team view
+- 2026-10-17 21:02 Started a worker on a-running-lead-notices
+- 2026-10-17 21:09 Audit of a-running-lead-notices: complete, clean
+- 2026-10-17 21:11 Merged a-running-lead-notices: A running lead notices when its tool server is out of date
+- 2026-10-17 21:12 Started a worker on the-lead-can-withdraw
+- 2026-10-17 21:27 Planned calm-team-view-one: Calm Team view: one line per task, plain-language summaries, the lead's decisions fading
+- 2026-10-17 21:27 Planned decisions-with-a-timer: Decisions with a timer: the lead proposes, the user can override, silence means go
+- 2026-10-17 21:28 Planned claude-s-grey-prompt: Claude's grey prompt suggestion is not mistaken for a draft
+- 2026-10-17 21:29 Audit of the-lead-can-withdraw: complete, clean
+- 2026-10-17 21:33 Merged the-lead-can-withdraw: The lead's questions: a queue it can revise, withdraw and reorder
+- 2026-10-17 21:34 Started a worker on calm-team-view-one
+- 2026-10-17 21:39 Audit of phone-and-remote: complete, clean
+- 2026-10-17 21:40 Started a worker on fix-the-chat-layout
+- 2026-10-17 21:40 Started a worker on phone-and-remote
+- 2026-10-17 22:00 Started a worker on claude-s-grey-prompt
+- 2026-10-17 22:00 Planned stalled-workers-are: Stalled workers are noticed without the user pointing at them
+- 2026-10-17 22:00 Planned workers-can-bring-their: Workers can bring their own branch up to date with the base
+- 2026-10-17 22:03 Audit of calm-team-view-one: complete, suspect
+- 2026-10-17 22:03 Audit of merges-name-the-failing: complete, clean
+- 2026-10-17 22:09 Started a worker on claude-s-grey-prompt
+- 2026-10-17 22:09 Started a worker on calm-team-view-one
+- 2026-10-17 22:09 Started a worker on workers-can-bring-their
+- 2026-10-17 22:26 Started a worker on stalled-workers-are
+- 2026-10-17 22:26 Started a worker on decisions-with-a-timer
+- 2026-10-17 22:27 Audit of calm-team-view-one: complete, clean
+- 2026-10-17 22:28 Audit of workers-can-bring-their: complete, clean
+- 2026-10-17 22:28 Audit of a-message-sent-from: complete, clean
+- 2026-10-17 22:29 Audit of claude-s-grey-prompt: incomplete, suspect
+- 2026-10-17 22:59 Merged calm-team-view-one: Calm Team view: one line per task, plain-language summaries, the lead's decisions fading
+- 2026-10-17 23:01 Merged a-message-sent-from: A message sent from the composer is never lost
+- 2026-10-17 23:01 Started a worker on claude-s-grey-prompt
+- 2026-10-17 23:02 Planned a-compacted-worker-doesn: A compacted worker doesn't read as working
+- 2026-10-17 23:03 Audit of decisions-with-a-timer: complete, clean
+- 2026-10-17 23:04 Audit of stalled-workers-are: complete, suspect
+- 2026-10-17 23:16 Merged workers-can-bring-their: Workers can bring their own branch up to date with the base
+- 2026-10-17 23:24 Audit of claude-s-grey-prompt: complete, clean
+- 2026-10-17 23:28 Started a worker on merges-name-the-failing
+- 2026-10-17 23:30 Merged claude-s-grey-prompt: Claude's grey prompt suggestion is not mistaken for a draft
+- 2026-10-17 23:31 Started a worker on merges-name-the-failing
+- 2026-10-17 23:35 Planned reports-wake-an-idle: Reports wake an idle lead
+- 2026-10-17 23:35 Started a worker on phone-and-remote
+- 2026-10-17 23:35 Started a worker on reports-wake-an-idle
+- 2026-10-17 23:35 Started a worker on decisions-with-a-timer
+- 2026-10-17 23:36 Started a worker on stalled-workers-are
+- 2026-10-18 00:14 Started a worker on fix-the-chat-layout
+- 2026-10-18 00:14 Started a worker on phone-and-remote
+- 2026-10-18 00:14 Started a worker on reports-wake-an-idle
+- 2026-10-18 00:16 Audit of stalled-workers-are: complete, clean
+- 2026-10-18 00:16 Audit of merges-name-the-failing: complete, clean
+- 2026-10-18 00:18 Merged stalled-workers-are: Stalled workers are noticed without the user pointing at them
+- 2026-10-18 00:18 Planned workers-live-through-an: Workers live through an app relaunch
+- 2026-10-18 00:18 Planned a-worker-s-rebase: A worker's rebase --continue is never refused
+- 2026-10-18 00:20 Merged merges-name-the-failing: Merges name the failing test; flaky tests found and fixed
+- 2026-10-18 00:20 Started a worker on a-worker-s-rebase
+- 2026-10-18 00:20 Started a worker on idle-cpu-and-memory
+- 2026-10-18 00:25 Audit of phone-and-remote: complete, clean
+- 2026-10-18 08:21 Merged phone-and-remote: Phone and remote hardening (lock check, Host check, previews, redaction)
+- 2026-10-18 08:22 Audit of a-worker-s-rebase: complete, clean
+- 2026-10-18 08:24 Audit of reports-wake-an-idle: complete, clean
+- 2026-10-18 08:24 Merged a-worker-s-rebase: A worker's rebase --continue is never refused
+- 2026-10-18 08:28 Audit of idle-cpu-and-memory: complete, clean
+- 2026-10-18 08:46 Merged idle-cpu-and-memory: Idle CPU and memory: an AAA menu bar footprint
+- 2026-10-18 08:47 Audit of reports-wake-an-idle: complete, clean
+- 2026-10-18 08:50 Merged reports-wake-an-idle: Reports wake an idle lead
+- 2026-10-18 09:10 Audit of fix-the-chat-layout: complete, clean
+- 2026-10-18 09:22 Merged fix-the-chat-layout: Chat hang: reconcile with the fix already on project-lead, keep the settle bench
+- 2026-10-18 09:41 Started a worker on workers-live-through-an
+- 2026-10-18 09:44 Planned host-hands-its-live: Host hands its live sessions to a new host build
+- 2026-10-18 09:44 Planned host-hygiene-ended: Host hygiene: ended sessions let go, lost input is reported, welcome says what the host can do
+- 2026-10-18 09:44 Started a worker on host-hands-its-live
+- 2026-10-18 09:45 Started a worker on host-hygiene-ended
+- 2026-10-18 09:45 Started a worker on lead-secrets-out-of
+- 2026-10-18 09:45 Started a worker on keep-up-with-claude
+- 2026-10-18 09:45 Planned one-session-s-crash: One session's crash or hang can't take down the host
+- 2026-10-18 10:26 Planned disk-never-fills-up: Disk never fills up silently
+- 2026-10-18 10:27 Started a worker on workers-live-through-an
+- 2026-10-18 10:27 Started a worker on keep-up-with-claude
+- 2026-10-18 10:27 Started a worker on lead-secrets-out-of
+- 2026-10-18 10:43 Started a worker on disk-never-fills-up
+- 2026-10-18 10:45 Started a worker on host-hygiene-ended
+- 2026-10-18 10:45 Started a worker on host-hands-its-live
+- 2026-10-18 10:47 Audit of workers-live-through-an: incomplete, clean
+- 2026-10-18 10:48 Started a worker on workers-live-through-an
+- 2026-10-18 10:51 Audit of lead-secrets-out-of: incomplete, clean
+- 2026-10-18 10:55 Started a worker on lead-secrets-out-of
+- 2026-10-18 10:55 Planned tests-pass-on-a: Tests pass on a loaded machine
+- 2026-10-18 10:57 Audit of host-hygiene-ended: complete, suspect
+- 2026-10-18 10:57 Started a worker on tests-pass-on-a
+- 2026-10-18 11:02 Audit of host-hygiene-ended: complete, clean
+- 2026-10-18 11:02 Audit of workers-live-through-an: complete, suspect
+- 2026-10-18 11:04 Audit of disk-never-fills-up: complete, clean
+- 2026-10-18 11:04 Merged host-hygiene-ended: Host hygiene: ended sessions let go, lost input is reported, welcome says what the host can do
+- 2026-10-18 11:06 Audit of workers-live-through-an: complete, clean
+- 2026-10-18 11:10 Merged disk-never-fills-up: Disk never fills up silently
+- 2026-10-18 11:11 Started a worker on workers-live-through-an
+- 2026-10-18 11:14 Planned workers-update-their: Workers update their branch with merge, which auto mode allows
+- 2026-10-18 11:14 Planned tests-stay-green-under: Tests stay green under load: a script that proves it
+- 2026-10-18 11:15 Started a worker on workers-update-their
+- 2026-10-18 11:15 Audit of host-hands-its-live: complete, clean
+- 2026-10-18 11:16 Audit of workers-live-through-an: complete, clean
+- 2026-10-18 11:17 Audit of lead-secrets-out-of: complete, clean
+- 2026-10-18 11:18 Audit of tests-pass-on-a: incomplete, clean
+- 2026-10-18 11:18 Planned the-lead-s-vault: The lead's vault survives a host handover, and the app proves who it is
+- 2026-10-18 11:18 Merged host-hands-its-live: Host hands its live sessions to a new host build
+- 2026-10-18 11:18 Started a worker on workers-live-through-an
+- 2026-10-18 11:19 Started a worker on tests-pass-on-a
+- 2026-10-18 11:19 Audit of keep-up-with-claude: complete, clean
+- 2026-10-18 11:21 Merged keep-up-with-claude: Keep up with Claude Code 2.1.26x–2.1.30x
+- 2026-10-18 11:22 Started a worker on the-lead-s-vault
+- 2026-10-18 11:23 Audit of workers-update-their: complete, suspect
+- 2026-10-18 11:27 Audit of tests-pass-on-a: complete, clean
+- 2026-10-18 11:52 Audit of workers-update-their: complete, clean
+- 2026-10-18 11:53 Audit of workers-live-through-an: complete, clean
+- 2026-10-18 11:53 Merged tests-pass-on-a: Tests pass on a loaded machine
+- 2026-10-18 11:56 Merged workers-update-their: Workers update their branch with merge, which auto mode allows
+- 2026-10-18 11:56 Started a worker on workers-live-through-an
+- 2026-10-18 12:00 Started a worker on lead-secrets-out-of
+- 2026-10-18 12:02 Audit of workers-live-through-an: complete, clean
+- 2026-10-18 12:04 Merged workers-live-through-an: Workers live through an app relaunch
+- 2026-10-18 12:05 Started a worker on lead-secrets-out-of
+- 2026-10-18 12:19 Audit of lead-secrets-out-of: incomplete, clean
+- 2026-10-18 12:19 Started a worker on lead-secrets-out-of
+- 2026-10-18 12:27 Audit of lead-secrets-out-of: incomplete, clean
+- 2026-10-18 12:35 Started a worker on lead-secrets-out-of
+- 2026-10-18 13:00 Audit of lead-secrets-out-of: complete, clean
+- 2026-10-18 13:05 Merged lead-secrets-out-of: Lead secrets out of the workers' reach
+- 2026-10-18 14:26 Planned the-window-always-offers: The window always offers to restart an outdated session host
+- 2026-10-18 15:04 Planned the-lead-s-tools: The lead's tools don't trip the lead
+- 2026-10-18 15:04 Planned no-silent-data-loss: No silent data loss or wrong command
+- 2026-10-18 15:04 Planned the-current-build-doesn: The current build doesn't hang or burn CPU
+- 2026-10-18 15:04 Started a worker on the-lead-s-vault
+- 2026-10-18 15:05 Started a worker on the-lead-s-tools
+- 2026-10-18 15:05 Started a worker on tests-stay-green-under
+- 2026-10-18 15:05 Started a worker on no-silent-data-loss
+- 2026-10-18 15:05 Started a worker on the-current-build-doesn
+- 2026-10-18 15:05 Planned the-app-shows-what: The app shows what the program in each session reports
+- 2026-10-18 15:37 Audit of no-silent-data-loss: complete, clean
+- 2026-10-18 15:38 Audit of the-lead-s-tools: complete, clean
+- 2026-10-18 16:01 Audit of the-lead-s-vault: complete, clean
+- 2026-10-18 16:57 Merged no-silent-data-loss: No silent data loss or wrong command
+- 2026-10-18 17:00 Merged the-lead-s-tools: The lead's tools don't trip the lead
+- 2026-10-18 17:02 Started a worker on a-compacted-worker-doesn
+- 2026-10-18 17:03 Planned start-worker-recovers-a: start_worker recovers a worktree stuck mid-rebase
+- 2026-10-18 17:03 Started a worker on decisions-with-a-timer
+- 2026-10-18 17:03 Merged the-lead-s-vault: The lead's vault survives a host handover, and the app proves who it is
+- 2026-10-18 17:04 Started a worker on one-session-s-crash
+- 2026-10-18 17:08 Audit of tests-stay-green-under: complete, clean
+- 2026-10-18 17:13 Audit of decisions-with-a-timer: complete, clean
+- 2026-10-18 17:14 Audit of a-compacted-worker-doesn: complete, clean
+- 2026-10-18 17:15 Merged decisions-with-a-timer: Decisions with a timer: the lead proposes, the user can override, silence means go
+- 2026-10-18 17:17 Merged a-compacted-worker-doesn: Workers' turn state is read right: compacted, waiting on a background task, idle compaction
+- 2026-10-18 17:18 Started a worker on start-worker-recovers-a
+- 2026-10-18 17:18 Started a worker on the-window-always-offers
+- 2026-10-18 17:26 Audit of the-window-always-offers: complete, clean
+- 2026-10-18 17:29 Merged the-window-always-offers: The window always offers to restart an outdated session host
+- 2026-10-18 17:29 Started a worker on the-app-shows-what
+- 2026-10-18 17:43 Audit of tests-stay-green-under: complete, clean
+- 2026-10-18 17:47 Audit of the-app-shows-what: complete, clean
+- 2026-10-18 17:47 Audit of start-worker-recovers-a: complete, clean
+- 2026-10-18 17:56 Merged the-app-shows-what: The app shows what the program in each session reports
+- 2026-10-18 17:57 Audit of one-session-s-crash: complete, clean
+- 2026-10-18 17:58 Merged start-worker-recovers-a: start_worker recovers a worktree stuck mid-rebase
+- 2026-10-18 18:01 Planned merges-and-worker-limits: Merges and worker limits hold under concurrency
+- 2026-10-18 18:01 Planned input-is-never-cut: Input is never cut while reported delivered
+- 2026-10-18 18:01 Planned a-worker-can-t: A worker can't run code as the lead or read other sessions' screens
+- 2026-10-18 18:01 Started a worker on merges-and-worker-limits
+- 2026-10-18 18:01 Started a worker on input-is-never-cut
+- 2026-10-18 18:01 Merged one-session-s-crash: One session's crash or hang can't take down the host
+- 2026-10-18 18:03 Audit of tests-stay-green-under: complete, clean
+- 2026-10-18 18:05 Audit of the-current-build-doesn: complete, clean
+- 2026-10-18 18:05 Merged tests-stay-green-under: Tests stay green under load and leave nothing behind
+- 2026-10-18 18:05 Planned timed-out-shell-runs: Timed-out shell runs give nothing; tests work with a long TMPDIR
+- 2026-10-18 18:07 Merged the-current-build-doesn: The current build doesn't hang or burn CPU
+- 2026-10-18 18:20 Planned a-successful-handover-is: A successful handover is logged as handed over
+- 2026-10-18 18:21 Planned reports-go-to-the: Reports go to the current lead, not a replaced one
+- 2026-10-18 18:21 Started a worker on a-successful-handover-is
+- 2026-10-18 18:21 Started a worker on reports-go-to-the
+- 2026-10-18 18:23 Planned a-running-lead-keeps: A running lead keeps its role and conversation through an install
+- 2026-10-18 18:23 Started a worker on a-running-lead-keeps
+- 2026-10-18 18:29 Audit of input-is-never-cut: complete, clean
+- 2026-10-18 18:30 Kept input-is-never-cut unmerged: Decision 2026-10-17 17:23: it touches remote input and the guard rails' sealed messages, so it merges only after the user approves (question 4ED4789A).
+- 2026-10-18 18:33 Audit of merges-and-worker-limits: complete, clean
+- 2026-10-18 18:44 Audit of a-successful-handover-is: complete, clean
+- 2026-10-18 18:44 Audit of reports-go-to-the: complete, clean
+- 2026-10-18 18:49 Planned tool-servers-update: Tool servers update themselves in place
+- 2026-10-18 18:49 Planned the-user-s-own: The user's own commits on the base branch are accepted without a restart
+- 2026-10-18 18:50 Started a worker on tool-servers-update
+- 2026-10-18 18:50 Started a worker on the-user-s-own
+- 2026-10-18 18:50 Started a worker on risk-tiers-the-user
+- 2026-10-18 19:02 Planned merge-approvals-live-in: Merge approvals live in the vault, not the board
+- 2026-10-18 19:04 Audit of risk-tiers-the-user: complete, clean
+- 2026-10-18 19:05 Audit of a-running-lead-keeps: complete, clean
+- 2026-10-18 19:09 Audit of tool-servers-update: complete, clean
+- 2026-10-18 19:15 Audit of the-user-s-own: complete, clean
+- 2026-10-18 19:21 Audit of tool-servers-update: complete, clean
+- 2026-10-18 19:56 Merged input-is-never-cut: Input is never cut while reported delivered
+- 2026-10-18 19:58 Merged reports-go-to-the: Reports go to the current lead, not a replaced one
+- 2026-10-18 20:00 Audit of a-successful-handover-is: complete, clean
+- 2026-10-18 20:03 Merged risk-tiers-the-user: The owner sets the merge policy once, and the lead checks in and runs retrospectives
+- 2026-10-18 20:05 Merged a-successful-handover-is: A successful handover is logged as handed over
+- 2026-10-18 20:07 Audit of the-user-s-own: complete, clean
+- 2026-10-18 20:08 Planned the-witness-doesn-t: The witness doesn't call a just-started verifier stopped
+- 2026-10-18 20:08 Started a worker on the-witness-doesn-t
+- 2026-10-18 20:10 Audit of merges-and-worker-limits: complete, clean
+- 2026-10-18 20:16 Planned pastedeliverytests-hold: PasteDeliveryTests hold under load
+- 2026-10-18 20:18 Started a worker on pastedeliverytests-hold
+- 2026-10-18 20:18 Audit of a-running-lead-keeps: complete, clean
+- 2026-10-18 20:19 Audit of the-witness-doesn-t: complete, clean
+- 2026-10-18 20:20 Planned stale-git-index-lock: Stale git index.lock files don't block the team
+- 2026-10-18 20:21 Started a worker on stale-git-index-lock
+- 2026-10-18 21:09 Audit of merges-and-worker-limits: complete, clean
+- 2026-10-18 22:12 Workflow: merge_policy = `auto`
+- 2026-10-18 22:27 Audit of pastedeliverytests-hold: complete, clean
+- 2026-10-18 22:29 Planned a-replaced-lead-never: A replaced lead never takes the user's orders in silence
+- 2026-10-18 22:29 Planned merge-refuses-a-dirty: Merge refuses a dirty main checkout only on overlap
+- 2026-10-18 22:29 Planned board-decode-off-the: Board decode off the main thread
+- 2026-10-18 22:31 Audit of stale-git-index-lock: complete, clean
+- 2026-10-18 23:21 Merged pastedeliverytests-hold: PasteDeliveryTests hold under load
+- 2026-10-18 23:21 Update: Merged: PasteDeliveryTests hold under load (test-only) — **What changed:** one file, `Tests/VibeSwitcherTests/PasteDeliveryTests.swift` (+27/−8), no production code. The flaky failure was a race in the test: it sent a 256 KB paste before the reader's `stty …
+- 2026-10-18 23:24 Merged tool-servers-update: Tool servers update themselves in place
+- 2026-10-18 23:24 Update: Merged: tool servers update themselves in place — **What changed:** `Sources/VibeCore/MCPServer.swift` and `Sources/vibeswitcher-mcp/main.swift` (3 commits: d5195c0, 658c3e1, 3102af3), plus tests. When the installed `vibeswitcher-mcp` binary changes,…
+- 2026-10-18 23:27 Merged the-user-s-own: The user's own commits on the base branch are accepted without a restart
+- 2026-10-18 23:28 Planned ended-sessions-really: Ended sessions really end: cleanup and stop_worker never report an end that didn't happen
+- 2026-10-18 23:28 Update: Merged: your own commits on project-lead are accepted without a lead restart — **What changed** (13 files, +1332/−9; commits 5ea1918, 0bca97c, 3836080, b50e9bb, 51aa515): the base-move guard rail now tells your commits from the team's. The hook reports each `git commit/merge/pul…
+- 2026-10-18 23:31 Update: How it's going (23:45) — **Landed since 22:10:** pastedeliverytests-hold (the flaky test that broke two merges), tool-servers-update (tool servers swap builds in place, no more `/mcp`), the-user-s-own (your commits on project…
+- 2026-10-18 23:31 Merged the-witness-doesn-t: The witness doesn't call a just-started verifier stopped
+- 2026-10-18 23:31 Update: Merged: the witness no longer calls a just-started verifier stopped — **What changed** (commit 299649f; `LeadWitness.swift`, one wiring line in `LeadController.swift`, 3 new tests): the false "verifier stopped without calling submit_audit" seconds after an audit started…
+- 2026-10-18 23:32 Audit of stale-git-index-lock: complete, clean
+- 2026-10-18 23:34 Merged merges-and-worker-limits: Merges and worker limits hold under concurrency
+- 2026-10-18 23:34 Update: Merged: merges and worker limits hold under concurrency (E-12, E-15, E-17, E-18) — **What changed** (`Worktrees.swift`, `LeadToolset.swift` start_worker/merge/configure paths, `LeadWorkflow.swift`; commits 2749205, 3a4450d plus a base merge, landed as 685ed89):
+- 2026-10-18 23:37 Merged stale-git-index-lock: Stale git index.lock files don't block the team
+- 2026-10-18 23:37 Started a worker on board-decode-off-the
+- 2026-10-18 23:37 Update: Merged: stale git index.lock files don't block the team — **What changed** (`Worktrees.swift`, `LeadToolset.swift` merge/start_worker paths, `LeadLaunch.swift`, 15 new tests; 6 commits landed squashed):
+- 2026-10-18 23:37 Started a worker on merge-refuses-a-dirty
+- 2026-10-18 23:38 Audit of a-running-lead-keeps: complete, clean
+- 2026-10-18 23:40 Started a worker on accessibility-labels
+- 2026-10-18 23:41 Merged a-running-lead-keeps: A running lead keeps its role and conversation through an install
+- 2026-10-18 23:41 Update: Merged: a running lead keeps its role and conversation through an install — **What changed** (7 files: `LeadController.swift` +143/−15, `LeadVault.swift` rebindLead, `LeadToolset.swift` refusal text, 4 test files; 5 commits plus 2 base merges, landed as one):
+- 2026-10-18 23:41 Started a worker on a-replaced-lead-never
+- 2026-10-18 23:41 Started a worker on ended-sessions-really
+- 2026-10-18 23:42 Planned audit-evidence-survives: Audit evidence survives a worker report on the same commit
+- 2026-10-18 23:42 Planned the-witness-doesn-t-2: The witness doesn't call a worker stalled while it waits on a background task
+- 2026-10-18 23:43 Planned one-load-harness-test: One load harness: test-under-load.sh caps the load, cleans up and refuses a Mac that's already loaded
+- 2026-10-18 23:43 Update: Retrospective: the 2026-10-18 evening queue (22:10–00:10) — **What landed:** 7 audited branches merged in about 1 h 45 m once unblocked: pastedeliverytests-hold, tool-servers-update, the-user-s-own, the-witness-doesn-t, merges-and-worker-limits, stale-git-inde…
+- 2026-10-18 23:47 Planned test-hosts-exit-with: Test hosts exit with their test: no scratch vibeswitcher-host outlives the suite</title>
+- 2026-10-18 23:48 Planned indexlocktests-hold: IndexLockTests hold under load
+- 2026-10-18 23:49 Update: Installed build 1792360149 (23:49): every session and all three leads kept — **What happened:** `scripts/build-app.sh --install` ran from the lead (exit 0): release build, signed with the local identity, copied to /Applications, relaunched. The app (new pid 92275) connected to…
+- 2026-10-18 23:50 Started a worker on the-witness-doesn-t-2
+- 2026-10-18 23:51 Audit of merge-refuses-a-dirty: complete, clean
+- 2026-10-18 23:55 Merged merge-refuses-a-dirty: Merge refuses a dirty main checkout only on overlap
+- 2026-10-18 23:56 Update: Merged: merge refuses a dirty main checkout only on overlap — **What changed** (commit 87f5766; `Worktrees.swift` +68/−7, `WorktreesTests.swift` +127/−2): the fast-forward into your main checkout no longer stops on any uncommitted change. It lists the files the …
+- 2026-10-18 23:56 Started a worker on indexlocktests-hold
+- 2026-10-18 23:57 Started a worker on timed-out-shell-runs
+- 2026-10-19 00:01 Audit of the-witness-doesn-t-2: complete, clean
+- 2026-10-19 00:03 Audit of ended-sessions-really: complete, clean
+- 2026-10-19 00:05 Started a worker on test-hosts-exit-with
+- 2026-10-19 00:06 Planned a-worker-seen-before: A worker seen before its hooks fire isn't called stalled: the stall clock starts at the session's start
+- 2026-10-19 00:08 Started a worker on a-worker-seen-before
+- 2026-10-19 00:11 Merged the-witness-doesn-t-2: The witness doesn't call a worker stalled while it waits on a background task
+- 2026-10-19 00:11 Update: Merged: the witness doesn't call a worker stalled while it waits on its own background task — **What changed** (commit 8e16932; `LeadStall.swift`, `LeadWitness.swift`, one call site in `LeadController.swift`, two tests): the witness read each worker's activity without the background shells the…
+- 2026-10-19 00:13 Audit of accessibility-labels: complete, clean
+- 2026-10-19 00:18 Audit of a-replaced-lead-never: complete, clean
+- 2026-10-19 00:18 Update: How it's going (00:30) — **Landed since the install (23:49):** merge-refuses-a-dirty (your task 2) and the witness stall rule for workers waiting on their own background task.
+- 2026-10-19 00:23 Planned the-witness-reads: The witness reads transcripts off the main thread
+- 2026-10-19 00:24 Merged a-replaced-lead-never: A replaced lead never takes the user's orders in silence
+- 2026-10-19 00:24 Update: Merged: a replaced lead never takes your orders in silence — **What changed** (commits 42a1fd0 and 5713727; 15 files, +798/−29):
+- 2026-10-19 00:30 Audit of board-decode-off-the: incomplete, clean
+- 2026-10-19 00:34 Audit of a-worker-seen-before: complete, clean
+- 2026-10-19 00:34 Audit of timed-out-shell-runs: complete, clean
+- 2026-10-19 00:39 Audit of accessibility-labels: complete, clean
+- 2026-10-19 00:48 Merged accessibility-labels: Accessibility: labels, status beyond colour, contrast, motion
+- 2026-10-19 00:49 Update: Merged: accessibility (labels, status shapes, AA contrast, Reduce Motion) — **What changed** (39 files, +925/−132; commits 719688e, 8f2250f, 7135e9f, ef4f80a plus the base merge f43ff55):
+- 2026-10-19 00:50 Audit of board-decode-off-the: complete, clean
+- 2026-10-19 00:54 Merged ended-sessions-really: Ended sessions really end: cleanup and stop_worker never report an end that didn't happen
+- 2026-10-19 00:54 Update: Merged: ended sessions really end (cleanup and stop_worker never claim an end that didn't happen) — **Root cause, verified against host.log:** the host refused every kill of the input-is-never-cut worker ("not the app, the session itself or its lead") ten times between 20:02 and 23:26, and the tool …
+- 2026-10-19 00:55 Audit of test-hosts-exit-with: complete, clean
+- 2026-10-19 00:59 Planned the-process-table: The process-table snapshot doesn't stall under load
+- 2026-10-19 01:00 Merged board-decode-off-the: Board decode off the main thread
+- 2026-10-19 01:00 Update: Merged: board decode off the main thread (your task 3) — **What changed** (commits 8771899 red bench, 3536862 fix, f2897ed, plus the base merge d420317): every full read or write of board.json that the lead controller does now runs on one serial background …
+- 2026-10-19 01:02 Update: How it's going (01:02) — **Your three tasks are all merged:** a replaced lead never takes your orders in silence, merge refuses a dirty checkout only on overlap, board decode off the main thread. Also in since the last check-…
+- 2026-10-19 05:31 Planned the-app-keeps-the: The app keeps the Mac awake while the team is working
+- 2026-10-19 07:45 Update: Overnight: paused at 06:00, the Mac is on battery at 2 % and sleeping — **What happened:** at 01:38 the Mac entered idle sleep, and since then it has only had five-second dark wakes every 15 minutes. It's on battery power at 2 % (checked at 05:59). The session host and al…
+- 2026-10-19 08:07 Planned the-team-summary-helper: The team-summary helper runs in an empty working directory
+- 2026-10-19 08:07 Update: Resumed (08:15): Mac on power, held awake, leaked sessions and orphaned load ended — **Since the 06:00 pause:** the Mac is on AC power again (charging from 2 %), and I'm holding it awake with a 4-hour `caffeinate -i` from my shell until the-app-keeps-the lands. Per your answer on the …
+- 2026-10-19 08:24 Planned a-worktree-that-left: A worktree that left its task branch is put back by the lead's tools, never by asking the user
+- 2026-10-19 08:24 Planned a-message-handed-over: A message handed over at a turn's end doesn't read as a "Stop hook error"
+- 2026-10-19 08:36 Planned worker-and-verifier: Worker and verifier starts are load-aware and Mac-wide, not per project
+- 2026-10-19 08:39 Planned chat-and-terminal-stay: Chat and terminal stay in sync: questions, buttons and sends agree on both sides
+- 2026-10-19 08:39 Started a worker on chat-and-terminal-stay
+- 2026-10-19 08:40 Planned team-messages-in-the: Team messages in the chat view are shown as what they are: collapsed, coloured, with sender and a TL;DR
+- 2026-10-19 08:40 Started a worker on team-messages-in-the
+- 2026-10-19 08:44 Update: Load source found and ended (09:00): a dead verifier's load script kept burning</title> — **What it was:** the indexlocktests-hold verifier whose turn ended on "your computer went to sleep" at 05:50 never released its background load script. The script slept through the night's sleep cycle…
+- 2026-10-19 09:13 Merged test-hosts-exit-with: Test hosts exit with their test: no scratch vibeswitcher-host outlives the suite
+- 2026-10-19 09:13 Update: Merged: test hosts exit with their test — **What changed** (tests only: new `Tests/VibeHostTests/TestHosts.swift` and `TestHostsTests.swift`; the four suites that start scratch session hosts now start and end them through it). Root cause of t…
+- 2026-10-19 09:19 Audit of a-worker-seen-before: complete, clean
+- 2026-10-19 09:30 Audit of timed-out-shell-runs: complete, clean
+- 2026-10-19 09:32 Started a worker on the-witness-reads
+- 2026-10-19 09:33 Audit of indexlocktests-hold: complete, clean
+- 2026-10-19 09:35 Audit of team-messages-in-the: complete, clean
+- 2026-10-19 09:37 Merged indexlocktests-hold: IndexLockTests hold under load
+- 2026-10-19 09:37 Update: Merged: four load-sensitive tests hold, plus two production fixes they exposed — **What changed** (7 commits, landed squashed):
+- 2026-10-19 09:39 Started a worker on audit-evidence-survives
+- 2026-10-19 09:39 Started a worker on one-load-harness-test
+- 2026-10-19 09:40 Merged team-messages-in-the: Team messages in the chat view are shown as what they are: collapsed, coloured, with sender and a TL;DR
+- 2026-10-19 09:40 Update: Merged: team messages in the chat view are collapsed cards with sender, gist and TL;DR — **What changed** (new `VibeCore/TeamMessage.swift` and `Chat/TeamMessageCard.swift`; one case in ChatTimeline and ChatView; an optional field on ChatEntry; two methods on the summary model): a message…
+- 2026-10-19 09:43 Update: How it's going (10:15) — **Landed this morning:** test-hosts-exit-with, indexlocktests-hold (the four load-sensitive tests plus the fast lock-holder search and the Codex quit/timeout fix), and your team-messages chat card. Si…
+- 2026-10-19 09:45 Merged timed-out-shell-runs: Timed-out shell runs give nothing; tests work with a long TMPDIR
+- 2026-10-19 09:45 Update: Merged: timed-out shell runs give nothing; tests work with a long TMPDIR — **What changed** (`Worktrees.swift` Git.run only, `DiskSpace.swift` ClaudeScratch, tests, `scripts/test-under-load.sh`; 5 commits plus a base merge, landed squashed):
+- 2026-10-19 09:48 Started a worker on the-process-table
+- 2026-10-19 09:48 Started a worker on a-message-handed-over
+- 2026-10-19 09:48 Started a worker on the-team-summary-helper
+- 2026-10-19 09:49 Merged a-worker-seen-before: A worker seen before its hooks fire isn't called stalled: the stall clock starts at the session's start
+- 2026-10-19 09:49 Update: Merged: a worker seen before its hooks fire isn't called stalled — **What changed** (`LeadStall.swift` +11/−4, 3 new tests; commits 208af62 red, 4c27cac fix, plus two base merges, landed squashed): the stall clock for a worker now counts from the latest of its last a…
+- 2026-10-19 09:54 Audit of the-witness-reads: complete, clean
+- 2026-10-19 09:54 Audit of audit-evidence-survives: complete, clean
+- 2026-10-19 09:56 Planned audit-refuses-a-branch: audit refuses a branch that is behind the base in files it changes
+- 2026-10-19 10:06 Merged audit-evidence-survives: Audit evidence survives a worker report on the same commit
+- 2026-10-19 10:06 Update: Merged: audit evidence survives a worker report on the same commit — **What changed** (`LeadToolset.swift` report/submit_audit/status lines, an optional field on `LeadBoard`, 3 tests; commit 8803a36): a worker's report on the very commit a verifier already passed keeps…
+- 2026-10-19 10:06 Audit of the-team-summary-helper: complete, clean
+- 2026-10-19 10:12 Merged the-team-summary-helper: The team-summary helper runs in an empty working directory
+- 2026-10-19 10:12 Update: Merged: the team-summary helper runs in an empty folder of its own — **What changed** (`TeamSummaries.swift` +16/−3, one new test; commit 07332f3): the headless `claude -p` that writes the Team view's summaries and the new chat-card TL;DRs now starts in `~/.vibeswitche…
+- 2026-10-19 10:18 Audit of the-witness-reads: complete, clean
+- 2026-10-19 10:19 Planned rows-never-show-a: Rows never show a false "agent ended" from an unread or stale process table
+- 2026-10-19 10:20 Audit of a-message-handed-over: complete, clean
+- 2026-10-19 10:20 Audit of one-load-harness-test: complete, clean
+- 2026-10-19 10:22 Merged the-witness-reads: The witness reads transcripts off the main thread
+- 2026-10-19 10:23 Update: Merged: the witness reads transcripts off the main thread (the last hang cause in the samples) — **What changed** (`LeadController.swift` refresh/witness/wake/flush, `BaseMoves.swift` tell, a formatter fix in `ChatTranscript.swift`/`TranscriptReader.swift`, a read counter, the bench; 4 commits pl…
+- 2026-10-19 10:25 Audit of the-process-table: complete, clean
+- 2026-10-19 10:25 Started a worker on the-app-keeps-the
+- 2026-10-19 10:25 Started a worker on worker-and-verifier
+- 2026-10-19 10:26 Merged a-message-handed-over: A message handed over at a turn's end doesn't read as a "Stop hook error"
+- 2026-10-19 10:26 Update: Merged: a message handed over at a turn's end shows as feedback, not as a "Stop hook error" — **What changed** (`Steer.swift` SteerReply.output, tests, docs; commits 161ebd5, 69b78c6, d057162): VibeSwitcher's Stop-hook delivery now answers Claude Code with the `hookSpecificOutput.additionalCon…
+- 2026-10-19 10:28 Audit of chat-and-terminal-stay: incomplete, suspect
+- 2026-10-19 10:31 Merged one-load-harness-test: One load harness: test-under-load.sh caps the load, cleans up and refuses a Mac that's already loaded
+- 2026-10-19 10:31 Update: Merged: one load harness that caps the load, cleans up and refuses a loaded Mac — **What changed** (`scripts/test-under-load.sh`, a new self-check script, one paragraph in the worker and verifier prompts, README, 8 tests; 4 commits, landed squashed): the script is now the only sanc…
+- 2026-10-19 10:33 Update: How it's going (10:55) — **Landed since the last check-in (6):** the stall-clock fix, audit evidence surviving a repeat report, the summary helper's empty working folder, the witness's transcript reads off the main thread (th…
+- 2026-10-19 10:34 Merged the-process-table: The process-table snapshot doesn't stall under load
+- 2026-10-19 10:34 Update: Merged: the process-table snapshot doesn't stall under load, and is whole or nothing — **What changed** (`ProcessTable.swift` and its direct callers, SessionScanner/SessionStore, the witness in LeadController, the tool server's agentPid, Shell.signalFamily; 2 commits plus the earlier ho…
+- 2026-10-19 10:34 Started a worker on rows-never-show-a
+- 2026-10-19 10:35 Update: Retrospective: the night and morning of 2026-10-19 (00:10–11:00) — **What landed:** 15 branches since the last retrospective, including your three chat/merge requests of the night, your two chat-view requests of the morning (one merged, one in rework), both window-fr…
+- 2026-10-19 10:35 Started a worker on the-lead-s-decisions
+- 2026-10-19 10:40 Audit of worker-and-verifier: complete, clean
+- 2026-10-19 10:43 Audit of chat-and-terminal-stay: complete, clean
+- 2026-10-19 10:44 Merged worker-and-verifier: Worker and verifier starts are load-aware and Mac-wide, not per project
+- 2026-10-19 10:44 Update: Merged: worker and verifier starts are load-aware and Mac-wide — **What changed** (new `MacLoad.swift`, `LeadToolset.swift` start_worker/audit/merge pre-checks, two workflow keys, the Team view's Mac line, one prompt paragraph; commits 6ee22d6 and b413732): a lead'…
+- 2026-10-19 10:46 Started a worker on audit-refuses-a-branch
+- 2026-10-19 10:48 Audit of the-app-keeps-the: complete, clean
+- 2026-10-19 10:50 Planned a-process-in-a: A process in a transient state doesn't void the whole process table
+- 2026-10-19 10:50 Started a worker on a-process-in-a
+- 2026-10-19 10:59 Audit of rows-never-show-a: complete, clean
+- 2026-10-19 11:00 Audit of audit-refuses-a-branch: complete, clean
+- 2026-10-19 11:08 Audit of the-lead-s-decisions: complete, clean
+- 2026-10-19 11:09 Started a worker on a-worker-can-t
+- 2026-10-19 11:19 Planned row-text-and-team: Row text and team rows use the store's undecided-aware "agent quit" rule
+- 2026-10-19 11:29 Audit of a-process-in-a: incomplete, clean
+- 2026-10-19 11:29 Planned tests-never-touch-the: Tests never touch the user's Keychain: no "Keychain Not Found" dialog during test runs
+- 2026-10-19 11:29 Started a worker on tests-never-touch-the
+- 2026-10-19 11:33 Audit of the-app-keeps-the: complete, clean
+- 2026-10-19 11:34 Planned the-ui-bench-s: The UI bench's harness doesn't crash on duplicate pids, and its instruction budget is judged at low load
+- 2026-10-19 11:34 Started a worker on the-ui-bench-s
+- 2026-10-19 11:42 Audit of a-worker-can-t: complete, clean
+- 2026-10-19 11:54 Audit of a-process-in-a: complete, clean
+- 2026-10-19 11:57 Audit of the-ui-bench-s: complete, clean
+- 2026-10-19 11:57 Planned handover-tests-hold: Handover tests hold under load
+- 2026-10-19 11:57 Audit of tests-never-touch-the: complete, clean
+- 2026-10-19 11:58 Merged a-process-in-a: A process in a transient state doesn't void the whole process table
+- 2026-10-19 11:58 Update: Merged: a process in a transient state doesn't void the whole process table — **What changed** (`ProcessTable.swift`, `SessionScanner.swift`, `SessionStore.swift`, one witness call site, 5 commits landed squashed): the morning's whole-or-nothing snapshot returned nil whenever o…
+- 2026-10-19 12:01 Merged chat-and-terminal-stay: Chat and terminal stay in sync: questions, buttons and sends agree on both sides
+- 2026-10-19 12:02 Update: Merged: chat and terminal stay in sync (your request of 08:40) — **What changed** (a ChatSync layer extracted from the window controller, the AnswerCard, ScreenMenu, the composer outbox, a `screenText` read of highlighted terminal cells; 8 commits plus a base merge…
+- 2026-10-19 12:05 Merged tests-never-touch-the: Tests never touch the user's Keychain: no "Keychain Not Found" dialog during test runs
+- 2026-10-19 12:05 Planned tests-never-write-to: Tests never write to the real ~/.vibeswitcher: no test lines in the user's app.log
+- 2026-10-19 12:05 Update: Merged: tests never touch your Keychain (the "Keychain Not Found" dialogs stop) — **What changed** (`LeadVaultAppProof.swift`, one line in `AppDelegate.swift`, `HostClient.swift`'s default key, tests, README; commit 66e2d5d): the app's key now comes through an injectable store. Onl…
+- 2026-10-19 12:07 Started a worker on handover-tests-hold
+- 2026-10-19 12:07 Started a worker on tests-never-write-to
+- 2026-10-19 12:07 Update: Installed build 1792404424 (12:07): every session and lead kept, no stall since — **What happened:** `scripts/build-app.sh --install` ran from the lead (exit 0). The app (new pid 33307) connected to the running host and handed it over to the bundled build.
+- 2026-10-19 12:11 Merged the-app-keeps-the: The app keeps the Mac awake while the team is working
+- 2026-10-19 12:11 Update: Merged: the app keeps the Mac awake while the team works — **What changed** (new `KeepAwake.swift`, one call in the lead controller's refresh, a Settings picker, a Team-view line; commits c131b4e, a5a6648 plus a base merge): while a project's team works (a li…
+- 2026-10-19 12:16 Merged audit-refuses-a-branch: audit refuses a branch that is behind the base in files it changes
+- 2026-10-19 12:16 Update: Merged: audit refuses a branch that is behind the base in files it changes — **What changed** (`LeadToolset.swift` +66/−6, `Worktrees.swift` +67, two lines of lead prompt, 5 tests; commit 6ce9ab6): before a verifier starts, audit compares the files the branch changed since its…
+- 2026-10-19 12:21 Merged the-lead-s-decisions: The lead's decisions and progress are committed to the repo
+- 2026-10-19 12:21 Update: Merged: the lead's decisions and progress are committed to the repository — **What changed** (new `LeadRecords.swift`, `Worktrees.commitFiles`, a `records_dir:` key, call sites in the lead's tools and the app's Files buttons; 4 commits plus a base merge, landed squashed): dec…
+- 2026-10-19 12:23 Audit of rows-never-show-a: complete, clean
+- 2026-10-19 12:23 Planned the-merge-s-test: The merge's test run gets its own scratch HOME and CFFIXED_USER_HOME
+- 2026-10-19 12:24 Planned the-guard-hash-reads: The guard hash reads records_dir as the team does
+- 2026-10-19 12:30 Update: How it's going (12:40) — **Installed at 12:07** (verified: host and all 40 sessions kept, all three leads kept, no stall since). That build has both freeze fixes, chat and terminal in sync, the team-messages card, the Keychai…
+- 2026-10-19 12:32 Merged rows-never-show-a: Rows never show a false "agent ended" from an unread or stale process table
+- 2026-10-19 12:32 Update: Merged: rows never show a false "agent ended" from an unread or stale process table — **What changed** (`WindowGroups.swift`, `LeadTeams.swift`, `SessionStore.swift`, plumbing through WindowModel/AppDelegate and the benches; one work commit plus two base merges, landed squashed): the s…
+- 2026-10-19 12:34 Started a worker on the-merge-s-test
+- 2026-10-19 12:42 Audit of a-worker-can-t: complete, clean
+- 2026-10-19 12:47 Audit of the-ui-bench-s: complete, clean
+- 2026-10-19 12:50 Merged a-worker-can-t: A worker can't run code as the lead or read other sessions' screens
+- 2026-10-19 12:50 Update: Merged: a worker can't run code as the lead or read other sessions' screens — **What changed** (new `LeadVaultGuarded.swift`, vault requests `guarded`/`setGuarded`, checks in start_worker, the merge-policy read and merge; the screen debug aid removed; README; 5 commits, landed …
+- 2026-10-19 12:52 Started a worker on a-worktree-that-left
+- 2026-10-19 13:00 Merged the-ui-bench-s: The UI bench's harness doesn't crash on duplicate pids, and its instruction budget is judged at low load
+- 2026-10-19 13:00 Update: Merged: the UI bench's harness doesn't crash on duplicate pids, and its instruction budget is relative — **What changed** (`UIBench.swift` harness only, `scripts/ui-bench.sh`, docs, README, 8 tests; 3 commits plus a base merge, landed squashed): the bench's invented process table is built with uniquing a…
+- 2026-10-19 13:02 Started a worker on merge-approvals-live-in
+- 2026-10-19 13:05 Audit of the-merge-s-test: complete, clean
+- 2026-10-19 13:06 Planned chatsynctests-steer-case: ChatSyncTests' steer case passes under a scratch HOME
+- 2026-10-19 13:08 Started a worker on chatsynctests-steer-case
+- 2026-10-19 13:09 Planned verifier-2-0-part: Verifier 2.0, part 2: parallel finders and a vote, within the Mac-wide limits
+- 2026-10-19 13:17 Planned process-table-reads: Process-table reads finish on a busy Mac: a deadline that fits the load, and tests that don't assume a quiet one
+- 2026-10-19 13:17 Started a worker on process-table-reads
+- 2026-10-19 13:20 Audit of tests-never-write-to: complete, clean
+- 2026-10-19 13:26 Audit of a-worktree-that-left: complete, clean
+- 2026-10-19 13:26 Audit of merge-approvals-live-in: complete, clean
+- 2026-10-19 13:34 Merged the-merge-s-test: The merge's test run gets its own scratch HOME and CFFIXED_USER_HOME
+- 2026-10-19 13:34 Update: Merged: the merge's test run gets its own scratch HOME — **What changed** (`Worktrees.rebaseAndTest` and the merge call site; commit 7a28468): the merge's init and test commands now run with HOME, CFFIXED_USER_HOME and TMPDIR pointed at a per-merge scratch …
+- 2026-10-19 13:44 Started a worker on verifier-2-0-parallel
+- 2026-10-19 13:44 Update: How it's going (14:00) — **Landed since 12:40:** rows never show a false "agent ended", the worker guard rails (every workflow.md policy and limit key guarded in the vault; the screen debug aid removed), the UI bench harness,…
+- 2026-10-19 13:46 Merged tests-never-write-to: Tests never write to the real ~/.vibeswitcher: no test lines in the user's app.log
+- 2026-10-19 13:46 Update: Merged: tests never write to your real ~/.vibeswitcher — **What changed** (`DebugLog.swift` Breadcrumbs, the app's `main.swift`, `scripts/test-under-load.sh` and its self-check, 3 new test suites; commits e8a79ae, cc79cb6, 8cc7b5d): the breadcrumb log no lo…
+- 2026-10-19 13:56 Merged a-worktree-that-left: A worktree that left its task branch is put back by the lead's tools, never by asking the user
+- 2026-10-19 13:56 Update: Merged: a worktree that left its task branch is put back by the lead's tools, never by asking you — **What changed** (`Worktrees.swift` offBranch/putBack, `LeadToolset.swift` audit and start_worker; commits 809c867, efc5aa6): when a worker's worktree is on another branch or a detached HEAD (a review…
+- 2026-10-19 13:59 Audit of chatsynctests-steer-case: complete, clean
+- 2026-10-19 14:04 Merged merge-approvals-live-in: Merge approvals live in the vault, not the board
+- 2026-10-19 14:04 Update: Merged: merge approvals live in the vault, not the board — **What changed** (`LeadVault.swift` requests approve/approved, new `LeadVaultApprovals.swift`, the app's answer path in LeadController, LeadToolset's checkMergePolicy; commit 332ce00): when you answer…
+- 2026-10-19 14:13 Merged chatsynctests-steer-case: ChatSyncTests' steer case passes under a scratch HOME
+- 2026-10-19 14:13 Update: Merged: the steer seal survives a /private/tmp folder, and the chat-sync harness never touches your home — **What changed** (`Steer.swift` SteerSeal.place in its own commit 9ad8b30, plus the harness in ChatSyncTests; commits 678aabb, a34eb15): a real defect in the steer seal: a scratch inbox's HMAC key was…
+- 2026-10-19 14:14 Planned re-check-the-four: Re-check the four evaluation reports against project-lead: the open-items backlog, with evidence
+- 2026-10-19 14:15 Started a worker on re-check-the-four
+- 2026-10-19 14:43 Update: Load at 245 since 13:41: another project's load probe, plus my own leaked verifiers (being ended) — **What's driving it:** a worker of another project's lead (session worker-make-the-harness-2) is running a deliberate load probe: `./.probe/load6.sh 24 420 8 …` keeps 24 `node -e for(;;){}` loops busy…
+- 2026-10-19 14:45 Planned the-signing-identity-can: The signing identity can't borrow the app's grants, and its password is never in argv or a plain file (F-F2)
+- 2026-10-19 14:45 Planned a-terminal-app-session: A Terminal.app session that needs you can be answered from the window (WT-1)
+- 2026-10-19 14:45 Planned the-phone-shows-a: The phone shows a question or permission prompt as option buttons (PH-1)
+- 2026-10-19 14:45 Planned a-dropped-host: A dropped host connection never reads as "no sessions" (E-09 residual)
+- 2026-10-19 14:45 Audit of verifier-2-0-parallel: complete, clean
+- 2026-10-19 14:46 Planned nothing-a-worker-can: Nothing a worker can reach makes the user's own session, or a sealed sender, speak for it (F-L3r, F-L2r)
+- 2026-10-19 14:46 Planned a-hook-event-never: A hook event never holds an agent's turn: clip before redacting, an alarm, bounded locks (R4, E-28)
+- 2026-10-19 14:46 Planned installing-removing-or: Installing, removing or trusting hooks touches exactly our own handlers (F-H2, F-H1, E-13)
+- 2026-10-19 14:46 Planned sending-or-withdrawing-a: Sending or withdrawing a steered message never freezes the window (E-14)
+- 2026-10-19 14:47 Planned verifier-2-0-part-2: Verifier 2.0 part 1 follow-ups: re-audits of the same commit, base merges in the diff, dismissals that unblock, the Reconsider wording
+- 2026-10-19 14:53 Audit of re-check-the-four: complete, clean
+- 2026-10-19 14:55 Started a worker on a-terminal-app-session
+- 2026-10-19 14:55 Started a worker on the-phone-shows-a
+- 2026-10-19 14:56 Planned the-app-s-handover: The app's handover request waits as long as the host's probe, and never logs a handover as failed that then succeeds
+- 2026-10-19 14:56 Started a worker on the-signing-identity-can
+- 2026-10-19 14:58 Merged verifier-2-0-parallel: Verifier 2.0, part 1: structured findings, tags, a merge gate and bounded rounds
+- 2026-10-19 14:59 Update: Merged: Verifier 2.0 part 1, structured findings with a merge gate and bounded rounds — **What changed** (`LeadBoard.swift` LeadFinding and LeadAuditLedger, `LeadVault.swift` ledger beside the verdicts with lead-only dismiss/replan, `LeadToolset.swift` submit_audit findings, the merge ga…
+- 2026-10-19 15:04 Merged re-check-the-four: Re-check the four evaluation reports against project-lead: the open-items backlog, with evidence
+- 2026-10-19 15:05 Update: Merged: the four evaluation reports re-checked against today's base (docs/eval/open-2026-10-19.md) — **What it is** (one file, +696 lines, no code): every item in the four reports' top lists and every P0/P1 finding (65 ids), each with a verdict checked against the code at HEAD: 37 fixed (with the com…
+- 2026-10-19 15:08 Started a worker on verifier-2-0-part-2
+- 2026-10-19 15:08 Started a worker on a-hook-event-never
+- 2026-10-19 15:12 Audit of process-table-reads: complete, clean
+- 2026-10-19 15:14 Update: How it's going (15:40) — **Landed since 14:00:** the merge runner's scratch HOME, tests never writing to your real ~/.vibeswitcher, worktree recovery, merge approvals in the vault, the steer-seal fix, Verifier 2.0 part 1 (str…
+- 2026-10-19 15:18 Audit of the-phone-shows-a: complete, clean
+- 2026-10-19 15:21 Merged process-table-reads: Process-table reads finish on a busy Mac: a deadline that fits the load, and tests that don't assume a quiet one
+- 2026-10-19 15:21 Update: Merged: process-table reads finish on a busy Mac — **What changed** (`ProcessTable.swift` and its tests; commits ac05129, 13bc01e): the probe showed `devname()` dominating each snapshot (95–221 ms of a 0.1–0.25 s read at load 176, scanning /dev for ev…
+- 2026-10-19 15:23 Audit of a-terminal-app-session: complete, clean
+- 2026-10-19 15:27 Merged the-phone-shows-a: The phone shows a question or permission prompt as option buttons (PH-1)
+- 2026-10-19 15:27 Update: Merged: the phone shows a question or permission prompt as option buttons (PH-1) — **What changed** (new `PhoneMenu.swift` in VibeCore, `PhoneAccess.swift` +204, `Web/app.js`, `index.html`, `style.css`, tests; 4 commits): the phone's state now carries the parsed menu of a session wa…
+- 2026-10-19 15:30 Started a worker on installing-removing-or
+- 2026-10-19 15:35 Started a worker on nothing-a-worker-can
+- 2026-10-19 15:38 Merged a-terminal-app-session: A Terminal.app session that needs you can be answered from the window (WT-1)
+- 2026-10-19 15:38 Audit of a-hook-event-never: complete, clean
+- 2026-10-19 15:38 Update: Merged: a Terminal.app session that needs you can be answered from the window (WT-1) — **What changed** (`ChatSync.swift`, `ChatView.swift`, six lines of wiring in the window controller, two test files, renders; commits 8730c58, 3bed1fb, 2208653): the needs-you card of a session running…
+- 2026-10-19 15:42 Audit of verifier-2-0-part-2: complete, clean
+- 2026-10-19 15:46 Merged a-hook-event-never: A hook event never holds an agent's turn: clip before redacting, an alarm, bounded locks (R4, E-28)
+- 2026-10-19 15:46 Update: Merged: a hook event never holds an agent's turn (clip before redacting, an alarm, bounded locks) — **What changed** (`HookState.swift`, `SessionNaming.swift`, the hook's `main.swift`, `Steer.swift`'s lock helper, one timeout default in `SessionDigest.swift`, 8 tests; commit 38c98b2): the hook masks…
+- 2026-10-19 15:48 Audit of the-signing-identity-can: complete, clean
+- 2026-10-19 15:48 Kept the-signing-identity-can unmerged: Audited clean, held for the user's decision (question 8659FA84, asked 16:20): the change makes every build ask for the keychain password (no unattended installs by the lead) and needs a one-time setup-signing.sh re-run that re-asks macOS permissions. Merge only after the user answers "merge it".
+- 2026-10-19 15:49 Started a worker on sending-or-withdrawing-a
+- 2026-10-19 15:50 Update: On battery at 29 % with 36 minutes left: pausing new starts and merges until the Mac is on power — The Mac was unplugged a few minutes ago (29 %, discharging, about 36 minutes at the current load of 61). The team is most of that load: two workers (guard-rail residuals, the steer lock), two audits (…
+- 2026-10-19 15:53 Merged verifier-2-0-part-2: Verifier 2.0 part 1 follow-ups: re-audits of the same commit, base merges in the diff, dismissals that unblock, the Reconsider wording
+- 2026-10-19 15:53 Update: Merged: Verifier 2.0 follow-ups (same-commit re-audits, base merges out of the re-audit scope, dismissals that unblock, the Reconsider wording) — **What changed** (`LeadToolset.swift`, `LeadBoard.swift`, `TeamRows.swift`, the re-audit prompt in `LeadWorkflow.swift`, 10 tests; commit 324d57d): a re-audit of the very commit already audited covers…
+- 2026-10-19 15:55 Audit of installing-removing-or: complete, clean
+- 2026-10-19 16:03 Audit of handover-tests-hold: complete, clean
+- 2026-10-19 16:06 Update: Battery at 15 %, about 19 minutes: all work committed, the last worker holds its test runs until power — Both running workers have reported: the guard-rail residuals are done (every steer post sealed by sender, forged lead lines demoted to "unverified sender", a worker's typing into one of your sessions …
+- 2026-10-19 16:34 Planned the-signing-keychain: The signing keychain asks for its password once per login session, not at every build
+- 2026-10-19 16:36 Started a worker on verifier-2-0-part
+- 2026-10-19 16:42 Audit of nothing-a-worker-can: complete, clean
+- 2026-10-19 16:43 Merged handover-tests-hold: Handover tests hold under load
+- 2026-10-19 16:43 Update: Merged: the handover probe tolerates a loaded Mac (and the handover tests hold under load) — **What changed** (`HostHandover.swift` probeLimit 15 s → 180 s in its own commit c58a814; test helpers and a new test; commits f48cfb4, 8679061): when the session host hands over to a new build, it fi…
+- 2026-10-19 16:45 Started a worker on a-dropped-host
+- 2026-10-19 16:45 Started a worker on the-app-s-handover
+- 2026-10-19 16:45 Audit of sending-or-withdrawing-a: complete, clean
+- 2026-10-19 16:47 Merged the-signing-identity-can: The signing identity can't borrow the app's grants, and its password is never in argv or a plain file (F-F2)
+- 2026-10-19 16:47 Update: Merged: the signing identity can't borrow the app's grants; its password is never on a command line or in a file (F-F2) — **What changed** (`scripts/setup-signing.sh`, `scripts/build-app.sh`, a new `scripts/test-signing.sh`, README, a doc comment; commits 543d74c, cc81fe1): setup asks you for the keychain password at sec…
+- 2026-10-19 16:54 Merged installing-removing-or: Installing, removing or trusting hooks touches exactly our own handlers (F-H2, F-H1, E-13)
+- 2026-10-19 16:54 Update: Merged: installing, removing or trusting hooks touches exactly our own handlers (F-H2, F-H1, E-13) — **What changed** (`HookInstaller.swift`, `CodexTrust.swift`, 13 new tests; commits ce87a8f, 2b2c1fe): Codex trust now accepts a hook only when its type is "command" and its command equals VibeSwitcher…
+- 2026-10-19 17:00 Merged nothing-a-worker-can: Nothing a worker can reach makes the user's own session, or a sealed sender, speak for it (F-L3r, F-L2r)
+- 2026-10-19 17:00 Update: Merged: nothing a worker can reach makes your own session, or a sealed sender, speak for it (F-L3r, F-L2r) — **What changed** (`Steer.swift`, `LeadVault.swift`, `HostServer.swift`, a seal check in `LeadHandover.swift`, README; commits 224399a, 8feee81):
+- 2026-10-19 17:02 Started a worker on the-signing-keychain
+- 2026-10-19 17:03 Update: How it's going (18:15) — **Landed since 15:40 (9):** the process-table deadline fix, the phone's option buttons, the Terminal.app answer card, the hook's clip-and-bounds, Verifier 2.0 follow-ups, the handover probe fix, the s…
+- 2026-10-19 17:05 Merged sending-or-withdrawing-a: Sending or withdrawing a steered message never freezes the window (E-14)
+- 2026-10-19 17:05 Update: Merged: sending or withdrawing a steered message never freezes the window (E-14) — **What changed** (`ChatModel.swift`, `ChatSync.swift`, three lines in `ChatView.swift`, 7 new tests; commits cdd943a, ea781c6): the steer inbox is posted to and withdrawn from on one serial background…
+- 2026-10-19 17:08 Audit of verifier-2-0-part: incomplete, clean
+- 2026-10-19 17:11 Audit of the-app-s-handover: complete, clean
+- 2026-10-19 17:13 Audit of a-dropped-host: complete, clean
+- 2026-10-19 17:15 Planned home-or-vibeswitcher: $HOME or VIBESWITCHER_HOME isolates the hook, debug modes and a plain `swift test` from the real ~/.vibeswitcher (E-30, R10)
+- 2026-10-19 17:15 Planned the-answer-card-s: The answer card's numbers are keys: while a question is up and the composer is empty, 1–9 choose and Return confirms (WC-1)
+- 2026-10-19 17:15 Started a worker on home-or-vibeswitcher
+- 2026-10-19 17:16 Merged the-app-s-handover: The app's handover request waits as long as the host's probe, and never logs a handover as failed that then succeeds
+- 2026-10-19 17:17 Update: Merged: the app's handover request waits as long as the host's probe, and never logs a handover as failed that then succeeds — **What changed** (`HostClient.swift` and its tests; commits 9395214, a374359): when the app asks the session host to hand over to a new build, it now waits 210 s (the host's 180 s probe limit plus 30 …
+- 2026-10-19 17:24 Audit of the-signing-keychain: complete, clean
+- 2026-10-19 17:24 Merged a-dropped-host: A dropped host connection never reads as "no sessions" (E-09 residual)
+- 2026-10-19 17:25 Planned one-button-speaks-a: One button speaks a 30-second briefing of what's been happening, in the language set in Settings, with ElevenLabs when a key is set
+- 2026-10-19 17:25 Planned the-phone-gets-the: The phone gets the same "Brief me" button: it plays the briefing and shows its text
+- 2026-10-19 17:25 Update: Merged: a dropped host connection never reads as "no sessions" (E-09 residual) — **What changed** (`SessionDigest.swift`, a test seam in the tool server's `main.swift`, 3 new tests; commits ca0d7c0 repro, 40f5960 fix): when the session host closes the connection before its welcome…
+- 2026-10-19 17:26 Audit of verifier-2-0-part: complete, clean
+- 2026-10-19 17:27 Started a worker on one-button-speaks-a
+- 2026-10-19 17:28 Planned steeroffmaintests-hold: SteerOffMainTests hold under load: the lock-held send case never trips a merge
+- 2026-10-19 17:29 Planned a-new-project-button: A "New Project…" button on Home creates a folder in the projects folder (set in Settings), initializes git with a first commit, and can open a session or start the lead
+- 2026-10-19 17:29 Started a worker on a-new-project-button
+- 2026-10-19 17:30 Merged the-signing-keychain: The signing keychain asks for its password once per login session, not at every build
+- 2026-10-19 17:30 Update: Merged: the signing keychain asks for its password once per login session, not at every build — **What changed** (`scripts/setup-signing.sh`, `scripts/build-app.sh`, `scripts/test-signing.sh`, README; commits a666f91, 64b364a; no Swift, the key's ACL untouched): the signing keychain now locks on…
+- 2026-10-19 17:37 Merged verifier-2-0-part: Verifier 2.0, part 2: parallel finders and a vote, within the Mac-wide limits
+- 2026-10-19 17:37 Update: Merged: Verifier 2.0 part 2, parallel finders and a vote within the Mac-wide limits — **What changed** (`LeadToolset.swift`, `LeadWorkflow.swift`, `LeadVault.swift`, `LeadBoard.swift`, `LeadWitness.swift`, `Worktrees.swift`, `TeamRows.swift`, README; 5 commits ending d9237c1): workflow…
+- 2026-10-19 17:37 Started a worker on the-answer-card-s
+- 2026-10-19 17:37 Started a worker on steeroffmaintests-hold
+- 2026-10-19 17:37 Update: How it's going (19:45) — **Landed since 18:15 (5):** the steer lock off the main thread, the dropped-host fix, the app's handover wait, the once-per-login signing keychain, Verifier 2.0 part 2. That closes the re-check's whol…
+- 2026-10-19 17:48 Audit of home-or-vibeswitcher: complete, clean
+- 2026-10-19 17:51 Planned the-hook-installer-s: The hook installer's default home follows VibePaths.home, so a scratch home never installs into the real ~/.claude or ~/.codex
+- 2026-10-19 17:53 Workflow: test_command = `bash scripts/test.sh`
+- 2026-10-19 17:59 Audit of one-button-speaks-a: complete, clean
+- 2026-10-19 17:59 Audit of a-new-project-button: complete, suspect
+- 2026-10-19 18:01 Merged home-or-vibeswitcher: $HOME or VIBESWITCHER_HOME isolates the hook, debug modes and a plain `swift test` from the real ~/.vibeswitcher (E-30, R10)
+- 2026-10-19 18:01 Update: Merged: $HOME or VIBESWITCHER_HOME isolates the hook, debug modes and a plain `swift test` from the real ~/.vibeswitcher (E-30, R10) — **What changed** (`Paths.swift`, `Attention.swift`, the home defaults at eight call sites and the hook, the three test targets' TestSupport, `Package.swift`, a new `scripts/test.sh`, the bench and loa…
+- 2026-10-19 18:03 Started a worker on the-hook-installer-s
+- 2026-10-19 18:09 Merged one-button-speaks-a: One button speaks a 30-second briefing of what's been happening, in the language set in Settings, with ElevenLabs when a key is set
+- 2026-10-19 18:09 Update: Merged: one "Brief me" button speaks a 30-second briefing, in your language, with ElevenLabs when a key is set — **What changed** (new `Briefing.swift` in VibeCore, a `Briefing/` folder in the app, Settings › General, the toolbar and the menu bar popover, the Keychain secret store, README; 4 commits ending 2c8e9…
+- 2026-10-19 18:09 Started a worker on the-phone-gets-the
+- 2026-10-19 18:10 Planned the-witness-never: The witness never reports a verifier that already gave its verdict as "stopped without calling submit_audit"
+- 2026-10-19 18:10 Started a worker on the-witness-never
+- 2026-10-19 18:11 Audit of the-answer-card-s: complete, clean
+- 2026-10-19 18:17 Audit of a-new-project-button: complete, clean
+- 2026-10-19 18:19 Merged the-answer-card-s: The answer card's numbers are keys: while a question is up and the composer is empty, 1–9 choose and Return confirms (WC-1)
+- 2026-10-19 18:20 Update: Merged: the answer card's numbers are keys, with Return to confirm and arrows to move (WC-1) — **What changed** (`ChatView.swift`, `ComposerView.swift`, 17 new tests; commit a0ce38e): while a question is up in the chat view and the composer is empty, 1–9 choose that option, ↑/↓ move the highlig…
+- 2026-10-19 18:20 Update: How it's going (21:20) — **Landed since 19:45 (3):** home isolation for tests and the hook (item 10, with the project's test command now the scratch-home wrapper), the voice briefing button, the answer card's number keys (ite…
+- 2026-10-19 18:28 Audit of the-hook-installer-s: complete, clean
+- 2026-10-19 18:34 Audit of the-witness-never: complete, clean
+- 2026-10-19 18:34 Audit of the-phone-gets-the: complete, suspect
+- 2026-10-19 18:35 Planned the-verifier-sees-the: The verifier sees the lead's approvals: a boundary excursion the lead accepted on the task is judged on its merits, never marked suspect for scope
+- 2026-10-19 18:35 Started a worker on the-verifier-sees-the
+- 2026-10-19 18:36 Merged the-hook-installer-s: The hook installer's default home follows VibePaths.home, so a scratch home never installs into the real ~/.claude or ~/.codex
+- 2026-10-19 18:36 Update: Merged: the hook installer's default home follows VibePaths.home — **What changed** (`HookInstaller.swift` +5/−2, one line in `CodexTrust.swift`, two tests; commit 7c0e356): the installer's default settings paths (~/.claude/settings.json, ~/.codex/hooks.json) now com…
+- 2026-10-19 18:37 Audit of a-new-project-button: complete, clean
+- 2026-10-19 18:42 Audit of the-phone-gets-the: complete, clean
+- 2026-10-19 18:45 Merged the-witness-never: The witness never reports a verifier that already gave its verdict as "stopped without calling submit_audit"
+- 2026-10-19 18:45 Update: Merged: the witness never reports a verifier that already gave its verdict as "stopped without calling submit_audit" — **What changed** (`LeadWitness.swift` +10/−2, two tests; commit 9484012): when a verifier has submitted its verdict and the worker then commits again, report() moves that verdict aside as outdated evi…
+- 2026-10-19 18:50 Merged a-new-project-button: A "New Project…" button on Home creates a folder in the projects folder (set in Settings), initializes git with a first commit, and can open a session or start the lead
+- 2026-10-19 18:50 Update: Merged: "New Project…" on Home creates a folder in your projects folder, initializes git with a first commit, and can open a session or start the lead — **What changed** (new `ProjectCreation.swift` in VibeCore, a `NewProject/` sheet, `StartPage.swift`, Settings › General, `Preferences.swift`, wiring in `AppDelegate.swift` and `WindowModel.swift`, REA…
+- 2026-10-19 18:55 Audit of the-verifier-sees-the: complete, clean
+- 2026-10-19 18:57 Merged the-phone-gets-the: The phone gets the same "Brief me" button: it plays the briefing and shows its text
+- 2026-10-19 18:57 Update: Merged: the phone gets the same "Brief me" button, plays the briefing and shows its text — **What changed** (`PhoneAccess.swift`, new `PhoneBriefing.swift`, `Web/app.js`, `index.html`, `style.css`, one CSP line in `RemoteServer.swift`, five lines in `AppDelegate.swift`, README; commits 426f…
+- 2026-10-19 19:00 Started a worker on lead-scorecard-and
+- 2026-10-19 19:00 Planned a-session-vibeswitcher: A session VibeSwitcher ended never looks like a failure, and ended rows fold away under "Ended (n)" (WL-1 remainder)
+- 2026-10-19 19:00 Planned terminal-app-is-read: Terminal.app is read only on change and without a process per read (R6)
+- 2026-10-19 19:00 Started a worker on a-session-vibeswitcher
+- 2026-10-19 19:01 Started a worker on terminal-app-is-read
+- 2026-10-19 19:03 Merged the-verifier-sees-the: The verifier sees the lead's approvals: a boundary excursion the lead accepted on the task is judged on its merits, never marked suspect for scope
+- 2026-10-19 19:04 Update: Merged: the verifier sees the lead's approvals, so an accepted edit outside a task's file list is judged on its merits — **What changed** (`LeadBoard.swift`, `LeadToolset.swift`, `LeadWorkflow.swift`, four tests; commit 13db331): the lead's appended notes on a task and its messages to the worker are now recorded on the …
+- 2026-10-19 19:05 Update: Retrospective: the evening batch (15:40–23:30) — **Landed:** 17 branches: the re-check's first wave (items 1–8: signing identity, Terminal.app answer card, phone buttons, dropped host, guard-rail residuals, hook bounds, hook ownership, steer lock), …
+- 2026-10-19 19:05 Planned the-normal-test-suite: The normal test suite fails on any test that uses the system temp folder, matching the load harness's lint
+- 2026-10-19 19:05 Planned setup-signing-sh-says: setup-signing.sh says what each password dialog wants before it appears, and what state you're in if you cancel
+- 2026-10-19 19:06 Started a worker on setup-signing-sh-says
+- 2026-10-19 19:21 Audit of steeroffmaintests-hold: incomplete, violation
+- 2026-10-19 19:24 Audit of setup-signing-sh-says: complete, clean
+- 2026-10-19 19:29 Merged setup-signing-sh-says: setup-signing.sh says what each password dialog wants before it appears, and what state you're in if you cancel
+- 2026-10-19 19:29 Update: Merged: setup-signing.sh says what each password dialog wants before it appears, and what state you're in if you cancel — **What changed** (`scripts/setup-signing.sh`, `scripts/test-signing.sh`, the missing-keychain message in `scripts/build-app.sh`, README; commits dd89fd9, fd75d38): before each macOS trust dialog the s…
+- 2026-10-19 19:30 Audit of lead-scorecard-and: complete, clean
+- 2026-10-19 19:33 Audit of a-session-vibeswitcher: complete, clean
+- 2026-10-19 19:39 Audit of steeroffmaintests-hold: complete, clean
+- 2026-10-19 19:40 Merged a-session-vibeswitcher: A session VibeSwitcher ended never looks like a failure, and ended rows fold away under "Ended (n)" (WL-1 remainder)
+- 2026-10-19 19:40 Update: Merged: a session VibeSwitcher ended never looks like a failure, and ended rows fold away under "Ended (n)" (WL-1 remainder) — **What changed** (`WindowGroups.swift`, `LeadTeams.swift`, `SessionListView.swift`, `StartPage.swift`, `WindowModel.swift`, 18 files in all; commits 01a7964, 344e260, 0bcba75, 75d91bd): one shared map…
+- 2026-10-19 19:41 Audit of lead-scorecard-and: complete, clean
+- 2026-10-19 19:42 Planned one-vocabulary-for-one: One vocabulary for one state model: Needs you · Working · Background · Done · Idle · Paused · Ended everywhere, and one duration format (WL-3)
+- 2026-10-19 19:43 Planned one-private-write-helper: One private-write helper: every file VibeSwitcher writes under ~/.vibeswitcher and the repo's .vibeswitcher/ is 0600 in 0700 folders (F-F1, F-L6)
+- 2026-10-19 19:43 Planned the-remaining-test-gaps: The remaining test gaps: ProcessTable.ancestors, ensurePrivateDirectories, Worktrees.signalFamily, and the hook on malformed stdin (E-32)
+- 2026-10-19 19:43 Started a worker on one-vocabulary-for-one
+- 2026-10-19 19:43 Started a worker on one-private-write-helper
+- 2026-10-19 19:43 Started a worker on the-remaining-test-gaps
+- 2026-10-19 19:46 Merged steeroffmaintests-hold: SteerOffMainTests hold under load: the lock-held send case never trips a merge
+- 2026-10-19 19:46 Update: Merged: the steer tests hold under load, and the load harness runs again on project-lead — **What changed** (`SteerOffMainTests.swift`, plus three temp-folder fixes in `KeepAwakeTests.swift`, `BriefingSnapshots.swift` and `PhoneBriefingTests.swift` with a folder parameter on `MacVoiceFile.r…
+- 2026-10-19 19:48 Started a worker on the-normal-test-suite
+- 2026-10-19 20:01 Merged lead-scorecard-and: Lead scorecard and incidents that become regression checks
+- 2026-10-19 20:01 Update: Merged: the lead scorecard, a regression command at merge, and incidents that become checks — **What changed** (`LeadBoard.swift`, `LeadRecords.swift`, new `LeadScorecard.swift`, `LeadToolset.swift`, `LeadVaultGuarded.swift`, `LeadWorkflow.swift`, the Team tab, 16 tests; commits a985429, 2c746…
+- 2026-10-19 20:01 Update: How it's going (01:15) — **Landed since the retrospective (4):** clearer wording in the signing setup script, ended rows that never look like failures with an "Ended (n)" fold (item 12), the steer tests holding under load (an…
+- 2026-10-19 20:12 Planned the-chat-bench-covers: The chat bench covers paging back and fails on a stalled tick (R12)
+- 2026-10-19 20:12 Planned a-footprint-target-under: A footprint target: under 150 MB with the window closed, no growth over a working day (R8)
+- 2026-10-19 20:12 Audit of one-private-write-helper: complete, clean
+- 2026-10-19 20:12 Started a worker on the-chat-bench-covers
+- 2026-10-19 20:16 Planned the-phone-s-screen: The phone's screen route never blocks the main thread on a Terminal read
+- 2026-10-19 20:20 Audit of the-remaining-test-gaps: incomplete, clean
+- 2026-10-19 20:23 Merged one-private-write-helper: One private-write helper: every file VibeSwitcher writes under ~/.vibeswitcher and the repo's .vibeswitcher/ is 0600 in 0700 folders (F-F1, F-L6)
+- 2026-10-19 20:23 Audit of one-vocabulary-for-one: complete, clean
+- 2026-10-19 20:23 Update: Merged: one private-write helper, so VibeSwitcher's own files are 0600 in 0700 folders (F-F1, F-L6) — **What changed** (`Paths.swift`, `LeadVault.swift`, `LeadBoard.swift`, `LeadRecords.swift`, `LeadWorkflow.swift`, `LeadLaunch.swift`, two lines in `LeadToolset.swift`, `FocusLog.swift`, `Sidebar.swift…
+- 2026-10-19 20:23 Audit of terminal-app-is-read: complete, clean
+- 2026-10-19 20:25 Started a worker on a-footprint-target-under
+- 2026-10-19 20:28 Merged one-vocabulary-for-one: One vocabulary for one state model: Needs you · Working · Background · Done · Idle · Paused · Ended everywhere, and one duration format (WL-3)
+- 2026-10-19 20:28 Update: Merged: one vocabulary for one state model, and one duration format everywhere (WL-3) — **What changed** (`Models.swift`, `WindowGroups.swift`, `BackgroundJobs.swift`, `PopoverView.swift`, `StatusStyle.swift`, `PhoneAccess.swift`, `Web/app.js`, and the surfaces that show state words: men…
+- 2026-10-19 20:34 Merged terminal-app-is-read: Terminal.app is read only on change and without a process per read (R6)
+- 2026-10-19 20:34 Update: Merged: Terminal.app is read only on change and without a process per read (R6) — **What changed** (`TerminalBridge.swift`, `SessionStore.swift`, `SessionScanner.swift`, two test files; commit ba16000): the three Terminal reads (tabs, screens, history) are handlers of one AppleScri…
+- 2026-10-19 20:34 Started a worker on the-phone-s-screen
+- 2026-10-19 20:38 Audit of the-remaining-test-gaps: complete, clean
+- 2026-10-19 20:41 Started a worker on the-normal-test-suite
+- 2026-10-19 20:45 Planned footprint-growth-under: Footprint growth under churn: find and fix what grows 50–90 % in ten minutes of sessions and chats coming and going
+- 2026-10-19 20:45 Merged the-remaining-test-gaps: The remaining test gaps: ProcessTable.ancestors, ensurePrivateDirectories, Worktrees.signalFamily, and the hook on malformed stdin (E-32)
+- 2026-10-19 20:45 Update: Merged: the remaining test gaps (E-32), and the hook ignores events it doesn't know (R11) — **What changed** (two seams with unchanged defaults in `ProcessTable.swift` and `Paths.swift`, one case in `HookState.swift`, five tests; commits 4ff8d03, d611f7f, 3e2cf43 and a merge of project-lead)…
+- 2026-10-19 20:46 Planned nothing-ticks-every: Nothing ticks every second unless you're watching a live counter, and the sidebar's desktop-switch flash can be turned off (AX-5 remainder)
+- 2026-10-19 20:46 Planned the-activity-tab-shows: The Activity tab shows what the chat doesn't: files touched, commands with exit and duration, tokens and cost (WI-1)
+- 2026-10-19 20:46 Started a worker on nothing-ticks-every
+- 2026-10-19 21:00 Audit of the-normal-test-suite: complete, clean
+- 2026-10-19 21:03 Planned the-two-remaining-main: The two remaining main-thread waits on Terminal or the host (bringToFront, HostApp.activate) never block the window
+- 2026-10-19 21:05 Merged the-normal-test-suite: The normal test suite fails on any test that uses the system temp folder, matching the load harness's lint
+- 2026-10-19 21:06 Update: Merged: the normal test suite fails on any test that uses the system temp folder, and the socket tests stop leaking into /tmp — **What changed** (new `scripts/temporary-folder-lint.txt` and `.sh`, a lint test, `scripts/test-under-load.sh`, `scripts/tmp-socket-count.sh`, test support and eleven test files, README; commits throu…
+- 2026-10-19 21:11 Audit of the-phone-s-screen: complete, clean
+- 2026-10-19 21:12 Audit of a-footprint-target-under: complete, clean
+- 2026-10-19 21:26 Planned the-hook-bounds-tests: The hook-bounds tests warm up the built hook before timing it, so a first-exec check can't fail a merge
+- 2026-10-19 21:27 Started a worker on the-hook-bounds-tests
+- 2026-10-19 21:30 Planned chat-paging-main-thread: Chat paging main-thread cost: opening a conversation or paging back costs under 0.1 s of main-thread work per page
+- 2026-10-19 21:31 Audit of nothing-ticks-every: complete, clean
+- 2026-10-19 21:34 Audit of a-footprint-target-under: complete, clean
+- 2026-10-19 21:37 Audit of the-phone-s-screen: complete, clean
+- 2026-10-19 21:38 Merged nothing-ticks-every: Nothing ticks every second unless you're watching a live counter, and the sidebar's desktop-switch flash can be turned off (AX-5 remainder)
+- 2026-10-19 21:38 Update: Merged: nothing ticks every second unless you're watching a live counter, and the desktop-switch flash has a setting (AX-5, plus the countdown half of item 9) — **What changed** (new `ElapsedTicks.swift` in VibeCore, `PopoverView.swift`, `ChatView.swift`, `LeadViews.swift`, `AppDelegate.swift`, Settings, `Preferences.swift`, one line in `IdleBench.swift`, tes…
+- 2026-10-19 21:39 Audit of the-chat-bench-covers: complete, clean
+- 2026-10-19 21:44 Merged the-phone-s-screen: The phone's screen route never blocks the main thread on a Terminal read
+- 2026-10-19 21:44 Update: Merged: the phone's screen route and taps never wait for a Terminal read on the main thread — **What changed** (`PhoneAccess.swift` +13/−6, two test files; commits dac1dfa, 17ec764, f5a2187, b4f6cc7): a tap on a menu option from the phone used to read the Terminal.app screen inside a synchrono…
+- 2026-10-19 21:46 Started a worker on the-two-remaining-main
+- 2026-10-19 21:50 Merged the-chat-bench-covers: The chat bench covers paging back and fails on a stalled tick (R12)
+- 2026-10-19 21:51 Update: Merged: the chat bench covers paging back and fails on a stalled tick (R12) — **What changed** (`ChatBench.swift`, `scripts/chat-bench-settle.sh`, a synthetic 104 KB fixture, `ChatBenchTests`, one line in `Package.swift`; 7 commits ending 8f5e543): VIBESWITCHER_BENCH_EARLIER=N …
+- 2026-10-19 21:51 Started a worker on chat-paging-main-thread
+- 2026-10-19 21:51 Update: How it's going (07:15, the night's summary) — **Landed overnight (8 since 01:15):** private file modes everywhere but HangWatchdog (item 17), one vocabulary for every state (item 15), Terminal.app read only on change (item 13), the remaining test…
+- 2026-10-19 21:56 Audit of a-footprint-target-under: complete, clean
+- 2026-10-19 22:02 Merged a-footprint-target-under: A footprint target: under 150 MB with the window closed, no growth over a working day (R8)
+- 2026-10-19 22:03 Update: Merged: a footprint target, measured (R8): under 150 MB with the window closed is met; growth under churn is not, and has its fix task — **What changed** (`IdleBench.swift`, debug-only live counters in `TerminalPane.swift` and `ChatModel.swift`, a new `FootprintBenchTests`; commits 4acbe53, eed80d9, 37433c5, 35f074e and two merges of p…
+- 2026-10-19 22:03 Started a worker on footprint-growth-under
+- 2026-10-19 22:07 Planned hostclienthandovertests: HostClientHandoverTests hold under load: the "handed over after the wait" case never trips a merge
+- 2026-10-19 22:07 Started a worker on hostclienthandovertests
+- 2026-10-19 22:15 Audit of the-two-remaining-main: complete, clean
+- 2026-10-19 22:22 Merged the-two-remaining-main: The two remaining main-thread waits on Terminal or the host (bringToFront, HostApp.activate) never block the window
+- 2026-10-19 22:22 Audit of the-hook-bounds-tests: complete, clean
+- 2026-10-19 22:23 Update: Merged: the last two main-thread waits on Terminal or the host app are gone (bring-to-front, activate) — **What changed** (`TerminalBridge.swift`'s HostApp, one line in `AppDelegate.swift`, two test files; commits 68d2157, 223095f): bringing a session's Terminal window to the front and activating the hos…
+- 2026-10-19 22:29 Planned chatbenchtests-records: ChatBenchTests records instead of failing on today's known layout cost, until the paging-cost fix lands
+- 2026-10-19 22:29 Started a worker on chatbenchtests-records
+- 2026-10-19 22:30 Audit of hostclienthandovertests: complete, clean
+- 2026-10-19 22:52 Audit of chatbenchtests-records: complete, clean
+- 2026-10-19 23:18 Audit of chatbenchtests-records: complete, clean
+- 2026-10-19 23:23 Merged chatbenchtests-records: ChatBenchTests records instead of failing on today's known layout cost, until the paging-cost fix lands
+- 2026-10-19 23:23 Update: Merged: the chat bench test records today's known layout cost instead of failing merges on it — **What changed** (`ChatBenchTests.swift` only; commits 14044e3, 1587905, 41fab59): the test judges a bench run only when the Mac's 1-minute load before and after it is under the core count (12 here), …
+- 2026-10-19 23:29 Merged the-hook-bounds-tests: The hook-bounds tests warm up the built hook before timing it, so a first-exec check can't fail a merge
+- 2026-10-19 23:29 Update: Merged: the hook-bounds tests warm up the built hook before timing it — **What changed** (`HookBoundsTests.swift` only; commits 95b5a63, 827ebb9, b33860b): the suite runs the built hook once, untimed, before any timed case, so macOS's first-exec check of a freshly built b…
+- 2026-10-19 23:34 Merged hostclienthandovertests: HostClientHandoverTests hold under load: the "handed over after the wait" case never trips a merge
+- 2026-10-19 23:34 Update: Merged: the handover tests hold under load (the "handed over after the wait" case) — **What changed** (`HostClientHandoverTests.swift` only; commit 2ff9fb3): the fake host answers a handover when the test cues it, after the client has logged "no answer in N s", instead of on its own t…
+- 2026-10-19 23:35 Started a worker on the-activity-tab-shows
+- 2026-10-19 23:35 Planned a-task-can-be: A task can be folded into another: a board state that is neither failed nor abandoned, counted under Merged, with the link shown
+- 2026-10-19 23:35 Started a worker on a-task-can-be
+- 2026-10-19 23:49 Planned selecting-text-in-the: Selecting text in the chat spans paragraphs and messages: dragging across a reply and ⌘C copies all of it
+- 2026-10-20 00:08 Audit of the-activity-tab-shows: complete, clean
+- 2026-10-20 00:15 Audit of a-task-can-be: complete, clean
+- 2026-10-20 00:18 Planned terminalbridgetests-hold: TerminalBridgeTests hold under load: the read-behind-a-hung-one case never trips a merge
+- 2026-10-20 00:18 Started a worker on terminalbridgetests-hold
+- 2026-10-20 00:20 Merged the-activity-tab-shows: The Activity tab shows what the chat doesn't: files touched, commands with exit and duration, tokens and cost (WI-1)
+- 2026-10-20 00:21 Update: Merged: the Activity tab shows what the chat doesn't: files touched, commands with exit and duration, tokens and cost (WI-1) — **What changed** (`ActivityFeed.swift` rewritten in VibeCore, the Activity tab in `InspectorView.swift`, tests and fixtures, renders in docs/eval/activity; commits a57f428, 2937e43, 1715796): the insp…
+- 2026-10-20 00:27 Merged a-task-can-be: A task can be folded into another: a board state that is neither failed nor abandoned, counted under Merged, with the link shown
+- 2026-10-20 00:27 Update: Merged: a task can be folded into another, abandoned with a reason, or removed if it never ran; none of them reads as failed — **What changed** (`LeadBoard.swift`, `LeadToolset.swift`, `LeadWorkflow.swift`, `LeadScorecard.swift`, `TeamRows.swift`, `TeamViews.swift`, `LeadViews.swift`, two one-line rules, README; 5 commits end…
+- 2026-10-20 00:28 Update: How it's going (01:20) — **Landed since 23:40 (5):** the chat bench test records the known layout cost instead of failing merges, the hook-bounds warm-up, the handover test fix, the Activity tab (item 21), and the fold / aban…
+- 2026-10-20 00:33 Update: On battery at 17 % (about 33 minutes): no new starts; the three running workers finish or resume on power — The Mac was unplugged around 00:30. Three workers are mid-task (chat paging cost, footprint growth, the Terminal-bridge test); I'm starting nothing new and merging nothing until it's on AC power again…
+- 2026-10-20 00:37 Planned homeisolationtests-real: HomeIsolationTests' real-folder check ignores the live app's own writes, so it never fails because VibeSwitcher is running
+- 2026-10-20 07:34 Started a worker on homeisolationtests-real
+- 2026-10-20 07:42 Audit of terminalbridgetests-hold: complete, clean
+- 2026-10-20 07:42 Planned swift-tool-runs-leak: Swift tool runs leak no folders into the user's temp directory
+- 2026-10-20 07:45 Started a worker on swift-tool-runs-leak
+- 2026-10-20 07:51 Merged terminalbridgetests-hold: TerminalBridgeTests hold under load: the read-behind-a-hung-one case never trips a merge
+- 2026-10-20 07:52 Update: Merged: TerminalBridgeTests holds under load; a temp-folder leak found (one command for you) — **Merged** terminalbridgetests-hold (f532b05, tests only, +60/−15 in TerminalBridgeTests.swift). The read-behind-a-hung-script case is now timed from its own call on a cue instead of from before the h…
+- 2026-10-20 07:58 Audit of homeisolationtests-real: complete, clean
+- 2026-10-20 08:04 Merged homeisolationtests-real: HomeIsolationTests' real-folder check ignores the live app's own writes, so it never fails because VibeSwitcher is running
+- 2026-10-20 08:04 Update: Merged: HomeIsolationTests ignores the live app's writes — **Merged** homeisolationtests-real (3 commits, head 5187a8e; tests only, +130/−19 in HomeIsolationTests.swift). The real-folder check no longer diffs the whole `~/.vibeswitcher` tree, which made it fl…
+- 2026-10-20 08:10 Audit of footprint-growth-under: complete, clean
+- 2026-10-20 08:34 Planned role-sessions-end: Role sessions end themselves when their job is done
+- 2026-10-20 08:58 Started a worker on role-sessions-end
+- 2026-10-20 09:01 Merged footprint-growth-under: Footprint growth under churn: find and fix what grows 50–90 % in ten minutes of sessions and chats coming and going
+- 2026-10-20 09:01 Update: Merged: footprint growth under churn fixed · How it's going — **Merged** footprint-growth-under (7 commits, head 06d0101; 5 files, +165/−51). Ten minutes of sessions and chats coming and going used to grow the app 51–89 %; it now moves −1.5 to −0.7 % from a warm…
+- 2026-10-20 09:06 Audit of swift-tool-runs-leak: incomplete, clean
+- 2026-10-20 09:23 Planned a-role-session-s: A role session's pending permission prompt is shown in full to the lead
+- 2026-10-20 09:23 Started a worker on a-role-session-s
+- 2026-10-20 09:32 Audit of role-sessions-end: complete, clean
+- 2026-10-20 09:40 Merged role-sessions-end: Role sessions end themselves when their job is done
+- 2026-10-20 09:41 Update: Merged: role sessions end themselves when their job is done — **Merged** role-sessions-end (7 commits, head 6e69804; 15 files, +906/−16). This is the fix for the idle verifiers and workers you saw running for 14–20 hours:
+- 2026-10-20 09:52 Audit of swift-tool-runs-leak: complete, clean
+- 2026-10-20 09:55 Audit of a-role-session-s: complete, clean
+- 2026-10-20 09:57 Audit of chat-paging-main-thread: complete, clean
+- 2026-10-20 09:58 Merged swift-tool-runs-leak: Swift tool runs leak no folders into the user's temp directory
+- 2026-10-20 09:58 Planned chat-bench-settle-no: Chat bench settle: no bench artifacts, every tick judged
+- 2026-10-20 09:58 Update: Merged: Swift tool runs leak nothing into your temp folder — **Merged** swift-tool-runs-leak (8 commits, head 01d036e; 26 files). SwiftPM leaves 5–7 empty `TemporaryDirectory.*` folders per build or test run; this stops them reaching your `$TMPDIR`:
+- 2026-10-20 10:40 Merged chat-paging-main-thread: Chat paging main-thread cost: opening a conversation or paging back costs under 0.1 s of main-thread work per page
+- 2026-10-20 10:40 Audit of a-role-session-s: complete, clean
+- 2026-10-20 10:40 Update: Merged: chat opens and pages cost under 0.1 s per tick (0.25 s stall rule hard again) — **Merged** chat-paging-main-thread (head 2677d13; 9 files, +500/−131). Opening a conversation and each "Show earlier" page used to cost 0.13 s of main-thread time in one tick, with outliers to 0.33 s,…
+- 2026-10-20 10:42 Started a worker on selecting-text-in-the
+- 2026-10-20 10:42 Started a worker on chat-bench-settle-no
+- 2026-10-20 10:43 Planned audit-refuses-a-branch-2: Audit refuses a branch whose trial merge conflicts, naming the files
+- 2026-10-20 10:43 Planned audit-tells-untracked: Audit tells untracked leftovers in a worktree from committed settings changes
+- 2026-10-20 10:43 Planned the-witness-tells-the: The witness tells the lead when the Mac goes on battery or back on power
+- 2026-10-20 10:44 Update: Retrospective: the morning batch (6 merges, 2 re-audits, 5 verifiers ended by hand) — **Landed** since 07:30: TerminalBridgeTests hold, HomeIsolationTests isolation, footprint growth fix, role sessions end themselves, Swift temp-folder fix, chat paging (prompt visibility merging now). …
+- 2026-10-20 10:45 Merged a-role-session-s: A role session's pending permission prompt is shown in full to the lead
+- 2026-10-20 10:45 Update: Merged: a stalled session's pending prompt is shown to the lead in full — **Merged** a-role-session-s (head 208ecff; 9 files, +458/−15). When a worker or verifier waits on a permission prompt, the witness report, read_session, sessions and status now show the whole pending …
+- 2026-10-20 11:28 Started a worker on selecting-text-in-the
+- 2026-10-20 11:28 Started a worker on chat-bench-settle-no
+- 2026-10-20 11:28 Started a worker on audit-refuses-a-branch-2
+- 2026-10-20 11:28 Started a worker on the-witness-tells-the
+- 2026-10-20 12:02 Started a worker on selecting-text-in-the
+- 2026-10-20 12:02 Started a worker on the-witness-tells-the
+- 2026-10-20 12:15 Audit of the-witness-tells-the: complete, clean
+- 2026-10-20 12:20 Merged the-witness-tells-the: The witness tells the lead when the Mac goes on battery or back on power
+- 2026-10-20 12:20 Update: Merged: the witness tells the lead about battery and power — **Merged** the-witness-tells-the (43cdbc6; 8 files). The app reads the battery through IOKit once a minute (about 77 µs, no process spawned, nothing leaked) and sends every running lead one witness me…
+- 2026-10-20 12:26 Started a worker on chat-bench-settle-no
+- 2026-10-20 12:26 Started a worker on audit-refuses-a-branch-2
+- 2026-10-20 12:39 Audit of audit-refuses-a-branch-2: complete, clean
+- 2026-10-20 12:44 Merged audit-refuses-a-branch-2: Audit refuses a branch whose trial merge conflicts, naming the files
+- 2026-10-20 12:45 Update: Merged: audit refuses a conflicting branch before spending a verifier — **Merged** audit-refuses-a-branch-2 (09b7464; 3 files, +156/−5). Before starting a verifier, audit now runs a trial merge of the branch onto project-lead (git merge-tree, touching no ref or worktree).…
+- 2026-10-20 12:45 Started a worker on audit-tells-untracked
+- 2026-10-20 12:45 Update: How it's going (early afternoon) — **Landed since the retrospective:** the lead sees a stalled session's full prompt; the witness reports battery and power to the lead; audit refuses a conflicting branch up front. Nine merges today in …
+- 2026-10-20 12:49 Planned wt-2-claude-s: WT-2: Claude's status rows render as in Terminal.app, resizes are logged, Focus Terminal mode
+- 2026-10-20 12:49 Planned ax-6-remainder-increase: AX-6 remainder: Increase Contrast gives solid backgrounds and 7:1 inks
+- 2026-10-20 12:50 Started a worker on ax-6-remainder-increase
+- 2026-10-20 12:51 Planned vibeswitcher-s-own: VibeSwitcher's own battery use: find the polling and cut idle CPU to near zero
+- 2026-10-20 12:51 Started a worker on vibeswitcher-s-own
+- 2026-10-20 13:12 Audit of audit-tells-untracked: complete, clean
+- 2026-10-20 13:18 Merged audit-tells-untracked: Audit tells untracked leftovers in a worktree from committed settings changes
+- 2026-10-20 13:18 Update: Merged: audit tells untracked leftovers from a settings change — **Merged** audit-tells-untracked (3 commits, head 686aaeb; 5 files). Audit now judges Claude-settings changes from the branch's commits (what would merge) plus only the uncommitted files Claude would …
+- 2026-10-20 13:18 Started a worker on wt-2-claude-s
+- 2026-10-20 13:29 Audit of ax-6-remainder-increase: complete, clean
+- 2026-10-20 13:36 Merged ax-6-remainder-increase: AX-6 remainder: Increase Contrast gives solid backgrounds and 7:1 inks
+- 2026-10-20 13:36 Update: Merged: Increase Contrast gives solid backgrounds and 7:1 inks (AX-6 done) — **Merged** ax-6-remainder-increase (7c936a2; 6 files). With macOS's Increase Contrast on, the popover, sidebar and floating pill switch live from materials to solid backgrounds (white / #121212) with …
+- 2026-10-20 13:52 Audit of chat-bench-settle-no: incomplete, clean
+- 2026-10-20 13:56 Audit of selecting-text-in-the: incomplete, clean
+- 2026-10-20 14:09 Audit of chat-bench-settle-no: complete, clean
+- 2026-10-20 14:15 Merged chat-bench-settle-no: Chat bench settle: no bench artifacts, every tick judged
+- 2026-10-20 14:15 Update: Merged: chat bench judges every tick and no longer measures itself — **Merged** chat-bench-settle-no (b9892d7, a6d73a2, 1350f74; 3 files). The chat bench's reading scroll now waits until an open has settled, so the top/middle reopen cases measure the app rather than th…
+- 2026-10-20 14:18 Audit of wt-2-claude-s: complete, clean
+- 2026-10-20 14:39 Audit of wt-2-claude-s: complete, clean
+- 2026-10-20 14:44 Merged wt-2-claude-s: WT-2: Claude's status rows render as in Terminal.app, resizes are logged, Focus Terminal mode
+- 2026-10-20 14:45 Update: Merged: WT-2 (status rows match Terminal.app, resize log, Focus Terminal) · How it's going (14:44) — **Merged** wt-2-claude-s (head bb7e161; 20 files). Claude Code's status rows were captured byte for byte from a scratch session (scratch home, fake Messages API, no real session touched) at 110 and 16…
+- 2026-10-20 14:45 Planned the-settle-script-passes: The settle script passes 64/64 at 12/12 on a quiet Mac, so it can become the regression command
+- 2026-10-20 14:45 Started a worker on the-settle-script-passes
+- 2026-10-20 15:04 Audit of vibeswitcher-s-own: complete, clean
+- 2026-10-20 15:06 Planned test-gaps-from-the: Test gaps from the battery audit: orphan sweep cases, exit-poll delays, the scratch lint race
+- 2026-10-20 15:09 Merged vibeswitcher-s-own: VibeSwitcher's own battery use: find the polling and cut idle CPU to near zero
+- 2026-10-20 15:10 Update: Merged: VibeSwitcher's own battery use cut to under 1 % of a core — **Merged** vibeswitcher-s-own (5 commits, head 3f07933; 22 files). Your "it's using way too much" was right: the installed app sat at 9–12 % of a core with the window open and 3 leads running, because…
+- 2026-10-20 15:10 Started a worker on test-gaps-from-the
+- 2026-10-20 15:52 Audit of test-gaps-from-the: complete, clean
+- 2026-10-20 15:59 Merged test-gaps-from-the: Test gaps from the battery audit: orphan sweep cases, exit-poll delays, the scratch lint race
+- 2026-10-20 15:59 Update: Merged: test gaps from the battery audit closed — **Merged** test-gaps-from-the (5 commits, head 9dca1f7; 5 files, +347/−36). The host's exit poll and parser watchdog now take their timers from an injectable source, so their backoff (0.05/1/5/30 s), …
+- 2026-10-20 16:05 Planned pushes-never-trip-github: Pushes never trip GitHub push protection on the redaction tests' made-up secrets
+- 2026-10-20 16:05 Started a worker on pushes-never-trip-github
+- 2026-10-20 16:20 Audit of selecting-text-in-the: incomplete, clean
+- 2026-10-20 16:20 Planned redaction-a-slack: Redaction: a Slack webhook path is masked whole even when a broader rule matches part of it first
+- 2026-10-20 16:28 Audit of pushes-never-trip-github: complete, clean
+- 2026-10-20 16:33 Merged pushes-never-trip-github: Pushes never trip GitHub push protection on the redaction tests' made-up secrets
+- 2026-10-20 16:35 Update: Merged: pushes no longer trip GitHub push protection on test fixtures (touches .github) — **Merged** pushes-never-trip-github (3 commits, head fff5c70; 4 files). **Sensitive path:** commit 2554086 adds `.github/secret_scanning.yml`, whose paths-ignore excludes the two redaction fixture fil…
+- 2026-10-20 16:35 Update: End of day: installed, pushed, wrapped up — **Installed** at 16:35: `/Applications/VibeSwitcher.app` now carries everything merged since yesterday's 12:07 build (16 branches today plus last night's), signed with the new keychain identity. At it…
+- 2026-10-20 16:56 Planned no-file-in-the: No file in the repo holds a complete secret shape as a literal, so pushes never trip push protection
+- 2026-10-20 16:56 Started a worker on no-file-in-the
+- 2026-10-20 17:21 Planned worktreestests-signal: WorktreesTests' signal-family test is deterministic; the secret-shape lint names its skips
+- 2026-10-20 17:21 Update: Handover: restart the lead to merge the push-protection fix — The push-protection fix (no-file-in-the, 109f966) passed its audit complete and clean: fixtures built from pieces, docs cut short, a whole-tree lint, no GitHub config; the verifier's own scan of all 6…
+- 2026-10-20 17:21 Audit of no-file-in-the: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
+- 2026-10-20 18:08 You accepted 0 commits on project-lead in VibeSwitcher:
+- 2026-10-20 18:13 Merged no-file-in-the: No file in the repo holds a complete secret shape as a literal, so pushes never trip push protection
+- 2026-10-20 18:13 Update: Merged: no file holds a complete secret shape, so pushes never trip push protection — **Merged** no-file-in-the (109f966; 5 files). Every secret-shaped fixture in the redaction tests is now built from pieces at run time (the strings the rules see are byte-identical to before, every ass…
+- 2026-10-20 19:25 Planned the-signing-scripts-can: The signing scripts can never leave the login keychain out of the search list
+- 2026-10-20 22:11 Started a worker on the-settle-script-passes
+- 2026-10-20 22:11 Started a worker on the-signing-scripts-can
+- 2026-10-20 22:12 Planned battery-hold-only-below: Battery hold only below a level set in Settings (default 50 %), not at every unplug
+- 2026-10-20 22:45 Audit of the-signing-scripts-can: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
+- 2026-10-20 22:51 Merged the-signing-scripts-can: The signing scripts can never leave the login keychain out of the search list
+- 2026-10-20 22:51 Update: Merged: the signing scripts can never leave your login keychain out of the search list — **Merged** the-signing-scripts-can (e7a5864, b353fd6; the two signing scripts and their test). Both scripts now share one search-list block: they read the keychain search list first and stop before an…
+- 2026-10-20 22:51 Started a worker on battery-hold-only-below
+- 2026-10-20 23:13 Audit of battery-hold-only-below: complete, clean, round 1: 1 Nit open
+- 2026-10-20 23:18 Merged battery-hold-only-below: Battery hold only below a level set in Settings (default 50 %), not at every unplug
+- 2026-10-20 23:18 Update: Merged: battery hold only below a level you set (default 50 %) — **Merged** battery-hold-only-below (7d1ecd3; 10 files). Settings › General › Project lead gains "On battery, pause lead work below [50] %" (field plus stepper in steps of 5 within 10–90; 0 means never…
+- 2026-10-21 00:15 Planned settle-script-staggered: Settle script: staggered job starts and a reason recorded for each starved tick
+- 2026-10-21 00:21 Audit of the-settle-script-passes: complete, clean
+- 2026-10-21 00:26 Merged the-settle-script-passes: The settle script passes 64/64 at 12/12 on a quiet Mac, so it can become the regression command
+- 2026-10-21 00:27 Update: Merged: the chat settle matrix passes 64/64 at 12/12 on a quiet Mac — **Merged** the-settle-script-passes (3339dfd; one doc, docs/eval/chat-bench-settle-2026-10-20.md). The full chat bench matrix (64 cases × 12 runs) ran from 23:23 after the Mac had been quiet for five …
+- 2026-10-21 09:12 Planned a-slash-command-that: A slash command that opens a picker shows it in the chat at once
+- 2026-10-21 09:12 Started a worker on a-slash-command-that
+- 2026-10-21 09:33 Planned brief-me-for-the: Brief me for the open project, beside the global briefing
+- 2026-10-21 09:33 Started a worker on brief-me-for-the
+- 2026-10-21 09:38 Started a worker on selecting-text-in-the
+- 2026-10-21 10:04 Audit of brief-me-for-the: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
+- 2026-10-21 10:06 Planned scripts-test-sh-runs: scripts/test.sh runs the phone's web tests too
+- 2026-10-21 10:06 Started a worker on scripts-test-sh-runs
+- 2026-10-21 10:10 Merged brief-me-for-the: Brief me for the open project, beside the global briefing
+- 2026-10-21 10:10 Update: Merged: Brief me on one project, beside the global briefing — **Merged** brief-me-for-the (7 commits, head 44b636a; 19 files).
+- 2026-10-21 10:18 Audit of a-slash-command-that: incomplete, clean, round 1: 1 Important open, 1 Nit open
