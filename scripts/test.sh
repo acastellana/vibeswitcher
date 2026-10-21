@@ -11,6 +11,10 @@
 # and the run fails. On 2026-10-20 hosts from a run a day before still ran, one of them a test's counter loop (8
 # CPU-minutes so far): a host runs in a process group of its own and outlives a runner killed with its group.
 #
+# swift build and swift test hold the Mac-wide test and build lock (scripts/lib/test-lock.sh): while another run holds
+# it (another worker's suite, a build-app.sh, a merge's tests), this one waits, saying for whom. The web tests and the
+# leftover check run after it's let go.
+#
 # The phone's web tests run after swift test, in the same scratch home and TMPDIR: each Tests/Web/*.test.mjs with
 # node, a failing one named, then one line saying how many passed. Without node on PATH the run stops before the
 # build, naming it: PhoneWebTests (swift test) skips them without node, and Web/ changes had been checked only by hand.
@@ -103,6 +107,7 @@ if ! command -v node > /dev/null; then
 fi
 
 source scripts/lib/scratch.sh
+source scripts/lib/test-lock.sh
 
 scratch_tmpdir vs-test
 mkdir -p "$tool_scratch/home" || exit 1
@@ -116,8 +121,13 @@ if [[ -n $web_only ]]; then
     run_web_tests "$web_only"
     status=$?
 else
-    swift build && swift test "$@"
-    status=$?
+    test_lock scripts/test.sh || exit 1
+    # Without fd 9: nothing they leave running holds the lock.
+    {
+        swift build && swift test "$@"
+        status=$?
+    } 9>&-
+    test_unlock
     # Even when the build or a test failed: they don't need the build, and their result is worth having.
     run_web_tests Tests/Web || status=1
 fi

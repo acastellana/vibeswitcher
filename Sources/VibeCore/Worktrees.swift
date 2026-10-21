@@ -563,8 +563,10 @@ public enum Worktrees {
     /// The commands run with HOME, CFFIXED_USER_HOME and TMPDIR in `home` (by default next to `scratch`), made empty
     /// before and removed after, as workers and verifiers run the tests: never the user's own ~/.vibeswitcher,
     /// Keychain or app.log. A failed or hung run's output starts by naming it.
+    /// The commands hold the Mac-wide test and build lock (`lock`; nil: none) while they run.
     public static func rebaseAndTest(root: String, commit: String, onto base: String, setup: String? = nil, test: String?,
-                                     scratch: URL, home: URL? = nil, timeout: TimeInterval = testTimeout) -> Check {
+                                     scratch: URL, home: URL? = nil, timeout: TimeInterval = testTimeout,
+                                     lock: TestLock? = TestLock.standard()) -> Check {
         let path = scratch.path
         let home = (home ?? scratch.deletingLastPathComponent().appendingPathComponent(scratch.lastPathComponent + "-home")).path
         let cancel = ShellCancel.current
@@ -603,14 +605,17 @@ public enum Worktrees {
         }
         guard cancel?.isCancelled != true else { return .cancelled }
         let tested = Git.run(["rev-parse", "HEAD"], in: path).output
-        return runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout).stopped ?? .passed(tested)
+        return runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
+                         as: "VibeSwitcher's merge test of \(commit.prefix(8)) in \(root)").stopped ?? .passed(tested)
     }
 
     /// Runs `setup` then `test` (each when given) in `path` with HOME, CFFIXED_USER_HOME and TMPDIR in `home` (made
     /// here, removed by the caller), as merge and an audit's shared run do. `stopped`: nil when every command passed,
     /// else how it stopped (failed, hung, cancelled, or the home couldn't be made); `outputs`: each command that ran,
-    /// with all of its output, in order.
-    static func runChecks(setup: String?, test: String?, in path: String, home: String, timeout: TimeInterval)
+    /// with all of its output, in order. With `lock`, they run holding it (as `holder` says), after waiting for it up
+    /// to `timeout`; the commands get its path in `TestLock.heldVariable`, so a script among them doesn't wait for it.
+    static func runChecks(setup: String?, test: String?, in path: String, home: String, timeout: TimeInterval,
+                          lock: TestLock? = nil, as holder: String = "VibeSwitcher's test run")
         -> (stopped: Check?, outputs: [(name: String, output: String)]) {
         let cancel = ShellCancel.current
         let tmp = home + "/tmp"
@@ -619,7 +624,23 @@ public enum Worktrees {
         } catch {
             return (.error("Couldn't make the scratch home \(home) to run the tests in: \(error.localizedDescription)"), [])
         }
-        let header = "HOME, CFFIXED_USER_HOME and TMPDIR: \(home) (a scratch folder, removed afterwards)\n"
+        var header = "HOME, CFFIXED_USER_HOME and TMPDIR: \(home) (a scratch folder, removed afterwards)\n"
+        var held: TestLock.Held?
+        defer { held?.release() }
+        let runs = [setup, test].contains { !($0 ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
+        if let lock, runs {
+            switch lock.acquire(as: holder, timeout: timeout, cancel: cancel) {
+            case .held(let taken, let waited, let after):
+                held = taken
+                if let after { header += "Waited \(duration(waited)) for the Mac-wide test and build lock, held by \(after).\n" }
+            case .busy(let who):
+                return (.error("Another run held the Mac-wide test and build lock (\(lock.path)) for over \(duration(timeout)): \(who ?? "it didn't say who"). Nothing was tested; try again once it's done."), [])
+            case .cancelled:
+                return (.cancelled, [])
+            case .failed(let text):
+                return (.error(text + " Nothing was tested."), [])
+            }
+        }
         var outputs: [(name: String, output: String)] = []
         for (name, command) in [("init_command", setup), ("test command", test)] {
             guard let command, !command.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
@@ -627,8 +648,9 @@ public enum Worktrees {
             // command and all it starts have the scratch one.
             let script = "export HOME=\(RecentProjects.shellQuote(home))\n" + command
             // All of it, in order: what failed may be anywhere in it, and its tail is often a build's warnings.
-            let run = Shell.run(executable: "/bin/zsh", args: ["-lc", script], in: path,
-                                env: ["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"], timeout: timeout, interleaved: true)
+            var env = ["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"]
+            if let lock, held != nil { env[TestLock.heldVariable] = lock.path }
+            let run = Shell.run(executable: "/bin/zsh", args: ["-lc", script], in: path, env: env, timeout: timeout, interleaved: true)
             outputs.append((name, header + run.output))
             if run.cancelled || cancel?.isCancelled == true { return (.cancelled, outputs) }
             if run.timedOut { return (.hung(command: name, after: timeout, output: header + run.output), outputs) }
@@ -644,7 +666,7 @@ public enum Worktrees {
     /// command's whole output goes to `<logs>/init.log` and `<logs>/test.log` for the finders to read, with
     /// `<logs>/run.txt` saying how it went (written last: a folder without it holds no finished run).
     public static func auditRun(root: String, commit: String, setup: String?, test: String?, scratch: URL, home: URL,
-                                logs: URL, timeout: TimeInterval = testTimeout) -> AuditRun {
+                                logs: URL, timeout: TimeInterval = testTimeout, lock: TestLock? = TestLock.standard()) -> AuditRun {
         let path = scratch.path, homePath = home.path
         let remove = {
             ShellCancel.with(nil) {
@@ -666,7 +688,8 @@ public enum Worktrees {
         guard added.ok else {
             return AuditRun(outcome: .error(added.error.isEmpty ? "Couldn't set up a worktree to test \(commit.prefix(8)) in." : added.error), logs: [])
         }
-        let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: homePath, timeout: timeout)
+        let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: homePath, timeout: timeout, lock: lock,
+                                           as: "VibeSwitcher's audit run of \(commit.prefix(8)) in \(root)")
         var files: [String] = []
         for (name, output) in outputs {
             let file = logs.appendingPathComponent(name == "init_command" ? "init.log" : "test.log")
