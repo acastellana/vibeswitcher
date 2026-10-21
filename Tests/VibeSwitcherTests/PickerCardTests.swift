@@ -1,6 +1,8 @@
 import AppKit
+import Combine
 import CryptoKit
 import Foundation
+import SwiftTerm
 import SwiftUI
 import Testing
 import VibeCore
@@ -113,6 +115,70 @@ struct PickerCardTests {
         try await h.typed("/permissions\r\u{1b}\r")
     }
 
+    /// 2026-10-21: the test above failed 1 run in 3: its card's hint read "Enter to confirm · Esc to caect · ←/→ to
+    /// switch · Esc to cancel". The replay writes 11-enter's 16 526 bytes at once, the host is handed the first
+    /// 16 KiB of them (to byte 21943), and a read of its screen came before the other 142: Claude draws the dialog's
+    /// footer over the list's ("En", then from column 9 "er to confirm · Esc to can", then "el" at 36), and what was
+    /// left of the old one still ends in "Esc to cancel", so it parsed as the dialog, rows and all. Here that read
+    /// is made to happen: the split screen is read once, and the rest is drawn before the next read.
+    @Test func aRedrawSplitMidWordNeverReachesTheCard() async throws {
+        let h = try await ReplayHarness.start(temp)
+        defer { h.stop() }
+        _ = h.sync.type("/permissions")
+        h.draw("10-down")
+        #expect(await until(timeout: 30) { h.chat.menu?.options == ["Add a new rule…", "Bash(ls:*)"] && h.chat.menu?.selected == 1 })
+        let list = h.chat.menu
+        var shown: [ScreenMenu?] = []
+        let watching = h.chat.$menu.sink { shown.append($0) }
+        defer { watching.cancel() }
+        let half = { (lines: [String]) in lines.contains { $0.contains("Esc to caect") } }
+        let whole = { (lines: [String]) in lines.contains { $0.trimmingCharacters(in: .whitespaces) == "Enter to confirm · Esc to cancel" } }
+        h.awaited = [half, whole]
+        h.draw(at: 21943)
+        #expect(await until(timeout: 30) { h.reads.last.map(half) == true })
+        h.draw("11-enter")
+        #expect(await until(timeout: 30) { h.chat.menu?.hint == "Enter to confirm · Esc to cancel" })
+        #expect(h.reads.filter(half).count == 1)
+        #expect(h.chat.menu?.options == ["Yes", "No"])
+        #expect(h.chat.menu?.selected == 1)
+        // The list's card stayed until the dialog's came: nothing in between.
+        let dialog = h.chat.menu
+        #expect(shown.allSatisfy { $0 == list || $0 == dialog }, "shown: \(shown.map { $0?.hint ?? "none" })")
+    }
+
+    /// The same screens read off the capture byte for byte (no host): a parse is taken when the read before parsed
+    /// the same, so a read landing mid-redraw is never taken, and a screen that couldn't be read counts as none.
+    @Test func aPickerParseIsTakenOnceTwoReadsInARowAgree() throws {
+        let raw = Array(try Data(contentsOf: ReplayHarness.capture.appendingPathExtension("raw")))
+        func screen(_ end: Int) -> [String] {
+            let terminal = Terminal(delegate: HeadlessDelegate(), options: TerminalOptions(cols: 110, rows: 40, scrollback: 100))
+            terminal.feed(byteArray: Array(raw[0..<end]))
+            return HostedSession.styledScreen(of: terminal).text.components(separatedBy: "\n")
+        }
+        let list = screen(19779), half = screen(21943), whole = screen(22085)
+        #expect(ScreenMenu.parsePicker(half)?.hint == "Enter to confirm · Esc to caect · ←/→ to switch · Esc to cancel")
+        var settled = ScreenMenu.SettledPicker()
+        settled.read(list)
+        #expect(settled.menu == nil)
+        #expect(settled.settling)
+        settled.read(list)
+        let taken = try #require(settled.menu)
+        #expect(taken.options == ["Add a new rule…", "Bash(ls:*)"])
+        #expect(!settled.settling)
+        settled.read(half)
+        #expect(settled.menu == taken)
+        #expect(settled.settling)
+        settled.read(whole)
+        #expect(settled.menu == taken)
+        settled.read(whole)
+        #expect(settled.menu?.hint == "Enter to confirm · Esc to cancel")
+        #expect(settled.menu?.options == ["Yes", "No"])
+        settled.read(nil)
+        #expect(settled.menu?.options == ["Yes", "No"])
+        settled.read(nil)
+        #expect(settled.menu == nil)
+    }
+
     /// The audit's probe: a message held while a picker is open, another session selected for a while (nothing open
     /// there), then back with the picker still open: the message still waits, and goes in once the picker closes.
     @Test func aHeldMessageStaysHeldAcrossSwitchingAwayAndBack() async throws {
@@ -190,7 +256,8 @@ struct PickerCardTests {
 @MainActor
 final class ReplayHarness {
     static let program = #"""
-# Replays a terminal capture: draws it up to a mark when told ({"to": MARK} lines appended to CONTROL), records
+# Replays a terminal capture: draws it up to a mark when told ({"to": MARK} lines appended to CONTROL; {"at": N} up to
+# byte N), records
 # every byte typed into it (KEYS). Usage: python3 -I -u replay.py RAW MARKS CONTROL KEYS
 import json, os, select, sys, tty
 RAW, MARKS, CONTROL, KEYS = sys.argv[1:5]
@@ -198,14 +265,13 @@ raw = open(RAW, "rb").read()
 marks = json.load(open(MARKS))
 tty.setraw(0)
 at = 0
-def draw(mark):
+def draw(end):
     global at
-    end = marks[mark]
     data = raw[at:end] if end >= at else b""
     while data:
         data = data[os.write(1, data):]
     at = max(at, end)
-draw("idle")
+draw(marks["idle"])
 seen = 0
 while True:
     ready, _, _ = select.select([0], [], [], 0.02)
@@ -218,7 +284,8 @@ while True:
     with open(CONTROL) as f:
         lines = f.read().splitlines()
     for line in lines[seen:]:
-        draw(json.loads(line)["to"])
+        told = json.loads(line)
+        draw(told["at"] if "at" in told else marks[told["to"]])
     seen = len(lines)
 """#
 
@@ -273,13 +340,26 @@ while True:
         command = "exec /usr/bin/python3 -I -u '\(script.path)' '\(capture).raw' '\(capture).marks.json' '\(control.path)' '\(keysFile.path)'"
         // Every read of the host's screen counted, and kept as the pane's read of it would be (trimmed both sides):
         // the pane follows the same session stream.
+        // A read answered only once the host's screen passes the first of `awaited` (that one used up).
         let read = sync.hostScreen
-        sync.hostScreen = { [weak self] id, done in
-            self?.hostReads += 1
-            read(id) { lines in
-                if let lines { self?.paneReads[id] = ScreenRead(lines: lines.map { $0.replacingOccurrences(of: "\u{0}", with: " ").trimmingCharacters(in: .whitespaces) }) }
+        hostRead = read
+        func answer(_ id: UUID, _ done: @escaping ([String]?) -> Void) {
+            read(id) { [weak self] lines in
+                guard let self else { return done(lines) }
+                if let wanted = self.awaited.first {
+                    guard let lines, wanted(lines) else {
+                        return DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { answer(id, done) }
+                    }
+                    self.awaited.removeFirst()
+                }
+                if let lines { self.paneReads[id] = ScreenRead(lines: lines.map { $0.replacingOccurrences(of: "\u{0}", with: " ").trimmingCharacters(in: .whitespaces) }) }
+                if let lines { self.reads.append(lines) }
                 done(lines)
             }
+        }
+        sync.hostScreen = { [weak self] id, done in
+            self?.hostReads += 1
+            answer(id, done)
         }
         sync.screen = { [weak self] id in self?.paneReads[id] ?? ScreenRead() }
         sync.inSight = { [weak self] in self?.inSight ?? false }
@@ -323,9 +403,17 @@ while True:
         unlink(socket + ".lock")
     }
 
-    /// The host's screen, as ChatSync reads it.
+    /// The host's screen, as ChatSync reads it (not counted, never awaited).
     func hostLines() async -> [String] {
-        await withCheckedContinuation { done in sync.hostScreen(session.id) { done.resume(returning: $0 ?? []) } }
+        await withCheckedContinuation { done in hostRead(session.id) { done.resume(returning: $0 ?? []) } }
+    }
+
+    /// The terminal draws the capture up to byte `offset`.
+    func draw(at offset: Int) {
+        let handle = try! FileHandle(forWritingTo: control)
+        handle.seekToEndOfFile()
+        handle.write(Data(#"{"at": \#(offset)}"#.utf8) + Data("\n".utf8))
+        try? handle.close()
     }
 
     /// The terminal draws the capture up to `mark`.
@@ -344,6 +432,13 @@ while True:
     var inSight = true
     /// Reads of the host's screen so far.
     var hostReads = 0
+    /// What each read answered with, in order.
+    var reads: [[String]] = []
+    /// Screens the next reads wait for, one each: a read is answered only once the host's screen passes the first (read
+    /// again every 20 ms), which is then used up. A test decides what the watch gets to see.
+    var awaited: [([String]) -> Bool] = []
+    /// The host's screen read as the chat's own `hostScreen` would, before the harness counts it.
+    private var hostRead: (UUID, @escaping ([String]?) -> Void) -> Void = { _, done in done(nil) }
     /// Each session's screen as the pane would read it, as of the last read of the host's.
     var paneReads: [UUID: ScreenRead] = [:]
 

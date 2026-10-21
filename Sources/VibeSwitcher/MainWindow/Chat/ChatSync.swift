@@ -86,9 +86,12 @@ final class ChatSync {
     private var terminalTyping = false
     private var terminalReadAt: Date?
 
-    /// A local command's picker or dialog (/mcp, /model, a confirmation) on the host's screen, as last read while
-    /// `watch` runs: such a picker writes nothing to the transcript, and the pane's read can't make out its rows.
-    private var picker: ScreenMenu?
+    /// A local command's picker or dialog (/mcp, /model, a confirmation) on the host's screen, as read while `watch`
+    /// runs: such a picker writes nothing to the transcript, and the pane's read can't make out its rows. Only once
+    /// two reads in a row agree on it (one may land in the middle of a redraw, see `ScreenMenu.SettledPicker`): the
+    /// card is up within two `watchEvery` of the terminal drawing it, and stays as it was meanwhile.
+    private var settled = ScreenMenu.SettledPicker()
+    private var picker: ScreenMenu? { settled.menu }
     /// The screen is read fast (`watchEvery`, the host's screen too) since a slash command was typed in (`since`),
     /// or a dialog's footer showed: until a picker or question has shown (`seen`) and been gone a moment, or
     /// `watchFor` passes with none.
@@ -122,6 +125,8 @@ final class ChatSync {
     /// footer is on screen.
     func watchScreen() {
         guard let target = target() else { return }
+        // Another session's reads say nothing of this one's screen.
+        if watch?.id != target.id { settled = ScreenMenu.SettledPicker() }
         watch = (target.id, now(), false, nil)
         resumeWatch()
     }
@@ -145,7 +150,7 @@ final class ChatSync {
     func stopWatching() {
         pauseWatch()
         watch = nil
-        picker = nil
+        settled = ScreenMenu.SettledPicker()
     }
 
     /// One read while watched: the pane's screen now, the host's once it answers (one request at a time).
@@ -160,7 +165,7 @@ final class ChatSync {
             self.hostReading = false
             // Another session was selected, or the watch ended meanwhile.
             guard self.watch?.id == target.id, self.target()?.id == target.id else { return }
-            self.picker = lines.flatMap(ScreenMenu.parsePicker)
+            self.settled.read(lines)
             self.readScreen()
             self.followWatch()
         }
@@ -204,13 +209,16 @@ final class ChatSync {
             return
         }
         let read = screen(target.id)
+        let onScreen = Self.menu(on: read, needsInput: target.needsInput), watched = watch?.id == target.id
         // A local command's picker the pane's read can't make out, from the host's screen.
-        let menu = Self.menu(on: read, needsInput: target.needsInput) ?? (watch?.id == target.id ? picker : nil)
+        let menu = onScreen ?? (watched ? picker : nil)
         // A dialog's footer with nothing read off it: watch the host's screen for its picker (once per dialog).
         let footer = menu == nil ? Self.dialogFooter(read.lines) : nil
         if footer == nil { unreadFooter = nil } else if watch == nil, footer != unreadFooter { watchScreen() }
         // Back in sight with a watch paused.
         if watch != nil, watchTimer == nil { resumeWatch() }
+        // The host's last read parsed as another picker (or none), not yet taken: the card stays as it was.
+        if onScreen == nil, watched, settled.settling { return }
         guard show(menu) else { return }
         let mode = target.agent == .codex ? nil : AgentMode.parse(Array(read.lines.suffix(6)))
         if chat.mode != mode { chat.mode = mode }
