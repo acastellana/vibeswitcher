@@ -887,3 +887,5 @@
 - 2026-10-21 15:45 Audit of the-picker-card-never: complete, clean, round 1: 2 Nit open
 - 2026-10-21 15:47 Planned picker-card-numbered: Picker card: numbered menus settle too, and the replay harness always removes its home
 - 2026-10-21 15:51 Merged the-picker-card-never: The picker card never reads a half-drawn screen
+- 2026-10-21 15:51 Update: Merged: the picker card never shows a half-drawn screen — **Merged** the-picker-card-never (f110b3e).
+- 2026-10-21 15:55 Started a worker on picker-card-numbered
