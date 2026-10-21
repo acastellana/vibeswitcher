@@ -868,3 +868,6 @@
 - 2026-10-21 10:18 Audit of a-slash-command-that: incomplete, clean, round 1: 1 Important open, 1 Nit open
 - 2026-10-21 10:33 Folded row-text-and-team into rows-never-show-a: that task carries its work
 - 2026-10-21 10:33 Folded the-guard-hash-reads into a-worker-can-t: that task carries its work
+- 2026-10-21 10:40 Audit of scripts-test-sh-runs: complete, clean
+- 2026-10-21 10:45 Audit of a-slash-command-that: complete, clean, round 2: 1 Important closed, 1 Nit closed
+- 2026-10-21 10:46 Merged scripts-test-sh-runs: scripts/test.sh runs the phone's web tests too
