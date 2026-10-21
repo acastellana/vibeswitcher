@@ -344,3 +344,7 @@ The user on 2026-10-20 at 21:2x: they plug and unplug often, and a hold at 100 %
 
 The matrix is the evidence the earlier decision asked for, but its cost per merge is the wrong trade; the 8-case subset is where every real finding came from (top/1728 page 2, the two-heights artifact), and 11 of 768 runs still needed the starved allowance when six jobs hit the same phase together, which the full matrix would turn into merge noise.
 
+## 2026-10-21 11:40:57 selecting-text-in-the gets one narrowly re-planned round instead of a new approach: drop the 40-view pool, keep no views from the warm-up, empty caches synchronously on window close, stage 14 rows a turn. Bar: interleaved most-CPU medians within 10 ms of project-lead on open and page 2, no tick over 0.2 s CPU, churn growth within 2 points and cycle readings within 15 MB of the lead.
+
+The third audit (5699441) passed everything except cost. Two of its three Important findings (memory, churn) come from the pool and warm-up added in that round. The page-2 gap of 20 ms was measured at 20 rows a turn, which earlier measurements showed costs more than 14. The user asked twice for multi-paragraph and multi-message selection, which works on the branch.
+
