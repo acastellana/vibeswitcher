@@ -884,3 +884,6 @@
 - 2026-10-21 15:01 Update: Merged: the briefing uses ELEVENLABS_API_KEY from your shell — **Merged** the-briefing-uses (head 3b716e7).
 - 2026-10-21 15:01 Started a worker on the-picker-card-never
 - 2026-10-21 15:29 Audit of selecting-text-in-the: incomplete, clean, round 2: 4 Important (1 open), 1 Nit closed
+- 2026-10-21 15:45 Audit of the-picker-card-never: complete, clean, round 1: 2 Nit open
+- 2026-10-21 15:47 Planned picker-card-numbered: Picker card: numbered menus settle too, and the replay harness always removes its home
+- 2026-10-21 15:51 Merged the-picker-card-never: The picker card never reads a half-drawn screen
