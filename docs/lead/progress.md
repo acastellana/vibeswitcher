@@ -921,3 +921,5 @@
 - 2026-10-22 00:34 Merged every-lead-and-worker: Every lead and worker, in every project, follows the user's working policy
 - 2026-10-22 00:34 Update: Merged: your working policy reaches every lead, in every project — **Merged** every-lead-and-worker (903d6fe; audited, since it affects every project).
 - 2026-10-22 00:47 Audit of timing-benches-leave-the: complete, clean, round 1: 1 Pre-existing open
+- 2026-10-22 01:38 Started a worker on worktreestests-signal
+- 2026-10-22 01:44 Merged timing-benches-leave-the: Timing benches leave the default test run
