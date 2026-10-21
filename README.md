@@ -81,16 +81,28 @@ here, in full color.
 one Claude session per repository that you talk to about the project, and that runs a small team for you. You
 tell it what you want; it plans the work into tasks, each with a contract (goal, acceptance checks, boundaries),
 and starts up to three **workers**, each a Claude session in its own git worktree (`.vibeswitcher/worktrees/<task>`
-on `agent/<task>`). When a worker reports, the lead starts a read-only **verifier** that checks the work against
-the contract with real commands (and tries to break it); only work the verifier passes is rebased on the lead's branch,
-tested (the workflow's `test_command`) and fast-forwarded into it, never with a merge commit or a force. The
+on `agent/<task>`). A worker owns its change through completion: it makes the routine calls itself (a small file
+outside its boundaries that the goal needs, naming, layout) and lists them in its report, asking the lead only about
+direction, scope or anything risky. It runs the tests its change affects while it edits; the merge's run is the one
+full suite, so it runs the whole suite itself only after changing shared test or build infrastructure, or after a
+failed merge. Each task has a **review level** the lead sets (`add_task` or `update_task` with `review`): `none`, the
+default, where `merge` takes the worker's done report on the branch's head and runs `test_command` as its check, with
+no verdict; or `audit`, which the lead chooses for security, irreversible operations or complex changes, where a
+read-only **verifier** checks the work against the contract with real commands (and tries to break it) and only work
+it passes merges. A branch that touches `sensitive_paths` is audited whatever its level, and `merge` says so when it
+refuses; once an audit was started on a task, its verdict decides. The level merge goes by, and the worker's done
+report, are kept in the session host's vault, where only the lead sets the level and only the task's own worker
+reports, so a session that writes `board.json` can't lower either; `status`, `board` and the Team tab show the level,
+and the scorecard counts merges with no audit apart. Either way the work is rebased on the lead's branch, tested (the
+workflow's `test_command`) and fast-forwarded into it, never with a merge commit or a force. The
 verifier's verdict comes with **findings**, each tagged Important, Nit or Pre-existing at a file:line with its
 evidence (what it ran and saw), kept in the session host's vault with the verdict and shown, by severity, in `status`,
 `board(task)` and the Team tab's task view. `merge` refuses while an Important finding is open, naming it; a Nit never
-blocks and a Pre-existing one never fails the task. The lead resolves each one: the worker fixes it and a re-audit,
-handed the open findings and the diff since the audited commit, marks it fixed (it checks that diff only, and never
-raises a closed finding again); or `dismiss_finding` closes it with a reason; or `add_task(from_finding: task:F2)`
-makes it a task of its own. After three audits in a row that left Important findings open, the task's status says
+blocks (nor becomes a task by itself) and a Pre-existing one never fails the task. The lead resolves each one: the
+worker fixes it and a re-audit, handed the open findings and the diff since the audited commit, marks it fixed (it
+checks only those findings' concerns, with focused tests rather than the whole suite, raises no new Nit, and never a
+closed finding again); or `dismiss_finding` closes it with a reason; or `add_task(from_finding: task:F2)` makes it a
+task of its own. After three audits in a row that left Important findings open, the task's status says
 "reconsider the approach" and the lead re-plans it or asks you, instead of another round. With `audit_finders: 2`
 or `3` in `workflow.md` (1, one verifier, is the default), an audit runs that many **finders** instead, each with its
 own focus (contract and acceptance; bugs and regressions; security when the branch touches `sensitive_paths`, else
@@ -590,7 +602,12 @@ HookBoundsTests`). It points HOME, CFFIXED_USER_HOME, VIBESWITCHER_HOME and TMPD
 removes it after, so nothing a test writes reaches your `~/.vibeswitcher`, `~/.claude` or login Keychain. After swift
 test it runs the phone's web tests, each `Tests/Web/*.test.mjs` with node, in the same scratch home, names any that
 fails and ends with one line, `web tests: N of M passed`; it needs node on PATH (Node.js; the Swift side works with the
-Command Line Tools only) and stops, saying so, without it (`scripts/test.sh --web Tests/Web` runs just those). A plain
+Command Line Tools only) and stops, saying so, without it (`scripts/test.sh --web Tests/Web` runs just those).
+`scripts/test.sh` and `scripts/build-app.sh` hold a Mac-wide lock around swift build and swift test (a flock on
+`/private/tmp/vibeswitcher-<uid>/test-build.lock`, `scripts/lib/test-lock.sh`), so two workers' suites or builds never
+run at once: the second waits, printing who holds it and, once it has it, how long it waited. Ctrl-C or a killed run
+lets go of it (the kernel drops a flock with its holder), and the lead's merge and an audit's shared run take the same
+lock around their test command. A plain
 `swift test` on your own home refuses to start, with one message and no test run: each test target checks, as it
 loads, that VibeSwitcher's folder isn't your own `~/.vibeswitcher`. To run `swift test` yourself, set
 `VIBESWITCHER_HOME` (the folder VibeSwitcher keeps its files in) or HOME and CFFIXED_USER_HOME (`NSHomeDirectory()`
