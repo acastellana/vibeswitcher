@@ -11,15 +11,22 @@
 # and the run fails. On 2026-10-20 hosts from a run a day before still ran, one of them a test's counter loop (8
 # CPU-minutes so far): a host runs in a process group of its own and outlives a runner killed with its group.
 #
-# swift build and swift test run under vs-heavy (Resources/bin/vs-heavy, the Mac-wide lock for heavy work that every
-# project's sessions have on PATH): while another run holds it (another worker's suite in any project, a build-app.sh, a
-# merge's tests), this one waits, saying for whom. The web tests and the leftover check run after it's let go.
+# swift build and swift test, --perf's too, run under vs-heavy (Resources/bin/vs-heavy, the Mac-wide lock for heavy
+# work that every project's sessions have on PATH): while another run holds it (another worker's suite in any project,
+# a build-app.sh, a merge's tests), this one waits, saying for whom. The web tests and the leftover check run after
+# it's let go.
 #
 # The phone's web tests run after swift test, in the same scratch home and TMPDIR: each Tests/Web/*.test.mjs with
 # node, a failing one named, then one line saying how many passed. Without node on PATH the run stops before the
 # build, naming it: PhoneWebTests (swift test) skips them without node, and Web/ changes had been checked only by hand.
 #
+# The default run is correctness only: its result doesn't depend on how busy the Mac is, so a merge's run doesn't fail
+# because other sessions load it. The benches, tests judged by wall-clock time or memory (`perf_tests` below, each
+# tagged `.perf` and skipped unless VIBESWITCHER_PERF=1), run alone in `--perf`: for a task about speed or memory, and
+# before an install, on a calm Mac (over its load threshold a bench prints its numbers and doesn't judge them).
+#
 # scripts/test.sh [swift test options], e.g. scripts/test.sh --filter HomeIsolationTests
+# scripts/test.sh --perf [swift test options]: only the benches (no web tests), on a scratch home as above.
 # scripts/test.sh --leftovers MARK: only the check, for the processes whose environment or arguments hold MARK
 #   (LeftoverCheckTests); exit 1 when it ended any.
 # scripts/test.sh --web DIR: only the web tests, DIR/*.test.mjs (DIR from the repository's root, or absolute), on a
@@ -93,12 +100,28 @@ run_web_tests() {
     [[ -z $failed ]]
 }
 
+# The benches, as `swift test --filter` patterns: the tests tagged `.perf` (Tag.perf in
+# Tests/VibeSwitcherTests/TestSupport.swift), no more and no fewer (PerfRunTests checks).
+perf_tests=(
+    ChatBenchTests/theChatSettlesWithoutAStall
+    ChatBenchTests/aReopenSettlesAtTheFirstOpensHeight
+    ChatBenchSettleScriptTests
+    FootprintBenchTests/theWindowClosedIsUnder150MBAndChurnGrowsItAtMost10Percent
+    PowerBenchTests/idleUnder1PercentAndLeadWorkUnder3
+    BoardBenchTests/aBigBoardRefreshedBlocksTheMainThreadUnder50ms
+)
+
 if [[ ${1:-} == --leftovers ]]; then
     end_leftovers "${2:?scripts/test.sh --leftovers MARK}"
     exit
 fi
 web_only=""
 [[ ${1:-} == --web ]] && web_only=${2:?scripts/test.sh --web DIR}
+perf=""
+if [[ ${1:-} == --perf ]]; then
+    shift
+    perf=$(IFS='|'; echo "${perf_tests[*]}")
+fi
 
 if ! command -v node > /dev/null; then
     echo "scripts/test.sh: node isn't on PATH, and the phone's web tests (Tests/Web/*.test.mjs) run with it: install"
@@ -116,15 +139,25 @@ mark=$(basename "$tool_scratch")
 on_exit 'end_leftovers "$mark" > /dev/null'
 
 export HOME=$tool_scratch/home CFFIXED_USER_HOME=$tool_scratch/home VIBESWITCHER_HOME=$tool_scratch/home/.vibeswitcher
+# Only --perf runs the benches, whatever the caller's environment holds.
+unset VIBESWITCHER_PERF
 if [[ -n $web_only ]]; then
     run_web_tests "$web_only"
     status=$?
 else
-    # The repository's own vs-heavy, not the installed app's: the one these tests check.
+    if [[ -n $perf ]]; then
+        echo "perf run: the benches alone; the Mac's 1-minute load is $(sysctl -n vm.loadavg | awk '{print $2}') on $(sysctl -n hw.ncpu) cores"
+        export VIBESWITCHER_PERF=1
+        set -- --filter "$perf" "$@"
+    fi
+    # The default run and --perf alike, under the one lock call. The repository's own vs-heavy, not the installed app's:
+    # the one these tests check.
     Resources/bin/vs-heavy --as scripts/test.sh bash -c 'swift build && swift test "$@"' scripts/test.sh "$@"
     status=$?
-    # Even when the build or a test failed: they don't need the build, and their result is worth having.
-    run_web_tests Tests/Web || status=1
+    # Even when the build or a test failed: they don't need the build, and their result is worth having. Not in --perf.
+    if [[ -z $perf ]]; then
+        run_web_tests Tests/Web || status=1
+    fi
 fi
 end_leftovers "$mark" || status=1
 exit $status

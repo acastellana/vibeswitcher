@@ -8,7 +8,8 @@ import Testing
 /// and ending, the window and the chat opening and closing), in a process of its own on a scratch home: with the window
 /// closed its phys_footprint is under 150 MB, after churn it's at most 10 % more than after a warm-up cycle of churn, and
 /// the terminal views and chat models alive are what they were before any. Judged only while the Mac's 1-minute load is
-/// under load_threshold (workflow.md, else twice the cores); over it the numbers are printed, not judged.
+/// under load_threshold (workflow.md, else twice the cores); over it the numbers are printed, not judged. A bench, run
+/// only by `scripts/test.sh --perf` (`Tag.perf`); the vmmap parser's test runs in every run.
 struct FootprintBenchTests {
     private let scratch = Scratch()
 
@@ -33,7 +34,7 @@ struct FootprintBenchTests {
         return LeadWorkflow().loadLimit
     }
 
-    @Test func theWindowClosedIsUnder150MBAndChurnGrowsItAtMost10Percent() throws {
+    @Test(.tags(.perf), .enabled(if: perfRun, perfOnly)) func theWindowClosedIsUnder150MBAndChurnGrowsItAtMost10Percent() throws {
         let app = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("VibeSwitcher")
         #expect(FileManager.default.isExecutableFile(atPath: app.path))
         // Short: the bench's private session host puts its socket in this home, and a socket's path is limited to 104 bytes.

@@ -243,13 +243,14 @@ struct TestLockTests {
     }
 
     /// `scripts/test.sh` as run `name`, in a process group of its own (as a terminal runs it, so Ctrl-C reaches all of
-    /// it), with the fakes first on PATH and the lock in this test's scratch; its output goes to `<name>.out`.
-    func start(_ name: String, sleep: Int = 1, bin: String) throws -> (process: Process, output: String) {
+    /// it), with the fakes first on PATH and the lock in this test's scratch, given `arguments`; its output goes to
+    /// `<name>.out`.
+    func start(_ name: String, sleep: Int = 1, bin: String, arguments: [String] = []) throws -> (process: Process, output: String) {
         let output = url("\(name).out").path
         FileManager.default.createFile(atPath: output, contents: nil)
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-        process.arguments = ["-e", "setpgrp(0, 0); exec @ARGV or die", "/bin/bash", Self.repo.appendingPathComponent("scripts/test.sh").path]
+        process.arguments = ["-e", "setpgrp(0, 0); exec @ARGV or die", "/bin/bash", Self.repo.appendingPathComponent("scripts/test.sh").path] + arguments
         var environment = ProcessInfo.processInfo.environment
         environment["PATH"] = bin + ":/usr/bin:/bin"
         environment["RUN"] = name
@@ -277,6 +278,25 @@ struct TestLockTests {
         #expect(a.process.terminationStatus == 0 && b.process.terminationStatus == 0, "\(lines(a.output)) \(lines(b.output))")
         // Never side by side: all of A's swift, then all of B's.
         #expect(lines(log) == ["A build start", "A build end", "A test start", "A test end", "B build start", "B build end", "B test start", "B test end"])
+        let said = lines(b.output).joined(separator: "\n")
+        #expect(said.contains("vs-heavy: scripts/test.sh: waiting for the Mac-wide test and build lock"), "\(said)")
+        #expect(said.contains(", scripts/test.sh in \(Self.repo.path), since"), "\(said)")
+        #expect(said.contains("vs-heavy: scripts/test.sh: took the test and build lock after"), "\(said)")
+        #expect(!lines(a.output).joined().contains("waiting for"))
+    }
+
+    /// `--perf` (the benches alone) takes the same lock: a default run waits for it, and it runs no web tests.
+    @Test func aPerfRunHoldsTheLockToo() throws {
+        let (bin, log) = try fakes()
+        let a = try start("A", bin: bin, arguments: ["--perf"])
+        #expect(eventually { lines(log).contains("A build start") })
+        let b = try start("B", bin: bin)
+        a.process.waitUntilExit()
+        b.process.waitUntilExit()
+        #expect(a.process.terminationStatus == 0 && b.process.terminationStatus == 0, "\(lines(a.output)) \(lines(b.output))")
+        #expect(lines(log) == ["A build start", "A build end", "A test start", "A test end", "B build start", "B build end", "B test start", "B test end"])
+        #expect(lines(a.output).contains { $0.hasPrefix("perf run: the benches alone") }, "\(lines(a.output))")
+        #expect(!lines(a.output).contains { $0.hasPrefix("web tests: ") }, "\(lines(a.output))")
         let said = lines(b.output).joined(separator: "\n")
         #expect(said.contains("vs-heavy: scripts/test.sh: waiting for the Mac-wide test and build lock"), "\(said)")
         #expect(said.contains(", scripts/test.sh in \(Self.repo.path), since"), "\(said)")

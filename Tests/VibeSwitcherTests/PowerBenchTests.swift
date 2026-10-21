@@ -8,7 +8,7 @@ import Testing
 /// while a lead's team works, its wakeups a few a second, and the session host's under 0.1 %. The app's
 /// `--idle-bench 20 --power` (see `PowerBench`), in a process of its own on a scratch home. Judged only while the Mac's
 /// 1-minute load is under its cores before and after, like the footprint (`FootprintBenchTests`); over it the numbers
-/// are printed, not judged.
+/// are printed, not judged. A bench, run only by `scripts/test.sh --perf` (`Tag.perf`).
 struct PowerBenchTests {
     private let scratch = Scratch()
 
@@ -21,7 +21,7 @@ struct PowerBenchTests {
         return phases
     }
 
-    @Test func idleUnder1PercentAndLeadWorkUnder3() throws {
+    @Test(.tags(.perf), .enabled(if: perfRun, perfOnly)) func idleUnder1PercentAndLeadWorkUnder3() throws {
         let app = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("VibeSwitcher")
         #expect(FileManager.default.isExecutableFile(atPath: app.path))
         let home = URL(fileURLWithPath: try scratch.shortFolder("vspw"))

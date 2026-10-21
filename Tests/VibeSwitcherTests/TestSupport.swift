@@ -1,4 +1,5 @@
 import Foundation
+import Testing
 import VibeCore
 
 /// Set when `refuseTheAccountRoot` has run (a test in each target checks it did).
@@ -78,3 +79,15 @@ extension Scratch {
         return folder.path
     }
 }
+
+extension Tag {
+    /// A bench: judged by wall-clock time or memory, so whether it passes depends on how busy the Mac is. Runs only in
+    /// `scripts/test.sh --perf` (`perfRun`), for a task about speed or memory and before an install; the default run,
+    /// a merge's included, skips it.
+    @Tag static var perf: Self
+}
+
+/// Whether this is `scripts/test.sh --perf` (VIBESWITCHER_PERF=1), the one run a bench (`Tag.perf`) runs in: each takes
+/// `.tags(.perf), .enabled(if: perfRun, perfOnly)`.
+let perfRun = ProcessInfo.processInfo.environment["VIBESWITCHER_PERF"] == "1"
+let perfOnly: Comment = "a bench, judged by time or memory: scripts/test.sh --perf"

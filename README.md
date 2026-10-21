@@ -605,6 +605,7 @@ Requires macOS 14+ and a Swift 6 toolchain (Xcode or just the Command Line Tools
 
 ```sh
 scripts/test.sh                # swift build && swift test, then the phone's web tests with node, on a scratch home
+scripts/test.sh --perf         # the benches alone (time and memory), for speed or memory work and before an install
 ./scripts/build-app.sh --install
 ```
 
@@ -626,6 +627,14 @@ loads, that VibeSwitcher's folder isn't your own `~/.vibeswitcher`. To run `swif
 `VIBESWITCHER_HOME` (the folder VibeSwitcher keeps its files in) or HOME and CFFIXED_USER_HOME (`NSHomeDirectory()`
 follows CFFIXED_USER_HOME, not HOME) to a scratch folder; one anywhere but your own `~/.vibeswitcher` will do, a
 worktree's `.build/scratchhome` included.
+
+Which run when: `scripts/test.sh` is the correctness run, for every change and the one a merge runs; its result
+doesn't depend on how busy the Mac is. The benches, tests judged by wall-clock time or memory (the chat bench's
+stall and reopen runs and its settle script's tests, the footprint, power and board benches), are tagged `.perf`
+and skipped there; `scripts/test.sh --perf` runs them alone (no web tests), with VIBESWITCHER_PERF=1, under the
+same vs-heavy lock. Run it for a task about speed or memory and before an install, on a calm Mac: over the load
+threshold a bench prints its numbers without judging them. test.sh's `perf_tests` lists them and `PerfRunTests` keeps that list and the tags the same.
+Tests that check timing logic on fakes or injected clocks stay in the correctness run.
 
 VibeSwitcher's folder is `$VIBESWITCHER_HOME` when that's an absolute path, else `.vibeswitcher` in
 CFFIXED_USER_HOME, else in `$HOME`, else `~/.vibeswitcher` (`NSHomeDirectory()`), for the app, the hook and the host

@@ -4,11 +4,11 @@ import Testing
 /// A big board refreshed by the window never blocks its main thread, nor is read there, nor are the team's transcripts
 /// the witness reads with it: the app's `--board-bench` (see
 /// `BoardBench`), in a process of its own on a scratch home, so no other test's work on this process's main thread is
-/// counted.
+/// counted. A bench (its 50 ms is wall-clock time), run only by `scripts/test.sh --perf` (`Tag.perf`).
 struct BoardBenchTests {
     private let scratch = Scratch()
 
-    @Test func aBigBoardRefreshedBlocksTheMainThreadUnder50ms() throws {
+    @Test(.tags(.perf), .enabled(if: perfRun, perfOnly)) func aBigBoardRefreshedBlocksTheMainThreadUnder50ms() throws {
         let app = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("VibeSwitcher")
         #expect(FileManager.default.isExecutableFile(atPath: app.path))
         let home = scratch.url("board-bench")

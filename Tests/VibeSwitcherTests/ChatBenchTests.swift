@@ -10,7 +10,8 @@ import VibeCore
 /// publishes every 20 ms and the window's chat timer ticks. On a Mac whose 1-minute load is not over load_threshold
 /// each run must settle with no tick over 0.25 s, its pages filling in below the fold without moving what's on screen;
 /// over it a run is only recorded (its stalls say how busy the Mac is).
-/// One run at a time: five at once made each other's load.
+/// One run at a time: five at once made each other's load. The runs judged on their ticks and settle (the stall and
+/// reopen cases) are benches, run only by `scripts/test.sh --perf` (`Tag.perf`); the rule's own tests run in every run.
 @Suite(.serialized)
 struct ChatBenchTests {
     static let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/chat-bench.jsonl")
@@ -66,7 +67,7 @@ struct ChatBenchTests {
     static let settle = ["VIBESWITCHER_BENCH_OPEN": "bottom", "VIBESWITCHER_BENCH_AT": "bottom", "VIBESWITCHER_BENCH_SECONDS": "8",
                          "VIBESWITCHER_BENCH_TICKS": "1", "VIBESWITCHER_BENCH_UPDATES": "1"]
 
-    @Test(arguments: [0, 2], ["inspector", "no inspector"])
+    @Test(.tags(.perf), .enabled(if: perfRun, perfOnly), arguments: [0, 2], ["inspector", "no inspector"])
     func theChatSettlesWithoutAStall(earlier: Int, pane: String) throws {
         var settings = Self.settle
         settings["VIBESWITCHER_BENCH_SIZE"] = Self.panes[pane]
@@ -123,7 +124,7 @@ struct ChatBenchTests {
     /// 15558). Whatever the Mac's load, the rows the first open showed take the same height opened again: from the first
     /// one's top to the end. Read at the top, the reopen shows 5 rows more above it (`ChatWindow.shown`'s context); in
     /// the middle the same rows, so the same height.
-    @Test(arguments: ["top", "middle"])
+    @Test(.tags(.perf), .enabled(if: perfRun, perfOnly), arguments: ["top", "middle"])
     func aReopenSettlesAtTheFirstOpensHeight(position: String) throws {
         var settings = Self.settle
         settings["VIBESWITCHER_BENCH_OPEN"] = position
@@ -313,7 +314,8 @@ private final class Anchor {}
 
 /// scripts/chat-bench-settle.sh's verdict, on a fake build that prints what `--chat-bench` prints when a tick stalls: a
 /// starved longest tick is run once more and passes as starved when that one starves too, but never beside a tick the
-/// main thread worked through over the limit on the CPU.
+/// main thread worked through over the limit on the CPU. Run with the benches, by `scripts/test.sh --perf` (`Tag.perf`).
+@Suite(.tags(.perf), .enabled(if: perfRun, perfOnly))
 struct ChatBenchSettleScriptTests {
     let scratch = Scratch()
 
