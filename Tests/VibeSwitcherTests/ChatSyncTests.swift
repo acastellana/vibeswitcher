@@ -71,6 +71,29 @@ struct ChatSyncTests {
         #expect(card.position == nil)
     }
 
+    /// A question's card is up within 1.2 s of the terminal drawing it, on the window's 1 s heartbeat: the read that
+    /// first sees it isn't taken (two reads must agree), and the confirm read it asks for is (`ChatSync.confirmAfter`),
+    /// not the next heartbeat's a second later. The heartbeat's first read comes 0.3 s after the terminal drew it.
+    @Test func aQuestionsCardIsUpWithin1Point2SOfTheTerminalDrawingIt() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "ask", "questions": [Self.fruit]])
+        try await h.paneShows { $0.contains("Which fruit?") }
+        let drawn = Date()
+        let heartbeat = Task { @MainActor in
+            try await Task.sleep(nanoseconds: 300_000_000)
+            while !Task.isCancelled {
+                h.tickNow()
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+        defer { heartbeat.cancel() }
+        #expect(await until(timeout: 30) { h.chat.menu != nil })
+        let took = Date().timeIntervalSince(drawn)
+        #expect(took < 1.2, "the card took \(took) s")
+        #expect(h.card?.question == "Which fruit?")
+    }
+
     @Test func aClickInChatMovesTheTerminalAndTheCardKeepsUp() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
@@ -781,11 +804,13 @@ final class Harness {
         await tick()
     }
 
-    /// The window's 1 s heartbeat while the chat shows: the transcript followed, the screen read.
+    /// The window's 1 s heartbeat while the chat shows: the transcript followed, the screen read, and the confirm
+    /// read that asks for when the screen changed (`ChatSync.confirmAfter`: a menu is taken once two reads agree).
     func tick() async {
         chat.poll()
         _ = await VibeSwitcherTests.until { !self.chat.reading }
         heartbeat()
+        _ = await VibeSwitcherTests.until { !self.sync.confirming }
     }
 
     /// `tick` without waiting for the read (inside an `until`).

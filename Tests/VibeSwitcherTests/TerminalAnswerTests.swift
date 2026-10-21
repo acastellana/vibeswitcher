@@ -92,12 +92,15 @@ struct TerminalAnswerTests {
         let home = temp.url("terminal-answer-window")
         let chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: home)
         let sync = ChatSync(chat: chat, host: HostClient(socketPath: "/tmp/vsh-ta-\(UUID().uuidString.prefix(8)).sock"))
-        sync.target = { ChatSync.Target(id: UUID(), key: "window", agent: .claude, needsInput: true) }
+        let id = UUID()
+        sync.target = { ChatSync.Target(id: id, key: "window", agent: .claude, needsInput: true) }
         sync.screen = { _ in ScreenRead(lines: screen.components(separatedBy: "\n")) }
         sync.terminalTarget = {
             Issue.record("a window session never reads Terminal")
             return nil
         }
+        // Twice: a menu is taken once two reads agree (the second, here, is the confirm read the first asks for).
+        sync.readScreen()
         sync.readScreen()
         return chat.menu.map { AnswerCardContent(menu: $0, pending: nil) }
     }

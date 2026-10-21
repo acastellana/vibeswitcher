@@ -21,98 +21,98 @@ struct PickerCardTests {
     let temp = Scratch()
 
     @Test func theMCPPickerShowsAsACardAtOnceWithNoTranscriptLine() async throws {
-        let h = try await ReplayHarness.start(temp)
-        defer { h.stop() }
-        let transcript = try Data(contentsOf: h.transcript)
-        let entries = h.chat.log.entries.count
-        #expect(h.sync.type("/mcp"))
-        try await h.typed("/mcp\r")
-        #expect(h.sync.watching)
-        // The terminal draws the picker: the card is up within a second, nothing new in the transcript.
-        h.draw("01-/mcp")
-        let drawn = Date()
-        #expect(await until(timeout: 30) { h.chat.menu?.picker == true })
-        let took = Date().timeIntervalSince(drawn)
-        #expect(took < 1, "the card took \(took) s")
-        let card = try await h.requireCard()
-        #expect(card.picker)
-        #expect(card.question == "Manage MCP servers\n2 servers")
-        #expect(card.options.map(\.label) == ["✘ scratch-broken", "✔ scratch-notes"])
-        #expect(card.options.map(\.detail) == [nil, "1 tool"])
-        #expect(card.selected == 0)
-        #expect(try Data(contentsOf: h.transcript) == transcript)
-        #expect(h.chat.log.entries.count == entries)
-        // ↓ in the terminal: the card's highlight follows.
-        h.draw("02-down")
-        #expect(await until(timeout: 30) { h.chat.menu?.selected == 1 })
-        // Closed: the card goes, and so does the watch.
-        h.draw("03-esc")
-        #expect(await until(timeout: 30) { h.chat.menu == nil })
-        #expect(await until(timeout: 30) { !h.sync.watching })
+        try await ReplayHarness.run(temp) { h in
+            let transcript = try Data(contentsOf: h.transcript)
+            let entries = h.chat.log.entries.count
+            #expect(h.sync.type("/mcp"))
+            try await h.typed("/mcp\r")
+            #expect(h.sync.watching)
+            // The terminal draws the picker: the card is up within a second, nothing new in the transcript.
+            h.draw("01-/mcp")
+            let drawn = Date()
+            #expect(await until(timeout: 30) { h.chat.menu?.picker == true })
+            let took = Date().timeIntervalSince(drawn)
+            #expect(took < 1, "the card took \(took) s")
+            let card = try await h.requireCard()
+            #expect(card.picker)
+            #expect(card.question == "Manage MCP servers\n2 servers")
+            #expect(card.options.map(\.label) == ["✘ scratch-broken", "✔ scratch-notes"])
+            #expect(card.options.map(\.detail) == [nil, "1 tool"])
+            #expect(card.selected == 0)
+            #expect(try Data(contentsOf: h.transcript) == transcript)
+            #expect(h.chat.log.entries.count == entries)
+            // ↓ in the terminal: the card's highlight follows.
+            h.draw("02-down")
+            #expect(await until(timeout: 30) { h.chat.menu?.selected == 1 })
+            // Closed: the card goes, and so does the watch.
+            h.draw("03-esc")
+            #expect(await until(timeout: 30) { h.chat.menu == nil })
+            #expect(await until(timeout: 30) { !h.sync.watching })
+        }
     }
 
     @Test func aMessageWhileThePickerIsOpenWaitsAndEscClosesIt() async throws {
-        let h = try await ReplayHarness.start(temp)
-        defer { h.stop() }
-        _ = h.sync.type("/mcp")
-        try await h.typed("/mcp\r")
-        h.draw("01-/mcp")
-        #expect(await until(timeout: 30) { h.chat.menu?.picker == true })
-        // What happened to the user: their next message went in as text and ↩, which opened the highlighted server.
-        // Now it waits, and the card says why.
-        let entry = h.send("hello")
-        try await Task.sleep(nanoseconds: 600_000_000)
-        #expect(h.keys == "/mcp\r")
-        #expect(h.chat.outbox.outbox.entries.first { $0.id == entry.id }?.state == .held)
-        #expect(h.chat.answerNotice?.contains("Esc") == true)
-        #expect(h.chat.sendNotice?.contains("picker is open") == true)
-        // Esc from the composer (empty): the card takes it and closes the picker with the terminal's Esc.
-        #expect(h.press(.escape, composer: "") == "")
-        try await h.typed("/mcp\r\u{1b}")
-        // Not with text in the box: the key is the box's.
-        #expect(h.press(.escape, composer: "draft") == "draft")
-        h.draw("03-esc")
-        #expect(await until(timeout: 30) { h.chat.menu == nil })
-        // Closed: the message goes in (once the window's heartbeat has seen nothing open for a moment), once.
-        try await h.typed("/mcp\r\u{1b}hello\r", timeout: 30, heartbeat: true)
+        try await ReplayHarness.run(temp) { h in
+            _ = h.sync.type("/mcp")
+            try await h.typed("/mcp\r")
+            h.draw("01-/mcp")
+            #expect(await until(timeout: 30) { h.chat.menu?.picker == true })
+            // What happened to the user: their next message went in as text and ↩, which opened the highlighted server.
+            // Now it waits, and the card says why.
+            let entry = h.send("hello")
+            try await Task.sleep(nanoseconds: 600_000_000)
+            #expect(h.keys == "/mcp\r")
+            #expect(h.chat.outbox.outbox.entries.first { $0.id == entry.id }?.state == .held)
+            #expect(h.chat.answerNotice?.contains("Esc") == true)
+            #expect(h.chat.sendNotice?.contains("picker is open") == true)
+            // Esc from the composer (empty): the card takes it and closes the picker with the terminal's Esc.
+            #expect(h.press(.escape, composer: "") == "")
+            try await h.typed("/mcp\r\u{1b}")
+            // Not with text in the box: the key is the box's.
+            #expect(h.press(.escape, composer: "draft") == "draft")
+            h.draw("03-esc")
+            #expect(await until(timeout: 30) { h.chat.menu == nil })
+            // Closed: the message goes in (once the window's heartbeat has seen nothing open for a moment), once.
+            try await h.typed("/mcp\r\u{1b}hello\r", timeout: 30, heartbeat: true)
+        }
     }
 
     @Test func theModelPickerAnsweredFromTheCardSendsTheTerminalsKeys() async throws {
-        let h = try await ReplayHarness.start(temp)
-        defer { h.stop() }
-        _ = h.sync.type("/model")
-        h.draw("04-/model")
-        #expect(await until(timeout: 30) { h.chat.menu?.options.count == 5 })
-        let card = try await h.requireCard()
-        #expect(card.question.hasPrefix("Select model"))
-        #expect(card.options.map(\.label) == ["Default (recommended) ✔", "Opus", "Fable", "Sonnet", "Haiku"])
-        #expect(card.selected == 0)
-        // Fable chosen (the composer's ↓ ↓ ↩): down, down, Enter, as a terminal user types them.
-        #expect(h.press(.down, composer: "") == "")
-        #expect(h.press(.down, composer: "") == "")
-        #expect(h.cardKeys.highlight == 2)
-        try await h.typed("/model\r")
-        #expect(h.press(.enter, composer: "") == "")
-        try await h.typed("/model\r\u{1b}[B\u{1b}[B\r")
-        #expect(h.chat.answering)
+        try await ReplayHarness.run(temp) { h in
+            _ = h.sync.type("/model")
+            h.draw("04-/model")
+            #expect(await until(timeout: 30) { h.chat.menu?.options.count == 5 })
+            let card = try await h.requireCard()
+            #expect(card.question.hasPrefix("Select model"))
+            #expect(card.options.map(\.label) == ["Default (recommended) ✔", "Opus", "Fable", "Sonnet", "Haiku"])
+            #expect(card.selected == 0)
+            // Fable chosen (the composer's ↓ ↓ ↩): down, down, Enter, as a terminal user types them.
+            #expect(h.press(.down, composer: "") == "")
+            #expect(h.press(.down, composer: "") == "")
+            #expect(h.cardKeys.highlight == 2)
+            try await h.typed("/model\r")
+            #expect(h.press(.enter, composer: "") == "")
+            try await h.typed("/model\r\u{1b}[B\u{1b}[B\r")
+            #expect(h.chat.answering)
+        }
     }
 
     @Test func aYesNoDialogIsACardEscClosesFromTheCard() async throws {
-        let h = try await ReplayHarness.start(temp)
-        defer { h.stop() }
-        _ = h.sync.type("/permissions")
-        h.draw("11-enter")
-        #expect(await until(timeout: 30) { h.chat.menu?.options == ["Yes", "No"] })
-        let card = try await h.requireCard()
-        #expect(card.question.hasPrefix("Delete allowed tool?"))
-        #expect(card.selected == 1)
-        #expect(card.hint == "Enter to confirm · Esc to cancel")
-        // The card's Close (Esc).
-        h.sync.cancel()
-        try await h.typed("/permissions\r\u{1b}")
-        // 2 pressed in the composer: "No" is where the cursor is, so just Enter.
-        #expect(h.press(.digit(2), composer: "") == "")
-        try await h.typed("/permissions\r\u{1b}\r")
+        try await ReplayHarness.run(temp) { h in
+            _ = h.sync.type("/permissions")
+            h.draw("11-enter")
+            #expect(await until(timeout: 30) { h.chat.menu?.options == ["Yes", "No"] })
+            let card = try await h.requireCard()
+            #expect(card.question.hasPrefix("Delete allowed tool?"))
+            #expect(card.selected == 1)
+            #expect(card.hint == "Enter to confirm · Esc to cancel")
+            // The card's Close (Esc).
+            h.sync.cancel()
+            try await h.typed("/permissions\r\u{1b}")
+            // 2 pressed in the composer: "No" is where the cursor is, so just Enter.
+            #expect(h.press(.digit(2), composer: "") == "")
+            try await h.typed("/permissions\r\u{1b}\r")
+        }
     }
 
     /// 2026-10-21: the test above failed 1 run in 3: its card's hint read "Enter to confirm · Esc to caect · ←/→ to
@@ -122,28 +122,87 @@ struct PickerCardTests {
     /// left of the old one still ends in "Esc to cancel", so it parsed as the dialog, rows and all. Here that read
     /// is made to happen: the split screen is read once, and the rest is drawn before the next read.
     @Test func aRedrawSplitMidWordNeverReachesTheCard() async throws {
-        let h = try await ReplayHarness.start(temp)
-        defer { h.stop() }
-        _ = h.sync.type("/permissions")
-        h.draw("10-down")
-        #expect(await until(timeout: 30) { h.chat.menu?.options == ["Add a new rule…", "Bash(ls:*)"] && h.chat.menu?.selected == 1 })
-        let list = h.chat.menu
-        var shown: [ScreenMenu?] = []
-        let watching = h.chat.$menu.sink { shown.append($0) }
-        defer { watching.cancel() }
-        let half = { (lines: [String]) in lines.contains { $0.contains("Esc to caect") } }
-        let whole = { (lines: [String]) in lines.contains { $0.trimmingCharacters(in: .whitespaces) == "Enter to confirm · Esc to cancel" } }
-        h.awaited = [half, whole]
-        h.draw(at: 21943)
-        #expect(await until(timeout: 30) { h.reads.last.map(half) == true })
-        h.draw("11-enter")
-        #expect(await until(timeout: 30) { h.chat.menu?.hint == "Enter to confirm · Esc to cancel" })
-        #expect(h.reads.filter(half).count == 1)
-        #expect(h.chat.menu?.options == ["Yes", "No"])
-        #expect(h.chat.menu?.selected == 1)
-        // The list's card stayed until the dialog's came: nothing in between.
-        let dialog = h.chat.menu
-        #expect(shown.allSatisfy { $0 == list || $0 == dialog }, "shown: \(shown.map { $0?.hint ?? "none" })")
+        try await ReplayHarness.run(temp) { h in
+            _ = h.sync.type("/permissions")
+            h.draw("10-down")
+            #expect(await until(timeout: 30) { h.chat.menu?.options == ["Add a new rule…", "Bash(ls:*)"] && h.chat.menu?.selected == 1 })
+            let list = h.chat.menu
+            var shown: [ScreenMenu?] = []
+            let watching = h.chat.$menu.sink { shown.append($0) }
+            defer { watching.cancel() }
+            let half = { (lines: [String]) in lines.contains { $0.contains("Esc to caect") } }
+            let whole = { (lines: [String]) in lines.contains { $0.trimmingCharacters(in: .whitespaces) == "Enter to confirm · Esc to cancel" } }
+            h.awaited = [half, whole]
+            h.draw(at: 21943)
+            #expect(await until(timeout: 30) { h.reads.last.map(half) == true })
+            h.draw("11-enter")
+            #expect(await until(timeout: 30) { h.chat.menu?.hint == "Enter to confirm · Esc to cancel" })
+            #expect(h.reads.filter(half).count == 1)
+            #expect(h.chat.menu?.options == ["Yes", "No"])
+            #expect(h.chat.menu?.selected == 1)
+            // The list's card stayed until the dialog's came: nothing in between.
+            let dialog = h.chat.menu
+            #expect(shown.allSatisfy { $0 == list || $0 == dialog }, "shown: \(shown.map { $0?.hint ?? "none" })")
+        }
+    }
+
+    /// The pane's numbered menus settle too (/model's rows, `ScreenMenu.parse` over the pane's read). Two of its
+    /// redraws read part way: ↓ at byte 14360, the old row's ❯ wiped and the new one's not drawn yet ("1. Default"
+    /// and "2. Opus" both unmarked: no menu, the card would go), and Esc at 14801, the conversation drawn back over
+    /// the dialog's top while its rows are still there ("❯ /model", "⎿  Kept model as Opus 5.5 (default)" read as
+    /// the question). Each is read once and the rest drawn before the next read; the watch is stopped and there's no
+    /// confirm read (`ChatSync.confirmAfter`: the pane's read here is the host's last, not the terminal's now), so
+    /// the window's heartbeat (`beat`) is every read.
+    @Test func aNumberedMenuSplitMidRowNeverReachesTheCard() async throws {
+        try await ReplayHarness.run(temp) { h in
+            _ = h.sync.type("/model")
+            h.draw("04-/model")
+            #expect(await until(timeout: 30) { h.chat.menu?.options.count == 5 && h.chat.menu?.selected == 0 })
+            h.sync.stopWatching()
+            h.sync.confirmAfter = nil
+            // The watch's last read answered (one under way would take the first screen awaited).
+            #expect(await until(timeout: 30) { h.readsUnderWay == 0 })
+            var shown: [ScreenMenu?] = []
+            let watching = h.chat.$menu.sink { shown.append($0) }
+            defer { watching.cancel() }
+            // The host's lines have NULs where the program moved the cursor on instead of drawing.
+            let has = { (text: String) in
+                { (lines: [String]) in lines.contains { $0.replacingOccurrences(of: "\u{0}", with: " ").contains(text) } }
+            }
+            let marked = { (row: String) in has("❯ \(row)") }
+            let halfDown = { (lines: [String]) in
+                has("Select model")(lines) && !(1...5).contains { marked("\($0).")(lines) }
+            }
+            let halfEsc = { (lines: [String]) in has("Kept model as")(lines) && marked("3. Fable")(lines) }
+            // ↓, split mid-row: the half read isn't taken, the whole one is once read twice.
+            h.awaited = [halfDown]
+            h.draw(at: 14360)
+            await h.beat()
+            h.draw("05-down")
+            h.awaited = [marked("2. Opus")]
+            await h.beat()
+            await h.beat()
+            #expect(h.chat.menu?.selected == 1)
+            h.draw("06-down")
+            h.awaited = [marked("3. Fable")]
+            await h.beat()
+            await h.beat()
+            #expect(h.chat.menu?.selected == 2)
+            // Esc, split: the half read isn't taken; closed, the card goes once read twice.
+            h.awaited = [halfEsc]
+            h.draw(at: 14801)
+            await h.beat()
+            h.draw("07-esc")
+            h.awaited = [{ !has("Select model")($0) }]
+            await h.beat()
+            await h.beat()
+            #expect(h.chat.menu == nil)
+            #expect(h.reads.filter(halfDown).count == 1)
+            #expect(h.reads.filter(halfEsc).count == 1)
+            let cards = shown.map { $0.map { "\($0.question.prefix(30)) \($0.selected)" } ?? "none" }
+            #expect(shown.map { $0?.selected } == [0, 1, 2, nil], "shown: \(cards)")
+            #expect(!shown.contains { $0?.question.contains("Kept model") == true })
+        }
     }
 
     /// The same screens read off the capture byte for byte (no host): a parse is taken when the read before parsed
@@ -182,45 +241,45 @@ struct PickerCardTests {
     /// The audit's probe: a message held while a picker is open, another session selected for a while (nothing open
     /// there), then back with the picker still open: the message still waits, and goes in once the picker closes.
     @Test func aHeldMessageStaysHeldAcrossSwitchingAwayAndBack() async throws {
-        let h = try await ReplayHarness.start(temp)
-        defer { h.stop() }
-        try await h.spawnOther()
-        _ = h.sync.type("/mcp")
-        try await h.typed("/mcp\r")
-        h.draw("01-/mcp")
-        #expect(await until(timeout: 30) { h.chat.menu?.picker == true })
-        let entry = h.send("hello")
-        h.selected = h.other.id
-        try await h.beats(for: 2.5)
-        #expect(h.chat.menu == nil)
-        h.selected = nil
-        try await h.beats(for: 2.5)
-        #expect(h.keys == "/mcp\r")
-        #expect(h.chat.outbox.outbox.entries.first { $0.id == entry.id }?.state == .held)
-        #expect(h.chat.menu?.picker == true)
-        h.draw("03-esc")
-        try await h.typed("/mcp\rhello\r", timeout: 30, heartbeat: true)
+        try await ReplayHarness.run(temp) { h in
+            try await h.spawnOther()
+            _ = h.sync.type("/mcp")
+            try await h.typed("/mcp\r")
+            h.draw("01-/mcp")
+            #expect(await until(timeout: 30) { h.chat.menu?.picker == true })
+            let entry = h.send("hello")
+            h.selected = h.other.id
+            try await h.beats(for: 2.5)
+            #expect(h.chat.menu == nil)
+            h.selected = nil
+            try await h.beats(for: 2.5)
+            #expect(h.keys == "/mcp\r")
+            #expect(h.chat.outbox.outbox.entries.first { $0.id == entry.id }?.state == .held)
+            #expect(h.chat.menu?.picker == true)
+            h.draw("03-esc")
+            try await h.typed("/mcp\rhello\r", timeout: 30, heartbeat: true)
+        }
     }
 
     /// Out of sight (window closed or behind others, the terminal shown), the watch reads nothing; back, it goes on.
     @Test func noReadsWhileTheChatIsOutOfSight() async throws {
-        let h = try await ReplayHarness.start(temp)
-        defer { h.stop() }
-        _ = h.sync.type("/mcp")
-        h.draw("01-/mcp")
-        #expect(await until(timeout: 30) { h.chat.menu?.picker == true })
-        h.inSight = false
-        // The tick under way ends it.
-        try await Task.sleep(nanoseconds: 500_000_000)
-        let reads = h.hostReads
-        try await Task.sleep(nanoseconds: 3_000_000_000)
-        #expect(h.hostReads == reads, "\(h.hostReads - reads) reads while out of sight")
-        #expect(h.sync.watching)
-        // Back in sight: the heartbeat's read resumes the watch.
-        h.inSight = true
-        await h.beat()
-        #expect(await until(timeout: 10) { h.hostReads >= reads + 4 })
-        #expect(h.chat.menu?.picker == true)
+        try await ReplayHarness.run(temp) { h in
+            _ = h.sync.type("/mcp")
+            h.draw("01-/mcp")
+            #expect(await until(timeout: 30) { h.chat.menu?.picker == true })
+            h.inSight = false
+            // The tick under way ends it.
+            try await Task.sleep(nanoseconds: 500_000_000)
+            let reads = h.hostReads
+            try await Task.sleep(nanoseconds: 3_000_000_000)
+            #expect(h.hostReads == reads, "\(h.hostReads - reads) reads while out of sight")
+            #expect(h.sync.watching)
+            // Back in sight: the heartbeat's read resumes the watch.
+            h.inSight = true
+            await h.beat()
+            #expect(await until(timeout: 10) { h.hostReads >= reads + 4 })
+            #expect(h.chat.menu?.picker == true)
+        }
     }
 
     /// The bytes for a choice: arrows from the terminal's cursor, then Enter; Esc alone to close.
@@ -242,12 +301,12 @@ struct PickerCardTests {
 
     /// The watch stops by itself when no picker comes.
     @Test func theWatchEndsWhenNoPickerComes() async throws {
-        let h = try await ReplayHarness.start(temp)
-        defer { h.stop() }
-        _ = h.sync.type("/compact")
-        #expect(h.sync.watching)
-        #expect(await until(timeout: 60) { !h.sync.watching })
-        #expect(h.chat.menu == nil)
+        try await ReplayHarness.run(temp) { h in
+            _ = h.sync.type("/compact")
+            #expect(h.sync.watching)
+            #expect(await until(timeout: 60) { !h.sync.watching })
+            #expect(h.chat.menu == nil)
+        }
     }
 }
 
@@ -340,15 +399,16 @@ while True:
         command = "exec /usr/bin/python3 -I -u '\(script.path)' '\(capture).raw' '\(capture).marks.json' '\(control.path)' '\(keysFile.path)'"
         // Every read of the host's screen counted, and kept as the pane's read of it would be (trimmed both sides):
         // the pane follows the same session stream.
-        // A read answered only once the host's screen passes the first of `awaited` (that one used up).
+        // A read answered only once the host's screen passes the first of `awaited` (that one used up), or given up on
+        // after a minute (the test's own checks fail then, it doesn't hang).
         let read = sync.hostScreen
         hostRead = read
-        func answer(_ id: UUID, _ done: @escaping ([String]?) -> Void) {
+        func answer(_ id: UUID, by deadline: Date, _ done: @escaping ([String]?) -> Void) {
             read(id) { [weak self] lines in
                 guard let self else { return done(lines) }
                 if let wanted = self.awaited.first {
-                    guard let lines, wanted(lines) else {
-                        return DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { answer(id, done) }
+                    guard let lines, wanted(lines) || Date() > deadline else {
+                        return DispatchQueue.main.asyncAfter(deadline: .now() + 0.02) { answer(id, by: deadline, done) }
                     }
                     self.awaited.removeFirst()
                 }
@@ -359,14 +419,30 @@ while True:
         }
         sync.hostScreen = { [weak self] id, done in
             self?.hostReads += 1
-            answer(id, done)
+            self?.readsUnderWay += 1
+            answer(id, by: Date().addingTimeInterval(60)) { lines in
+                self?.readsUnderWay -= 1
+                done(lines)
+            }
         }
         sync.screen = { [weak self] id in self?.paneReads[id] ?? ScreenRead() }
         sync.inSight = { [weak self] in self?.inSight ?? false }
     }
 
-    static func start(_ temp: Scratch) async throws -> ReplayHarness {
+    /// A harness on its scratch host for `body`, ended (`end`) once it's done, also when it throws.
+    static func run(_ temp: Scratch, _ body: (ReplayHarness) async throws -> Void) async throws {
         let h = try ReplayHarness(temp)
+        do {
+            try await begin(h)
+            try await body(h)
+        } catch {
+            await h.end()
+            throw error
+        }
+        await h.end()
+    }
+
+    private static func begin(_ h: ReplayHarness) async throws {
         h.host.connectIfRunning()
         #expect(await until { h.host.state == .connected })
         var result: Result<HostSession, HostClientError>?
@@ -394,13 +470,30 @@ while True:
         // input: what's typed from here on is counted after it.
         try await Task.sleep(nanoseconds: 500_000_000)
         h.typedBefore = (try? Data(contentsOf: h.keysFile).count) ?? 0
-        return h
     }
 
-    func stop() {
+    /// Ends the scratch host, waits for what was still under way to end, then removes the harness's folder. The host
+    /// ends its session and drops the client at once, but the client finds that out only once the main actor runs
+    /// again: then a composer message still waiting for the host's word fails, ChatSync's callback saves the outbox,
+    /// and `OutboxStore.save` makes the folder again for it. Removed before that (the Scratch's removal, once the
+    /// test returned: a test ends as soon as the replay has the keys, and under load the host's word comes later),
+    /// it was back with an outbox.json in it, left in TMPDIR. So: the client has lost the host, no message is still
+    /// sending, the replay has exited; then the folder goes.
+    func end() async {
         sync.stopWatching()
         server.stop(terminateSessions: true)
         unlink(socket + ".lock")
+        let replay = session?.childPID
+        var exited = replay == nil
+        let settled = await until(timeout: 60) {
+            // Reaped here: the stopped host no longer waits for its child.
+            var status: Int32 = 0
+            if !exited, let replay { exited = waitpid(replay, &status, WNOHANG) != 0 }
+            return exited && host.state != .connected && !chat.outbox.outbox.entries.contains { $0.state == .sending }
+        }
+        #expect(settled, "the replay never ended: \(host.state), \(chat.outbox.outbox.entries.map(\.state)), exited: \(exited)")
+        try? FileManager.default.removeItem(at: home)
+        #expect(!FileManager.default.fileExists(atPath: home.path), "\(home.path) is still there")
     }
 
     /// The host's screen, as ChatSync reads it (not counted, never awaited).
@@ -432,6 +525,8 @@ while True:
     var inSight = true
     /// Reads of the host's screen so far.
     var hostReads = 0
+    /// Reads of the host's screen not answered yet.
+    var readsUnderWay = 0
     /// What each read answered with, in order.
     var reads: [[String]] = []
     /// Screens the next reads wait for, one each: a read is answered only once the host's screen passes the first (read
@@ -545,21 +640,21 @@ struct PickerCardSnapshots {
     let temp = Scratch()
 
     @Test(.enabled(if: folder != nil)) func drawTheMCPPicker() async throws {
-        let h = try await ReplayHarness.start(temp)
-        defer { h.stop() }
-        _ = h.sync.type("/mcp")
-        h.draw("01-/mcp")
-        #expect(await until(timeout: 30) { h.chat.menu?.picker == true })
-        try await draw(h, "mcp")
+        try await ReplayHarness.run(temp) { h in
+            _ = h.sync.type("/mcp")
+            h.draw("01-/mcp")
+            #expect(await until(timeout: 30) { h.chat.menu?.picker == true })
+            try await draw(h, "mcp")
+        }
     }
 
     @Test(.enabled(if: folder != nil)) func drawTheModelPicker() async throws {
-        let h = try await ReplayHarness.start(temp)
-        defer { h.stop() }
-        _ = h.sync.type("/model")
-        h.draw("06-down")
-        #expect(await until(timeout: 30) { h.chat.menu?.selected == 2 })
-        try await draw(h, "model")
+        try await ReplayHarness.run(temp) { h in
+            _ = h.sync.type("/model")
+            h.draw("06-down")
+            #expect(await until(timeout: 30) { h.chat.menu?.selected == 2 })
+            try await draw(h, "model")
+        }
     }
 
     func draw(_ h: ReplayHarness, _ name: String) async throws {

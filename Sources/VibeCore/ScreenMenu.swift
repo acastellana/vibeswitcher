@@ -281,7 +281,7 @@ public struct ScreenMenu: Equatable, Sendable {
     /// parse as a dialog made of both: /permissions' "Delete allowed tool?" with its Yes / No rows, under a footer half
     /// overwritten ("Enter to confirm · Esc to caect · ←/→ to switch · Esc to cancel", the old one's end still saying
     /// how to close it). A parse is taken when the read before parsed the same; until then `menu` is the one taken
-    /// before.
+    /// before. The pane's numbered menus (`parse`, an agent's question, /model's rows) go through one too (`take`).
     public struct SettledPicker: Equatable, Sendable {
         /// The last parse taken: nil before any, or for a screen with no picker.
         public private(set) var menu: ScreenMenu?
@@ -293,9 +293,16 @@ public struct ScreenMenu: Equatable, Sendable {
         /// The last read parsed as something else than `menu`: a change not yet taken.
         public var settling: Bool { last.map { $0 != menu } ?? false }
 
+        /// The last read's parse, taken or not (nil before any read).
+        public var latest: ScreenMenu? { last ?? nil }
+
         /// The next read's lines (nil: the screen couldn't be read, as one with no picker).
         public mutating func read(_ screen: [String]?) {
-            let parse = screen.flatMap(ScreenMenu.parsePicker)
+            take(screen.flatMap(ScreenMenu.parsePicker))
+        }
+
+        /// The next read's parse, whatever parsed it.
+        public mutating func take(_ parse: ScreenMenu?) {
             if last == .some(parse) { menu = parse }
             last = .some(parse)
         }

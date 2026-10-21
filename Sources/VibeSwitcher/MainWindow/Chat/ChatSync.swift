@@ -92,6 +92,23 @@ final class ChatSync {
     /// card is up within two `watchEvery` of the terminal drawing it, and stays as it was meanwhile.
     private var settled = ScreenMenu.SettledPicker()
     private var picker: ScreenMenu? { settled.menu }
+    /// The pane's own read of the selected session's screen (`menu(on:)`: an agent's question, /model's numbered
+    /// rows), taken as the host's picker is, once two reads in a row agree: a read between two pieces of a redraw can
+    /// parse as a menu with half a row. Its session's: another session's reads start it again.
+    private var paneMenus: (id: UUID, menus: ScreenMenu.SettledPicker)?
+    /// The pane's last read parsed as another menu than the one taken (or none): the screen is changing.
+    private var paneSettling: Bool { paneMenus?.menus.settling == true }
+    /// What the screen shows now, for an answer about to be typed in: the pane's last read, taken or not (the card
+    /// may be a read behind it), else the card's.
+    private var onScreenNow: ScreenMenu? { paneSettling ? paneMenus?.menus.latest : chat.menu }
+    /// A read `confirmAfter` after one whose parse wasn't taken, so a question's card is up then, not a heartbeat
+    /// later. One at a time: any read meanwhile is the one it waited for, and a confirm read never asks for another
+    /// (a screen that keeps changing is read at the heartbeat's pace, as before).
+    private var confirm: DispatchWorkItem?
+    /// How long after a read not taken the confirm read comes (nil: none, every read is the heartbeat's or a watch's).
+    var confirmAfter: TimeInterval? = 0.15
+    /// A confirm read is waiting to happen.
+    var confirming: Bool { confirm != nil }
     /// The screen is read fast (`watchEvery`, the host's screen too) since a slash command was typed in (`since`),
     /// or a dialog's footer showed: until a picker or question has shown (`seen`) and been gone a moment, or
     /// `watchFor` passes with none.
@@ -199,8 +216,16 @@ final class ChatSync {
     /// The menu and permission mode on the session's screen, for the answer card and the mode chip; once no menu has
     /// shown for a while, the messages held for it go in.
     func readScreen() {
+        read(confirming: false)
+    }
+
+    /// `readScreen`; `confirming`: the confirm read itself.
+    private func read(confirming: Bool) {
+        confirm?.cancel()
+        confirm = nil
         guard let target = target() else {
             clearSince = nil
+            paneMenus = nil
             if watch != nil { stopWatching() }
             if chat.mode != nil { chat.mode = nil }
             if let terminal = terminalTarget() { return readTerminal(terminal) }
@@ -209,15 +234,24 @@ final class ChatSync {
             return
         }
         let read = screen(target.id)
-        let onScreen = Self.menu(on: read, needsInput: target.needsInput), watched = watch?.id == target.id
+        var pane = paneMenus?.id == target.id ? paneMenus!.menus : ScreenMenu.SettledPicker()
+        pane.take(Self.menu(on: read, needsInput: target.needsInput))
+        paneMenus = (target.id, pane)
+        let onScreen = pane.menu, watched = watch?.id == target.id
         // A local command's picker the pane's read can't make out, from the host's screen.
         let menu = onScreen ?? (watched ? picker : nil)
-        // A dialog's footer with nothing read off it: watch the host's screen for its picker (once per dialog).
-        let footer = menu == nil ? Self.dialogFooter(read.lines) : nil
+        // A dialog's footer with nothing read off it (nor off the pane's last read): watch the host's screen for its
+        // picker (once per dialog).
+        let footer = menu == nil && pane.latest == nil ? Self.dialogFooter(read.lines) : nil
         if footer == nil { unreadFooter = nil } else if watch == nil, footer != unreadFooter { watchScreen() }
         // Back in sight with a watch paused.
         if watch != nil, watchTimer == nil { resumeWatch() }
-        // The host's last read parsed as another picker (or none), not yet taken: the card stays as it was.
+        // The pane's last read, or the host's, parsed as another menu (or none), not yet taken: the card stays as it
+        // was.
+        if pane.settling {
+            if !confirming { confirmSoon(target.id) }
+            return
+        }
         if onScreen == nil, watched, settled.settling { return }
         guard show(menu) else { return }
         let mode = target.agent == .codex ? nil : AgentMode.parse(Array(read.lines.suffix(6)))
@@ -230,6 +264,20 @@ final class ChatSync {
         } else {
             clearSince = nil
         }
+    }
+
+    /// The confirm read for `id`'s screen: dropped if another session is selected meanwhile, or the chat is out of
+    /// sight.
+    private func confirmSoon(_ id: UUID) {
+        guard let confirmAfter else { return }
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.confirm = nil
+            guard self.target()?.id == id, self.inSight() else { return }
+            self.read(confirming: true)
+        }
+        confirm = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + confirmAfter, execute: work)
     }
 
     /// The menu waiting on you on `read`: the hooks say so, or the screen says how to choose.
@@ -398,8 +446,12 @@ final class ChatSync {
         guard answering == nil else { return }
         // Read again right before: the question may have changed or gone, and an answer must not land on another one.
         readScreen()
-        guard let menu = chat.menu, menu.sameQuestion(as: drawn) else {
-            chat.answerNotice = Self.refusal(chat.menu)
+        let shown = onScreenNow
+        guard let menu = shown, menu.sameQuestion(as: drawn) else {
+            // Here it is now, as the notice says: the card takes the screen's last read at once (a change of card
+            // later would clear the notice).
+            if paneSettling, chat.menu != shown { chat.menu = shown }
+            chat.answerNotice = Self.refusal(shown)
             return
         }
         let writes: [HostInput.Write]
@@ -419,7 +471,7 @@ final class ChatSync {
     /// The answer card's tab `index`: ← / → from the tab the screen has open now.
     func moveTab(to index: Int) {
         readScreen()
-        guard answering == nil, let current = chat.menu?.currentTab, index != current else { return }
+        guard answering == nil, let current = onScreenNow?.currentTab, index != current else { return }
         sendKeys(Array(repeating: index > current ? [27, 91, 67] : [27, 91, 68], count: abs(index - current)).flatMap { $0 })
     }
 
@@ -463,7 +515,8 @@ final class ChatSync {
     func type(_ text: String) -> Bool {
         guard let target = target(), host.isUsable else { return false }
         readScreen()
-        if let menu = chat.menu {
+        // A menu on the pane's last read not taken yet, or the card's while it's going: the message waits for it.
+        if let menu = onScreenNow ?? (paneSettling ? chat.menu : nil) {
             if let field = freeTextRow(menu), !text.hasPrefix("/") {
                 Breadcrumbs.shared.note("composer: sent as the question's free-text answer")
                 choose(field, typing: text, drawn: menu)
