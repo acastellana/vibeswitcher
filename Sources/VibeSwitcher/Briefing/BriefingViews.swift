@@ -109,7 +109,8 @@ struct BriefingPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 8) {
-                Text(model.projectName.map { "Briefing on \($0)" } ?? "Briefing").font(.headline).lineLimit(1)
+                // A project's panel sits under its Brief me on <project>, which names it.
+                Text("Briefing").font(.headline)
                 if let briefing = model.briefing {
                     Text(Self.written(briefing)).font(.caption).foregroundStyle(.secondary)
                 }
