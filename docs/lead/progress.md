@@ -871,3 +871,5 @@
 - 2026-10-21 10:40 Audit of scripts-test-sh-runs: complete, clean
 - 2026-10-21 10:45 Audit of a-slash-command-that: complete, clean, round 2: 1 Important closed, 1 Nit closed
 - 2026-10-21 10:46 Merged scripts-test-sh-runs: scripts/test.sh runs the phone's web tests too
+- 2026-10-21 10:49 Update: Merged: every merge also runs the phone's web tests — **Merged** scripts-test-sh-runs (9b5eeab).
+- 2026-10-21 10:52 Merged a-slash-command-that: A slash command that opens a picker shows it in the chat at once
