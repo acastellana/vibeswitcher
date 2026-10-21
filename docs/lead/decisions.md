@@ -356,3 +356,7 @@ The user asked why the app asks for a key that's already in their environment. A
 
 The user's answer to 1B9FE8C5 on 2026-10-21 at 13:2x. The chat's cost now matches today's, the memory is the renderer's surface cache rather than a leak, and the alternative was days of uncertain re-plan.
 
+## 2026-10-21 17:55:46 The picker card's settling work stops after picker-card-the-two. Its two remaining Nits (in the app, ScreenRead.at is the call time; the refusal notice says "changed; here it is now" for one read while the card still shows the old question) stay recorded on the task, not as new tasks.
+
+Four rounds have closed every case that put half-drawn text on the card. What's left changes, at worst, a notice for one 0.15 s read. Further rounds cost more than they protect until the user reports a visible problem.
+
