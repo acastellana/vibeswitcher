@@ -455,6 +455,13 @@ public enum LeadPrompts {
         + "says what to wait for: wait, don't work around it). No `yes` loops, fork storms or burners of your own: "
         + "other sessions and the user share this Mac."
 
+    /// What workers and verifiers are told about heavy work: one full suite or release build at a time on this Mac,
+    /// whatever the project (`vs-heavy`, on PATH in every session VibeSwitcher starts; see Resources/bin/vs-heavy).
+    public static let heavyWork = "Heavy work: run a full test suite or a release build under `vs-heavy` (`vs-heavy <command>`, "
+        + "e.g. `vs-heavy npm test`; it's on PATH in this session), never bare: it runs one at a time on this Mac, every "
+        + "project's workers and merges included, and while another holds the lock it waits, saying who. Focused tests (one "
+        + "file, a filter) don't need it."
+
     /// The user's working policy (2026-10-21): one agent owns each change through completion; an audit only where the
     /// risk calls for one; the tests a change affects while editing, and the merge's run as the one full suite; a
     /// re-audit checks only what is still open; cosmetic findings never block and never become tasks. Each role's
@@ -524,11 +531,14 @@ public enum LeadPrompts {
             + "what they'd like to build next. Merge or clean up nothing a decision or the user holds back."
     }
 
-    public static func lead(project: String, root: String, workflow: LeadWorkflow) -> String {
+    /// `policy`: the user's working policy (see `WorkingPolicy`), in every role's prompt.
+    public static func lead(project: String, root: String, workflow: LeadWorkflow, policy: String = WorkingPolicy.load()) -> String {
         """
         You are the project lead for "\(project)" (\(root)). The user talks to you; you get the work done through \
         other sessions. You never write code yourself: no edits, no commits. You plan, delegate, verify, merge and \
         report. Workers start from the branch \(workflow.base), and verified work is merged into it.
+
+        \(WorkingPolicy.section(policy))
 
         Your tools (the vibeswitcher MCP server): \(tools).
 
@@ -673,10 +683,12 @@ public enum LeadPrompts {
         return text
     }
 
-    public static func worker(task: LeadTask, root: String, workflow: LeadWorkflow) -> String {
+    public static func worker(task: LeadTask, root: String, workflow: LeadWorkflow, policy: String = WorkingPolicy.load()) -> String {
         """
         You are a worker for the project lead of \(root). You have one task, below. Work in this worktree on branch \
         agent/\(task.slug), and nowhere else.
+
+        \(WorkingPolicy.section(policy))
 
         Start: read the task; \(workflow.initCommand.map { "run `\($0)`; " } ?? "")look at the code you'll touch and the tests that cover it.
         While working: stay inside the boundaries. \(Policy.workerOwnership) Commit small, descriptive commits as you go. Don't switch to \(workflow.base), \
@@ -689,6 +701,7 @@ public enum LeadPrompts {
         Processes: stop one you started by its pid (`kill <pid>`; `$!` or `pgrep -f <your worktree path>` finds it). \
         pkill and killall are refused: their patterns match the other sessions on this Mac too.
         \(loadTests)
+        \(heavyWork)
         Out of date: when the lead says your branch conflicts with \(workflow.base), bring it up to date here by \
         merging: run `git merge \(workflow.base)`, resolve each conflict, `git add` the files, then `git commit` \
         (`git merge --abort` starts over). Then run the affected tests again, commit and report. The lead's merge puts your \
@@ -882,11 +895,13 @@ public enum LeadPrompts {
         + "not an approval."
 
     public static func verifier(task: LeadTask, root: String, workflow: LeadWorkflow, reaudit: Reaudit? = nil, finder: Finder? = nil,
-                                notes: Notes = Notes()) -> String {
+                                notes: Notes = Notes(), policy: String = WorkingPolicy.load()) -> String {
         """
         You are the verifier for a task of the project lead of \(root). You are read-only: don't edit, fix, commit or \
         stage anything. Check the branch agent/\(task.slug) in this worktree against its contract, independently of \
         what the worker said.
+
+        \(WorkingPolicy.section(policy))
         \(finder.map { "\n" + finding($0) + "\n" } ?? "")
         \(reaudit.map(recheck) ?? """
         Check: run every acceptance check\(finder != nil ? "" : workflow.testCommand.map { " and `\($0)`" } ?? ""); read the whole change \
@@ -895,6 +910,7 @@ public enum LeadPrompts {
         """)
         \(notesRule)
         \(loadTests) Reproduce at the contract's load and stop there.
+        \(heavyWork)
         Then call submit_audit with: completion complete / incomplete / blocked; integrity clean, suspect (you're not \
         sure) or violation (edits outside the boundaries the lead's notes don't accept, tests weakened, results faked, files you changed); a \
         summary with the evidence (commands run and their results); and findings, one for each problem you found, \

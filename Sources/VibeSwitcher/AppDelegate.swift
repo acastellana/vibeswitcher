@@ -67,6 +67,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         controller.select = { [weak self] id in self?.showMainWindow(select: id) }
         controller.keepAwake.mode = { [weak self] in self?.preferences.keepAwake ?? .never }
         controller.watchPower(limit: { [weak self] in self?.preferences.batteryHoldBelow ?? PowerWatch.defaultLimit }) { SystemPower.state() }
+        controller.watchPolicy()
         return controller
     }()
     /// The ElevenLabs key for the briefing, the Mac's and the phone's: the one saved in the login Keychain, else your
@@ -516,7 +517,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             settingsWindow = SettingsWindowController(
                 preferences: preferences, setup: setup, phoneAccess: phoneAccess,
                 recentProjects: { [weak self] in self?.popoverState.recentProjects.map(\.path) ?? [] },
-                showWelcome: { [weak self] in self?.showWelcome(firstRun: false) }, host: hostClient, briefing: briefing)
+                showWelcome: { [weak self] in self?.showWelcome(firstRun: false) }, host: hostClient, briefing: briefing,
+                policy: WorkingPolicyEditor(saved: { [weak self] in self?.leadController.lookAtPolicy() }))
         }
         loadRecentProjects()
         settingsWindow?.show(tab: tab)

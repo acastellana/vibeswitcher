@@ -181,6 +181,10 @@ final class LeadController: ObservableObject {
     /// (`watchPower`): benches and tests read nothing.
     private var power: LeadWitness.Power?
     private var powerTimer: Heartbeat.Subscription?
+    /// The working policy in Settings › Project lead, told to each running lead once when it changes and once when
+    /// this build first runs (see `LeadWitness.PolicyWatch`); none until the app starts it (`watchPolicy`).
+    var policyWatch: LeadWitness.PolicyWatch?
+    private var policyTimer: Heartbeat.Subscription?
     /// Ended team sessions the host has been asked to drop.
     private var forgetting: Set<UUID> = []
     /// Ends the sessions of finished tasks from the vault's roster, in every project (see `RoleSweep`); nil in tests
@@ -446,6 +450,8 @@ final class LeadController: ObservableObject {
             var issued: String?
             var replacedSession: UUID?
             var waiting: [SteerMessage] = []
+            // In its prompt: it isn't told it again (see `LeadWitness.PolicyWatch`).
+            let policy = WorkingPolicy.load()
             let prepared = Result<(grant: String, launch: LeadLaunch.Prepared), Error> {
                 let workflowPath = try boardStore.prepare()
                 var workflow = LeadWorkflow.load(from: workflowPath)
@@ -485,7 +491,7 @@ final class LeadController: ObservableObject {
                 DispatchQueue.main.sync { if let old = replacedSession { self?.replacing[old] = root } }
                 let launch = try LeadLaunch.prepare(
                     role: .lead, root: root, task: nil, base: base,
-                    prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow),
+                    prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow, policy: policy),
                     start: LeadPrompts.leadStart(root: root, goal: goal, note: Self.commandLineNote, replaced: handed),
                     server: Self.serverPath, name: name, folder: vault.runFolder(root: root, name: name), cwd: root)
                 return (grant, launch)
@@ -499,13 +505,14 @@ final class LeadController: ObservableObject {
                 case .failure(let error):
                     self.replacing = self.replacing.filter { $0.value != root }
                     self.alert("The lead didn't start.", "\(error)")
-                case .success(let (grant, launch)): self.spawnLead(root: root, project: project, grant: grant, launch: launch, show: show)
+                case .success(let (grant, launch)):
+                    self.spawnLead(root: root, project: project, grant: grant, launch: launch, policy: policy, show: show)
                 }
             }
         }
     }
 
-    private func spawnLead(root: String, project: String, grant: String, launch: LeadLaunch.Prepared, show: Bool) {
+    private func spawnLead(root: String, project: String, grant: String, launch: LeadLaunch.Prepared, policy: String, show: Bool) {
         let boardStore = BoardStore(root: root)
         let vault = self.vault
         host.spawn(SpawnRequest(cwd: root, command: launch.command, env: launch.environment, cols: 120, rows: 40, keepShell: false,
@@ -519,6 +526,7 @@ final class LeadController: ObservableObject {
                     }
                 }
                 self?.reads.async { _ in try? boardStore.update { board in LeadHandover.started(session.id.uuidString, on: &board) } }
+                self?.policyWatch?.started(session.id.uuidString, with: policy)
                 // You chose to start the lead here: answer Claude's trust question for this folder.
                 if self?.answersTrust == true { self?.answerTrust(session.id, folder: root) }
                 if show { self?.select(session.id) }
@@ -891,6 +899,23 @@ final class LeadController: ObservableObject {
     func watchPower(limit: @escaping () -> Int, _ read: @escaping () -> PowerState?) {
         power = LeadWitness.Power(read: read, limit: limit)
         powerTimer = Heartbeat.shared.every(60) { [weak self] in self?.lookAtPower() }
+    }
+
+    /// Tells each running lead the working policy once a minute from now on, when it isn't the one it has (the first a
+    /// minute in: the host has said which leads run by then).
+    func watchPolicy(_ watch: LeadWitness.PolicyWatch = LeadWitness.PolicyWatch()) {
+        policyWatch = watch
+        policyTimer = Heartbeat.shared.every(60) { [weak self] in self?.lookAtPolicy() }
+    }
+
+    /// The working policy, to each running lead that hasn't got it (changed since, or started before this build), as
+    /// the witness; Settings looks at once after a save.
+    func lookAtPolicy() {
+        let running = leadSessions
+        guard let watch = policyWatch, let news = watch.look(running: running.values.map(\.id.uuidString)) else { return }
+        for (root, session) in running where news.leads.contains(session.id.uuidString) {
+            deliver(news.text, from: .system("witness"), root: root)
+        }
     }
 
     /// A hold on battery, or the resume after one: to each running lead, as the witness.

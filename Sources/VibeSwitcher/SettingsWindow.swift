@@ -20,7 +20,7 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
 
     init(preferences: Preferences, setup: SetupModel, phoneAccess: PhoneAccess,
          recentProjects: @escaping () -> [String], showWelcome: @escaping () -> Void, host: HostClient? = nil,
-         briefing: BriefingModel? = nil) {
+         briefing: BriefingModel? = nil, policy: WorkingPolicyEditor? = nil) {
         self.setup = setup
         self.briefing = briefing
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.size),
@@ -31,7 +31,8 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
         window.delegate = self
         window.contentView = NSHostingView(rootView: SettingsView(preferences: preferences, setup: setup, phoneAccess: phoneAccess,
                                                                   selection: selection, recentProjects: recentProjects,
-                                                                  showWelcome: showWelcome, host: host, briefing: briefing))
+                                                                  showWelcome: showWelcome, host: host, briefing: briefing,
+                                                                  policy: policy))
         window.center()
     }
 
@@ -71,10 +72,11 @@ struct SettingsView: View {
     let showWelcome: () -> Void
     var host: HostClient? = nil
     var briefing: BriefingModel? = nil
+    var policy: WorkingPolicyEditor? = nil
 
     var body: some View {
         TabView(selection: $selection.tab) {
-            GeneralSettings(preferences: preferences, setup: setup, showWelcome: showWelcome, host: host, briefing: briefing)
+            GeneralSettings(preferences: preferences, setup: setup, showWelcome: showWelcome, host: host, briefing: briefing, policy: policy)
                 .tabItem { Label("General", systemImage: "gearshape") }.tag(SettingsTab.general)
             AgentsSettings(setup: setup)
                 .tabItem { Label("Agents", systemImage: "waveform.path.ecg") }.tag(SettingsTab.agents)
@@ -117,6 +119,7 @@ struct GeneralSettings: View {
     let showWelcome: () -> Void
     var host: HostClient? = nil
     var briefing: BriefingModel? = nil
+    var policy: WorkingPolicyEditor? = nil
 
     var body: some View {
         Form {
@@ -175,6 +178,7 @@ struct GeneralSettings: View {
             } footer: {
                 SettingsFooter("The Team tab says in plain words what each task's agent is doing and what long decisions mean, written by a small Claude model (claude -p with haiku, no tools) from the task's title, checkpoints and last steps: at most every 3 minutes per task, while the tab is open. Off, it shows the latest checkpoint or activity. While a worker, verifier or merge runs, the Mac doesn't go to sleep on its own (the display still does); on battery only if set to Always. On battery, the lead starts no workers or audits and merges nothing only while the charge is under the level set here (work in flight finishes); above it, it works as on power. 0 never pauses.")
             }
+            if let policy { WorkingPolicySection(editor: policy) }
             if let briefing { BriefingSettings(preferences: preferences, briefing: briefing) }
             Section("Notifications") {
                 LabeledContent("Permission") {
