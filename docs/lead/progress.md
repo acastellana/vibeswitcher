@@ -903,3 +903,5 @@
 - 2026-10-21 18:07 Update: Merged: picker card's two-reads rule holds everywhere — **Merged** picker-card-the-two (9b48bdd), on the second try. The first merge check failed in the chat speed test, unrelated to this branch; that cost is now task chat-fill-in-turns.
 - 2026-10-21 18:07 Started a worker on chat-fill-in-turns
 - 2026-10-21 21:50 Workflow: max_workers = `3`
+- 2026-10-21 21:50 Planned one-agent-owns-a: One agent owns a change: audits only where risk calls for them, tests run once and one at a time
+- 2026-10-21 21:50 Update: New working policy: one agent per change, audits only where risk calls for them — **Your policy is now the team's policy** (recorded in decisions.md):
