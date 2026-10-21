@@ -110,10 +110,15 @@ final class PhoneAccess: ObservableObject {
     /// Brief me from the phone: writes one briefing with its audio (`PhoneBriefer`) and calls back on the main thread;
     /// nil, the route answers 503.
     var brief: ((@escaping (PhoneBriefing) -> Void) -> Void)?
-    /// Each phone's briefing, by device: being written (that press's number), or written and kept until its next press.
+    /// Brief me on one led project (`{"project": name}`), the same way; nil, such a request answers 503.
+    var briefProject: ((String, @escaping (PhoneBriefing) -> Void) -> Void)?
+    /// The led projects a phone may ask a briefing of, by name (the card's picker); any other name is refused.
+    var briefingProjects: () -> [String] = { [] }
+    /// Each phone's briefing, by device: being written (that press's number and project), or written and kept until
+    /// its next press.
     private var briefings: [String: Briefed] = [:]
     private enum Briefed {
-        case writing(Int)
+        case writing(Int, project: String?)
         case ready(PhoneBriefing)
     }
     private var briefingRun = 0
@@ -521,6 +526,7 @@ final class PhoneAccess: ObservableObject {
             // The phone reloads when the Mac serves a newer web app (an old page wouldn't send what it needs).
             "web": WebAssets.version,
             "devPagesAllowed": devPagesAllowed,
+            "briefingProjects": briefingProjects().map(Redaction.secrets(in:)),
             "device": ["id": device.id, "name": device.name, "push": device.push != nil],
             "vapidPublicKey": Base64URL.encode(vapidKey.publicKey.x963Representation),
             "mac": Host.current().localizedName ?? "Mac",
@@ -1057,20 +1063,34 @@ final class PhoneAccess: ObservableObject {
     // MARK: - Brief me
 
     /// Starts a fresh briefing for this phone (the one under way, if any, instead of a second); the phone then asks
-    /// `GET /api/briefing` until it's written (a briefing takes longer than a request may stay open).
+    /// `GET /api/briefing` until it's written (a briefing takes longer than a request may stay open). With
+    /// `{"project": name}`, of that led project alone: a name that isn't one the Mac leads now is refused.
     private func startBriefing(_ request: HTTPRequest, device: PairedDevice) -> HTTPResponse {
-        guard let brief else { return .error(503, "Briefings aren't available on this Mac.") }
-        if case .writing = briefings[device.id] { return .json(["writing": true]) }
+        let project: String?
+        switch body(request)?["project"] {
+        case nil, is NSNull: project = nil
+        case let name as String where briefingProjects().contains(name): project = name
+        default: return .error(400, "No project lead runs in that project.")
+        }
+        let start: (@escaping (PhoneBriefing) -> Void) -> Void
+        if let project {
+            guard let briefProject else { return .error(503, "Briefings aren't available on this Mac.") }
+            start = { briefProject(project, $0) }
+        } else {
+            guard let brief else { return .error(503, "Briefings aren't available on this Mac.") }
+            start = brief
+        }
+        if case .writing(_, project) = briefings[device.id] { return .json(["writing": true]) }
         let source = RemoteGate.source(login: request.header("tailscale-user-login"), forwardedFor: request.header("x-forwarded-for"))
         if briefingStarts.isThrottled(source) { return .error(429, "That's a lot of briefings; wait a few minutes.") }
         briefingStarts.recordFailure(source)
         briefings = briefings.filter { id, _ in devices.contains { $0.id == id } }
         briefingRun += 1
         let run = briefingRun
-        briefings[device.id] = .writing(run)
-        audit("briefing for \(device.name)")
-        brief { [weak self] briefing in
-            guard let self, case .writing(run) = self.briefings[device.id] else { return }
+        briefings[device.id] = .writing(run, project: project)
+        audit("briefing\(project.map { " on \($0)" } ?? "") for \(device.name)")
+        start { [weak self] briefing in
+            guard let self, case .writing(run, _) = self.briefings[device.id] else { return }
             self.briefings[device.id] = .ready(briefing)
         }
         return .json(["writing": true])

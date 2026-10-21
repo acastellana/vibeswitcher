@@ -171,6 +171,7 @@ async function refreshList(render = true) {
   $('notifyCard').hidden = Boolean(state.device.push) || !('PushManager' in window);
   $('bell').classList.toggle('on', Boolean(state.device.push));
   if (current) { refreshConversation(); return renderSessionMeta(); }
+  renderBriefScope();
   if (render) renderList();
 }
 
@@ -947,7 +948,8 @@ async function enableNotifications() {
 // own); the phone gets it with its token and plays it from a blob. A briefing takes longer than a request may stay
 // open, so the press starts one and the phone asks until it's written.
 
-const brief = { gen: 0, url: null, writing: false, ready: false };
+const brief = { gen: 0, url: null, writing: false, ready: false, projects: '' };
+const BRIEF_PROJECT = 'vs.briefProject';   // the picker's choice on this phone: a led project's name, or '' for all
 const BRIEF_POLL = 1000;      // ms between asks
 const BRIEF_WAIT = 150;       // asks: Claude may take a minute, ElevenLabs half of one more
 
@@ -974,12 +976,48 @@ function setBriefAudio(blob) {
   $('briefAudio').src = brief.url;
 }
 
+// The picker's choice: kept on this phone (storage may be unavailable: then it's All projects each time).
+function savedBriefProject() {
+  try { return localStorage.getItem(BRIEF_PROJECT) || ''; } catch (error) { return ''; }
+}
+
+function saveBriefProject(name) {
+  try { if (name) localStorage.setItem(BRIEF_PROJECT, name); else localStorage.removeItem(BRIEF_PROJECT); } catch (error) { /* not kept */ }
+}
+
+// The project Brief me is about: one the Mac leads now, or '' for all of them.
+function briefProject() {
+  const name = $('briefScope').value || '';
+  return (state?.briefingProjects || []).includes(name) ? name : '';
+}
+
+// "On [All projects ▾]": All projects and each project the Mac leads (from /api/state), drawn again only when they change.
+function renderBriefScope() {
+  const projects = state?.briefingProjects || [];
+  $('briefScopeRow').hidden = projects.length === 0;
+  const key = JSON.stringify(projects);
+  if (key === brief.projects) return;
+  brief.projects = key;
+  const select = $('briefScope');
+  const all = el('option', '', 'All projects');
+  all.value = '';
+  select.replaceChildren(all, ...projects.map(name => {
+    const option = el('option', '', name);
+    option.value = name;
+    return option;
+  }));
+  const saved = savedBriefProject();
+  select.value = projects.includes(saved) ? saved : '';
+  renderBrief();
+}
+
 function renderBrief() {
   const audio = $('briefAudio');
   const playing = brief.ready && !audio.paused && !audio.ended;
+  const project = briefProject();
   $('briefMe').disabled = brief.writing;
   $('briefSpinner').hidden = !brief.writing;
-  $('briefLabel').textContent = brief.writing ? 'Writing your briefing…' : 'Brief me';
+  $('briefLabel').textContent = brief.writing ? 'Writing your briefing…' : project ? `Brief me on ${project}` : 'Brief me';
   const play = $('briefPlay');
   play.hidden = !brief.writing && !brief.ready;
   play.textContent = brief.writing || playing ? '■ Stop' : '▶ Play';
@@ -1001,7 +1039,8 @@ async function briefMe() {
   try { setBriefAudio(silence()); audio.play().catch(() => {}); } catch (error) { /* no audio here: the text still shows */ }
   renderBrief();
   try {
-    let result = await api('/api/briefing', { method: 'POST', body: '{}' });
+    const project = briefProject();
+    let result = await api('/api/briefing', { method: 'POST', body: JSON.stringify(project ? { project } : {}) });
     for (let asked = 0; result.writing && asked < BRIEF_WAIT; asked++) {
       await wait(BRIEF_POLL);
       if (gen !== brief.gen) return;
@@ -1149,6 +1188,7 @@ document.addEventListener('DOMContentLoaded', () => {
   $('quickReset').addEventListener('click', () => saveQuickReplies(DEFAULT_QUICK_REPLIES));
   renderQuickReplies();
   $('briefMe').addEventListener('click', () => briefMe());
+  $('briefScope').addEventListener('change', () => { saveBriefProject($('briefScope').value); renderBrief(); });
   $('briefPlay').addEventListener('click', toggleBriefAudio);
   for (const type of ['play', 'pause', 'ended']) $('briefAudio').addEventListener(type, renderBrief);
   $('prev').addEventListener('click', () => step(-1));

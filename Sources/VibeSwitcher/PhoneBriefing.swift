@@ -15,11 +15,14 @@ struct PhoneBriefing: Equatable, Sendable {
     var voice: String?
     var audio: Data?
     var audioType: String?
+    /// The project it's about (Brief me on <project>); nil: every led project.
+    var project: String? = nil
 
     /// What the phone gets: the text redacted again on the way out, the audio as base64.
     var json: [String: Any] {
         var object: [String: Any] = ["text": Redaction.secrets(in: text), "language": language, "at": at]
         if let notice { object["notice"] = notice }
+        if let project { object["project"] = Redaction.secrets(in: project) }
         if let voice, let audio, let audioType {
             object["voice"] = voice
             object["audio"] = audio.base64EncodedString()
@@ -33,7 +36,8 @@ struct PhoneBriefing: Equatable, Sendable {
 /// the chosen language), read aloud on the phone instead of the Mac. With an ElevenLabs key its MP3 is sent; without
 /// one, or when ElevenLabs fails, the Mac's own voice is rendered to an AAC file (`MacVoiceFile`) and that is sent. The
 /// key is read here, off the main thread, and goes to ElevenLabs only. A phone's briefing counts as the last briefing
-/// for the Mac's button too (the next one, on either, covers what's new since).
+/// for the Mac's button too (the next one, on either, covers what's new since). The phone may ask for one led project
+/// instead (`brief(project:_:)`): the Mac's Brief me on <project>, with that project's own 'since'.
 final class PhoneBriefer: @unchecked Sendable {
     private let snapshot: () -> BriefingModel.Snapshot
     private let language: () -> BriefingLanguage
@@ -60,19 +64,39 @@ final class PhoneBriefer: @unchecked Sendable {
 
     /// Writes one and makes its audio; called on the main thread, and `done` is called there.
     func brief(_ done: @escaping (PhoneBriefing) -> Void) {
+        brief(.all, done)
+    }
+
+    /// The led projects the phone may ask about, by name (their folders'), sorted.
+    func projects() -> [String] {
+        Set(snapshot().boards.keys.map { ($0 as NSString).lastPathComponent }).sorted { $0.localizedStandardCompare($1) == .orderedAscending }
+    }
+
+    /// Brief me on one led project, by name (`PhoneAccess` has checked it's in `projects()`); one no longer led gets
+    /// a line saying so, nothing written.
+    func brief(project name: String, _ done: @escaping (PhoneBriefing) -> Void) {
+        guard let root = snapshot().boards.keys.sorted().first(where: { ($0 as NSString).lastPathComponent == name }) else {
+            return done(PhoneBriefing(text: "No project lead runs in \(name) now.", language: "en", at: now(), project: name))
+        }
+        brief(.project(root: root), done)
+    }
+
+    private func brief(_ scope: BriefingModel.Scope, _ done: @escaping (PhoneBriefing) -> Void) {
         let taken = snapshot()
         let language = language()
-        let since = defaults.object(forKey: BriefingModel.lastKey) as? Double
+        let stamp = BriefingModel.lastKey(scope)
+        let since = defaults.object(forKey: stamp) as? Double
         let at = now()
         let (generate, keyStore, client, render) = (generate, keyStore, client, render)
         DispatchQueue.global(qos: .userInitiated).async {
-            let input = Briefing.compose(BriefingModel.sources(taken.boards), sessions: taken.sessions, lastBriefed: since, now: at)
+            let input = BriefingModel.input(taken, scope: scope, lastBriefed: since, now: at)
             let written = Briefing.write(input, language: language, generate: generate, now: at)
             let key = keyStore.read()
             Task.detached(priority: .userInitiated) {
-                let briefing = await Self.voiced(written, key: key, client: client, render: render)
+                var briefing = await Self.voiced(written, key: key, client: client, render: render)
+                briefing.project = input.project
                 DispatchQueue.main.async {
-                    self.defaults.set(written.at, forKey: BriefingModel.lastKey)
+                    self.defaults.set(written.at, forKey: stamp)
                     done(briefing)
                 }
             }

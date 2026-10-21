@@ -267,5 +267,71 @@ assert.equal($('briefSpinner').hidden, true);
 assert.equal($('briefMe').disabled, false);
 assert.deepEqual(requests.map(r => `${r.method} ${r.path}`), ['POST /api/briefing']);
 
+// 7. The picker: All projects and each project the Mac leads (from its state); the pick is kept on this phone and
+//    posted as {project} through the same endpoint; All projects posts none.
+for (const id of ['briefScopeRow', 'briefScope']) assert.ok(page.includes(`id="${id}"`), `index.html has #${id}`);
+assert.equal($('briefScopeRow').hidden, true, 'no led projects: no picker');
+const refresh = () => vm.runInContext('refreshList()', context);
+macState.briefingProjects = ['genswap', 'vibeswitcher'];
+storage.set('vs.briefProject', 'vibeswitcher');
+await refresh();
+assert.equal($('briefScopeRow').hidden, false);
+assert.deepEqual($('briefScope').children.map(o => o.textContent), ['All projects', 'genswap', 'vibeswitcher']);
+assert.deepEqual($('briefScope').children.map(o => o.value), ['', 'genswap', 'vibeswitcher']);
+assert.equal($('briefScope').value, 'vibeswitcher', 'the kept pick');
+assert.equal($('briefLabel').textContent, 'Brief me on vibeswitcher');
+requests.length = 0;
+startReply = { status: 200, body: { writing: true } };
+briefingAsks = [{ text: 'Vibeswitcher: two landed.', language: 'en', at: 3000, project: 'vibeswitcher' }];
+$('briefMe').click();
+await flush();
+assert.deepEqual(requests.map(r => `${r.method} ${r.path}`), ['POST /api/briefing', 'GET /api/briefing']);
+assert.deepEqual(JSON.parse(requests[0].body), { project: 'vibeswitcher' });
+assert.equal(requests[0].authorization, 'Bearer test-token');
+assert.equal($('briefText').textContent, 'Vibeswitcher: two landed.');
+assert.equal($('briefLabel').textContent, 'Brief me on vibeswitcher');
+
+// All projects: the pick forgotten, and the press posts no project.
+$('briefScope').value = '';
+$('briefScope').dispatch('change');
+assert.equal(storage.has('vs.briefProject'), false);
+assert.equal($('briefLabel').textContent, 'Brief me');
+requests.length = 0;
+$('briefMe').click();
+await flush();
+assert.deepEqual(JSON.parse(requests[0].body), {});
+$('briefScope').value = 'genswap';
+$('briefScope').dispatch('change');
+assert.equal(storage.get('vs.briefProject'), 'genswap');
+
+// A kept pick the Mac no longer leads is All projects, and is never posted.
+storage.set('vs.briefProject', 'films');
+macState.briefingProjects = ['genswap'];
+await refresh();
+assert.equal($('briefScope').value, '');
+$('briefScope').value = 'films';   // not one of its options: not sent either
+requests.length = 0;
+$('briefMe').click();
+await flush();
+assert.deepEqual(JSON.parse(requests[0].body), {});
+
+// Storage unavailable (a private tab): the picker still works, as All projects to begin with.
+const { getItem, setItem, removeItem } = context.localStorage;
+Object.assign(context.localStorage, { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); },
+                                      removeItem() { throw new Error('denied'); } });
+macState.briefingProjects = ['genswap', 'vibeswitcher'];
+await refresh();
+assert.equal($('briefScope').value, '');
+$('briefScope').value = 'genswap';
+$('briefScope').dispatch('change');
+assert.equal($('briefLabel').textContent, 'Brief me on genswap');
+Object.assign(context.localStorage, { getItem, setItem, removeItem });
+
+// The Mac leads nothing now: the picker goes.
+macState.briefingProjects = [];
+await refresh();
+assert.equal($('briefScopeRow').hidden, true);
+assert.equal($('briefLabel').textContent, 'Brief me');
+
 console.log('phone-briefing: ok');
 process.exit(0);
