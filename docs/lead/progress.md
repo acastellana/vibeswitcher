@@ -911,3 +911,5 @@
 - 2026-10-21 22:52 Planned timing-benches-leave-the: Timing benches leave the default test run
 - 2026-10-21 22:52 Planned a-new-worktree-builds: A new worktree builds warm, not from scratch
 - 2026-10-21 23:26 Workflow: max_workers = `4`, mac_max_sessions = `10`
+- 2026-10-21 23:27 Started a worker on timing-benches-leave-the
+- 2026-10-21 23:27 Started a worker on a-new-worktree-builds
