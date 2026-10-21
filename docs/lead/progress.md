@@ -917,3 +917,5 @@
 - 2026-10-21 23:42 Merged one-agent-owns-a: One agent owns a change: audits only where risk calls for them, tests run once and one at a time
 - 2026-10-21 23:42 Update: Merged: the working policy is built into the tools (review levels, test once, one build at a time) — **Merged** one-agent-owns-a (22e0a72; audited, since it changes the guard rails).
 - 2026-10-21 23:44 Started a worker on every-lead-and-worker
+- 2026-10-22 00:23 Audit of every-lead-and-worker: complete, clean
+- 2026-10-22 00:34 Merged every-lead-and-worker: Every lead and worker, in every project, follows the user's working policy
