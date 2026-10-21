@@ -883,3 +883,4 @@
 - 2026-10-21 15:01 Merged the-briefing-uses: The briefing uses ELEVENLABS_API_KEY from the user's shell when no key is saved
 - 2026-10-21 15:01 Update: Merged: the briefing uses ELEVENLABS_API_KEY from your shell — **Merged** the-briefing-uses (head 3b716e7).
 - 2026-10-21 15:01 Started a worker on the-picker-card-never
+- 2026-10-21 15:29 Audit of selecting-text-in-the: incomplete, clean, round 2: 4 Important (1 open), 1 Nit closed
