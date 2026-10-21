@@ -199,26 +199,31 @@ struct PickerCardTests {
     }
 
     /// The watch's ticks read the pane once each: the host's answer within a tick isn't a second read of the pane
-    /// (the two would be of one instant and agree whatever they show). ↓ split mid-row (`halfDown`: no menu) is read
-    /// by one watch tick's host read, the rest drawn before the next: the card never goes.
+    /// (the two would be of one instant and agree whatever they show). Esc split (`halfEsc`: the conversation drawn
+    /// back over the dialog's top, "Kept model as …" read as a question) is read by one watch tick's host read, the
+    /// rest drawn after a few more ticks: the half-drawn question never shows, the card goes once the closed screen
+    /// is read twice.
     @Test func aRedrawSplitBetweenWatchTicksNeverReachesTheCard() async throws {
         try await ReplayHarness.run(temp) { h in
             _ = h.sync.type("/model")
             h.draw("04-/model")
             #expect(await until(timeout: 30) { h.chat.menu?.options.count == 5 && h.chat.menu?.selected == 0 })
             #expect(h.sync.watching)
+            let drawn = h.chat.menu
             var shown: [ScreenMenu?] = []
             let watching = h.chat.$menu.sink { shown.append($0) }
             defer { watching.cancel() }
-            h.awaited = [ReplayHarness.halfDown, ReplayHarness.marked("2. Opus")]
-            h.draw(at: 14360)
-            #expect(await until(timeout: 30) { h.reads.last.map(ReplayHarness.halfDown) == true })
-            // A tick or two with the half read as the pane's last (the next host read waits for the whole one).
-            try await Task.sleep(nanoseconds: 600_000_000)
-            h.draw("05-down")
-            #expect(await until(timeout: 30) { h.chat.menu?.selected == 1 })
-            #expect(h.reads.filter(ReplayHarness.halfDown).count == 1)
-            #expect(shown.map { $0?.selected } == [0, 1], "shown: \(shown.map { $0.map { "\($0.question.prefix(30)) \($0.selected)" } ?? "none" })")
+            let closed = { (lines: [String]) in !ReplayHarness.has("Select model")(lines) }
+            h.awaited = [ReplayHarness.halfEsc, closed]
+            h.draw(at: 14801)
+            #expect(await until(timeout: 30) { h.reads.last.map(ReplayHarness.halfEsc) == true })
+            // Ticks with the half read as the pane's last (the next host read waits for the closed screen).
+            try await Task.sleep(nanoseconds: 800_000_000)
+            #expect(h.chat.menu == drawn)
+            h.draw("07-esc")
+            #expect(await until(timeout: 30) { h.chat.menu == nil })
+            #expect(h.reads.filter(ReplayHarness.halfEsc).count == 1)
+            #expect(shown == [drawn, nil], "shown: \(shown.map { $0.map { "\($0.question.prefix(30)) \($0.selected)" } ?? "none" })")
         }
     }
 
