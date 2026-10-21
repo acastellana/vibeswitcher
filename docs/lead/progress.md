@@ -919,3 +919,4 @@
 - 2026-10-21 23:44 Started a worker on every-lead-and-worker
 - 2026-10-22 00:23 Audit of every-lead-and-worker: complete, clean
 - 2026-10-22 00:34 Merged every-lead-and-worker: Every lead and worker, in every project, follows the user's working policy
+- 2026-10-22 00:34 Update: Merged: your working policy reaches every lead, in every project — **Merged** every-lead-and-worker (903d6fe; audited, since it affects every project).
