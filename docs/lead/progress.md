@@ -866,3 +866,5 @@
 - 2026-10-21 10:10 Merged brief-me-for-the: Brief me for the open project, beside the global briefing
 - 2026-10-21 10:10 Update: Merged: Brief me on one project, beside the global briefing — **Merged** brief-me-for-the (7 commits, head 44b636a; 19 files).
 - 2026-10-21 10:18 Audit of a-slash-command-that: incomplete, clean, round 1: 1 Important open, 1 Nit open
+- 2026-10-21 10:33 Folded row-text-and-team into rows-never-show-a: that task carries its work
+- 2026-10-21 10:33 Folded the-guard-hash-reads into a-worker-can-t: that task carries its work
