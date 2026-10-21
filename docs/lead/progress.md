@@ -913,3 +913,5 @@
 - 2026-10-21 23:26 Workflow: max_workers = `4`, mac_max_sessions = `10`
 - 2026-10-21 23:27 Started a worker on timing-benches-leave-the
 - 2026-10-21 23:27 Started a worker on a-new-worktree-builds
+- 2026-10-21 23:33 Audit of one-agent-owns-a: complete, clean, round 1: 3 Nit open
+- 2026-10-21 23:42 Merged one-agent-owns-a: One agent owns a change: audits only where risk calls for them, tests run once and one at a time
