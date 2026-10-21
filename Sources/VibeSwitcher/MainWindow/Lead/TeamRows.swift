@@ -271,6 +271,10 @@ enum TeamRows {
             if task.evidence?.passes == true {
                 row.mark = .merge
                 row.state = "Ready to merge"
+            } else if task.reviewLevel == .none, task.verifier == nil, task.evidence == nil {
+                // Review none: its worker's done report is what merge takes, with the merge's own test run.
+                row.mark = .merge
+                row.state = "Ready to merge"
             } else if let verifier, !verifier.live, task.evidence == nil {
                 red(.ended, "Verifier ended", "The verifier ended without a verdict.", since: nil)
             } else if verifierGone, task.evidence == nil {

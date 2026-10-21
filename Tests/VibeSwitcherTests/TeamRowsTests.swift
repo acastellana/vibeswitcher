@@ -184,6 +184,33 @@ struct TeamRowsTests {
         #expect(TeamRows.finishedTitle([row(merged), row(abandoned)]) == "Merged (1) · Abandoned (1)")
     }
 
+    @Test func aReviewNoneTaskItsWorkerReportedIsReadyToMerge() {
+        // No audit to wait for: merge takes the worker's done report and runs the tests.
+        let none = Self.task("n", .review, since: 60)
+        #expect(row(none).state == "Ready to merge" && row(none).mark == .merge)
+        // An audit task waits for its audit; so does a none task once an audit was started on it.
+        var audit = Self.task("a", .review, since: 60)
+        audit.review = .audit
+        #expect(row(audit).state == "In review" && row(audit).activity == "Waiting for the audit")
+        var audited = Self.task("v", .review, since: 60)
+        audited.verifier = "v-v"
+        #expect(row(audited, ["v-v": Self.working]).state == "In review")
+    }
+
+    @Test func theScorecardSaysHowManyMergedWithNoAudit() {
+        var board = LeadBoard()
+        var plain = Self.task("p", .done)
+        plain.merged = LeadMergeRecord(commit: "abc", tested: true, audited: false)
+        var checked = Self.task("c", .done)
+        checked.merged = LeadMergeRecord(commit: "def", tested: true)
+        var ledger = LeadAuditLedger()
+        (ledger.rounds, ledger.passed) = (1, true)
+        checked.audits = ledger
+        board.tasks = [plain, checked]
+        let scorecard = LeadScorecard(board)
+        #expect(ScorecardView.footnote(scorecard) == "Over 2 merged tasks; 1 with no audit (review none).")
+    }
+
     @Test func eachMarkHasItsOwnShape() {
         let shapes = TeamRow.Mark.allCases.map(\.symbol)
         #expect(Set(shapes).count == shapes.count)

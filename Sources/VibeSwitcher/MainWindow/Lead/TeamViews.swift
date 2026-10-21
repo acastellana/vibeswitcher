@@ -154,10 +154,12 @@ struct TeamRowDetails: View {
                 }
             }
             if let merged = task.merged {
-                Text("Merged \(merged.commit.prefix(8)) at \(LeadBoard.clock(merged.at))" + (merged.tested ? ", tests passed" : ", no tests ran"))
+                Text("Merged \(merged.commit.prefix(8)) at \(LeadBoard.clock(merged.at))" + (merged.tested ? ", tests passed" : ", no tests ran")
+                     + (merged.unaudited ? ", no audit" : ""))
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
-            if let score = task.score, score.rounds > 0 || score.questions > 0 || task.merged != nil {
+            // Its review level shows in it (scores counted before review levels have none).
+            if let score = task.score, score.review != nil || score.rounds > 0 || score.questions > 0 || task.merged != nil {
                 Text(score.line).font(.system(size: 11))
                     .foregroundStyle(score.revertedBy != nil ? AnyShapeStyle(Color.red) : AnyShapeStyle(.secondary))
                     .fixedSize(horizontal: false, vertical: true)
@@ -284,14 +286,21 @@ struct ScorecardView: View {
                         }
                     }
                 }
-                Text("Over \(scorecard.merged) merged task\(scorecard.merged == 1 ? "" : "s")"
-                     + (scorecard.counted < scorecard.merged ? " (audit rounds known for \(scorecard.counted))" : "")
-                     + (scorecard.mergedWithoutTests > 0 ? "; \(scorecard.mergedWithoutTests) merged without tests" : "") + ".")
+                Text(Self.footnote(scorecard))
                     .font(.system(size: 10.5)).foregroundStyle(scorecard.mergedWithoutTests > 0 ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.tertiary))
             }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(scorecard.spoken)
+    }
+
+    /// "Over 5 merged tasks (audit rounds known for 2); 2 with no audit (review none); 1 merged without tests."
+    static func footnote(_ scorecard: LeadScorecard) -> String {
+        var text = "Over \(scorecard.merged) merged task\(scorecard.merged == 1 ? "" : "s")"
+        if scorecard.counted < scorecard.merged - scorecard.mergedUnaudited { text += " (audit rounds known for \(scorecard.counted))" }
+        if scorecard.mergedUnaudited > 0 { text += "; \(scorecard.mergedUnaudited) with no audit (review none)" }
+        if scorecard.mergedWithoutTests > 0 { text += "; \(scorecard.mergedWithoutTests) merged without tests" }
+        return text + "."
     }
 }
 

@@ -122,14 +122,22 @@ public struct LeadMergeRecord: Codable, Equatable, Sendable {
     /// The base's commit that reverted it (all or part of it), and when that was found (see `LeadReverts`).
     public var revertedBy: String?
     public var revertedAt: Double?
+    /// false: it merged with no verdict, a `review: none` task on its worker's report and the merge's own test run;
+    /// nil (older records, and every audited merge): a passing audit let it in.
+    public var audited: Bool?
 
-    public init(commit: String, tested: Bool, onto: String? = nil, regression: Bool? = nil, at: Double = Date().timeIntervalSince1970) {
+    public init(commit: String, tested: Bool, onto: String? = nil, regression: Bool? = nil, audited: Bool? = nil,
+                at: Double = Date().timeIntervalSince1970) {
         self.commit = commit
         self.tested = tested
         self.onto = onto
         self.regression = regression
+        self.audited = audited
         self.at = at
     }
+
+    /// It merged without an audit (`audited` false).
+    public var unaudited: Bool { audited == false }
 }
 
 /// Something a verifier found in a task's branch, kept until it's resolved: fixed (a later audit saw it fixed) or
@@ -453,6 +461,20 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
         public var attentionRank: Int { Self.attentionOrder.firstIndex(of: self) ?? Self.attentionOrder.count }
     }
 
+    /// Who checks its work before merge, as the lead set it (add_task, update_task). none: its worker owns it through
+    /// completion, and merge takes it on the worker's "done" report and the merge's own test run, with no verdict.
+    /// audit: a verifier's passing verdict, as every task before review levels: for security, irreversible operations
+    /// and complex changes. A branch that touches sensitive_paths is audited whatever it says (merge checks).
+    public enum Review: String, Codable, Sendable, CaseIterable {
+        case none, audit
+
+        /// "audit", "Audit", " none ": the level; nil for anything else.
+        public init?(text: String) { self.init(rawValue: text.trimmingCharacters(in: .whitespaces).lowercased()) }
+
+        /// The stricter of two levels.
+        public func atLeast(_ other: Review?) -> Review { self == .audit || other == .audit ? .audit : .none }
+    }
+
     public var id: String
     public var slug: String
     public var title: String
@@ -510,6 +532,12 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var notes: [LeadNote]?
     /// How it went, in the scorecard's numbers, as of the board's last change (see `LeadTaskScore`).
     public var score: LeadTaskScore?
+    /// Its review level as the lead set it (for showing, and never lowering: merge goes by the stricter of this and
+    /// the vault's copy, which only the lead writes). nil: none, the default.
+    public var review: Review?
+
+    /// Its review level: none unless the lead set audit.
+    public var reviewLevel: Review { review ?? .none }
 
     public static let keptCheckpoints = 40
     /// Notes kept per task, the newest: an approval is rarely more than a few dozen messages back.

@@ -183,6 +183,12 @@ public struct LeadVault: Sendable {
         /// The workers and verifiers the vault knows of (`RosterEntry`), never a lead: the app's of every team (nil),
         /// or a repository's lead's of its own.
         case roster(root: String?)
+        /// The repository's lead only: the task's review level (see `LeadTask.Review`).
+        case setReview(root: String, task: String, review: LeadTask.Review)
+        /// The task's own worker only: it reported done on this commit (nil: its last report wasn't done).
+        case reportDone(root: String, task: String, commit: String?)
+        /// The task's review level and the commit its worker last reported done on (`Reply.unaudited`).
+        case unaudited(root: String, task: String)
     }
 
     public enum Reply: Codable, Equatable, Sendable {
@@ -203,6 +209,7 @@ public struct LeadVault: Sendable {
         case guarded([String: String]?)
         case approved(Bool)
         case roster([RosterEntry])
+        case unaudited(review: LeadTask.Review?, reported: String?)
     }
 
     /// The host said no, or couldn't be asked.
@@ -461,6 +468,11 @@ extension LeadVault {
             /// The verifiers that gave their verdict or cast their ballot, by session: when. The host ends each a
             /// little later (its job is done: see `HostServer`). Newest 200 (optional: older vaults have none).
             var submitted: [String: Double]?
+            /// Each task's review level as the lead set it, by task (optional: older vaults have none; a task with
+            /// none here is none).
+            var reviews: [String: LeadTask.Review]?
+            /// The commit each task's worker last reported done on, by task (optional: older vaults have none).
+            var reported: [String: String]?
 
             /// Takes the members `drop` picks out; the sessions the workers and verifiers among them were bound to
             /// become `former`, with the role and task each held.
@@ -705,6 +717,8 @@ extension LeadVault {
                     team.audits?[task] = nil
                     team.approvals?[task] = nil
                     team.ballots?[task] = nil
+                    team.reviews?[task] = nil
+                    team.reported?[task] = nil
                 }
                 return .ok
             case .whoami(let root):
@@ -829,6 +843,28 @@ extension LeadVault {
                 return .ok
             case .approved(let root, let task, let commit):
                 return .approved(team(root)?.approvals?[task]?.contains(commit.lowercased()) == true)
+            case .setReview(let root, let task, let review):
+                // A worker that lowered its own task's level would merge with no verdict: the lead's word only.
+                guard isLead(caller, root) else { return .refused("Only the repository's lead sets a task's review level.") }
+                change(root, &changed) { team in
+                    var reviews = team.reviews ?? [:]
+                    reviews[task] = review == .none ? nil : review
+                    team.reviews = reviews
+                }
+                return .ok
+            case .reportDone(let root, let task, let commit):
+                guard case .session(let session) = caller,
+                      team(root)?.members.contains(where: { $0.session == session && $0.role == .worker && $0.task == task }) == true else {
+                    return .refused("Only the task's own worker reports it done.")
+                }
+                change(root, &changed) { team in
+                    var reported = team.reported ?? [:]
+                    reported[task] = commit
+                    team.reported = reported
+                }
+                return .ok
+            case .unaudited(let root, let task):
+                return .unaudited(review: team(root)?.reviews?[task], reported: team(root)?.reported?[task])
             case .roster(let root):
                 if let root {
                     guard caller == .app || isLead(caller, root) else { return .refused("Only VibeSwitcher or the repository's lead reads its roster.") }

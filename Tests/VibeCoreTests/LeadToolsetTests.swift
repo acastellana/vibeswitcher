@@ -217,7 +217,8 @@ struct LeadToolsetTests: LeadTeamFixture {
         // The lead records who it is, so answers and events can reach it.
         #expect(BoardStore(root: root).load().leadPid == 4242)
 
-        let added = call(lead, "add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"], "boundaries": ["only b.txt"]])
+        let added = call(lead, "add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"], "boundaries": ["only b.txt"],
+                                            "review": "audit"])
         #expect(!added.isError)
         #expect(added.text.contains("add-b"))
 

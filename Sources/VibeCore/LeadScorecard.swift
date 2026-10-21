@@ -21,13 +21,19 @@ public struct LeadTaskScore: Codable, Equatable, Sendable {
     public var waitingOnUser: Double
     /// It merged with no test_command run; nil while it isn't merged.
     public var mergedWithoutTests: Bool?
+    /// It merged with no audit (review none: its worker's report and the merge's own test run); nil while it isn't
+    /// merged, and in scores counted before review levels.
+    public var mergedUnaudited: Bool?
+    /// Its review level (none, or audit); nil in scores counted before review levels.
+    public var review: LeadTask.Review?
     /// The base's commit that reverted its merge (all or part of it), once one did.
     public var revertedBy: String?
     /// When these were counted.
     public var asOf: Double
 
     public init(roundsToPass: Int? = nil, rounds: Int = 0, importantFindings: Int = 0, questions: Int = 0, answers: Int = 0,
-                waitingOnUser: Double = 0, mergedWithoutTests: Bool? = nil, revertedBy: String? = nil, asOf: Double = Date().timeIntervalSince1970) {
+                waitingOnUser: Double = 0, mergedWithoutTests: Bool? = nil, mergedUnaudited: Bool? = nil, review: LeadTask.Review? = nil,
+                revertedBy: String? = nil, asOf: Double = Date().timeIntervalSince1970) {
         self.roundsToPass = roundsToPass
         self.rounds = rounds
         self.importantFindings = importantFindings
@@ -35,6 +41,8 @@ public struct LeadTaskScore: Codable, Equatable, Sendable {
         self.answers = answers
         self.waitingOnUser = waitingOnUser
         self.mergedWithoutTests = mergedWithoutTests
+        self.mergedUnaudited = mergedUnaudited
+        self.review = review
         self.revertedBy = revertedBy
         self.asOf = asOf
     }
@@ -42,8 +50,17 @@ public struct LeadTaskScore: Codable, Equatable, Sendable {
     /// "Passed on audit 2 · 1 Important finding · 1 question to you (answered), 4 min waiting on you · reverted by
     /// abc12345": what the Team tab shows under an opened task.
     public var line: String {
-        var parts = [roundsToPass.map { "Passed on audit \($0)" } ?? (rounds == 0 ? "Not audited yet" : "\(rounds) audit\(rounds == 1 ? "" : "s"), not passed yet")]
-        parts.append("\(importantFindings) Important finding\(importantFindings == 1 ? "" : "s")")
+        var parts: [String] = []
+        if mergedUnaudited == true {
+            parts.append("Merged with no audit (review none)")
+        } else if review == LeadTask.Review.none, rounds == 0 {
+            // Its worker owns it through merge: no audit to count.
+            parts.append("Review none: no audit")
+        } else {
+            if review == .audit { parts.append("Review audit") }
+            parts.append(roundsToPass.map { "Passed on audit \($0)" } ?? (rounds == 0 ? "Not audited yet" : "\(rounds) audit\(rounds == 1 ? "" : "s"), not passed yet"))
+            parts.append("\(importantFindings) Important finding\(importantFindings == 1 ? "" : "s")")
+        }
         if questions > 0 {
             let answered = answers == questions ? (questions == 1 ? "answered" : "all answered") : "\(answers) answered"
             parts.append("\(questions) question\(questions == 1 ? "" : "s") to you (\(answered)), \(LeadScorecard.minutes(waitingOnUser / 60)) min waiting on you")
@@ -68,7 +85,8 @@ public struct LeadTaskScore: Codable, Equatable, Sendable {
                   importantFindings: audits?.findings.filter { $0.severity == .important && $0.status != .unconfirmed }.count ?? 0,
                   questions: asked.count, answers: asked.filter { $0.answer != nil }.count,
                   waitingOnUser: asked.reduce(0) { $0 + $1.waitingOnUser(now: now) },
-                  mergedWithoutTests: folded ? nil : task.merged.map { !$0.tested }, revertedBy: folded ? nil : task.merged?.revertedBy, asOf: now)
+                  mergedWithoutTests: folded ? nil : task.merged.map { !$0.tested }, mergedUnaudited: folded ? nil : task.merged.map(\.unaudited),
+                  review: task.reviewLevel, revertedBy: folded ? nil : task.merged?.revertedBy, asOf: now)
     }
 }
 
@@ -107,6 +125,8 @@ public struct LeadScorecard: Equatable, Sendable {
     public var userMinutes: Double
     public var reverts: Int
     public var mergedWithoutTests: Int
+    /// Merged with no audit (review none): not in the audit numbers, which are the audited merges'.
+    public var mergedUnaudited: Int
 
     public init(_ board: LeadBoard, now: Double = Date().timeIntervalSince1970) {
         // A folded task isn't counted (its work merged with the task that carried it; that one's rounds count), nor
@@ -122,6 +142,7 @@ public struct LeadScorecard: Equatable, Sendable {
         userMinutesPerMergedTask = merged.isEmpty ? nil : userMinutes / Double(merged.count)
         reverts = scores.filter { $0.revertedBy != nil }.count
         mergedWithoutTests = scores.filter { $0.mergedWithoutTests == true }.count
+        mergedUnaudited = scores.filter { $0.mergedUnaudited == true }.count
     }
 
     /// The four numbers as the Team tab shows them, each a value and what it is ("–" while nothing is merged).
@@ -136,8 +157,9 @@ public struct LeadScorecard: Equatable, Sendable {
     public var line: String {
         guard merged > 0 else { return "Scorecard: nothing merged yet." }
         let untested = mergedWithoutTests == 0 ? "" : "; \(mergedWithoutTests) merged without tests"
-        let uncounted = counted < merged ? " (rounds of \(counted) of them)" : ""
-        return "Scorecard (\(merged) merged\(uncounted)): " + items.map { "\($0.value) \($0.label)" }.joined(separator: ", ") + untested + "."
+        let unaudited = mergedUnaudited == 0 ? "" : "; \(mergedUnaudited) merged with no audit (review none)"
+        let uncounted = counted < merged - mergedUnaudited ? " (rounds of \(counted) of them)" : ""
+        return "Scorecard (\(merged) merged\(uncounted)): " + items.map { "\($0.value) \($0.label)" }.joined(separator: ", ") + untested + unaudited + "."
     }
 
     /// What VoiceOver reads.
@@ -149,6 +171,7 @@ public struct LeadScorecard: Equatable, Sendable {
         if let minutes = userMinutesPerMergedTask { parts.append("\(Self.minutes(minutes)) minutes of the user's per merged task") }
         parts.append("\(reverts) reverted later")
         if mergedWithoutTests > 0 { parts.append("\(mergedWithoutTests) merged without tests") }
+        if mergedUnaudited > 0 { parts.append("\(mergedUnaudited) merged with no audit") }
         return "Scorecard: " + parts.joined(separator: ", ") + "."
     }
 
