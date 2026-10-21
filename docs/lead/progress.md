@@ -905,3 +905,5 @@
 - 2026-10-21 21:50 Workflow: max_workers = `3`
 - 2026-10-21 21:50 Planned one-agent-owns-a: One agent owns a change: audits only where risk calls for them, tests run once and one at a time
 - 2026-10-21 21:50 Update: New working policy: one agent per change, audits only where risk calls for them — **Your policy is now the team's policy** (recorded in decisions.md):
+- 2026-10-21 22:48 Abandoned chat-fill-in-turns: Measured, no change needed: over 48 runs, calm and under load, no fill-in turn exceeded 0.12 s of CPU (max 0.12). The 0.17 s at the merge gate was the same work running 3–4× slower on a contended core, not a code path. The cost is SwiftUI laying out 14 rows; the text views are about 20 %. Levers if ever needed: the prompt's second typesetting, a smaller batch.
+- 2026-10-21 22:48 Started a worker on one-agent-owns-a
