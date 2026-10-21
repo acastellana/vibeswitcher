@@ -891,3 +891,4 @@
 - 2026-10-21 15:55 Started a worker on picker-card-numbered
 - 2026-10-21 16:54 Audit of selecting-text-in-the: complete, clean, round 3: 4 Important closed, 2 Nit (1 open)
 - 2026-10-21 17:00 Merged selecting-text-in-the: Selecting text in the chat spans paragraphs and messages: dragging across a reply and ⌘C copies all of it
+- 2026-10-21 17:00 Update: Merged: select and copy across paragraphs, code blocks and messages in the chat — **Merged** selecting-text-in-the (head 0b75b75), after four audits. Your request: in the chat you can now drag across paragraphs, code blocks and neighbouring messages, in either direction, and ⌘C cop…
