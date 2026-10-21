@@ -910,3 +910,4 @@
 - 2026-10-21 22:52 Planned every-lead-and-worker: Every lead and worker, in every project, follows the user's working policy
 - 2026-10-21 22:52 Planned timing-benches-leave-the: Timing benches leave the default test run
 - 2026-10-21 22:52 Planned a-new-worktree-builds: A new worktree builds warm, not from scratch
+- 2026-10-21 23:26 Workflow: max_workers = `4`, mac_max_sessions = `10`

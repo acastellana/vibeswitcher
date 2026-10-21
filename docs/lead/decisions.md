@@ -368,3 +368,7 @@ The user's direction after the lead's introspection: about five full suites per 
 
 Remaining causes of slowness after the first policy pass: one extra full suite per task in the worker, merge gates failing on load-sensitive benches, about 2 minutes of clean build per worktree, routine worker questions round-tripping through the lead, and the lead's own update volume. The user asked for the policy to reach the other leads and future ones; the user also asked the lead not to touch other leads directly, so delivery goes through the app.
 
+## 2026-10-21 23:26:41 Caps re-evaluated (2026-10-21 23:1x, at the user's request): mac_max_sessions 6 → 10 and max_workers 3 → 4 for vibeswitcher; load_threshold stays 24. Once the Mac-wide heavy-work lock lands (every-lead-and-worker), raise max_workers to 5–6 if memory allows.
+
+At the old cap the Mac sat at load 6–7 while starts were refused, because sessions spend most of their time waiting on the model, not on the CPU. The real limits are memory (36 GB, swap at 13.7 of 14 GB used, each session 0.3–0.5 GB) and concurrent builds, which the coming lock serializes. 10 sessions keeps memory headroom while roughly doubling the work in flight.
+
