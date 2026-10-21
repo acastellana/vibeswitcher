@@ -907,3 +907,6 @@
 - 2026-10-21 21:50 Update: New working policy: one agent per change, audits only where risk calls for them — **Your policy is now the team's policy** (recorded in decisions.md):
 - 2026-10-21 22:48 Abandoned chat-fill-in-turns: Measured, no change needed: over 48 runs, calm and under load, no fill-in turn exceeded 0.12 s of CPU (max 0.12). The 0.17 s at the merge gate was the same work running 3–4× slower on a contended core, not a code path. The cost is SwiftUI laying out 14 rows; the text views are about 20 %. Levers if ever needed: the prompt's second typesetting, a smaller batch.
 - 2026-10-21 22:48 Started a worker on one-agent-owns-a
+- 2026-10-21 22:52 Planned every-lead-and-worker: Every lead and worker, in every project, follows the user's working policy
+- 2026-10-21 22:52 Planned timing-benches-leave-the: Timing benches leave the default test run
+- 2026-10-21 22:52 Planned a-new-worktree-builds: A new worktree builds warm, not from scratch
