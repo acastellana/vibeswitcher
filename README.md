@@ -80,8 +80,17 @@ here, in full color.
 **Project lead** (a project's ⊕ menu › Project Lead, the start page, ⌘K, or `VibeSwitcher --lead FOLDER [--goal …]`):
 one Claude session per repository that you talk to about the project, and that runs a small team for you. You
 tell it what you want; it plans the work into tasks, each with a contract (goal, acceptance checks, boundaries),
-and starts up to three **workers**, each a Claude session in its own git worktree (`.vibeswitcher/worktrees/<task>`
-on `agent/<task>`). A worker owns its change through completion: it makes the routine calls itself (a small file
+and starts up to three **workers** (`max_workers: 3` in a new project's `workflow.md`), each a Claude session in its
+own git worktree (`.vibeswitcher/worktrees/<task>` on `agent/<task>`). Every project's lead, workers and verifiers
+get your **working policy** in their prompts: one text, kept in `~/.vibeswitcher/policy.md` and edited in Settings ›
+Project lead (Save; Reset to Default puts back your five rules: one agent owns each change, affected tests while
+editing and the full suite once before merging, parallel work with builds and tests serialized, only material bugs
+fixed, stop when it works). When you save a change, and once when a build that has it first runs, each lead running
+then is told it by the witness, once, to apply from then on; a lead started with it in its prompt isn't told again.
+Heavy work runs one at a time on the Mac, whatever the project: every session VibeSwitcher starts has `vs-heavy` on
+its PATH (`vs-heavy <command>` runs it under the Mac-wide test and build lock, saying who holds it while it waits),
+workers and verifiers are told to run full suites and release builds under it, and every project's `merge` takes the
+same lock around its tests. A worker owns its change through completion: it makes the routine calls itself (a small file
 outside its boundaries that the goal needs, naming, layout) and lists them in its report, asking the lead only about
 direction, scope or anything risky. It runs the tests its change affects while it edits; the merge's run is the one
 full suite, so it runs the whole suite itself only after changing shared test or build infrastructure, or after a
@@ -89,8 +98,8 @@ failed merge. Each task has a **review level** the lead sets (`add_task` or `upd
 default, where `merge` takes the worker's done report on the branch's head and runs `test_command` as its check, with
 no verdict; or `audit`, which the lead chooses for security, irreversible operations or complex changes, where a
 read-only **verifier** checks the work against the contract with real commands (and tries to break it) and only work
-it passes merges. A branch that touches `sensitive_paths` is audited whatever its level, and `merge` says so when it
-refuses; once an audit was started on a task, its verdict decides. The level merge goes by, and the worker's done
+it passes merges. A branch that touches `sensitive_paths` is audited whatever its level: `merge` says so when it
+refuses, and the Team tab shows such a task as **Needs audit**, with why, rather than Ready to merge; once an audit was started on a task, its verdict decides. The level merge goes by, and the worker's done
 report, are kept in the session host's vault, where only the lead sets the level and only the task's own worker
 reports, so a session that writes `board.json` can't lower either; `status`, `board` and the Team tab show the level,
 and the scorecard counts merges with no audit apart. Either way the work is rebased on the lead's branch, tested (the
@@ -139,8 +148,9 @@ exactly as they were. None lands while a merge tests, the next merge takes them 
 edit that folder, a held `index.lock` is waited for briefly (never removed), and a commit that fails or waits shows
 in the lead's status, its entries kept in the files for the next try. Everything written there is redacted, and the
 old `.vibeswitcher` logs are moved in once. How merges are handled is yours to choose once per project, as `merge_policy:` in
-`workflow.md`: `auto` (audited work merges, and the lead posts what changed, how it was checked, the risk and how to
-revert it afterwards), `ask_sensitive` (a commit touching `sensitive_paths:`, comma-separated globs as in
+`workflow.md`: `auto` (work merges once its review passes, its audit or, for review `none`, its worker's done report
+and the merge's own test run, and the lead posts what changed, how it was checked, the risk and how to revert it
+afterwards), `ask_sensitive` (a commit touching `sensitive_paths:`, comma-separated globs as in
 `.gitignore`, by default Claude's settings and instructions, `.github`, `.env` files, entitlements and keys, waits for
 you) or `ask_all` (every merge waits). Until you've chosen, the lead asks you once, early, proposing one, records your
 answer with `configure` and as a decision, and doesn't ask again; meanwhile merges are handled as `ask_sensitive`. A
@@ -241,8 +251,9 @@ as you can end any other, a session's program or the host itself, without asking
 sessions, which still take keys from anyone running as you (though once anything but the app or the session
 itself types into one of yours, the host records it, and what that session commits to the lead's base is no longer
 taken as yours: the next merge asks you about it); a window capture (`--capture-window`, which any process can ask for), whose picture shows what
-the window shows, a chat's text included; the code a merge's tests run from the audited branch itself (the
-verifier read it; nothing else checks it); `workflow.md`'s guard rails in a project where none are recorded yet (a
+the window shows, a chat's text included; the code a merge's tests run from the branch itself (an audit task's
+verifier read it; a review `none` task's, only its own worker wrote and read it, and the merge's tests are its one
+check, which is why a branch touching `sensitive_paths` is audited whatever its level); `workflow.md`'s guard rails in a project where none are recorded yet (a
 lead that never set them, a vault that began empty): those in the file when the lead first configures, starts a
 worker or merges are taken as the lead's; its other settings (`test_timeout_min`, the disk limits, `base_branch`,
 whose moves `merge` checks on its own); `audit`, which reads the session limits without that check; and three narrow windows where the host learns the app's key without a proof. A host that holds
@@ -260,7 +271,7 @@ starts empty after a host replacement (a handover keeps it), and `merge` then sa
 earlier session host and needs running again. `merge` reads that verdict from there, not from `board.json`; it refuses when the lead's branch was
 moved by anything but its own merges since the lead last left it. Starting the lead again doesn't take the branch
 as it is (anything can ask for that, `vibeswitcher --lead` included); starting it from the app does, once it has
-shown you the move and you said you made it. `merge` rebases exactly the audited commit in a worktree no agent works in (squashing it into one commit when the
+shown you the move and you said you made it. `merge` rebases exactly the audited commit (for review `none`, the commit its worker reported done on, read from the vault) in a worktree no agent works in (squashing it into one commit when the
 worker merged the base in, so the lead's history stays a line), runs the test command there and
 fast-forwards to exactly what was tested. Verifiers start without the branch's project settings, hooks and MCP servers, and
 VibeSwitcher doesn't answer Claude's trust question for a branch whose commits change them (what would merge), or whose
@@ -603,11 +614,13 @@ removes it after, so nothing a test writes reaches your `~/.vibeswitcher`, `~/.c
 test it runs the phone's web tests, each `Tests/Web/*.test.mjs` with node, in the same scratch home, names any that
 fails and ends with one line, `web tests: N of M passed`; it needs node on PATH (Node.js; the Swift side works with the
 Command Line Tools only) and stops, saying so, without it (`scripts/test.sh --web Tests/Web` runs just those).
-`scripts/test.sh` and `scripts/build-app.sh` hold a Mac-wide lock around swift build and swift test (a flock on
-`/private/tmp/vibeswitcher-<uid>/test-build.lock`, `scripts/lib/test-lock.sh`), so two workers' suites or builds never
-run at once: the second waits, printing who holds it and, once it has it, how long it waited. Ctrl-C or a killed run
-lets go of it (the kernel drops a flock with its holder), and the lead's merge and an audit's shared run take the same
-lock around their test command. A plain
+`scripts/test.sh` and `scripts/build-app.sh` run swift build and swift test under `Resources/bin/vs-heavy`, the
+Mac-wide lock for heavy work (a flock on `/private/tmp/vibeswitcher-<uid>/test-build.lock`) that the app bundle carries
+in `Contents/Resources/bin` and every session it starts has on PATH, so no two suites or builds of any project's
+workers run at once: the second waits, printing who holds it (again if that changes) and, once it has it, how long it
+waited. Ctrl-C or a killed run lets go of it (the kernel drops a flock with its holder), a `vs-heavy` under a holder
+of the same lock runs at once, and every project's merge and an audit's shared run take the same lock around their
+test command (the tests use a scratch one). A plain
 `swift test` on your own home refuses to start, with one message and no test run: each test target checks, as it
 loads, that VibeSwitcher's folder isn't your own `~/.vibeswitcher`. To run `swift test` yourself, set
 `VIBESWITCHER_HOME` (the folder VibeSwitcher keeps its files in) or HOME and CFFIXED_USER_HOME (`NSHomeDirectory()`

@@ -147,7 +147,7 @@ public struct LeadWorkflow: Equatable, Sendable {
         /// What it means, in a line.
         public var meaning: String {
             switch self {
-            case .auto: return "audited work merges, and the user gets an update afterwards"
+            case .auto: return "work merges once its review passes (its audit, or for review none its worker's done report and the merge's test run), and the user gets an update afterwards"
             case .askSensitive: return "a commit touching sensitive_paths waits for the user's approval of that exact commit"
             case .askAll: return "every merge waits for the user's approval of that exact commit"
             }
@@ -427,7 +427,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     audit_finders: 1
     # How many new Nit findings one audit's vote keeps.
     audit_nit_cap: 5
-    # How merges are handled, chosen once by the owner: auto (audited work merges, you get an update afterwards),
+    # How merges are handled, chosen once by the owner: auto (work merges once its review passes, you get an update after),
     # ask_sensitive (a commit touching sensitive_paths waits for your approval of that exact commit) or ask_all.
     # Empty: not chosen yet; the lead asks you once, and until then merges are handled as ask_sensitive.
     merge_policy:
@@ -669,7 +669,7 @@ public enum LeadPrompts {
         var text = "Merge policy (the owner chose it; follow it and don't ask the user about each merge): \(policy.rawValue), \(policy.meaning)."
         switch policy {
         case .auto:
-            text += " Merge audited work without asking. After each merge, post_update what changed, how it was checked, "
+            text += " Merge without asking once a task's review passes (its audit; for review none, its worker's done report and the merge's own test run). After each merge, post_update what changed, how it was checked, "
                 + "the risk and how to revert it (the commits it brought, to `git revert`)."
         case .askSensitive, .askAll:
             if policy == .askSensitive {
