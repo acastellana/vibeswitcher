@@ -165,15 +165,8 @@ struct PickerCardTests {
             var shown: [ScreenMenu?] = []
             let watching = h.chat.$menu.sink { shown.append($0) }
             defer { watching.cancel() }
-            // The host's lines have NULs where the program moved the cursor on instead of drawing.
-            let has = { (text: String) in
-                { (lines: [String]) in lines.contains { $0.replacingOccurrences(of: "\u{0}", with: " ").contains(text) } }
-            }
-            let marked = { (row: String) in has("❯ \(row)") }
-            let halfDown = { (lines: [String]) in
-                has("Select model")(lines) && !(1...5).contains { marked("\($0).")(lines) }
-            }
-            let halfEsc = { (lines: [String]) in has("Kept model as")(lines) && marked("3. Fable")(lines) }
+            let has = ReplayHarness.has, marked = ReplayHarness.marked
+            let halfDown = ReplayHarness.halfDown, halfEsc = ReplayHarness.halfEsc
             // ↓, split mid-row: the half read isn't taken, the whole one is once read twice.
             h.awaited = [halfDown]
             h.draw(at: 14360)
@@ -202,6 +195,60 @@ struct PickerCardTests {
             let cards = shown.map { $0.map { "\($0.question.prefix(30)) \($0.selected)" } ?? "none" }
             #expect(shown.map { $0?.selected } == [0, 1, 2, nil], "shown: \(cards)")
             #expect(!shown.contains { $0?.question.contains("Kept model") == true })
+        }
+    }
+
+    /// The watch's ticks read the pane once each: the host's answer within a tick isn't a second read of the pane
+    /// (the two would be of one instant and agree whatever they show). ↓ split mid-row (`halfDown`: no menu) is read
+    /// by one watch tick's host read, the rest drawn before the next: the card never goes.
+    @Test func aRedrawSplitBetweenWatchTicksNeverReachesTheCard() async throws {
+        try await ReplayHarness.run(temp) { h in
+            _ = h.sync.type("/model")
+            h.draw("04-/model")
+            #expect(await until(timeout: 30) { h.chat.menu?.options.count == 5 && h.chat.menu?.selected == 0 })
+            #expect(h.sync.watching)
+            var shown: [ScreenMenu?] = []
+            let watching = h.chat.$menu.sink { shown.append($0) }
+            defer { watching.cancel() }
+            h.awaited = [ReplayHarness.halfDown, ReplayHarness.marked("2. Opus")]
+            h.draw(at: 14360)
+            #expect(await until(timeout: 30) { h.reads.last.map(ReplayHarness.halfDown) == true })
+            // A tick or two with the half read as the pane's last (the next host read waits for the whole one).
+            try await Task.sleep(nanoseconds: 600_000_000)
+            h.draw("05-down")
+            #expect(await until(timeout: 30) { h.chat.menu?.selected == 1 })
+            #expect(h.reads.filter(ReplayHarness.halfDown).count == 1)
+            #expect(shown.map { $0?.selected } == [0, 1], "shown: \(shown.map { $0.map { "\($0.question.prefix(30)) \($0.selected)" } ?? "none" })")
+        }
+    }
+
+    /// A click refused because the screen is mid-redraw (Esc split at 14801: the conversation drawn back over the
+    /// dialog's top, "Kept model as …" read as a question): the card keeps the question it drew, the half-drawn one
+    /// never shows, and once the closed screen is read twice the card goes and the notice says the question's gone.
+    @Test func aClickRefusedMidRedrawKeepsTheCardUntilTheScreenSettles() async throws {
+        try await ReplayHarness.run(temp) { h in
+            _ = h.sync.type("/model")
+            h.draw("04-/model")
+            #expect(await until(timeout: 30) { h.chat.menu?.options.count == 5 && h.chat.menu?.selected == 0 })
+            let drawn = try #require(h.chat.menu)
+            var shown: [ScreenMenu?] = []
+            let watching = h.chat.$menu.sink { shown.append($0) }
+            defer { watching.cancel() }
+            let closed = { (lines: [String]) in !ReplayHarness.has("Select model")(lines) }
+            h.awaited = [ReplayHarness.halfEsc, closed]
+            h.draw(at: 14801)
+            #expect(await until(timeout: 30) { h.reads.last.map(ReplayHarness.halfEsc) == true })
+            // Fable chosen on the card as drawn: the screen's last read is another question, not taken yet.
+            h.sync.choose(2, drawn: drawn)
+            #expect(h.keys == "/model\r")
+            #expect(h.chat.menu == drawn)
+            #expect(h.chat.answerNotice != nil)
+            h.draw("07-esc")
+            #expect(await until(timeout: 30) { h.chat.menu == nil })
+            #expect(h.chat.answerNotice == "That question is gone.")
+            #expect(h.keys == "/model\r")
+            #expect(h.reads.filter(ReplayHarness.halfEsc).count == 1)
+            #expect(shown == [drawn, nil], "shown: \(shown.map { $0.map { "\($0.question.prefix(30)) \($0.selected)" } ?? "none" })")
         }
     }
 
@@ -495,6 +542,20 @@ while True:
         try? FileManager.default.removeItem(at: home)
         #expect(!FileManager.default.fileExists(atPath: home.path), "\(home.path) is still there")
     }
+
+    /// Host lines (NULs where the program moved the cursor on instead of drawing) holding `text`.
+    static func has(_ text: String) -> ([String]) -> Bool {
+        { lines in lines.contains { $0.replacingOccurrences(of: "\u{0}", with: " ").contains(text) } }
+    }
+
+    /// `row` (`"2. Opus"`) with the cursor on it.
+    static func marked(_ row: String) -> ([String]) -> Bool { has("❯ \(row)") }
+
+    /// /model's ↓ read part way (byte 14360): the old row's ❯ wiped, the new one's not drawn yet.
+    static let halfDown = { (lines: [String]) in has("Select model")(lines) && !(1...5).contains { marked("\($0).")(lines) } }
+
+    /// /model's Esc read part way (byte 14801): the conversation drawn back over the dialog's top, its rows still there.
+    static let halfEsc = { (lines: [String]) in has("Kept model as")(lines) && marked("3. Fable")(lines) }
 
     /// The host's screen, as ChatSync reads it (not counted, never awaited).
     func hostLines() async -> [String] {
