@@ -895,3 +895,5 @@
 - 2026-10-21 17:20 Audit of picker-card-numbered: complete, clean, round 1: 2 Nit open
 - 2026-10-21 17:22 Planned picker-card-the-two: Picker card: the two-reads rule holds on the refusal path and inside the slash-command watch
 - 2026-10-21 17:26 Merged picker-card-numbered: Picker card: numbered menus settle too, and the replay harness always removes its home
+- 2026-10-21 17:26 Update: Merged: numbered menus settle too; picker tests leave nothing behind — **Merged** picker-card-numbered (27b7863).
+- 2026-10-21 17:26 Started a worker on picker-card-the-two
