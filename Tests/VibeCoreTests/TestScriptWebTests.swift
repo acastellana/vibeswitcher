@@ -94,8 +94,10 @@ struct TestScriptWebTests {
     @Test func theFullRunRunsTheWebTestsAfterSwiftTest() throws {
         let lines = try String(contentsOf: Self.repo.appendingPathComponent("scripts/test.sh"), encoding: .utf8)
             .components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-        let swift = lines.firstIndex(of: "swift build && swift test \"$@\""), web = lines.firstIndex(of: "run_web_tests Tests/Web || status=1")
-        #expect(swift != nil, "scripts/test.sh has no line `swift build && swift test \"$@\"`")
+        // Under vs-heavy (the Mac-wide lock for heavy work), as one command.
+        let build = #"Resources/bin/vs-heavy --as scripts/test.sh bash -c 'swift build && swift test "$@"' scripts/test.sh "$@""#
+        let swift = lines.firstIndex(of: build), web = lines.firstIndex(of: "run_web_tests Tests/Web || status=1")
+        #expect(swift != nil, "scripts/test.sh has no line `\(build)`")
         #expect(web != nil, "scripts/test.sh doesn't run the web tests: no line `run_web_tests Tests/Web || status=1`")
         guard let swift, let web else { return }
         #expect(swift < web, "the web tests run before swift test")
