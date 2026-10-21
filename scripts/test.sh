@@ -11,9 +11,15 @@
 # and the run fails. On 2026-10-20 hosts from a run a day before still ran, one of them a test's counter loop (8
 # CPU-minutes so far): a host runs in a process group of its own and outlives a runner killed with its group.
 #
+# The phone's web tests run after swift test, in the same scratch home and TMPDIR: each Tests/Web/*.test.mjs with
+# node, a failing one named, then one line saying how many passed. Without node on PATH the run stops before the
+# build, naming it: PhoneWebTests (swift test) skips them without node, and Web/ changes had been checked only by hand.
+#
 # scripts/test.sh [swift test options], e.g. scripts/test.sh --filter HomeIsolationTests
 # scripts/test.sh --leftovers MARK: only the check, for the processes whose environment or arguments hold MARK
 #   (LeftoverCheckTests); exit 1 when it ended any.
+# scripts/test.sh --web DIR: only the web tests, DIR/*.test.mjs (DIR from the repository's root, or absolute), on a
+#   scratch home as above (TestScriptWebTests).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -61,9 +67,39 @@ end_leftovers() {
     return 1
 }
 
+# Each $1/*.test.mjs with node, its output as it goes, a failing one named; then one line: how many passed. Returns 1
+# when any failed, or when there were none.
+run_web_tests() {
+    local dir=$1 file passed=0 total=0 failed=""
+    for file in "$dir"/*.test.mjs; do
+        [[ -f $file ]] || continue
+        total=$((total + 1))
+        if node "$file"; then
+            passed=$((passed + 1))
+        else
+            echo "WEB TEST FAILED: $file (exit $?)"
+            failed="$failed $file"
+        fi
+    done
+    if (( total == 0 )); then
+        echo "web tests: none in $dir (*.test.mjs)"
+        return 1
+    fi
+    echo "web tests: $passed of $total passed${failed:+; failed:$failed}"
+    [[ -z $failed ]]
+}
+
 if [[ ${1:-} == --leftovers ]]; then
     end_leftovers "${2:?scripts/test.sh --leftovers MARK}"
     exit
+fi
+web_only=""
+[[ ${1:-} == --web ]] && web_only=${2:?scripts/test.sh --web DIR}
+
+if ! command -v node > /dev/null; then
+    echo "scripts/test.sh: node isn't on PATH, and the phone's web tests (Tests/Web/*.test.mjs) run with it: install"
+    echo "Node.js (e.g. brew install node) or put its folder on PATH. Nothing ran."
+    exit 1
 fi
 
 source scripts/lib/scratch.sh
@@ -76,7 +112,14 @@ mark=$(basename "$tool_scratch")
 on_exit 'end_leftovers "$mark" > /dev/null'
 
 export HOME=$tool_scratch/home CFFIXED_USER_HOME=$tool_scratch/home VIBESWITCHER_HOME=$tool_scratch/home/.vibeswitcher
-swift build && swift test "$@"
-status=$?
+if [[ -n $web_only ]]; then
+    run_web_tests "$web_only"
+    status=$?
+else
+    swift build && swift test "$@"
+    status=$?
+    # Even when the build or a test failed: they don't need the build, and their result is worth having.
+    run_web_tests Tests/Web || status=1
+fi
 end_leftovers "$mark" || status=1
 exit $status

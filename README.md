@@ -581,13 +581,16 @@ VibeSwitcher --capture-window /tmp/w.png # debug aid: the running app draws its 
 Requires macOS 14+ and a Swift 6 toolchain (Xcode or just the Command Line Tools).
 
 ```sh
-scripts/test.sh                # swift build && swift test on a scratch home; works with Command Line Tools only
+scripts/test.sh                # swift build && swift test, then the phone's web tests with node, on a scratch home
 ./scripts/build-app.sh --install
 ```
 
 Run the tests with `scripts/test.sh` (it passes its arguments on to `swift test`, e.g. `scripts/test.sh --filter
 HookBoundsTests`). It points HOME, CFFIXED_USER_HOME, VIBESWITCHER_HOME and TMPDIR at a fresh folder under /tmp and
-removes it after, so nothing a test writes reaches your `~/.vibeswitcher`, `~/.claude` or login Keychain. A plain
+removes it after, so nothing a test writes reaches your `~/.vibeswitcher`, `~/.claude` or login Keychain. After swift
+test it runs the phone's web tests, each `Tests/Web/*.test.mjs` with node, in the same scratch home, names any that
+fails and ends with one line, `web tests: N of M passed`; it needs node on PATH (Node.js; the Swift side works with the
+Command Line Tools only) and stops, saying so, without it (`scripts/test.sh --web Tests/Web` runs just those). A plain
 `swift test` on your own home refuses to start, with one message and no test run: each test target checks, as it
 loads, that VibeSwitcher's folder isn't your own `~/.vibeswitcher`. To run `swift test` yourself, set
 `VIBESWITCHER_HOME` (the folder VibeSwitcher keeps its files in) or HOME and CFFIXED_USER_HOME (`NSHomeDirectory()`
