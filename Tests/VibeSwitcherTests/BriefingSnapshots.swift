@@ -52,4 +52,29 @@ struct BriefingSnapshots {
         }
         try? FileManager.default.removeItem(at: scratchRoot.appendingPathComponent("\(suite).json"))
     }
+
+    /// Settings › General › Briefing in each state of the key: saved in the Keychain, from your shell, none.
+    @Test(.enabled(if: folder != nil)) func drawKeySources() async throws {
+        let suite = "briefing-key-snapshots-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preferences = Preferences(defaults: defaults, presetsFile: scratchRoot.appendingPathComponent("\(suite).json"))
+        let made = BriefingKeyTests.saved
+        let states: [(name: String, key: BriefingKey)] = [
+            ("keychain", BriefingKey(saved: AppProof.MemorySecret(made))),
+            ("shell", BriefingKey(saved: AppProof.MemorySecret(), shell: { made })),
+            ("none", BriefingKey(saved: AppProof.MemorySecret())),
+        ]
+        for state in states {
+            let model = BriefingModel(snapshot: { .init(boards: [:], sessions: []) }, language: { .english }, keyStore: state.key,
+                                      generate: { _ in nil }, voice: BriefingButtonTests.FakeVoice(), defaults: defaults)
+            model.checkKey()
+            #expect(await until { model.keySource != nil })
+            for scheme in [ColorScheme.light, .dark] {
+                try draw(Form { BriefingSettings(preferences: preferences, briefing: model) }.formStyle(.grouped),
+                         size: CGSize(width: 620, height: 300), scheme: scheme, name: "briefing-key-\(state.name)")
+            }
+        }
+        try? FileManager.default.removeItem(at: scratchRoot.appendingPathComponent("\(suite).json"))
+    }
 }
