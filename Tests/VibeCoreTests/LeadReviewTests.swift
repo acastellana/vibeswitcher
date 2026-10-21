@@ -225,3 +225,66 @@ struct LeadReviewTests: LeadTeamFixture {
         #expect(LeadTask.Review.none.atLeast(.audit) == .audit && LeadTask.Review.none.atLeast(nil) == LeadTask.Review.none)
     }
 }
+
+/// The working policy as each role's prompt says it, from one place (`LeadPrompts.Policy`).
+struct LeadPolicyPromptTests {
+    static let task: LeadTask = {
+        var task = LeadTask(slug: "add-login", title: "Add login",
+                            contract: LeadContract(goal: "Users can log in", acceptance: ["LoginTests pass"], boundaries: ["only Sources/Auth"], context: ""))
+        task.review = .audit
+        return task
+    }()
+
+    /// Sentences in `text`: each ends with ., ! or ? before a space or the end.
+    static func sentences(_ text: String) -> Int {
+        try! NSRegularExpression(pattern: #"[.!?](\s|$)"#).numberOfMatches(in: text, range: NSRange(text.startIndex..., in: text))
+    }
+
+    @Test func theWorkerIsToldTheTestingRuleAndThatItOwnsItsChangeInTwoSentencesEach() {
+        let workflow = LeadWorkflow.parse("---\ninit_command: make\ntest_command: make test\n---")
+        let testing = LeadPrompts.Policy.workerTesting(test: "make test")
+        #expect(Self.sentences(testing) == 2, "\(testing)")
+        #expect(Self.sentences(LeadPrompts.Policy.workerOwnership) == 2)
+        for needle in ["affects while you edit", "merge runs the full suite (`make test`) once", "shared infrastructure", "after a failed merge",
+                       "summary line", "don't repeat runs or benches"] {
+            #expect(testing.contains(needle), "missing \(needle)")
+        }
+        for needle in ["own this change through completion", "small file outside the listed boundaries", "list each in your report",
+                       "direction, scope changes, or anything risky or irreversible"] {
+            #expect(LeadPrompts.Policy.workerOwnership.contains(needle), "missing \(needle)")
+        }
+        let audited = LeadPrompts.worker(task: Self.task, root: "/r", workflow: workflow)
+        #expect(audited.contains(testing) && audited.contains(LeadPrompts.Policy.workerOwnership))
+        // No full run at the start, and done no longer asks for one.
+        #expect(!audited.contains("where things stand") && !audited.contains("`make test` passes"))
+        #expect(audited.contains("A verifier will check your branch independently."))
+        var plain = Self.task
+        plain.review = nil
+        let unaudited = LeadPrompts.worker(task: plain, root: "/r", workflow: workflow)
+        #expect(unaudited.contains("The lead merges it on your report after the merge's own full test run"))
+        #expect(!unaudited.contains("A verifier will check"))
+    }
+
+    @Test func aReauditChecksOnlyTheOpenFindingsConcerns() {
+        for scope in [LeadPrompts.Reaudit.Scope.since, .ownFiles(["a.swift"]), .wholeBranch(sameCommit: false)] {
+            let text = LeadPrompts.recheck(.init(round: 2, since: "aaaaaaaa1111", head: "bbbbbbbb2222", open: [], known: [], stat: "", diff: nil,
+                                                 base: "dev", scope: scope))
+            #expect(text.contains(LeadPrompts.Policy.reaudit), "\(scope)")
+            #expect(text.contains("checks only the concerns the open findings below raise"))
+            #expect(!text.contains("run every acceptance check again") && text.contains("never a new Nit"), "\(scope)")
+        }
+        let first = LeadPrompts.verifier(task: Self.task, root: "/r", workflow: LeadWorkflow.parse("---\ntest_command: make test\n---"))
+        #expect(!first.contains(LeadPrompts.Policy.reaudit) && first.contains("run every acceptance check and `make test`"))
+    }
+
+    @Test func theLeadIsToldWhenToChooseAnAuditAndThatNitsNeverBecomeTasks() {
+        let prompt = LeadPrompts.lead(project: "acme", root: "/r", workflow: LeadWorkflow.parse("---\nmerge_policy: auto\n---"))
+        for needle in [LeadPrompts.Policy.leadReview, LeadPrompts.Policy.leadUnaudited, LeadPrompts.Policy.nits, "security", "irreversible operations",
+                       "complex changes", "touches sensitive_paths is audited", "re-audit checks only those findings' concerns"] {
+            #expect(prompt.contains(needle), "missing \(needle)")
+        }
+        #expect(!prompt.contains("worthwhile Nits"))
+        // No prompt or tool reply suggests making a Nit a task.
+        #expect(!LeadPrompts.Policy.nits.isEmpty && LeadPrompts.Policy.nits.contains("never become tasks by themselves"))
+    }
+}

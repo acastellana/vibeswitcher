@@ -2246,7 +2246,7 @@ public final class LeadToolset: MCPToolset {
             ? "The audit of \(slug) passed (complete, clean): \(evidence.summary)\n" + (blocking.isEmpty ? "merge(\(slug)) when you're ready.\(moved)" : "")
             : "The audit of \(slug) did not pass (\(evidence.completion.rawValue), \(evidence.integrity.rawValue)): \(evidence.summary)\n"
         if let vote = ledger?.vote {
-            text += (text.hasSuffix("\n") ? "" : "\n") + vote.text + (vote.unconfirmed > 0 ? " (unconfirmed ones don't hold the merge back; dismiss_finding or add_task(from_finding: …) one that's real)" : "") + ".\n"
+            text += (text.hasSuffix("\n") ? "" : "\n") + vote.text + (vote.unconfirmed > 0 ? " (unconfirmed ones don't hold the merge back; dismiss_finding them, or add_task(from_finding: …) one that's a real Important problem)" : "") + ".\n"
         }
         if let ledger, !ledger.findings.isEmpty {
             text += (text.hasSuffix("\n") ? "" : "\n") + Self.findingsText(ledger, of: slug) + "\n"
@@ -2258,7 +2258,7 @@ public final class LeadToolset: MCPToolset {
         } else if !evidence.passes {
             text += "Send the worker the findings with message, or re-plan the task."
         } else if ledger?.open.isEmpty == false {
-            text += "merge(\(slug)) when you're ready: Nits and Pre-existing findings don't hold it back (add_task(from_finding: …) makes one a task).\(moved)"
+            text += "merge(\(slug)) when you're ready: Nits and Pre-existing findings don't hold it back, and a Nit never becomes a task by itself (add_task(from_finding: …) makes a Pre-existing one that matters a task).\(moved)"
         }
         let told = try tellLead(text.trimmingCharacters(in: .whitespacesAndNewlines), about: "verifier \(slug)")
         let recorded = submission.of > 1 ? "Your findings are in, the last of \(submission.of): the vote is done and its verdict recorded." : "Verdict recorded."
