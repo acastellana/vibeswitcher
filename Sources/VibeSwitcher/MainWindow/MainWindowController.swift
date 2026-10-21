@@ -738,6 +738,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         if model.selectedRow?.session?.inTerminalApp == true {
             commands.insert(command("Open in Terminal", "arrow.up.forward.app", "⌘O", #selector(openInTerminalAction(_:))), at: 1)
         }
+        let lead = model.selectedRow.flatMap(leads.lead(for:)).map { ($0.root as NSString).lastPathComponent }
+        commands += PaletteItem.briefings(available: briefing != nil, leadProject: lead,
+                                          all: { [weak self] in self?.briefMeAction(nil) }, project: { [weak self] in self?.briefProjectAction(nil) })
         commands.append(PaletteItem(id: "cmd:settings", title: "Settings…", subtitle: "⌘,", icon: .symbol("gearshape")) {
             [weak self] in self?.actions.settings()
         })

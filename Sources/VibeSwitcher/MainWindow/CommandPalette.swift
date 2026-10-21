@@ -16,6 +16,19 @@ struct PaletteItem: Identifiable {
     let run: () -> Void
 
     var searchText: String { "\(title) \(subtitle)" }
+
+    /// The briefings, as the Session menu has them: Brief Me (every led project), and Brief Me on <project> when a
+    /// lead is selected (`leadProject`, its folder's name). None without a briefing model (the benches).
+    static func briefings(available: Bool, leadProject: String?, all: @escaping () -> Void, project: @escaping () -> Void) -> [PaletteItem] {
+        guard available else { return [] }
+        var items = [PaletteItem(id: "cmd:brief", title: "Brief Me", subtitle: "⇧⌘B · 30 seconds, spoken, across your projects",
+                                 icon: .symbol("text.bubble"), run: all)]
+        if let leadProject {
+            items.append(PaletteItem(id: "cmd:brief-project", title: "Brief Me on \(leadProject)",
+                                     subtitle: "⌥⇧⌘B · 30 seconds, spoken, on this project alone", icon: .symbol("text.bubble"), run: project))
+        }
+        return items
+    }
 }
 
 /// ⌘K: a floating search over sessions and commands, over the window.

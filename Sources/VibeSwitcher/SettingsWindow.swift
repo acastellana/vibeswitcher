@@ -518,7 +518,7 @@ struct BriefingSettings: View {
         } header: {
             Text("Briefing")
         } footer: {
-            SettingsFooter("Brief me (in the window's toolbar and the menu bar) writes 30 seconds on what happened lately across the projects VibeSwitcher leads, with headless Claude, and reads it aloud. With a key, the text goes to ElevenLabs to be read, only when you press the button; without one, the Mac's own voice reads it. The key is kept in your login Keychain, nowhere else.")
+            SettingsFooter("Brief me (in the window's toolbar and the menu bar) writes 30 seconds on what happened lately across the projects VibeSwitcher leads, with headless Claude, and reads it aloud. Brief me on <project>, at the top of a lead's Team tab or with ⌥⇧⌘B, does the same for that one project. With a key, the text goes to ElevenLabs to be read, only when you press the button; without one, the Mac's own voice reads it. The key is kept in your login Keychain, nowhere else.")
         }
         .onAppear { briefing.checkKey() }
     }

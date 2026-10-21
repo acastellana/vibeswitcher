@@ -194,6 +194,25 @@ struct ProjectBriefingButtonTests {
         #expect(project.keyEquivalent == "b" && project.keyEquivalentModifierMask == [.command, .option, .shift])
     }
 
+    /// ⌘K: Brief Me always (with a briefing model), Brief Me on <project> only while a lead is selected; each runs
+    /// its own briefing.
+    @Test func thePaletteOffersBothBriefings() {
+        var ran: [String] = []
+        let withLead = PaletteItem.briefings(available: true, leadProject: "genswap", all: { ran.append("all") }, project: { ran.append("project") })
+        #expect(withLead.map(\.title) == ["Brief Me", "Brief Me on genswap"])
+        #expect(withLead.map(\.id) == ["cmd:brief", "cmd:brief-project"])
+        #expect(withLead[0].subtitle.hasPrefix("⇧⌘B") && withLead[1].subtitle.hasPrefix("⌥⇧⌘B"))
+        withLead[1].run()
+        withLead[0].run()
+        #expect(ran == ["project", "all"])
+        // Found by searching the project's name.
+        #expect(FuzzyMatch.rank(withLead, query: "brief gens") { $0.searchText }.first?.id == "cmd:brief-project")
+
+        let noLead = PaletteItem.briefings(available: true, leadProject: nil, all: {}, project: {})
+        #expect(noLead.map(\.title) == ["Brief Me"])
+        #expect(PaletteItem.briefings(available: false, leadProject: "genswap", all: {}, project: {}).isEmpty)
+    }
+
     /// The Team tab's button says what it does.
     @Test func theTeamTabsButtonNamesTheProject() {
         #expect(ProjectBriefingBar.help(.idle, name: "genswap").hasPrefix("Brief me on genswap: 30 seconds"))
