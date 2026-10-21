@@ -889,3 +889,5 @@
 - 2026-10-21 15:51 Merged the-picker-card-never: The picker card never reads a half-drawn screen
 - 2026-10-21 15:51 Update: Merged: the picker card never shows a half-drawn screen — **Merged** the-picker-card-never (f110b3e).
 - 2026-10-21 15:55 Started a worker on picker-card-numbered
+- 2026-10-21 16:54 Audit of selecting-text-in-the: complete, clean, round 3: 4 Important closed, 2 Nit (1 open)
+- 2026-10-21 17:00 Merged selecting-text-in-the: Selecting text in the chat spans paragraphs and messages: dragging across a reply and ⌘C copies all of it
