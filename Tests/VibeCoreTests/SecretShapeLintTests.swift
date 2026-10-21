@@ -38,22 +38,32 @@ struct SecretShapeLintTests {
         ("OpenAI key", #"sk-[A-Za-z0-9_-]{16,}T3BlbkFJ[A-Za-z0-9_-]{16,}"#),
     ].map { ($0.0, try! NSRegularExpression(pattern: $0.1)) }
 
+    /// git couldn't list the files: what it said, so the failure names the cause rather than a missing file.
+    struct ListingFailed: Error, CustomStringConvertible {
+        var description: String
+    }
+
     /// The files under `root` a push could carry, relative to it: the ones git tracks and the new ones it doesn't
-    /// ignore (not .build/, nor the worktrees under .vibeswitcher/ in the main checkout). Empty when git can't say.
-    static func files(under root: URL) -> [String] {
+    /// ignore (not .build/, nor the worktrees under .vibeswitcher/ in the main checkout). Throws, with git's error,
+    /// when git can't say.
+    static func files(under root: URL) throws -> [String] {
         let listed = Git.run(["ls-files", "-z", "--cached", "--others", "--exclude-standard"], in: root.path)
-        guard listed.ok else { return [] }
+        guard listed.ok else {
+            let said = listed.error.isEmpty ? (listed.timedOut ? "timed out" : "exit \(listed.status)") : listed.error
+            throw ListingFailed(description: "git ls-files can't list the files in \(root.path): \(said)")
+        }
         return Set(listed.output.split(separator: "\0").map(String.init)).filter { !$0.hasSuffix("/") }.sorted()
     }
 
-    /// "docs/…/file.md:12 (GitLab token)" for each shape on each line of the text files under `root`, in order. Each
+    /// "docs/…/file.md:12 (GitLab token)" for each shape on each line of the files under `root`, in order. Each
     /// pattern searches a whole file with ICU (Swift's Regex, a line at a time, took 6 s over the repository); no shape
-    /// crosses a line.
-    static func matches(under root: URL) -> [String] {
+    /// crosses a line. A file that isn't UTF-8 (an image, a capture in another encoding) is read as Latin-1, a
+    /// character a byte: every shape is ASCII, so it's found there as in text, and no file is passed over.
+    static func matches(under root: URL) throws -> [String] {
         var found: [String] = []
-        for file in files(under: root) {
+        for file in try files(under: root) {
             guard let data = FileManager.default.contents(atPath: root.appendingPathComponent(file).path),
-                  let text = String(data: data, encoding: .utf8) else { continue }
+                  let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .isoLatin1) else { continue }
             var places: Set<[Int]> = []
             for (shape, (_, pattern)) in shapes.enumerated() {
                 for match in pattern.matches(in: text, range: NSRange(text.startIndex..., in: text)) {
@@ -66,12 +76,12 @@ struct SecretShapeLintTests {
         return found
     }
 
-    @Test func noFileHoldsACredentialsShape() {
+    @Test func noFileHoldsACredentialsShape() throws {
         // The listing works here, so an empty result means clean, not unread.
-        let files = Self.files(under: Self.repo)
+        let files = try Self.files(under: Self.repo)
         #expect(files.contains("docs/eval/security.md"))
         #expect(files.contains("Tests/VibeCoreTests/RedactionAgreementTests.swift"))
-        let found = Self.matches(under: Self.repo)
+        let found = try Self.matches(under: Self.repo)
         #expect(found == [], """
             these look like real credentials, and GitHub push protection refuses a push carrying them: assemble the \
             string at run time ("gl" + "pat-" and a body from a helper), or quote it cut short in a doc (`glpat-AbCd…`):
@@ -120,8 +130,36 @@ struct SecretShapeLintTests {
         try ".build/\n".write(to: root.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
         try literals.joined(separator: "\n").write(to: root.appendingPathComponent(".build/Built.swift"), atomically: true, encoding: .utf8)
 
-        #expect(Self.matches(under: root) == ["Notes.swift:1 (Stripe key)"]
+        #expect(try Self.matches(under: root) == ["Notes.swift:1 (Stripe key)"]
             + samples.enumerated().map { "Tests/VibeCoreTests/FixtureTests.swift:\($0.offset + 2) (\($0.element.name))" }
             + ["docs/security.md:3 (GitLab token)"])
+    }
+
+    /// A file whose bytes aren't UTF-8 (a Latin-1 note, binary around a string) is read a byte a character, not passed
+    /// over: its shape is named with its line like any other.
+    @Test func aFileThatIsntUTF8IsReadAsLatin1() throws {
+        let root = temp.url("lint")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        #expect(Git.run(["init", "-q"], in: root.path).ok)
+        let token = "gl" + "pat-" + String(repeating: "AbCd0123", count: 3)
+        // "café" in Latin-1 (0xE9 alone is no UTF-8), then bytes no decoder takes, then the token.
+        var bytes = Data("caf".utf8) + Data([0xE9, 0x0A, 0xFF, 0xFE, 0xC0, 0x0A])
+        bytes += Data("token = \(token)\n".utf8)
+        try bytes.write(to: root.appendingPathComponent("Legacy.txt"))
+        #expect(String(data: bytes, encoding: .utf8) == nil)
+        #expect(try Self.matches(under: root) == ["Legacy.txt:3 (GitLab token)"])
+    }
+
+    /// When git can't list the files the lint fails saying what git said, not with an expectation about a file it
+    /// never got to read.
+    @Test func aListingGitRefusesFailsWithGitsError() throws {
+        let root = temp.url("lint")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        // Not a repository: git ls-files refuses.
+        let refused = Git.run(["ls-files"], in: root.path)
+        #expect(!refused.ok && refused.error.contains("not a git repository"))
+        let error = try #require(throws: ListingFailed.self) { try Self.files(under: root) }
+        #expect(error.description.contains(refused.error), "\(error)")
+        #expect(throws: ListingFailed.self) { try Self.matches(under: root) }
     }
 }
