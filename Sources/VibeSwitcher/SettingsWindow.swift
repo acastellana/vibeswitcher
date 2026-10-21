@@ -493,14 +493,23 @@ struct BriefingSettings: View {
     /// What's typed into the key field, until Save: then it goes to the Keychain and the field empties.
     @State private var key = ""
 
+    /// What the section says about the key, made from where it comes from alone (it never has the key): the field's
+    /// prompt, the 'Key in use' line, and whether Save to Keychain is offered.
+    struct KeyText: Equatable {
+        var prompt: String
+        var line: String
+        var offersSave: Bool
+    }
+
     var body: some View {
+        let text = KeyText(briefing.keySource)
         Section {
             Picker("Language", selection: $preferences.briefingLanguage) {
                 ForEach(BriefingLanguage.all) { Text($0.name).tag($0.code) }
             }
             LabeledContent("ElevenLabs API key") {
                 HStack {
-                    SecureField("ElevenLabs API key", text: $key, prompt: Text(prompt))
+                    SecureField("ElevenLabs API key", text: $key, prompt: Text(text.prompt))
                         .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 220)
@@ -513,8 +522,8 @@ struct BriefingSettings: View {
             }
             LabeledContent("Key in use") {
                 HStack {
-                    Text(briefing.keySource?.line ?? "Looking…").foregroundStyle(.secondary)
-                    if briefing.keySource?.canSave == true {
+                    Text(text.line).foregroundStyle(.secondary)
+                    if text.offersSave {
                         Button("Save to Keychain") { briefing.saveFoundKey() }
                     }
                 }
@@ -531,18 +540,22 @@ struct BriefingSettings: View {
         .onAppear { briefing.checkKey() }
     }
 
-    private var prompt: String {
-        switch briefing.keySource {
-        case .keychain: return "Saved in your Keychain"
-        case .shell, .file: return "Paste one to use instead"
-        case .absent, nil: return "Not set"
-        }
-    }
-
     private func save() {
         let value = key.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !value.isEmpty else { return }
         briefing.saveKey(value)
         key = ""
+    }
+}
+
+extension BriefingSettings.KeyText {
+    init(_ source: BriefingKeySource?) {
+        switch source {
+        case .keychain: prompt = "Saved in your Keychain"
+        case .shell, .file: prompt = "Paste one to use instead"
+        case .absent, nil: prompt = "Not set"
+        }
+        line = source?.line ?? "Looking…"
+        offersSave = source?.canSave == true
     }
 }

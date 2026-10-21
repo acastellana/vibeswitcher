@@ -166,12 +166,13 @@ struct PhoneBriefingTests {
 
     // MARK: - The key never reaches the phone
 
-    func briefer(key: String?, claude: BriefingButtonTests.FakeClaude, rendered: Data? = Data("mac-m4a".utf8)) -> PhoneBriefer {
+    func briefer(key: String?, claude: BriefingButtonTests.FakeClaude, rendered: Data? = Data("mac-m4a".utf8),
+                 keyStore: SecretStore? = nil) -> PhoneBriefer {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [Stub.self]
         let client = ElevenLabs(voice: voiceID, session: URLSession(configuration: configuration))
         return PhoneBriefer(snapshot: { .init(boards: [:], sessions: []) }, language: { BriefingLanguage.named("es")! },
-                            keyStore: AppProof.MemorySecret(key), generate: { claude.generate($0) }, client: client,
+                            keyStore: keyStore ?? AppProof.MemorySecret(key), generate: { claude.generate($0) }, client: client,
                             render: { _, _ in rendered }, defaults: defaults, now: { 5000 })
     }
 
@@ -204,6 +205,22 @@ struct PhoneBriefingTests {
         #expect(seen.first?.request.value(forHTTPHeaderField: "xi-api-key") == key)
         // It counts as the last briefing for the Mac's button too.
         #expect(defaults.object(forKey: BriefingModel.lastKey) as? Double == 5000)
+    }
+
+    /// A key from the shell or the key file (nothing saved) reads it on the phone too, and is never in the reply.
+    @Test(arguments: ["shell", "file"]) func aKeyFoundOutsideTheKeychainIsUsedButNeverSent(_ source: String) async throws {
+        defer { cleanUp() }
+        let key = BriefingKeyTests.fromShell
+        let found = source == "shell"
+            ? BriefingKey(saved: AppProof.MemorySecret(), shell: { key })
+            : BriefingKey(saved: AppProof.MemorySecret(), file: { "export ELEVENLABS_API_KEY='\(key)'\r\n" })
+        Stub.expect(voice: voiceID, body: Data("ID3-phone-mp3".utf8))
+        let answer = try await briefed(briefer(key: nil, claude: .init("Todo tranquilo."), keyStore: found))
+        #expect(answer.json["voice"] as? String == "elevenlabs")
+        #expect(Stub.requests(voiceID).first?.request.value(forHTTPHeaderField: "xi-api-key") == key)
+        #expect(!answer.text.contains(key))
+        #expect(!answer.text.contains(Data(key.utf8).base64EncodedString()))
+        #expect(!answer.text.contains(String(Data(key.utf8).base64EncodedString().dropLast(4))))
     }
 
     @Test func aRefusedKeyFallsBackToTheMacsVoiceStillWithoutTheKey() async throws {
