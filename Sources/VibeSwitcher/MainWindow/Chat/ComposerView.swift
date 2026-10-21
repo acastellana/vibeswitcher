@@ -593,13 +593,14 @@ private struct ComposerTextView: NSViewRepresentable {
             }
         }
 
-        /// The answer card's key for a command: plain ↩ (⇧↩ and ⌥↩ stay the box's), ↑, ↓.
+        /// The answer card's key for a command: plain ↩ (⇧↩ and ⌥↩ stay the box's), ↑, ↓, and Esc (a picker's).
         static func cardKey(_ selector: Selector, flags: NSEvent.ModifierFlags) -> AnswerKeys.Key? {
             switch selector {
             case #selector(NSResponder.insertNewline(_:)):
                 return flags.intersection([.shift, .option, .command, .control]).isEmpty ? .enter : nil
             case #selector(NSResponder.moveUp(_:)): return .up
             case #selector(NSResponder.moveDown(_:)): return .down
+            case #selector(NSResponder.cancelOperation(_:)): return .escape
             default: return nil
             }
         }

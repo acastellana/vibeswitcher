@@ -56,15 +56,24 @@ final class ChatSync {
     var onMain: (@escaping () -> Void) -> Void = { DispatchQueue.main.async(execute: $0) }
     /// The session's screen (see `TerminalPaneController.screenText`).
     var screen: (UUID) -> ScreenRead = { _ in ScreenRead() }
+    /// The session's screen as the host's parser has it (`HostClient.styledScreen`), each line keeping its indentation:
+    /// a local command's picker is read off it (`ScreenMenu.parsePicker` tells rows from headings by where they start,
+    /// and the pane's read trims that). Nil when it couldn't be read; answered on the main thread.
+    var hostScreen: (UUID, @escaping ([String]?) -> Void) -> Void
     /// Whether the program in that session asked for bracketed paste.
     var bracketedPaste: (UUID) -> Bool = { _ in false }
+    /// Whether the chat is in sight (the window shown and not covered, the chat over the terminal: the rule
+    /// `MainWindowController.followChat` reads by). The watch reads nothing otherwise, and goes on when it's back.
+    var inSight: () -> Bool = { true }
     var now: () -> Date = Date.init
 
     /// An answer typed in whose keys the screen hasn't shown yet: while it shows the menu as it was, the card waits
     /// (a second click would land on whatever comes next with this one's keys).
     private var answering: (menu: ScreenMenu, until: Date)?
-    /// Since when the screen has shown no menu (held messages go in once it's been a while).
-    private var noMenuSince: Date?
+    /// Since when the selected session's own screen has shown nothing open (no menu, no dialog's footer): its held
+    /// messages go in once it's been a while. Its session's: another session selected meanwhile starts it again, so a
+    /// picker still open on the one you come back to never gets them.
+    private var clearSince: (id: UUID, since: Date)?
     /// How long an answer's keys may take to show on screen before the card takes clicks again.
     static let answerWait: TimeInterval = 2.5
     /// How long the screen must show no menu before held messages are typed in (a redraw between two questions
@@ -77,15 +86,117 @@ final class ChatSync {
     private var terminalTyping = false
     private var terminalReadAt: Date?
 
+    /// A local command's picker or dialog (/mcp, /model, a confirmation) on the host's screen, as last read while
+    /// `watch` runs: such a picker writes nothing to the transcript, and the pane's read can't make out its rows.
+    private var picker: ScreenMenu?
+    /// The screen is read fast (`watchEvery`, the host's screen too) since a slash command was typed in (`since`),
+    /// or a dialog's footer showed: until a picker or question has shown (`seen`) and been gone a moment, or
+    /// `watchFor` passes with none.
+    private var watch: (id: UUID, since: Date, seen: Bool, goneSince: Date?)?
+    private var watchTimer: DispatchSourceTimer?
+    private var hostReading = false
+    /// The footer on screen when the last watch ended with nothing to show (a dialog it can't read): the heartbeat
+    /// doesn't start another for it.
+    private var unreadFooter: String?
+    /// How often the screen is read while watched: the card is up within this of the terminal drawing the picker.
+    static let watchEvery: TimeInterval = 0.25
+    /// How long after a slash command a picker may take to show.
+    static let watchFor: TimeInterval = 10
+    /// How long a picker must be gone before the watch ends (one closing as the next one opens isn't the end).
+    static let watchGrace: TimeInterval = 0.75
+
     init(chat: ChatModel, host: HostClient) {
         self.chat = chat
         self.host = host
+        hostScreen = { [weak host] id, done in
+            guard let host else { return done(nil) }
+            host.styledScreen(id) { done($0?.text.components(separatedBy: "\n")) }
+        }
+    }
+
+    /// Whether the screen is being watched (`watchScreen`).
+    var watching: Bool { watch != nil }
+
+    /// Reads the screen every `watchEvery`, the host's screen with it, for a while: a slash command was just typed in
+    /// (its picker comes within a moment, and nothing reaches the transcript to redraw the chat for it), or a dialog's
+    /// footer is on screen.
+    func watchScreen() {
+        guard let target = target() else { return }
+        watch = (target.id, now(), false, nil)
+        resumeWatch()
+    }
+
+    /// The watch's reads, while the chat is in sight.
+    private func resumeWatch() {
+        guard watch != nil, watchTimer == nil, inSight() else { return }
+        let timer = DispatchSource.makeTimerSource(queue: .main)
+        timer.schedule(deadline: .now(), repeating: Self.watchEvery, leeway: .milliseconds(20))
+        timer.setEventHandler { [weak self] in self?.watchTick() }
+        timer.resume()
+        watchTimer = timer
+    }
+
+    /// No reads while the chat is out of sight; the watch itself goes on (`resumeWatch`).
+    private func pauseWatch() {
+        watchTimer?.cancel()
+        watchTimer = nil
+    }
+
+    func stopWatching() {
+        pauseWatch()
+        watch = nil
+        picker = nil
+    }
+
+    /// One read while watched: the pane's screen now, the host's once it answers (one request at a time).
+    private func watchTick() {
+        guard let watch, let target = target(), target.id == watch.id else { return stopWatching() }
+        guard inSight() else { return pauseWatch() }
+        readScreen()
+        guard !hostReading else { return }
+        hostReading = true
+        hostScreen(target.id) { [weak self] lines in
+            guard let self else { return }
+            self.hostReading = false
+            // Another session was selected, or the watch ended meanwhile.
+            guard self.watch?.id == target.id, self.target()?.id == target.id else { return }
+            self.picker = lines.flatMap(ScreenMenu.parsePicker)
+            self.readScreen()
+            self.followWatch()
+        }
+    }
+
+    /// Ends the watch once what it waited for has come and gone, or never came.
+    private func followWatch() {
+        guard var watch else { return }
+        let now = now()
+        if chat.menu != nil {
+            watch.seen = true
+            watch.goneSince = nil
+        } else if watch.seen {
+            let gone = watch.goneSince ?? now
+            watch.goneSince = gone
+            if now.timeIntervalSince(gone) >= Self.watchGrace { return stopWatching() }
+        } else if now.timeIntervalSince(watch.since) >= Self.watchFor {
+            unreadFooter = target().flatMap { Self.dialogFooter(screen($0.id).lines) }
+            return stopWatching()
+        }
+        self.watch = watch
+    }
+
+    /// The footer of a dialog on `lines` ("… · Esc to cancel"), its last line: a picker may be open.
+    static func dialogFooter(_ lines: [String]) -> String? {
+        guard let last = lines.last(where: { !$0.allSatisfy(\.isWhitespace) }),
+              last.range(of: #"\bEsc to (cancel|close|back|go back|clear|exit)\b"#, options: .regularExpression) != nil else { return nil }
+        return last.trimmingCharacters(in: .whitespaces)
     }
 
     /// The menu and permission mode on the session's screen, for the answer card and the mode chip; once no menu has
     /// shown for a while, the messages held for it go in.
     func readScreen() {
         guard let target = target() else {
+            clearSince = nil
+            if watch != nil { stopWatching() }
             if chat.mode != nil { chat.mode = nil }
             if let terminal = terminalTarget() { return readTerminal(terminal) }
             if chat.menu != nil { chat.menu = nil }
@@ -93,16 +204,23 @@ final class ChatSync {
             return
         }
         let read = screen(target.id)
-        let menu = Self.menu(on: read, needsInput: target.needsInput)
+        // A local command's picker the pane's read can't make out, from the host's screen.
+        let menu = Self.menu(on: read, needsInput: target.needsInput) ?? (watch?.id == target.id ? picker : nil)
+        // A dialog's footer with nothing read off it: watch the host's screen for its picker (once per dialog).
+        let footer = menu == nil ? Self.dialogFooter(read.lines) : nil
+        if footer == nil { unreadFooter = nil } else if watch == nil, footer != unreadFooter { watchScreen() }
+        // Back in sight with a watch paused.
+        if watch != nil, watchTimer == nil { resumeWatch() }
         guard show(menu) else { return }
         let mode = target.agent == .codex ? nil : AgentMode.parse(Array(read.lines.suffix(6)))
         if chat.mode != mode { chat.mode = mode }
-        if menu == nil {
-            let since = noMenuSince ?? now()
-            noMenuSince = since
-            if now().timeIntervalSince(since) >= Self.releaseAfter { releaseHeld(target) }
+        // Held messages go in once this session's own screen has shown nothing open for a while: no menu, and no
+        // dialog's footer (a picker read off the host's screen only once the watch has caught up with it).
+        if menu == nil, footer == nil {
+            if clearSince?.id != target.id { clearSince = (target.id, now()) }
+            if let clearSince, now().timeIntervalSince(clearSince.since) >= Self.releaseAfter { releaseHeld(target) }
         } else {
-            noMenuSince = nil
+            clearSince = nil
         }
     }
 
@@ -347,7 +465,13 @@ final class ChatSync {
                     return true
                 }
             }
-            chat.sendNotice = "Waiting for your answer to the question above: typed in now, it would go into the question as keys."
+            if menu.picker || menu.commands {
+                // Typed in now it would go into the picker as keys (text and ↩ choose whatever is highlighted).
+                chat.sendNotice = "A picker is open in the terminal: choose above, or close it (Esc). Your message waits until it's closed."
+                chat.answerNotice = "Your message waits until this closes. Close it (Esc) to send it now."
+            } else {
+                chat.sendNotice = "Waiting for your answer to the question above: typed in now, it would go into the question as keys."
+            }
             // Not the composer's (a Run, a chip): refused, so whoever sent it knows it didn't go.
             guard chat.held(key: target.key, message: text) else { return false }
             Breadcrumbs.shared.note("composer: held while a question is open")
@@ -359,6 +483,8 @@ final class ChatSync {
 
     private func typeIn(_ text: String, to target: Target) {
         let key = target.key
+        // A slash command may open a picker: read the screen fast until it shows (or doesn't).
+        if text.hasPrefix("/") { watchScreen() }
         host.send(target.id, writes: ComposerText.writes(text, bracketed: bracketedPaste(target.id))) { [weak self] ok in
             if !ok { Breadcrumbs.shared.note("composer: the host didn't confirm \(text.count) chars") }
             self?.chat.confirmed(key: key, message: text, ok: ok)
@@ -430,12 +556,17 @@ struct AnswerCardContent: Equatable {
     var otherText: String?
     /// The slash-command menu, not a question.
     var commands: Bool
+    /// A local command's picker or dialog (/mcp, /model), not the agent's question: Esc closes it.
+    var picker: Bool
+    /// How the terminal says to answer it ("↑/↓ to navigate · Enter to confirm · Esc to cancel").
+    var hint: String?
 
     init(menu: ScreenMenu, pending: [ChatQuestion]?) {
         let questionTabs = menu.tabs.filter { $0.title != "Submit" }
         // The question on the open tab (none on the review tab), when the screen shows its options.
         var question: ChatQuestion?
-        if let pending {
+        // A local command's picker isn't the agent's question.
+        if let pending, !menu.picker {
             let index = menu.tabs.isEmpty ? 0 : menu.currentTab ?? 0
             if index < max(questionTabs.count, 1), pending.indices.contains(index) { question = pending[index] }
         }
@@ -451,6 +582,8 @@ struct AnswerCardContent: Equatable {
         multiSelect = menu.multiSelect || question?.multiSelect == true
         submit = menu.submit
         commands = menu.commands
+        picker = menu.picker
+        hint = menu.hint
         var otherText: String?
         options = menu.options.enumerated().map { index, label in
             let lower = label.lowercased()

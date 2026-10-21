@@ -384,6 +384,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         }
         sync.screen = { [weak self] id in self?.pane.screenText(id) ?? ScreenRead() }
         sync.bracketedPaste = { [weak self] id in self?.pane.bracketedPaste(id) ?? false }
+        sync.inSight = { [weak self] in self?.chatInSight ?? false }
         return sync
     }
 
@@ -477,11 +478,17 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         if window?.occlusionState.contains(.visible) == true { followChat() }
     }
 
+    /// The chat is shown, in a window that's on screen and not behind others (or on another Space).
+    private var chatInSight: Bool {
+        guard let window else { return false }
+        return window.isVisible && window.occlusionState.contains(.visible) && !chatHost.isHidden
+    }
+
     /// Each second while the chat is shown and in sight: the transcript, the steering line and the terminal's screen.
     /// A window behind others or on another Space (still `isVisible`) reads nothing: 2026-10-20, the user's window
     /// sat behind others for a day re-reading a terminal screen every second.
     private func followChat() {
-        guard let window, window.isVisible, window.occlusionState.contains(.visible), !chatHost.isHidden else { return }
+        guard chatInSight, let window else { return }
         chat.poll()
         chat.refreshSteering()
         readScreen()

@@ -31,6 +31,9 @@ public struct ScreenMenu: Equatable, Sendable {
     public var openTab: Int?
     /// Claude's slash-command menu (under the prompt box while `/…` is typed), not a question: Esc closes it.
     public var commands = false
+    /// A local command's picker or dialog (/mcp, /model, /config, a yes/no confirmation; see `parsePicker`), not the
+    /// agent's question: Esc closes it. A dialog with nothing to choose (a text field, a notice) has no options.
+    public var picker = false
 
     public init(question: String, options: [String], descriptions: [String?]? = nil, selected: Int, tabs: [Tab] = [], hint: String? = nil,
                 checked: [Bool]? = nil, submit: String? = nil, openTab: Int? = nil) {
@@ -56,7 +59,7 @@ public struct ScreenMenu: Equatable, Sendable {
     public func sameQuestion(as other: ScreenMenu) -> Bool {
         question == other.question && tabs.map(\.title) == other.tabs.map(\.title) && currentTab == other.currentTab
             && options.count == other.options.count && submit == other.submit && multiSelect == other.multiSelect
-            && commands == other.commands && (!commands || options == other.options)
+            && commands == other.commands && (!commands || options == other.options) && picker == other.picker
     }
 
     /// The last menu on the screen: options "1. …", "2. …" in order (description lines, rules and blank lines may
@@ -88,6 +91,12 @@ public struct ScreenMenu: Equatable, Sendable {
         let marked = found.filter(\.option.marked).count + (submit?.marked == true ? 1 : 0)
         guard found.count >= 2, found.first?.option.number == 1, marked == 1 else { return nil }
         let selected = found.firstIndex(where: \.option.marked) ?? found.count
+        // `[✔] Cream`, `[ ] Nuts`: a multi-select (every option has its box).
+        let boxes = found.map { box($0.option.label) }
+        let checked = boxes.allSatisfy { $0 != nil } ? boxes.map { $0!.checked } : nil
+        // A picker's rows may carry their description on the same line, in a column of its own (/model).
+        let inline = found.map { checked == nil ? Self.columns($0.option.label) : (label: $0.option.label, detail: nil) }
+        let labels = checked == nil ? inline.map(\.label) : boxes.map { $0!.label }
         // Descriptions: the text lines right under an option, up to the next option, rule or blank line.
         let descriptions: [String?] = found.enumerated().map { position, entry in
             let stop = position + 1 < found.count ? found[position + 1].index : lines.count
@@ -96,12 +105,9 @@ public struct ScreenMenu: Equatable, Sendable {
                 if line.isEmpty || isSeparator(line) || isHint(line) || submitRow(line) != nil { break }
                 text.append(line)
             }
+            if let detail = inline[position].detail { text.insert(detail, at: 0) }
             return text.isEmpty ? nil : text.joined(separator: " ")
         }
-        // `[✔] Cream`, `[ ] Nuts`: a multi-select (every option has its box).
-        let boxes = found.map { box($0.option.label) }
-        let checked = boxes.allSatisfy { $0 != nil } ? boxes.map { $0!.checked } : nil
-        let labels = checked == nil ? found.map(\.option.label) : boxes.map { $0!.label }
         var tabs: [Tab] = []
         var openTab: Int?
         var question: [String] = []
@@ -159,8 +165,23 @@ public struct ScreenMenu: Equatable, Sendable {
         line.trimmingCharacters(in: CharacterSet(charactersIn: "│┃║").union(.whitespaces))
     }
 
+    private static let ruleCharacters: Set<Character> = Set("─━═╭╮╰╯┌┐└┘-▔╌")
+
+    /// A rule: nothing but rule characters, or a run of them with a label set in (`▔▔▔ ◐ medium · /effort ▔`, the
+    /// line a fullscreen Claude draws over its pickers).
     private static func isSeparator(_ line: String) -> Bool {
-        !line.isEmpty && line.allSatisfy { "─━═╭╮╰╯┌┐└┘-".contains($0) || $0 == " " }
+        guard !line.isEmpty else { return false }
+        if line.allSatisfy({ ruleCharacters.contains($0) || $0 == " " }) { return true }
+        return line.first.map { "▔─━".contains($0) } == true && line.prefix(8).allSatisfy { ruleCharacters.contains($0) }
+    }
+
+    /// `Default (recommended) ✔  Use the default model` → the label and the column after it: text after a gap of two
+    /// spaces or more, when it has words (a lone `✔` after a gap stays with its label).
+    static func columns(_ row: String) -> (label: String, detail: String?) {
+        guard let gap = row.range(of: "  +", options: .regularExpression) else { return (row, nil) }
+        let detail = row[gap.upperBound...].trimmingCharacters(in: .whitespaces)
+        guard detail.contains(where: \.isLetter) else { return (row, nil) }
+        return (row[..<gap.lowerBound].trimmingCharacters(in: .whitespaces), detail)
     }
 
     private static func isHint(_ line: String) -> Bool {
@@ -184,6 +205,87 @@ public struct ScreenMenu: Equatable, Sendable {
                               selected: selected)
         menu.commands = true
         return menu
+    }
+
+    /// A local command's picker or dialog: what a fullscreen Claude Code draws under the `▔▔▔` rule over the
+    /// conversation for /mcp, /model, /config, /theme or a confirmation (`Delete allowed tool?  Yes / ❯ No`), with a
+    /// footer saying how to answer (`↑/↓ to navigate · Enter to confirm · Esc to cancel`). Its rows have no numbers
+    /// (or lose them: `1. Opus` is "Opus") and one is marked ❯; a row is told from the title, a section heading
+    /// (`User MCPs (…)`) or a row's second line by where it starts. So `screen` must keep each line's indentation, as
+    /// the host's screen does (the pane's read trims it). A dialog with nothing to choose (a text field, a notice) is
+    /// one with no options: its title and footer.
+    public static func parsePicker(_ screen: [String]) -> ScreenMenu? {
+        // A box's sides become blanks: its rows keep their columns.
+        let lines = screen.map(unboxed)
+        guard let footer = lines.lastIndex(where: { !$0.allSatisfy(\.isWhitespace) }) else { return nil }
+        let hint = lines[footer].trimmingCharacters(in: .whitespaces)
+        guard hint.range(of: #"\bEsc to (cancel|close|back|go back|clear|exit)\b"#, options: .regularExpression) != nil,
+              let top = lines[..<footer].lastIndex(where: { $0.hasPrefix("▔▔▔") }) else { return nil }
+        let body = (top + 1)..<footer
+        let indent = { (line: String) in line.prefix { $0 == " " }.count }
+        let blank = { (line: String) in line.allSatisfy(\.isWhitespace) || isSeparator(clean(line)) }
+        var menu: ScreenMenu
+        if let marked = body.last(where: { lines[$0].drop { $0 == " " }.first.map { "❯›".contains($0) } == true }) {
+            // The marker's column, and where its row's text starts: rows start there (or a little further in, after a
+            // ✔ the marked one carries); a heading starts before it, a row's second line well after it.
+            let marker = indent(lines[marked])
+            let text = marker + 1 + lines[marked].dropFirst(marker + 1).prefix { $0 == " " }.count
+            var first = marked, last = marked
+            while first - 1 > top, blank(lines[first - 1]) || indent(lines[first - 1]) > marker { first -= 1 }
+            while last + 1 < footer, blank(lines[last + 1]) || indent(lines[last + 1]) > marker { last += 1 }
+            // Rows that start with a status mark (`✘ scratch-broken`): /mcp's headings (`User MCPs (…)`) start where its
+            // rows do, without one. (/theme's ✔ goes before the chosen row only: the others start after where it is.)
+            let glyph = { (text: String) in text.first.map { !$0.isLetter && !$0.isNumber } == true && text.dropFirst().first == " " }
+            let marks = glyph(lines[marked].dropFirst(text).trimmingCharacters(in: .whitespaces))
+            var rows: [(label: String, detail: [String])] = []
+            var selected = 0
+            for index in first...last {
+                let line = lines[index]
+                // A search field's line (/config's `⌕ Search settings…`) isn't a row.
+                guard !blank(line), !clean(line).hasPrefix("⌕") else { continue }
+                let column = index == marked ? text : indent(line)
+                let content = line.dropFirst(index == marked ? text : column).trimmingCharacters(in: .whitespaces)
+                if column >= text + 4 {
+                    // A row's second line.
+                    if !rows.isEmpty { rows[rows.count - 1].detail.append(content) }
+                    continue
+                }
+                // A heading, or "↓ 13 more".
+                guard column >= text, !marks || column > text || glyph(content),
+                      content.range(of: #"^[↑↓] \d+ more"#, options: .regularExpression) == nil else { continue }
+                if index == marked { selected = rows.count }
+                // `1. Opus` → "Opus" (its number is where it is).
+                let split = columns(option(content)?.label ?? content)
+                rows.append((split.label, split.detail.map { [$0] } ?? []))
+            }
+            guard !rows.isEmpty else { return nil }
+            let title = Array(lines[body.lowerBound..<first].map { clean($0) }.filter { !$0.isEmpty && !isSeparator($0) && !$0.hasPrefix("⌕") }.prefix(6))
+            menu = ScreenMenu(question: title.joined(separator: "\n"), options: rows.map(\.label),
+                              descriptions: rows.map { $0.detail.isEmpty ? nil : $0.detail.joined(separator: " ") }, selected: selected, hint: hint)
+        } else {
+            // Nothing marked: its title, down to the first numbered row (one there's no cursor on can't be chosen).
+            var title: [String] = []
+            for line in lines[body].map({ clean($0) }) where !line.isEmpty && !isSeparator(line) && !line.hasPrefix("⌕") {
+                if option(line) != nil || title.count == 6 { break }
+                title.append(line)
+            }
+            guard !title.isEmpty else { return nil }
+            menu = ScreenMenu(question: title.joined(separator: "\n"), options: [], selected: 0, hint: hint)
+        }
+        menu.picker = true
+        return menu
+    }
+
+    /// `  │ ❯ No   │` → `    ❯ No`: a box's sides as blanks.
+    private static func unboxed(_ line: String) -> String {
+        var characters = Array(line.replacingOccurrences(of: "\u{0}", with: " "))
+        while characters.last == " " { characters.removeLast() }
+        guard let left = characters.firstIndex(where: { $0 != " " }), "│┃".contains(characters[left]), characters.count > left + 1,
+              let right = characters.indices.last, "│┃".contains(characters[right]) else { return String(characters) }
+        characters[left] = " "
+        characters[right] = " "
+        while characters.last == " " { characters.removeLast() }
+        return String(characters)
     }
 
     /// `❯ /model   Set the AI model` → "/model", its description, marked.

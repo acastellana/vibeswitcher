@@ -759,13 +759,15 @@ struct AnswerCard: View {
             HStack(spacing: 8) {
                 Image(systemName: "questionmark.bubble.fill").foregroundStyle(Color.accentColor).font(.system(size: 15))
                     .accessibilityHidden(true)
-                Text(content.commands ? "Commands" : "\(agent) is asking").font(.system(size: 13, weight: .semibold))
+                Text(content.commands ? "Commands" : content.picker ? "\(agent) shows a \(content.options.isEmpty ? "dialog" : "picker")"
+                     : "\(agent) is asking").font(.system(size: 13, weight: .semibold))
                 if let position = content.position {
                     Text(position).font(.system(size: 11.5)).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if content.commands {
+                if content.commands || content.picker {
                     Button("Close (Esc)", action: dismiss).buttonStyle(.borderless).font(.system(size: 11.5))
+                        .disabled(answering)
                 }
                 if let openInTerminal {
                     Button(action: openInTerminal) { Label("Open in Terminal", systemImage: "arrow.up.forward.app") }
@@ -831,6 +833,10 @@ struct AnswerCard: View {
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: keys.highlight)
             .disabled(answering || confirming != nil)
             .opacity(answering || confirming != nil ? 0.55 : 1)
+            // A picker's footer, as the terminal draws it: which keys it takes (the card sends the same).
+            if content.picker, let hint = content.hint {
+                Text(hint).font(.system(size: 11)).foregroundStyle(.secondary)
+            }
             if let confirming {
                 HStack(spacing: 8) {
                     Text(ChatSync.confirmation(menu, index: confirming.index, typing: confirming.typing))
@@ -868,6 +874,8 @@ struct AnswerCard: View {
         }
         .onDisappear { keys.highlight = nil }
         .onChange(of: keys.press) { _, press in if let press { act(press.index, content) } }
+        // Esc in the composer: the picker closes, as Esc in the terminal does.
+        .onChange(of: keys.escapes) { _, _ in if !answering { dismiss() } }
         // Asked about one question, never answered on the next one: its index means another option there.
         .onChange(of: menu) { old, new in
             if !new.sameQuestion(as: old) { confirming = nil }
@@ -975,6 +983,8 @@ enum AnswerKeys {
         /// 1–9 (anything else is never an option).
         case digit(Int)
         case enter, up, down
+        /// Closes a picker (`AnswerCardKeys.take`); never an option.
+        case escape
     }
 
     enum Action: Equatable {
@@ -1003,6 +1013,8 @@ enum AnswerKeys {
             return .move(highlighted.map { max(0, min(rows - 1, $0 - 1)) } ?? rows - 1)
         case .down:
             return .move(highlighted.map { max(0, min(rows - 1, $0 + 1)) } ?? 0)
+        case .escape:
+            return .pass
         }
     }
 
@@ -1034,11 +1046,19 @@ final class AnswerCardKeys: ObservableObject {
 
     @Published var highlight: Int?
     @Published private(set) var press: Press?
+    /// Esc presses handed to a picker's card (each closes it).
+    @Published private(set) var escapes = 0
 
     /// One key while `content`'s card is up: true when it was the card's (it doesn't go into the composer).
     /// `busy`: the card is waiting for an answer's keys to show; its keys go nowhere meanwhile.
     @discardableResult
     func take(_ key: AnswerKeys.Key, composer: String, content: AnswerCardContent, busy: Bool = false) -> Bool {
+        // Esc closes a local command's picker, as in the terminal (a question's Esc is the terminal's own answer).
+        if key == .escape {
+            guard content.picker, composer.isEmpty else { return false }
+            if !busy { escapes += 1 }
+            return true
+        }
         guard !content.commands else { return false }
         // No highlight yet (the card's only just up): it starts at the terminal's cursor, as the card draws it.
         let action = AnswerKeys.action(for: key, composer: composer, options: content.options.count,
