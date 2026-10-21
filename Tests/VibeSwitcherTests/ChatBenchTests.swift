@@ -93,8 +93,9 @@ struct ChatBenchTests {
         // carried a CPU reading (it has a place).
         let cpu = run.output.firstMatch(of: #/\nticks: longest .*, most CPU ([\d.]+)s \(t=\d+s, /#).flatMap { Double($0.1) }
         #expect(cpu != nil && cpu! <= ChatBench.StallRule.limit, "most CPU in a tick: \(cpu.map { "\($0)" } ?? "none") s\n\(run.output)")
-        // Opened out of sight 20 rows a turn, then shown (twice: opened, left, opened again).
-        #expect(run.output.matches(of: #/laid out out of sight in (\d+) turns, then shown/#).compactMap { Int($0.1) } == [3, 3], "\(run.output)")
+        // Opened out of sight a staging batch of rows a turn, then shown (twice: opened, left, opened again).
+        #expect(run.output.matches(of: #/laid out out of sight in (\d+) turns, then shown/#).compactMap { Int($0.1) } == [Self.turns, Self.turns],
+                "\(run.output)")
         guard earlier > 0 else { return }
         let settles = verdict.firstMatch(of: #/earlier=(\d+) settled=\[([^\]]*)\]/#)
         #expect(settles?.1 == "\(earlier)", "\(verdict)")
@@ -103,7 +104,7 @@ struct ChatBenchTests {
         let shown = run.output.matches(of: #/page \d settled in [\d.]+s: shown=(\d+) of (\d+)/#).compactMap { Int($0.1) }
         #expect(shown == [120, 180], "\(run.output)")
         for page in Self.pages(run.output) {
-            #expect(page.turns == 3, "page \(page.number): \(page.turns) turns\n\(run.output)")
+            #expect(page.turns == Self.turns, "page \(page.number): \(page.turns) turns\n\(run.output)")
             // Filling in below the fold: what's at the top of the view and where the view is don't move.
             #expect(!page.fillingIn.isEmpty, "page \(page.number)\n\(run.output)")
             #expect(Set(page.fillingIn.map(\.first)) == [page.first], "page \(page.number) moved\n\(run.output)")
@@ -111,6 +112,9 @@ struct ChatBenchTests {
             #expect(page.fillingIn.map(\.height) == page.fillingIn.map(\.height).sorted(), "page \(page.number)\n\(run.output)")
         }
     }
+
+    /// The turns a page (or an open) takes to lay out: a batch of rows a turn (`ChatStaging.batch`), the first at once.
+    static let turns = Int((Double(ChatWindow.page) / Double(ChatStaging.batch)).rounded(.up))
 
     /// As scripts/chat-bench-settle.sh's top and middle scenarios: read there once opened, left, opened again where it
     /// was read and scrolled there. The bench reads only once the open is laid out and the view has put it where it
@@ -200,6 +204,21 @@ struct ChatBenchTests {
             FAIL: a tick stalled 1.00s (t=12s, page 2, 0.10s of it on the CPU), over 0.25s; rule: the Mac's 1-minute load 9 is not over
             FAIL: a tick worked 0.30s on the CPU (t=8s, page 1, a tick of 0.40s), over 0.25s; rule: the Mac's 1-minute load 9 is not over
             """)))
+    }
+
+    /// A reopen is judged once its height could have kept still for the settle's quiet seconds since it loaded: on time,
+    /// as before (8 s run, reopened at 3, loaded at 4: judged at 8); late (reopened at 5 behind a starved first open,
+    /// loaded at 6), judged at 10, not at 8 with only 2 s to show it. Never waiting past 30 s more.
+    @Test func aLateReopenIsGivenItsQuietSecondsBeforeItsSettleIsJudged() {
+        func judgedAt(reopenedAt: Int, readyAt: Int?) -> Int? {
+            (0...40).first { $0 >= 8 && !ChatBench.waitsAfterReopen(second: $0, seconds: 8, reopenedAt: reopenedAt, readyAt: readyAt) }
+        }
+        #expect(judgedAt(reopenedAt: 3, readyAt: 4) == 8)
+        #expect(judgedAt(reopenedAt: 3, readyAt: 6) == 10)
+        #expect(judgedAt(reopenedAt: 5, readyAt: 6) == 10)
+        #expect(judgedAt(reopenedAt: 5, readyAt: 6).map { $0 - 6 } == ChatBench.settleQuiet + 1)
+        #expect(judgedAt(reopenedAt: 3, readyAt: nil) == 38)
+        #expect(!ChatBench.waitsAfterReopen(second: 7, seconds: 8, reopenedAt: 3, readyAt: nil))
     }
 
     @Test func aLoadedMacJudgesTicksAgainstTheFirstOpen() throws {

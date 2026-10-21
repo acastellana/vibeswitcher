@@ -213,8 +213,10 @@ public enum ChatWindow {
 /// and shown once all of it is, where it opens (`ChatModel.assembling`). Item indices.
 public struct ChatStaging: Equatable, Sendable {
     /// How many rows a turn adds: on the chat bench's rows ~0.04 s of the main thread's time a turn (in 10s, 0.03 s, but
-    /// each turn's own update of the window cost a page 20-40% more in all; in 20s it costs what one turn did).
-    public static let batch = 20
+    /// each turn's own update of the window cost a page 20-40% more in all; in 20s it costs what one turn did). 14 since
+    /// a prompt's and a reply's text is a text view of its own (`ChatMessageText`): a row costs a turn more, and a page's
+    /// costliest turn was 0.060 s at 14 against 0.065-0.080 s at 20 (the chat bench's median, 2026-10-20 and -21).
+    public static let batch = 14
 
     /// Still to come under the rows shown, added from the top down.
     public private(set) var below: Range<Int>

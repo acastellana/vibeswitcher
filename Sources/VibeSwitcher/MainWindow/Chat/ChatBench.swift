@@ -15,6 +15,7 @@ enum ChatBench {
     nonisolated(unsafe) private static var activity: NSObjectProtocol?
 
     static func run(path: String) -> Never {
+        if env["VIBESWITCHER_BENCH_PREPARE"] != nil { prepareStress(path: path) }
         // VIBESWITCHER_BENCH_SECONDS=N: how long it runs (default 15).
         let seconds = env["VIBESWITCHER_BENCH_SECONDS"].flatMap(Int.init) ?? 15
         // VIBESWITCHER_BENCH_FONT=SIZE: the chat's text size (⌘+ / ⌘−); unset: the standard one.
@@ -187,6 +188,8 @@ enum ChatBench {
             fflush(stdout)
             exit(status != 0 ? status : failed ? 4 : 0)
         }
+        let quiet = TimeInterval(Self.settleQuiet)
+        let waits: (Int, Int, Int?) -> Bool = { Self.waitsAfterReopen(second: $0, seconds: seconds, reopenedAt: $1, readyAt: $2) }
         let tick = Timer(timeInterval: 1, repeats: true) { _ in
             second += 1
             longest.second = second
@@ -317,8 +320,8 @@ enum ChatBench {
             if earlier > 0 { return }
             // Not opened again yet: the first open is slow to show (at most 30 s more).
             if reopens, reopenedAt == nil { return }
-            // Opened again: the same time after it had loaded as after the reopen when it loads at once (at most 30 s more).
-            if let reopenedAt, second >= seconds, second < seconds + 30, readyAt.map({ second - $0 < seconds - reopenedAt - 1 }) ?? true { return }
+            // Opened again: long enough after it had loaded to judge its settle (`waitsAfterReopen`).
+            if let reopenedAt, waits(second, reopenedAt, readyAt) { return }
             if second >= seconds {
                 // Opened and left alone, the content must have settled: no height changes in the last 3 seconds.
                 if let reopenedAt {
@@ -327,10 +330,10 @@ enum ChatBench {
                         finish(3)
                     }
                     if firstRow != nil { print("  opened again at \(heights())") }
-                    let verdict = probe.changedRecently(seconds: 3) ? "FAIL: the content height still changes" : "settled"
+                    let verdict = probe.changedRecently(seconds: quiet) ? "FAIL: the content height still changes" : "settled"
                     print("\(verdict) \(second - reopenedAt) s after opening (loaded after \(readyAt - reopenedAt) s): height=\(probe.heights.last ?? 0) heights=\(probe.heights.count) "
                         + "range=\(probe.range) layouts=\(probe.layouts) last 3 s: \(probe.layoutsRecently) layouts longest tick=\(LongestTicks.text(longest.overall, cpu: longest.overallCPU))")
-                    finish(probe.changedRecently(seconds: 3) ? 3 : 0)
+                    finish(probe.changedRecently(seconds: quiet) ? 3 : 0)
                 }
                 finish(0)
             }
@@ -341,6 +344,49 @@ enum ChatBench {
     }
 
     static func seconds(_ value: TimeInterval) -> String { String(format: "%.2fs", value) }
+
+    /// VIBESWITCHER_BENCH_PREPARE: no window; the transcript's prompts and replies built on several threads at once
+    /// (`ChatTextContent.prepareNow`, eight at a time) at 200 text sizes, each a set of fonts not made yet. Prints "ready"
+    /// and waits for a line on its input, builds, prints "built" and waits for its input to end: `leaks` looks at it
+    /// before and after (ChatTextPrepareLeakTests).
+    static func prepareStress(path: String) -> Never {
+        let lines = (try? String(contentsOfFile: path, encoding: .utf8))?.split(separator: "\n") ?? []
+        let texts: [(text: String, kind: ChatTextContent.Kind)] = lines.flatMap { line -> [(text: String, kind: ChatTextContent.Kind)] in
+            guard let entry = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  let message = entry["message"] as? [String: Any] else { return [] }
+            if let prompt = message["content"] as? String { return [(prompt, .plain)] }
+            let parts = message["content"] as? [[String: Any]] ?? []
+            return parts.compactMap { $0["type"] as? String == "text" ? ($0["text"] as? String).map { ($0, .markdown) } : nil }
+        }
+        print("ready \(texts.count) texts")
+        fflush(stdout)
+        _ = readLine()
+        for step in 0..<200 {
+            let size = 9 + CGFloat(step) * 0.125
+            ChatTextContent.purge()
+            for start in stride(from: 0, to: texts.count, by: 8) {
+                ChatTextContent.prepareNow(Array(texts[start..<min(start + 8, texts.count)]), size: size, folder: nil)
+            }
+        }
+        ChatTextContent.purge()
+        print("built")
+        fflush(stdout)
+        while readLine() != nil {}
+        exit(0)
+    }
+
+    /// A conversation opened and left alone has settled once its height hasn't changed for this many seconds.
+    static let settleQuiet = 3
+
+    /// Whether the run waits on at `second` (of `seconds`) before judging a reopen's settle: as long after the reopen had
+    /// loaded as after the reopen when it loads at once, and never less than the settle's quiet seconds and one more,
+    /// however late the reopen came (a first open's read held up by a starved Mac reopened at t=5, loaded at t=6, and was
+    /// judged at t=8 with 2 s of it: "height still changes", the 3 s never possible). Not loaded: on, at most 30 s more.
+    static func waitsAfterReopen(second: Int, seconds: Int, reopenedAt: Int, readyAt: Int?) -> Bool {
+        guard second >= seconds, second < seconds + 30 else { return false }
+        guard let readyAt else { return true }
+        return second - readyAt < max(seconds - reopenedAt - 1, settleQuiet + 1)
+    }
 
     /// The CPU time `thread` has used.
     static func cpuTime(of thread: thread_act_t) -> TimeInterval? {

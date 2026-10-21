@@ -277,7 +277,7 @@ extension Array {
 /// Runs a code block's command in the session: typed in as `! command`, so it runs in the session's shell and the
 /// output joins the conversation. Shown only while a window session you can type into is selected. Anything longer than
 /// one plain line is shown in full first (see `RunnableCommand`).
-private struct RunButton: View {
+struct RunButton: View {
     @ObservedObject var runner: ChatRunner
     let runnable: RunnableCommand.Runnable
     @State private var sent = false
@@ -327,34 +327,16 @@ struct CodeBlockView: View {
     /// Lines shown before "Show all" (nil: everything).
     var maxLines: Int? = 40
     @State private var showAll = false
-    @State private var copied = false
-    @Environment(\.chatRunner) private var runner
 
     var body: some View {
         let lines = code.split(separator: "\n", omittingEmptySubsequences: false)
         let limited = !showAll && maxLines.map { lines.count > $0 + 5 } == true
         let shown = limited ? lines.prefix(maxLines ?? 0).joined(separator: "\n") : code
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text(language?.lowercased() ?? "code").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.secondary)
-                Spacer()
-                // No Run while lines are hidden behind "Show all".
-                if let runner, let runnable = RunnableCommand.runnable(code: code, language: language,
-                                                                       visibleLines: limited ? maxLines : nil) {
-                    RunButton(runner: runner, runnable: runnable)
-                }
-                Button {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(code, forType: .string)
-                    copied = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
-                } label: {
-                    Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc").font(.system(size: 10.5))
-                }
-                .buttonStyle(.borderless)
-            }
-            .padding(.horizontal, 10).padding(.vertical, 5)
-            .background(Color.secondary.opacity(0.08))
+            // No Run while lines are hidden behind "Show all".
+            CodeBlockHeader(language: language, code: code,
+                            runnable: RunnableCommand.runnable(code: code, language: language, visibleLines: limited ? maxLines : nil))
+                .background(Color.secondary.opacity(0.08))
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(SyntaxColors.attributed(String(shown), language: language))
                     .font(.system(size: 12, design: .monospaced))

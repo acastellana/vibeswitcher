@@ -107,6 +107,9 @@ struct ChatView: View {
     @State private var placing = false
     /// With Reduce Motion, scrolls jump instead of gliding.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.chatFolder) private var folder
+    /// How many chats are on screen (`ChatTextContent.purge` once none is).
+    static var shown = 0
 
     var body: some View {
         let items = chat.items
@@ -236,7 +239,39 @@ struct ChatView: View {
             }
             .onChange(of: chat.state) { _, _ in initialScroll(proxy) }
             .onChange(of: chat.assembling) { _, _ in initialScroll(proxy) }
-            .onChange(of: chat.staging) { _, _ in chat.stagingShown() }
+            .onAppear {
+                ChatView.shown += 1
+                ChatTextContent.warmUp()
+            }
+            .onDisappear {
+                ChatView.shown -= 1
+                // No chat left on screen (the window closed, or the chat gave way to the terminal): the messages' texts
+                // built for it go now, not a moment later.
+                if ChatView.shown == 0 { ChatTextContent.purge() }
+            }
+            .onReceive(chat.$log) { log in
+                // A conversation just read, its newest rows laid out this turn: their texts made on every core first.
+                guard chat.items.isEmpty, !log.entries.isEmpty else { return }
+                let messages = log.entries.suffix(ChatStaging.batch).compactMap { entry -> (text: String, kind: ChatTextContent.Kind)? in
+                    guard entry.team == nil else { return nil }
+                    if case .reply = entry.kind { return ChatItem.reply(entry).messageText }
+                    return ChatItem.prompt(entry).messageText
+                }
+                let size = UserDefaults.standard.object(forKey: ChatFont.key) as? Double ?? ChatFont.standard
+                ChatTextContent.prepareNow(messages, size: CGFloat(size), folder: folder)
+            }
+            .onChange(of: chat.staging) { old, new in
+                // The rows still to come: their texts made off the main thread meanwhile, not in the turn that shows them.
+                if old == nil, let new {
+                    let messages = chat.items.indices.filter(new.holds).compactMap { chat.items[$0].messageText }
+                    let size = UserDefaults.standard.object(forKey: ChatFont.key) as? Double ?? ChatFont.standard
+                    ChatTextContent.prepare(messages, size: CGFloat(size), folder: folder)
+                }
+                // All of it shown: the messages Show earlier brings next, made meanwhile too. Its first rows come in the
+                // turn it's pressed, and a page's first turn is its most costly.
+                if new == nil { prepareEarlier() }
+                chat.stagingShown()
+            }
             .onChange(of: chat.log.entries.count) { _, _ in
                 if bottom.atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
             }
@@ -258,6 +293,16 @@ struct ChatView: View {
 
     /// The conversation out of sight: being laid out, or just scrolled to where it opens.
     private var hidden: Bool { chat.state == .ready && (chat.assembling || placing) }
+
+    /// The texts of the page Show earlier would show next, made off the main thread (`ChatTextContent.prepare`).
+    private func prepareEarlier() {
+        guard !chat.searchActive else { return }
+        let hidden = ChatWindow.shown(chat.items, limit: chat.shownLimit, including: nil).hidden
+        guard hidden > 0 else { return }
+        let messages = chat.items[max(0, hidden - ChatWindow.page)..<hidden].compactMap(\.messageText)
+        let size = UserDefaults.standard.object(forKey: ChatFont.key) as? Double ?? ChatFont.standard
+        ChatTextContent.prepare(messages, size: CGFloat(size), folder: folder)
+    }
 
     /// Once the conversation is laid out: where it opens, where you were reading, else at what's new since you looked,
     /// else at the end.
@@ -395,9 +440,8 @@ private struct LatestButton: View {
 /// One item of the conversation. It doesn't observe the model: it's drawn again only when its own inputs change
 /// (`.equatable()`), not on every keystroke in the composer or every line the transcript gains.
 private struct ChatItemView: View, Equatable {
-    @AppStorage(ChatFont.key) private var chatFontSize = ChatFont.standard
-    /// The pointer has been over this row: its text is selectable from then on (see `ChatTextSelection`). With
-    /// VoiceOver on it always is.
+    /// The pointer has been over this row: a tool's or a team message's text is selectable from then on (see
+    /// `ChatTextSelection`; a prompt's and a reply's always is, `ChatMessageText`). With VoiceOver on it always is.
     @State private var reached = false
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
     let item: ChatItem
@@ -416,18 +460,34 @@ private struct ChatItemView: View, Equatable {
     }
 
     var body: some View {
-        content
+        ChatItemRow(item: item, chat: chat, expanded: expanded, agent: agent, rowID: rowID, canSend: canSend, resend: resend,
+                    openImage: openImage, reached: reached || voiceOver)
             .environment(\.chatTextSelectable, reached || voiceOver)
             .onHover { inside in if inside, !reached { reached = true } }
     }
+}
 
-    @ViewBuilder private var content: some View {
+/// What a row of the conversation shows. `reached` (the pointer has been over it, or VoiceOver is on) adds the row's
+/// menus and tooltip, never by wrapping its text in a branch of its own: the row's first hover comes as a drag ends
+/// on it (or brings it into view), and a new text view would drop its part of the selection.
+struct ChatItemRow: View {
+    @AppStorage(ChatFont.key) private var chatFontSize = ChatFont.standard
+    let item: ChatItem
+    let chat: ChatModel
+    let expanded: Set<String>
+    let agent: MarkKind
+    let rowID: String?
+    let canSend: Bool
+    let resend: (String) -> Void
+    let openImage: (ChatImage) -> Void
+    let reached: Bool
+
+    var body: some View {
         switch item {
         case .prompt(let entry):
             if case .steered(let text, let fromLead) = entry.kind {
                 VStack(alignment: .trailing, spacing: 4) {
-                    Text(text).font(.system(size: CGFloat(chatFontSize))).lineSpacing(2).chatTextSelection()
-                        .fixedSize(horizontal: false, vertical: true)
+                    ChatMessageText(text: text, kind: .plain, fontSize: CGFloat(chatFontSize), hugs: true)
                         .padding(.horizontal, 13).padding(.vertical, 9)
                         .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.orange.opacity(0.13)))
                     Label(fromLead ? "from another agent (not you)" : "steered while it worked", systemImage: fromLead ? "person.2" : "arrow.turn.down.right")
@@ -448,39 +508,39 @@ private struct ChatItemView: View, Equatable {
                             }
                         }
                         if !text.isEmpty {
-                            Text(text).font(.system(size: CGFloat(chatFontSize))).lineSpacing(2).chatTextSelection()
-                                .fixedSize(horizontal: false, vertical: true)
+                            ChatMessageText(text: text, kind: .plain, fontSize: CGFloat(chatFontSize), hugs: true,
+                                            menu: promptMenu(text))
                         }
                     }
                     .padding(.horizontal, 13).padding(.vertical, 9)
-                    .background(RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.accentColor.opacity(0.16)))
+                    // The text has its own menu (`ChatTextView`); the bubble around it, this one.
+                    .background {
+                        RoundedRectangle(cornerRadius: 14, style: .continuous).fill(Color.accentColor.opacity(0.16))
+                            .onceReached(reached) {
+                                let menu = promptMenu(text)
+                                ForEach(menu.indices, id: \.self) { index in Button(menu[index].title, action: menu[index].action) }
+                            }
+                    }
                     if let at = entry.at {
                         Text(at.formatted(date: .omitted, time: .shortened)).font(.system(size: 10)).foregroundStyle(.tertiary)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .trailing)
                 .padding(.leading, 60)
-                .onceReached(reached || voiceOver) {
-                    Button("Copy") { Pasteboard.copy(text) }
-                    if canSend, let rowID {
-                        Button("Edit in Composer") {
-                            chat.composer.drafts[rowID] = text
-                            chat.focusComposer()
-                        }
-                        Button("Send Again") { resend(text) }
-                    }
-                }
             }
         case .reply(let entry):
             if case .reply(let text) = entry.kind {
                 // The mark beside the text, as an HStack would place it, without the HStack's sizing: it measures the reply
                 // at no width and at any width to share the row out, every paragraph's text again each time.
-                MarkdownView(text: text).frame(maxWidth: .infinity, minHeight: 21, alignment: .topLeading)
+                let when = entry.at.map { $0.formatted(date: .abbreviated, time: .shortened) }
+                ChatMessageText(text: text, kind: .markdown, fontSize: CGFloat(chatFontSize),
+                                menu: [ChatTextMenuItem(title: "Copy as Markdown") { Pasteboard.copy(text) }], help: reached ? when : nil)
+                    .frame(maxWidth: .infinity, minHeight: 21, alignment: .topLeading)
                     .padding(.leading, 30)
-                    .overlay(alignment: .topLeading) { AgentMark(kind: agent, size: 20).padding(.top, 1) }
-                .onceReached(reached || voiceOver, help: entry.at.map { $0.formatted(date: .abbreviated, time: .shortened) }) {
-                    Button("Copy as Markdown") { Pasteboard.copy(text) }
-                }
+                    .overlay(alignment: .topLeading) {
+                        AgentMark(kind: agent, size: 20).padding(.top, 1)
+                            .onceReached(reached, help: when) { Button("Copy as Markdown") { Pasteboard.copy(text) } }
+                    }
             }
         case .team(let entry, let message):
             TeamMessageCard(entry: entry, message: message, chat: chat, expanded: expanded).padding(.trailing, 40)
@@ -501,9 +561,45 @@ private struct ChatItemView: View, Equatable {
     }
 }
 
+private extension ChatItem {
+    /// What a prompt's or a reply's row shows in its `ChatMessageText`, as `ChatItemRow` gives it.
+    var messageText: (text: String, kind: ChatTextContent.Kind)? {
+        switch self {
+        case .prompt(let entry):
+            if case .steered(let text, _) = entry.kind { return (text, .plain) }
+            if case .prompt(let raw, _) = entry.kind {
+                let text = AttachedImages.prompt(raw).1
+                return text.isEmpty ? nil : (text, .plain)
+            }
+            return nil
+        case .reply(let entry):
+            if case .reply(let text) = entry.kind { return (text, .markdown) }
+            return nil
+        default:
+            return nil
+        }
+    }
+}
+
+extension ChatItemRow {
+    /// A prompt's menu: on its bubble, and after Copy and Select All on its text.
+    func promptMenu(_ text: String) -> [ChatTextMenuItem] {
+        var items = [ChatTextMenuItem(title: "Copy Message") { Pasteboard.copy(text) }]
+        if canSend, let rowID {
+            items.append(ChatTextMenuItem(title: "Edit in Composer") {
+                chat.composer.drafts[rowID] = text
+                chat.focusComposer()
+            })
+            items.append(ChatTextMenuItem(title: "Send Again") { resend(text) })
+        }
+        return items
+    }
+}
+
 private extension View {
     /// The row's context menu and tooltip, from when the pointer has reached the row (with VoiceOver, always): neither
     /// can show before, and a page shown earlier needn't build them for each of its rows (as `ChatTextSelection`).
+    /// Never around a message's text: the branch makes what it wraps anew (`ChatItemRow`).
     @ViewBuilder func onceReached<Menu: View>(_ reached: Bool, help: String? = nil, @ViewBuilder menu: () -> Menu) -> some View {
         if !reached {
             self

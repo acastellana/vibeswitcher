@@ -111,6 +111,7 @@ struct ChatStagingTests {
 
     @Test func anEarlierPageFillsInUnderItsFirstRows() {
         // 240 items, 60 shown (180...239); Show earlier: the window starts at 120.
+        let batch = ChatStaging.batch
         let all = items(240)
         let window = ChatWindow.shown(all, limit: 120, including: nil).items
         var staging = ChatStaging.page(start: 120, previous: 180)
@@ -119,19 +120,20 @@ struct ChatStagingTests {
             staging.step()
             turns.append(ids(ChatWindow.visible(window, staging: staging)))
         }
-        #expect(turns.count == 3)
+        #expect(turns.count == (60 + batch - 1) / batch)
         // At once: the page's first rows, at the top where the view is, then the rows that were shown.
-        #expect(turns[0] == (120..<140).map { "t\($0)" } + (180..<240).map { "t\($0)" })
-        // Each turn adds the next rows under those, never anything above them: the first rows never move.
+        #expect(turns[0] == (120..<(120 + batch)).map { "t\($0)" } + (180..<240).map { "t\($0)" })
+        // Each turn adds the next rows under those (a batch, the last what's left), never anything above them: the first
+        // rows never move.
         for (before, after) in zip(turns, turns.dropFirst()) {
-            #expect(Array(after.prefix(20)) == Array(before.prefix(20)))
+            #expect(Array(after.prefix(batch)) == Array(before.prefix(batch)))
             #expect(Array(after.suffix(60)) == Array(before.suffix(60)))
-            #expect(after.count == before.count + 20)
+            #expect(after.count == min(before.count + batch, 120))
         }
         #expect(turns.last == ids(Array(window)))
         // A short page (the conversation's first rows): all of it at once.
-        #expect(ChatStaging.page(start: 0, previous: 18).isDone)
-        #expect(ChatStaging.page(start: 0, previous: 40).below == 20..<40)
+        #expect(ChatStaging.page(start: 0, previous: batch - 2).isDone)
+        #expect(ChatStaging.page(start: 0, previous: 40).below == batch..<40)
     }
 
     @Test func theRowsComeInBlocksThatKeepTheirNumber() {
@@ -155,16 +157,18 @@ struct ChatStagingTests {
     @Test func anOpenComesNewestFirst() {
         let all = items(240)
         let window = ChatWindow.shown(all, limit: 60, including: nil).items
+        let batch = ChatStaging.batch
         var staging = ChatStaging.open(start: 180, end: 240)
-        #expect(ids(ChatWindow.visible(window, staging: staging)) == (220..<240).map { "t\($0)" })
+        #expect(ids(ChatWindow.visible(window, staging: staging)) == ((240 - batch)..<240).map { "t\($0)" })
         staging.step()
-        #expect(ids(ChatWindow.visible(window, staging: staging)) == (200..<240).map { "t\($0)" })
+        #expect(ids(ChatWindow.visible(window, staging: staging)) == ((240 - 2 * batch)..<240).map { "t\($0)" })
         var turns = 1
         while !staging.isDone { staging.step(); turns += 1 }
-        #expect(turns == 2)
+        // The rows over the first batch, a batch a turn.
+        #expect(turns == (60 - batch + batch - 1) / batch)
         #expect(ChatWindow.visible(window, staging: staging).count == 60)
         // Fewer rows than a turn adds: all at once.
-        #expect(ChatStaging.open(start: 222, end: 240).isDone)
+        #expect(ChatStaging.open(start: 240 - (batch - 2), end: 240).isDone)
         #expect(ChatWindow.visible(window, staging: nil).count == 60)
     }
 }
