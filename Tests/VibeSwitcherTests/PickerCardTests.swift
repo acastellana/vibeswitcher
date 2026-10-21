@@ -258,7 +258,8 @@ struct PickerCardTests {
     }
 
     /// The same screens read off the capture byte for byte (no host): a parse is taken when the read before parsed
-    /// the same, so a read landing mid-redraw is never taken, and a screen that couldn't be read counts as none.
+    /// the same at another time, so a read landing mid-redraw is never taken (gone over twice, it's still one read),
+    /// and a screen that couldn't be read counts as none.
     @Test func aPickerParseIsTakenOnceTwoReadsInARowAgree() throws {
         let raw = Array(try Data(contentsOf: ReplayHarness.capture.appendingPathExtension("raw")))
         func screen(_ end: Int) -> [String] {
@@ -269,24 +270,33 @@ struct PickerCardTests {
         let list = screen(19779), half = screen(21943), whole = screen(22085)
         #expect(ScreenMenu.parsePicker(half)?.hint == "Enter to confirm · Esc to caect · ←/→ to switch · Esc to cancel")
         var settled = ScreenMenu.SettledPicker()
-        settled.read(list)
+        var clock = Date(timeIntervalSince1970: 1_000)
+        func read(_ lines: [String]?) {
+            clock += 0.25
+            settled.read(lines, at: clock)
+        }
+        read(list)
         #expect(settled.menu == nil)
         #expect(settled.settling)
-        settled.read(list)
+        read(list)
         let taken = try #require(settled.menu)
         #expect(taken.options == ["Add a new rule…", "Bash(ls:*)"])
         #expect(!settled.settling)
-        settled.read(half)
+        read(half)
         #expect(settled.menu == taken)
         #expect(settled.settling)
-        settled.read(whole)
+        // The same read gone over again: one instant, not two reads agreeing.
+        settled.read(half, at: clock)
         #expect(settled.menu == taken)
-        settled.read(whole)
+        #expect(settled.settling)
+        read(whole)
+        #expect(settled.menu == taken)
+        read(whole)
         #expect(settled.menu?.hint == "Enter to confirm · Esc to cancel")
         #expect(settled.menu?.options == ["Yes", "No"])
-        settled.read(nil)
+        read(nil)
         #expect(settled.menu?.options == ["Yes", "No"])
-        settled.read(nil)
+        read(nil)
         #expect(settled.menu == nil)
     }
 
@@ -449,8 +459,9 @@ while True:
         sync = ChatSync(chat: chat, host: host)
         let capture = Self.capture.path
         command = "exec /usr/bin/python3 -I -u '\(script.path)' '\(capture).raw' '\(capture).marks.json' '\(control.path)' '\(keysFile.path)'"
-        // Every read of the host's screen counted, and kept as the pane's read of it would be (trimmed both sides):
-        // the pane follows the same session stream.
+        // Every read of the host's screen counted, and kept as the pane's read of it would be (trimmed both sides),
+        // stamped with when it was read (the pane's reads of it, until the next, are of that instant): the pane
+        // follows the same session stream.
         // A read answered only once the host's screen passes the first of `awaited` (that one used up), or given up on
         // after a minute (the test's own checks fail then, it doesn't hang).
         let read = sync.hostScreen
@@ -464,7 +475,10 @@ while True:
                     }
                     self.awaited.removeFirst()
                 }
-                if let lines { self.paneReads[id] = ScreenRead(lines: lines.map { $0.replacingOccurrences(of: "\u{0}", with: " ").trimmingCharacters(in: .whitespaces) }) }
+                if let lines {
+                    self.paneReads[id] = ScreenRead(lines: lines.map { $0.replacingOccurrences(of: "\u{0}", with: " ").trimmingCharacters(in: .whitespaces) },
+                                                    at: Date())
+                }
                 if let lines { self.reads.append(lines) }
                 done(lines)
             }

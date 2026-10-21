@@ -5,6 +5,9 @@ import VibeCore
 struct ScreenRead: Equatable {
     var lines: [String] = []
     var highlights: [[String]] = []
+    /// When the screen was read (nil: as it's asked for, `ChatSync.now`). Two reads of one instant are one read
+    /// (`ScreenMenu.SettledPicker`).
+    var at: Date?
 }
 
 /// The chat's side of the selected window session's terminal: the question, permission prompt or picker its screen
@@ -98,6 +101,10 @@ final class ChatSync {
     private var paneMenus: (id: UUID, menus: ScreenMenu.SettledPicker)?
     /// The pane's last read parsed as another menu than the one taken (or none): the screen is changing.
     private var paneSettling: Bool { paneMenus?.menus.settling == true }
+    /// A click refused while the screen was changing (the pane's last read not taken): the card kept the question it
+    /// drew (`drawn`), and the notice is said again of the next read taken (none when that's still the question
+    /// drawn: it can be clicked again). Its session's.
+    private var refused: (id: UUID, drawn: ScreenMenu)?
     /// What the screen shows now, for an answer about to be typed in: the pane's last read, taken or not (the card
     /// may be a read behind it), else the card's.
     private var onScreenNow: ScreenMenu? { paneSettling ? paneMenus?.menus.latest : chat.menu }
@@ -170,7 +177,8 @@ final class ChatSync {
         settled = ScreenMenu.SettledPicker()
     }
 
-    /// One read while watched: the pane's screen now, the host's once it answers (one request at a time).
+    /// One read while watched: the pane's screen now, the host's once it answers (one request at a time). The pane is
+    /// read once a tick: read again as the host answers, the two reads would agree whatever they show.
     private func watchTick() {
         guard let watch, let target = target(), target.id == watch.id else { return stopWatching() }
         guard inSight() else { return pauseWatch() }
@@ -182,8 +190,8 @@ final class ChatSync {
             self.hostReading = false
             // Another session was selected, or the watch ended meanwhile.
             guard self.watch?.id == target.id, self.target()?.id == target.id else { return }
-            self.settled.read(lines)
-            self.readScreen()
+            self.settled.read(lines, at: self.now())
+            self.read(confirming: false, pane: false)
             self.followWatch()
         }
     }
@@ -219,13 +227,17 @@ final class ChatSync {
         read(confirming: false)
     }
 
-    /// `readScreen`; `confirming`: the confirm read itself.
-    private func read(confirming: Bool) {
-        confirm?.cancel()
-        confirm = nil
+    /// `readScreen`; `confirming`: the confirm read itself. `pane`: the pane's read goes to its menus (false: the host's
+    /// answer within a watch tick, whose pane read was taken already; a confirm read it asked for still comes).
+    private func read(confirming: Bool, pane paneRead: Bool = true) {
+        if paneRead {
+            confirm?.cancel()
+            confirm = nil
+        }
         guard let target = target() else {
             clearSince = nil
             paneMenus = nil
+            refused = nil
             if watch != nil { stopWatching() }
             if chat.mode != nil { chat.mode = nil }
             if let terminal = terminalTarget() { return readTerminal(terminal) }
@@ -235,8 +247,10 @@ final class ChatSync {
         }
         let read = screen(target.id)
         var pane = paneMenus?.id == target.id ? paneMenus!.menus : ScreenMenu.SettledPicker()
-        pane.take(Self.menu(on: read, needsInput: target.needsInput))
-        paneMenus = (target.id, pane)
+        if paneRead {
+            pane.take(Self.menu(on: read, needsInput: target.needsInput), at: read.at ?? now())
+            paneMenus = (target.id, pane)
+        }
         let onScreen = pane.menu, watched = watch?.id == target.id
         // A local command's picker the pane's read can't make out, from the host's screen.
         let menu = onScreen ?? (watched ? picker : nil)
@@ -249,11 +263,17 @@ final class ChatSync {
         // The pane's last read, or the host's, parsed as another menu (or none), not yet taken: the card stays as it
         // was.
         if pane.settling {
-            if !confirming { confirmSoon(target.id) }
+            if !confirming, paneRead { confirmSoon(target.id) }
             return
         }
         if onScreen == nil, watched, settled.settling { return }
         guard show(menu) else { return }
+        if let refused {
+            self.refused = nil
+            if refused.id == target.id {
+                chat.answerNotice = chat.menu?.sameQuestion(as: refused.drawn) == true ? nil : Self.refusal(chat.menu)
+            }
+        }
         let mode = target.agent == .codex ? nil : AgentMode.parse(Array(read.lines.suffix(6)))
         if chat.mode != mode { chat.mode = mode }
         // Held messages go in once this session's own screen has shown nothing open for a while: no menu, and no
@@ -448,9 +468,9 @@ final class ChatSync {
         readScreen()
         let shown = onScreenNow
         guard let menu = shown, menu.sameQuestion(as: drawn) else {
-            // Here it is now, as the notice says: the card takes the screen's last read at once (a change of card
-            // later would clear the notice).
-            if paneSettling, chat.menu != shown { chat.menu = shown }
+            // The screen's last read not taken yet may be half a redraw: the card keeps what it drew, and the notice
+            // is said again of the read that's taken (the confirm read's, `refused`).
+            if paneSettling { refused = (target.id, drawn) }
             chat.answerNotice = Self.refusal(shown)
             return
         }

@@ -280,31 +280,39 @@ public struct ScreenMenu: Equatable, Sendable {
     /// only the cells that changed, a dialog over the last one in pieces, and a read landing between two pieces can
     /// parse as a dialog made of both: /permissions' "Delete allowed tool?" with its Yes / No rows, under a footer half
     /// overwritten ("Enter to confirm · Esc to caect · ←/→ to switch · Esc to cancel", the old one's end still saying
-    /// how to close it). A parse is taken when the read before parsed the same; until then `menu` is the one taken
-    /// before. The pane's numbered menus (`parse`, an agent's question, /model's rows) go through one too (`take`).
+    /// how to close it). A parse is taken when the read before parsed the same, and was read at another time: each
+    /// read is stamped with when the screen was read, and two reads of one instant (the same read gone over twice)
+    /// agree whatever they show. Until then `menu` is the one taken before. The pane's numbered menus (`parse`, an
+    /// agent's question, /model's rows) go through one too (`take`).
     public struct SettledPicker: Equatable, Sendable {
+        /// A read: its parse, and when the screen was read.
+        private struct Read: Equatable, Sendable {
+            var parse: ScreenMenu?
+            var at: Date
+        }
+
         /// The last parse taken: nil before any, or for a screen with no picker.
         public private(set) var menu: ScreenMenu?
-        /// The read before's parse; nil before the first read.
-        private var last: ScreenMenu??
+        /// The read before; nil before the first.
+        private var last: Read?
 
         public init() {}
 
         /// The last read parsed as something else than `menu`: a change not yet taken.
-        public var settling: Bool { last.map { $0 != menu } ?? false }
+        public var settling: Bool { last.map { $0.parse != menu } ?? false }
 
         /// The last read's parse, taken or not (nil before any read).
-        public var latest: ScreenMenu? { last ?? nil }
+        public var latest: ScreenMenu? { last?.parse }
 
-        /// The next read's lines (nil: the screen couldn't be read, as one with no picker).
-        public mutating func read(_ screen: [String]?) {
-            take(screen.flatMap(ScreenMenu.parsePicker))
+        /// The next read's lines (nil: the screen couldn't be read, as one with no picker), read at `at`.
+        public mutating func read(_ screen: [String]?, at: Date) {
+            take(screen.flatMap(ScreenMenu.parsePicker), at: at)
         }
 
-        /// The next read's parse, whatever parsed it.
-        public mutating func take(_ parse: ScreenMenu?) {
-            if last == .some(parse) { menu = parse }
-            last = .some(parse)
+        /// The next read's parse, whatever parsed it, of the screen as it was at `at`.
+        public mutating func take(_ parse: ScreenMenu?, at: Date) {
+            if let last, last.parse == parse, last.at != at { menu = parse }
+            self.last = Read(parse: parse, at: at)
         }
     }
 
