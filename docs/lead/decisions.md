@@ -352,3 +352,7 @@ The third audit (5699441) passed everything except cost. Two of its three Import
 
 The user asked why the app asks for a key that's already in their environment. A Finder-launched app doesn't inherit shell variables, but the app already reads the login-shell environment for sessions. A typed key still wins, so nothing changes for users without the variable.
 
+## 2026-10-21 13:37:19 The user accepts text selection's transient graphics memory: about 100 MB more during repeated chat-window open and close, released when churn stops, with churn growth about 7.6 % against 5 %. selecting-text-in-the merges after a clean audit. The footprint bar for it is the per-cycle and churn numbers the worker measured, not the lead's earlier 2-point and 15 MB bar.
+
+The user's answer to 1B9FE8C5 on 2026-10-21 at 13:2x. The chat's cost now matches today's, the memory is the renderer's surface cache rather than a leak, and the alternative was days of uncertain re-plan.
+
