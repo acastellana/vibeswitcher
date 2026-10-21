@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Testing
 import VibeCore
@@ -15,20 +16,39 @@ struct BriefingKeyTests {
     static let fromFile = "sk" + "_" + String(repeating: "f11e", count: 8)
     static let fileText = "ELEVENLABS_API_KEY=\(fromFile)\n"
 
-    /// Counts the shell's reads.
+    /// Counts the shell's reads; with `held`, each read waits until let go (a slow .zshrc).
     final class FakeShell: @unchecked Sendable {
         private let lock = NSLock()
         private var count = 0
         var value: String?
+        var held = false
+        let entered = DispatchSemaphore(value: 0)
+        let gate = DispatchSemaphore(value: 0)
         init(_ value: String?) { self.value = value }
         var reads: Int { lock.withLock { count } }
-        func read() -> String? { lock.withLock { count += 1; return value } }
+        func read() -> String? {
+            lock.withLock { count += 1 }
+            if held {
+                entered.signal()
+                gate.wait()
+            }
+            return lock.withLock { value }
+        }
     }
 
-    func key(saved: String? = nil, shell: String? = nil, file: String? = nil) -> (BriefingKey, AppProof.MemorySecret, FakeShell) {
+    /// A clock the test moves.
+    final class FakeClock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var at: TimeInterval = 1000
+        var now: TimeInterval { lock.withLock { at } }
+        func advance(_ seconds: TimeInterval) { lock.withLock { at += seconds } }
+    }
+
+    func key(saved: String? = nil, shell: String? = nil, file: String? = nil, refreshEvery: TimeInterval = BriefingKey.refreshInterval,
+             clock: FakeClock = FakeClock()) -> (BriefingKey, AppProof.MemorySecret, FakeShell) {
         let store = AppProof.MemorySecret(saved)
         let fake = FakeShell(shell)
-        return (BriefingKey(saved: store, shell: { fake.read() }, file: { file }), store, fake)
+        return (BriefingKey(saved: store, shell: { fake.read() }, file: { file }, refreshEvery: refreshEvery, now: { clock.now }), store, fake)
     }
 
     // MARK: - The order
@@ -67,6 +87,60 @@ struct BriefingKeyTests {
         // A shell without it is remembered too.
         #expect(key.read() == nil)
         #expect(shell.reads == 2)
+    }
+
+    /// Settings closed and opened again within seconds keeps the shell's value; a refresh while a shell reads it is
+    /// dropped (that read is new enough), and never waits for it.
+    @Test func aRefreshIsDebouncedAndNeverStartsASecondShell() async throws {
+        let clock = FakeClock()
+        let (key, _, shell) = key(shell: Self.fromShell, clock: clock)
+        #expect(key.refresh())
+        #expect(key.read() == Self.fromShell)
+        #expect(shell.reads == 1)
+        clock.advance(BriefingKey.refreshInterval - 1)
+        #expect(!key.refresh())
+        #expect(key.read() == Self.fromShell)
+        #expect(shell.reads == 1)
+        clock.advance(2)
+        #expect(key.refresh())
+        // A slow shell: a refresh meanwhile is dropped at once, and a second reader waits for that shell's value.
+        shell.held = true
+        let first = Task.detached { key.read() }
+        shell.entered.wait()
+        clock.advance(BriefingKey.refreshInterval * 2)
+        #expect(!key.refresh())
+        let second = Task.detached { key.read() }
+        shell.held = false
+        shell.gate.signal()
+        #expect(await first.value == Self.fromShell)
+        #expect(await second.value == Self.fromShell)
+        #expect(shell.reads == 2)
+        // Once it's done, a refresh is taken again.
+        #expect(key.refresh())
+    }
+
+    /// Settings › General › Briefing looks again on each opening of the window, never on a tab switch within one
+    /// (the window is kept for the launch; the General tab appears again each time it's chosen).
+    @Test func eachOpeningOfSettingsRefreshesTheKeyOnce() async throws {
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let presets = scratchRoot.appendingPathComponent("\(suite).json")
+        defer { try? FileManager.default.removeItem(at: presets) }
+        let (key, _, shell) = key(shell: Self.fromShell, refreshEvery: 0)
+        let model = model(key, voice: .init(), defaults: defaults)
+        let preferences = Preferences(defaults: defaults, presetsFile: presets)
+        let setup = SetupModel(preferences: preferences, system: .fixed(hooks: [.claude: true], terminal: .notAsked, notifications: .off))
+        let controller = SettingsWindowController(preferences: preferences, setup: setup, phoneAccess: PhoneAccess(store: SessionStore()),
+                                                  recentProjects: { [] }, showWelcome: {}, briefing: model)
+        for opening in 1...3 {
+            controller.open(tab: .general)
+            #expect(await until { shell.reads == opening && model.keySource == .shell(variable: "ELEVENLABS_API_KEY") })
+            for tab in [SettingsTab.agents, .general, .phone, .general, .terminal, .general] { controller.open(tab: tab) }
+            try await Task.sleep(nanoseconds: 200_000_000)
+            #expect(shell.reads == opening)
+            controller.windowWillClose(Notification(name: NSWindow.willCloseNotification, object: controller.window))
+        }
+        #expect(shell.reads == 3)
     }
 
     /// Saving and removing touch the Keychain item only.

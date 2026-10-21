@@ -14,12 +14,15 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     static let size = CGSize(width: 660, height: 540)
     private let selection = SettingsSelection()
     private let setup: SetupModel
+    private let briefing: BriefingModel?
+    /// The window is open (from `open(tab:)` to its closing): what's started for an opening runs once per opening.
     private var watching = false
 
     init(preferences: Preferences, setup: SetupModel, phoneAccess: PhoneAccess,
          recentProjects: @escaping () -> [String], showWelcome: @escaping () -> Void, host: HostClient? = nil,
          briefing: BriefingModel? = nil) {
         self.setup = setup
+        self.briefing = briefing
         let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.size),
                               styleMask: [.titled, .closable], backing: .buffered, defer: false)
         window.title = "Settings"
@@ -35,13 +38,23 @@ final class SettingsWindowController: NSWindowController, NSWindowDelegate {
     required init?(coder: NSCoder) { fatalError("not used") }
 
     func show(tab: SettingsTab) {
-        selection.tab = tab
-        if !watching { setup.watch(); watching = true }
+        open(tab: tab)
         showWindow(nil)
         window?.makeKeyAndOrderFront(nil)
         // Up front even when macOS doesn't make the app active (opened from the command line, at login).
         window?.orderFrontRegardless()
         NSApp.activate()
+    }
+
+    /// Shows `tab`; on an opening (not when it's open already: ⌘, again, a tab switched), watches the setup and looks
+    /// where the briefing's key comes from, the login shell's read again. Not on a view appearing: the window is kept
+    /// for the whole launch, and the General tab appears again each time it's chosen.
+    func open(tab: SettingsTab) {
+        selection.tab = tab
+        guard !watching else { return }
+        watching = true
+        setup.watch()
+        briefing?.checkKey()
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -537,7 +550,6 @@ struct BriefingSettings: View {
         } footer: {
             SettingsFooter("Brief me (in the window's toolbar and the menu bar) writes 30 seconds on what happened lately across the projects VibeSwitcher leads, with headless Claude, and reads it aloud. Brief me on <project>, at the top of a lead's Team tab or with ⌥⇧⌘B, does the same for that one project. With a key, the text goes to ElevenLabs to be read, only when you press the button; without one, the Mac's own voice reads it. A key typed here is kept in your login Keychain, nowhere else; without one, ELEVENLABS_API_KEY from your shell or ~/.config/elevenlabs/key.env is used, held in memory only.")
         }
-        .onAppear { briefing.checkKey() }
     }
 
     private func save() {

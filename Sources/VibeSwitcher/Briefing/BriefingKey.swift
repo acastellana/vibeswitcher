@@ -48,15 +48,27 @@ final class BriefingKey: SecretStore, @unchecked Sendable {
     private let saved: SecretStore
     private let shell: @Sendable () -> String?
     private let file: @Sendable () -> String?
-    /// Taken while the shell's value is read, so two briefings at once start one shell.
-    private let shellLock = NSLock()
+    /// Settings opened again within this many seconds of the last refresh: the shell's value is kept.
+    static let refreshInterval: TimeInterval = 10
+    private let refreshEvery: TimeInterval
+    private let now: @Sendable () -> TimeInterval
+    /// Taken while the shell is read, so two briefings at once start one shell.
+    private let readLock = NSLock()
+    /// Guards the three below; never held while the shell runs, so `refresh()` doesn't wait on it.
+    private let state = NSLock()
     /// The shell's value (nil inside: the shell hasn't it); nil: not read since launch or since `refresh()`.
     private var shellValue: String??
+    /// A shell is running for it now.
+    private var reading = false
+    private var refreshedAt: TimeInterval?
 
     /// `saved`: the Keychain item. `shell`: the login shell's ELEVENLABS_API_KEY. `file`: the key file's text. Tests
-    /// give stand-ins for all three.
-    init(saved: SecretStore, shell: @escaping @Sendable () -> String? = { nil }, file: @escaping @Sendable () -> String? = { nil }) {
+    /// give stand-ins for all three, and for the clock.
+    init(saved: SecretStore, shell: @escaping @Sendable () -> String? = { nil }, file: @escaping @Sendable () -> String? = { nil },
+         refreshEvery: TimeInterval = refreshInterval, now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
         self.saved = saved
+        self.refreshEvery = refreshEvery
+        self.now = now
         self.shell = shell
         self.file = file
     }
@@ -88,16 +100,30 @@ final class BriefingKey: SecretStore, @unchecked Sendable {
         return (nil, .absent)
     }
 
-    /// The shell's value is read again the next time it's needed (Settings opening).
-    func refresh() {
-        shellLock.withLock { shellValue = nil }
+    /// Settings opened: the shell's value is read again the next time it's needed. Not while a shell is reading it
+    /// (what that one finds is new enough), nor within `refreshInterval` of the last refresh (Settings closed and
+    /// opened again). Returns whether it was. Never waits.
+    @discardableResult
+    func refresh() -> Bool {
+        state.withLock {
+            let at = now()
+            if reading { return false }
+            if let last = refreshedAt, at - last < refreshEvery { return false }
+            refreshedAt = at
+            shellValue = nil
+            return true
+        }
     }
 
     private func shellKey() -> String? {
-        shellLock.withLock {
-            if let held = shellValue { return held }
+        readLock.withLock {
+            if let held = state.withLock({ shellValue }) { return held }
+            state.withLock { reading = true }
             let value = Self.usable(shell())
-            shellValue = .some(value)
+            state.withLock {
+                shellValue = .some(value)
+                reading = false
+            }
             return value
         }
     }

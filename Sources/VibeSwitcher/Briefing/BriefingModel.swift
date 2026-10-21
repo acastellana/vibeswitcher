@@ -245,13 +245,13 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
         speak(Self.sample(language), language: Self.sample[language.code] == nil ? "en" : language.code)
     }
 
-    /// Looks where the key comes from, the shell's read again (off the main thread: the Keychain may ask you first,
-    /// the shell takes a moment).
+    /// Settings opened: looks where the key comes from, the shell's read again (`BriefingKey.refresh`: not twice
+    /// within seconds, nor while one reads it). Off the main thread: the Keychain may ask you first, the shell takes a
+    /// moment.
     func checkKey() {
         let keyStore = keyStore
+        keyStore.refresh()
         DispatchQueue.global(qos: .userInitiated).async {
-            // Off the main thread too: a briefing may be reading the shell, and this waits for it.
-            keyStore.refresh()
             let source = keyStore.resolve().source
             DispatchQueue.main.async { self.keySource = source }
         }
