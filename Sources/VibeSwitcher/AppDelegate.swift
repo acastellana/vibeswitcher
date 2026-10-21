@@ -69,12 +69,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         controller.watchPower(limit: { [weak self] in self?.preferences.batteryHoldBelow ?? PowerWatch.defaultLimit }) { SystemPower.state() }
         return controller
     }()
-    /// Brief me: the spoken briefing of what happened lately across the led projects. The ElevenLabs key is in the
-    /// login Keychain, read only when it's used.
+    /// The ElevenLabs key for the briefing, the Mac's and the phone's: the one saved in the login Keychain, else your
+    /// login shell's ELEVENLABS_API_KEY (one shell per launch), else ~/.config/elevenlabs/key.env; read only when it's used.
+    private lazy var briefingKey = BriefingKey.live(saved: AppProof.KeychainSecret(account: AppProof.elevenLabsAccount))
+    /// Brief me: the spoken briefing of what happened lately across the led projects.
     private lazy var briefing = BriefingModel(
         snapshot: { [weak self] in BriefingModel.Snapshot(boards: self?.leadController.boards ?? [:], sessions: self?.store.sessions ?? []) },
         language: { [weak self] in BriefingLanguage.named(self?.preferences.briefingLanguage ?? "") ?? .preferred() },
-        keyStore: AppProof.KeychainSecret(account: AppProof.elevenLabsAccount))
+        keyStore: briefingKey)
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var hotKey: HotKey?
@@ -156,7 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         let phoneBriefer = PhoneBriefer(
             snapshot: { [weak self] in BriefingModel.Snapshot(boards: self?.leadController.boards ?? [:], sessions: self?.store.sessions ?? []) },
             language: { [weak self] in BriefingLanguage.named(self?.preferences.briefingLanguage ?? "") ?? .preferred() },
-            keyStore: AppProof.KeychainSecret(account: AppProof.elevenLabsAccount))
+            keyStore: briefingKey)
         phoneAccess.brief = phoneBriefer.brief
         phoneAccess.briefProject = phoneBriefer.brief(project:_:)
         phoneAccess.briefingProjects = phoneBriefer.projects

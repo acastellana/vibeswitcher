@@ -485,7 +485,8 @@ struct ColorRow: View {
 }
 
 /// Settings › General › Briefing: the language the Brief me briefing is written and read in, and the ElevenLabs API
-/// key, kept in the login Keychain only (never in the defaults, a log or the phone).
+/// key: where it comes from (`BriefingKey`: the Keychain, your shell, the key file; named, never shown), and one typed
+/// here, kept in the login Keychain only (never in the defaults, a log or the phone).
 struct BriefingSettings: View {
     @ObservedObject var preferences: Preferences
     @ObservedObject var briefing: BriefingModel
@@ -499,8 +500,7 @@ struct BriefingSettings: View {
             }
             LabeledContent("ElevenLabs API key") {
                 HStack {
-                    SecureField("ElevenLabs API key", text: $key,
-                                prompt: Text(briefing.keySaved == true ? "Saved in your Keychain" : "Not set"))
+                    SecureField("ElevenLabs API key", text: $key, prompt: Text(prompt))
                         .labelsHidden()
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 220)
@@ -511,6 +511,14 @@ struct BriefingSettings: View {
                     }
                 }
             }
+            LabeledContent("Key in use") {
+                HStack {
+                    Text(briefing.keySource?.line ?? "Looking…").foregroundStyle(.secondary)
+                    if briefing.keySource?.canSave == true {
+                        Button("Save to Keychain") { briefing.saveFoundKey() }
+                    }
+                }
+            }
             LabeledContent("Voice") {
                 Button("Test voice") { briefing.testVoice() }
             }
@@ -518,9 +526,17 @@ struct BriefingSettings: View {
         } header: {
             Text("Briefing")
         } footer: {
-            SettingsFooter("Brief me (in the window's toolbar and the menu bar) writes 30 seconds on what happened lately across the projects VibeSwitcher leads, with headless Claude, and reads it aloud. Brief me on <project>, at the top of a lead's Team tab or with ⌥⇧⌘B, does the same for that one project. With a key, the text goes to ElevenLabs to be read, only when you press the button; without one, the Mac's own voice reads it. The key is kept in your login Keychain, nowhere else.")
+            SettingsFooter("Brief me (in the window's toolbar and the menu bar) writes 30 seconds on what happened lately across the projects VibeSwitcher leads, with headless Claude, and reads it aloud. Brief me on <project>, at the top of a lead's Team tab or with ⌥⇧⌘B, does the same for that one project. With a key, the text goes to ElevenLabs to be read, only when you press the button; without one, the Mac's own voice reads it. A key typed here is kept in your login Keychain, nowhere else; without one, ELEVENLABS_API_KEY from your shell or ~/.config/elevenlabs/key.env is used, held in memory only.")
         }
         .onAppear { briefing.checkKey() }
+    }
+
+    private var prompt: String {
+        switch briefing.keySource {
+        case .keychain: return "Saved in your Keychain"
+        case .shell, .file: return "Paste one to use instead"
+        case .absent, nil: return "Not set"
+        }
     }
 
     private func save() {

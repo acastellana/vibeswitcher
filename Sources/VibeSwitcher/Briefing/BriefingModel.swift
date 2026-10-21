@@ -2,8 +2,8 @@ import Foundation
 import VibeCore
 
 /// The Brief me button's state: pressing it writes a thirty-second briefing of what happened lately across the
-/// projects VibeSwitcher leads (`Briefing`), shows it, and reads it aloud, through ElevenLabs when a key is saved in
-/// Settings, else with the Mac's voice. Pressing it again stops it. Nothing leaves the Mac but on a press (Brief me,
+/// projects VibeSwitcher leads (`Briefing`), shows it, and reads it aloud, through ElevenLabs when there's a key (saved
+/// in Settings, or found in your shell: `BriefingKey`), else with the Mac's voice. Pressing it again stops it. Nothing leaves the Mac but on a press (Brief me,
 /// Play, Test voice): the briefing's notes go to headless Claude, its text to ElevenLabs when there's a key.
 /// Used on the main thread; the writing, the Keychain and ElevenLabs run off it.
 ///
@@ -28,9 +28,11 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
     @Published var panelHidden = false
     /// Counts the window menu's presses: the views that hold the panel open it (`pressFromMenu()`).
     @Published private(set) var revealed = 0
-    /// Whether an ElevenLabs key is saved (nil: not looked yet), and what the last save said.
-    @Published private(set) var keySaved: Bool?
+    /// Where the ElevenLabs key comes from (nil: not looked yet), and what the last save said.
+    @Published private(set) var keySource: BriefingKeySource?
     @Published private(set) var keyNotice: String?
+    /// Whether a key is saved in the Keychain (nil: not looked yet).
+    var keySaved: Bool? { keySource.map { $0 == .keychain } }
 
     /// What the briefing is composed from, taken on the main thread: each led project's board by root, and the sessions.
     struct Snapshot {
@@ -42,7 +44,7 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
     private let snapshot: () -> Snapshot
     private let language: () -> BriefingLanguage
     private let generate: @Sendable (String) -> String?
-    private let keyStore: SecretStore
+    private let keyStore: BriefingKey
     private let client: ElevenLabs
     private let shared: Shared
     private var voice: BriefingVoice { shared.voice }
@@ -91,7 +93,7 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
         self.scope = scope
         self.snapshot = snapshot
         self.language = language
-        self.keyStore = keyStore
+        self.keyStore = keyStore as? BriefingKey ?? BriefingKey(saved: keyStore)
         self.generate = generate
         self.client = client
         self.shared = shared
@@ -243,24 +245,41 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
         speak(Self.sample(language), language: Self.sample[language.code] == nil ? "en" : language.code)
     }
 
-    /// Looks whether a key is saved (off the main thread: the Keychain may ask you first).
+    /// Looks where the key comes from, the shell's read again (off the main thread: the Keychain may ask you first,
+    /// the shell takes a moment).
     func checkKey() {
         let keyStore = keyStore
+        keyStore.refresh()
         DispatchQueue.global(qos: .userInitiated).async {
-            let saved = keyStore.read() != nil
-            DispatchQueue.main.async { self.keySaved = saved }
+            let source = keyStore.resolve().source
+            DispatchQueue.main.async { self.keySource = source }
         }
     }
 
-    /// Saves the key in the Keychain (nil or empty: removes it).
+    /// Saves the key in the Keychain (nil or empty: removes the saved one; your shell's or the file's is used then).
     func saveKey(_ value: String?) {
         let value = value?.trimmingCharacters(in: .whitespacesAndNewlines)
+        update { $0.write(value) }
+    }
+
+    /// Save to Keychain: the key found in your shell or the key file, saved as if typed (it never reaches the view).
+    func saveFoundKey() {
+        update { keyStore in
+            let found = keyStore.resolve()
+            return found.source.canSave ? keyStore.write(found.key) : true
+        }
+    }
+
+    /// Changes the Keychain item off the main thread (`change` says whether it took it), then looks where the key
+    /// comes from.
+    private func update(_ change: @escaping @Sendable (BriefingKey) -> Bool) {
         let keyStore = keyStore
         audio = nil
         DispatchQueue.global(qos: .userInitiated).async {
-            let ok = keyStore.write(value)
+            let ok = change(keyStore)
+            let source = keyStore.resolve().source
             DispatchQueue.main.async {
-                if ok { self.keySaved = value?.isEmpty == false }
+                self.keySource = source
                 self.keyNotice = ok ? nil : "The Keychain didn't take it; nothing was saved."
             }
         }
