@@ -878,3 +878,4 @@
 - 2026-10-21 12:30 Planned the-briefing-uses: The briefing uses ELEVENLABS_API_KEY from the user's shell when no key is saved
 - 2026-10-21 12:31 Started a worker on the-briefing-uses
 - 2026-10-21 14:33 Audit of the-briefing-uses: incomplete, clean, round 1: 1 Important open, 1 Pre-existing open
+- 2026-10-21 14:48 Planned the-picker-card-never: The picker card never reads a half-drawn screen
