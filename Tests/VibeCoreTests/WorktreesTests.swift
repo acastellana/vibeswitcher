@@ -735,50 +735,107 @@ struct ShellTests {
 
     /// E-32: `signalFamily` stops a process and what it started (its children and theirs), each matched by pid and
     /// start time; a process outside the family, or one an earlier walk names that has since been replaced, is left be.
-    /// Only processes this test started are signalled.
+    /// Only processes this test started are signalled. Nothing here waits on the clock: the child and grandchild say
+    /// they started on the root's output, and each exit is seen by a process source (kqueue), so a loaded Mac makes it
+    /// slower, never wrong. The hang guard bounds the wait for them to start; `stopsWithin`, the wait for them to go.
     @Test func signalFamilyStopsAProcessAndWhatItStartedAndNothingElse() throws {
         let dir = temp.url("family").path
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        func start(_ executable: String, _ args: [String]) throws -> Process {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: executable)
-            process.arguments = args
-            process.currentDirectoryURL = URL(fileURLWithPath: dir)
-            try process.run()
-            return process
-        }
-        func written(_ name: String) -> Int32? {
-            (try? String(contentsOfFile: dir + "/" + name, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
-        }
         /// Running as it was when read: gone, or its pid another process's by now, is not.
         func running(_ process: ProcInfo) -> Bool { ProcessTable.info(pid: process.pid)?.startTime == process.startTime }
-        // A shell, the leader of a process group of its own (Process starts it so), with a child and a grandchild that
-        // ignore nothing; and a process outside it.
-        let shell = try start("/bin/sh", ["-c", "sleep \(Self.childRuns) & echo $! > child; (sleep \(Self.childRuns) & echo $! > grandchild; wait) & wait"])
-        let outsider = try start("/bin/sleep", ["\(Self.childRuns)"])
+        // A root, the leader of a process group of its own (Process starts it so), with a child and a grandchild that
+        // ignore nothing, each writing "<name> <pid>" once it runs; and a process outside it. The root ends in a sleep
+        // of its own (exec keeps its pid, start time and children), so only a signal ends it: a shell `wait`ing on
+        // them would exit by itself, 143, the moment they were stopped, maybe before its own TERM landed.
+        let started = Reports(["child", "grandchild"])
+        let output = Pipe()
+        let shell = Process()
+        shell.executableURL = URL(fileURLWithPath: "/bin/sh")
+        shell.arguments = ["-c", """
+            sh -c 'echo child $$; exec sleep \(Self.childRuns)' &
+            (sh -c 'echo grandchild $$; exec sleep \(Self.childRuns)' & wait) &
+            exec sleep \(Self.childRuns)
+            """]
+        shell.currentDirectoryURL = URL(fileURLWithPath: dir)
+        shell.standardOutput = output
+        try shell.run()
+        started.read(output.fileHandleForReading)
+        let outsider = try Process.run(URL(fileURLWithPath: "/bin/sleep"), arguments: ["\(Self.childRuns)"])
         defer {
             for process in [shell, outsider] where process.isRunning { kill(process.processIdentifier, SIGKILL) }
-            for name in ["child", "grandchild"] { if let pid = written(name), getpgid(pid) == shell.processIdentifier { kill(pid, SIGKILL) } }
+            for pid in started.pids.values where getpgid(pid) == shell.processIdentifier { kill(pid, SIGKILL) }
         }
-        #expect(eventually { written("child") != nil && written("grandchild") != nil })
+        #expect(started.all.wait(timeout: .now() + hangGuard) == .success, "started: \(started.pids)")
         let root = try #require(ProcessTable.info(pid: shell.processIdentifier))
-        let child = try #require(written("child").flatMap(ProcessTable.info(pid:)))
-        let grandchild = try #require(written("grandchild").flatMap(ProcessTable.info(pid:)))
+        let child = try #require(started.pids["child"].flatMap(ProcessTable.info(pid:)))
+        let grandchild = try #require(started.pids["grandchild"].flatMap(ProcessTable.info(pid:)))
         let other = try #require(ProcessTable.info(pid: outsider.processIdentifier))
+        #expect(child.ppid == root.pid && ProcessTable.info(pid: grandchild.ppid)?.ppid == root.pid)
         #expect(getpgid(root.pid) == root.pid && getpgid(child.pid) == root.pid && getpgid(grandchild.pid) == root.pid)
         #expect(getpgid(other.pid) != root.pid)
+
+        // Each member's exit, seen as it happens; watched before anything is signalled, so none is missed.
+        let exited = DispatchGroup()
+        let sources = [root, child, grandchild].map { member in
+            let source = DispatchSource.makeProcessSource(identifier: member.pid, eventMask: .exit, queue: .global())
+            exited.enter()
+            source.setEventHandler { [weak source] in source?.cancel(); exited.leave() }
+            source.resume()
+            return source
+        }
+        defer { sources.forEach { $0.cancel() } }
 
         // The outsider named by an earlier walk, but with another start time: a pid since given to another process.
         let replaced = ProcInfo(pid: other.pid, ppid: other.ppid, tty: other.tty, comm: other.comm,
                                 startTime: other.startTime.addingTimeInterval(-60), agent: nil)
         let signalled = Shell.signalFamily(of: root.pid, SIGTERM, also: [replaced])
         #expect(Set([root.pid, child.pid, grandchild.pid]).isSubset(of: Set(signalled.map(\.pid))))
-        // The shell is this process's child: it's gone once Process has reaped it.
-        #expect(eventually { !shell.isRunning && !running(child) && !running(grandchild) })
-        #expect(shell.terminationReason == .uncaughtSignal && shell.terminationStatus == SIGTERM)
+        // A sleep sent TERM ends at once; this bounds only a failure (a member never signalled), never a measure of speed.
+        let stopsWithin: TimeInterval = 10
+        let gone = exited.wait(timeout: .now() + stopsWithin) == .success
+        #expect(gone, "the family wasn't all gone \(stopsWithin) s after TERM")
+        // The root is this process's child: Process has its status once it has reaped it, just after its exit.
+        if gone { shell.waitUntilExit() }
+        #expect(!shell.isRunning && shell.terminationReason == .uncaughtSignal && shell.terminationStatus == SIGTERM)
         #expect(running(other) && outsider.isRunning)
         outsider.terminate()
         outsider.waitUntilExit()
+    }
+
+    /// What `signalFamily`'s test runs report on their output, one "<name> <pid>" line each: `all` is signalled once
+    /// every name expected has.
+    final class Reports: @unchecked Sendable {
+        let all = DispatchSemaphore(value: 0)
+        private let expected: Set<String>
+        private let lock = NSLock()
+        private var seen: [String: Int32] = [:]
+
+        init(_ expected: Set<String>) { self.expected = expected }
+
+        var pids: [String: Int32] { lock.withLock { seen } }
+
+        /// Reads `handle` on a thread of its own until it ends (every writer has gone).
+        func read(_ handle: FileHandle) {
+            Thread.detachNewThread { [self] in
+                var pending = ""
+                while true {
+                    let data = handle.availableData
+                    if data.isEmpty { return }
+                    pending += String(decoding: data, as: UTF8.self)
+                    while let newline = pending.firstIndex(of: "\n") {
+                        let words = pending[..<newline].split(separator: " ")
+                        pending.removeSubrange(...newline)
+                        guard words.count == 2, let pid = Int32(words[1]) else { continue }
+                        let complete = lock.withLock {
+                            let before = Set(seen.keys).isSuperset(of: expected)
+                            seen[String(words[0])] = pid
+                            return !before && Set(seen.keys).isSuperset(of: expected)
+                        }
+                        if complete { all.signal() }
+                    }
+                }
+            }
+        }
     }
 
     @Test func aTimedOutRunSaysSoAndIsntOk() {
