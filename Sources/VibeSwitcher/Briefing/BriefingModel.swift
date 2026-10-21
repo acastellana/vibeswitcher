@@ -26,7 +26,7 @@ final class BriefingModel: ObservableObject, @unchecked Sendable {
     @Published private(set) var voiceNotice: String?
     /// The menu bar's panel closed until the next briefing.
     @Published var panelHidden = false
-    /// Counts the window menu's presses: the views that hold the panel open it (`reveal()`).
+    /// Counts the window menu's presses: the views that hold the panel open it (`pressFromMenu()`).
     @Published private(set) var revealed = 0
     /// Whether an ElevenLabs key is saved (nil: not looked yet), and what the last save said.
     @Published private(set) var keySaved: Bool?
