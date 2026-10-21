@@ -669,8 +669,9 @@ public enum LeadPrompts {
         var text = "Merge policy (the owner chose it; follow it and don't ask the user about each merge): \(policy.rawValue), \(policy.meaning)."
         switch policy {
         case .auto:
-            text += " Merge without asking once a task's review passes (its audit; for review none, its worker's done report and the merge's own test run). After each merge, post_update what changed, how it was checked, "
-                + "the risk and how to revert it (the commits it brought, to `git revert`)."
+            text += " Merge without asking once a task's review passes (its audit; for review none, its worker's done report "
+                + "and the merge's own test run). After each merge, post_update what changed, how it was checked, the risk "
+                + "and how to revert it (the commits it brought, to `git revert`)."
         case .askSensitive, .askAll:
             if policy == .askSensitive {
                 text += " Sensitive paths: \(workflow.sensitiveGlobs.joined(separator: ", ")); every other commit merges without asking."
