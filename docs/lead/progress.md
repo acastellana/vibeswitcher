@@ -900,3 +900,5 @@
 - 2026-10-21 17:53 Audit of picker-card-the-two: complete, clean, round 1: 2 Nit open
 - 2026-10-21 18:03 Planned chat-fill-in-turns: Chat fill-in turns never take 0.17 s of CPU: find the outlier since the text-view rows
 - 2026-10-21 18:07 Merged picker-card-the-two: Picker card: the two-reads rule holds on the refusal path and inside the slash-command watch
+- 2026-10-21 18:07 Update: Merged: picker card's two-reads rule holds everywhere — **Merged** picker-card-the-two (9b48bdd), on the second try. The first merge check failed in the chat speed test, unrelated to this branch; that cost is now task chat-fill-in-turns.
+- 2026-10-21 18:07 Started a worker on chat-fill-in-turns
