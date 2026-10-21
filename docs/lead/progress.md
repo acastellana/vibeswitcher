@@ -892,3 +892,6 @@
 - 2026-10-21 16:54 Audit of selecting-text-in-the: complete, clean, round 3: 4 Important closed, 2 Nit (1 open)
 - 2026-10-21 17:00 Merged selecting-text-in-the: Selecting text in the chat spans paragraphs and messages: dragging across a reply and ⌘C copies all of it
 - 2026-10-21 17:00 Update: Merged: select and copy across paragraphs, code blocks and messages in the chat — **Merged** selecting-text-in-the (head 0b75b75), after four audits. Your request: in the chat you can now drag across paragraphs, code blocks and neighbouring messages, in either direction, and ⌘C cop…
+- 2026-10-21 17:20 Audit of picker-card-numbered: complete, clean, round 1: 2 Nit open
+- 2026-10-21 17:22 Planned picker-card-the-two: Picker card: the two-reads rule holds on the refusal path and inside the slash-command watch
+- 2026-10-21 17:26 Merged picker-card-numbered: Picker card: numbered menus settle too, and the replay harness always removes its home
