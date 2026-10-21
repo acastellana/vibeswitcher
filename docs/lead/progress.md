@@ -875,3 +875,5 @@
 - 2026-10-21 10:52 Merged a-slash-command-that: A slash command that opens a picker shows it in the chat at once
 - 2026-10-21 10:52 Update: Merged: a slash command's picker shows in the chat at once — **Merged** a-slash-command-that (head d47b736). This fixes what you saw with `/mcp`: the chat only recognised numbered menus, so the server list never showed. Your next message was then typed into the…
 - 2026-10-21 11:40 Audit of selecting-text-in-the: incomplete, clean, round 1: 3 Important open, 1 Nit open
+- 2026-10-21 12:30 Planned the-briefing-uses: The briefing uses ELEVENLABS_API_KEY from the user's shell when no key is saved
+- 2026-10-21 12:31 Started a worker on the-briefing-uses

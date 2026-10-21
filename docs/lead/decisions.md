@@ -348,3 +348,7 @@ The matrix is the evidence the earlier decision asked for, but its cost per merg
 
 The third audit (5699441) passed everything except cost. Two of its three Important findings (memory, churn) come from the pool and warm-up added in that round. The page-2 gap of 20 ms was measured at 20 rows a turn, which earlier measurements showed costs more than 14. The user asked twice for multi-paragraph and multi-message selection, which works on the branch.
 
+## 2026-10-21 12:30:57 The briefing's ElevenLabs key falls back to ELEVENLABS_API_KEY from the user's login shell, then ~/.config/elevenlabs/key.env, when no key is saved in the Keychain. Settings shows the source by name, never the value, and offers 'Save to Keychain'.
+
+The user asked why the app asks for a key that's already in their environment. A Finder-launched app doesn't inherit shell variables, but the app already reads the login-shell environment for sessions. A typed key still wins, so nothing changes for users without the variable.
+
