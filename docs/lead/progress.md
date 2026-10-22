@@ -942,3 +942,5 @@
 - 2026-10-22 03:10 Planned vs-heavy-takes-a: vs-heavy takes a few slots, not one, and merge reports while it waits
 - 2026-10-22 03:10 Started a worker on vs-heavy-takes-a
 - 2026-10-22 03:18 Merged audit-2026-10-22-2: Audit 2026-10-22: the UI (no audit: review none)
+- 2026-10-22 17:28 Planned session-temp-folders: Session temp folders: sweep and cap while a session is alive
+- 2026-10-22 17:44 Merged vs-heavy-takes-a: vs-heavy takes a few slots, not one, and merge reports while it waits (no audit: review none)
