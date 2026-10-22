@@ -628,6 +628,19 @@ loads, that VibeSwitcher's folder isn't your own `~/.vibeswitcher`. To run `swif
 follows CFFIXED_USER_HOME, not HOME) to a scratch folder; one anywhere but your own `~/.vibeswitcher` will do, a
 worktree's `.build/scratchhome` included.
 
+In a worktree the lead made (`.vibeswitcher/worktrees/<task>`), `scripts/test.sh` and `scripts/test-under-load.sh`
+build against one cache of the SDK's modules (Foundation, AppKit…) shared by every such worktree,
+`.vibeswitcher/module-cache` in the main checkout, instead of a `.build/…/ModuleCache` of 300 MB each
+(`scripts/lib/module-cache.sh`). A new worktree's first build took 62–71 s and 367 MB that way, against 140–151 s
+and 673 MB from nothing (2026-10-21, on a Mac at load 20–30). The package's own code and SwiftTerm still compile in each
+worktree: SwiftPM writes absolute paths into them, so a copy of another checkout's `.build` (`cp -c`) recompiles all
+of it. The project's init_command, `bash scripts/worktree-init.sh`, points the worker's SourceKit-LSP at the same
+cache (`.sourcekit-lsp/config.json`, git-ignored), which otherwise builds a ModuleCache of its own in `.build`. The
+main checkout, and the worktrees `merge` and `audit` test in, build from nothing as before. A plain `swift build` in a
+worker's worktree works too; it keeps a ModuleCache of its own for what it compiles. Builds and LSPs of several
+worktrees use the cache at once, as Xcode's builds share one; a module whose SDK headers changed is rebuilt, and when
+an error names a file in the cache (a damaged module), the scripts start the cache again and build once more.
+
 Which run when: `scripts/test.sh` is the correctness run, for every change and the one a merge runs; its result
 doesn't depend on how busy the Mac is. The benches, tests judged by wall-clock time or memory (the chat bench's
 stall and reopen runs and its settle script's tests, the footprint, power and board benches), are tagged `.perf`

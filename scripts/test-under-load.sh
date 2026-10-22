@@ -30,6 +30,7 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
+source scripts/lib/module-cache.sh
 # Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
 unset VIBESWITCHER_HOME
 
@@ -193,6 +194,8 @@ stopped() {
 }
 # The build, and a COMMAND's swift test, leave SwiftPM's empty folders in TMPDIR: a scratch one, gone on exit.
 scratch_tmpdir vs-loadtmp
+# In a worktree the lead made, the build and a COMMAND's swift test take the SDK's modules from the worktrees' shared cache.
+shared_module_cache
 on_exit cleanup
 trap stopped INT TERM
 

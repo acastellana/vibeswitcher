@@ -2,7 +2,8 @@
 # `swift build && swift test "$@"` on a fresh scratch home, so nothing a test writes reaches your ~/.vibeswitcher,
 # ~/.claude or login Keychain. HOME, CFFIXED_USER_HOME (what NSHomeDirectory() follows; HOME alone doesn't move it),
 # VIBESWITCHER_HOME and TMPDIR all point into a folder this creates under /tmp and removes when it exits, Ctrl-C too
-# (scripts/lib/scratch.sh).
+# (scripts/lib/scratch.sh). In a worktree the lead made, both build against the worktrees' shared cache of the SDK's
+# modules (scripts/lib/module-cache.sh); the main checkout and merge's own run build as ever.
 # A plain `swift test` on your own home refuses to start (see `VibePaths.testRefusal`).
 #
 # Then no process of the run may be left: a scratch session host, its sessions' parsers (launcher-* --parse-session)
@@ -130,6 +131,7 @@ if ! command -v node > /dev/null; then
 fi
 
 source scripts/lib/scratch.sh
+source scripts/lib/module-cache.sh
 
 scratch_tmpdir vs-test
 mkdir -p "$tool_scratch/home" || exit 1
@@ -150,6 +152,8 @@ else
         export VIBESWITCHER_PERF=1
         set -- --filter "$perf" "$@"
     fi
+    # Both runs too: exports the swift function that adds it, for the bash under vs-heavy.
+    shared_module_cache
     # The default run and --perf alike, under the one lock call. The repository's own vs-heavy, not the installed app's:
     # the one these tests check.
     Resources/bin/vs-heavy --as scripts/test.sh bash -c 'swift build && swift test "$@"' scripts/test.sh "$@"
