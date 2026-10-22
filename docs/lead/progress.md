@@ -944,3 +944,6 @@
 - 2026-10-22 03:18 Merged audit-2026-10-22-2: Audit 2026-10-22: the UI (no audit: review none)
 - 2026-10-22 17:28 Planned session-temp-folders: Session temp folders: sweep and cap while a session is alive
 - 2026-10-22 17:44 Merged vs-heavy-takes-a: vs-heavy takes a few slots, not one, and merge reports while it waits (no audit: review none)
+- 2026-10-22 17:44 Update: Merged: vs-heavy takes several slots, and merges/audits report progress — **What changed:**
+- 2026-10-22 18:16 Planned tests-never-read-the: Tests never read the Mac's real free disk space
+- 2026-10-22 18:17 Started a worker on tests-never-read-the
