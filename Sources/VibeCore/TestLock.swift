@@ -10,6 +10,20 @@ import Foundation
 /// Slot 1 is a flock on `<directory>/test-build.lock`, slot k on `<directory>/test-build-k.lock`: the kernel lets go of
 /// it when its holder exits, however it ends, so no stale slot outlives a run. `<slot>.holder` says who holds it, for
 /// the one waiting and for status.
+///
+/// Waiters take slots first come, first served (flock has no queue: on 2026-10-22 a merge waited over 90 minutes for a
+/// slot while pytests and merges arriving after it took it again and again). Each takes a number (a ticket) on
+/// arriving and takes a slot only once no live ticket before it could take that one; `vs-heavy` keeps the same line:
+/// - Taking a number: under a flock on `<directory>/queue.lock`, whose text is the last number given, the next is one
+///   past that (or past the highest ticket there, if higher), and `<directory>/ticket-<n>` is created with O_EXCL and
+///   O_EXLOCK, so it's never seen unlocked while its waiter lives. Numbers aren't given twice.
+/// - A ticket's text is a holder's note ("pid P, WHAT in DIR, since T") and "slots N", the slots its waiter may take.
+/// - Its waiter keeps it flocked while it waits, and removes it once it holds a slot or gives up. One that can be
+///   flocked has no waiter (it died, however it ended): whoever finds it so removes it, and it's passed over.
+/// - A waiter takes slot k only when no live ticket before its own has slots ≥ k: the first in line takes any of its
+///   slots, and one behind a waiter with fewer slots takes the ones that waiter can't.
+/// An older `vs-heavy` (or app) takes no ticket: it may take a slot ahead of the line, as before, but waits on nothing
+/// in it, and holds a slot only while its command runs; so the line can be held up by one, never stuck.
 public struct TestLock: Sendable {
     /// Set to the held slot's path for the commands run under its holder: a script among them doesn't wait for its own
     /// ancestor (`vs-heavy` reads it).
@@ -162,6 +176,39 @@ public struct TestLock: Sendable {
         holders.isEmpty ? "nothing says who" : holders.map { "slot \($0.slot) held by \($0.text(now: now))" }.joined(separator: "; ")
     }
 
+    /// A waiter in line for a slot, as its ticket says.
+    public struct Waiter: Equatable, Sendable {
+        /// Its ticket's number: lower ones go first.
+        public var number: Int
+        /// The slots it may take (the ticket's "slots N"; any of them when it doesn't say).
+        public var slots: Int
+        /// Who it is, its ticket's note read as a holder's (slot 0); `since` is when it arrived.
+        public var who: Holder
+
+        public init(number: Int, slots: Int, who: Holder) {
+            self.number = number
+            self.slots = slots
+            self.who = who
+        }
+
+        /// "merge of x (vibeswitcher)", or the note itself.
+        public var name: String {
+            guard let what = who.what else { return who.note ?? "a run that didn't say who it is" }
+            return what + (who.project.map { " (\($0))" } ?? "")
+        }
+    }
+
+    /// A place in line: "1st in line", "3rd in line, behind merge of a (alpha) and pytest -q (TGE)".
+    public static func place(behind ahead: [Waiter]) -> String {
+        let place = ahead.count + 1
+        let suffix = (11...13).contains(place % 100) ? "th" : [1: "st", 2: "nd", 3: "rd"][place % 10] ?? "th"
+        guard !ahead.isEmpty else { return "\(place)\(suffix) in line" }
+        var names = ahead.prefix(3).map(\.name)
+        if ahead.count > 3 { names.append("\(ahead.count - 3) more") }
+        let list = names.count == 1 ? names[0] : names.dropLast().joined(separator: ", ") + " and " + names.last!
+        return "\(place)\(suffix) in line, behind " + list
+    }
+
     /// How a wait for a slot ended.
     public enum Outcome {
         /// Taken: `waited` seconds, and who held every slot when it started waiting (empty when one was free).
@@ -170,6 +217,66 @@ public struct TestLock: Sendable {
         case busy(holders: [Holder])
         case cancelled
         case failed(String)
+    }
+
+    /// The line's lock, whose text is the last number given.
+    public var queuePath: String { (directory as NSString).appendingPathComponent("queue.lock") }
+
+    /// Ticket `number`'s file.
+    public func ticketPath(_ number: Int) -> String { (directory as NSString).appendingPathComponent("ticket-\(number)") }
+
+    /// The numbers of the tickets there, live or not.
+    private func ticketNumbers() -> [Int] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? []).compactMap { name in
+            guard name.hasPrefix("ticket-") else { return nil }
+            let number = name.dropFirst("ticket-".count)
+            return !number.isEmpty && number.allSatisfy({ $0.isASCII && $0.isNumber }) ? Int(number) : nil
+        }
+    }
+
+    /// Takes the next number in line for `note` (a holder's line), waiting on up to `slots`: its ticket, flocked from
+    /// its making on the returned fd. Nil when the folder won't have it.
+    private func takeTicket(_ note: String, slots: Int) -> (fd: Int32, number: Int)? {
+        let queue = open(queuePath, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0o600)
+        guard queue >= 0 else { return nil }
+        defer { close(queue) }
+        guard flock(queue, LOCK_EX) == 0 else { return nil }
+        var bytes = [UInt8](repeating: 0, count: 32)
+        let count = pread(queue, &bytes, bytes.count, 0)
+        let given = Int(String(decoding: bytes.prefix(max(0, count)), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
+        let number = max(given, ticketNumbers().max() ?? 0) + 1
+        let text = Array("\(number)\n".utf8)
+        guard ftruncate(queue, 0) == 0, pwrite(queue, text, text.count, 0) == text.count else { return nil }
+        let fd = open(ticketPath(number), O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC | O_NOFOLLOW | O_EXLOCK, 0o600)
+        guard fd >= 0 else { return nil }
+        let line = Array("\(note)\nslots \(slots)\n".utf8)
+        _ = write(fd, line, line.count)
+        return (fd, number)
+    }
+
+    /// The waiters in line before ticket `number` (all of them by default), first first. A ticket no waiter holds is
+    /// removed and passed over.
+    public func waiters(before number: Int = .max) -> [Waiter] {
+        ticketNumbers().filter { $0 < number }.sorted().compactMap { number in
+            let path = ticketPath(number)
+            let fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+            guard fd >= 0 else { return nil }
+            defer { close(fd) }
+            if flock(fd, LOCK_EX | LOCK_NB) == 0 {
+                // Numbers aren't given twice: the name can only be this dead one's.
+                unlink(path)
+                return nil
+            }
+            var bytes = [UInt8](repeating: 0, count: 4096)
+            let count = read(fd, &bytes, bytes.count)
+            let lines = String(decoding: bytes.prefix(max(0, count)), as: UTF8.self).split(separator: "\n")
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            let slots = lines.lazy.compactMap { $0.hasPrefix("slots ") ? Int($0.dropFirst("slots ".count)) : nil }.first ?? .max
+            var info = stat()
+            let since = fstat(fd, &info) == 0 ? Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec)) : nil
+            let note = lines.first.flatMap { $0.isEmpty || $0.hasPrefix("slots ") ? nil : $0 }
+            return Waiter(number: number, slots: slots, who: Holder(slot: 0, note: note, since: note == nil ? nil : since))
+        }
     }
 
     /// Who holds slot `index`, as its note says (written when it was taken).
@@ -202,10 +309,11 @@ public struct TestLock: Sendable {
         }
     }
 
-    /// Waits for a free slot up to `timeout` (checking `cancel`), takes the first, and writes `what` (run in
-    /// `directory`) as its holder. While it waits, `waiting` hears who holds them, at once and then every `every`.
+    /// Waits in line for a slot up to `timeout` (checking `cancel`), takes the first it may, and writes `what` (run in
+    /// `directory`) as its holder. While it waits, `waiting` hears who holds them and who's in line before it (first
+    /// first), at once and then every `every`.
     public func acquire(as what: String, in directory: String? = nil, timeout: TimeInterval, cancel: ShellCancel? = ShellCancel.current,
-                        every: TimeInterval = 30, waiting: (([Holder], TimeInterval) -> Void)? = nil) -> Outcome {
+                        every: TimeInterval = 30, waiting: (([Holder], [Waiter], TimeInterval) -> Void)? = nil) -> Outcome {
         let folder = self.directory
         do { try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true)) } catch {
             return .failed("Couldn't make \(folder) for the test and build lock (\(error.localizedDescription)).")
@@ -222,18 +330,30 @@ public struct TestLock: Sendable {
             guard fd >= 0 else { return .failed("Couldn't open \(slotPath(index)) (\(String(cString: strerror(errno)))).") }
             fds.append(fd)
         }
+        let place = directory.map { " in \($0)" } ?? ""
+        func note() -> String {
+            "pid \(getpid()), \(what)\(place), since \(DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium))"
+        }
+        guard let ticket = takeTicket(note(), slots: slots) else {
+            return .failed("Couldn't take a number in line at \(queuePath) (\(String(cString: strerror(errno)))).")
+        }
+        // Out of line however this ends: removed first, so no one finds it let go.
+        defer {
+            unlink(ticketPath(ticket.number))
+            close(ticket.fd)
+        }
         let start = Date()
         var waitedFor: [Holder] = []
         var told: Date?
         while true {
-            if let free = fds.firstIndex(where: { flock($0, LOCK_EX | LOCK_NB) == 0 }) {
+            let ahead = waiters(before: ticket.number)
+            // The slots no one before it may take.
+            let from = min(slots, ahead.map(\.slots).max() ?? 0)
+            if let free = fds.indices.dropFirst(from).first(where: { flock(fds[$0], LOCK_EX | LOCK_NB) == 0 }) {
                 let fd = fds[free]
                 fds[free] = -1
                 let index = free + 1
-                let stamp = DateFormatter.localizedString(from: Date(), dateStyle: .none, timeStyle: .medium)
-                let place = directory.map { " in \($0)" } ?? ""
-                try? VibePaths.writePrivate(Data("pid \(getpid()), \(what)\(place), since \(stamp)\n".utf8),
-                                            to: URL(fileURLWithPath: slotPath(index) + ".holder"))
+                try? VibePaths.writePrivate(Data((note() + "\n").utf8), to: URL(fileURLWithPath: slotPath(index) + ".holder"))
                 return .held(Held(fd: fd, path: slotPath(index)), waited: Date().timeIntervalSince(start), after: waitedFor)
             }
             if waitedFor.isEmpty { waitedFor = (1...slots).map(holder) }
@@ -242,7 +362,7 @@ public struct TestLock: Sendable {
             if now.timeIntervalSince(start) >= timeout { return .busy(holders: (1...slots).map(holder)) }
             if let waiting, told.map({ now.timeIntervalSince($0) >= every }) ?? true {
                 told = now
-                waiting((1...slots).map(holder), now.timeIntervalSince(start))
+                waiting((1...slots).map(holder), ahead, now.timeIntervalSince(start))
             }
             usleep(useconds_t(min(500_000, max(10_000, every * 1_000_000 / 2))))
         }

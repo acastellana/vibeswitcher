@@ -635,8 +635,8 @@ public enum Worktrees {
         if let lock, runs {
             let slots = lock.slots == 1 ? "its one slot" : "all \(lock.slots) slots"
             let outcome = lock.acquire(as: holder, in: place, timeout: timeout, cancel: cancel, every: progress?.every ?? 30,
-                                       waiting: progress.map { progress in { holders, waited in
-                progress.send("Waiting \(duration(waited)) for a slot of the Mac-wide test and build lock (\(slots) held): \(TestLock.text(holders)).")
+                                       waiting: progress.map { progress in { holders, ahead, waited in
+                progress.send("Waiting \(duration(waited)) for a slot of the Mac-wide test and build lock (\(slots) held), \(TestLock.place(behind: ahead)): \(TestLock.text(holders)).")
             } })
             switch outcome {
             case .held(let taken, let waited, let after):

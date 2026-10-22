@@ -61,18 +61,30 @@ for (( k = 1; k <= slots; k++ )); do
     fds+=("$(( 19 + k )):$file")
 done
 
-# Takes the first free slot (a flock on its fd), waiting as long as it takes, and prints its number; while it waits,
-# says who holds each slot (from their .holder notes), again whenever that changes and every 5 minutes.
-taken=$(/usr/bin/perl -MFcntl=:flock -e '
-    my ($what, @slots) = @ARGV;
+# Waits in line for a slot and prints its number: takes a ticket (TestLock's line, below), then the first slot no one
+# before it may take (a flock on its fd), however long it takes. While it waits, it says its place in line and who
+# holds each slot (from their .holder notes), again whenever that changes and every 5 minutes.
+#
+# The line (first come, first served; flock has none, and on 2026-10-22 a merge waited 90 minutes while later pytests
+# and merges took the slot again and again), as TestLock keeps it: under a flock on queue.lock, whose text is the last
+# number given, the next number is one past that (or past the highest ticket, if higher), and ticket-<n> is made with
+# O_EXCL|O_EXLOCK: its text a holder's note and "slots N". Its waiter keeps it flocked until it holds a slot or gives up,
+# then removes it; one that can be flocked has no waiter, and is removed and passed over. A waiter takes slot k only
+# when no live ticket before its own has slots >= k. An older vs-heavy takes no ticket: it may take a slot ahead of the
+# line but waits on nothing in it, so it can hold the line up only while its command runs.
+taken=$(/usr/bin/perl -MFcntl=:DEFAULT,:flock -MPOSIX=strftime -e '
+    my ($what, $script, $place, @slots) = @ARGV;
     my @handles;
     for my $slot (@slots) {
         my ($fd, $file) = split /:/, $slot, 2;
         open(my $fh, ">&=", $fd) or exit 2;
         push @handles, [$fh, $file];
     }
+    my $n = @handles;
+    (my $dir = $handles[0][1]) =~ s{/[^/]*$}{};
     sub project { my ($dir) = @_; $dir = $1 if $dir =~ m{^(.*?)/\.vibeswitcher/worktrees/}; $dir =~ s{/+$}{}; return (split m{/}, $dir)[-1]; }
     sub held_for { my ($s) = @_; return $s < 60 ? "$s s" : int($s / 60) . " min" . ($s >= 1800 ? ", long" : ""); }
+    sub parse { my ($line) = @_; return $line =~ /^pid (\d+), (.*?)(?: in (\/.*))?, since [^,]*$/ ? ($1, $2, $3) : (); }
     # Who holds a slot, from its note: "pid P, WHAT in DIR (project), for 38 min, long".
     sub holder {
         my ($file) = @_;
@@ -82,34 +94,80 @@ taken=$(/usr/bin/perl -MFcntl=:flock -e '
         chomp $line;
         my $since = (stat($note))[9];
         my $who = $line;
-        $who = "pid $1, $2" . (defined $3 ? " in $3 (" . project($3) . ")" : "") if $line =~ /^pid (\d+), (.*?)(?: in (\/.*))?, since [^,]*$/;
+        if (my ($pid, $cmd, $in) = parse($line)) { $who = "pid $pid, $cmd" . (defined $in ? " in $in (" . project($in) . ")" : ""); }
         return ($who, $line, defined $since ? time - $since : undef);
     }
-    sub take { for my $i (0 .. $#handles) { return $i + 1 if flock($handles[$i][0], LOCK_EX | LOCK_NB); } return 0; }
-    my $got = take();
-    if ($got) { print $got; exit 0; }
-    my ($start, $said, $saidAt) = (time, "", 0);
-    my $n = @handles;
-    (my $dir = $handles[0][1]) =~ s{/[^/]*$}{};
-    until ($got = take()) {
+    sub numbers { opendir(my $d, $dir) or return (); my @all = map { /^ticket-(\d+)$/ ? $1 : () } readdir($d); return @all; }
+    # Takes a number: its ticket, flocked from its making on $ticket.
+    sysopen(my $queue, "$dir/queue.lock", O_RDWR | O_CREAT | O_NOFOLLOW, 0600) or exit 2;
+    flock($queue, LOCK_EX) or exit 2;
+    my $given = <$queue>;
+    $given = defined $given && $given =~ /^(\d+)/ ? $1 : 0;
+    for (numbers()) { $given = $_ if $_ > $given; }
+    my $mine = $given + 1;
+    seek($queue, 0, 0); truncate($queue, 0); syswrite($queue, "$mine\n") or exit 2;
+    my $path = "$dir/ticket-$mine";
+    sysopen(my $ticket, $path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_EXLOCK, 0600) or exit 2;
+    syswrite($ticket, "pid $script, $what in $place, since " . strftime("%H:%M:%S", localtime) . "\nslots $n\n");
+    close($queue);
+    # Out of line, removed first so no one finds it let go.
+    sub leave { unlink $path; close $ticket; }
+    # The live tickets before this one, first first: [what (project), slots]. One no waiter holds is removed.
+    sub ahead {
+        my @live;
+        for my $number (sort { $a <=> $b } grep { $_ < $mine } numbers()) {
+            my $file = "$dir/ticket-$number";
+            sysopen(my $fh, $file, O_RDONLY | O_NOFOLLOW) or next;
+            if (flock($fh, LOCK_EX | LOCK_NB)) { unlink $file; close $fh; next; }
+            my @lines = <$fh>;
+            chomp @lines;
+            my ($slots) = map { /^slots (\d+)$/ ? $1 : () } @lines;
+            my $line = defined $lines[0] && $lines[0] !~ /^slots / ? $lines[0] : "";
+            my ($pid, $cmd, $in) = parse($line);
+            my $name = defined $cmd ? $cmd . (defined $in ? " (" . project($in) . ")" : "") : length $line ? $line : "a run that did not say who it is";
+            push @live, [$name, defined $slots ? $slots : 1e9];
+        }
+        return @live;
+    }
+    sub place {
+        my @ahead = @_;
+        my $p = @ahead + 1;
+        my $th = ($p % 100 >= 11 && $p % 100 <= 13) ? "th" : ({1 => "st", 2 => "nd", 3 => "rd"}->{$p % 10} // "th");
+        return "$p$th in line" unless @ahead;
+        my @names = map { $_->[0] } @ahead[0 .. ($#ahead < 2 ? $#ahead : 2)];
+        push @names, (@ahead - 3) . " more" if @ahead > 3;
+        my $list = @names == 1 ? $names[0] : join(", ", @names[0 .. $#names - 1]) . " and $names[-1]";
+        return "$p$th in line, behind $list";
+    }
+    sub take { my ($from) = @_; for my $i ($from .. $#handles) { return $i + 1 if flock($handles[$i][0], LOCK_EX | LOCK_NB); } return 0; }
+    my ($start, $said, $saidAt, $got) = (time, "", 0, 0);
+    while (1) {
+        my @ahead = ahead();
+        my $from = 0;
+        for (@ahead) { $from = $_->[1] if $_->[1] > $from; }
+        last if $got = take($from);
+        # The script went (kill -9): out of line rather than wait for nobody.
+        if (!kill(0, $script) || getppid() == 1) { leave(); exit 1; }
         my (@told, @keys);
         for my $i (0 .. $#handles) {
             my ($who, $key, $age) = holder($handles[$i][1]);
             push @keys, $key;
             push @told, "slot " . ($i + 1) . " held by $who" . (defined $age ? ", for " . held_for($age) : "");
         }
-        my $set = join("\n", @keys);
+        my $where = place(@ahead);
+        my $set = join("\n", $where, @keys);
         if ($set ne $said || time - $saidAt >= 300) {
             my $all = $n == 1 ? "its one slot held" : "all $n slots held";
             print STDERR ($said eq "" ? "vs-heavy: $what: waiting for the Mac-wide test and build lock ($all, in $dir): "
-                                      : "vs-heavy: $what: still waiting ($all): ") . join("; ", @told) . ".\n";
+                                      : "vs-heavy: $what: still waiting ($all): ") . "$where; " . join("; ", @told) . ".\n";
             ($said, $saidAt) = ($set, time);
         }
         select(undef, undef, undef, 0.5);
     }
-    printf STDERR "vs-heavy: %s: took the test and build lock (slot %d of %d) after %d s.\n", $what, $got, $n, time - $start;
+    leave();
+    printf STDERR "vs-heavy: %s: took the test and build lock (slot %d of %d) after %d s.\n", $what, $got, $n, time - $start if $said ne "";
     print $got;
-' "$what" "${fds[@]}") || { echo "vs-heavy: couldn't take a slot of the test and build lock" >&2; exit 1; }
+' "$what" "$$" "$PWD" "${fds[@]}") || { echo "vs-heavy: couldn't take a slot of the test and build lock" >&2; exit 1; }
 
 # Keeps the slot taken on fd 9 and lets go of the others' fds.
 lock_file=$(slot_file "$taken")

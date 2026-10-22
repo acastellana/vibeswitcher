@@ -376,7 +376,7 @@ struct TestLockTests {
         #expect(lock.holders().map(\.what) == ["merge of a", "audit run of b"])
         // The third waits, hearing who holds both at once and then every `every`, and gives up at its timeout.
         let heard = Heard()
-        guard case .busy(let holders) = lock.acquire(as: "merge of c", timeout: 1, every: 0.2, waiting: { holders, _ in heard.add(holders) }) else {
+        guard case .busy(let holders) = lock.acquire(as: "merge of c", timeout: 1, every: 0.2, waiting: { holders, _, _ in heard.add(holders) }) else {
             Issue.record("taken past two"); return
         }
         #expect(holders.map(\.project) == ["alpha", "beta"])
