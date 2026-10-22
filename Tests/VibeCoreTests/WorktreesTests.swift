@@ -736,8 +736,8 @@ struct ShellTests {
     /// E-32: `signalFamily` stops a process and what it started (its children and theirs), each matched by pid and
     /// start time; a process outside the family, or one an earlier walk names that has since been replaced, is left be.
     /// Only processes this test started are signalled. Nothing here waits on the clock: the child and grandchild say
-    /// they started on the root's output, and each exit is seen by a process source (kqueue), so a loaded Mac makes it
-    /// slower, never wrong. The hang guard bounds the wait for them to start; `stopsWithin`, the wait for them to go.
+    /// they started on the root's output, and each exit is seen by the kernel's process filter (`Exits`), so a loaded
+    /// Mac makes it slower, never wrong. The hang guard bounds the wait for them to start; `stopsWithin`, for them to go.
     @Test func signalFamilyStopsAProcessAndWhatItStartedAndNothingElse() throws {
         let dir = temp.url("family").path
         try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
@@ -774,32 +774,59 @@ struct ShellTests {
         #expect(getpgid(root.pid) == root.pid && getpgid(child.pid) == root.pid && getpgid(grandchild.pid) == root.pid)
         #expect(getpgid(other.pid) != root.pid)
 
-        // Each member's exit, seen as it happens; watched before anything is signalled, so none is missed.
-        let exited = DispatchGroup()
-        let sources = [root, child, grandchild].map { member in
-            let source = DispatchSource.makeProcessSource(identifier: member.pid, eventMask: .exit, queue: .global())
-            exited.enter()
-            source.setEventHandler { [weak source] in source?.cancel(); exited.leave() }
-            source.resume()
-            return source
-        }
-        defer { sources.forEach { $0.cancel() } }
+        // Every exit, seen as it happens: each watched before anything is signalled, so none is missed.
+        let exits = Exits()
+        #expect(exits.watch(root.pid, ownChild: true) && exits.watch(child.pid) && exits.watch(grandchild.pid)
+            && exits.watch(other.pid, ownChild: true))
 
         // The outsider named by an earlier walk, but with another start time: a pid since given to another process.
         let replaced = ProcInfo(pid: other.pid, ppid: other.ppid, tty: other.tty, comm: other.comm,
                                 startTime: other.startTime.addingTimeInterval(-60), agent: nil)
         let signalled = Shell.signalFamily(of: root.pid, SIGTERM, also: [replaced])
         #expect(Set([root.pid, child.pid, grandchild.pid]).isSubset(of: Set(signalled.map(\.pid))))
-        // A sleep sent TERM ends at once; this bounds only a failure (a member never signalled), never a measure of speed.
+        // A sleep sent TERM ends at once: this bounds only a failure (a member never signalled), never a speed.
         let stopsWithin: TimeInterval = 10
-        let gone = exited.wait(timeout: .now() + stopsWithin) == .success
-        #expect(gone, "the family wasn't all gone \(stopsWithin) s after TERM")
-        // The root is this process's child: Process has its status once it has reaped it, just after its exit.
-        if gone { shell.waitUntilExit() }
-        #expect(!shell.isRunning && shell.terminationReason == .uncaughtSignal && shell.terminationStatus == SIGTERM)
-        #expect(running(other) && outsider.isRunning)
-        outsider.terminate()
-        outsider.waitUntilExit()
+        #expect(exits.wait(for: [root.pid, child.pid, grandchild.pid], within: stopsWithin),
+                "the family wasn't all gone \(stopsWithin) s after TERM: \(exits.ended)")
+        // The root, this process's child, was ended by TERM: its wait status is the signal's number (no core).
+        #expect(exits.ended[root.pid] == SIGTERM, "\(exits.ended)")
+        #expect(exits.ended[other.pid] == nil && running(other))
+        kill(other.pid, SIGKILL)
+        #expect(exits.wait(for: [other.pid], within: stopsWithin) && exits.ended[other.pid] == SIGKILL)
+    }
+
+    /// Processes' exits, through a kqueue of the test's own: a watch is the kernel's when `watch` returns, and `wait`
+    /// takes the exits on the calling thread. A DispatchSource's handlers run on a global queue, which the suite's other
+    /// tests keep busy: under load they ran 4 to 56 s late, and Process, whose status comes from such a source, as late.
+    final class Exits {
+        private let queue = kqueue()
+        /// The processes seen to end: each one's wait status (as `waitpid` gives it) when it's this process's own child
+        /// watched as one, else 0.
+        private(set) var ended: [Int32: Int32] = [:]
+
+        deinit { close(queue) }
+
+        /// Watches `pid`; false when it has ended already or can't be watched. Only a parent may ask for the status.
+        func watch(_ pid: Int32, ownChild: Bool = false) -> Bool {
+            var change = kevent(ident: UInt(pid), filter: Int16(EVFILT_PROC), flags: UInt16(EV_ADD | EV_ONESHOT),
+                                fflags: UInt32(NOTE_EXIT) | (ownChild ? UInt32(NOTE_EXITSTATUS) : 0), data: 0, udata: nil)
+            return kevent(queue, &change, 1, nil, 0, nil) == 0
+        }
+
+        /// Waits until all of `pids` have ended, or `limit` has passed; whether they all have.
+        func wait(for pids: Set<Int32>, within limit: TimeInterval) -> Bool {
+            let deadline = Date().addingTimeInterval(limit)
+            while !pids.isSubset(of: ended.keys) {
+                let left = deadline.timeIntervalSinceNow
+                guard left > 0 else { return false }
+                var timeout = timespec(tv_sec: Int(left), tv_nsec: Int(left.truncatingRemainder(dividingBy: 1) * 1e9))
+                var event = kevent()
+                if kevent(queue, nil, 0, &event, 1, &timeout) == 1, event.filter == Int16(EVFILT_PROC) {
+                    ended[Int32(event.ident)] = Int32(truncatingIfNeeded: event.data)
+                }
+            }
+            return true
+        }
     }
 
     /// What `signalFamily`'s test runs report on their output, one "<name> <pid>" line each: `all` is signalled once
