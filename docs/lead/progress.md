@@ -952,3 +952,6 @@
 - 2026-10-22 23:46 Started a worker on session-temp-folders
 - 2026-10-23 00:38 Review of session-temp-folders: audit
 - 2026-10-23 01:10 Merged tests-never-read-the: Tests never read the Mac's real free disk space (no audit: review none)
+- 2026-10-23 01:10 Update: Merged: tests never read the Mac's real free disk — **What changed:**
+- 2026-10-23 01:15 Audit of session-temp-folders: complete, clean, round 1: 1 Nit open
+- 2026-10-23 01:46 Merged vs-heavy-serves-waiters: vs-heavy serves waiters in arrival order (no audit: review none)
