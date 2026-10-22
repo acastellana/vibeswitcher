@@ -275,6 +275,8 @@ struct LeadToolTripTests: LeadTeamFixture {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
+        // A roomy disk: the Mac's own, under 10 GB free, added the low-disk line and failed the bound (2026-10-22).
+        lead.freeSpace = { _ in 500_000_000_000 }
         try bigBoard(root, runtime)
         let status = lead.call("status", [:]).text
         #expect(status.utf8.count < 10_000, "status is \(status.utf8.count) bytes")
