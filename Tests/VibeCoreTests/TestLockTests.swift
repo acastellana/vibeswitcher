@@ -492,11 +492,154 @@ struct TestLockTests {
         let waiting = try heavy("build", sleep: 0, log: log)
         #expect(eventually { lines(waiting.output).joined().contains("waiting for") })
         let said = lines(waiting.output).joined(separator: "\n")
-        #expect(said.contains("(its one slot held, in \(url("heavy-locks").path)): slot 1 held by pid \(holder.processIdentifier), .venv/bin/python -m pytest -q in /Users/a/dev/TGE-ANALYSIS/.vibeswitcher/worktrees/r (TGE-ANALYSIS), for 38 min, long."), "\(said)")
+        #expect(said.contains("(its one slot held, in \(url("heavy-locks").path)): 1st in line; slot 1 held by pid \(holder.processIdentifier), .venv/bin/python -m pytest -q in /Users/a/dev/TGE-ANALYSIS/.vibeswitcher/worktrees/r (TGE-ANALYSIS), for 38 min, long."), "\(said)")
         // Not ended: the holder still runs while it waits.
         #expect(kill(holder.processIdentifier, 0) == 0)
         kill(holder.processIdentifier, SIGKILL)
         waiting.process.waitUntilExit()
         #expect(waiting.process.terminationStatus == 0 && lines(log) == ["build start", "build end"])
+    }
+
+    // MARK: The line (first come, first served)
+
+    /// Who took a slot, in order, and the places in line they were told.
+    final class Taken: @unchecked Sendable {
+        private let lock = NSLock()
+        private var all: [String] = []
+        private var told: [String: String] = [:]
+        func add(_ name: String) { lock.withLock { all.append(name) } }
+        func tell(_ name: String, _ place: String) { lock.withLock { told[name] = place } }
+        var names: [String] { lock.withLock { all } }
+        func place(_ name: String) -> String? { lock.withLock { told[name] } }
+    }
+
+    /// `acquire` as `name` on a thread of its own, looking every `every` (its place in line noted in `taken`): once it
+    /// holds a slot, it notes it in `taken` (and "<name> start" in `log`), holds it a moment and lets go.
+    func waiter(_ lock: TestLock, _ name: String, every: TimeInterval = 30, log: String? = nil, taken: Taken) {
+        Thread {
+            guard case .held(let held, _, _) = lock.acquire(as: name, timeout: hangGuard, every: every, waiting: { _, ahead, _ in
+                taken.tell(name, TestLock.place(behind: ahead))
+            }) else { taken.add("\(name) not taken"); return }
+            taken.add(name)
+            if let log, let file = FileHandle(forWritingAtPath: log) {
+                file.seekToEndOfFile()
+                file.write(Data("\(name) start\n".utf8))
+                try? file.close()
+            }
+            Thread.sleep(forTimeInterval: 0.3)
+            held.release()
+        }.start()
+    }
+
+    @Test func waitersTakeTheSlotInTheOrderTheyCameEvenOneThatLooksMoreOften() throws {
+        let lock = self.lock
+        let holder = try outsideHolder(lock)
+        let taken = Taken()
+        // A and B look twice a second; C, last, every 10 ms: without a line it would take the slot each time it's let go.
+        for (index, (name, every)) in [("a", 30.0), ("b", 30.0), ("c", 0.02)].enumerated() {
+            waiter(lock, name, every: every, taken: taken)
+            #expect(eventually { lock.waiters().count == index + 1 })
+        }
+        #expect(lock.waiters().map(\.who.what) == ["a", "b", "c"])
+        #expect(lock.waiters().map(\.slots) == [1, 1, 1])
+        #expect(eventually { taken.place("c") == "3rd in line, behind a and b" }, "\(String(describing: taken.place("c")))")
+        kill(holder.processIdentifier, SIGKILL)
+        holder.waitUntilExit()
+        #expect(eventually { taken.names.count == 3 })
+        #expect(taken.names == ["a", "b", "c"])
+        // Out of line once served: no ticket is left, and no number is given twice.
+        #expect(eventually { lock.holders().isEmpty })
+        #expect(lock.waiters().isEmpty && !FileManager.default.fileExists(atPath: lock.ticketPath(3)))
+        #expect(try String(contentsOfFile: lock.queuePath, encoding: .utf8) == "3\n")
+    }
+
+    @Test func vsHeavyAndTheSwiftSideKeepOneLine() throws {
+        let lock = TestLock(directory: url("heavy-locks").path)
+        let holder = try outsideHolder(lock)
+        try note(lock, "pid \(holder.processIdentifier), pytest -q in /Users/a/dev/TGE-ANALYSIS, since 01:00:00")
+        let log = url("heavy.log").path
+        let a = try heavy("a", log: log)
+        #expect(eventually { lock.waiters().count == 1 })
+        let b = try heavy("b", log: log)
+        #expect(eventually { lock.waiters().count == 2 })
+        // C, the Swift side (a merge), comes last and looks every 10 ms.
+        let taken = Taken()
+        waiter(lock, "c", every: 0.02, log: log, taken: taken)
+        #expect(eventually { lock.waiters().count == 3 })
+        let project = Self.repo.path.components(separatedBy: "/.vibeswitcher/worktrees/").first.map { URL(fileURLWithPath: $0).lastPathComponent }!
+        #expect(eventually { taken.place("c") == "3rd in line, behind a (\(project)) and b (\(project))" }, "\(String(describing: taken.place("c")))")
+        #expect(eventually { lines(b.output).joined().contains("its one slot held, in \(url("heavy-locks").path)): 2nd in line, behind a (\(project)); slot 1 held by pid \(holder.processIdentifier), pytest -q in /Users/a/dev/TGE-ANALYSIS (TGE-ANALYSIS), for ") },
+                "\(lines(b.output))")
+        kill(holder.processIdentifier, SIGKILL)
+        holder.waitUntilExit()
+        a.process.waitUntilExit()
+        b.process.waitUntilExit()
+        #expect(a.process.terminationStatus == 0 && b.process.terminationStatus == 0)
+        #expect(eventually { taken.names == ["c"] })
+        #expect(lines(log) == ["a start", "a end", "b start", "b end", "c start"])
+        // B was told again as its place changed: first in line once A was served.
+        #expect(lines(b.output).joined(separator: "\n").contains("still waiting (its one slot held): 1st in line; slot 1 held by pid "), "\(lines(b.output))")
+    }
+
+    @Test func aWaiterThatDiedLeavesATicketThatDoesntHoldUpTheLine() throws {
+        let lock = TestLock(directory: url("heavy-locks").path)
+        let holder = try outsideHolder(lock)
+        let log = url("heavy.log").path
+        // Killed outright: one vs-heavy alone (its perl, left waiting, notices), one with its whole group (its ticket's
+        // file is left behind, let go).
+        let alone = try heavy("alone", log: log)
+        #expect(eventually { lock.waiters().count == 1 })
+        let group = try heavy("group", log: log)
+        #expect(eventually { lock.waiters().count == 2 })
+        kill(alone.process.processIdentifier, SIGKILL)
+        alone.process.waitUntilExit()
+        kill(-group.process.processIdentifier, SIGKILL)
+        group.process.waitUntilExit()
+        #expect(FileManager.default.fileExists(atPath: lock.ticketPath(2)))
+        #expect(eventually { !FileManager.default.fileExists(atPath: lock.ticketPath(1)) }, "the orphaned waiter kept its place")
+        // The next waiter takes the slot once it's let go, passing the dead ticket over (and removing it).
+        Self.after(0.5) { kill(holder.processIdentifier, SIGKILL) }
+        guard case .held(let held, let waited, _) = lock.acquire(as: "next", timeout: 60) else { Issue.record("held up by a dead ticket"); return }
+        holder.waitUntilExit()
+        #expect(waited < 30)
+        #expect(!FileManager.default.fileExists(atPath: lock.ticketPath(2)) && lock.waiters().isEmpty)
+        held.release()
+        #expect(lines(log).isEmpty)
+    }
+
+    @Test func anOlderVsHeavyWithoutTicketsCantStickTheLine() throws {
+        // An older vs-heavy (or app) takes no ticket and waits on the slots alone, as this perl does: it may take a
+        // slot ahead of the line, but waits on nothing in it and holds a slot only while its command runs, so the
+        // waiter in line still gets one after it.
+        let lock = self.lock
+        let holder = try outsideHolder(lock)
+        let taken = Taken()
+        waiter(lock, "new", taken: taken)
+        #expect(eventually { lock.waiters().count == 1 })
+        let old = Process()
+        old.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
+        old.arguments = ["-MFcntl=:flock", "-e", #"open(F, ">>", $ARGV[0]) or die; flock(F, LOCK_EX) or die; sleep 1"#, lock.slotPath(1)]
+        try old.run()
+        kill(holder.processIdentifier, SIGKILL)
+        holder.waitUntilExit()
+        old.waitUntilExit()
+        #expect(old.terminationStatus == 0)
+        #expect(eventually { taken.names == ["new"] })
+        #expect(eventually { lock.holders().isEmpty && lock.waiters().isEmpty })
+    }
+
+    @Test func aPlaceInLineNamesWhoIsBefore() {
+        func waiter(_ number: Int, _ note: String?) -> TestLock.Waiter {
+            TestLock.Waiter(number: number, slots: 1, who: TestLock.Holder(slot: 0, note: note, since: nil))
+        }
+        #expect(TestLock.place(behind: []) == "1st in line")
+        let merge = waiter(4, "pid 7, merge of x in /Users/a/dev/vibeswitcher/.vibeswitcher/worktrees/x, since 01:00:00")
+        #expect(TestLock.place(behind: [merge]) == "2nd in line, behind merge of x (vibeswitcher)")
+        let pytest = waiter(5, "pid 8, pytest -q in /Users/a/dev/TGE-ANALYSIS, since 01:00:00")
+        #expect(TestLock.place(behind: [merge, pytest]) == "3rd in line, behind merge of x (vibeswitcher) and pytest -q (TGE-ANALYSIS)")
+        let odd = waiter(6, "something else"), silent = waiter(7, nil)
+        #expect(TestLock.place(behind: [merge, pytest, odd, silent]) == "5th in line, behind merge of x (vibeswitcher), pytest -q (TGE-ANALYSIS), something else and 1 more")
+        #expect(TestLock.place(behind: Array(repeating: silent, count: 10)).hasPrefix("11th in line, behind a run that didn't say who it is"))
+        #expect(TestLock.place(behind: Array(repeating: silent, count: 21)).hasPrefix("22nd in line"))
     }
 }

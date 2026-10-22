@@ -57,7 +57,7 @@ extension LeadToolsetTests {
         #expect(Git.run(["rev-parse", "main"], in: root).output == before)
         #expect(BoardStore(root: root).load().task("add-b")?.status == .review)
         // Progress at once and then every `every` (30 s for a client), each naming both holders: never silent.
-        let waits = told.texts.filter { $0.hasPrefix("Waiting ") && $0.contains("for a slot of the Mac-wide test and build lock (all 2 slots held)") }
+        let waits = told.texts.filter { $0.hasPrefix("Waiting ") && $0.contains("for a slot of the Mac-wide test and build lock (all 2 slots held), 1st in line: ") }
         #expect(waits.count >= 3, "\(told.texts)")
         #expect(waits.allSatisfy { $0.contains("(TGE-ANALYSIS)") && $0.contains("(vibeswitcher)") }, "\(waits)")
         let times = told.times
