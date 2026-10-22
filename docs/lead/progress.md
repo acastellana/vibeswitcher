@@ -948,3 +948,5 @@
 - 2026-10-22 18:16 Planned tests-never-read-the: Tests never read the Mac's real free disk space
 - 2026-10-22 18:17 Started a worker on tests-never-read-the
 - 2026-10-22 20:05 Planned vs-heavy-serves-waiters: vs-heavy serves waiters in arrival order
+- 2026-10-22 23:46 Started a worker on vs-heavy-serves-waiters
+- 2026-10-22 23:46 Started a worker on session-temp-folders
