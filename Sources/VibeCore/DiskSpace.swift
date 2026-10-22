@@ -5,9 +5,40 @@ import Foundation
 public enum DiskSpace {
     public static let gigabyte: Int64 = 1_000_000_000
 
-    /// The bytes free to you on the volume holding `path` (or its nearest folder that exists), as `df` counts them;
-    /// nil when it can't be read.
+    /// A test run: each test target sets it as its bundle loads (`fakeTheDisk` in its TestSupport.swift), before any
+    /// test. No test's outcome may hang on how full the Mac's disk is: twice a test passed on a roomy disk and failed
+    /// under 10 GB free (the low-disk line grew status past its bound; the witness's low-disk report reached a lead's
+    /// inbox, 2026-10-22). A test that wants a low disk gives its own reading where it's read (`LeadToolset.freeSpace`,
+    /// `LeadWitness.Disk`, the app's `LeadController.freeSpace`).
+    public struct TestRun: Sendable {
+        /// What `free(at:)` reads in the run: roomy, far above any warning.
+        public var free: Int64
+        /// Told of each read of the volume itself in the run (it's a bug, the test's result hangs on the Mac's disk);
+        /// the read gives nil.
+        public var readVolume: @Sendable (String) -> Void
+
+        public init(free: Int64, readVolume: @escaping @Sendable (String) -> Void) {
+            self.free = free
+            self.readVolume = readVolume
+        }
+    }
+
+    /// Set once, as a test bundle loads; nil in the app.
+    public nonisolated(unsafe) static var testRun: TestRun?
+
+    /// The bytes free to you on the volume holding `path` (`volumeFree`); in a test run, its roomy reading.
     public static func free(at path: String) -> Int64? {
+        if let testRun { return testRun.free }
+        return volumeFree(at: path)
+    }
+
+    /// The bytes free to you on the volume holding `path` (or its nearest folder that exists), as `df` counts them;
+    /// nil when it can't be read, and in a test run (which is told).
+    static func volumeFree(at path: String) -> Int64? {
+        if let testRun {
+            testRun.readVolume(path)
+            return nil
+        }
         var path = (path as NSString).standardizingPath
         while !FileManager.default.fileExists(atPath: path), path != "/", !path.isEmpty {
             path = (path as NSString).deletingLastPathComponent

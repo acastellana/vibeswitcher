@@ -176,6 +176,9 @@ final class LeadController: ObservableObject {
     private var told: Set<String> = []
     /// Each project's free disk space, watched (see `LeadWitness.Disk`), by root.
     private var disks: [String: LeadWitness.Disk] = [:]
+    /// The bytes free on the volume holding a path, as the disk watch reads them (see `DiskSpace.free`; a test run's
+    /// is roomy). Faked in tests.
+    var freeSpace: (String) -> Int64? = DiskSpace.free(at:)
     /// The Mac's power source, read once a minute: a hold under the battery limit in Settings, and the resume after
     /// it, is told to every running lead (see `LeadWitness.Power`). None until the app gives it the reader
     /// (`watchPower`): benches and tests read nothing.
@@ -1009,7 +1012,7 @@ final class LeadController: ObservableObject {
             deliver(message.text, from: .system("witness"), root: root)
         }
         // Low disk space, once per episode; what takes it is sized off the main thread.
-        var disk = disks[root] ?? LeadWitness.Disk()
+        var disk = disks[root] ?? LeadWitness.Disk(free: freeSpace)
         let workflow = team.workflow
         if let free = disk.check(root: root, workflow: workflow) {
             let sizing = disk
