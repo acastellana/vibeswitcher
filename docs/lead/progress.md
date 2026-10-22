@@ -955,3 +955,4 @@
 - 2026-10-23 01:10 Update: Merged: tests never read the Mac's real free disk — **What changed:**
 - 2026-10-23 01:15 Audit of session-temp-folders: complete, clean, round 1: 1 Nit open
 - 2026-10-23 01:46 Merged vs-heavy-serves-waiters: vs-heavy serves waiters in arrival order (no audit: review none)
+- 2026-10-23 01:46 Update: Merged: vs-heavy serves waiters in arrival order — **What changed:**
