@@ -87,10 +87,14 @@ Project lead (Save; Reset to Default puts back your five rules: one agent owns e
 editing and the full suite once before merging, parallel work with builds and tests serialized, only material bugs
 fixed, stop when it works). When you save a change, and once when a build that has it first runs, each lead running
 then is told it by the witness, once, to apply from then on; a lead started with it in its prompt isn't told again.
-Heavy work runs one at a time on the Mac, whatever the project: every session VibeSwitcher starts has `vs-heavy` on
-its PATH (`vs-heavy <command>` runs it under the Mac-wide test and build lock, saying who holds it while it waits),
-workers and verifiers are told to run full suites and release builds under it, and every project's `merge` takes the
-same lock around its tests. A worker owns its change through completion: it makes the routine calls itself (a small file
+Heavy work runs a few at a time on the Mac, whatever the project: every session VibeSwitcher starts has `vs-heavy` on
+its PATH (`vs-heavy <command>` runs it in one of the Mac-wide test and build slots, `heavy_slots` in the workflow or
+`VIBESWITCHER_HEAVY_SLOTS`, else the Mac's cores ÷ 4: 3 on a 12-core Mac), workers and verifiers are told to run full
+suites and release builds under it, and every project's `merge` takes a slot around its tests. A run that finds every
+slot held waits, naming each holder (pid, command, folder, project, how long; "long" past 30 min), and merge and an
+audit's shared run tell Claude Code who they wait for every 30 s (MCP progress, so the call never goes silent), refusing
+past `test_timeout_min` with the holders named. A slot held over 30 min is named in status's header and told to the
+leads by the witness, once; nothing ends it. A worker owns its change through completion: it makes the routine calls itself (a small file
 outside its boundaries that the goal needs, naming, layout) and lists them in its report, asking the lead only about
 direction, scope or anything risky. It runs the tests its change affects while it edits; the merge's run is the one
 full suite, so it runs the whole suite itself only after changing shared test or build infrastructure, or after a
@@ -233,7 +237,7 @@ program of its choosing (only the app may ask for a handover; anyone else's is r
 anything), or end another session through the host (only the app, the session itself or one started from it, and
 its team's lead may). Nor can it get its own commands run as the lead, or loosen the rules its work is merged by:
 `workflow.md`'s guard rails (its test and setup commands, which `merge` runs as the lead; `merge_policy` and
-`sensitive_paths`; `records_dir`; `max_workers`, `mac_max_sessions`, `load_threshold`, `audit_finders` and `audit_nit_cap`, each as the team reads it,
+`sensitive_paths`; `records_dir`; `max_workers`, `mac_max_sessions`, `heavy_slots`, `load_threshold`, `audit_finders` and `audit_nit_cap`, each as the team reads it,
 so a line left out is its default) count only as the lead last
 set them with `configure` (the host keeps a hash of each, and takes one only from the app or the lead). When the file
 says anything else, whether a worker's Bash wrote it or a branch's committed copy was merged over it, `merge` and
@@ -616,12 +620,13 @@ test it runs the phone's web tests, each `Tests/Web/*.test.mjs` with node, in th
 fails and ends with one line, `web tests: N of M passed`; it needs node on PATH (Node.js; the Swift side works with the
 Command Line Tools only) and stops, saying so, without it (`scripts/test.sh --web Tests/Web` runs just those).
 `scripts/test.sh` and `scripts/build-app.sh` run swift build and swift test under `Resources/bin/vs-heavy`, the
-Mac-wide lock for heavy work (a flock on `/private/tmp/vibeswitcher-<uid>/test-build.lock`) that the app bundle carries
-in `Contents/Resources/bin` and every session it starts has on PATH, so no two suites or builds of any project's
-workers run at once: the second waits, printing who holds it (again if that changes) and, once it has it, how long it
-waited. Ctrl-C or a killed run lets go of it (the kernel drops a flock with its holder), a `vs-heavy` under a holder
-of the same lock runs at once, and every project's merge and an audit's shared run take the same lock around their
-test command (the tests use a scratch one). A plain
+Mac-wide slots for heavy work (flocks on `/private/tmp/vibeswitcher-<uid>/test-build.lock`, `test-build-2.lock`, …,
+N of them: `VIBESWITCHER_HEAVY_SLOTS`, else the cores ÷ 4) that the app bundle carries in `Contents/Resources/bin` and
+every session it starts has on PATH, so no more than N suites or builds of any project's workers run at once: the next
+waits, printing who holds each slot (again if that changes, and every 5 minutes) and, once it has one, how long it
+waited. Ctrl-C or a killed run lets go of its slot (the kernel drops a flock with its holder), a `vs-heavy` under a
+holder of any of the slots runs at once, and every project's merge and an audit's shared run take a slot around their
+test command (`heavy_slots` sets their count; the tests use scratch slots). A plain
 `swift test` on your own home refuses to start, with one message and no test run: each test target checks, as it
 loads, that VibeSwitcher's folder isn't your own `~/.vibeswitcher`. To run `swift test` yourself, set
 `VIBESWITCHER_HOME` (the folder VibeSwitcher keeps its files in) or HOME and CFFIXED_USER_HOME (`NSHomeDirectory()`

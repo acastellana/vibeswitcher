@@ -9,7 +9,7 @@ import Foundation
 /// says something else.
 extension LeadVault {
     public static let guardedKeys = ["test_command", "regression_command", "init_command", "merge_policy", "sensitive_paths", "records_dir",
-                                     "max_workers", "mac_max_sessions", "load_threshold", "audit_finders", "audit_nit_cap"]
+                                     "max_workers", "mac_max_sessions", "heavy_slots", "load_threshold", "audit_finders", "audit_nit_cap"]
 
     /// A guard rail as the team reads it (a limit left out is its default, "ask-all" is ask_all); a key this build
     /// doesn't read itself, as written. Empty when it isn't set.
@@ -22,6 +22,7 @@ extension LeadVault {
         case "sensitive_paths": return workflow.sensitivePaths?.joined(separator: ", ") ?? ""
         case "max_workers": return String(workflow.maxWorkers)
         case "mac_max_sessions": return String(workflow.macMaxSessions)
+        case "heavy_slots": return workflow.heavySlots.map(String.init) ?? ""
         case "audit_finders": return String(workflow.auditFinders)
         case "audit_nit_cap": return String(workflow.auditNitCap)
         case "load_threshold": return workflow.loadThreshold.map { String(format: "%g", $0) } ?? ""

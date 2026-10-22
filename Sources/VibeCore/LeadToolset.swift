@@ -114,8 +114,9 @@ public final class LeadToolset: MCPToolset {
     var power: () -> PowerState? = { PowerState.load() }
     /// How often merge reads the load again while it waits for it to drop below load_threshold.
     var loadPoll: TimeInterval = 15
-    /// The lock merge's and an audit's test runs hold (see `TestLock`): the tool server sets the Mac-wide one, every
-    /// project's merges sharing it with `vs-heavy`; nil (tests that don't give a scratch one): none.
+    /// The slots merge's and an audit's test runs take one of (see `TestLock`; the workflow's heavy_slots sets how
+    /// many): the tool server sets the Mac-wide ones, every project's merges sharing them with `vs-heavy`; nil (tests
+    /// that don't give scratch ones): none.
     public var testLock: TestLock?
 
     /// `testLock` with the workflow's heavy_slots, when set.

@@ -462,12 +462,12 @@ public enum LeadPrompts {
         + "says what to wait for: wait, don't work around it). No `yes` loops, fork storms or burners of your own: "
         + "other sessions and the user share this Mac."
 
-    /// What workers and verifiers are told about heavy work: one full suite or release build at a time on this Mac,
-    /// whatever the project (`vs-heavy`, on PATH in every session VibeSwitcher starts; see Resources/bin/vs-heavy).
+    /// What workers and verifiers are told about heavy work: a few full suites or release builds at a time on this
+    /// Mac, whatever the project (`vs-heavy`, on PATH in every session VibeSwitcher starts; see Resources/bin/vs-heavy).
     public static let heavyWork = "Heavy work: run a full test suite or a release build under `vs-heavy` (`vs-heavy <command>`, "
-        + "e.g. `vs-heavy npm test`; it's on PATH in this session), never bare: it runs one at a time on this Mac, every "
-        + "project's workers and merges included, and while another holds the lock it waits, saying who. Focused tests (one "
-        + "file, a filter) don't need it."
+        + "e.g. `vs-heavy npm test`; it's on PATH in this session), never bare: it runs a few at a time on this Mac (its "
+        + "slots), every project's workers and merges included, and while every slot is held it waits, saying who holds "
+        + "each. Focused tests (one file, a filter) don't need it."
 
     /// The user's working policy (2026-10-21): one agent owns each change through completion; an audit only where the
     /// risk calls for one; the tests a change affects while editing, and the merge's run as the one full suite; a

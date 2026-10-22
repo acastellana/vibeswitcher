@@ -129,6 +129,12 @@ extension LeadToolsetTests {
         #expect(!call(lead, "configure", ["heavy_slots": "4"]).isError)
         #expect(call(lead, "configure").text.contains("- heavy_slots: 4 (builds and full test runs at once"))
         #expect(call(lead, "configure", ["heavy_slots": "0"]).isError)
+        #expect(LeadWorkflow.load(from: root + "/.vibeswitcher/workflow.md").heavySlots == 4)
+        #expect(LeadWorkflow.parse("---\nheavy_slots: 0\n---").heavySlots == nil)
+        #expect(LeadWorkflow.template.contains("\nheavy_slots:\n"))
+        // A limit a worker could loosen: a guard rail, as mac_max_sessions is.
+        #expect(LeadVault.guardedKeys.contains("heavy_slots"))
+        #expect(LeadVault.guardedValue("heavy_slots", in: LeadWorkflow.parse("---\nheavy_slots: 4\n---")) == "4")
     }
 
     @Test func workersGetTheProjectsHeavySlots() throws {
