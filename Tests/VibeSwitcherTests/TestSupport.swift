@@ -17,6 +17,17 @@ private let refuseTheAccountRoot: @convention(c) () -> Void = {
     exit(78)
 }
 
+/// Runs as the test bundle loads too: no test reads the Mac's own free disk space (see `DiskSpace.TestRun`). The run
+/// reads 1 TB free where a test gives no reading of its own; a read of the volume itself fails the test it's in (the
+/// run, when it's in none: a reader on another thread), naming the path.
+@_used @_section("__DATA,__mod_init_func")
+private let fakeTheDisk: @convention(c) () -> Void = {
+    DiskSpace.testRun = DiskSpace.TestRun(free: 1_000 * DiskSpace.gigabyte) { path in
+        Issue.record(Comment(rawValue: "A test read the Mac's own free disk space (the volume holding \(path)), so its result "
+                             + "hangs on how full the disk is: give it a reading where it's read (see DiskSpace.TestRun)."))
+    }
+}
+
 /// How long a wait may go on before the test calls it hung. Every wait ends as soon as what it waits for happens;
 /// this is only a guard, sized for a Mac running several suites at once (load 100+), never a measure of speed.
 let hangGuard: TimeInterval = 300

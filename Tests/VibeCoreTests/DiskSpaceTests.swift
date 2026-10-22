@@ -276,6 +276,42 @@ struct DiskSpaceTests: LeadTeamFixture {
         #expect(runtime.spawned.count == 1)
     }
 
+    /// A full disk: the witness tells, status says so, start_worker refuses.
+    @Test func atZeroTheLeadIsToldAndNoWorkerStarts() throws {
+        let root = try repo()
+        var disk = LeadWitness.Disk(free: { _ in 0 }, scratch: try folder("scratch"))
+        #expect(disk.event(root: root, board: LeadBoard(), workflow: LeadWorkflow())?.contains("Disk space is low: 0 MB free") == true)
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        lead.scratchRoot = try folder("lead-scratch")
+        lead.freeSpace = { _ in 0 }
+        _ = lead.call("add_task", ["title": "One", "goal": "g", "acceptance": ["a"]])
+        #expect(lead.call("status", [:]).text.contains("Disk space is low: 0 MB free"))
+        let refused = lead.call("start_worker", ["task": "one"])
+        #expect(refused.isError)
+        #expect(refused.text.contains("only 0 MB free"))
+        #expect(runtime.spawned.isEmpty)
+    }
+
+    // MARK: Tests never read the Mac's own disk
+
+    /// 2026-10-22: twice a test passed on a roomy disk and failed with the Mac under 10 GB free. A test run reads a
+    /// roomy disk wherever no reading is given (`fakeTheDisk` in TestSupport.swift), and a read of the volume itself
+    /// is a failure of the test it's in.
+    @Test func noTestReadsTheMacsOwnFreeSpace() throws {
+        let run = try #require(DiskSpace.testRun)
+        #expect(run.free >= 100 * Self.gb)
+        #expect(DiskSpace.free(at: "/") == run.free)
+        // The readers' defaults are that roomy one: no warning, whatever the Mac has free.
+        let root = try repo()
+        var disk = LeadWitness.Disk(scratch: try folder("scratch"))
+        #expect(disk.check(root: root, workflow: LeadWorkflow()) == nil)
+        #expect(try lead(root, FakeRuntime()).freeSpace(root) == run.free)
+        withKnownIssue("the guard: a read of the volume itself is a failure") {
+            #expect(DiskSpace.volumeFree(at: "/") == nil)
+        }
+    }
+
     @Test func configureSetsAndClearsTheDiskLimits() throws {
         let root = try repo()
         let lead = try lead(root, FakeRuntime())
