@@ -21,8 +21,6 @@ struct HostClientHandoverTests {
         case quit
         /// Says no, and carries on.
         case refuse(String)
-        /// The new build's probe takes this long (a loaded Mac's first exec), then the rest as `then`.
-        case after(TimeInterval, then: OnHandover)
         /// The probe ends when the test says so (`FakeHost.cue()`), then the rest as `then`: an answer ordered after
         /// something the client logged, not by a timer racing the client's own on a loaded Mac.
         case onCue(then: OnHandover)
@@ -135,8 +133,6 @@ struct HostClientHandoverTests {
                 unlink(path)
             case .refuse(let message):
                 send(.error(message), replyTo: seq, on: fd)
-            case .after(let delay, let then):
-                queue.asyncAfter(deadline: .now() + delay) { [weak self] in self?.handOver(then, replyTo: seq, on: fd) }
             case .onCue(let then):
                 cued = { [weak self] in self?.handOver(then, replyTo: seq, on: fd) }
             case .hold:
@@ -228,15 +224,20 @@ struct HostClientHandoverTests {
     }
 
     /// The host's probe of the new build takes past a request's 15 s (a loaded Mac's first exec waits on amfid): the
-    /// handover is waited for, with a breadcrumb every 15 s, and logged as handed over; never as failed first.
+    /// handover is waited for, with a breadcrumb every 15 s, and logged as handed over; never as failed first. The host
+    /// answers once the app has logged its 15 s breadcrumb (or given up), so the answer comes past 15 s however loaded
+    /// the Mac: a timer of the host's own raced the app's on a busy main queue.
     @Test func aProbePastFifteenSecondsIsWaitedFor() async throws {
-        let host = try FakeHost(pid: 31589, build: 8, onHandover: .after(20, then: .reExec(build: 9)))
+        let host = try FakeHost(pid: 31589, build: 8, onHandover: .onCue(then: .reExec(build: 9)))
         defer { host.stop() }
         let log = Log()
         let client = client(of: host, log: log)
+        let breadcrumb = "host: handover: waiting for the new build's probe, 15 s"
+        #expect(await until { log.lines.contains(breadcrumb) || !log.handover.isEmpty }, "\(log.lines)")
+        #expect(await until { host.cue() })
         #expect(await until { client.state == .connected })
         #expect(log.handover == ["host: handed over (pid 31589, build 9)"], "\(log.lines)")
-        #expect(log.lines.contains("host: handover: waiting for the new build's probe, 15 s"), "\(log.lines)")
+        #expect(log.lines.contains(breadcrumb), "\(log.lines)")
         #expect(!log.lines.contains { $0.contains("didn't answer") || $0.contains("no answer") }, "\(log.lines)")
     }
 
