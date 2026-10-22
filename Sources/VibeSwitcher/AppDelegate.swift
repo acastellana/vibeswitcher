@@ -68,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         controller.keepAwake.mode = { [weak self] in self?.preferences.keepAwake ?? .never }
         controller.watchPower(limit: { [weak self] in self?.preferences.batteryHoldBelow ?? PowerWatch.defaultLimit }) { SystemPower.state() }
         controller.watchPolicy()
+        controller.watchHeavySlots()
         return controller
     }()
     /// The ElevenLabs key for the briefing, the Mac's and the phone's: the one saved in the login Keychain, else your

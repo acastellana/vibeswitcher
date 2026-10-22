@@ -239,6 +239,37 @@ public enum LeadWitness {
         }
     }
 
+    /// Watches the Mac-wide test and build slots (the app looks once a minute, see `TestLock`): a slot held over
+    /// `TestLock.longAfter` is told to every running lead once per holder, as long. Only said: nothing is ended (it may
+    /// be another project's, and a long suite isn't a hung one).
+    public struct HeavySlots {
+        let lock: TestLock?
+        /// The long holders told, by slot, note and since: one that's let go is forgotten.
+        public private(set) var told: Set<String> = []
+
+        public init(lock: TestLock? = TestLock.standard()) { self.lock = lock }
+
+        /// What to tell the leads now, if anything.
+        public mutating func look(now: Date = Date()) -> String? {
+            guard let lock else { return nil }
+            let long = lock.holders().filter { $0.isLong(now: now) }
+            let keyed = long.map { (holder: $0, key: "\($0.slot)|\($0.note ?? "")|\($0.since?.timeIntervalSince1970 ?? 0)") }
+            told.formIntersection(keyed.map(\.key))
+            let new = keyed.filter { !told.contains($0.key) }
+            guard !new.isEmpty else { return nil }
+            told.formUnion(new.map(\.key))
+            return LeadWitness.longSlotText(new.map(\.holder), now: now)
+        }
+    }
+
+    /// "A Mac-wide test and build slot is held long: slot 1 held by pid 30098, pytest -q in /…/TGE (TGE), for 38 min,
+    /// long. …".
+    public static func longSlotText(_ holders: [TestLock.Holder], now: Date = Date()) -> String {
+        (holders.count == 1 ? "A Mac-wide test and build slot is held long: " : "\(holders.count) Mac-wide test and build slots are held long: ")
+            + TestLock.text(holders, now: now) + ". Nothing ends it: builds, suites and merges wait only once every slot is held. "
+            + "If it's one of this project's and looks hung, have its worker look; if it's another project's, tell the user."
+    }
+
     /// Watches the Mac's power source (the app looks once a minute): a hold when the charge is under the user's limit
     /// on battery, and the resume after one, told to every running lead once (see `PowerWatch`); each reading is kept
     /// in `file` for status, with the hold while it lasts.

@@ -23,6 +23,8 @@ struct TestLockTests {
         var environment = ProcessInfo.processInfo.environment
         environment[TestLock.directoryVariable] = lockDirectory
         environment[TestLock.heldVariable] = nil
+        // One slot unless the test gives more: each test says how many it counts on.
+        environment[TestLock.slotsVariable] = "1"
         environment.merge(extra) { $1 }
         process.environment = environment
         let handle = try #require(FileHandle(forWritingAtPath: output))
@@ -45,13 +47,18 @@ struct TestLockTests {
 
     var lock: TestLock { TestLock(directory: url("locks").path) }
 
-    /// A process that takes the lock with perl's flock, says "held", and sleeps: another program holding it.
-    func outsideHolder(_ lock: TestLock) throws -> Process {
-        try FileManager.default.createDirectory(atPath: (lock.path as NSString).deletingLastPathComponent, withIntermediateDirectories: true,
+    /// A process that takes the lock (its slot `slot`) with perl's flock, says "held", and sleeps: another program
+    /// holding it.
+    func outsideHolder(_ lock: TestLock, slot: Int = 1) throws -> Process {
+        try Self.outsideHolder(path: lock.slotPath(slot))
+    }
+
+    static func outsideHolder(path: String) throws -> Process {
+        try FileManager.default.createDirectory(atPath: (path as NSString).deletingLastPathComponent, withIntermediateDirectories: true,
                                                 attributes: [.posixPermissions: 0o700])
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/perl")
-        process.arguments = ["-MFcntl=:flock", "-e", #"open(F, ">>", $ARGV[0]) or die; flock(F, LOCK_EX) or die; $| = 1; print "held\n"; sleep 60"#, lock.path]
+        process.arguments = ["-MFcntl=:flock", "-e", #"open(F, ">>", $ARGV[0]) or die; flock(F, LOCK_EX) or die; $| = 1; print "held\n"; sleep 60"#, path]
         let pipe = Pipe()
         process.standardOutput = pipe
         try process.run()
@@ -71,14 +78,14 @@ struct TestLockTests {
 
     @Test func theSecondWaitsSayingWhoHoldsItAndTakesItOnceItsLetGo() throws {
         guard case .held(let first, let waited, let after) = lock.acquire(as: "merge of a", timeout: 5) else { Issue.record("not taken"); return }
-        #expect(waited < 1 && after == nil)
-        #expect(lock.holder()?.contains("pid \(getpid()), merge of a, since") == true)
-        guard case .busy(let holder) = lock.acquire(as: "merge of b", timeout: 1) else { Issue.record("taken twice"); return }
-        #expect(holder?.contains("merge of a") == true)
+        #expect(waited < 1 && after.isEmpty)
+        #expect(lock.holder(1).note?.contains("pid \(getpid()), merge of a, since") == true)
+        guard case .busy(let holders) = lock.acquire(as: "merge of b", timeout: 1) else { Issue.record("taken twice"); return }
+        #expect(holders.count == 1 && holders.first?.note?.contains("merge of a") == true)
         Self.after(1) { first.release() }
         guard case .held(let second, let waitedAgain, let behind) = lock.acquire(as: "merge of b", timeout: hangGuard) else { Issue.record("not taken"); return }
-        #expect(waitedAgain >= 0.5 && behind?.contains("merge of a") == true)
-        #expect(lock.holder()?.contains("merge of b") == true)
+        #expect(waitedAgain >= 0.5 && behind.first?.note?.contains("merge of a") == true)
+        #expect(lock.holder(1).note?.contains("merge of b") == true)
         second.release()
     }
 
@@ -94,12 +101,12 @@ struct TestLockTests {
         let holder = try outsideHolder(lock)
         guard case .busy = lock.acquire(as: "b", timeout: 0.5) else { Issue.record("taken while held"); return }
         // It dies without letting go: kill -9, and a note naming it left behind.
-        try "pid \(holder.processIdentifier), a run that died, since 01:00:00\n".write(toFile: lock.holderPath, atomically: true, encoding: .utf8)
+        try "pid \(holder.processIdentifier), a run that died, since 01:00:00\n".write(toFile: lock.slotPath(1) + ".holder", atomically: true, encoding: .utf8)
         kill(holder.processIdentifier, SIGKILL)
         holder.waitUntilExit()
         guard case .held(let held, let waited, _) = lock.acquire(as: "b", timeout: 5) else { Issue.record("not taken"); return }
         #expect(waited < 1)
-        #expect(lock.holder()?.contains(", b, since") == true)
+        #expect(lock.holder(1).note?.contains(", b, since") == true)
         held.release()
     }
 
@@ -117,14 +124,14 @@ struct TestLockTests {
         other.waitUntilExit()
         #expect(stopped == nil, "\(outputs)")
         #expect(try String(contentsOfFile: seen, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines) == lock.path)
-        #expect(outputs.first?.output.contains("Waited ") == true && outputs.first?.output.contains("for the Mac-wide test and build lock") == true, "\(outputs)")
+        #expect(outputs.first?.output.contains("Waited ") == true && outputs.first?.output.contains("for a slot of the Mac-wide test and build lock, its one slot held") == true, "\(outputs)")
         // Let go after: the next one takes it at once.
         guard case .held(let held, let waited, _) = lock.acquire(as: "next", timeout: 2) else { Issue.record("still held"); return }
         #expect(waited < 1)
         held.release()
         // Held by someone else past the timeout: nothing runs, and it says who held it.
         let stuck = try outsideHolder(lock)
-        try "pid \(stuck.processIdentifier), scripts/test.sh in /r, since 01:00:00\n".write(toFile: lock.holderPath, atomically: true, encoding: .utf8)
+        try "pid \(stuck.processIdentifier), scripts/test.sh in /r, since 01:00:00\n".write(toFile: lock.slotPath(1) + ".holder", atomically: true, encoding: .utf8)
         let (refused, ran) = Worktrees.runChecks(setup: nil, test: "true", in: worktree.path, home: home, timeout: 1, lock: lock)
         kill(stuck.processIdentifier, SIGKILL)
         stuck.waitUntilExit()
@@ -138,6 +145,14 @@ struct TestLockTests {
         #expect(TestLock.standard([TestLock.directoryVariable: "/l", TestLock.heldVariable: path]) == nil)
         // Mac-wide: one folder per user.
         #expect(TestLock.standard([TestLock.heldVariable: path])?.path.hasSuffix("tmp/vibeswitcher-\(getuid())/test-build.lock") == true)
+        // Any of the folder's slots, whatever the count: a run under slot 3 of a project with more doesn't wait either.
+        #expect(TestLock.standard([TestLock.directoryVariable: "/l", TestLock.heldVariable: "/l/test-build-3.lock"]) == nil)
+        #expect(TestLock.standard([TestLock.directoryVariable: "/l", TestLock.heldVariable: "/l/test-build-x.lock"]) != nil)
+        #expect(TestLock.standard([TestLock.directoryVariable: "/l", TestLock.heldVariable: "/m/test-build-2.lock"]) != nil)
+        // The count: the variable, else the cores ÷ 4, at least 1.
+        #expect(TestLock.standard([TestLock.directoryVariable: "/l", TestLock.slotsVariable: "2"])?.slots == 2)
+        #expect(TestLock.standard([TestLock.directoryVariable: "/l", TestLock.slotsVariable: "0"])?.slots == TestLock.defaultSlots)
+        #expect(TestLock.standard([TestLock.directoryVariable: "/l"])?.slots == max(1, ProcessInfo.processInfo.processorCount / 4))
     }
 
     // MARK: vs-heavy (any project's heavy work)
@@ -162,7 +177,7 @@ struct TestLockTests {
         let said = lines(b.output).joined(separator: "\n")
         #expect(said.contains("vs-heavy: tge-build: waiting for the Mac-wide test and build lock"), "\(said)")
         #expect(said.contains("held by pid ") && said.contains(", genswap-suite in "), "\(said)")
-        #expect(said.contains("vs-heavy: tge-build: took the test and build lock after"), "\(said)")
+        #expect(said.contains("vs-heavy: tge-build: took the test and build lock (slot 1 of 1) after"), "\(said)")
         #expect(lines(a.output).isEmpty, "\(lines(a.output))")
         // The command's status is vs-heavy's.
         let failing = try Self.runVsHeavy(["/bin/sh", "-c", "exit 7"], lockDirectory: url("heavy-locks").path, output: url("failing.out").path)
@@ -214,8 +229,8 @@ struct TestLockTests {
         // The lock the Swift side takes is the one vs-heavy takes: merge waits for it too.
         let held = try heavy("held", sleep: 2, log: log)
         #expect(eventually { lines(log).last == "held start" })
-        guard case .busy(let holder) = lock.acquire(as: "merge", timeout: 0.5) else { Issue.record("taken beside vs-heavy"); return }
-        #expect(holder?.contains(", held in ") == true)
+        guard case .busy(let holders) = lock.acquire(as: "merge", timeout: 0.5) else { Issue.record("taken beside vs-heavy"); return }
+        #expect(holders.first?.note?.contains(", held in ") == true)
         held.process.waitUntilExit()
     }
 
@@ -257,6 +272,7 @@ struct TestLockTests {
         environment["SWIFT_SLEEP"] = String(sleep)
         environment[TestLock.directoryVariable] = url("script-locks").path
         environment[TestLock.heldVariable] = nil
+        environment[TestLock.slotsVariable] = "1"
         process.environment = environment
         let handle = try #require(FileHandle(forWritingAtPath: output))
         process.standardOutput = handle
@@ -280,8 +296,8 @@ struct TestLockTests {
         #expect(lines(log) == ["A build start", "A build end", "A test start", "A test end", "B build start", "B build end", "B test start", "B test end"])
         let said = lines(b.output).joined(separator: "\n")
         #expect(said.contains("vs-heavy: scripts/test.sh: waiting for the Mac-wide test and build lock"), "\(said)")
-        #expect(said.contains(", scripts/test.sh in \(Self.repo.path), since"), "\(said)")
-        #expect(said.contains("vs-heavy: scripts/test.sh: took the test and build lock after"), "\(said)")
+        #expect(said.contains(", scripts/test.sh in \(Self.repo.path) ("), "\(said)")
+        #expect(said.contains("vs-heavy: scripts/test.sh: took the test and build lock (slot 1 of 1) after"), "\(said)")
         #expect(!lines(a.output).joined().contains("waiting for"))
     }
 
@@ -299,8 +315,8 @@ struct TestLockTests {
         #expect(!lines(a.output).contains { $0.hasPrefix("web tests: ") }, "\(lines(a.output))")
         let said = lines(b.output).joined(separator: "\n")
         #expect(said.contains("vs-heavy: scripts/test.sh: waiting for the Mac-wide test and build lock"), "\(said)")
-        #expect(said.contains(", scripts/test.sh in \(Self.repo.path), since"), "\(said)")
-        #expect(said.contains("vs-heavy: scripts/test.sh: took the test and build lock after"), "\(said)")
+        #expect(said.contains(", scripts/test.sh in \(Self.repo.path) ("), "\(said)")
+        #expect(said.contains("vs-heavy: scripts/test.sh: took the test and build lock (slot 1 of 1) after"), "\(said)")
         #expect(!lines(a.output).joined().contains("waiting for"))
     }
 
@@ -339,5 +355,148 @@ struct TestLockTests {
         #expect(b.process.terminationStatus == 0, "\(lines(b.output))")
         #expect(!lines(b.output).joined().contains("waiting for"), "\(lines(b.output))")
         #expect(lines(note).first != killed && lines(note).first?.contains(", scripts/test.sh in \(Self.repo.path)") == true)
+    }
+
+    // MARK: Slots
+
+    /// A note for slot `slot` of `lock` as a holder writes it, written `ago` seconds back.
+    func note(_ lock: TestLock, slot: Int = 1, _ line: String, ago: TimeInterval = 0) throws {
+        let path = lock.slotPath(slot) + ".holder"
+        try (line + "\n").write(toFile: path, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-ago)], ofItemAtPath: path)
+    }
+
+    @Test func withTwoSlotsTwoRunsHoldOneEachAndAThirdWaitsNamingBoth() throws {
+        let lock = TestLock(directory: url("locks").path, slots: 2)
+        guard case .held(let first, _, let none) = lock.acquire(as: "merge of a", in: "/Users/a/dev/alpha", timeout: 5) else { Issue.record("not taken"); return }
+        guard case .held(let second, _, _) = lock.acquire(as: "audit run of b", in: "/Users/a/dev/beta/.vibeswitcher/worktrees/x", timeout: 5) else { Issue.record("second not taken"); return }
+        #expect(none.isEmpty && first.path == lock.slotPath(1) && second.path == lock.slotPath(2))
+        #expect(lock.holders().map(\.slot) == [1, 2])
+        #expect(lock.holders().map(\.project) == ["alpha", "beta"])
+        #expect(lock.holders().map(\.what) == ["merge of a", "audit run of b"])
+        // The third waits, hearing who holds both at once and then every `every`, and gives up at its timeout.
+        let heard = Heard()
+        guard case .busy(let holders) = lock.acquire(as: "merge of c", timeout: 1, every: 0.2, waiting: { holders, _ in heard.add(holders) }) else {
+            Issue.record("taken past two"); return
+        }
+        #expect(holders.map(\.project) == ["alpha", "beta"])
+        #expect(heard.count >= 3, "\(heard.count)")
+        #expect(heard.first?.map(\.slot) == [1, 2])
+        #expect(TestLock.text(holders).hasPrefix("slot 1 held by pid \(getpid()), merge of a in /Users/a/dev/alpha (alpha), for "), "\(TestLock.text(holders))")
+        // One lets go: the third takes its slot, having waited for both.
+        Self.after(0.5) { second.release() }
+        guard case .held(let third, let waited, let behind) = lock.acquire(as: "merge of c", timeout: hangGuard) else { Issue.record("not taken"); return }
+        #expect(third.path == lock.slotPath(2) && waited >= 0.3 && behind.count == 2)
+        #expect(lock.holder(2).what == "merge of c" && lock.holder(2).project == nil)
+        #expect(lock.holder(2).text().hasPrefix("pid \(getpid()), merge of c, for "), "\(lock.holder(2).text())")
+        first.release()
+        third.release()
+        #expect(lock.holders().isEmpty)
+    }
+
+    final class Heard: @unchecked Sendable {
+        private let lock = NSLock()
+        private var all: [[TestLock.Holder]] = []
+        func add(_ holders: [TestLock.Holder]) { lock.withLock { all.append(holders) } }
+        var count: Int { lock.withLock { all.count } }
+        var first: [TestLock.Holder]? { lock.withLock { all.first } }
+    }
+
+    @Test func aHolderOverThirtyMinutesIsLongAndADeadOneIsntCounted() throws {
+        let lock = TestLock(directory: url("locks").path, slots: 3)
+        let pytest = try outsideHolder(lock, slot: 2)
+        defer { kill(pytest.processIdentifier, SIGKILL); pytest.waitUntilExit() }
+        try note(lock, slot: 2, "pid \(pytest.processIdentifier), .venv/bin/python -m pytest -q in /Users/a/dev/TGE-ANALYSIS/.vibeswitcher/worktrees/redesign, since 02:53:22",
+                 ago: 38 * 60 + 5)
+        // Slot 1's note is left by a run that died: its slot is free.
+        try note(lock, slot: 1, "pid 1, a run that died in /Users/a/dev/gone, since 01:00:00", ago: 90 * 60)
+        let holders = lock.holders()
+        #expect(holders.map(\.slot) == [2])
+        let held = try #require(holders.first)
+        #expect(held.isLong() && held.project == "TGE-ANALYSIS")
+        #expect(held.text().hasSuffix("(TGE-ANALYSIS), for 38 min, long"), "\(held.text())")
+        #expect(held.short() == "TGE-ANALYSIS (.venv/bin/python -m pytest -q) for 38 min")
+        // Under 30 min it isn't.
+        try note(lock, slot: 2, "pid \(pytest.processIdentifier), make in /Users/a/dev/p, since 02:53:22", ago: 29 * 60)
+        #expect(lock.holders().first?.isLong() == false && lock.holders().first?.text().hasSuffix("(p), for 29 min") == true)
+        // A slot past this lock's count (another project's heavy_slots) is seen too.
+        let other = try outsideHolder(lock, slot: 5)
+        defer { kill(other.processIdentifier, SIGKILL); other.waitUntilExit() }
+        #expect(lock.holders().map(\.slot) == [2, 5])
+    }
+
+    @Test func theWitnessTellsALongHolderOnceAndForgetsItWhenItsLetGo() throws {
+        let lock = TestLock(directory: url("locks").path, slots: 2)
+        var watch = LeadWitness.HeavySlots(lock: lock)
+        let quick = try outsideHolder(lock, slot: 1)
+        defer { kill(quick.processIdentifier, SIGKILL); quick.waitUntilExit() }
+        try note(lock, slot: 1, "pid \(quick.processIdentifier), swift build in /Users/a/dev/p, since 03:00:00", ago: 60)
+        #expect(watch.look() == nil)
+        let long = try outsideHolder(lock, slot: 2)
+        try note(lock, slot: 2, "pid \(long.processIdentifier), pytest in /Users/a/dev/TGE-ANALYSIS, since 02:53:22", ago: 38 * 60)
+        let looked = watch.look()
+        let told = try #require(looked)
+        #expect(told.contains("held long: slot 2 held by pid \(long.processIdentifier), pytest in /Users/a/dev/TGE-ANALYSIS (TGE-ANALYSIS), for 38 min, long"), "\(told)")
+        #expect(told.contains("Nothing ends it"))
+        #expect(watch.look() == nil)
+        // Let go, and another run holds the slot long later: told afresh.
+        kill(long.processIdentifier, SIGKILL)
+        long.waitUntilExit()
+        #expect(watch.look() == nil && watch.told.isEmpty)
+        let again = try outsideHolder(lock, slot: 2)
+        defer { kill(again.processIdentifier, SIGKILL); again.waitUntilExit() }
+        try note(lock, slot: 2, "pid \(again.processIdentifier), pytest in /Users/a/dev/TGE-ANALYSIS, since 04:00:00", ago: 31 * 60)
+        let again31 = watch.look()
+        #expect(again31?.contains("for 31 min, long") == true)
+    }
+
+    @Test func withTwoSlotsThreeVsHeavyRunsGiveTwoRunningAndOneWaitingThatNamesBoth() throws {
+        let log = url("heavy.log").path
+        let two = [TestLock.slotsVariable: "2"]
+        let a = try heavy("genswap-suite", sleep: 60, log: log, extra: two)
+        let b = try heavy("tge-pytest", sleep: 60, log: log, extra: two)
+        #expect(eventually { Set(lines(log)) == ["genswap-suite start", "tge-pytest start"] })
+        // The Swift side sees the same two slots held.
+        let lock = TestLock(directory: url("heavy-locks").path, slots: 2)
+        guard case .busy(let holders) = lock.acquire(as: "merge", timeout: 0.3) else { Issue.record("a third slot taken"); return }
+        #expect(Set(holders.compactMap(\.what)) == ["genswap-suite", "tge-pytest"])
+        let c = try heavy("tge-build", sleep: 0, log: log, extra: two)
+        #expect(eventually { lines(c.output).joined().contains("waiting for") })
+        let said = lines(c.output).joined(separator: "\n")
+        #expect(said.contains("vs-heavy: tge-build: waiting for the Mac-wide test and build lock (all 2 slots held"), "\(said)")
+        #expect(said.contains(", genswap-suite in \(Self.repo.path)") && said.contains(", tge-pytest in \(Self.repo.path)"), "\(said)")
+        // Which project: the repository a worktree of VibeSwitcher's belongs to, else the folder.
+        let project = Self.repo.path.components(separatedBy: "/.vibeswitcher/worktrees/").first.map { URL(fileURLWithPath: $0).lastPathComponent }!
+        #expect(said.contains("in \(Self.repo.path) (\(project)), for "), "\(said)")
+        #expect(!lines(log).contains("tge-build start"))
+        // kill -9 of a holder frees its slot: the waiter runs at once, not after the sleep.
+        let killed = Date()
+        kill(-a.process.processIdentifier, SIGKILL)
+        a.process.waitUntilExit()
+        c.process.waitUntilExit()
+        #expect(c.process.terminationStatus == 0, "\(lines(c.output))")
+        #expect(Date().timeIntervalSince(killed) < 30, "c waited for a's sleep instead")
+        #expect(lines(c.output).joined().contains("took the test and build lock (slot "), "\(lines(c.output))")
+        #expect(lines(log).suffix(2) == ["tge-build start", "tge-build end"])
+        kill(-b.process.processIdentifier, SIGINT)
+        b.process.waitUntilExit()
+    }
+
+    @Test func aVsHeavyWaiterMarksAHolderOverThirtyMinutesLong() throws {
+        let lock = TestLock(directory: url("heavy-locks").path)
+        let holder = try outsideHolder(lock)
+        defer { kill(holder.processIdentifier, SIGKILL); holder.waitUntilExit() }
+        try note(lock, "pid \(holder.processIdentifier), .venv/bin/python -m pytest -q in /Users/a/dev/TGE-ANALYSIS/.vibeswitcher/worktrees/r, since 02:53:22",
+                 ago: 38 * 60 + 5)
+        let log = url("heavy.log").path
+        let waiting = try heavy("build", sleep: 0, log: log)
+        #expect(eventually { lines(waiting.output).joined().contains("waiting for") })
+        let said = lines(waiting.output).joined(separator: "\n")
+        #expect(said.contains("(its one slot held, in \(url("heavy-locks").path)): slot 1 held by pid \(holder.processIdentifier), .venv/bin/python -m pytest -q in /Users/a/dev/TGE-ANALYSIS/.vibeswitcher/worktrees/r (TGE-ANALYSIS), for 38 min, long."), "\(said)")
+        // Not ended: the holder still runs while it waits.
+        #expect(kill(holder.processIdentifier, 0) == 0)
+        kill(holder.processIdentifier, SIGKILL)
+        waiting.process.waitUntilExit()
+        #expect(waiting.process.terminationStatus == 0 && lines(log) == ["build start", "build end"])
     }
 }

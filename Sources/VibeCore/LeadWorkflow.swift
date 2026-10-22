@@ -30,6 +30,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// How many workers and verifiers may run at once across every project the session host knows
     /// (`mac_max_sessions:`); start_worker and audit refuse at it.
     public var macMaxSessions = 6
+    /// How many test and build slots merge and an audit's shared run share with every project's `vs-heavy`
+    /// (`heavy_slots:`, see `TestLock`); nil: VIBESWITCHER_HEAVY_SLOTS, else the Mac's cores ÷ 4.
+    public var heavySlots: Int?
     /// How many finders an audit runs (`audit_finders:`, 1 to `maxFinders`): 1 is one verifier, as before; 2 or 3
     /// run that many with different focuses on one shared build and test run, and a vote keeps what most of them found.
     public var auditFinders = 1
@@ -93,6 +96,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "test_timeout_min": workflow.testTimeoutMinutes = minutes(value) ?? Worktrees.testTimeout / 60
                 case "load_threshold": workflow.loadThreshold = positive(value)
                 case "mac_max_sessions": workflow.macMaxSessions = max(1, Int(value) ?? 6)
+                case "heavy_slots": workflow.heavySlots = Int(value).flatMap { $0 >= 1 ? $0 : nil }
                 case "audit_finders": workflow.auditFinders = min(maxFinders, max(1, Int(value) ?? 1))
                 case "audit_nit_cap": workflow.auditNitCap = max(0, Int(value) ?? 5)
                 // One it can't read asks for everything rather than merging what the owner meant to see.
@@ -290,7 +294,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// The settings the lead may change with `configure`.
     public static let configurable = ["test_command", "regression_command", "init_command", "base_branch", "verifier_model", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "load_threshold", "mac_max_sessions",
-                                      "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "records_dir"]
+                                      "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "records_dir"]
 
     /// Writes the workflow file (`.vibeswitcher/workflow.md`), private to you (0600), atomically: the template the first
     /// time (`BoardStore.prepare`), the lead's `configure` after.
@@ -421,6 +425,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     load_threshold:
     # How many workers and verifiers may run at once across all projects on this Mac.
     mac_max_sessions: 6
+    # How many builds and full test runs (vs-heavy's, merge's, audits') may run at once across all projects on this
+    # Mac; one more waits, saying who holds each slot. Empty: the Mac's cores ÷ 4 (VIBESWITCHER_HEAVY_SLOTS when set).
+    heavy_slots:
     # How many finders an audit runs: 1 is one verifier. 2 or 3 run that many with different focuses (contract and
     # acceptance; bugs and regressions; security when sensitive_paths are touched, else tests), on one build and test
     # run the audit makes first; a vote keeps the findings most of them found. Each counts against mac_max_sessions.

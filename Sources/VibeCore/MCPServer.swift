@@ -425,6 +425,51 @@ public final class MCPHostedToolset: MCPToolset, @unchecked Sendable {
     }
 }
 
+/// What a long tool call says while it works (merge and an audit waiting for a test and build slot, or for the load to
+/// drop, and testing): MCP `notifications/progress` on the request's progress token, so the client hears from it at
+/// least every `every` (Claude Code ends a call that sends "no response or progress for 1800s"). Set on the call's
+/// thread (`current`), as `ShellCancel` is; nil when the client gave no progress token, and in tests that set none.
+public final class ToolProgress: @unchecked Sendable {
+    /// How often a wait or a run says how it goes.
+    public let every: TimeInterval
+    private let sink: (String) -> Void
+
+    public init(every: TimeInterval = 30, _ sink: @escaping (String) -> Void) {
+        self.every = every
+        self.sink = sink
+    }
+
+    public func send(_ message: String) { sink(message) }
+
+    private static let key = "VibeSwitcher.ToolProgress"
+    public static var current: ToolProgress? { Thread.current.threadDictionary[key] as? ToolProgress }
+
+    /// `body` with `progress` as `current` (nil: none); the one set before is set again afterwards.
+    public static func with<T>(_ progress: ToolProgress?, _ body: () throws -> T) rethrows -> T {
+        let outer = Thread.current.threadDictionary[key]
+        Thread.current.threadDictionary[key] = progress
+        defer { Thread.current.threadDictionary[key] = outer }
+        return try body()
+    }
+
+    /// Until `stop` is called, `message()` every `every` on a thread of its own: for a call blocked in a command.
+    public func heartbeat(_ message: @escaping @Sendable () -> String) -> () -> Void {
+        let done = ShellCancel()
+        let every = self.every
+        Thread.detachNewThread { [self] in
+            var next = Date().addingTimeInterval(every)
+            while !done.isCancelled {
+                if Date() >= next {
+                    send(message())
+                    next = Date().addingTimeInterval(every)
+                }
+                Thread.sleep(forTimeInterval: min(0.5, every / 4))
+            }
+        }
+        return { done.cancel() }
+    }
+}
+
 /// MCP over stdio: one JSON-RPC 2.0 message per line in, one reply per line out (none for notifications). Tool
 /// calls run side by side (a 20-minute merge doesn't make `status` or `ping` wait), and a cancelled call's commands
 /// are stopped. With a `watch`, the server switches to a new build of itself when one is installed, between requests
@@ -595,8 +640,22 @@ public final class MCPServer: @unchecked Sendable {
             lock.unlock()
             // A thread of its own, not the shared pool: a call blocks for as long as its commands run, and while the
             // pool is busy (a build, other calls) it wouldn't even start; a cancel would find nothing running.
+            // The client's progress token, when it gave one: what the call says while it works goes to it.
+            let progressToken = ((message?["params"] as? [String: Any])?["_meta"] as? [String: Any])?["progressToken"]
+            let progress = progressToken.map { token in
+                let counting = NSLock()
+                var count = 0
+                return ToolProgress { [weak self] text in
+                    counting.lock()
+                    count += 1
+                    let note: [String: Any] = ["jsonrpc": "2.0", "method": "notifications/progress",
+                                               "params": ["progressToken": token, "progress": count, "message": text]]
+                    counting.unlock()
+                    if let data = self?.encode(note) { respond(data) }
+                }
+            }
             Thread.detachNewThread { [self] in
-                let reply = ShellCancel.with(token) { handle(data) }
+                let reply = ShellCancel.with(token) { ToolProgress.with(progress) { handle(data) } }
                 // Answered before it counts as ended: a switch of builds waits for no call, and loses none.
                 if let reply { respond(reply) }
                 lock.lock()

@@ -607,16 +607,18 @@ public enum Worktrees {
         guard cancel?.isCancelled != true else { return .cancelled }
         let tested = Git.run(["rev-parse", "HEAD"], in: path).output
         return runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
-                         as: "VibeSwitcher's merge test of \(commit.prefix(8)) in \(root)").stopped ?? .passed(tested)
+                         as: "VibeSwitcher's merge test of \(commit.prefix(8))", place: root).stopped ?? .passed(tested)
     }
 
     /// Runs `setup` then `test` (each when given) in `path` with HOME, CFFIXED_USER_HOME and TMPDIR in `home` (made
     /// here, removed by the caller), as merge and an audit's shared run do. `stopped`: nil when every command passed,
     /// else how it stopped (failed, hung, cancelled, or the home couldn't be made); `outputs`: each command that ran,
-    /// with all of its output, in order. With `lock`, they run holding it (as `holder` says), after waiting for it up
-    /// to `timeout`; the commands get its path in `TestLock.heldVariable`, so a script among them doesn't wait for it.
+    /// with all of its output, in order. With `lock`, they run holding one of its slots (its note names `holder`, run
+    /// for `place`), after waiting for one up to `timeout`; the commands get its path in `TestLock.heldVariable`, so a
+    /// script among them doesn't wait for it. The call's `ToolProgress` hears the wait (who holds the slots) and the
+    /// run, every its `every`: a merge's tool call never goes silent.
     static func runChecks(setup: String?, test: String?, in path: String, home: String, timeout: TimeInterval,
-                          lock: TestLock? = nil, as holder: String = "VibeSwitcher's test run")
+                          lock: TestLock? = nil, as holder: String = "VibeSwitcher's test run", place: String? = nil)
         -> (stopped: Check?, outputs: [(name: String, output: String)]) {
         let cancel = ShellCancel.current
         let tmp = home + "/tmp"
@@ -628,14 +630,22 @@ public enum Worktrees {
         var header = "HOME, CFFIXED_USER_HOME and TMPDIR: \(home) (a scratch folder, removed afterwards)\n"
         var held: TestLock.Held?
         defer { held?.release() }
+        let progress = ToolProgress.current
         let runs = [setup, test].contains { !($0 ?? "").trimmingCharacters(in: .whitespaces).isEmpty }
         if let lock, runs {
-            switch lock.acquire(as: holder, timeout: timeout, cancel: cancel) {
+            let slots = lock.slots == 1 ? "its one slot" : "all \(lock.slots) slots"
+            let outcome = lock.acquire(as: holder, in: place, timeout: timeout, cancel: cancel, every: progress?.every ?? 30,
+                                       waiting: progress.map { progress in { holders, waited in
+                progress.send("Waiting \(duration(waited)) for a slot of the Mac-wide test and build lock (\(slots) held): \(TestLock.text(holders)).")
+            } })
+            switch outcome {
             case .held(let taken, let waited, let after):
                 held = taken
-                if let after { header += "Waited \(duration(waited)) for the Mac-wide test and build lock, held by \(after).\n" }
-            case .busy(let who):
-                return (.error("Another run held the Mac-wide test and build lock (\(lock.path)) for over \(duration(timeout)): \(who ?? "it didn't say who"). Nothing was tested; try again once it's done."), [])
+                if !after.isEmpty {
+                    header += "Waited \(duration(waited)) for a slot of the Mac-wide test and build lock, \(slots) held: \(TestLock.text(after)).\n"
+                }
+            case .busy(let holders):
+                return (.error("Every slot of the Mac-wide test and build lock (\(lock.directory), \(lock.slots)) stayed held for over \(duration(timeout)) (test_timeout_min): \(TestLock.text(holders)). Nothing was tested; try again once one is done."), [])
             case .cancelled:
                 return (.cancelled, [])
             case .failed(let text):
@@ -650,8 +660,11 @@ public enum Worktrees {
             let script = "export HOME=\(RecentProjects.shellQuote(home))\n" + command
             // All of it, in order: what failed may be anywhere in it, and its tail is often a build's warnings.
             var env = ["CFFIXED_USER_HOME": home, "TMPDIR": tmp + "/"]
-            if let lock, held != nil { env[TestLock.heldVariable] = lock.path }
+            if let held { env[TestLock.heldVariable] = held.path }
+            let started = Date()
+            let stop = progress?.heartbeat { "Running the \(name) (\(duration(Date().timeIntervalSince(started))) so far)." }
             let run = Shell.run(executable: "/bin/zsh", args: ["-lc", script], in: path, env: env, timeout: timeout, interleaved: true)
+            stop?()
             outputs.append((name, header + run.output))
             if run.cancelled || cancel?.isCancelled == true { return (.cancelled, outputs) }
             if run.timedOut { return (.hung(command: name, after: timeout, output: header + run.output), outputs) }
@@ -690,7 +703,7 @@ public enum Worktrees {
             return AuditRun(outcome: .error(added.error.isEmpty ? "Couldn't set up a worktree to test \(commit.prefix(8)) in." : added.error), logs: [])
         }
         let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: homePath, timeout: timeout, lock: lock,
-                                           as: "VibeSwitcher's audit run of \(commit.prefix(8)) in \(root)")
+                                           as: "VibeSwitcher's audit run of \(commit.prefix(8))", place: root)
         var files: [String] = []
         for (name, output) in outputs {
             let file = logs.appendingPathComponent(name == "init_command" ? "init.log" : "test.log")

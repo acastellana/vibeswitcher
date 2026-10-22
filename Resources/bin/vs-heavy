@@ -1,19 +1,24 @@
 #!/bin/bash
-# vs-heavy [--as WHAT] COMMAND [ARGS...]: runs COMMAND under the Mac-wide lock for heavy work (a full test suite, a
-# release build), so that every project's workers, merges and audits run one at a time on this Mac. Two suites side by
-# side starved each other and the benches (3–4 min each at load 30–50, measured 2026-10-21). While another run holds
-# the lock, this one waits, saying who holds it (again each time that changes), then runs COMMAND and exits with its
-# status. VibeSwitcher puts it on PATH in every session it starts (the app bundle's Contents/Resources/bin); merge and an
-# audit's shared run take the same lock around their test command (`TestLock` in VibeCore).
+# vs-heavy [--as WHAT] COMMAND [ARGS...]: runs COMMAND in one of the Mac-wide slots for heavy work (a full test suite, a
+# release build), so that every project's workers, merges and audits run at most N at a time on this Mac. Two suites
+# side by side starved each other and the benches (3–4 min each at load 30–50, measured 2026-10-21); one slot, though,
+# let a 38-minute pytest hold up every project's builds, suites and merges (2026-10-22). N is VIBESWITCHER_HEAVY_SLOTS,
+# else the Mac's cores ÷ 4 (at least 1): 3 on a 12-core Mac. While every slot is held, this run waits, saying who
+# holds each (pid, what, where, which project, and how long: "long" past 30 min, which is only said, never acted on),
+# again each time that changes and every 5 minutes, then runs COMMAND and exits with its status. VibeSwitcher puts it on
+# PATH in every session it starts (the app bundle's Contents/Resources/bin); merge and an audit's shared run take a slot
+# around their test command too (`TestLock` in VibeCore).
 #
-# The lock is a flock on $VIBESWITCHER_TEST_LOCK_DIR/test-build.lock (default /private/tmp/vibeswitcher-<uid>/), held on
-# this script's fd 9: the kernel lets go of it when the script exits, Ctrl-C and kill -9 too, so a run that died leaves
-# no lock behind (its .holder note says who held it last; the next holder writes its own). macOS has no flock(1):
-# /usr/bin/perl takes it on fd 9 and exits, and the lock stays with the script's fd. COMMAND runs without fd 9, so
-# nothing it leaves running keeps the lock.
+# Slot 1 is a flock on $VIBESWITCHER_TEST_LOCK_DIR/test-build.lock (default /private/tmp/vibeswitcher-<uid>/), slot k
+# on test-build-k.lock beside it (an older vs-heavy, with only test-build.lock, contends for slot 1). The slot taken is
+# held on this script's fd 9: the kernel lets go of it when the script exits, Ctrl-C and kill -9 too, so a run that died
+# leaves no lock behind (its slot's .holder note says who held it last; the next holder writes its own). macOS has no
+# flock(1): /usr/bin/perl takes it on one of the slots' fds and exits, and the lock stays with the script's fd. COMMAND
+# runs without it, so nothing it leaves running keeps the slot.
 #
-# COMMAND gets VIBESWITCHER_TEST_LOCK naming the lock: a vs-heavy under one that holds it (a test script the merge's
-# test command runs, a suite under a wrapped build) runs its command at once rather than wait for its own ancestor.
+# COMMAND gets VIBESWITCHER_TEST_LOCK naming the slot: a vs-heavy under one that holds any of this folder's slots (a
+# test script the merge's test command runs, a suite under a wrapped build) runs its command at once rather than wait
+# for its own ancestor.
 # --as WHAT: who the holder note names (default: the command line).
 set -uo pipefail
 
@@ -24,44 +29,92 @@ if [[ ${1:-} == --as ]]; then
 fi
 [[ ${1:-} == -- ]] && shift
 if (( $# == 0 )); then
-    echo "usage: vs-heavy [--as WHAT] COMMAND [ARGS...]: runs COMMAND under the Mac-wide lock for heavy work" >&2
+    echo "usage: vs-heavy [--as WHAT] COMMAND [ARGS...]: runs COMMAND in a Mac-wide slot for heavy work" >&2
     exit 2
 fi
 [[ -n $what ]] || what=$(printf '%s' "$*" | tr '\n' ' ' | cut -c 1-120)
 
 lock_dir=${VIBESWITCHER_TEST_LOCK_DIR:-/private/tmp/vibeswitcher-$(id -u)}
-# As TestLock names it (no trailing slash), so a run under a holder of the Swift side's lock knows it.
+# As TestLock names it (no trailing slash), so a run under a holder of the Swift side's slot knows it.
 while [[ $lock_dir == */ && $lock_dir != / ]]; do lock_dir=${lock_dir%/}; done
-lock_file=$lock_dir/test-build.lock
 
-# Under a holder of this very lock: it's ours already.
-[[ ${VIBESWITCHER_TEST_LOCK:-} == "$lock_file" ]] && exec "$@"
+# Under a holder of one of these very slots: it's ours already.
+held=${VIBESWITCHER_TEST_LOCK:-}
+[[ $held == "$lock_dir/test-build.lock" || $held == "$lock_dir"/test-build-[0-9]*.lock ]] && exec "$@"
 
-mkdir -p -m 700 "$lock_dir" || { echo "vs-heavy: can't make $lock_dir for the heavy-work lock" >&2; exit 1; }
+slots=${VIBESWITCHER_HEAVY_SLOTS:-}
+if ! [[ $slots =~ ^[0-9]+$ ]] || (( slots < 1 )); then
+    slots=$(( $(sysctl -n hw.ncpu 2>/dev/null || echo 4) / 4 ))
+    (( slots >= 1 )) || slots=1
+fi
+
+mkdir -p -m 700 "$lock_dir" || { echo "vs-heavy: can't make $lock_dir for the heavy-work slots" >&2; exit 1; }
 # /private/tmp is everyone's: a folder someone else made there (or a link) isn't taken as this user's.
-[[ -O $lock_dir && ! -L $lock_dir ]] || { echo "vs-heavy: $lock_dir isn't a folder of yours: the heavy-work lock can't be kept there" >&2; exit 1; }
-exec 9>> "$lock_file" || { echo "vs-heavy: can't open $lock_file" >&2; exit 1; }
+[[ -O $lock_dir && ! -L $lock_dir ]] || { echo "vs-heavy: $lock_dir isn't a folder of yours: the heavy-work slots can't be kept there" >&2; exit 1; }
 
-# Takes the flock on fd 9, waiting as long as it takes; while it waits, says who holds it (from the .holder note), and
-# again whenever that changes.
-/usr/bin/perl -MFcntl=:flock -e '
-    my ($file, $what) = @ARGV;
-    open(my $fh, ">&=", 9) or exit 2;
-    exit 0 if flock($fh, LOCK_EX | LOCK_NB);
-    my ($start, $said) = (time, "");
-    $| = 1;
-    until (flock($fh, LOCK_EX | LOCK_NB)) {
-        my $holder = "a run that did not say who it is";
-        if (open(my $note, "<", "$file.holder")) { my $line = <$note>; chomp $line if defined $line; $holder = $line if defined $line && length $line; }
-        if ($holder ne $said) {
-            print STDERR ($said eq "" ? "vs-heavy: $what: waiting for the Mac-wide test and build lock ($file), held by $holder.\n"
-                                      : "vs-heavy: $what: still waiting; now held by $holder.\n");
-            $said = $holder;
+# Slot k's file, on fd 19+k while this waits.
+slot_file() { (( $1 == 1 )) && echo "$lock_dir/test-build.lock" || echo "$lock_dir/test-build-$1.lock"; }
+fds=()
+for (( k = 1; k <= slots; k++ )); do
+    file=$(slot_file "$k")
+    eval "exec $(( 19 + k ))>> \"\$file\"" || { echo "vs-heavy: can't open $file" >&2; exit 1; }
+    fds+=("$(( 19 + k )):$file")
+done
+
+# Takes the first free slot (a flock on its fd), waiting as long as it takes, and prints its number; while it waits,
+# says who holds each slot (from their .holder notes), again whenever that changes and every 5 minutes.
+taken=$(/usr/bin/perl -MFcntl=:flock -e '
+    my ($what, @slots) = @ARGV;
+    my @handles;
+    for my $slot (@slots) {
+        my ($fd, $file) = split /:/, $slot, 2;
+        open(my $fh, ">&=", $fd) or exit 2;
+        push @handles, [$fh, $file];
+    }
+    sub project { my ($dir) = @_; $dir = $1 if $dir =~ m{^(.*?)/\.vibeswitcher/worktrees/}; $dir =~ s{/+$}{}; return (split m{/}, $dir)[-1]; }
+    sub held_for { my ($s) = @_; return $s < 60 ? "$s s" : int($s / 60) . " min" . ($s >= 1800 ? ", long" : ""); }
+    # Who holds a slot, from its note: "pid P, WHAT in DIR (project), for 38 min, long".
+    sub holder {
+        my ($file) = @_;
+        open(my $note, "<", "$file.holder") or return ("a run that did not say who it is", "?");
+        my $line = <$note>;
+        return ("a run that did not say who it is", "?") unless defined $line && length $line > 1;
+        chomp $line;
+        my $since = (stat($note))[9];
+        my $who = $line;
+        $who = "pid $1, $2" . (defined $3 ? " in $3 (" . project($3) . ")" : "") if $line =~ /^pid (\d+), (.*?)(?: in (\/.*))?, since [^,]*$/;
+        return ($who, $line, defined $since ? time - $since : undef);
+    }
+    sub take { for my $i (0 .. $#handles) { return $i + 1 if flock($handles[$i][0], LOCK_EX | LOCK_NB); } return 0; }
+    my $got = take();
+    if ($got) { print $got; exit 0; }
+    my ($start, $said, $saidAt) = (time, "", 0);
+    my $n = @handles;
+    (my $dir = $handles[0][1]) =~ s{/[^/]*$}{};
+    until ($got = take()) {
+        my (@told, @keys);
+        for my $i (0 .. $#handles) {
+            my ($who, $key, $age) = holder($handles[$i][1]);
+            push @keys, $key;
+            push @told, "slot " . ($i + 1) . " held by $who" . (defined $age ? ", for " . held_for($age) : "");
+        }
+        my $set = join("\n", @keys);
+        if ($set ne $said || time - $saidAt >= 300) {
+            my $all = $n == 1 ? "its one slot held" : "all $n slots held";
+            print STDERR ($said eq "" ? "vs-heavy: $what: waiting for the Mac-wide test and build lock ($all, in $dir): "
+                                      : "vs-heavy: $what: still waiting ($all): ") . join("; ", @told) . ".\n";
+            ($said, $saidAt) = ($set, time);
         }
         select(undef, undef, undef, 0.5);
     }
-    printf STDERR "vs-heavy: %s: took the test and build lock after %d s.\n", $what, time - $start;
-' "$lock_file" "$what" || { echo "vs-heavy: couldn't take the test and build lock" >&2; exit 1; }
+    printf STDERR "vs-heavy: %s: took the test and build lock (slot %d of %d) after %d s.\n", $what, $got, $n, time - $start;
+    print $got;
+' "$what" "${fds[@]}") || { echo "vs-heavy: couldn't take a slot of the test and build lock" >&2; exit 1; }
+
+# Keeps the slot taken on fd 9 and lets go of the others' fds.
+lock_file=$(slot_file "$taken")
+exec 9>&$(( 19 + taken ))
+for (( k = 1; k <= slots; k++ )); do eval "exec $(( 19 + k ))>&-"; done
 
 echo "pid $$, $what in $PWD, since $(date +%H:%M:%S)" > "$lock_file.holder"
 export VIBESWITCHER_TEST_LOCK=$lock_file

@@ -118,6 +118,27 @@ public final class LeadToolset: MCPToolset {
     /// project's merges sharing it with `vs-heavy`; nil (tests that don't give a scratch one): none.
     public var testLock: TestLock?
 
+    /// `testLock` with the workflow's heavy_slots, when set.
+    func heavyLock(_ workflow: LeadWorkflow) -> TestLock? {
+        testLock.map { lock in workflow.heavySlots.map(lock.with(slots:)) ?? lock }
+    }
+
+    /// "3 (not set: the Mac's cores ÷ 4)", as merge and audits take them.
+    func heavySlotsText(_ workflow: LeadWorkflow) -> String {
+        let count = heavyLock(workflow)?.slots ?? workflow.heavySlots ?? TestLock.slotCount()
+        return workflow.heavySlots == nil ? "\(count) (not set: VIBESWITCHER_HEAVY_SLOTS, else the Mac's cores ÷ 4)" : "\(count)"
+    }
+
+    /// Status's word on a test and build slot held over `TestLock.longAfter`: "; a test and build slot held long:
+    /// TGE (pytest -q) for 38 min". Only said: nothing ends it.
+    func longHolderText() -> String {
+        guard let lock = heavyLock(workflow) else { return "" }
+        let now = Date()
+        let long = lock.holders().filter { $0.isLong(now: now) }
+        guard !long.isEmpty else { return "" }
+        return "; \(long.count == 1 ? "a test and build slot" : "\(long.count) test and build slots") held long: " + long.map { $0.short(now: now) }.joined(separator: ", ")
+    }
+
     /// The server for the session it runs in. `expected` and `expectedTask` are what it was started as (`--role`,
     /// `--task`): when they don't match the session's role, it serves nothing. `wait`: how long to wait for the
     /// session's role while VibeSwitcher is still binding it (the session can start first).
@@ -378,6 +399,7 @@ public final class LeadToolset: MCPToolset {
                                          "disk_warning_gb": P(type: "number", description: "Free space (GB) on the worktrees' volume below which you're told, once, what takes the space (default 10)"),
                                          "disk_floor_gb": P(type: "number", description: "Free space (GB) below which start_worker refuses (default 3)"),
                                          "test_timeout_min": P(type: "number", description: "Minutes merge lets init_command and test_command run before it takes them as hung and stops them (default 45)"),
+                                         "heavy_slots": P(type: "integer", description: "How many builds and full test runs (vs-heavy's, merges', audits') may run at once across all projects on this Mac (empty: the cores ÷ 4)"),
                                          "audit_finders": P(type: "integer", description: "How many finders an audit runs: 1 (one verifier, the default), 2 or 3 (different focuses on one shared build and test run, and a vote keeps what most of them found; each counts against mac_max_sessions)"),
                                          "audit_nit_cap": P(type: "integer", description: "How many new Nit findings one audit's vote keeps (default 5)"),
                                          "merge_policy": P(type: "string", description: "How merges are handled, as the owner chose once: auto (work merges once its review passes: its audit, or for review none its worker's done report and the merge's test run; the user gets an update afterwards), ask_sensitive (a commit touching sensitive_paths waits for the user's approval of that exact commit), ask_all (every merge waits)",
@@ -1009,7 +1031,10 @@ public final class LeadToolset: MCPToolset {
                                                 start: start, server: runtime.server, name: name, model: model, branch: branch,
                                                 records: workflow.recordsDir, folder: vault.runFolder(root: root, name: name),
                                                 cwd: folder, temporary: sessionTempRoot)
-            let session = try runtime.spawn(cwd: folder, command: launch.command, env: launch.environment, label: label,
+            // The project's heavy_slots for its sessions' vs-heavy too.
+            var environment = launch.environment
+            if let slots = workflow.heavySlots { environment[TestLock.slotsVariable] = String(slots) }
+            let session = try runtime.spawn(cwd: folder, command: launch.command, env: environment, label: label,
                                             agent: "claude", trust: trust)
             try vault.bind(grant, root: root, session: session)
             return session
@@ -1133,7 +1158,7 @@ public final class LeadToolset: MCPToolset {
         let run = Self.sharedRun(at: logs) ?? {
             Worktrees.auditRun(root: root, commit: head, setup: workflow.initCommand, test: workflow.testCommand,
                                scratch: vault.scratch(root: root, "audit-\(slug)"), home: vault.scratch(root: root, "audit-\(slug)-home"),
-                               logs: logs, timeout: workflow.testTimeout, lock: testLock)
+                               logs: logs, timeout: workflow.testTimeout, lock: heavyLock(workflow))
         }()
         if case .cancelled = run.outcome {
             throw Problem(text: "The audit of \(slug) was cancelled during its build and test run; no finder started.")
@@ -1455,7 +1480,7 @@ public final class LeadToolset: MCPToolset {
         let tested: String
         switch Worktrees.rebaseAndTest(root: root, commit: commit, onto: current, setup: workflow.initCommand, test: workflow.mergeChecks,
                                        scratch: vault.scratch(root: root, "merge-\(slug)"), home: vault.scratch(root: root, "merge-\(slug)-home"),
-                                       timeout: workflow.testTimeout, lock: testLock) {
+                                       timeout: workflow.testTimeout, lock: heavyLock(workflow)) {
         case .passed(let commit): tested = commit
         case .cancelled:
             // Stopped by the caller: nothing is known about the work, and the task stays as it was.
@@ -1711,7 +1736,13 @@ public final class LeadToolset: MCPToolset {
         let deadline = start.addingTimeInterval(workflow.testTimeout)
         guard let first = runtime.loadAverage(), first > workflow.loadLimit else { return nil }
         var load: Double? = first
+        let progress = ToolProgress.current
+        var told: Date?
         while let current = load, current > workflow.loadLimit {
+            if let progress, told.map({ Date().timeIntervalSince($0) >= progress.every }) ?? true {
+                told = Date()
+                progress.send("Waiting \(Worktrees.duration(Date().timeIntervalSince(start))) for the Mac's 1-minute load (\(MacLoad.number(current))) to drop below load_threshold (\(MacLoad.number(workflow.loadLimit))) before testing \(slug).")
+            }
             if ShellCancel.current?.isCancelled == true {
                 throw Problem(text: "The merge of \(slug) was cancelled while it waited for the Mac's load to drop; nothing was merged, and \(slug) stays as it was.")
             }
@@ -1720,7 +1751,7 @@ public final class LeadToolset: MCPToolset {
                 throw Problem(text: "Not merged (nothing was tested): the Mac's 1-minute load stayed above load_threshold for the \(Worktrees.duration(workflow.testTimeout)) merge waits (test_timeout_min). Now: \(Self.macText(mac, workflow)). "
                               + "Timing-sensitive tests fail on a Mac this busy, so \(slug) wasn't tested and stays as it was. Merge again in about \(MacLoad.retryMinutes) minutes; meanwhile start no workers or audits (they'd add to the load), and tell the user if it stays this busy.")
             }
-            Thread.sleep(forTimeInterval: min(loadPoll, max(0, deadline.timeIntervalSinceNow)))
+            Thread.sleep(forTimeInterval: min(loadPoll, progress?.every ?? loadPoll, max(0, deadline.timeIntervalSinceNow)))
             load = runtime.loadAverage()
         }
         return (Date().timeIntervalSince(start), first)
@@ -1978,6 +2009,10 @@ public final class LeadToolset: MCPToolset {
                 guard !value.isEmpty else { break }
                 guard let count = Int(value), count >= 1 else { throw Problem(text: "mac_max_sessions must be a whole number, at least 1.") }
                 value = String(count)
+            case "heavy_slots":
+                guard !value.isEmpty else { break }
+                guard let count = Int(value), count >= 1 else { throw Problem(text: "heavy_slots must be a whole number, at least 1 (empty: the Mac's cores ÷ 4).") }
+                value = String(count)
             case "audit_finders":
                 guard !value.isEmpty else { break }
                 guard let count = Int(value), (1...LeadWorkflow.maxFinders).contains(count) else {
@@ -2027,6 +2062,7 @@ public final class LeadToolset: MCPToolset {
                                       "disk_warning_gb": Self.gb(after.diskWarningGB), "disk_floor_gb": Self.gb(after.diskFloorGB),
                                       "test_timeout_min": Self.gb(after.testTimeoutMinutes),
                                       "load_threshold": after.loadThreshold.map(Self.gb) ?? "", "mac_max_sessions": String(after.macMaxSessions),
+                                      "heavy_slots": after.heavySlots.map(String.init) ?? "",
                                       "audit_finders": String(after.auditFinders), "audit_nit_cap": String(after.auditNitCap),
                                       "merge_policy": after.mergePolicy?.rawValue ?? "", "sensitive_paths": after.sensitivePaths?.joined(separator: ", ") ?? "",
                                       "records_dir": after.recordsDir ?? ""]
@@ -2349,7 +2385,7 @@ public final class LeadToolset: MCPToolset {
         let sessions = listing.map { Dictionary($0.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) }
         let workflow = self.workflow
         let power = self.power()?.statusText.map { "; \($0)" } ?? ""
-        var lines = ["Project \(project) on branch \(workflow.base) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once\(power)."]
+        var lines = ["Project \(project) on branch \(workflow.base) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once\(power)\(longHolderText())."]
         lines += workflowWarnings(workflow)
         lines += diskWarning(workflow, board: board)
         if let line = records.statusLine { lines.append(line) }
@@ -2662,6 +2698,7 @@ public final class LeadToolset: MCPToolset {
                      "- test_timeout_min: \(Self.gb(workflow.testTimeoutMinutes)) (merge stops init_command and test_command past it, as hung)",
                      "- load_threshold: \(Self.loadLimitText(workflow)) (above this 1-minute load, Mac-wide, start_worker and audit refuse and merge waits)",
                      "- mac_max_sessions: \(workflow.macMaxSessions) (workers and verifiers of all projects on this Mac; start_worker and audit refuse at it)",
+                     "- heavy_slots: \(heavySlotsText(workflow)) (builds and full test runs at once, Mac-wide: vs-heavy's, merges', audits'; one more waits)",
                      "- audit_finders: \(workflow.auditFinders) (" + (workflow.auditFinders == 1 ? "one verifier per audit" : "finders per audit, on one shared build and test run, with a vote; each counts against mac_max_sessions") + ")",
                      "- audit_nit_cap: \(workflow.auditNitCap) (new Nit findings one audit's vote keeps)"]
         let policy = workflow.mergePolicy.map { "\($0.rawValue) (\($0.meaning))" } ?? "not set: ask the owner once; until then merges are handled as ask_sensitive"

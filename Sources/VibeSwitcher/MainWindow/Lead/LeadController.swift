@@ -185,6 +185,10 @@ final class LeadController: ObservableObject {
     /// this build first runs (see `LeadWitness.PolicyWatch`); none until the app starts it (`watchPolicy`).
     var policyWatch: LeadWitness.PolicyWatch?
     private var policyTimer: Heartbeat.Subscription?
+    /// The Mac-wide test and build slots, looked at once a minute: one held long is told to every running lead (see
+    /// `LeadWitness.HeavySlots`); none until the app starts it (`watchHeavySlots`).
+    private var heavySlots: LeadWitness.HeavySlots?
+    private var heavySlotsTimer: Heartbeat.Subscription?
     /// Ended team sessions the host has been asked to drop.
     private var forgetting: Set<UUID> = []
     /// Ends the sessions of finished tasks from the vault's roster, in every project (see `RoleSweep`); nil in tests
@@ -899,6 +903,19 @@ final class LeadController: ObservableObject {
     func watchPower(limit: @escaping () -> Int, _ read: @escaping () -> PowerState?) {
         power = LeadWitness.Power(read: read, limit: limit)
         powerTimer = Heartbeat.shared.every(60) { [weak self] in self?.lookAtPower() }
+    }
+
+    /// Looks at the Mac-wide test and build slots once a minute from now on: a slot held long is told to every
+    /// running lead once (see `LeadWitness.HeavySlots`).
+    func watchHeavySlots(_ watch: LeadWitness.HeavySlots = LeadWitness.HeavySlots()) {
+        heavySlots = watch
+        heavySlotsTimer = Heartbeat.shared.every(60) { [weak self] in self?.lookAtHeavySlots() }
+    }
+
+    /// A slot held long: to each running lead, as the witness.
+    func lookAtHeavySlots() {
+        guard let text = heavySlots?.look() else { return }
+        for root in leadSessions.keys { deliver(text, from: .system("witness"), root: root) }
     }
 
     /// Tells each running lead the working policy once a minute from now on, when it isn't the one it has (the first a
