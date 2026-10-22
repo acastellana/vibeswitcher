@@ -947,3 +947,4 @@
 - 2026-10-22 17:44 Update: Merged: vs-heavy takes several slots, and merges/audits report progress — **What changed:**
 - 2026-10-22 18:16 Planned tests-never-read-the: Tests never read the Mac's real free disk space
 - 2026-10-22 18:17 Started a worker on tests-never-read-the
+- 2026-10-22 20:05 Planned vs-heavy-serves-waiters: vs-heavy serves waiters in arrival order
