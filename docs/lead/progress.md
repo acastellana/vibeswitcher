@@ -927,3 +927,14 @@
 - 2026-10-22 01:54 Audit of a-new-worktree-builds: complete, clean, round 1: 2 Nit open
 - 2026-10-22 02:03 Audit of a-new-worktree-builds: complete, clean, round 2: 2 Nit open
 - 2026-10-22 02:16 Merged a-new-worktree-builds: A new worktree builds warm, not from scratch
+- 2026-10-22 02:16 Workflow: init_command = `bash scripts/worktree-init.sh`
+- 2026-10-22 02:17 Update: Merged: new worktrees build warm (about 145 s → 65 s) — **Merged** a-new-worktree-builds (7d16d32), on the second try. The first merge check failed on a known handover timing test, now part of the deterministic-tests task.
+- 2026-10-22 02:26 Workflow: max_workers = `5`
+- 2026-10-22 02:26 Planned audit-2026-10-22: Audit 2026-10-22: memory and performance
+- 2026-10-22 02:26 Planned audit-2026-10-22-2: Audit 2026-10-22: the UI
+- 2026-10-22 02:26 Planned audit-2026-10-22-3: Audit 2026-10-22: process handling
+- 2026-10-22 02:26 Planned audit-2026-10-22-4: Audit 2026-10-22: messaging
+- 2026-10-22 02:26 Started a worker on audit-2026-10-22
+- 2026-10-22 02:26 Started a worker on audit-2026-10-22-2
+- 2026-10-22 02:26 Started a worker on audit-2026-10-22-3
+- 2026-10-22 02:26 Started a worker on audit-2026-10-22-4
