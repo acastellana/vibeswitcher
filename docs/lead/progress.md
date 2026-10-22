@@ -939,3 +939,6 @@
 - 2026-10-22 02:26 Started a worker on audit-2026-10-22-3
 - 2026-10-22 02:26 Started a worker on audit-2026-10-22-4
 - 2026-10-22 02:39 Merged worktreestests-signal: WorktreesTests' signal-family test is deterministic; the secret-shape lint names its skips (no audit: review none)
+- 2026-10-22 03:10 Planned vs-heavy-takes-a: vs-heavy takes a few slots, not one, and merge reports while it waits
+- 2026-10-22 03:10 Started a worker on vs-heavy-takes-a
+- 2026-10-22 03:18 Merged audit-2026-10-22-2: Audit 2026-10-22: the UI (no audit: review none)
