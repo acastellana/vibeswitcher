@@ -3,8 +3,9 @@
 # release build), so that every project's workers, merges and audits run at most N at a time on this Mac. Two suites
 # side by side starved each other and the benches (3–4 min each at load 30–50, measured 2026-10-21); one slot, though,
 # let a 38-minute pytest hold up every project's builds, suites and merges (2026-10-22). N is VIBESWITCHER_HEAVY_SLOTS,
-# else the Mac's cores ÷ 4 (at least 1): 3 on a 12-core Mac. While every slot is held, this run waits, saying who
-# holds each (pid, what, where, which project, and how long: "long" past 30 min, which is only said, never acted on),
+# else the Mac's cores ÷ 4 (at least 1): 3 on a 12-core Mac. While every slot is held, this run waits in line (first
+# come, first served, with merges and audits too), saying its place ("2nd in line, behind merge of x (vibeswitcher)")
+# and who holds each slot (pid, what, where, which project, and how long: "long" past 30 min, only said, never acted on),
 # again each time that changes and every 5 minutes, then runs COMMAND and exits with its status. VibeSwitcher puts it on
 # PATH in every session it starts (the app bundle's Contents/Resources/bin); merge and an audit's shared run take a slot
 # around their test command too (`TestLock` in VibeCore).
