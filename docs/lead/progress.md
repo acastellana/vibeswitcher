@@ -938,3 +938,4 @@
 - 2026-10-22 02:26 Started a worker on audit-2026-10-22-2
 - 2026-10-22 02:26 Started a worker on audit-2026-10-22-3
 - 2026-10-22 02:26 Started a worker on audit-2026-10-22-4
+- 2026-10-22 02:39 Merged worktreestests-signal: WorktreesTests' signal-family test is deterministic; the secret-shape lint names its skips (no audit: review none)
