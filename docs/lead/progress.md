@@ -925,3 +925,5 @@
 - 2026-10-22 01:44 Merged timing-benches-leave-the: Timing benches leave the default test run
 - 2026-10-22 01:44 Update: Merged: timing benches leave the normal test run — **Merged** timing-benches-leave-the (6dde666).
 - 2026-10-22 01:54 Audit of a-new-worktree-builds: complete, clean, round 1: 2 Nit open
+- 2026-10-22 02:03 Audit of a-new-worktree-builds: complete, clean, round 2: 2 Nit open
+- 2026-10-22 02:16 Merged a-new-worktree-builds: A new worktree builds warm, not from scratch
