@@ -210,16 +210,62 @@ struct DiskSpaceTests: LeadTeamFixture {
         #expect(told.contains("finished: cleanup removes it"))
         let big = try #require(told.range(of: "big's")), small = try #require(told.range(of: "small's"))
         #expect(big.lowerBound < small.lowerBound)
-        // Still low, lower, or back up a little: the same episode.
-        for level in [7.0, 2.0, 10.5] {
+        // Still low, or back up a little: the same episode.
+        for level in [7.0, 10.5, 6.0] {
             free = DiskSpace.bytes(level)
             #expect(tell() == nil)
         }
+        // Under a lower band (5 GB, then 3 GB): told once each, hovering around it or not.
+        free = DiskSpace.bytes(4.9)
+        #expect(tell()?.contains("4.9 GB free") == true)
+        for level in [5.0, 4.9, 5.0, 3.5] {
+            free = DiskSpace.bytes(level)
+            #expect(tell() == nil)
+        }
+        free = DiskSpace.bytes(2.0)
+        #expect(tell()?.contains("2.0 GB free") == true)
+        free = DiskSpace.bytes(4.0)
+        #expect(tell() == nil)
+        free = DiskSpace.bytes(2.0)
+        #expect(tell() == nil)
         // Back up for real, then low again: a new episode.
         free = 12 * Self.gb
         #expect(tell() == nil)
         free = 9 * Self.gb
         #expect(tell()?.contains("9.0 GB free") == true)
+    }
+
+    /// Free space hovering at the line (9.9 / 10.0 / 9.9 GB on 2026-10-22) told the lead three times in a few minutes,
+    /// each a wake: the app had been relaunched between them, and the watch started afresh. Kept on disk, a relaunched
+    /// app's watch goes on from it; a still-low disk is told again only after `DiskWatch.quiet`.
+    @Test func aWobblingReadingIsToldOnceAcrossRelaunches() throws {
+        let root = try repo()
+        let file = try folder("state").appendingPathComponent("disk-watch.json")
+        var free = DiskSpace.bytes(9.9)
+        let start = Date()
+        let workflow = LeadWorkflow()
+        var told: [Int64] = []
+        for (index, level) in [9.9, 10.0, 9.9, 10.0, 9.9, 9.95, 9.9].enumerated() {
+            free = DiskSpace.bytes(level)
+            // A new app each reading, as after an install.
+            var disk = LeadWitness.Disk(free: { _ in free }, scratch: try folder("scratch"), file: file)
+            if let at = disk.check(root: root, workflow: workflow, now: start.addingTimeInterval(Double(index) * 60)) { told.append(at) }
+        }
+        #expect(told == [DiskSpace.bytes(9.9)])
+        // Another project's is its own.
+        var other = LeadWitness.Disk(free: { _ in free }, scratch: try folder("scratch"), file: file)
+        #expect(other.check(root: root + "-other", workflow: workflow, now: start) != nil)
+        // Still low after the quiet interval: told again, once.
+        var later = LeadWitness.Disk(free: { _ in free }, scratch: try folder("scratch"), file: file)
+        #expect(later.check(root: root, workflow: workflow, now: start.addingTimeInterval(DiskWatch.quiet + 600)) != nil)
+        #expect(later.check(root: root, workflow: workflow, now: start.addingTimeInterval(DiskWatch.quiet + 660)) == nil)
+        // Back up past the margin: the episode ends (and the file forgets it); low again is told.
+        free = DiskSpace.bytes(11.5)
+        #expect(later.check(root: root, workflow: workflow) == nil)
+        #expect(DiskWatch.load(root: root, from: file) == nil)
+        free = DiskSpace.bytes(9.9)
+        var again = LeadWitness.Disk(free: { _ in free }, scratch: try folder("scratch"), file: file)
+        #expect(again.check(root: root, workflow: workflow) != nil)
     }
 
     @Test func theWarningIsSetInTheWorkflow() throws {

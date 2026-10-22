@@ -116,6 +116,10 @@ final class HostClient: ObservableObject {
     /// How often app.log is told the handover is still waiting for the new build's probe. Tests shorten it.
     var handoverBreadcrumb: TimeInterval = 15
 
+    /// The sweep of the sessions' TMPDIRs every `SessionTemp.sweepEvery` (see `removeSessionTemporaryFolders`), from
+    /// the first welcome on.
+    private var sweeps: Heartbeat.Subscription?
+
     /// The bundled host a handover asks for; a test's scratch build instead.
     private let handoverExecutable: () -> String
 
@@ -341,8 +345,10 @@ final class HostClient: ObservableObject {
                 handoverWaitedOut = false
             }
             sessions = list
-            // What ended while the app was away, or went with a host that's gone.
+            // What ended while the app was away, or went with a host that's gone; and then every while, what live
+            // sessions' TMPDIRs can lose.
             removeSessionTemporaryFolders()
+            if sweeps == nil { sweeps = Heartbeat.shared.every(SessionTemp.sweepEvery) { [weak self] in self?.removeSessionTemporaryFolders() } }
             canHandOver = hostCapabilities.contains(HostProtocol.Capability.handover)
             let live = list.filter(\.isLive).count
             let bundled = bundledBuild()
@@ -404,14 +410,13 @@ final class HostClient: ObservableObject {
     }
 
     /// The TMPDIRs of the lead's, workers' and verifiers' sessions (see `SessionTemp`) that no live session uses and that
-    /// have settled, after `delay`: judged by the host's whole list then, so only while connected to it.
+    /// have settled, what pytest keeps of earlier runs in the live ones', and the handover tests' leftovers in /tmp
+    /// (`SessionTemp.sweep`), after `delay`: judged by the host's whole list then, so only while connected to it.
     private func removeSessionTemporaryFolders(after delay: TimeInterval = 0) {
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self, self.connection != nil, ![.connecting, .notRunning].contains(self.state) else { return }
             let sessions = self.sessions
-            DispatchQueue.global(qos: .utility).async {
-                for folder in SessionTemp.removable(sessions: sessions) { try? FileManager.default.removeItem(at: folder) }
-            }
+            DispatchQueue.global(qos: .utility).async { SessionTemp.sweep(sessions: sessions) }
         }
     }
 

@@ -1012,12 +1012,13 @@ final class LeadController: ObservableObject {
             deliver(message.text, from: .system("witness"), root: root)
         }
         // Low disk space, once per episode; what takes it is sized off the main thread.
-        var disk = disks[root] ?? LeadWitness.Disk(free: freeSpace)
+        var disk = disks[root] ?? LeadWitness.Disk(free: freeSpace, file: DiskWatch.file)
         let workflow = team.workflow
         if let free = disk.check(root: root, workflow: workflow) {
             let sizing = disk
+            let cwds = host.sessions.map(\.cwd)
             DispatchQueue.global(qos: .utility).async { [weak self] in
-                let text = sizing.text(free: free, root: root, board: board, workflow: workflow)
+                let text = sizing.text(free: free, root: root, board: board, workflow: workflow, cwds: cwds)
                 DispatchQueue.main.async { self?.deliver(text, from: .system("witness"), root: root) }
             }
         }

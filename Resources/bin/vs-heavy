@@ -13,7 +13,8 @@
 # Slot 1 is a flock on $VIBESWITCHER_TEST_LOCK_DIR/test-build.lock (default /private/tmp/vibeswitcher-<uid>/), slot k
 # on test-build-k.lock beside it (an older vs-heavy, with only test-build.lock, contends for slot 1). The slot taken is
 # held on this script's fd 9: the kernel lets go of it when the script exits, Ctrl-C and kill -9 too, so a run that died
-# leaves no lock behind (its slot's .holder note says who held it last; the next holder writes its own). macOS has no
+# leaves no lock behind. Its slot's .holder note goes when it exits; one a kill -9 left names a pid that's gone, and
+# readers take it as saying nothing (the next holder writes its own). macOS has no
 # flock(1): /usr/bin/perl takes it on one of the slots' fds and exits, and the lock stays with the script's fd. COMMAND
 # runs without it, so nothing it leaves running keeps the slot.
 #
@@ -93,6 +94,8 @@ taken=$(/usr/bin/perl -MFcntl=:DEFAULT,:flock -MPOSIX=strftime -e '
         my $line = <$note>;
         return ("a run that did not say who it is", "?") unless defined $line && length $line > 1;
         chomp $line;
+        # A note naming a process that has ended says nothing: it outlived its run.
+        return ("a run that did not say who it is", "?") if $line =~ /^pid (\d+),/ && !kill(0, $1) && $!{ESRCH};
         my $since = (stat($note))[9];
         my $who = $line;
         if (my ($pid, $cmd, $in) = parse($line)) { $who = "pid $pid, $cmd" . (defined $in ? " in $in (" . project($in) . ")" : ""); }
@@ -176,5 +179,8 @@ exec 9>&$(( 19 + taken ))
 for (( k = 1; k <= slots; k++ )); do eval "exec $(( 19 + k ))>&-"; done
 
 echo "pid $$, $what in $PWD, since $(date +%H:%M:%S)" > "$lock_file.holder"
+# The note goes with this run (Ctrl-C too), while the slot is still ours: only our own, so no later holder's. A kill -9
+# leaves it, naming a pid that's gone, which readers (waiters here, TestLock's) take as saying nothing.
+trap '[[ $(head -n 1 "$lock_file.holder" 2>/dev/null) == "pid $$, "* ]] && rm -f "$lock_file.holder"' EXIT
 export VIBESWITCHER_TEST_LOCK=$lock_file
 "$@" 9>&-

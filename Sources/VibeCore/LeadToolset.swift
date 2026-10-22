@@ -1818,10 +1818,12 @@ public final class LeadToolset: MCPToolset {
     static func gb(_ value: Double) -> String { String(format: "%g", value) }
 
     /// Low disk space, with what takes it (status says it while it lasts; the witness tells it once).
-    func diskWarning(_ workflow: LeadWorkflow, board: LeadBoard) -> [String] {
+    /// `sessions`: every project's listed sessions, to name the big TMPDIRs by.
+    func diskWarning(_ workflow: LeadWorkflow, board: LeadBoard, sessions: [LeadSessionInfo]? = nil) -> [String] {
         guard let free = freeSpace(worktreesFolder), free < workflow.diskWarning else { return [] }
         return [LeadWitness.diskText(free: free, workflow: workflow, folders: TaskFolder.all(root: root, board: board, scratch: scratchRoot,
-                                                                                                 sessions: sessionTempRoot))]
+                                                                                                 sessions: sessionTempRoot),
+                                     tmpdirs: SessionTemp.big(cwds: (sessions ?? []).map(\.cwd), in: sessionTempRoot))]
     }
 
     private func askUser(_ arguments: [String: Any]) throws -> MCPToolResult {
@@ -2388,7 +2390,7 @@ public final class LeadToolset: MCPToolset {
         let power = self.power()?.statusText.map { "; \($0)" } ?? ""
         var lines = ["Project \(project) on branch \(workflow.base) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once\(power)\(longHolderText())."]
         lines += workflowWarnings(workflow)
-        lines += diskWarning(workflow, board: board)
+        lines += diskWarning(workflow, board: board, sessions: listing)
         if let line = records.statusLine { lines.append(line) }
         if let listing {
             let mac = MacLoad.count(listing.map { ($0.label, $0.cwd, $0.live) }, load: runtime.loadAverage())

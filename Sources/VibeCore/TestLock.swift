@@ -112,6 +112,10 @@ public struct TestLock: Sendable {
 
         public func release() {
             guard fd >= 0 else { return }
+            // Its note goes first, while the slot is still this process's: only its own (no other holder could write
+            // one meanwhile).
+            let note = path + ".holder"
+            if (try? String(contentsOfFile: note, encoding: .utf8))?.hasPrefix("pid \(getpid()), ") == true { unlink(note) }
             flock(fd, LOCK_UN)
             close(fd)
             fd = -1
@@ -279,13 +283,22 @@ public struct TestLock: Sendable {
         }
     }
 
-    /// Who holds slot `index`, as its note says (written when it was taken).
+    /// Who holds slot `index`, as its note says (written when it was taken). A note naming a process that's gone says
+    /// nothing: it outlived its run (killed outright, or the slot is held by something it left running), and naming it
+    /// sent waiters, status and the witness after a worktree cleaned up long ago (2026-10-22, pid 56668).
     public func holder(_ index: Int) -> Holder {
         let note = slotPath(index) + ".holder"
         let line = (try? String(contentsOfFile: note, encoding: .utf8))?.split(separator: "\n").first
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 }
+            .flatMap { Self.isGone(note: $0) ? nil : $0 }
         let since = (try? FileManager.default.attributesOfItem(atPath: note))?[.modificationDate] as? Date
         return Holder(slot: index, note: line, since: line == nil ? nil : since)
+    }
+
+    /// Whether `note` ("pid P, …") names a process that has ended.
+    static func isGone(note: String) -> Bool {
+        guard let match = note.firstMatch(of: #/^pid (\d+),/#), let pid = pid_t(match.1) else { return false }
+        return kill(pid, 0) != 0 && errno == ESRCH
     }
 
     /// The slots held now, with who holds them: a slot is tried (and let go at once), so a holder that died isn't

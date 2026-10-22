@@ -199,11 +199,185 @@ public enum SessionTemp {
         }.map { root.appendingPathComponent($0, isDirectory: true) }.filter(isDirectory).sorted { $0.path < $1.path }
     }
 
+    /// How often the app sweeps (`sweep`) besides each connection to the session host and each session's end.
+    public static let sweepEvery = 600
+
+    /// The app's sweep: the folders of sessions that have ended (`removable`), what pytest keeps of earlier runs in the
+    /// live ones' (`leftovers`), and the handover tests' leftovers under `handovers` (`handoverLeftovers`); never
+    /// anything a live process holds (`open`, read after the ended sessions' folders go). What was removed. Nothing
+    /// when the processes can't be read.
+    @discardableResult
+    public static func sweep(sessions: [HostSession], in root: URL = root, handovers: URL? = handoverRoot, now: Date = Date(),
+                             open: () -> OpenPaths? = OpenPaths.now) -> [URL] {
+        guard let held = open() else { return [] }
+        var removed = removable(in: root, sessions: sessions, now: now).filter { !held.holds($0) }.filter(remove)
+        removed += leftovers(in: root, isHeld: held.holds).filter(remove)
+        if let handovers { removed += handoverLeftovers(in: handovers, now: now, isHeld: held.holds).filter(remove) }
+        return removed
+    }
+
+    private static func remove(_ url: URL) -> Bool { (try? FileManager.default.removeItem(at: url)) != nil }
+
+    /// A session's TMPDIR that takes much, for status's and the witness's low-disk words: every project's, named by the
+    /// project and task of the session it belongs to when one is listed.
+    public struct Big: Equatable, Sendable {
+        public var path: String
+        public var bytes: Int64
+        /// The project (its folder's name) and the task (its worktree's), when a listed session runs there.
+        public var project: String?
+        public var task: String?
+
+        /// "the TMPDIR of a session on TGE-ANALYSIS's task oktgmi, 2.6 GB (/private/tmp/vibeswitcher-501/oktgmi-i7pjc5)".
+        public var text: String {
+            let whose = switch (project, task) {
+            case let (project?, task?): "a session on \(project)'s task \(task)"
+            case let (project?, nil): "a session in \(project) (not a task's)"
+            default: "a session no longer listed"
+            }
+            return "the TMPDIR of \(whose), \(DiskSpace.text(bytes)) (\(path))"
+        }
+    }
+
+    /// Over this, a session's TMPDIR is named when disk space is low.
+    public static let bigOver: Int64 = 500_000_000
+
+    /// The session folders under `root` over `over`, biggest first, each named by the first of `cwds` (the listed
+    /// sessions' folders, every project's) whose sessions it belongs to. Sizes each: slow for a big one.
+    public static func big(cwds: [String], in root: URL = root, over: Int64 = bigOver, size: (String) -> Int64 = DiskSpace.size(of:)) -> [Big] {
+        guard isPrivate(root) else { return [] }
+        let named = Dictionary(Set(cwds).flatMap { cwd in folders(for: cwd, in: root).map { ($0.path, cwd) } }, uniquingKeysWith: min)
+        return children(of: root).filter { $0.lastPathComponent.wholeMatch(of: #/[0-9a-z]+-[0-9a-z]+/#) != nil }.compactMap { url in
+            let bytes = size(url.path)
+            guard bytes > over else { return nil }
+            var big = Big(path: url.path, bytes: bytes)
+            if var cwd = named[url.path] {
+                if let range = cwd.range(of: "/.vibeswitcher/worktrees/") {
+                    big.task = String(cwd[range.upperBound...]).split(separator: "/").first.map(String.init)
+                    cwd = String(cwd[..<range.lowerBound])
+                }
+                big.project = URL(fileURLWithPath: cwd).lastPathComponent
+            }
+            return big
+        }.sorted { $0.bytes > $1.bytes }
+    }
+
+    /// What a live session's TMPDIR can lose while it runs: pytest keeps its last three runs' basetemp there
+    /// (`pytest-of-<user>/pytest-N`), 1.3 GB each for TGE-ANALYSIS's suite, and a worker's held 2.6 GB with 3 GB left on
+    /// the disk (2026-10-22). Each `pytest-of-*`'s `pytest-N` but the newest, in any session's folder under `root`, unless
+    /// `isHeld` (a live process has a file, its working folder or its program in it). Real folders only, never a link;
+    /// nothing when `root` isn't private (`isPrivate`).
+    public static func leftovers(in root: URL = root, isHeld: (URL) -> Bool) -> [URL] {
+        guard isPrivate(root) else { return [] }
+        var found: [URL] = []
+        for session in children(of: root) where session.lastPathComponent.wholeMatch(of: #/[0-9a-z]+-[0-9a-z]+/#) != nil {
+            for pytest in children(of: session) where pytest.lastPathComponent.hasPrefix("pytest-of-") {
+                let runs = children(of: pytest).compactMap { url in
+                    url.lastPathComponent.wholeMatch(of: #/pytest-([0-9]+)/#).flatMap { Int($0.1) }.map { (number: $0, url: url) }
+                }.sorted { $0.number < $1.number }
+                found += runs.dropLast().map(\.url).filter { !isHeld($0) }
+            }
+        }
+        return found.sorted { $0.path < $1.path }
+    }
+
+    /// Where the session host's handover tests put their scratch hosts when their TMPDIR is too long for a socket (a
+    /// session's is): `vsho-XXXXXXXX` and `vsho-state-XXXXXXXX`. A run that's killed leaves them (6 held 275 MB on
+    /// 2026-10-22). Only the user's own VibeSwitcher sweeps them (`handoverRoot` is nil for a scratch one).
+    public static var handoverRoot: URL? {
+        VibePaths.isAccountRoot(VibePaths.root, accountHome: VibePaths.accountHome) ? URL(fileURLWithPath: "/private/tmp", isDirectory: true) : nil
+    }
+
+    /// How long a handover test's folder stays untouched before it's taken as outliving its run: no test runs that
+    /// long, and its scratch host (a program in it, so `isHeld`) runs while the test does.
+    public static let handoverSettle: TimeInterval = 3600
+
+    /// The handover tests' folders under `tmp` whose run has ended: the user's own (not a link), nothing in them
+    /// changed for `handoverSettle`, and nothing in them `isHeld`.
+    public static func handoverLeftovers(in tmp: URL, now: Date = Date(), isHeld: (URL) -> Bool) -> [URL] {
+        let entries = (try? FileManager.default.contentsOfDirectory(atPath: tmp.path)) ?? []
+        return entries.filter { $0.wholeMatch(of: #/vsho-(state-)?[0-9A-F]{8}/#) != nil }.map { tmp.appendingPathComponent($0) }.filter { url in
+            var info = stat()
+            guard lstat(url.path, &info) == 0, info.st_uid == getuid(), (info.st_mode & S_IFMT) != S_IFLNK else { return false }
+            let changed = ([url] + children(of: url, folders: false)).compactMap { url -> Date? in
+                var info = stat()
+                return lstat(url.path, &info) == 0 ? Date(timeIntervalSince1970: TimeInterval(info.st_mtimespec.tv_sec)) : nil
+            }.max() ?? now
+            return now.timeIntervalSince(changed) >= handoverSettle && !isHeld(url)
+        }.sorted { $0.path < $1.path }
+    }
+
+    /// The real folders in `folder` (every entry but links, with `folders` false), unsorted.
+    private static func children(of folder: URL, folders: Bool = true) -> [URL] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).map { folder.appendingPathComponent($0) }
+            .filter { url in
+                var info = stat()
+                guard lstat(url.path, &info) == 0, (info.st_mode & S_IFMT) != S_IFLNK else { return false }
+                return !folders || (info.st_mode & S_IFMT) == S_IFDIR
+            }
+    }
+
     private static func prefix(_ cwd: String) -> String { ClaudeScratch.hash((cwd as NSString).standardizingPath) + "-" }
 
     private static func isDirectory(_ url: URL) -> Bool {
         var info = stat()
         return lstat(url.path, &info) == 0 && (info.st_mode & S_IFMT) == S_IFDIR
+    }
+}
+
+/// The paths the user's live processes hold: their open files and folders, their working folders and their programs.
+/// What a sweep must leave (`SessionTemp.leftovers`, `handoverLeftovers`).
+public struct OpenPaths: Sendable {
+    /// Each one resolved (as the kernel gives them: /private/tmp, not /tmp).
+    public let paths: Set<String>
+
+    public init(paths: Set<String>) { self.paths = paths }
+
+    /// Read now from every process of the user's that can be read; nil when the process list can't be.
+    public static func now() -> OpenPaths? {
+        guard let pids = ProcessTable.allPids() else { return nil }
+        var paths = Set<String>()
+        let me = getuid()
+        for pid in pids {
+            var short = proc_bsdshortinfo()
+            let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
+            guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, size) == size, short.pbsi_uid == me else { continue }
+            if let cwd = ProcessTable.cwd(pid: pid) { paths.insert(cwd) }
+            var buffer = [CChar](repeating: 0, count: 4 * Int(MAXPATHLEN))
+            if proc_pidpath(pid, &buffer, UInt32(buffer.count)) > 0 { paths.insert(String(cString: buffer)) }
+            paths.formUnion(files(of: pid))
+        }
+        return OpenPaths(paths: paths)
+    }
+
+    /// The files and folders `pid` has open.
+    static func files(of pid: pid_t) -> [String] {
+        let stride = MemoryLayout<proc_fdinfo>.stride
+        let needed = proc_pidinfo(pid, PROC_PIDLISTFDS, 0, nil, 0)
+        guard needed > 0 else { return [] }
+        var fds = [proc_fdinfo](repeating: proc_fdinfo(), count: Int(needed) / stride + 8)
+        let got = fds.withUnsafeMutableBytes { proc_pidinfo(pid, PROC_PIDLISTFDS, 0, $0.baseAddress, Int32($0.count)) }
+        guard got > 0 else { return [] }
+        return fds.prefix(Int(got) / stride).compactMap { fd in
+            guard fd.proc_fdtype == UInt32(PROX_FDTYPE_VNODE) else { return nil }
+            var info = vnode_fdinfowithpath()
+            let size = Int32(MemoryLayout<vnode_fdinfowithpath>.size)
+            guard proc_pidfdinfo(pid, fd.proc_fd, PROC_PIDFDVNODEPATHINFO, &info, size) == size else { return nil }
+            let path = withUnsafePointer(to: &info.pvip.vip_path) {
+                $0.withMemoryRebound(to: CChar.self, capacity: Int(MAXPATHLEN)) { String(cString: $0) }
+            }
+            return path.isEmpty ? nil : path
+        }
+    }
+
+    /// Whether any of them is `url` or in it (by its resolved path: realpath's, as the kernel's, where Foundation's
+    /// drops /private).
+    public func holds(_ url: URL) -> Bool {
+        var folder = url.path
+        if let resolved = realpath(folder, nil) {
+            folder = String(cString: resolved)
+            free(resolved)
+        }
+        return paths.contains { $0 == folder || $0.hasPrefix(folder + "/") }
     }
 }
 
@@ -252,22 +426,64 @@ public struct TaskFolder: Equatable, Sendable {
 }
 
 /// Low disk space, told once per episode: when free space first drops below the warning, and again only after it
-/// has been back above it (by `margin`, so hovering around the line doesn't tell it each time).
-public struct DiskWatch: Equatable, Sendable {
+/// has been back above it (by `margin`, so hovering around the line doesn't tell it each time). Within an episode it's
+/// told again when free space drops under a lower band (`bands`, those under the warning), once each, or after `quiet`
+/// with it still under the warning. The app keeps it on disk by project (`file`): a relaunch (each install) started it
+/// afresh, and free space hovering at 9.9–10.0 GB told the lead three times in a few minutes (2026-10-22).
+public struct DiskWatch: Codable, Equatable, Sendable {
     public static let margin = DiskSpace.gigabyte
+    public static let bands: [Int64] = [DiskSpace.bytes(5), DiskSpace.bytes(3)]
+    public static let quiet: TimeInterval = 6 * 3600
     public private(set) var low = false
+    /// The lowest line told in this episode: the warning, or a band under it.
+    public private(set) var line: Int64?
+    public private(set) var toldAt: Date?
 
     public init() {}
 
     /// Whether to tell now.
-    public mutating func check(free: Int64?, warning: Int64) -> Bool {
+    public mutating func check(free: Int64?, warning: Int64, now: Date = Date()) -> Bool {
         guard let free else { return false }
         if low {
-            if free >= warning + Self.margin { low = false }
-            return false
+            if free >= warning + Self.margin {
+                self = DiskWatch()
+                return false
+            }
+            guard let under = Self.line(free: free, warning: warning) else { return false }
+            if under < (line ?? warning) {
+                line = under
+            } else if now.timeIntervalSince(toldAt ?? .distantPast) < Self.quiet {
+                return false
+            }
+            toldAt = now
+            return true
         }
-        guard free < warning else { return false }
+        guard let under = Self.line(free: free, warning: warning) else { return false }
         low = true
+        line = under
+        toldAt = now
         return true
+    }
+
+    /// The lowest of the warning and the bands under it that `free` is under; nil when it isn't under the warning.
+    static func line(free: Int64, warning: Int64) -> Int64? {
+        ([warning] + bands.filter { $0 < warning }).filter { free < $0 }.min()
+    }
+
+    /// Where the app keeps each project's, by its folder.
+    public static var file: URL { VibePaths.root.appendingPathComponent("disk-watch.json") }
+
+    /// The one kept for the project at `root`, if any.
+    public static func load(root: String, from url: URL = file) -> DiskWatch? {
+        guard let data = try? Data(contentsOf: url), let all = try? JSONDecoder().decode([String: DiskWatch].self, from: data) else { return nil }
+        return all[root]
+    }
+
+    /// Keeps this as the project's at `root` (a fresh one, never low, is dropped).
+    public func save(root: String, to url: URL = file) {
+        var all = (try? Data(contentsOf: url)).flatMap { try? JSONDecoder().decode([String: DiskWatch].self, from: $0) } ?? [:]
+        all[root] = low ? self : nil
+        guard let data = try? JSONEncoder().encode(all) else { return }
+        try? VibePaths.writePrivate(data, to: url)
     }
 }

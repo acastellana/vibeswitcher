@@ -152,4 +152,122 @@ struct SessionTempTests {
         #expect(SessionTemp.removable(in: sessions, sessions: list, now: Date().addingTimeInterval(-SessionTemp.settle - 10)) == [])
         #expect(!SessionTemp.removable(in: sessions, sessions: list).contains(starting))
     }
+
+    /// A process with its working folder in `folder` (what a live pytest does to its run's folder), until killed.
+    func holding(_ folder: URL) throws -> Process {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        process.arguments = ["3600"]
+        process.currentDirectoryURL = folder
+        try process.run()
+        return process
+    }
+
+    func end(_ process: Process) {
+        kill(process.processIdentifier, SIGKILL)
+        process.waitUntilExit()
+    }
+
+    /// While a session lives, its TMPDIR loses what pytest keeps of earlier runs (a worker's pytest left 2.6 GB there on
+    /// 2026-10-22, 3 GB free on the disk): each pytest-of-*'s pytest-N but the newest, and never one a live process
+    /// holds. pytest's own pytest-current link and anything else stay.
+    @Test func theSweepKeepsTheNewestPytestRunAndWhatALiveProcessHolds() throws {
+        let sessions = try folder("tmpdirs")
+        let worktree = "/Users/x/dev/TGE/.vibeswitcher/worktrees/one"
+        let command = "claude --append-system-prompt-file '/p' --name 'worker-one' -- 'Go.'"
+        let live = try #require(SessionTemp.make(cwd: worktree, name: "worker-one", in: sessions))
+        let pytest = live.appendingPathComponent("pytest-of-x")
+        let runs = (1...4).map { pytest.appendingPathComponent("pytest-\($0)") }
+        for run in runs {
+            try FileManager.default.createDirectory(at: run.appendingPathComponent("test_a0"), withIntermediateDirectories: true)
+            try Data(repeating: 1, count: 1000).write(to: run.appendingPathComponent("test_a0/data.bin"))
+        }
+        try FileManager.default.createSymbolicLink(at: pytest.appendingPathComponent("pytest-current"), withDestinationURL: runs[3])
+        try Data().write(to: live.appendingPathComponent("notes.txt"))
+        let holder = try holding(runs[1].appendingPathComponent("test_a0"))
+        defer { end(holder) }
+        let list = [session(cwd: worktree, command: command, live: true)]
+
+        let removed = SessionTemp.sweep(sessions: list, in: sessions, handovers: nil)
+        #expect(removed.map(\.path) == [runs[0], runs[2]].map(\.path))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: pytest.path).sorted() == ["pytest-2", "pytest-4", "pytest-current"])
+        #expect(FileManager.default.fileExists(atPath: live.appendingPathComponent("notes.txt").path))
+        // Let go: it goes at the next sweep; the newest stays.
+        end(holder)
+        #expect(SessionTemp.sweep(sessions: list, in: sessions, handovers: nil).map(\.path) == [runs[1].path])
+        #expect(SessionTemp.sweep(sessions: list, in: sessions, handovers: nil) == [])
+        #expect(FileManager.default.fileExists(atPath: runs[3].appendingPathComponent("test_a0/data.bin").path))
+        // Processes that can't be read: nothing goes.
+        try FileManager.default.createDirectory(at: pytest.appendingPathComponent("pytest-5"), withIntermediateDirectories: true)
+        #expect(SessionTemp.sweep(sessions: list, in: sessions, handovers: nil, open: { nil }) == [])
+    }
+
+    /// The same sweep takes an ended session's TMPDIR whole (unless a process it left still holds it), and what the
+    /// session host's handover tests leave in /tmp when their run is killed (vsho-XXXXXXXX, 6 of them 275 MB on
+    /// 2026-10-22) once untouched past `handoverSettle`: never a recent one, one a live process holds, a link, or
+    /// another name.
+    @Test func theSweepRemovesEndedSessionsFoldersAndHandoverTestsLeftovers() throws {
+        let sessions = try folder("tmpdirs")
+        let worktree = "/Users/x/dev/app/.vibeswitcher/worktrees/one"
+        let ended = try #require(SessionTemp.make(cwd: worktree, name: "verify-one", in: sessions))
+        let lingering = try #require(SessionTemp.make(cwd: worktree, name: "worker-one", in: sessions))
+        try FileManager.default.createDirectory(at: ended.appendingPathComponent("pytest-of-x/pytest-1"), withIntermediateDirectories: true)
+        for url in [ended, lingering] { try age(url) }
+        let tmp = try folder("tmp")
+        let old = Date().addingTimeInterval(-SessionTemp.handoverSettle - 60)
+        func make(_ name: String, at date: Date, folder: Bool = true) throws -> URL {
+            let url = tmp.appendingPathComponent(name)
+            if folder {
+                try FileManager.default.createDirectory(at: url.appendingPathComponent("home"), withIntermediateDirectories: true)
+                try Data("log".utf8).write(to: url.appendingPathComponent("session.log"))
+                for child in ["home", "session.log"] {
+                    try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: url.appendingPathComponent(child).path)
+                }
+            } else {
+                try Data("state".utf8).write(to: url)
+            }
+            try FileManager.default.setAttributes([.modificationDate: date], ofItemAtPath: url.path)
+            return url
+        }
+        let stale = try make("vsho-0123ABCD", at: old)
+        let state = try make("vsho-state-89ABCDEF", at: old, folder: false)
+        let recent = try make("vsho-11111111", at: Date())
+        let held = try make("vsho-22222222", at: old)
+        let other = try make("vsh-44444444", at: old)
+        let link = tmp.appendingPathComponent("vsho-33333333")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: other)
+        // A log written lately in an old folder: still in use.
+        let touched = try make("vsho-55555555", at: old)
+        try FileManager.default.setAttributes([.modificationDate: Date()], ofItemAtPath: touched.appendingPathComponent("session.log").path)
+        let holder = try holding(held.appendingPathComponent("home")), straggler = try holding(lingering)
+        defer { end(holder); end(straggler) }
+        let command = { (name: String) in "claude --append-system-prompt-file '/p' --name '\(name)' -- 'Go.'" }
+        let list = [session(cwd: worktree, command: command("verify-one"), live: false),
+                    session(cwd: worktree, command: command("worker-one"), live: false)]
+
+        let removed = SessionTemp.sweep(sessions: list, in: sessions, handovers: tmp)
+        #expect(removed.map(\.path) == [ended, stale, state].map(\.path), "\(removed)")
+        for url in [lingering, recent, held, other, link, touched] { #expect(FileManager.default.fileExists(atPath: url.path), "\(url.path)") }
+        // The user's own VibeSwitcher sweeps /private/tmp; a scratch one (this test run's) no handover folders.
+        #expect(SessionTemp.handoverRoot == nil)
+    }
+
+    /// When disk space is low, status names every project's session TMPDIR over 500 MB, by its project and task.
+    @Test func bigTMPDIRsAreNamedByProjectAndTask() throws {
+        let sessions = try folder("tmpdirs")
+        let tge = "/Users/x/dev/TGE-ANALYSIS"
+        let worker = try #require(SessionTemp.make(cwd: tge + "/.vibeswitcher/worktrees/oktgmi", name: "worker-oktgmi", in: sessions))
+        let lead = try #require(SessionTemp.make(cwd: tge, name: "lead-tge", in: sessions))
+        let gone = try #require(SessionTemp.make(cwd: "/Users/x/dev/gone", name: "lead-gone", in: sessions))
+        let small = try #require(SessionTemp.make(cwd: "/Users/x/dev/small", name: "lead-small", in: sessions))
+        let sizes = [worker.path: 2_600_000_000, lead.path: 600_000_000, gone.path: 900_000_000, small.path: 400_000_000] as [String: Int64]
+        let big = SessionTemp.big(cwds: [tge + "/.vibeswitcher/worktrees/oktgmi", tge, "/Users/x/dev/small"], in: sessions,
+                                  size: { sizes[$0] ?? 0 })
+        #expect(big.map(\.path) == [worker.path, gone.path, lead.path])
+        #expect(big[0].text == "the TMPDIR of a session on TGE-ANALYSIS's task oktgmi, 2.6 GB (\(worker.path))")
+        #expect(big[1].text == "the TMPDIR of a session no longer listed, 900 MB (\(gone.path))")
+        #expect(big[2].text == "the TMPDIR of a session in TGE-ANALYSIS (not a task's), 600 MB (\(lead.path))")
+        let text = LeadWitness.diskText(free: DiskSpace.bytes(3), workflow: LeadWorkflow(), folders: [], tmpdirs: big)
+        #expect(text.contains("Sessions' TMPDIRs over 500 MB (every project's): the TMPDIR of a session on TGE-ANALYSIS's task oktgmi, 2.6 GB"), "\(text)")
+    }
 }

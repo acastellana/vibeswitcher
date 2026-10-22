@@ -212,7 +212,62 @@ struct TestLockTests {
         let b = try heavy("b", log: log)
         b.process.waitUntilExit()
         #expect(b.process.terminationStatus == 0 && !lines(b.output).joined().contains("waiting for"), "\(lines(b.output))")
+        // b wrote its own over it, and took it with it when done.
+        #expect(lines(note).isEmpty)
+    }
+
+    /// A holder's note goes with its run (on 2026-10-22 test-build.lock.holder still named pid 56668, of a worktree
+    /// cleaned up long before): vs-heavy's when it exits, its command's status kept, and on Ctrl-C; merge's and an
+    /// audit's at release.
+    @Test func aRunsHolderNoteGoesWithIt() throws {
+        let log = url("heavy.log").path
+        let note = url("heavy-locks/test-build.lock.holder").path
+        let exists = { FileManager.default.fileExists(atPath: note) }
+        let a = try heavy("a", sleep: 0, log: log)
+        a.process.waitUntilExit()
+        #expect(a.process.terminationStatus == 0 && lines(log) == ["a start", "a end"])
+        #expect(!exists())
+        let failing = try Self.runVsHeavy(["/bin/sh", "-c", "exit 7"], lockDirectory: url("heavy-locks").path, output: url("failing.out").path)
+        failing.waitUntilExit()
+        #expect(failing.terminationStatus == 7 && !exists())
+        let b = try heavy("b", sleep: 60, log: log)
+        #expect(eventually { lines(log).contains("b start") })
         #expect(lines(note).first?.contains(", b in ") == true)
+        kill(-b.process.processIdentifier, SIGINT)
+        b.process.waitUntilExit()
+        #expect(!exists())
+        guard case .held(let held, _, _) = lock.acquire(as: "merge of a", timeout: 5) else { Issue.record("not taken"); return }
+        #expect(lock.holder(1).note?.contains("merge of a") == true)
+        held.release()
+        #expect(!FileManager.default.fileExists(atPath: lock.path + ".holder"))
+    }
+
+    /// A note naming a process that has ended (killed outright, or the slot held by something its run left running)
+    /// says nothing: not to a vs-heavy waiter, nor status's and the witness's long holders.
+    @Test func aNoteNamingAProcessThatsGoneSaysNothing() throws {
+        let lock = TestLock(directory: url("heavy-locks").path)
+        let holder = try outsideHolder(lock)
+        defer { kill(holder.processIdentifier, SIGKILL); holder.waitUntilExit() }
+        let gone = Process()
+        gone.executableURL = URL(fileURLWithPath: "/usr/bin/true")
+        try gone.run()
+        gone.waitUntilExit()
+        try note(lock, "pid \(gone.processIdentifier), vs-heavy swift build in /Users/a/dev/p/.vibeswitcher/worktrees/cleaned, since 01:00:00",
+                 ago: 40 * 60)
+        #expect(lock.holder(1).note == nil && lock.holder(1).since == nil)
+        let holders = lock.holders()
+        #expect(holders.map(\.slot) == [1] && holders.allSatisfy { !$0.isLong() })
+        #expect(TestLock.text(holders) == "slot 1 held by a run that didn't say who it is")
+        var watch = LeadWitness.HeavySlots(lock: lock)
+        #expect(watch.look() == nil)
+        let log = url("heavy.log").path
+        let waiting = try heavy("build", sleep: 0, log: log)
+        #expect(eventually { lines(waiting.output).joined().contains("waiting for") })
+        let said = lines(waiting.output).joined(separator: "\n")
+        #expect(said.contains("slot 1 held by a run that did not say who it is.") && !said.contains("pid \(gone.processIdentifier)"), "\(said)")
+        kill(holder.processIdentifier, SIGKILL)
+        waiting.process.waitUntilExit()
+        #expect(waiting.process.terminationStatus == 0 && lines(log) == ["build start", "build end"])
     }
 
     @Test func underAHolderOfTheSameLockVsHeavyRunsAtOnce() throws {
@@ -354,7 +409,8 @@ struct TestLockTests {
         b.process.waitUntilExit()
         #expect(b.process.terminationStatus == 0, "\(lines(b.output))")
         #expect(!lines(b.output).joined().contains("waiting for"), "\(lines(b.output))")
-        #expect(lines(note).first != killed && lines(note).first?.contains(", scripts/test.sh in \(Self.repo.path)") == true)
+        // B wrote its own over it, and took it with it when done.
+        #expect(killed != nil && lines(note).isEmpty)
     }
 
     // MARK: Slots
