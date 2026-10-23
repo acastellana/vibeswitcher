@@ -1025,3 +1025,8 @@
 - 2026-10-23 12:38 Started a worker on settle-script-staggered
 - 2026-10-23 12:52 Audit of host-orders-text-enter: complete, clean, round 1: 1 Important open, 1 Nit open
 - 2026-10-23 12:53 Review of redaction-a-slack: audit
+- 2026-10-23 13:16 Audit of redaction-a-slack: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
+- 2026-10-23 13:17 Audit of host-orders-text-enter: incomplete, clean, round 2: 2 Important (1 open), 1 Nit closed
+- 2026-10-23 13:18 Planned composerdeliverytests: ComposerDeliveryTests.afterTheAgentExitsToAShellNothingIsTypedIntoIt flakes in the full suite
+- 2026-10-23 13:18 Started a worker on composerdeliverytests
+- 2026-10-23 13:21 Merged redaction-a-slack: Redaction: a Slack webhook path is masked whole even when a broader rule matches part of it first
