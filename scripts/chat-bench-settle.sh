@@ -13,8 +13,15 @@
 # ~/.vibeswitcher: the bench runs in a scratch home holding copies of the transcripts.
 # A tick's wall time past its CPU time is the Mac's: top at 1728 on the fixture, page 2's longest tick was 0.05-0.22 s
 # with at most 0.11 s of CPU at load 8-12 (2026-10-20, 24 runs), and 0.26-0.27 s with 0.15 s of CPU at load 14.5.
+# The runs start staggered: one at a time, STAGGER seconds after the last one started and once that one opened its
+# conversation (its "clock …: opening" line; at most 10 s), so the jobs don't open or page back in the same instant.
+# Started together, a whole -j 6 batch reached page 2 at once and starved six at a time (2026-10-20: 37 of 768 runs,
+# docs/eval/chat-bench-settle-2026-10-20.md). Each starved attempt is recorded in OUTPUTS/starved.txt with why the
+# main thread was off the CPU: its tick's wall and CPU time, the 1-minute load and the threads runnable at the tick's
+# end (sampled every second into OUTPUTS/load.txt), and what the other runs were doing then.
 #
-# scripts/chat-bench-settle.sh [-n RUNS] [-j JOBS] [-b BINARY] [-B REPO] [-q] [-e PAGES] [-W WORKFLOW] [-o OUTPUTS] [-w "700 900"] [-s "switch top"] [-v "plain LIVE"] A.jsonl B.jsonl
+# scripts/chat-bench-settle.sh [-n RUNS] [-j JOBS] [-S STAGGER] [-b BINARY] [-B REPO] [-q] [-e PAGES] [-W WORKFLOW] [-o OUTPUTS] [-w "700 900"] [-s "switch top"] [-v "plain LIVE"] A.jsonl B.jsonl
+#   -S STAGGER: the seconds between two runs' starts (2; 0: started as the jobs free up, not waiting for an opening).
 #   -B REPO: the WINDOW variant shows REPO/.vibeswitcher/board.json's team strip and open questions.
 #   -q: only the window's once-a-second timer, not the busy model (VIBESWITCHER_BENCH_UPDATES).
 #   -e PAGES: how many times Show earlier is pressed after settling (2; 0: not paging back).
@@ -27,15 +34,15 @@ source scripts/lib/scratch.sh
 # Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
 unset VIBESWITCHER_HOME
 
-runs=10 jobs=6 binary=.build/debug/VibeSwitcher board="" updates=1 earlier=2 workflow="" outputs=.build/chat-bench-settle
+runs=10 jobs=6 stagger=2 binary=.build/debug/VibeSwitcher board="" updates=1 earlier=2 workflow="" outputs=.build/chat-bench-settle
 for candidate in .vibeswitcher/workflow.md ../../workflow.md; do
     [[ $candidate == ../* && $(basename "$(dirname "$PWD")") != worktrees ]] && continue
     [[ -f $candidate ]] && { workflow=$PWD/$candidate; break; }
 done
 widths="700 900 1200 1728" scenarios="switch top middle bottom" variants="plain LIVE STACK WINDOW"
-while getopts "n:j:b:B:qe:W:o:w:s:v:" option; do
+while getopts "n:j:S:b:B:qe:W:o:w:s:v:" option; do
     case $option in
-        n) runs=$OPTARG ;; j) jobs=$OPTARG ;; b) binary=$OPTARG ;; B) board=$OPTARG ;; q) updates=0 ;; e) earlier=$OPTARG ;; W) workflow=$OPTARG ;;
+        n) runs=$OPTARG ;; j) jobs=$OPTARG ;; S) stagger=$OPTARG ;; b) binary=$OPTARG ;; B) board=$OPTARG ;; q) updates=0 ;; e) earlier=$OPTARG ;; W) workflow=$OPTARG ;;
         o) outputs=$OPTARG ;;
         w) widths=$OPTARG ;; s) scenarios=$OPTARG ;; v) variants=$OPTARG ;;
         *) exit 64 ;;
@@ -54,6 +61,78 @@ mkdir -p "$home/.claude/projects/bench" "$outputs/out"
 cp -c "$1" "$home/.claude/projects/bench/a.jsonl" 2>/dev/null || cp "$1" "$home/.claude/projects/bench/a.jsonl"
 cp -c "$2" "$home/.claude/projects/bench/b.jsonl" 2>/dev/null || cp "$2" "$home/.claude/projects/bench/b.jsonl"
 a="$home/.claude/projects/bench/a.jsonl" b="$home/.claude/projects/bench/b.jsonl"
+
+# Every second until the script ends: the wall clock, the 1-minute load and the threads runnable (running or waiting
+# for a core: the run queue with what's on the cores; ps's own one not counted).
+/usr/bin/perl -MTime::HiRes=time,sleep -e '$| = 1; while (1) {
+    my $load = (split " ", `sysctl -n vm.loadavg`)[1];
+    my @threads = `ps -A -M -o state=`;
+    my $runnable = grep { (split)[-1] =~ /^R/ } @threads[1 .. $#threads];
+    printf "%.2f %s %d\n", time, $load, $runnable > 0 ? $runnable - 1 : 0;
+    sleep 1 - (time - int time) }' > "$outputs/load.txt" &
+sampler=$!
+on_exit 'kill "$sampler" 2> /dev/null'
+
+clock() { /usr/bin/perl -MTime::HiRes=time -e 'printf "%.2f\n", time'; }
+
+# Waits for this run's turn to start (see the top): $stagger seconds after the last start, and once that run had
+# opened or ended (at most 10 s); then it's the last start. One run at a time holds $outputs/gate.lock.
+gate() {
+    local out=$1 last previous
+    [[ $stagger == 0 ]] && return
+    until mkdir "$outputs/gate.lock" 2> /dev/null; do sleep 0.05; done
+    if read -r last previous 2> /dev/null < "$outputs/gate"; then
+        /usr/bin/perl -MTime::HiRes=time,sleep -e '
+            my ($last, $previous, $stagger) = @ARGV;
+            sub opened { open(my $file, "<", $previous) or open($file, "<", "$previous.starved") or return 0; scalar grep { /^  clock [0-9.]+: (opening|done|exited)$/ } <$file> }
+            sleep 0.05 until time >= $last + $stagger && (opened() || time >= $last + 10)' "$last" "$previous" "$stagger"
+    fi
+    echo "$(clock) $out" > "$outputs/gate"
+    rmdir "$outputs/gate.lock"
+}
+
+# The record of the starved attempt in $1 (scenario/width/variant #run, and which attempt in $2): its longest tick, the
+# load and the threads runnable at its end, and the other runs' phases then (launching, opening, page N: busy; settled
+# or done: not).
+why() {
+    local out=$1 attempt=$2 line wall place cpu end
+    line=$(grep -oE "FAIL: a tick stalled [0-9.]+s \(.*, [0-9.]+s of it on the CPU\)" "$out" | tail -1)
+    wall=$(sed -E 's/FAIL: a tick stalled ([0-9.]+)s.*/\1/' <<< "$line")
+    place=$(sed -E 's/FAIL: a tick stalled [0-9.]+s \((t=[0-9]+s, [^,]+),.*/\1/' <<< "$line")
+    cpu=$(sed -E 's/.*, ([0-9.]+)s of it on the CPU\)/\1/' <<< "$line")
+    end=$(grep -oE "^  clock [0-9.]+: the longest tick's end" "$out" | grep -oE "[0-9]+\.[0-9]+" | tail -1)
+    /usr/bin/perl -MPOSIX=strftime -e '
+        my ($label, $out, $wall, $place, $cpu, $end, $loads, @others) = @ARGV;
+        my ($t, $phase) = $place =~ /^t=(\d+)s, (.+)$/;
+        my $text = "$label starved on " . ($phase eq "opening" ? "the opening" : $phase) . " at t=$t s";
+        unless (length $end) { print "$text: $wall s with $cpu s CPU, the tick'"'"'s clock unknown\n"; exit }
+        $text .= sprintf " (%s.%02d)", strftime("%H:%M:%S", localtime $end), ($end - int $end) * 100;
+        my ($load, $runnable, $near);
+        open(my $samples, "<", $loads);
+        while (<$samples>) {
+            my ($at, $l, $r) = split;
+            ($near, $load, $runnable) = (abs($at - $end), $l, $r) if !defined $near || abs($at - $end) < $near;
+        }
+        my (%busy, $idle);
+        for my $other (@others) {
+            next if $other eq $out;
+            open(my $file, "<", $other) or next;
+            # Its latest phase begun by then (the longest tick end is printed late, with an earlier clock).
+            my ($now, $since);
+            for (<$file>) {
+                next unless /^  clock ([0-9.]+): (.+)$/ && $1 <= $end && $2 !~ /longest tick/;
+                ($since, $now) = ($1, $2) if !defined $since || $1 >= $since;
+            }
+            next unless defined $now;
+            if ($now =~ /^(launching|opening|page \d+)$/) { $busy{$now}++ } elsif ($now !~ /^(done|exited)$/) { $idle++ }
+        }
+        my $count = 0; $count += $_ for values %busy;
+        my $phases = join ", ", map { "$_ ×$busy{$_}" } sort { $busy{$b} <=> $busy{$a} || $a cmp $b } keys %busy;
+        printf "%s: %s s with %s s CPU, at load %s, %s threads runnable; %d other run%s opening or paging%s, %d settled\n",
+            $text, $wall, $cpu, $load // "unknown", $runnable // "unknown", $count, $count == 1 ? "" : "s",
+            $phases ? " ($phases)" : "", $idle // 0' "$attempt" "$out" "$wall" "$place" "$cpu" "$end" "$outputs/load.txt" \
+        "$outputs"/out/*.txt "$outputs"/out/*.starved
+}
 
 # Whether the run in $1 failed on a tick its main thread spent mostly waiting for a core, and on nothing else: not a tick
 # it worked through over the limit on the CPU, which the longest, starved, mustn't hide, nor a run no tick of which
@@ -84,20 +163,30 @@ one() {
     else
         settings+=(VIBESWITCHER_BENCH_OPEN="$scenario" VIBESWITCHER_BENCH_AT="$scenario")
     fi
-    local status=0
-    env "${settings[@]}" "$binary" --chat-bench "$path" > "$out" 2>&1 || status=$?
+    local status=0 label="$scenario/$width/$variant #$run"
+    gate "$out"
+    echo "  clock $(clock): launching" > "$out"
+    env "${settings[@]}" "$binary" --chat-bench "$path" >> "$out" 2>&1 || status=$?
+    echo "  clock $(clock): exited" >> "$out"
     if [[ $status -eq 4 ]] && starved "$out"; then
         mv "$out" "$out.starved"
+        why "$out.starved" "$label, first attempt," >> "$outputs/starved.txt"
         status=0
-        env "${settings[@]}" "$binary" --chat-bench "$path" > "$out" 2>&1 || status=$?
-        [[ $status -eq 4 ]] && starved "$out" && status=starved
+        gate "$out"
+        echo "  clock $(clock): launching" > "$out"
+        env "${settings[@]}" "$binary" --chat-bench "$path" >> "$out" 2>&1 || status=$?
+    echo "  clock $(clock): exited" >> "$out"
+        [[ $status -eq 4 ]] && starved "$out" && status=starved && why "$out" "$label, second attempt too (recorded)," >> "$outputs/starved.txt"
     fi
-    local verdict
+    local verdict opened
     verdict=$(grep -E '^(settled|FAIL|HANG)' "$out" | tail -1)
-    printf '%-7s %5s %-7s #%-2s status=%s %s\n' "$scenario" "$width" "$variant" "$run" "$status" "${verdict:-no verdict}"
+    # When it opened its conversation (the bench's first beat), to the hundredth of a second.
+    opened=$(grep -oE "^  clock [0-9.]+: opening$" "$out" | grep -oE "[0-9]+\.[0-9]+" | head -1 \
+        | /usr/bin/perl -MPOSIX=strftime -ne 'chomp; printf "%s.%02d", strftime("%H:%M:%S", localtime $_), ($_ - int $_) * 100' || true)
+    printf '%-7s %5s %-7s #%-2s open at %-11s status=%s %s\n' "$scenario" "$width" "$variant" "$run" "${opened:--}" "$status" "${verdict:-no verdict}"
 }
-export -f one starved
-export home outputs a b binary board updates earlier workflow
+export -f one starved gate why clock
+export home outputs a b binary board updates earlier workflow stagger
 
 for scenario in $scenarios; do for width in $widths; do for variant in $variants; do for run in $(seq 1 "$runs"); do
     echo "$scenario $width $variant $run"
@@ -120,5 +209,13 @@ for scenario in $scenarios; do for width in $widths; do for variant in $variants
         "${longest:--}" "${cpu:--}"
     [[ $passed -eq $runs ]] || failed=1
 done; done; done
+# How close the runs' openings came, every attempt's: the stagger's doing.
+grep -ohE "^  clock [0-9.]+: opening$" "$outputs"/out/* 2> /dev/null | grep -oE "[0-9]+\.[0-9]+" | sort -n \
+    | awk 'NR > 1 && (gap == "" || $1 - last < gap) { gap = $1 - last } { last = $1 } END {
+        if (NR > 1) printf "openings: %d, the closest two %.2f s apart (stagger %s s)\n", NR, gap, stagger }' stagger="$stagger"
+starved_runs=$(grep -c "first attempt," "$outputs/starved.txt" 2> /dev/null || true)
+recorded=$(grep -c "second attempt too" "$outputs/starved.txt" 2> /dev/null || true)
+echo "starved: ${starved_runs:-0} first attempts run again, ${recorded:-0} recorded starved (status=starved)"
+[[ -s $outputs/starved.txt ]] && sort "$outputs/starved.txt" | sed 's/^/  /'
 echo "outputs: $outputs/out"
 exit $failed

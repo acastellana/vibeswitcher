@@ -109,12 +109,13 @@ enum ChatBench {
             let cpu = Self.cpuTime(of: mainThread)
             let used = cpu.flatMap { now in lastCPU.map { now - $0 } }
             if now.timeIntervalSince(last) > worst { worst = now.timeIntervalSince(last); worstCPU = used }
-            longest.note(now.timeIntervalSince(last), cpu: used)
+            longest.note(now.timeIntervalSince(last), cpu: used, at: now)
             lastCPU = cpu
             last = now
             // Opened on the first beat, so the ticks count its layout and not the app's launch.
             if !opened {
                 opened = true
+                Self.clock("opening", at: now)
                 chat.show(path: path)
             }
             if updates, chat.state == .ready { chat.objectWillChange.send() }
@@ -175,16 +176,21 @@ enum ChatBench {
         /// The first open is over: its longest tick, and the most the main thread worked in one (its layout's cost).
         func endFirstOpen() {
             longest.endFirstOpen()
+            if earlier == 0 { Self.clock("after the first open") }
             print("  first open: longest tick \(LongestTicks.text(longest.overall, cpu: longest.overallCPU)), most CPU in a tick \(Self.seconds(longest.firstOpenMostCPU ?? 0))")
         }
         /// Ends the run with `status` (3: it never settled), or 4 when a tick stalled over the rule's limit.
         func finish(_ status: Int32) -> Never {
             var failed = false
             if !stall {
-                let verdict = rule.verdict(longest, load: [startLoad, rule.load()].compactMap { $0 }.max())
+                let load = [startLoad, rule.load()].compactMap { $0 }.max()
+                // When the tick judged ended, for the settle script's record of a starved one.
+                if let end = rule.loaded(load) ? longest.afterOpenEnd : longest.overallEnd { Self.clock("the longest tick's end", at: end) }
+                let verdict = rule.verdict(longest, load: load)
                 print(verdict.text)
                 failed = verdict.failed
             }
+            Self.clock("done")
             fflush(stdout)
             exit(status != 0 ? status : failed ? 4 : 0)
         }
@@ -289,11 +295,13 @@ enum ChatBench {
                 }
                 if let pressedAt = paging.pressedAt {
                     paging.settled(max(0, probe.lastChange.timeIntervalSince(pressedAt)), longestTick: LongestTicks.text(longest.page, cpu: longest.pageCPU))
+                    Self.clock("settled")
                     print("  page \(paging.settles.count) settled in \(Self.seconds(paging.settles.last ?? 0)): shown=\(min(chat.items.count, chat.shownLimit)) "
                         + "of \(chat.items.count) height=\(probe.heights.last ?? 0), longest tick \(LongestTicks.text(longest.page, cpu: longest.pageCPU)), "
                         + "most CPU in a tick \(Self.seconds(longest.pageMostCPU)), filled in over \(chat.stagingTurns) turns")
                 } else {
                     print("  settled \(second - readyAt) s after it loaded: \(heights())")
+                    Self.clock("settled")
                 }
                 let shown = ChatWindow.shown(chat.items, limit: chat.shownLimit, including: nil)
                 if paging.settles.count < earlier, shown.hidden > 0 || chat.hasEarlier {
@@ -301,6 +309,7 @@ enum ChatBench {
                     if let scroll = Self.scrollView(in: host) { Self.scroll(scroll, to: "top", host: host) }
                     if longest.firstOpen == nil { endFirstOpen() }
                     longest.startPage(paging.settles.count + 1)
+                    Self.clock("page \(paging.settles.count + 1)")
                     paging.pressed(at: Date(), second: second, height: probe.heights.last)
                     if shown.hidden > 0 {
                         print("  page \(paging.settles.count + 1): Show \(min(shown.hidden, ChatWindow.page)) earlier at t=\(second)s")
@@ -344,6 +353,13 @@ enum ChatBench {
     }
 
     static func seconds(_ value: TimeInterval) -> String { String(format: "%.2fs", value) }
+
+    /// "  clock 1761000000.12: page 2": the wall clock as the run starts a phase (opening, page N, settled, done) or at
+    /// its judged tick's end. scripts/chat-bench-settle.sh staggers its runs by the opening's, and records what the
+    /// other runs were doing and the Mac's load at a starved tick's end.
+    static func clock(_ what: String, at date: Date = Date()) {
+        print("  clock \(String(format: "%.2f", date.timeIntervalSince1970)): \(what)")
+    }
 
     /// VIBESWITCHER_BENCH_PREPARE: no window; the transcript's prompts and replies built on several threads at once
     /// (`ChatTextContent.prepareNow`, eight at a time) at 200 text sizes, each a set of fonts not made yet. Prints "ready"
@@ -484,6 +500,9 @@ enum ChatBench {
         private(set) var firstOpen: TimeInterval?
         private(set) var afterOpen: TimeInterval = 0
         private(set) var afterOpenPlace = ""
+        /// When the overall and the after-the-first-open longest ended.
+        private(set) var overallEnd: Date?
+        private(set) var afterOpenEnd: Date?
         private(set) var page: TimeInterval = 0
         /// The main thread's CPU time in the overall and the page's longest: near the tick, the main thread was busy
         /// (a layout); far under it, it waited for a core (the Mac's load).
@@ -500,12 +519,12 @@ enum ChatBench {
         private(set) var mostCPUAfterOpen: TimeInterval = 0
         private(set) var mostCPUAfterOpenPlace = ""
 
-        /// A tick of `gap` seconds, `cpu` of them on the main thread's CPU.
-        func note(_ gap: TimeInterval, cpu: TimeInterval? = nil) {
+        /// A tick of `gap` seconds, `cpu` of them on the main thread's CPU, ended `at`.
+        func note(_ gap: TimeInterval, cpu: TimeInterval? = nil, at end: Date = Date()) {
             guard started else { started = true; return }
             let place = "t=\(second + 1)s, \(phase)" + (cpu.map { ", \(ChatBench.seconds($0)) of it on the CPU" } ?? "")
-            if gap > overall { overall = gap; overallPlace = place; overallCPU = cpu }
-            if firstOpen != nil, gap > afterOpen { afterOpen = gap; afterOpenPlace = place }
+            if gap > overall { overall = gap; overallPlace = place; overallCPU = cpu; overallEnd = end }
+            if firstOpen != nil, gap > afterOpen { afterOpen = gap; afterOpenPlace = place; afterOpenEnd = end }
             if gap > page { page = gap; pageCPU = cpu }
             if let cpu, cpu > pageMostCPU { pageMostCPU = cpu }
             // The first reading counts even at 0: a place says some tick carried one.
