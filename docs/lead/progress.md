@@ -956,3 +956,5 @@
 - 2026-10-23 01:15 Audit of session-temp-folders: complete, clean, round 1: 1 Nit open
 - 2026-10-23 01:46 Merged vs-heavy-serves-waiters: vs-heavy serves waiters in arrival order (no audit: review none)
 - 2026-10-23 01:46 Update: Merged: vs-heavy serves waiters in arrival order — **What changed:**
+- 2026-10-23 01:53 Audit of session-temp-folders: complete, clean, round 2: 1 Nit open
+- 2026-10-23 02:24 Merged session-temp-folders: Session temp folders: sweep and cap while a session is alive
