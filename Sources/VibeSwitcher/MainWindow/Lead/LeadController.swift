@@ -971,20 +971,16 @@ final class LeadController: ObservableObject {
             // worker's transcript is read whatever it shows: a stall is one that reads as working too (see `LeadStall`).
             var apiError: (text: String, at: Double?)?
             var watched: (activity: LeadActivity, tail: TranscriptTail?, progress: TranscriptProgress?)?
-            var shellRunning = false
             var shells: [BackgroundJob] = []
             var held: SteerMessage?
             if let session, let reading = team.watched[id] {
                 watched = reading
                 if session.status != .working, case .apiError(let error) = reading.activity { apiError = (error, reading.tail?.at) }
                 if workers.contains(id) {
-                    // Between turns, the shells it waits on (status names them too), from the store's last scan as below.
+                    // Its shells: mid-turn the command its turn runs, between turns what it waits on (status names them
+                    // too); see `LeadWitness.Seen`. From the store's last scan, which reads the process table off the main
+                    // thread. Reading it here froze the window for minutes at a time on a loaded Mac (sysctl walks every process).
                     shells = session.backgroundJobs
-                    if let last = reading.progress?.lastWritten, now.timeIntervalSince1970 - last >= LeadStall.silentAfter {
-                        // From the store's last scan, which reads the process table off the main thread. Reading it
-                        // here froze the window for minutes at a time on a loaded Mac (sysctl walks every process).
-                        shellRunning = !session.backgroundJobs.isEmpty
-                    }
                     held = team.held[id]
                 }
             }
@@ -997,7 +993,7 @@ final class LeadController: ObservableObject {
                                         agentQuit: quit, apiError: apiError?.text,
                                         apiErrorAt: apiError?.at, activity: watched?.activity,
                                         lastActivity: watched?.progress?.lastWritten, compactedAt: watched?.progress?.compactedAt,
-                                        shellRunning: shellRunning, shells: shells, heldSince: held?.at, heldFrom: held.map { Self.sender($0.from) },
+                                        shells: shells, heldSince: held?.at, heldFrom: held.map { Self.sender($0.from) },
                                         started: info.startedAt.timeIntervalSince1970, submittedAt: submitted[id])
             if info.isLive, let session { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
         }

@@ -4,7 +4,8 @@ import Foundation
 /// `LeadWitness`), and the board keeps it on the task so status and the Team view show it until the worker moves again.
 public struct LeadStall: Codable, Equatable, Sendable {
     public enum Reason: String, Codable, Sendable, CaseIterable {
-        /// It reads as working, but its transcript hasn't grown for a while and no shell of its runs.
+        /// It reads as working, but its transcript hasn't grown for a while and its turn runs no shell (one it left in
+        /// the background doesn't count).
         case silent
         /// Between turns for a while, without having reported and with no question to the lead pending.
         case idle
@@ -24,15 +25,19 @@ public struct LeadStall: Codable, Equatable, Sendable {
     public var waitingFrom: String?
     /// For `idle`: the background task it still waits on, past `backgroundCeiling` (see `LeadWitness.Seen.waitingOn`).
     public var background: String?
+    /// For `silent` and `idle`: the shells it left running in the background, which weren't counted as it doing
+    /// anything ("npm run dev · 2h", see `BackgroundJobs.summary`).
+    public var shells: String?
 
     public init(reason: Reason, lastActivity: Double, at: Double = Date().timeIntervalSince1970,
-                waitingSince: Double? = nil, waitingFrom: String? = nil, background: String? = nil) {
+                waitingSince: Double? = nil, waitingFrom: String? = nil, background: String? = nil, shells: String? = nil) {
         self.reason = reason
         self.lastActivity = lastActivity
         self.at = at
         self.waitingSince = waitingSince
         self.waitingFrom = waitingFrom
         self.background = background
+        self.shells = shells
     }
 
     /// How long each takes to count as a stall.
@@ -43,19 +48,30 @@ public struct LeadStall: Codable, Equatable, Sendable {
     /// Between turns waiting on its own background task or shell (a long test run), it's idle only past this; once
     /// the task is told complete, `idleAfter` counts from then.
     public static let backgroundCeiling: TimeInterval = 45 * 60
+    /// The longest Claude Code's Bash tool runs a command in the foreground: a shell older than this, started before
+    /// its transcript's last write, isn't what its turn waits on (see `LeadWitness.Seen.turnShells`).
+    public static let bashCeiling: TimeInterval = 10 * 60
 
     /// The reason in words.
     public func why(now: Date = Date()) -> String {
         switch reason {
-        case .silent: return "it reads as working, but its transcript hasn't grown and no shell of its runs"
+        case .silent:
+            if let shells { return "it reads as working, but its transcript hasn't grown and its turn runs no command, only \(Self.left(shells))" }
+            return "it reads as working, but its transcript hasn't grown and no shell of its runs"
         case .idle:
             if let background { return "it has waited on its background task (\(background)) for over \(Int(Self.backgroundCeiling / 60)) min without having reported" }
             return "it's between turns without having reported, and has no question to the lead pending"
+                + (shells.map { "; \(Self.left($0)) runs on" } ?? "")
         case .compacted: return "its transcript ends at a context-compaction summary and nothing followed"
         case .undelivered:
             let waited = LeadToolset.age(now.timeIntervalSince1970 - (waitingSince ?? at))
             return "a message\(waitingFrom.map { " from \($0)" } ?? "") has waited \(waited) in its inbox, undelivered"
         }
+    }
+
+    /// "a shell it left in the background (npm run dev · 2h)", or "shells it left in the background (2 shells · …)".
+    static func left(_ shells: String) -> String {
+        (shells.contains(" shells · oldest ") ? "shells" : "a shell") + " it left in the background (\(shells))"
     }
 
     /// "stalled: <reason>, last activity N min ago" ("no activity seen yet" without a time for it).
@@ -99,6 +115,10 @@ public struct LeadStall: Codable, Equatable, Sendable {
         let betweenTurns = seen.activity?.betweenTurns ?? [.done, .idle, .background].contains(seen.status ?? .unknown)
         // Between turns waiting on its own background task: its transcript says (see `LeadActivity`), or its shells.
         let background = betweenTurns ? seen.waitingOn : nil
+        // Mid-turn, a command its turn runs is it at work; a shell it left in the background (a server) runs on
+        // whether or not it does anything, so it's named in the stall (as every shell, past those), not counted as progress.
+        let turnShells = seen.turnShells(now: now)
+        let shells = BackgroundJobs.summary(seen.shells, now: now)
         // Between turns with no transcript to read, its status says since when. Neither counts from before this
         // session started: one first seen before its hooks fire reads as between turns since ever (`.distantPast`),
         // one on a reused terminal as the earlier session left it.
@@ -108,14 +128,15 @@ public struct LeadStall: Codable, Equatable, Sendable {
             // A compaction once its turn was over is Claude tidying an idle session: it's idle, if anything.
             if let compacted = seen.compactedAt, !betweenTurns, quiet >= compactedAfter {
                 stalls.append(LeadStall(reason: .compacted, lastActivity: max(last, compacted), at: at))
-            } else if working, !seen.shellRunning, quiet >= silentAfter {
-                stalls.append(LeadStall(reason: .silent, lastActivity: last, at: at))
+            } else if working, turnShells.isEmpty, quiet >= silentAfter {
+                stalls.append(LeadStall(reason: .silent, lastActivity: last, at: at, shells: shells))
             } else if betweenTurns, task.leadQuestionAt == nil, quiet >= (background == nil ? idleAfter : backgroundCeiling) {
-                stalls.append(LeadStall(reason: .idle, lastActivity: last, at: at, background: background))
+                stalls.append(LeadStall(reason: .idle, lastActivity: last, at: at, background: background,
+                                        shells: background == nil ? shells : nil))
             }
         }
-        // A worker at work with a shell running takes the message at its next step.
-        if let held = seen.heldSince, at - held >= undeliveredAfter, !(working && seen.shellRunning) {
+        // A worker at work with its turn's command running takes the message at its next step.
+        if let held = seen.heldSince, at - held >= undeliveredAfter, !(working && !turnShells.isEmpty) {
             stalls.append(LeadStall(reason: .undelivered, lastActivity: seen.lastActivity ?? held, at: at,
                                     waitingSince: held, waitingFrom: seen.heldFrom))
         }

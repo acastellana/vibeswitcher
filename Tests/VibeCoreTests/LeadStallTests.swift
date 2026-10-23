@@ -28,13 +28,13 @@ struct LeadStallTests {
     static func lines(_ lines: [String]) -> Data { Data((lines.joined(separator: "\n") + "\n").utf8) }
 
     /// What the witness reads from a transcript fixture: the activity (no hooks), and its progress.
-    static func seen(_ data: Data, shellRunning: Bool = false, heldSince: Double? = nil) -> LeadWitness.Seen {
+    static func seen(_ data: Data, shells: [BackgroundJob] = [], heldSince: Double? = nil) -> LeadWitness.Seen {
         let tail = TranscriptTail.read(data)
         let progress = TranscriptProgress.read(data)
         let activity = LeadActivity.resolve(hook: nil, transcript: tail)
         return LeadWitness.Seen(live: true, status: activity.betweenTurns ? .done : .working, activity: activity,
                                 lastActivity: progress.lastWritten, compactedAt: progress.compactedAt,
-                                shellRunning: shellRunning, heldSince: heldSince, heldFrom: heldSince == nil ? nil : "lead of vibeswitcher")
+                                shells: shells, heldSince: heldSince, heldFrom: heldSince == nil ? nil : "lead of vibeswitcher")
     }
 
     // MARK: Fixtures
@@ -192,11 +192,91 @@ struct LeadStallTests {
         #expect(events.count == 1)
         #expect(event.text.contains("stalled: it reads as working, but its transcript hasn't grown and no shell of its runs, last activity 16 min ago"))
         #expect(event.key == "w1|stalled-\(Int(last))")
-        // Under 15 min, or a shell of its runs (a long build, a background job): not a stall.
+        // Under 15 min, or its turn's command running (a long build, started by the call its transcript ends at): not a stall.
         let recent = Self.seen(Self.midTurn(at: now.timeIntervalSince1970 - 14 * 60))
         #expect(LeadWitness.events(board: Self.board(), seen: ["w1": recent], now: now).isEmpty)
-        let building = Self.seen(Self.midTurn(at: last), shellRunning: true)
+        let building = Self.seen(Self.midTurn(at: last), shells: [Self.shell("swift build", startedAt: last + 0.5)])
         #expect(LeadWitness.events(board: Self.board(), seen: ["w1": building], now: now).isEmpty)
+    }
+
+    static func shell(_ command: String, startedAt: Double, pid: Int32 = 5151) -> BackgroundJob {
+        BackgroundJob(pid: pid, command: command, startedAt: Date(timeIntervalSince1970: startedAt))
+    }
+
+    /// Process audit 2026-10-22, finding 5: a worker started a dev server with `run_in_background` two hours ago, and
+    /// later its turn hung mid-stream. The server's shell runs on for as long as the server does; it isn't the agent
+    /// doing anything, so the stall is told all the same, with the server named.
+    @Test func aShellLeftInTheBackgroundDoesntHideAWorkerStalledMidTurn() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let last = now.timeIntervalSince1970 - 20 * 60
+        let server = [Self.shell("npm run dev", startedAt: now.timeIntervalSince1970 - 2 * 3600)]
+        let hung = Self.seen(Self.midTurn(at: last), shells: server)
+        #expect(hung.turnShells(now: now).isEmpty)
+        let events = LeadWitness.events(board: Self.board(), seen: ["w1": hung], now: now)
+        let event = try #require(events.first)
+        #expect(events.count == 1)
+        #expect(event.key == "w1|stalled-\(Int(last))")
+        #expect(event.text.contains("stalled: it reads as working, but its transcript hasn't grown and its turn runs no command, only a shell it left in the background (npm run dev · 2h), last activity 20 min ago"))
+        // On the board too, for status and the Team view.
+        #expect(LeadWitness.stalls(board: Self.board(), seen: ["w1": hung], now: now).values.map(\.shells) == ["npm run dev · 2h"])
+        // Several: how many, the oldest named.
+        let two = Self.seen(Self.midTurn(at: last), shells: server + [Self.shell("until ! pgrep Chrome; do sleep 5; done", startedAt: last - 60, pid: 5152)])
+        #expect(LeadStall.detect(two, task: Self.task(), now: now).first?.text(now: now)
+                == "stalled: it reads as working, but its transcript hasn't grown and its turn runs no command, only shells it left in the background (2 shells · oldest 2h: npm run dev), last activity 20 min ago")
+        // A message held meanwhile is told too, rather than waiting for the server to end.
+        let held = Self.seen(Self.midTurn(at: last), shells: server, heldSince: now.timeIntervalSince1970 - 6 * 60)
+        #expect(LeadStall.detect(held, task: Self.task(), now: now).map(\.reason) == [.silent, .undelivered])
+        // Its stalls on a prompt or an API error are still told the witness's own way, never as a stall.
+        var asking = hung
+        asking.status = .needsInput
+        #expect(LeadStall.detect(asking, task: Self.task(), now: now).isEmpty)
+        var failed = hung
+        failed.apiError = "Overloaded"
+        #expect(LeadStall.detect(failed, task: Self.task(), now: now).isEmpty)
+    }
+
+    /// The same server beside a worker that is at work: writing its transcript, or running its turn's command (one
+    /// started since its transcript's last write, or within the Bash tool's ceiling). Not stalled, and a held message
+    /// waits for its next step.
+    @Test func aWorkerAtWorkBesideAShellLeftInTheBackgroundIsntStalled() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let server = Self.shell("npm run dev", startedAt: now.timeIntervalSince1970 - 2 * 3600)
+        let heldSince = now.timeIntervalSince1970 - 6 * 60
+        // Its transcript growing.
+        let writing = Self.seen(Self.midTurn(at: now.timeIntervalSince1970 - 3 * 60), shells: [server])
+        #expect(LeadStall.detect(writing, task: Self.task(), now: now).isEmpty)
+        // Quiet for 20 min while its turn's command runs: a long test run its last write started, or one 3 min old.
+        let last = now.timeIntervalSince1970 - 20 * 60
+        for command in [Self.shell("swift test", startedAt: last + 0.5, pid: 6161), Self.shell("swift test", startedAt: now.timeIntervalSince1970 - 3 * 60, pid: 6161)] {
+            let running = Self.seen(Self.midTurn(at: last), shells: [server, command], heldSince: heldSince)
+            #expect(running.turnShells(now: now) == [command])
+            #expect(LeadStall.detect(running, task: Self.task(), now: now).isEmpty)
+            #expect(LeadWitness.events(board: Self.board(), seen: ["w1": running], now: now).isEmpty)
+        }
+        // A shell started before its last write and older than the ceiling is one it left behind.
+        let stale = Self.seen(Self.midTurn(at: last), shells: [server, Self.shell("swift test", startedAt: last - 1, pid: 6161)])
+        #expect(stale.turnShells(now: now).isEmpty)
+        #expect(LeadStall.detect(stale, task: Self.task(), now: now).map(\.reason) == [.silent])
+    }
+
+    /// Between turns, a server it left running hours ago isn't what its turn waits on: it stopped without reporting,
+    /// told as for any worker, and stalled 10 min on (not 45), the server named.
+    @Test func aShellLeftInTheBackgroundLongAgoIsntWorkItsTurnWaitsOn() throws {
+        let ended = 1_800_000_000.0
+        var seen = Self.seen(Self.turnOver(at: ended), shells: [Self.shell("npm run dev", startedAt: ended - 2 * 3600)])
+        seen.status = .background
+        seen.since = Date(timeIntervalSince1970: ended)
+        #expect(seen.waitingOn == nil)
+        let later = Date(timeIntervalSince1970: ended + 11 * 60)
+        let events = LeadWitness.events(board: Self.board(), seen: ["w1": seen], now: later)
+        #expect(events.contains { $0.key.hasPrefix("w1|stopped-") })
+        let stall = try #require(LeadStall.detect(seen, task: Self.task(), now: later).first)
+        #expect(stall.reason == .idle && stall.background == nil)
+        #expect(stall.text(now: later) == "stalled: it's between turns without having reported, and has no question to the lead pending; a shell it left in the background (npm run dev · 2h 11m) runs on, last activity 11 min ago")
+        // A run it started near its turn's end beside it: that's what it waits on, as before.
+        seen.shells.append(Self.shell("bash .scratch/calm-check.sh 7", startedAt: ended - 5, pid: 4242))
+        #expect(seen.waitingOn == "1 shell: bash .scratch/calm-check.sh 7")
+        #expect(LeadStall.detect(seen, task: Self.task(), now: later).isEmpty)
     }
 
     // MARK: (b) between turns without reporting
