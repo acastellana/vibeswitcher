@@ -206,6 +206,7 @@ final class ChatModel: ObservableObject {
         hasEarlier = false
         loadingEarlier = false
         pending = []
+        putBackTyped = []
         steering = []
         steeringTTY = nil
         menu = nil
@@ -587,6 +588,7 @@ final class ChatModel: ObservableObject {
         let prompts = SentMatch.prompts(log.entries)
         if let key = outboxKey, state == .ready { outbox.delivered(key: key, prompts: prompts) }
         if !pending.isEmpty { pending = PendingMessage.remaining(pending, prompts: prompts) }
+        if !putBackTyped.isEmpty { takeOutArrived(prompts: prompts) }
         guard let key = outboxKey else { return }
         let shown = Set(pending.map(\.id))
         let missing = outbox.outbox.onTheirWay(key: key).filter { !shown.contains($0.id) && !steeringEntry($0.id) }
@@ -603,6 +605,31 @@ final class ChatModel: ObservableObject {
 
     /// Typed messages that should be in the conversation by now and aren't.
     @Published private(set) var late: Set<UUID> = []
+    /// Messages typed into an idle agent that a turn then held up (see `agentWorking`).
+    private var heldUpByTurn: Set<UUID> = []
+
+    /// The agent's turn, as the window sees it each heartbeat. A message typed into an idle agent whose turn then
+    /// started (one you sent a moment before started it, or a wake-up did) waits in the agent's queue for that turn:
+    /// queued, not "may not have reached the agent" (and putting it back, then sending it again, made it twice).
+    /// Once the agent is between turns again, the agent takes it then: expected within seconds from that moment.
+    func agentWorking(_ working: Bool) {
+        let at = now()
+        var changed = false
+        for index in pending.indices where outbox.entry(pending[index].id)?.state != .held {
+            let id = pending[index].id
+            if working, pending[index].expectsSoon {
+                pending[index].expectsSoon = false
+                heldUpByTurn.insert(id)
+                changed = true
+            } else if !working, heldUpByTurn.remove(id) != nil {
+                pending[index].expectsSoon = true
+                pending[index].expectedFrom = at
+                changed = true
+            }
+        }
+        heldUpByTurn.formIntersection(pending.map(\.id))
+        if changed { updateLate() }
+    }
 
     private func updateLate() {
         let at = now()
@@ -617,14 +644,52 @@ final class ChatModel: ObservableObject {
         } else {
             let draft = composer.drafts[rowID] ?? ""
             composer.drafts[rowID] = draft.isEmpty ? message.text : message.text + "\n\n" + draft
+            putBackTyped.append((message, rowID, message.text, []))
             focusComposer()
         }
         dismiss(message)
     }
 
+    /// Messages put back in the box that went into the terminal (typed, then flagged late or left from before a
+    /// relaunch): the agent may still take them. One the conversation then shows comes back out of the box.
+    private var putBackTyped: [(message: PendingMessage, rowID: String, text: String, attachments: [String])] = []
+
+    /// Put back, then shown in the conversation after all: out of the box again while the box still starts with
+    /// it (sent again, it would be in the conversation twice), and you're told.
+    private func takeOutArrived(prompts: [SentMatch.Prompt]) {
+        let arrived = putBackTyped.filter { PendingMessage.remaining([$0.message], prompts: prompts).isEmpty }
+        guard !arrived.isEmpty else { return }
+        putBackTyped.removeAll { watch in arrived.contains { $0.message.id == watch.message.id } }
+        for watch in arrived {
+            let draft = composer.drafts[watch.rowID] ?? ""
+            let rest: String?
+            if draft == watch.text {
+                rest = ""
+            } else if draft.hasPrefix(watch.text + "\n\n") {
+                rest = String(draft.dropFirst(watch.text.count + 2))
+            } else {
+                rest = nil
+            }
+            if let rest {
+                composer.drafts[watch.rowID] = rest
+                composer.attachments[watch.rowID]?.removeAll { watch.attachments.contains($0) }
+                composer.save()
+                sendNotice = "It reached the agent after all, so it's out of the box again."
+            } else {
+                sendNotice = "A message you put back reached the agent after all: if you sent it again, it's there twice."
+            }
+        }
+    }
+
     /// An outbox message, back in the composer as it was (its text before what's there, its images attached),
     /// and out of the outbox.
     func putBack(_ entry: OutboxEntry, rowID: String) {
+        // Typed in: it may still arrive (see `takeOutArrived`).
+        if entry.state == .typed {
+            var message = PendingMessage(text: entry.message, afterPrompts: 0, sentAt: entry.sentAt, attachments: entry.attachments)
+            message.id = entry.id
+            putBackTyped.append((message, rowID, entry.text, entry.attachments))
+        }
         let draft = composer.drafts[rowID] ?? ""
         composer.drafts[rowID] = entry.text.isEmpty ? draft : draft.isEmpty ? entry.text : entry.text + "\n\n" + draft
         var images = entry.attachments

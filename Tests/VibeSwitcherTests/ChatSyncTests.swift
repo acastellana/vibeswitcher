@@ -658,8 +658,10 @@ final class Harness {
     var targetID: UUID?
     /// The agent is in its turn, as the composer sees it.
     var working = false
+    /// The agent the window's row has (nil: its session is gone, the terminal a shell).
+    var targetAgent: Agent? = .claude
 
-    private init(_ temp: Scratch, in folder: URL?) throws {
+    private init(_ temp: Scratch, in folder: URL?, keepShell: Bool) throws {
         let launcher = Bundle(for: HarnessAnchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host").path
         socket = try temp.shortFolder("vsh-sync") + "/h.sock"
         let key = SymmetricKey(size: .bits256)
@@ -692,18 +694,23 @@ final class Harness {
         steerRoot = home.appendingPathComponent("vibeswitcher")
         chat = ChatModel(outbox: ComposerOutbox(url: home.appendingPathComponent("outbox.json")), home: home.path, steerRoot: steerRoot)
         sync = ChatSync(chat: chat, host: host)
-        command = "exec /usr/bin/python3 -I -u '\(script.path)' '\(transcript.path)' '\(control.path)' '\(state.path)'"
+        // Kept a shell: the agent runs under it, and the shell is the terminal's once it exits.
+        command = (keepShell ? "" : "exec ") + "/usr/bin/python3 -I -u '\(script.path)' '\(transcript.path)' '\(control.path)' '\(state.path)'"
+        self.keepShell = keepShell
     }
 
     private let command: String
+    private let keepShell: Bool
 
-    static func start(_ temp: Scratch, in folder: URL? = nil) async throws -> Harness {
-        let h = try Harness(temp, in: folder)
+    /// `keepShell`: the session keeps a shell open once the agent exits (as the Shell preset, or a preset's "Keep a
+    /// shell open after it exits").
+    static func start(_ temp: Scratch, in folder: URL? = nil, keepShell: Bool = false) async throws -> Harness {
+        let h = try Harness(temp, in: folder, keepShell: keepShell)
         #expect(h.placesAreScratch, "the harness reads and writes outside its scratch: \(h.places)")
         h.host.connectIfRunning()
         #expect(await until { h.host.state == .connected })
         var result: Result<HostSession, HostClientError>?
-        h.host.spawn(SpawnRequest(cwd: "/tmp", command: h.command, env: [:], cols: 100, rows: 40, keepShell: false,
+        h.host.spawn(SpawnRequest(cwd: "/tmp", command: h.command, env: [:], cols: 100, rows: 40, keepShell: h.keepShell,
                                   label: "Fake Claude", agent: "claude")) { result = $0 }
         #expect(await until { result != nil })
         h.session = try #require(result).get()
@@ -711,7 +718,7 @@ final class Harness {
         h.pane.show(hostID: h.session.id, focus: false)
         h.sync.target = { [weak h] in
             guard let h else { return nil }
-            return ChatSync.Target(id: h.targetID ?? h.session.id, key: h.key, agent: .claude, needsInput: false,
+            return ChatSync.Target(id: h.targetID ?? h.session.id, key: h.key, agent: h.targetAgent, needsInput: false,
                                    working: h.working || h.agent["mode"] as? String == "working")
         }
         h.sync.screen = { [weak h] id in h?.pane.screenText(id) ?? ScreenRead() }
@@ -823,6 +830,7 @@ final class Harness {
     private func heartbeat() {
         chat.refreshSteering()
         chat.watchSteering(tty: session.tty, agentPid: session.childPID, idle: false)
+        chat.agentWorking(working || agent["mode"] as? String == "working")
         sync.readScreen()
     }
 
@@ -885,14 +893,20 @@ final class Harness {
     /// which answers as its click does (`AnswerCard.act`, a window session's: no asking first); a key the card
     /// doesn't take goes into the box. What the box holds afterwards.
     func press(_ key: AnswerKeys.Key, composer: String) -> String {
-        guard let menu = chat.menu else { return composer + Self.typed(key) }
+        cardKey(key, composer: composer) ? composer : composer + Self.typed(key)
+    }
+
+    /// What the composer asks the card for a key (`ComposerView.cardKey`): true when the card took it, and answered
+    /// as its click does.
+    func cardKey(_ key: AnswerKeys.Key, composer: String) -> Bool {
+        guard let menu = chat.menu else { return false }
         let content = AnswerCardContent(menu: menu, pending: chat.log.pendingQuestions)
         let before = cardKeys.press
-        guard cardKeys.take(key, composer: composer, content: content, busy: chat.answering) else { return composer + Self.typed(key) }
+        guard cardKeys.take(key, composer: composer, content: content, busy: chat.answering) else { return false }
         if let press = cardKeys.press, press != before, case .answer(let index) = AnswerKeys.pick(press.index, in: content) {
             sync.choose(index, drawn: menu)
         }
-        return composer
+        return true
     }
 
     /// What a key the card didn't take puts in the box (↩ and the arrows put nothing).

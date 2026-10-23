@@ -763,26 +763,66 @@ final class HostClient: ObservableObject {
         paced.queue.forEach { $0.done?(false) }
     }
 
-    /// Writes these into the session, each after its delay, then tells `confirmed` whether all of them went in (see
+    /// Writes these into the session as one unit (a message's text and its Enter, an answer's keys), each after its
+    /// delay and once the one before went in, then tells `confirmed` whether all of them did (see
     /// `send(_:bytes:reply:done:)`). Once one didn't, the rest aren't sent: an Enter after a paste cut short would
-    /// submit what did go in.
-    func send(_ id: UUID, writes: [HostInput.Write], confirmed: @escaping (Bool) -> Void) {
+    /// submit what did go in. `check` is asked right before each write (by its index): false stops the unit there.
+    /// `gate` is the same, answered later (after a screen read, say): the session's next unit waits for it.
+    ///
+    /// A session's units go in one after another, in the order they were sent, `unitGap` apart: the composer's
+    /// messages, the lead's wake-ups and the phone's replies all come through here. Each scheduled on its own, two
+    /// messages went in as text, text, Enter, Enter: one prompt, "first messagesecond message".
+    func send(_ id: UUID, writes: [HostInput.Write], check: ((Int) -> Bool)? = nil, confirmed: @escaping (Bool) -> Void = { _ in }) {
+        send(id, writes: writes, gate: check.map { check in { index, go in go(check(index)) } }, confirmed: confirmed)
+    }
+
+    func send(_ id: UUID, writes: [HostInput.Write], gate: ((Int, @escaping (Bool) -> Void) -> Void)?,
+              confirmed: @escaping (Bool) -> Void = { _ in }) {
         guard !writes.isEmpty else { return confirmed(true) }
-        var ok = true
-        var left = writes.count
-        let settled = { (went: Bool) in
-            ok = ok && went
-            left -= 1
-            if left == 0 { confirmed(ok) }
-        }
-        var at: TimeInterval = 0
-        for write in writes {
-            at += write.delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
-                guard let self, ok else { return settled(false) }
-                self.send(id, bytes: Data(write.bytes), reply: false, done: settled)
+        units[id, default: []].append(InputUnit(writes: writes, gate: gate, confirmed: confirmed))
+        if units[id]?.count == 1 { runUnit(id, at: 0) }
+    }
+
+    struct InputUnit {
+        let writes: [HostInput.Write]
+        let gate: ((Int, @escaping (Bool) -> Void) -> Void)?
+        let confirmed: (Bool) -> Void
+    }
+
+    /// Each session's units, the first one going in (see `send(_:writes:gate:confirmed:)`).
+    private var units: [UUID: [InputUnit]] = [:]
+    /// How long after a unit's last write the next unit's first write goes: a program that reads both at once takes
+    /// them for one paste, with the Enter inside it.
+    var unitGap: TimeInterval = 0.1
+
+    private func runUnit(_ id: UUID, at index: Int, after gap: TimeInterval = 0) {
+        guard let unit = units[id]?.first else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + gap + unit.writes[index].delay) { [weak self] in
+            guard let self else { return unit.confirmed(false) }
+            let write = { [weak self] in
+                guard let self else { return unit.confirmed(false) }
+                self.send(id, bytes: Data(unit.writes[index].bytes), reply: false) { [weak self] went in
+                    guard let self else { return unit.confirmed(false) }
+                    guard went, index + 1 < unit.writes.count else { return self.finishUnit(id, ok: went) }
+                    self.runUnit(id, at: index + 1)
+                }
+            }
+            guard let gate = unit.gate else { return write() }
+            gate(index) { [weak self] go in
+                DispatchQueue.main.async {
+                    guard let self else { return unit.confirmed(false) }
+                    go ? write() : self.finishUnit(id, ok: false)
+                }
             }
         }
+    }
+
+    private func finishUnit(_ id: UUID, ok: Bool) {
+        guard var queue = units[id], !queue.isEmpty else { return }
+        let unit = queue.removeFirst()
+        units[id] = queue.isEmpty ? nil : queue
+        unit.confirmed(ok)
+        if !queue.isEmpty { runUnit(id, at: 0, after: unitGap) }
     }
 
     /// Why a view's size changed, for app.log.

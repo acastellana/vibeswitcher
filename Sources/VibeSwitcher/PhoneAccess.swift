@@ -851,12 +851,13 @@ final class PhoneAccess: ObservableObject {
             }
             let writes = HostInput.writes(text: clean, submit: submit, key: key?.rawValue)
             let at = writes.reduce(0) { $0 + $1.delay }
-            RemoteInputGate.deliver(writes, check: check, after: { delay, block in
-                DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: block)
-            }, send: { [weak self] bytes in
-                self?.hostClient?.send(hostID, bytes: Data(bytes), reply: false)
-            }, stopped: { [weak self] verdict, sent in
-                self?.audit("input to \(session.displayName) from \(device.name) stopped after \(sent) of \(writes.count) writes: \(verdict)")
+            // As one unit, in order with what else is typed into that session (the composer's messages, the lead's).
+            hostClient?.send(hostID, writes: writes, check: { [weak self] sent in
+                let verdict = check()
+                if verdict != .allowed {
+                    self?.audit("input to \(session.displayName) from \(device.name) stopped after \(sent) of \(writes.count) writes: \(verdict)")
+                }
+                return verdict == .allowed
             })
             audit("\(device.name) typed into \(session.displayName): \(summary)")
             onEvent?("\(device.name) typed into \(session.displayName)", summary)
@@ -959,39 +960,48 @@ final class PhoneAccess: ObservableObject {
                         self?.answered[sid] = nil
                         self?.audit("input to \(session.displayName) from \(device.name) stopped after \(sent) of \(writes.count) writes: \(why)")
                     }
-                    // The arrows, then the screen read again: Enter only while it's the question tapped (its diff or
-                    // command too), the cursor on the option. The highlighted one's too, with no arrows before it.
-                    let arrows = Array(writes.dropLast()), enter = writes[writes.count - 1]
-                    RemoteInputGate.deliver(arrows, check: check, after: { delay, block in
-                        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: block)
-                    }, send: { [weak self] bytes in
-                        self?.hostClient?.send(hostID, bytes: Data(bytes), reply: false)
-                    }, stopped: { verdict, sent in
-                        stop("\(verdict)", sent)
-                        respond(refusal(verdict) ?? .error(409, Self.menuMoved))
-                    }, finished: {
-                        DispatchQueue.main.asyncAfter(deadline: .now() + enter.delay) { [weak self] in
-                            guard let self, let hostClient = self.hostClient else { return respond(.error(409, Self.menuMoved)) }
-                            hostClient.screen(hostID) { raw in
-                                DispatchQueue.main.async { [weak self] in
-                                    guard let self else { return }
-                                    guard let raw, PhoneMenu.readyToEnter(index, fingerprint: fingerprint, screen: raw, sid: sid) else {
-                                        stop("the menu moved", arrows.count)
-                                        return respond(.error(409, Self.menuMoved))
-                                    }
-                                    let verdict = check()
-                                    if let refused = refusal(verdict) {
-                                        stop("\(verdict)", arrows.count)
-                                        return respond(refused)
-                                    }
-                                    hostClient.send(hostID, bytes: Data(enter.bytes), reply: false)
-                                    self.audit("\(device.name) \(summary(label)) in \(session.displayName)")
-                                    self.onEvent?("\(device.name) answered \(session.displayName)", summary(label))
-                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.store.refresh() }
-                                    respond(.json(["ok": true]))
+                    // One unit, in order with the session's other input: the arrows, then the screen read again:
+                    // Enter only while it's the question tapped (its diff or command too), the cursor on the option.
+                    // The highlighted one's too, with no arrows before it.
+                    var refused: HTTPResponse?
+                    hostClient.send(hostID, writes: writes, gate: { [weak self] sent, go in
+                        let verdict = check()
+                        if let refusal = refusal(verdict) {
+                            stop("\(verdict)", sent)
+                            refused = refusal
+                            return go(false)
+                        }
+                        guard sent == writes.count - 1 else { return go(true) }
+                        guard let hostClient = self?.hostClient else {
+                            refused = .error(409, Self.menuMoved)
+                            return go(false)
+                        }
+                        hostClient.screen(hostID) { raw in
+                            DispatchQueue.main.async {
+                                guard let raw, PhoneMenu.readyToEnter(index, fingerprint: fingerprint, screen: raw, sid: sid) else {
+                                    stop("the menu moved", sent)
+                                    refused = .error(409, Self.menuMoved)
+                                    return go(false)
                                 }
+                                let verdict = check()
+                                if let refusal = refusal(verdict) {
+                                    stop("\(verdict)", sent)
+                                    refused = refusal
+                                    return go(false)
+                                }
+                                go(true)
                             }
                         }
+                    }, confirmed: { [weak self] ok in
+                        guard ok else {
+                            if refused == nil { stop("not sent", writes.count) }
+                            return respond(refused ?? .error(409, Self.menuMoved))
+                        }
+                        guard let self else { return respond(.json(["ok": true])) }
+                        self.audit("\(device.name) \(summary(label)) in \(session.displayName)")
+                        self.onEvent?("\(device.name) answered \(session.displayName)", summary(label))
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.store.refresh() }
+                        respond(.json(["ok": true]))
                     })
                 }
             }

@@ -69,6 +69,9 @@ final class ChatSync {
     /// `MainWindowController.followChat` reads by). The watch reads nothing otherwise, and goes on when it's back.
     var inSight: () -> Bool = { true }
     var now: () -> Date = Date.init
+    /// Whether the target's agent is still running in its terminal, asked right before a message is typed in: the
+    /// row's session lags the agent's exit by a refresh, and a message typed into the shell then runs as a command.
+    var agentRunning: (Target) -> Bool = { $0.agent != nil }
 
     /// An answer typed in whose keys the screen hasn't shown yet: while it shows the menu as it was, the card waits
     /// (a second click would land on whatever comes next with this one's keys).
@@ -534,6 +537,11 @@ final class ChatSync {
     /// takes one, else it waits until the question is answered.
     func type(_ text: String) -> Bool {
         guard let target = target(), host.isUsable else { return false }
+        guard agentRunning(target) else {
+            chat.sendNotice = Self.noAgent
+            Breadcrumbs.shared.note("composer: refused, no agent in the terminal")
+            return false
+        }
         readScreen()
         // A menu on the pane's last read not taken yet, or the card's while it's going: the message waits for it.
         if let menu = onScreenNow ?? (paneSettling ? chat.menu : nil) {
@@ -572,6 +580,13 @@ final class ChatSync {
         }
     }
 
+    /// The process is still running on that terminal (an agent that exited is gone, or a zombie with no terminal).
+    static func alive(pid: Int32, on tty: String) -> Bool {
+        ProcessTable.info(pid: pid)?.tty == tty
+    }
+
+    static let noAgent = "Not sent: no agent is running in this terminal, so your message would run as a shell command."
+
     /// The question's "Type something." row, when the open tab is a question that takes free text (not the review,
     /// not a permission prompt).
     private func freeTextRow(_ menu: ScreenMenu) -> Int? {
@@ -583,6 +598,11 @@ final class ChatSync {
     private func releaseHeld(_ target: Target) {
         let held = chat.outbox.outbox.entries.filter { $0.key == target.key && $0.state == .held }.sorted { $0.sentAt < $1.sentAt }
         guard !held.isEmpty else { return }
+        // The agent exited while they waited: they stay held (in the outbox strip), never typed into the shell.
+        guard agentRunning(target) else {
+            chat.sendNotice = Self.noAgent
+            return
+        }
         for entry in held {
             guard chat.release(entry.id, expectsSoon: !target.working) != nil else { continue }
             Breadcrumbs.shared.note("composer: a held message typed in")
@@ -591,13 +611,10 @@ final class ChatSync {
         chat.sendNotice = nil
     }
 
+    /// Keys for the session, as one unit: in order with the messages typed in (see `HostClient.send(_:writes:check:confirmed:)`).
     func write(_ writes: [HostInput.Write], to id: UUID) {
-        var at: TimeInterval = 0
-        for write in writes {
-            at += write.delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
-                self?.host.send(id, bytes: Data(write.bytes), reply: false)
-            }
+        host.send(id, writes: writes) { ok in
+            if !ok { Breadcrumbs.shared.note("composer: the host didn't confirm \(writes.count) key writes") }
         }
     }
 }

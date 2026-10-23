@@ -17,7 +17,7 @@ struct ChatContainer: View {
     let showTerminal: () -> Void
     /// Esc in the terminal: closes the slash-command menu.
     var dismissMenu: () -> Void = {}
-    /// The answer card's keys: the composer hands it 1–9, ↩ and ↑ / ↓ while it's empty. Held, not observed.
+    /// The answer card's keys: the composer hands it ⌘1–⌘9, ↩ and ↑ / ↓ while it's empty. Held, not observed.
     @State private var cardKeys = AnswerCardKeys()
 
     var body: some View {
@@ -46,7 +46,11 @@ struct ChatContainer: View {
                 .environment(\.teamSummaries, leads.summaries)
             Divider()
             if let row = model.selectedRow {
-                if row.hostID != nil, actions.isLive(row) {
+                if row.hostID != nil, actions.isLive(row), row.session == nil {
+                    // The agent exited (or hasn't started) and the terminal is a shell: typed in, a message would run
+                    // as a command.
+                    ShellHint(showTerminal: showTerminal)
+                } else if row.hostID != nil, actions.isLive(row) {
                     ComposerView(chat: chat, composer: chat.composer, rowID: row.draftKey, agent: row.session?.agent ?? .claude,
                                  // Background work (a dev server, a watcher) runs on after the turn: it takes prompts then.
                                  working: row.session?.status == .working,
@@ -733,6 +737,24 @@ private struct ChatSearchBar: View {
 }
 
 /// In place of the composer for a session that runs in Terminal.app.
+/// Under a window session whose terminal has no agent in it (the Shell preset, or a preset that keeps a shell
+/// open once its agent exits): no composer, since a message would run as a shell command.
+struct ShellHint: View {
+    let showTerminal: () -> Void
+
+    static let text = "No agent is running in this terminal: a message would run as a shell command. Type in the terminal, or start the agent there."
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "terminal").foregroundStyle(.secondary).accessibilityHidden(true)
+            Text(Self.text).font(.system(size: 12)).foregroundStyle(.secondary)
+            Spacer()
+            Button(action: showTerminal) { Label("Show Terminal", systemImage: "terminal") }.controlSize(.small)
+        }
+        .padding(.horizontal, 16).padding(.vertical, 10)
+    }
+}
+
 struct TerminalReplyHint: View {
     let canMove: Bool
     /// Its question is on the answer card above.
@@ -829,6 +851,15 @@ struct AnswerCard: View {
         case .answer(let index):
             pick(index, nil)
         }
+    }
+
+    /// The keys that answer, under the options. From the composer (a window session) a digit alone is the message's
+    /// text, so ⌘ and the digit answer; a Terminal session's card has the keys itself.
+    static func keysHint(options: Int, composer: Bool, commands: Bool) -> String? {
+        guard options > 0, !commands else { return nil }
+        let last = min(options, 9)
+        let digits = composer ? (last == 1 ? "⌘1" : "⌘1–⌘\(last)") : (last == 1 ? "1" : "1–\(last)")
+        return composer ? "\(digits) answers · ↑ ↓ and ↩ with the message box empty" : "\(digits) answers · ↑ ↓ and ↩"
     }
 
     /// The card's own keys (a Terminal session): ↩, ↑, ↓ and 1–9, unmodified.
@@ -932,6 +963,8 @@ struct AnswerCard: View {
             // A picker's footer, as the terminal draws it: which keys it takes (the card sends the same).
             if content.picker, let hint = content.hint {
                 Text(hint).font(.system(size: 11)).foregroundStyle(.secondary)
+            } else if let keysHint = Self.keysHint(options: content.options.count, composer: openInTerminal == nil, commands: content.commands) {
+                Text(keysHint).font(.system(size: 11)).foregroundStyle(.secondary)
             }
             if let confirming {
                 HStack(spacing: 8) {
@@ -1071,7 +1104,8 @@ struct AnswerCard: View {
     }
 }
 
-/// The answer card's keys, as in the terminal: while a question is up and the composer is empty, 1–9 choose, ↩
+/// The answer card's keys, as in the terminal: while a question is up and the composer is empty, 1–9 choose (⌘1–⌘9
+/// from the composer, where a digit alone is the message's text, `ComposerNSTextView.digit`), ↩
 /// confirms the highlighted option, ↑ / ↓ move the highlight (stopping at the ends, like the terminal's cursor; a
 /// multi-select's Submit row is the last stop). With anything in the composer, they're the composer's.
 enum AnswerKeys {

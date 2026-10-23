@@ -805,14 +805,9 @@ final class LeadController: ObservableObject {
         }
     }
 
+    /// As one unit, in order with what else is typed into that session (the composer's messages, the phone's replies).
     private func type(_ text: String, into id: UUID) {
-        var at: TimeInterval = 0
-        for write in ComposerText.writes(text, bracketed: true) {
-            at += write.delay
-            DispatchQueue.main.asyncAfter(deadline: .now() + at) { [weak self] in
-                self?.host.send(id, bytes: Data(write.bytes), reply: false)
-            }
-        }
+        host.send(id, writes: ComposerText.writes(text, bracketed: true))
     }
 
     // MARK: Refresh and witness

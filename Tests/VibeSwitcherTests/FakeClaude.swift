@@ -9,7 +9,8 @@ enum FakeClaude {
 # /model picker; it takes keys the way those do, and writes the transcript lines Claude writes.
 #
 # Usage: python3 -I -u fake_claude.py TRANSCRIPT CONTROL STATE
-# The test appends JSON lines to CONTROL ({"op": "ask" | "permission" | "work" | "take" | "done" | "freeze" | "thaw"});
+# The test appends JSON lines to CONTROL ({"op": "ask" | "permission" | "work" | "take" | "done" | "freeze" | "thaw" |
+# "turns" (from now on a prompt starts a turn, as Claude's do: it works until "done") | "exit" (it quits, as /exit));
 # the agent writes its state (mode, tab, answers, the free-text field, queued messages) to STATE after every change.
 import datetime
 import json
@@ -32,6 +33,8 @@ state = {
     "queued": [],
     "reply": "Ready.",
     "frozen": False,
+    "turns": False,          # a prompt starts a turn (working until "done")
+    "pid": os.getpid(),
     "suggest": 0,            # the slash menu's chosen row
     "dismissed": False,      # Esc closed the slash menu (until the box changes)
 }
@@ -238,6 +241,9 @@ def submit_prompt(text):
         open_picker()
         return
     record({"type": "user", "message": {"role": "user", "content": text}})
+    if state["turns"]:
+        state["mode"] = "working"
+        return
     state["reply"] = "Got: " + text.replace("\n", " ")
     record({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": state["reply"]}]}})
 
@@ -548,6 +554,13 @@ def control():
             state["mode"] = "idle"
             state["reply"] = command.get("reply", "Done.")
             record({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": state["reply"]}]}})
+        elif op == "turns":
+            state["turns"] = True
+        elif op == "exit":
+            state["mode"] = "exited"
+            save_state()
+            out(ESC + "[?2004l" + ESC + "[2J" + ESC + "[H")
+            sys.exit(0)
         elif op == "freeze":
             state["frozen"] = True
         elif op == "thaw":

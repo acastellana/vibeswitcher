@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 import SwiftUI
 import UniformTypeIdentifiers
 import VibeCore
@@ -27,7 +28,7 @@ struct ComposerView: View {
     /// Only steering (a Terminal session: nothing can be typed into it from here).
     var steerOnly = false
     let actions: ComposerActions
-    /// The answer card above, when it's a window session's: 1–9, ↩ and ↑ / ↓ are its while the box is empty.
+    /// The answer card above, when it's a window session's: ⌘1–⌘9, ↩ and ↑ / ↓ are its while the box is empty.
     var cardKeys: AnswerCardKeys?
     @State private var height: CGFloat = 22
     @State private var suggestions = Suggestions()
@@ -627,22 +628,27 @@ private struct ComposerTextView: NSViewRepresentable {
 }
 
 /// Pastes images as saved files and drops files as their paths.
-private final class ComposerNSTextView: NSTextView {
+final class ComposerNSTextView: NSTextView {
     var attachImage: (URL) -> Void = { _ in }
-    /// 1–9 typed: the answer card's when it takes them (see `ComposerTextView.cardKey`).
+    /// ⌘1–⌘9: the answer card's when it takes them (see `ComposerTextView.cardKey`). A digit typed alone is text:
+    /// "1 more thing…" typed with a question up went in as option 1 (usually Yes).
     var cardKey: (AnswerKeys.Key) -> Bool = { _ in false }
 
-    override func keyDown(with event: NSEvent) {
-        if !hasMarkedText(), let digit = Self.digit(event), cardKey(digit) { return }
-        super.keyDown(with: event)
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if window?.firstResponder === self, !hasMarkedText(), let digit = Self.digit(event), cardKey(digit) { return true }
+        return super.performKeyEquivalent(with: event)
     }
 
-    /// A key that types 1–9 (with ⇧ where the layout needs it, as on AZERTY), not a shortcut.
+    /// ⌘ and a 1–9 key (with ⇧ too), by the key pressed: ⌘ on AZERTY's top row types "&", "é"…
     static func digit(_ event: NSEvent) -> AnswerKeys.Key? {
-        guard event.modifierFlags.intersection([.command, .control, .option]).isEmpty, let typed = event.characters,
-              typed.count == 1, let n = Int(typed), (1...9).contains(n) else { return nil }
-        return .digit(n)
+        guard event.type == .keyDown, event.modifierFlags.intersection([.command, .control, .option]) == .command,
+              let index = digitKeys.firstIndex(of: Int(event.keyCode)) else { return nil }
+        return .digit(index % 9 + 1)
     }
+
+    private static let digitKeys = [kVK_ANSI_1, kVK_ANSI_2, kVK_ANSI_3, kVK_ANSI_4, kVK_ANSI_5, kVK_ANSI_6, kVK_ANSI_7, kVK_ANSI_8, kVK_ANSI_9,
+                                    kVK_ANSI_Keypad1, kVK_ANSI_Keypad2, kVK_ANSI_Keypad3, kVK_ANSI_Keypad4, kVK_ANSI_Keypad5,
+                                    kVK_ANSI_Keypad6, kVK_ANSI_Keypad7, kVK_ANSI_Keypad8, kVK_ANSI_Keypad9]
 
     /// A plain-text view only enables Paste for clipboards it can read: without these, an image-only clipboard
     /// leaves ⌘V disabled and `paste(_:)` is never called.

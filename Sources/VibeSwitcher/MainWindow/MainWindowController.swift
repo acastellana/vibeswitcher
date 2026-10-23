@@ -376,6 +376,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return ChatSync.Target(id: id, key: row.draftKey, agent: row.session?.agent, needsInput: row.session?.status == .needsInput,
                                    working: row.session?.status == .working)
         }
+        // Its agent's process, still on that terminal: the row's session lags an exit by a refresh.
+        sync.agentRunning = { [weak self] target in
+            guard target.agent != nil, let session = self?.model.selectedRow?.session else { return false }
+            return ChatSync.alive(pid: session.pid, on: session.tty)
+        }
         // A session in a Terminal tab: its question is read from the tab and answered through RemoteInput.
         sync.terminalTarget = { [weak self] in
             guard let self, let row = self.model.selectedRow, row.hostID == nil, let session = row.session, session.inTerminalApp else { return nil }
@@ -401,6 +406,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         } else {
             chat.watchSteering(tty: nil, agentPid: nil, idle: false)
         }
+        // What was typed into an idle agent whose turn started meanwhile is queued behind it, not late.
+        chat.agentWorking(model.selectedRow?.session?.status == .working)
         sync.readScreen()
     }
 

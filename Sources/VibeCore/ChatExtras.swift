@@ -40,6 +40,9 @@ public struct PendingMessage: Equatable, Sendable, Identifiable {
     /// Typed into an idle agent: it shows in the conversation within seconds (a queued one waits for the turn).
     public var expectsSoon: Bool
     public var sentAt: Date
+    /// When it was last expected in seconds (nil: when it was sent): a turn that started meanwhile held it up, and
+    /// the agent being between turns again starts the clock over.
+    public var expectedFrom: Date?
     /// The images attached to it (their paths are in `text`; the transcript shows them as image blocks).
     public var attachments: [String]
 
@@ -53,7 +56,7 @@ public struct PendingMessage: Equatable, Sendable, Identifiable {
 
     /// Should be in the conversation by now and isn't: the keys may not have reached the agent.
     public func late(at now: Date = Date()) -> Bool {
-        expectsSoon && !text.hasPrefix("/") && now.timeIntervalSince(sentAt) > 15
+        expectsSoon && !text.hasPrefix("/") && now.timeIntervalSince(expectedFrom ?? sentAt) > 15
     }
 
     /// Those not yet among the prompts that came after them.
