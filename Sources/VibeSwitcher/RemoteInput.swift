@@ -34,10 +34,18 @@ enum RemoteInput {
         /// Another tab or app came to the front while typing. `typed`: part of the text is in the session's
         /// box (not sent).
         case focusMoved(typed: Bool)
+        /// The Mac locked while typing, after some of the text went in (in the session's box, not sent).
+        case lockedAfterTyping
+
+        /// Part of the text is in the session's box, not sent: typing it again would double it.
+        var typedSome: Bool { self == .focusMoved(typed: true) || self == .lockedAfterTyping }
+        /// The Mac locked, before or while typing.
+        var isLocked: Bool { self == .locked || self == .lockedAfterTyping }
 
         var description: String {
             switch self {
             case .locked: return "The Mac is locked."
+            case .lockedAfterTyping: return "The Mac locked while typing, so it stopped. Part of the message is in the session's box, not sent."
             case .noAccessibility: return "VibeSwitcher needs Accessibility permission to type."
             case .notInTerminal: return "This session isn't in a Terminal tab."
             case .focusFailed: return "Couldn't bring that tab to the front on the Mac."
@@ -112,8 +120,8 @@ enum RemoteInput {
         switch outcome {
         case .done:
             return nil
-        case .locked:
-            return .locked
+        case .locked(let typed):
+            return typed ? .lockedAfterTyping : .locked
         case .stopped(let typed):
             FocusLog.record(tty: tty, source: "phone", steps: ["focus moved while typing", typed ? "stopped after some text" : "nothing typed"])
             return .focusMoved(typed: typed)

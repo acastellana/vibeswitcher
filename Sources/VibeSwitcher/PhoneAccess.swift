@@ -83,6 +83,21 @@ final class PhoneAccess: ObservableObject {
     /// A Terminal tab's screen, read through the bridge's own queue (nil: couldn't be read); called off the main thread
     /// only, so a slow or hung read holds up the request that asked, never the window. Replaceable for tests.
     var readTerminalScreen: (String) -> String? = { tty in TerminalBridge.screens(for: [tty])[tty] }
+    /// Types a reply or a key into a Terminal tab (`RemoteInput.send`), off the main thread. Replaceable for tests.
+    var typeInTerminal: (_ tty: String, _ agent: (pid: Int32, startedAt: Date), _ text: String?, _ submit: Bool,
+                         _ key: RemoteInput.Key?, _ stillAllowed: () -> Bool) -> RemoteInput.Failure? = RemoteInput.send
+    /// Writes into a window session through the session host as one unit, in turn with its other input
+    /// (`HostClient.send(_:writes:gate:confirmed:)`): the gate is asked before each write, and `confirmed` says whether
+    /// all of them went in (false with no host). Replaceable for tests.
+    lazy var sendToWindow: (UUID, [HostInput.Write], ((Int, @escaping (Bool) -> Void) -> Void)?,
+                            @escaping (Bool) -> Void) -> Void = { [weak self] id, writes, gate, confirmed in
+        guard let hostClient = self?.hostClient else { return confirmed(false) }
+        hostClient.send(id, writes: writes, gate: gate, confirmed: confirmed)
+    }
+    /// Whether a window session's agent (pid, start) still runs on its tty. Replaceable for tests.
+    var agentRunning: (Int32, Date, String) -> Bool = { pid, startedAt, tty in
+        SessionIdentity.isRunning(pid: pid, startedAt: startedAt) && ProcessTable.info(pid: pid)?.tty == tty
+    }
     private lazy var previews = DevPreviews(control: control)
     /// Reading Chrome's tabs: its own queue, so a slow Chrome (or a pending Automation prompt) never holds
     /// up Terminal screen reads.
@@ -383,7 +398,7 @@ final class PhoneAccess: ObservableObject {
 
     private func route(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) {
         guard state == .on, let owner = tailscale?.login, let host = tailscale?.dnsName else {
-            return respond(.error(503, "phone access is off"))
+            return respond(.error(503, notServing))
         }
         // Only this Mac's tailnet name, the one `tailscale serve` passes on: a page in a browser on the Mac
         // that rebinds its own name to 127.0.0.1 sends its own name, and gets nothing (not even the app).
@@ -403,15 +418,18 @@ final class PhoneAccess: ObservableObject {
                                            forwardedFor: request.header("x-forwarded-for"))
             if failedAuth.isThrottled(source) { return respond(.error(429, "too many failed attempts; wait a minute")) }
             failedAuth.recordFailure(source)
-            return respond(.error(401, "this device isn't paired"))
+            return respond(.error(401, Self.unpaired))
         }
         touch(device)
         // Answers that arrive later (screen reads, transcripts, typing) go out only if the phone is still
         // paired and Phone Access still on by then: removing a phone also stops what it already asked for.
+        // Only a removed phone hears 401 (it then forgets its token); a restart (after two failed health checks)
+        // keeps every pairing, and is said as such.
         let reply: (HTTPResponse) -> Void = { [weak self] response in
-            guard let self, self.state == .on, self.devices.contains(where: { $0.id == device.id }) else {
-                return respond(.error(401, "this device isn't paired"))
+            guard let self, self.devices.contains(where: { $0.id == device.id }) else {
+                return respond(.error(401, Self.unpaired))
             }
+            guard self.state == .on else { return respond(.error(503, self.notServing)) }
             respond(response)
         }
         switch (request.method, request.path) {
@@ -437,12 +455,23 @@ final class PhoneAccess: ObservableObject {
         }
     }
 
+    /// What a phone hears for a token the Mac doesn't know (it was removed, or never paired): it forgets it, and the
+    /// pairing screen says how to pair again.
+    static let unpaired = "This phone isn't paired with the Mac any more."
+    /// Why nothing is served while Phone Access isn't on: the phone keeps its token either way.
+    private var notServing: String {
+        state == .off ? "Phone Access is off on the Mac." : "Phone Access is restarting on the Mac. Try again in a moment."
+    }
+
     #if DEBUG
     /// Tests: requests answered as once `tailscale serve` is up for `status`, with nothing listening or started.
     func serveForTests(_ status: TailscaleCLI.Status) {
         tailscale = status
         state = .on
     }
+
+    /// Tests: Phone Access as while it restarts (`start` after failed health checks), Tailscale's status kept.
+    func restartForTests() { state = .starting }
 
     func handleForTests(_ request: HTTPRequest, respond: @escaping (HTTPResponse) -> Void) { route(request, respond: respond) }
     #endif
@@ -777,7 +806,7 @@ final class PhoneAccess: ObservableObject {
                     respond(.json(["pages": [], "hint": "Open the page in Chrome on your Mac first."]))
                 case .failure(.notAllowed):
                     respond(.json(["pages": [], "hint": "On the Mac, allow VibeSwitcher to control Google Chrome: "
-                                   + "Phone Access › Allow opening dev pages."]))
+                                   + "VibeSwitcher › Settings… › Phone › Allow opening dev pages."]))
                 case .failure(.failed(let message)):
                     respond(.error(503, "Couldn't read Chrome's tabs (\(message))."))
                 }
@@ -804,9 +833,38 @@ final class PhoneAccess: ObservableObject {
         }
     }
 
+    /// Replies being typed, or typed lately, by `replyKey`: a second copy of one is answered, not typed again.
+    private var replies: [String: ReplyState] = [:]
+    private enum ReplyState {
+        case typing
+        case typed(until: Date)
+        /// Cut short, part of it in the session's box (the text, not its Enter): sent again it would be doubled.
+        case partly(until: Date)
+    }
+    /// How long a typed reply is remembered: one the phone gave an id (`request`) for as long as the phone may send it
+    /// again after "check the screen"; one without an id (an older page) for a second, against a double tap.
+    static let replyMemory: (withID: TimeInterval, withoutID: TimeInterval) = (60, 1)
+    /// The time those windows are measured in. Replaceable for tests, which move it on themselves.
+    var replyClock: () -> Date = Date.init
+    static let stillTyping = "Still typing your last reply. Check the screen before sending again."
+    /// Some of a reply went in, not all: the text without its Enter, say. Typing it again would double it.
+    static let partlyWent = "Only part of it went in, and it wasn't sent. Check the screen before sending again."
+    static let didntGoIn = "It didn't go in: VibeSwitcher couldn't write to that session."
+
+    /// What identifies a reply (text with Enter) from `device` to session `sid`, and how long it's remembered. Keys and
+    /// text without Enter aren't kept: tapping ↓ twice means twice.
+    private func replyKey(_ object: [String: Any], text: String?, submit: Bool, device: PairedDevice,
+                          sid: String) -> (key: String, memory: TimeInterval)? {
+        guard let text, submit else { return nil }
+        if let id = object["request"] as? String, (1...64).contains(id.count) {
+            return ("\(device.id)\u{1F}\(sid)\u{1F}id\u{1F}\(id)", Self.replyMemory.withID)
+        }
+        return ("\(device.id)\u{1F}\(sid)\u{1F}text\u{1F}\(text)", Self.replyMemory.withoutID)
+    }
+
     private func input(_ request: HTTPRequest, device: PairedDevice, respond: @escaping (HTTPResponse) -> Void) {
         guard inputAllowed else {
-            return respond(.error(403, "Replying from the phone is off. Turn it on in VibeSwitcher › Phone Access."))
+            return respond(.error(403, "Replying from the phone is off. Turn it on in VibeSwitcher › Settings… › Phone."))
         }
         let object = body(request) ?? [:]
         let tty = object["tty"] as? String ?? ""
@@ -825,46 +883,147 @@ final class PhoneAccess: ObservableObject {
             key = parsed
         }
         guard text != nil || key != nil else { return respond(.error(400, "nothing to send")) }
+        // An arrow pressed while the phone showed a menu: sent only while that menu is still the one on the screen.
+        var menuFingerprint: String?
+        if let fingerprint = object["fingerprint"] as? String {
+            guard (1...64).contains(fingerprint.count), text == nil, key == .up || key == .down else {
+                return respond(.error(400, "bad fingerprint"))
+            }
+            menuFingerprint = fingerprint
+        }
         let summary = text.map { "“\(Redaction.secrets(in: String($0.prefix(60))))”" + (submit ? " ⏎" : "") } ?? key!.rawValue
         let sid = session.identity
-        if let hostID = session.hostID {
-            // Straight into the session's terminal: no focus changes, no Accessibility, nothing typed elsewhere.
-            // The same rules as the Terminal path (the lock included), before each write.
-            let check = { [weak self] () -> RemoteInputGate.Verdict in
-                self?.windowInputVerdict(device: device.id, tty: tty, sid: sid, agent: (session.pid, session.startedAt))
-                    ?? .notAllowed
+        // The same reply again (a second Enter while the first is typing, a resend of one already typed): not typed twice.
+        let now = replyClock()
+        replies = replies.filter {
+            switch $0.value {
+            case .typing: return true
+            case .typed(let until), .partly(let until): return until > now
             }
-            switch check() {
-            case .allowed: break
-            case .locked:
-                audit("input to \(session.displayName) from \(device.name) refused: \(RemoteInput.Failure.locked)")
-                return respond(.error(423, RemoteInput.Failure.locked.description))
-            case .notAllowed: return respond(.error(409, RemoteInput.Failure.notAllowed.description))
-            case .sessionChanged: return respond(.error(409, Self.sessionChanged))
-            }
-            var clean: String?
-            if let text {
-                guard let sanitized = RemoteInput.sanitized(text) else {
-                    return respond(.error(400, RemoteInput.Failure.invalidText.description))
-                }
-                clean = sanitized
-            }
-            let writes = HostInput.writes(text: clean, submit: submit, key: key?.rawValue)
-            let at = writes.reduce(0) { $0 + $1.delay }
-            // As one unit, in order with what else is typed into that session (the composer's messages, the lead's).
-            hostClient?.send(hostID, writes: writes, check: { [weak self] sent in
-                let verdict = check()
-                if verdict != .allowed {
-                    self?.audit("input to \(session.displayName) from \(device.name) stopped after \(sent) of \(writes.count) writes: \(verdict)")
-                }
-                return verdict == .allowed
-            })
-            audit("\(device.name) typed into \(session.displayName): \(summary)")
-            onEvent?("\(device.name) typed into \(session.displayName)", summary)
-            DispatchQueue.main.asyncAfter(deadline: .now() + at + 0.1) { self.store.refresh() }
-            return respond(.json(["ok": true]))
         }
+        let kept = replyKey(object, text: text, submit: submit, device: device, sid: sid)
+        if let kept, let earlier = replies[kept.key] {
+            switch earlier {
+            case .typing: return respond(.error(409, Self.stillTyping))
+            case .typed: return respond(.json(["ok": true, "duplicate": true]))
+            case .partly: return respond(.error(409, Self.partlyWent))
+            }
+        }
+        if let kept { replies[kept.key] = .typing }
+        // Answered once its writes went in (ok) or didn't (`some`: part of it did). One that failed with nothing typed
+        // may be sent again; one cut short is kept, so sending it again doesn't double what's in the box.
+        let finish = { [weak self] (response: HTTPResponse, some: Bool) in
+            if let kept {
+                guard let self else { return respond(response) }
+                let until = self.replyClock().addingTimeInterval(kept.memory)
+                self.replies[kept.key] = response.status == 200 ? .typed(until: until) : some ? .partly(until: until) : nil
+            }
+            respond(response)
+        }
+        if let hostID = session.hostID {
+            windowInput(hostID: hostID, session: session, device: device, text: text, submit: submit, key: key,
+                        fingerprint: menuFingerprint, summary: summary, respond: finish)
+        } else {
+            terminalInput(session: session, device: device, text: text, submit: submit, key: key,
+                          fingerprint: menuFingerprint, summary: summary, respond: finish)
+        }
+    }
 
+    /// Whether an arrow meant for the menu with `fingerprint` may go to `screen` (raw): that menu is still up, and not one
+    /// being answered; else the refusal. On the main thread.
+    private func menuStillUp(_ fingerprint: String, screen raw: String?, sid: String) -> HTTPResponse? {
+        guard store.sessions.contains(where: { $0.identity == sid }) else { return .error(409, Self.sessionChanged) }
+        if let answer = answered[sid], answer.until > Date(), answer.fingerprint == fingerprint {
+            return .error(409, "Still taking your last answer. Check the screen before pressing again.")
+        }
+        guard let raw else { return .error(503, "Couldn't read that tab right now.") }
+        guard let shown = PhoneMenu.read(screen: raw, needsInput: true), PhoneMenu.fingerprint(shown, sid: sid) == fingerprint else {
+            return .error(409, Self.menuChanged)
+        }
+        return nil
+    }
+
+    /// Straight into the session's terminal: no focus changes, no Accessibility, nothing typed elsewhere. The same rules
+    /// as the Terminal path (the lock included), before each write; answered ok only once every write went in.
+    private func windowInput(hostID: UUID, session: Session, device: PairedDevice, text: String?, submit: Bool,
+                             key: RemoteInput.Key?, fingerprint: String?, summary: String,
+                             respond: @escaping (HTTPResponse, _ some: Bool) -> Void) {
+        let tty = session.tty, sid = session.identity
+        let check = { [weak self] () -> RemoteInputGate.Verdict in
+            self?.windowInputVerdict(device: device.id, tty: tty, sid: sid, agent: (session.pid, session.startedAt))
+                ?? .notAllowed
+        }
+        let refusal = { [weak self] (verdict: RemoteInputGate.Verdict) -> HTTPResponse? in
+            switch verdict {
+            case .allowed: return nil
+            case .locked:
+                self?.audit("input to \(session.displayName) from \(device.name) refused: \(RemoteInput.Failure.locked)")
+                return .error(423, RemoteInput.Failure.locked.description)
+            case .notAllowed: return .error(409, RemoteInput.Failure.notAllowed.description)
+            case .sessionChanged: return .error(409, Self.sessionChanged)
+            }
+        }
+        if let refused = refusal(check()) { return respond(refused, false) }
+        var clean: String?
+        if let text {
+            guard let sanitized = RemoteInput.sanitized(text) else {
+                return respond(.error(400, RemoteInput.Failure.invalidText.description), false)
+            }
+            clean = sanitized
+        }
+        let writes = HostInput.writes(text: clean, submit: submit, key: key?.rawValue)
+        // Asked before each write, in turn with the session's other input. An arrow for a menu, before its one write:
+        // that menu still up, read when its turn comes.
+        var allowed = -1
+        var stopped: (verdict: RemoteInputGate.Verdict, sent: Int)?
+        var menuRefusal: HTTPResponse?
+        let gate = { [weak self] (index: Int, go: @escaping (Bool) -> Void) in
+            let pass = {
+                let verdict = check()
+                guard verdict == .allowed else {
+                    stopped = (verdict, index)
+                    return go(false)
+                }
+                allowed = index
+                go(true)
+            }
+            guard index == 0, let fingerprint, let self else { return pass() }
+            self.readScreen(session) { raw in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return go(false) }
+                    if let refused = self.menuStillUp(fingerprint, screen: raw, sid: sid) {
+                        menuRefusal = refused
+                        return go(false)
+                    }
+                    pass()
+                }
+            }
+        }
+        // As one unit, in order with what else is typed into that session (the composer's messages, the lead's).
+        sendToWindow(hostID, writes, gate) { [weak self] ok in
+            guard let self else { return respond(.error(503, Self.didntGoIn), false) }
+            if ok {
+                self.audit("\(device.name) typed into \(session.displayName): \(summary)")
+                self.onEvent?("\(device.name) typed into \(session.displayName)", summary)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.store.refresh() }
+                return respond(.json(["ok": true]), true)
+            }
+            if let menuRefusal { return respond(menuRefusal, false) }
+            // Stopped by the gate before write `sent`, or write `allowed` didn't go in: the ones before it did.
+            let sent = stopped?.sent ?? max(allowed, 0)
+            self.audit("input to \(session.displayName) from \(device.name) stopped after \(sent) of \(writes.count) writes: "
+                       + (stopped.map { "\($0.verdict)" } ?? "a write didn't go in"))
+            guard sent == 0 else { return respond(.error(409, Self.partlyWent), true) }
+            respond(stopped.flatMap { refusal($0.verdict) } ?? .error(503, Self.didntGoIn), false)
+        }
+    }
+
+    /// Typed into the session's Terminal tab, one input at a time; answered once it was typed.
+    private func terminalInput(session: Session, device: PairedDevice, text: String?, submit: Bool,
+                               key: RemoteInput.Key?, fingerprint: String?, summary: String,
+                               respond: @escaping (HTTPResponse, _ some: Bool) -> Void) {
+        let tty = session.tty, sid = session.identity
+        let type = typeInTerminal, readTab = readTerminalScreen
         work.async {
             // Queued work runs later: check again that the phone is still paired, replies are still on, and
             // the tty still holds that session, right before typing.
@@ -875,17 +1034,23 @@ final class PhoneAccess: ObservableObject {
                         && self.store.sessions.first(where: { $0.tty == tty })?.identity == sid
                 }
             }
-            let failure = RemoteInput.send(tty: tty, agent: (session.pid, session.startedAt), text: text, submit: submit,
-                                           key: key, stillAllowed: stillAllowed)
+            // An arrow for a menu: the screen read here, not on the main thread (a slow Terminal holds up this key only).
+            if let fingerprint {
+                let raw = readTab(tty)
+                if let refused = DispatchQueue.main.sync(execute: { self.menuStillUp(fingerprint, screen: raw, sid: sid) }) {
+                    return DispatchQueue.main.async { respond(refused, false) }
+                }
+            }
+            let failure = type(tty, (session.pid, session.startedAt), text, submit, key, stillAllowed)
             DispatchQueue.main.async {
                 if let failure {
                     self.audit("input to \(session.displayName) from \(device.name) refused: \(failure)")
-                    return respond(.error(failure == .locked ? 423 : 409, failure.description))
+                    return respond(.error(failure.isLocked ? 423 : 409, failure.description), failure.typedSome)
                 }
                 self.audit("\(device.name) typed into \(session.displayName): \(summary)")
                 self.onEvent?("\(device.name) typed into \(session.displayName)", summary)
                 self.store.refresh(forceTerminal: true)
-                respond(.json(["ok": true]))
+                respond(.json(["ok": true]), true)
             }
         }
     }
@@ -964,7 +1129,7 @@ final class PhoneAccess: ObservableObject {
                     // Enter only while it's the question tapped (its diff or command too), the cursor on the option.
                     // The highlighted one's too, with no arrows before it.
                     var refused: HTTPResponse?
-                    hostClient.send(hostID, writes: writes, gate: { [weak self] sent, go in
+                    self.sendToWindow(hostID, writes, { [weak self] sent, go in
                         let verdict = check()
                         if let refusal = refusal(verdict) {
                             stop("\(verdict)", sent)
@@ -992,7 +1157,7 @@ final class PhoneAccess: ObservableObject {
                                 go(true)
                             }
                         }
-                    }, confirmed: { [weak self] ok in
+                    }) { [weak self] ok in
                         guard ok else {
                             if refused == nil { stop("not sent", writes.count) }
                             return respond(refused ?? .error(409, Self.menuMoved))
@@ -1002,13 +1167,13 @@ final class PhoneAccess: ObservableObject {
                         self.onEvent?("\(device.name) answered \(session.displayName)", summary(label))
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.store.refresh() }
                         respond(.json(["ok": true]))
-                    })
+                    }
                 }
             }
             return
         }
 
-        let readTab = readTerminalScreen
+        let readTab = readTerminalScreen, type = typeInTerminal
         work.async {
             // The same checks as a typed reply, right before each key (after any jump in progress).
             let stillAllowed = {
@@ -1039,15 +1204,14 @@ final class PhoneAccess: ObservableObject {
                         break
                     }
                 }
-                failure = RemoteInput.send(tty: tty, agent: (session.pid, session.startedAt), text: nil, submit: false, key: key,
-                                           stillAllowed: stillAllowed)
+                failure = type(tty, (session.pid, session.startedAt), nil, false, key, stillAllowed)
                 if failure != nil { break }
             }
             DispatchQueue.main.async {
                 if failure != nil || moved {
                     self.answered[sid] = nil
                     self.audit("input to \(session.displayName) from \(device.name) refused: \(failure.map { "\($0)" } ?? "the menu moved")")
-                    if let failure { return respond(.error(failure == .locked ? 423 : 409, failure.description)) }
+                    if let failure { return respond(.error(failure.isLocked ? 423 : 409, failure.description)) }
                     return respond(.error(409, Self.menuMoved))
                 }
                 self.answered[sid] = (fingerprint, Date().addingTimeInterval(Self.answerWait))
@@ -1077,8 +1241,7 @@ final class PhoneAccess: ObservableObject {
             screenLocked: screenLocked(), accessOn: state == .on, inputAllowed: inputAllowed,
             devicePaired: devices.contains { $0.id == device },
             sameSession: store.sessions.first(where: { $0.tty == tty })?.identity == sid
-                && SessionIdentity.isRunning(pid: agent.pid, startedAt: agent.startedAt)
-                && ProcessTable.info(pid: agent.pid)?.tty == tty))
+                && agentRunning(agent.pid, agent.startedAt, tty)))
     }
 
     /// Pausing only changes what VibeSwitcher shows and announces, so it's allowed even with replies off.

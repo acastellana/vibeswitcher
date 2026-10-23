@@ -211,6 +211,7 @@ struct PhoneMainSyncLintTests {
         ("self.state == .on && self.inputAllowed", 2,
          "a Terminal reply's or tap's stillAllowed, before each key: replies on, the phone paired, the tty the same session (the store's state, nothing read)"),
         ("decide(raw)", 1, "a tap decided against the store and noted (menus, answered), the screen already read off the main thread"),
+        ("self.menuStillUp", 1, "an arrow for a menu checked against the store and noted answers, the screen already read off the main thread"),
     ]
 
     /// What a main-thread hop may never wrap: reading a screen, the session host, typing, running something, waiting.

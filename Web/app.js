@@ -52,6 +52,10 @@ async function api(path, options = {}, authToken = token) {
   }
   let body = {};
   try { body = await response.json(); } catch (e) { /* empty or non-JSON body (e.g. Tailscale's 502) */ }
+  // A bare 502 or 504 to a request that types something: the Mac may still be typing it, so it's unknown, not off.
+  if (!response.ok && !body.error && (response.status === 502 || response.status === 504) && options.unknownOutcome) {
+    throw new Error(options.unknownOutcome);
+  }
   // Our server always answers errors with a JSON message; a bare error (404, 502, 504) comes from
   // Tailscale itself, meaning VibeSwitcher isn't running or Phone Access is off.
   if (!response.ok && !body.error) {
@@ -60,8 +64,9 @@ async function api(path, options = {}, authToken = token) {
     throw new Error(message);
   }
   setOnline(true);
+  // Only a phone the Mac removed hears 401 (a restart answers 503): it forgets its token and says why.
   if (response.status === 401 && authToken === token) {
-    forgetToken();
+    forgetToken(body.error || "This phone isn't paired with the Mac any more.");
     throw new Error(body.error || 'Not paired');
   }
   if (!response.ok) throw new Error(body.error || `Error ${response.status}`);
@@ -91,9 +96,12 @@ function shownSession() {
 
 let webVersion = null;
 
-function forgetToken() {
+/// Back to the pairing screen; `reason`, when the Mac unpaired this phone, shows on it.
+function forgetToken(reason) {
   token = null;
   localStorage.removeItem('vs.token');
+  $('pairError').textContent = reason ? `${reason} Pair it again to keep using it.` : '';
+  $('pairError').hidden = !reason;
   show('pair');
 }
 
@@ -439,12 +447,21 @@ async function chooseOption(index, fingerprint, label) {
   refreshList(false);
 }
 
-/// A key button. While a menu is shown, 1, 2 and 3 are taps on its options, with its fingerprint: a bare digit would
-/// answer whatever question is up by the time it arrives.
+/// A key button. While a menu is shown, its keys carry its fingerprint, as a tap does: a bare key would answer whatever
+/// question is up by the time it arrives. 1, 2 and 3 are taps on its options, ⏎ a tap on the highlighted one, and ↑ ↓
+/// move only while that menu is still up.
 function pressKey(button) {
-  if (button.dataset.key) return send({ key: button.dataset.key }, button);
   const session = shownSession();
   const menu = session && !session.paused ? session.menu : null;
+  const key = button.dataset.key;
+  if (menu && key === 'enter') {
+    const index = menu.selected;
+    const label = index < menu.options.length ? menu.options[index] : menu.submit;
+    if (!Number.isInteger(index) || label === undefined) return setInputStatus('Tap an option.', true);
+    return chooseOption(index, menu.fingerprint, label);
+  }
+  if (menu && (key === 'up' || key === 'down')) return send({ key, fingerprint: menu.fingerprint }, button);
+  if (key) return send({ key }, button);
   if (menu && /^[1-9]$/.test(button.dataset.text)) {
     const index = Number(button.dataset.text) - 1;
     if (index >= menu.options.length) return setInputStatus(`There's no option ${index + 1}.`, true);
@@ -854,14 +871,30 @@ function setInputStatus(message, isError = false) {
   if (message && !isError) statusTimer = setTimeout(() => { status.hidden = true; }, 2000);
 }
 
+let replying = false;      // a reply (text with Enter) is being sent: a second Enter or Send waits for it
+let unconfirmed = null;   // the last reply the Mac didn't confirm (text, request id): sent again, it keeps its id
+
 async function send(payload, button, doneLabel) {
   if (!current) return false;
+  // A reply is sent once: a second Enter while it's on its way does nothing, and sending the same text again after an
+  // unknown outcome carries the same id, so the Mac types it at most once.
+  const reply = payload.text !== undefined && payload.submit;
+  if (reply) {
+    if (replying) return false;
+    replying = true;
+    if (!unconfirmed || unconfirmed.text !== payload.text) {
+      unconfirmed = { text: payload.text, id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}` };
+    }
+    payload = { ...payload, request: unconfirmed.id };
+  }
   if (button) button.disabled = true;
   try {
     // Typing waits for a jump in progress on the Mac and takes a moment for long text: allow for it, and on a
     // timeout say what's unknown rather than "unreachable" (a retry could type it twice).
+    const unknown = "The Mac didn't confirm in time. Check the screen before sending again.";
     await api('/api/input', { method: 'POST', body: JSON.stringify({ tty: current, sid: currentSid, ...payload }),
-                              timeout: 30000, timeoutMessage: "The Mac didn't confirm in time. Check the screen before sending again." });
+                              timeout: 30000, timeoutMessage: unknown, unknownOutcome: unknown });
+    if (reply) unconfirmed = null;
     const label = button && button.classList.contains('quickChip') ? `“${payload.text}” sent ✓` : 'Sent ✓';
     setInputStatus(doneLabel || (payload.text && payload.submit ? label : `${button ? button.textContent : 'Key'} ✓`));
     setTimeout(refreshScreen, 250);
@@ -871,6 +904,7 @@ async function send(payload, button, doneLabel) {
     setInputStatus(error.message, true);
     return false;
   } finally {
+    if (reply) replying = false;
     if (button) button.disabled = false;
   }
 }
@@ -1116,7 +1150,8 @@ function route() {
   if (!token) { $('deviceName').value = defaultName(); return show('pair'); }
   const tty = params.get('s');
   if (tty && /^ttys\d{1,4}$/.test(tty)) {
-    api('/api/state').then(result => { state = result; openSession(tty); }).catch(() => show('list'));
+    // Unpaired meanwhile (a 401): the pairing screen stays, with its reason, not an empty list over it.
+    api('/api/state').then(result => { state = result; openSession(tty); }).catch(() => { if (token) show('list'); });
   } else {
     show('list');
   }
@@ -1137,7 +1172,7 @@ document.addEventListener('DOMContentLoaded', () => {
       forgetToken();
     } catch (error) {
       if (!token) { note.hidden = true; return; }   // 401: the Mac had already removed it (and api() forgot it)
-      note.replaceChildren(`Couldn't reach the Mac, so this phone is still paired (${error.message}). Try again, or remove it on the Mac in Phone Access. `);
+      note.replaceChildren(`Couldn't reach the Mac, so this phone is still paired (${error.message}). Try again, or remove it on the Mac in VibeSwitcher › Settings… › Phone. `);
       const anyway = el('button', 'link', 'Forget it on this phone only');
       anyway.type = 'button';
       anyway.addEventListener('click', () => {

@@ -413,4 +413,22 @@ struct PhoneWebTests {
         #expect(process.terminationStatus == 0, "\(text)")
         #expect(text.contains("phone-briefing: ok"))
     }
+
+    /// Replies (Tests/Web/phone-replies.test.mjs): two quick Enters post once, ✓ only once the Mac answered, a bare 502
+    /// or 504 says to check the screen, a resend keeps its request id, and an unpaired phone gets the pairing screen
+    /// with the reason.
+    @Test(.enabled(if: node != nil, "node isn't installed on this Mac: the phone's web test can't run"))
+    func thePhoneSendsAReplyOnceAndSaysSentOnlyOnceItWentIn() throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: try #require(Self.node))
+        process.arguments = [Self.repo.appendingPathComponent("Tests/Web/phone-replies.test.mjs").path]
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        try process.run()
+        let text = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0, "\(text)")
+        #expect(text.contains("phone-replies: ok"))
+    }
 }

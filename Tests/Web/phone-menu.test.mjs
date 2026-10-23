@@ -235,5 +235,40 @@ assert.equal($('quickReplies').hidden, false);
 await pressKey('1');
 assert.deepEqual(posts[4], { tty: 'ttys001', sid: 's1', text: '1', submit: false });
 
+// 8. ⏎ and the arrows while a menu is shown go with its fingerprint too: ⏎ is a tap on the highlighted option, ↑ ↓ move
+//    only while that menu is still up. With none shown they're the raw keys, as before.
+const pressNamedKey = async key => {
+  context.keyButton = Object.assign(new FakeElement('button'), { dataset: { key } });
+  context.keyButton.textContent = key;
+  run('pressKey(keyButton)');
+  await flush();
+};
+open(stateWith(session({ ...menu, selected: 1 })));
+await pressNamedKey('enter');
+assert.deepEqual(posts[5], { tty: 'ttys001', sid: 's1', choose: 1, fingerprint: 'fp-one' });
+assert.equal($('inputStatus').textContent, `“${menu.options[1]}” ✓`);
+open(stateWith(session(menu)));
+await pressNamedKey('down');
+assert.deepEqual(posts[6], { tty: 'ttys001', sid: 's1', key: 'down', fingerprint: 'fp-one' });
+await pressNamedKey('up');
+assert.deepEqual(posts[7], { tty: 'ttys001', sid: 's1', key: 'up', fingerprint: 'fp-one' });
+// A multi-select's cursor on its Submit row: ⏎ is a tap on Submit.
+open(stateWith(session({ question: 'Which toppings?', options: ['Cream', 'Nuts'], descriptions: [null, null], selected: 2,
+                         checked: [true, false], submit: 'Submit', fingerprint: 'fp-three' })));
+await pressNamedKey('enter');
+assert.deepEqual(posts[8], { tty: 'ttys001', sid: 's1', choose: 2, fingerprint: 'fp-three' });
+// Esc stays a raw key (it only cancels).
+await pressNamedKey('escape');
+assert.deepEqual(posts[9], { tty: 'ttys001', sid: 's1', key: 'escape' });
+// No menu shown: the raw keys.
+open(stateWith(session(null)));
+await pressNamedKey('enter');
+await pressNamedKey('down');
+assert.deepEqual(posts.slice(10), [{ tty: 'ttys001', sid: 's1', key: 'enter' }, { tty: 'ttys001', sid: 's1', key: 'down' }]);
+// A paused session's menu isn't offered: raw too.
+open(stateWith({ ...session(menu), paused: true }));
+await pressNamedKey('enter');
+assert.deepEqual(posts[12], { tty: 'ttys001', sid: 's1', key: 'enter' });
+
 console.log('phone-menu: ok');
 process.exit(0);

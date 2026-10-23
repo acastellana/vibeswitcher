@@ -49,6 +49,10 @@ final class RemoteServer {
     private var connections = 0
     private let handler: Handler
     private static let maxConnections = 32
+    /// How long a client has to send its request, and how long a handler then has to answer it (a backstop: none
+    /// waits this long, and the phone gives up after 30 s). Tests shorten them.
+    var receiveLimit: TimeInterval = 15
+    var answerLimit: TimeInterval = 120
 
     init(handler: @escaping Handler) {
         self.handler = handler
@@ -111,8 +115,10 @@ final class RemoteServer {
             }
         }
         connection.start(queue: queue)
+        // 15 s to send the request. Answering it may take longer (a reply typed behind a jump in progress): cut then,
+        // the phone would hear Tailscale's bare 502, as if VibeSwitcher weren't running, while the reply still went in.
         let timeout = DispatchWorkItem { connection.cancel() }
-        queue.asyncAfter(deadline: .now() + 15, execute: timeout)
+        queue.asyncAfter(deadline: .now() + receiveLimit, execute: timeout)
         receive(on: connection, buffer: Data(), timeout: timeout)
     }
 
@@ -130,8 +136,11 @@ final class RemoteServer {
             case .tooLarge:
                 self.send(.error(413, "too large"), on: connection, timeout: timeout)
             case .complete(let request):
+                timeout.cancel()
+                let answerTimeout = DispatchWorkItem { connection.cancel() }
+                self.queue.asyncAfter(deadline: .now() + self.answerLimit, execute: answerTimeout)
                 self.handler(request) { response in
-                    self.queue.async { self.send(response, on: connection, timeout: timeout) }
+                    self.queue.async { self.send(response, on: connection, timeout: answerTimeout) }
                 }
             }
         }
