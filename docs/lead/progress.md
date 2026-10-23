@@ -1012,3 +1012,6 @@
 - 2026-10-23 11:59 Update: Retrospective: the 2026-10-23 fix batch (8 merged) — Landed: leak-check bounds, vs-heavy kill/timeout, phone tap fingerprint, host session-ending crash, worker scratch/debugger rules, composer send queue, sidebar crash, session-ending strays.
 - 2026-10-23 12:02 Audit of phone-replies-sent-once: complete, violation, round 1: 1 Important open, 2 Nit open
 - 2026-10-23 12:02 Dismissed phone-replies-sent-once:F1: Lead accepts the RemoteServer.swift change: it is goal (3) and messaging audit #4's fix sketch, verified correct and tested on a real loopback listener; leaving the file out of Boundaries was my oversight.
+- 2026-10-23 12:05 Audit of phone-replies-sent-once: complete, clean, round 2: 1 Important closed, 2 Nit closed
+- 2026-10-23 12:11 Planned endingasessiontests: EndingASessionTests.endingASessionEndsWhatItStartedOnly fails under a loaded full suite
+- 2026-10-23 12:11 Started a worker on endingasessiontests
