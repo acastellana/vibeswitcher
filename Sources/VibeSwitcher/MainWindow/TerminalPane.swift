@@ -155,6 +155,8 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         afterParked { [weak self] in
             guard let self, self.releases[id] == release, id != self.current else { return }
             self.forget(id)
+            // Its scrollback's pages stay malloc's, counted in the app's footprint, until given back.
+            DispatchQueue.global(qos: .utility).async { malloc_zone_pressure_relief(nil, 0) }
         }
     }
 
