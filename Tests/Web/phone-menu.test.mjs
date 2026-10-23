@@ -206,13 +206,34 @@ $('askOptions').children[2].click();
 await flush();
 assert.deepEqual(posts[2], { tty: 'ttys001', sid: 's1', choose: 2, fingerprint: 'fp-three' });
 
-// 6. Waiting on you with no menu read (yet): the question's text, no buttons, the quick replies back.
+// 6. The 1/2/3 keys while a menu is shown: a tap on that option with the menu's fingerprint, never a bare digit (one
+//    would answer whatever question is up by the time it arrives).
+const pressKey = async text => {
+  context.keyButton = Object.assign(new FakeElement('button'), { dataset: { text } });
+  run('pressKey(keyButton)');
+  await flush();
+};
+open(stateWith(session(menu)));
+await pressKey('2');
+assert.equal(posts.length, 4);
+assert.deepEqual(posts[3], { tty: 'ttys001', sid: 's1', choose: 1, fingerprint: 'fp-one' });
+assert.equal($('inputStatus').textContent, `“${menu.options[1]}” ✓`);
+// A digit the menu has no option for: nothing sent.
+open(stateWith(session(changed)));
+await pressKey('3');
+assert.equal(posts.length, 4, 'nothing posted');
+assert.equal($('inputStatus').textContent, "There's no option 3.");
+
+// 7. Waiting on you with no menu read (yet): the question's text, no buttons, the quick replies back.
 open(stateWith(session(null)));
 assert.equal($('askCard').hidden, false);
 assert.equal($('askText').textContent, 'Run: npm publish --tag next');
 assert.equal($('askOptions').hidden, true);
 assert.equal($('askOptions').children.length, 0);
 assert.equal($('quickReplies').hidden, false);
+// With no menu shown, a digit key is the digit.
+await pressKey('1');
+assert.deepEqual(posts[4], { tty: 'ttys001', sid: 's1', text: '1', submit: false });
 
 console.log('phone-menu: ok');
 process.exit(0);

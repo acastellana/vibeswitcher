@@ -439,6 +439,20 @@ async function chooseOption(index, fingerprint, label) {
   refreshList(false);
 }
 
+/// A key button. While a menu is shown, 1, 2 and 3 are taps on its options, with its fingerprint: a bare digit would
+/// answer whatever question is up by the time it arrives.
+function pressKey(button) {
+  if (button.dataset.key) return send({ key: button.dataset.key }, button);
+  const session = shownSession();
+  const menu = session && !session.paused ? session.menu : null;
+  if (menu && /^[1-9]$/.test(button.dataset.text)) {
+    const index = Number(button.dataset.text) - 1;
+    if (index >= menu.options.length) return setInputStatus(`There's no option ${index + 1}.`, true);
+    return chooseOption(index, menu.fingerprint, menu.options[index]);
+  }
+  return send({ text: button.dataset.text, submit: false }, button);
+}
+
 function syncQuickReplies() {
   $('quickReplies').hidden = !$('askOptions').hidden || !$('quickEditor').hidden;
 }
@@ -1136,11 +1150,7 @@ document.addEventListener('DOMContentLoaded', () => {
       note.hidden = false;
     }
   });
-  for (const button of document.querySelectorAll('.keys button')) {
-    button.addEventListener('click', () => button.dataset.key
-      ? send({ key: button.dataset.key }, button)
-      : send({ text: button.dataset.text, submit: false }, button));
-  }
+  for (const button of document.querySelectorAll('.keys button')) button.addEventListener('click', () => pressKey(button));
   const reply = $('reply');
   reply.addEventListener('input', growReply);
   reply.addEventListener('keydown', event => {
