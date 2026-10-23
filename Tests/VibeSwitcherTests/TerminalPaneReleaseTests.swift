@@ -58,7 +58,7 @@ struct TerminalPaneReleaseTests {
             }
             var result: Result<HostSession, HostClientError>?
             let numbered = lines > 0 ? "/usr/bin/awk 'BEGIN { for (i = 1; i <= \(lines); i++) printf \"line %d\\n\", i }'; " : ""
-            host.spawn(SpawnRequest(cwd: "/tmp", command: "\(numbered)echo '\(name) ready'; exec /bin/cat", env: [:], cols: 100, rows: 30,
+            host.spawn(SpawnRequest(cwd: scratchRoot.path, command: "\(numbered)echo '\(name) ready'; exec /bin/cat", env: [:], cols: 100, rows: 30,
                                     keepShell: false, label: name, agent: nil)) { result = $0 }
             #expect(await until { result != nil })
             return try #require(result).get().id
