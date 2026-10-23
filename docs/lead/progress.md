@@ -1048,3 +1048,5 @@
 - 2026-10-23 14:51 Started a worker on workers-and-verifiers
 - 2026-10-23 14:53 Merged new-tests-are-proven: New tests are proven under load before a worker reports done (no audit: review none)
 - 2026-10-23 14:53 Update: Merged: new tests are proven under load before a worker reports done — What changed: the worker brief now says a test waits on the real event (a file, a reply, a semaphore, an injected clock), never a fixed sleep or wall-clock window, and that every test a branch adds or…
+- 2026-10-23 15:10 Review of memory-the-host-parser: audit
+- 2026-10-23 15:14 Merged workers-and-verifiers: Workers and verifiers aren't counted as the user's sessions (no audit: review none)
