@@ -98,6 +98,72 @@ import Testing
         #expect(eventually(timeout: 30) { !exists(session.childPID) })
     }
 
+    /// Waits for `pid`'s exit (any process, not only a child: a kqueue watch), up to `timeout`. True once it's gone.
+    func waitForExit(of pid: pid_t, timeout: TimeInterval) -> Bool {
+        let gone = DispatchSemaphore(value: 0)
+        let watch = DispatchSource.makeProcessSource(identifier: pid, eventMask: .exit, queue: .global())
+        watch.setEventHandler { gone.signal() }
+        watch.resume()
+        defer { watch.cancel() }
+        // Gone before the watch began: no exit comes.
+        if kill(pid, 0) != 0, errno == ESRCH { return true }
+        return gone.wait(timeout: .now() + timeout) == .success
+    }
+
+    /// `--exit-with PID` (a bench's host, audit P2 #3 of 2026-10-22): its owner killed outright, the host ends every
+    /// session and exits by itself, well before any watchdog.
+    @Test func aHostWhoseOwnerIsKilledEndsItsSessionsAndExits() throws {
+        let bench = Process()
+        bench.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        bench.arguments = ["600"]
+        try bench.run()
+        let log = scratchRoot.appendingPathComponent("vsh-owner-\(UUID().uuidString.prefix(8)).log").path
+        let (host, socket, home) = host(idleExit: 600, log: log)
+        host.arguments! += ["--exit-with", String(bench.processIdentifier)]
+        defer {
+            if bench.isRunning { kill(bench.processIdentifier, SIGKILL); bench.waitUntilExit() }
+            TestHosts.end(host)
+            remove(socket, home)
+            unlink(log)
+        }
+        let hostEnded = DispatchSemaphore(value: 0)
+        host.terminationHandler = { _ in hostEnded.signal() }
+        try TestHosts.run(host)
+        var connected: TestClient?
+        #expect(eventually { connected = try? TestClient(socket: socket); return connected != nil })
+        let client = try #require(connected)
+        let sessions = try (0..<2).map { _ in try client.spawn(keepRunning).childPID }
+        #expect(eventually { sessions.allSatisfy { (ProcessTable.info(pid: $0)?.comm ?? "") == "sleep" } })
+        #expect(host.isRunning)
+        kill(bench.processIdentifier, SIGKILL)
+        bench.waitUntilExit()
+        try #require(hostEnded.wait(timeout: .now() + 10) == .success, "the host outlived its owner")
+        #expect(host.terminationReason == .exit && host.terminationStatus == 0)
+        for session in sessions { #expect(waitForExit(of: session, timeout: 10), "session pid \(session) outlived the host") }
+        let lines = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""
+        #expect(lines.contains("host: owner pid \(bench.processIdentifier) is gone, ending 2 sessions and exiting"))
+        #expect(!FileManager.default.fileExists(atPath: socket))
+    }
+
+    /// An owner already gone when the host starts (the bench died while it launched): the host doesn't stay.
+    @Test func aHostWhoseOwnerIsAlreadyGoneExits() throws {
+        let bench = Process()
+        bench.executableURL = URL(fileURLWithPath: "/usr/bin/true")
+        try bench.run()
+        bench.waitUntilExit()
+        let (host, socket, home) = host(idleExit: 600)
+        host.arguments! += ["--exit-with", String(bench.processIdentifier)]
+        defer {
+            TestHosts.end(host)
+            remove(socket, home)
+        }
+        let hostEnded = DispatchSemaphore(value: 0)
+        host.terminationHandler = { _ in hostEnded.signal() }
+        try TestHosts.run(host)
+        try #require(hostEnded.wait(timeout: .now() + 10) == .success, "the host outlived its owner")
+        #expect(host.terminationReason == .exit && host.terminationStatus == 0)
+    }
+
     /// `--idle-exit`: a host whose last client went away, with no session, exits once it's been idle that long, and
     /// not while the client is there.
     @Test func aHostWithNoClientLeftExitsWhenIdle() throws {
