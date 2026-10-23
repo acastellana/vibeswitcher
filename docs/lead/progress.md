@@ -1008,3 +1008,7 @@
 - 2026-10-23 11:52 Update: Merged: the sidebar no longer crashes the app — What changed: the crash at 02:44 (EXC_BAD_ACCESS in NSOutlineView rowForItem ← _shouldShowOutlineCellForGroupRow, during SwiftUI's outline diff) came from an AppKit bug: the hovered group row (_outlin…
 - 2026-10-23 11:54 Started a worker on host-orders-text-enter
 - 2026-10-23 11:58 Merged ending-a-session-ends: Ending a session ends what its agent started
+- 2026-10-23 11:58 Update: Merged: ending a session ends what its agent started — What changed: when a session ends, SessionStrays finds the processes its agent started (by its session marker, and by descendancy for Apple binaries whose environment macOS hides) and ends them, on a …
+- 2026-10-23 11:59 Update: Retrospective: the 2026-10-23 fix batch (8 merged) — Landed: leak-check bounds, vs-heavy kill/timeout, phone tap fingerprint, host session-ending crash, worker scratch/debugger rules, composer send queue, sidebar crash, session-ending strays.
+- 2026-10-23 12:02 Audit of phone-replies-sent-once: complete, violation, round 1: 1 Important open, 2 Nit open
+- 2026-10-23 12:02 Dismissed phone-replies-sent-once:F1: Lead accepts the RemoteServer.swift change: it is goal (3) and messaging audit #4's fix sketch, verified correct and tested on a real loopback listener; leaving the file out of Boundaries was my oversight.
