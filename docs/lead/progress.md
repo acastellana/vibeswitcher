@@ -1005,3 +1005,6 @@
 - 2026-10-23 11:46 Update: Merged: composer messages don't merge, don't go into a shell, and arrive once — What changed: each session has a FIFO of send units (text plus Enter as one unit), so a composer message, a lead message and a phone reply can't interleave; a message held while the session isn't an a…
 - 2026-10-23 11:51 Review of phone-replies-sent-once: audit
 - 2026-10-23 11:52 Merged app-crash-the-sidebar: App crash: the sidebar list crashed in SwiftUI's outline diff (no audit: review none)
+- 2026-10-23 11:52 Update: Merged: the sidebar no longer crashes the app — What changed: the crash at 02:44 (EXC_BAD_ACCESS in NSOutlineView rowForItem ← _shouldShowOutlineCellForGroupRow, during SwiftUI's outline diff) came from an AppKit bug: the hovered group row (_outlin…
+- 2026-10-23 11:54 Started a worker on host-orders-text-enter
+- 2026-10-23 11:58 Merged ending-a-session-ends: Ending a session ends what its agent started
