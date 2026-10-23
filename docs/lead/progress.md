@@ -1058,3 +1058,8 @@
 - 2026-10-23 18:11 Update: Merged: the app's terminal views don't each hold 10,000 lines — What changed: TerminalPane keeps at most 3 terminal views attached (the visible one and the last two shown; was 8). A view off screen for 5 minutes is released and its memory returned; shown again, it…
 - 2026-10-23 18:13 Started a worker on pickercardtests-the-mcp
 - 2026-10-23 18:17 Merged memory-the-host-parser: Memory: the host parser keeps a small scrollback; phone history is served on demand
+- 2026-10-23 18:17 Update: Merged: the host parser keeps 200 lines; phone history is served on demand — What changed: each session's parser keeps 200 lines of scrollback (was 5,000). When the phone asks for history (5,000 lines) or a session ends (500 lines), a one-off parser off the host's queue reads …
+- 2026-10-23 18:17 Planned bench-hosts-don-t: Bench hosts don't outlive a killed bench
+- 2026-10-23 18:17 Planned long-lived-background: Long-lived background shells don't blind stall checks
+- 2026-10-23 18:17 Started a worker on bench-hosts-don-t
+- 2026-10-23 18:17 Started a worker on long-lived-background
