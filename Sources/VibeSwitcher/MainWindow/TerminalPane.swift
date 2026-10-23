@@ -51,8 +51,9 @@ final class HostTerminalView: TerminalView {
 final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     /// The view on screen and the last two shown.
     static let keepAttached = 3
-    /// How long a view off screen stays attached before it's let go.
-    static let parkedLifetime: TimeInterval = 30
+    /// How long a view off screen stays attached before it's let go: long enough to answer another session and come
+    /// back to your long scrollback (the host's replay holds far less); `keepAttached` bounds the memory meanwhile.
+    static let parkedLifetime: TimeInterval = 5 * 60
 
     private let host: HostClient
     private var views: [UUID: HostTerminalView] = [:]
