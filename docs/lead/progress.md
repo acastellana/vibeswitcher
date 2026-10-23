@@ -1053,3 +1053,5 @@
 - 2026-10-23 15:14 Update: Merged: workers and verifiers aren't counted as your sessions — What changed: sessions carry a team role (from the lead's window label). The menu bar dots, counts, pill and VoiceOver label show your own sessions only (leads included). The popover lists yours first…
 - 2026-10-23 15:17 Audit of memory-the-host-parser: incomplete, clean, round 1: 1 Important open, 1 Nit open, 1 Pre-existing open
 - 2026-10-23 15:18 Planned pickercardtests-the-mcp: PickerCardTests: the MCP picker card test doesn't fail on a busy Mac
+- 2026-10-23 18:07 Audit of memory-the-host-parser: complete, clean, round 2: 1 Important closed, 1 Nit closed, 1 Pre-existing closed
+- 2026-10-23 18:11 Merged memory-the-app-s: Memory: the app's terminal views don't each hold 10,000 lines (no audit: review none)
