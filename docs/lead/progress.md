@@ -1047,3 +1047,4 @@
 - 2026-10-23 14:50 Started a worker on memory-the-app-s
 - 2026-10-23 14:51 Started a worker on workers-and-verifiers
 - 2026-10-23 14:53 Merged new-tests-are-proven: New tests are proven under load before a worker reports done (no audit: review none)
+- 2026-10-23 14:53 Update: Merged: new tests are proven under load before a worker reports done — What changed: the worker brief now says a test waits on the real event (a file, a reply, a semaphore, an injected clock), never a fixed sleep or wall-clock window, and that every test a branch adds or…
