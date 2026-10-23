@@ -123,6 +123,13 @@ final class HostClient: ObservableObject {
     /// The bundled host a handover asks for; a test's scratch build instead.
     private let handoverExecutable: () -> String
 
+    /// Added to the arguments of a host this client starts: a bench's `endsWithThisProcess`. None for the app's, which
+    /// outlives the app.
+    var hostArguments: [String] = []
+
+    /// A bench's host ends, sessions and all, when the bench does, however it ends (see `HostServer.Config.owner`).
+    static var endsWithThisProcess: [String] { ["--exit-with", String(getpid())] }
+
     init(socketPath: String = VibePaths.hostSocket.path, appKey: @escaping () -> SymmetricKey? = { nil },
          bundledBuild: @escaping () -> Int = { HostBuild.id(ofExecutableAt: HostClient.hostExecutable.path) },
          handoverExecutable: @escaping () -> String = { HostClient.hostExecutable.path },
@@ -249,7 +256,8 @@ final class HostClient: ObservableObject {
         defer { if keyPipe[0] >= 0 { close(keyPipe[0]) } }
         posix_spawn_file_actions_addopen(&actions, 1, VibePaths.hostLog.path, O_WRONLY | O_CREAT | O_APPEND, 0o600)
         posix_spawn_file_actions_adddup2(&actions, 1, 2)
-        let argv: [UnsafeMutablePointer<CChar>?] = [strdup(path)] + (keyPipe[0] >= 0 ? [strdup(AppProof.hostStdinFlag)] : []) + [nil]
+        let argv: [UnsafeMutablePointer<CChar>?] = [strdup(path)] + (keyPipe[0] >= 0 ? [strdup(AppProof.hostStdinFlag)] : [])
+            + hostArguments.map { strdup($0) } + [nil]
         defer { argv.forEach { free($0) } }
         var pid: pid_t = 0
         let result = posix_spawn(&pid, path, &actions, &attributes, argv, environ)

@@ -56,6 +56,8 @@ var config = HostServer.Config(
                                                  adding: TestLock.commandFolder(besideExecutable: executable)),
     hostBuild: build)
 config.idleExit = value(after: "--idle-exit").flatMap(TimeInterval.init) ?? 600
+// A bench's host: it ends, sessions and all, with the bench (see `HostServer.Config.owner`). Kept through a handover.
+config.owner = value(after: "--exit-with").flatMap(pid_t.init).flatMap { $0 > 0 ? $0 : nil }
 if let interval = value(after: "--housekeeping").flatMap(TimeInterval.init), interval > 0 { config.housekeepingInterval = interval }
 // This process's children are its own sessions' programs and parsers: a parser none holds is ended.
 config.endsStrayParsers = true

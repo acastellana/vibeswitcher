@@ -91,7 +91,7 @@ enum PowerBench {
             try? FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
             let process = Process()
             process.executableURL = URL(fileURLWithPath: hostPath)
-            process.arguments = ["--socket", socket, "--lock", socket + ".lock", "--idle-exit", "60"]
+            process.arguments = ["--socket", socket, "--lock", socket + ".lock", "--idle-exit", "60"] + HostClient.endsWithThisProcess
             process.standardInput = FileHandle.nullDevice
             process.standardOutput = FileHandle.nullDevice
             process.standardError = FileHandle.nullDevice

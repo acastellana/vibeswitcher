@@ -52,6 +52,9 @@ public final class HostServer {
         public var capabilities: [String] = HostServer.capabilities
         /// How long a held input unit waits for its sender's next part (see `InputOrder.holdLimit`). Tests shorten it.
         public var inputUnitHold: TimeInterval = InputOrder.holdLimit
+        /// The process this host ends with (`--exit-with`, a bench's): once it's gone, every session is ended and the
+        /// host exits, however it went (SIGKILL too). Nil: none, as for the app's host, which outlives the app.
+        public var owner: pid_t?
 
         /// Where a handover leaves the sessions for the next build: beside the lock, so a scratch host's stays its own.
         public var handoverPath: String { lockPath + ".handover" }
@@ -112,6 +115,8 @@ public final class HostServer {
     private var listenFD: Int32 = -1
     private var acceptSource: DispatchSourceRead?
     private var housekeeping: DispatchSourceTimer?
+    /// The watch on `Config.owner`.
+    private var ownerWatch: DispatchSourceProcess?
     private var lastBusy = Date()
     private var stopped = false
     /// A `shutdown` was accepted: the host stops in a moment and starts nothing more.
@@ -179,6 +184,40 @@ public final class HostServer {
         timer.resume()
         housekeeping = timer
         log.note("host: started, build \(config.hostBuild), socket \(config.socketPath)")
+        if let owner = config.owner { watch(owner: owner) }
+    }
+
+    /// See `Config.owner`.
+    private func watch(owner: pid_t) {
+        let source = DispatchSource.makeProcessSource(identifier: owner, eventMask: .exit, queue: queue)
+        source.setEventHandler { [weak self] in self?.ownerGone(owner) }
+        source.resume()
+        ownerWatch = source
+        // Gone before the watch began: no exit comes.
+        queue.async { if Darwin.kill(owner, 0) != 0, errno == ESRCH { self.ownerGone(owner) } }
+    }
+
+    private func ownerGone(_ owner: pid_t) {
+        guard let watch = ownerWatch, !watch.isCancelled else { return }
+        watch.cancel()
+        let programs = sessions.values.filter(\.info.isLive).map(\.info.childPID)
+        log.note("host: owner pid \(owner) is gone, ending \(programs.count) sessions and exiting")
+        stop(terminateSessions: true)
+        exitOnceEnded(programs, deadline: Date().addingTimeInterval(6))
+    }
+
+    /// Exits once the sessions' programs and their groups are gone (reaped here: closed sessions no longer reap them),
+    /// or at `deadline`, after `terminate`'s SIGKILL.
+    private func exitOnceEnded(_ programs: [pid_t], deadline: Date) {
+        let left = programs.filter { pid in
+            var status: Int32 = 0
+            let reaped = waitpid(pid, &status, WNOHANG)
+            return (reaped == 0 || (reaped < 0 && errno == EINTR)) || Darwin.kill(-pid, 0) == 0
+        }
+        guard left.isEmpty || Date() >= deadline else {
+            return queue.asyncAfter(deadline: .now() + 0.1) { self.exitOnceEnded(left, deadline: deadline) }
+        }
+        onExit?()
     }
 
     /// A line in the session log (see `HostLog`).
@@ -192,6 +231,7 @@ public final class HostServer {
             self.log.note("host: stopping, \(self.sessions.values.filter { $0.info.isLive }.count) sessions live\(terminateSessions ? ", ending them" : "")")
             self.acceptSource?.cancel()
             self.housekeeping?.cancel()
+            self.ownerWatch?.cancel()
             self.clients.values.forEach { $0.close() }
             self.clients = [:]
             for session in self.sessions.values {

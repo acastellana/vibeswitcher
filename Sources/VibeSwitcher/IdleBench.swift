@@ -226,6 +226,7 @@ enum IdleBench {
                     process.pid == 50_900
                         ? ["/bin/zsh", "-c", "source /tmp/claude/shell-snapshots/snapshot-zsh.sh && eval 'npm run dev' < /dev/null"] : []
                 }))
+            host.hostArguments = HostClient.endsWithThisProcess
         }
 
         static var transcriptFolder: String { (NSHomeDirectory() as NSString).appendingPathComponent(".claude/projects/-bench") }
@@ -643,7 +644,8 @@ enum IdleBench {
 
         private func finish() {
             // The private host runs from this build's folder, under the scratch home: its sessions and then it end with
-            // the bench. By pid (this process's child): other benches and tests run hosts from the same build.
+            // the bench. By pid (this process's child): other benches and tests run hosts from the same build. A bench
+            // that doesn't get here (killed, hung) has its host end all the same (`HostClient.endsWithThisProcess`).
             (shells + viewSessions).forEach(host.kill)
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 for process in ProcessTable.snapshot().values where process.ppid == getpid() && process.comm.hasPrefix("vibeswitcher-hos") {

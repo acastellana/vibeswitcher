@@ -217,6 +217,7 @@ enum UIBench {
                 cwd: { pid in weakSelf?.cwd(pid) },
                 arguments: { _ in [] }))
             weakSelf = self
+            host.hostArguments = HostClient.endsWithThisProcess
         }
 
         private func processes() -> [Int32: ProcInfo] {
@@ -561,12 +562,8 @@ enum UIBench {
         }
 
         private func finish() {
-            // The private host runs from this build's folder, under the scratch home: end it with the bench.
-            let stop = Process()
-            stop.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-            stop.arguments = ["-f", HostClient.hostExecutable.path]
-            try? stop.run()
-            stop.waitUntilExit()
+            // The private host runs from this build's folder, under the scratch home: it ends, sessions and all, as this
+            // process exits (`HostClient.endsWithThisProcess`), and no other run's host from the same build is touched.
             print(UIBench.failures.isEmpty ? "ui bench: all checks passed" : "ui bench: \(UIBench.failures.count) check(s) failed")
             fflush(stdout)
             exit(UIBench.failures.isEmpty ? 0 : 1)
