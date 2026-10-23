@@ -999,3 +999,6 @@
 - 2026-10-23 10:34 Update: Merged: host no longer crashes when a session ends while its reading is paused — What changed: HostedSession resumes a suspended PTY read source before cancelling it (cancelling a suspended DispatchSource crashed the host in drain()), and reads what's left on the way out. A new ki…
 - 2026-10-23 10:41 Audit of composer-messages-don-t: complete, clean, round 2: 4 Nit open, 1 Pre-existing open
 - 2026-10-23 11:13 Merged workers-don-t-stall: Workers don't stall on permission prompts for their own scratch files
+- 2026-10-23 11:14 Update: Merged: workers don't stall on permission prompts for their scratch files, and never attach debuggers — What changed: the worker and verifier briefs say scratch files stay (cleanup removes the TMPDIR and worktree) and leftovers are named in the report, never rm'd; workers may `git rm` tracked files. Wor…
+- 2026-10-23 11:16 Started a worker on phone-replies-sent-once
+- 2026-10-23 11:46 Merged composer-messages-don-t: Composer: messages don't merge, don't go into a shell, and a digit isn't an answer
