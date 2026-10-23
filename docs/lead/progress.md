@@ -1033,3 +1033,7 @@
 - 2026-10-23 13:32 Update: Merged: redaction masks a Slack webhook (and other shapes holding a 40-character run) whole — What changed: in Redaction.swift the bare AWS-secret rule now runs after the token shapes. Before, a Slack webhook path, Discord/GitLab/PyPI token or SendGrid key containing a run of exactly 40 base64…
 - 2026-10-23 13:42 Audit of host-orders-text-enter: complete, clean, round 3: 2 Important closed, 1 Nit closed
 - 2026-10-23 14:13 Merged composerdeliverytests: ComposerDeliveryTests.afterTheAgentExitsToAShellNothingIsTypedIntoIt flakes in the full suite (no audit: review none)
+- 2026-10-23 14:14 Update: Merged: ComposerDeliveryTests no longer reads the fake agent's pid before it exists — What changed: test harness only. The fake agent draws its screen before writing its state file, and Harness.start returned on the screen, so under load h.agent["pid"] could still be nil. Harness.start…
+- 2026-10-23 14:16 Planned new-tests-are-proven: New tests are proven under load before a worker reports done
+- 2026-10-23 14:16 Started a worker on new-tests-are-proven
+- 2026-10-23 14:40 Merged host-orders-text-enter: Host orders text+Enter units from every writer (MCP server included)
