@@ -190,4 +190,50 @@ import Testing
         #expect(sessionLog(host).contains("host: got SIGTERM from pid \(getpid())"))
         #expect(eventually { running.allSatisfy { kill($0, 0) != 0 } }, "parsers left running: \(running.filter { kill($0, 0) == 0 })")
     }
+
+    /// Stalls its parser, then prints `bytes` all at once: reading pauses once the parser is `maxUnparsed` behind.
+    static func flood(_ bytes: Int, then tail: String) -> String {
+        "printf '\\033]7599;stall\\007'; sleep 0.5; head -c \(bytes) /dev/zero | tr '\\0' x; \(tail)"
+    }
+
+    /// A session ends just after a flood paused its reading (its parser stalled, everything printed already read):
+    /// the host carries on, the session reads as ended once the watchdog replaced its parser, and another session
+    /// still answers.
+    @Test func aSessionEndingWhileReadingIsPausedEndsOnlyItself() throws {
+        let (host, client) = try host(stallLimit: 10)
+        let shell = try client.spawn("while read line; do echo got:$line; done")
+        let flood = try client.spawn(Self.flood(HostedSession.maxUnparsed, then: "sleep 1"))
+        defer { end(host, [shell, flood]) }
+        #expect(eventually(timeout: 60) { client.exitStatus(flood.id) != nil || !host.process.isRunning }, "\(host.log)")
+        #expect(host.process.isRunning, "\(host.log)")
+        guard host.process.isRunning else { return }
+        #expect(client.exitStatus(flood.id) == 0)
+        client.attach(shell.id)
+        client.send(.input(id: shell.id, bytes: Data("hello\r".utf8), reply: false))
+        #expect(eventually { client.text(shell.id).contains("got:hello") })
+        #expect(kill(shell.childPID, 0) == 0)
+    }
+
+    /// A session killed while its reading is paused: the kernel holds the program's exit until its terminal's output
+    /// is read, so the host reads again once it sees it exiting; it's gone in moments, not when the watchdog replaces
+    /// its parser. The program writes 64 KB at a time and the total so far to `progress`: stuck at `maxUnparsed` or more,
+    /// the host has stopped reading.
+    @Test func aSessionKilledWhileReadingIsPausedIsReapedAtOnce() throws {
+        let (host, client) = try host(stallLimit: 600)
+        let progress = scratchRoot.appendingPathComponent("flood-\(UUID().uuidString.prefix(8))").path
+        let writer = "perl -e '$|=1; $c = q(x) x 65536; while (1) { print $c; $n += 65536; open(F, q(>), $ARGV[0]); print F $n; close(F) }' \(progress)"
+        let flood = try client.spawn("printf '\\033]7599;stall\\007'; sleep 0.5; \(writer)")
+        defer { end(host, [flood]); unlink(progress) }
+        func written() -> Int { Int((try? String(contentsOfFile: progress, encoding: .utf8)) ?? "") ?? 0 }
+        #expect(eventually {
+            let before = written()
+            Thread.sleep(forTimeInterval: 1)
+            return before >= HostedSession.maxUnparsed && written() == before
+        }, "written: \(written())")
+        kill(-flood.childPID, SIGKILL)
+        let killed = Date()
+        #expect(eventually(timeout: 60) { kill(flood.childPID, 0) != 0 })
+        #expect(Date().timeIntervalSince(killed) < 5, "reaped \(Date().timeIntervalSince(killed)) s after the kill")
+        #expect(host.process.isRunning, "\(host.log)")
+    }
 }

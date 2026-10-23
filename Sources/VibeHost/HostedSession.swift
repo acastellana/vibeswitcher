@@ -54,6 +54,12 @@ public final class HostedSession {
     /// Reading the PTY waits while the parser is this far behind, as the program used to wait on the parse.
     static let maxUnparsed = 4 << 20
     private var readingPaused = false
+    /// While reading is paused, a look every `exitingCheckInterval` at whether the program is exiting (see
+    /// `checkExiting`).
+    private var exitingCheck: SessionTimer?
+    static let exitingCheckInterval: TimeInterval = 0.5
+    /// The program is exiting, not reaped yet: reading doesn't pause (see `checkExiting`).
+    private var exiting = false
     /// It ended, and its last screen is on its way from the parser: what's left to do then (see `finish`).
     private var finishing: (() -> Void)?
     /// What an ended session keeps: its last screen, how it was drawn, and the last lines above it.
@@ -274,6 +280,26 @@ public final class HostedSession {
         guard !readingPaused, let readSource else { return }
         readSource.suspend()
         readingPaused = true
+        let check = timers.make(.exitingCheck, queue) { [weak self] in self?.checkExiting() }
+        check.schedule(after: Self.exitingCheckInterval, repeating: Self.exitingCheckInterval, leeway: .milliseconds(100))
+        exitingCheck = check
+    }
+
+    /// The kernel holds a session leader's exit until its terminal's output is read: killed (or ending with output
+    /// still queued) while reading is paused, the program would stay unreaped until its parser caught up, or the
+    /// watchdog replaced a stalled one. Exiting, it's read to the end, no pausing.
+    private func checkExiting() {
+        guard readingPaused, info.isLive, Self.isExiting(info.childPID) else { return }
+        exiting = true
+        resumeReading()
+    }
+
+    /// Whether `pid` is on its way out (or a zombie already).
+    static func isExiting(_ pid: pid_t) -> Bool {
+        var short = proc_bsdshortinfo()
+        let size = Int32(MemoryLayout<proc_bsdshortinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDT_SHORTBSDINFO, 1, &short, size) == size else { return false }
+        return short.pbsi_status == SZOMB || short.pbsi_flags & UInt32(PROC_FLAG_INEXIT) != 0
     }
 
     private func resumeReadingIfCaughtUp() {
@@ -284,6 +310,8 @@ public final class HostedSession {
     private func resumeReading() {
         guard readingPaused else { return }
         readingPaused = false
+        exitingCheck?.cancel()
+        exitingCheck = nil
         readSource?.resume()
     }
 
@@ -323,11 +351,13 @@ public final class HostedSession {
                 ring?.append(chunk)
                 parser?.feed(chunk)
                 onOutput?(chunk)
-                if pausing, let parser, parser.unparsed > Self.maxUnparsed { return pauseReading() }
+                if pausing, !exiting, let parser, parser.unparsed > Self.maxUnparsed { return pauseReading() }
                 continue
             }
             if count < 0, errno == EAGAIN || errno == EINTR { return }
             // 0 or EIO: the terminal's other side is closed (the program and everything it started are gone).
+            // A suspended watcher can't be let go (reap's drain reads with it paused).
+            resumeReading()
             readSource?.cancel()
             readSource = nil
             return
@@ -366,6 +396,7 @@ public final class HostedSession {
         exitSource = nil
         exitPoll?.cancel()
         exitPoll = nil
+        exiting = false
         info.exit = .init(status: code, at: Date(), signal: signal == 0 ? nil : signal, core: signal == 0 ? nil : status & 0x80 != 0,
                           killedBy: killer?.pid, killedByName: killer?.name)
         // A program that died without `state=clear` isn't still working.
@@ -710,7 +741,7 @@ final class HeadlessDelegate: TerminalDelegate {
     func bell(source: Terminal) { onBell?() }
 }
 
-/// A timer of a session's (its exit poll, its parser's watchdog): scheduled again at will, on the session's queue.
+/// A timer of a session's (its exit poll, its parser's watchdog, its exiting check): scheduled again at will, on the session's queue.
 protocol SessionTimer: AnyObject {
     /// Fires `after` from now, then every `repeating` (nil: once).
     func schedule(after delay: TimeInterval, repeating: TimeInterval?, leeway: DispatchTimeInterval)
@@ -719,7 +750,7 @@ protocol SessionTimer: AnyObject {
 
 /// How a session makes its timers: dispatch's, or a test's whose clock it moves itself (HostedSessionTimerTests).
 struct SessionTimers {
-    enum Purpose { case exitPoll, parserWatchdog }
+    enum Purpose { case exitPoll, parserWatchdog, exitingCheck }
     /// A timer for `purpose` firing its handler on the queue.
     var make: (Purpose, DispatchQueue, @escaping () -> Void) -> SessionTimer
 
