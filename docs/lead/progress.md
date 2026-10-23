@@ -989,3 +989,4 @@
 - 2026-10-23 05:17 Audit of workers-don-t-stall: incomplete, clean, round 2: 1 Important open, 1 Pre-existing open
 - 2026-10-23 05:20 Audit of workers-don-t-stall: complete, clean, round 3: 1 Important closed, 1 Pre-existing open
 - 2026-10-23 05:30 Audit of ending-a-session-ends: complete, clean, round 2: 3 Important closed, 1 Nit open
+- 2026-10-23 10:10 Merged the-leaks-check-can: The leaks check can't hang a test run (no audit: review none)
