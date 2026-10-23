@@ -13,8 +13,8 @@
 # ~/.vibeswitcher: the bench runs in a scratch home holding copies of the transcripts.
 # A tick's wall time past its CPU time is the Mac's: top at 1728 on the fixture, page 2's longest tick was 0.05-0.22 s
 # with at most 0.11 s of CPU at load 8-12 (2026-10-20, 24 runs), and 0.26-0.27 s with 0.15 s of CPU at load 14.5.
-# The runs start staggered: one at a time, STAGGER seconds after the last one started and once that one opened its
-# conversation (its "clock …: opening" line; at most 10 s), so the jobs don't open or page back in the same instant.
+# The runs start staggered: one at a time, STAGGER seconds after the last one started and half that after it opened
+# its conversation (its "clock …: opening" line; at most 10 s), so the jobs don't open or page back in the same instant.
 # Started together, a whole -j 6 batch reached page 2 at once and starved six at a time (2026-10-20: 37 of 768 runs,
 # docs/eval/chat-bench-settle-2026-10-20.md). Each starved attempt is recorded in OUTPUTS/starved.txt with why the
 # main thread was off the CPU: its tick's wall and CPU time, the 1-minute load and the threads runnable at the tick's
@@ -75,20 +75,30 @@ on_exit 'kill "$sampler" 2> /dev/null'
 
 clock() { /usr/bin/perl -MTime::HiRes=time -e 'printf "%.2f\n", time'; }
 
-# Waits for this run's turn to start (see the top): $stagger seconds after the last start, and once that run had
-# opened or ended (at most 10 s); then it's the last start. One run at a time holds $outputs/gate.lock.
+# Waits for this run's turn to start (see the top): $stagger seconds after the last start, and half that after that run
+# opened or ended (at most 10 s after its start): a slow launch doesn't put two openings together; then it's the last start, and prints its clock (the run's launching). One run at a
+# time holds $outputs/gate.lock.
 gate() {
-    local out=$1 last previous
-    [[ $stagger == 0 ]] && return
+    local out=$1 last previous started
+    [[ $stagger == 0 ]] && { clock; return; }
     until mkdir "$outputs/gate.lock" 2> /dev/null; do sleep 0.05; done
     if read -r last previous 2> /dev/null < "$outputs/gate"; then
         /usr/bin/perl -MTime::HiRes=time,sleep -e '
             my ($last, $previous, $stagger) = @ARGV;
-            sub opened { open(my $file, "<", $previous) or open($file, "<", "$previous.starved") or return 0; scalar grep { /^  clock [0-9.]+: (opening|done|exited)$/ } <$file> }
-            sleep 0.05 until time >= $last + $stagger && (opened() || time >= $last + 10)' "$last" "$previous" "$stagger"
+            # When the previous run opened (or ended, not opening), undef until then.
+            sub opened {
+                open(my $file, "<", $previous) or open($file, "<", "$previous.starved") or return undef;
+                for (<$file>) { return $1 if /^  clock ([0-9.]+): (opening|done|exited)$/ }
+                undef
+            }
+            my $opened;
+            sleep 0.05 until time >= $last + $stagger && (defined($opened //= opened()) && time >= $opened + $stagger / 2 || time >= $last + 10)' \
+            "$last" "$previous" "$stagger"
     fi
-    echo "$(clock) $out" > "$outputs/gate"
+    started=$(clock)
+    echo "$started $out" > "$outputs/gate"
     rmdir "$outputs/gate.lock"
+    echo "$started"
 }
 
 # The record of the starved attempt in $1 (scenario/width/variant #run, and which attempt in $2): its longest tick, the
@@ -164,16 +174,14 @@ one() {
         settings+=(VIBESWITCHER_BENCH_OPEN="$scenario" VIBESWITCHER_BENCH_AT="$scenario")
     fi
     local status=0 label="$scenario/$width/$variant #$run"
-    gate "$out"
-    echo "  clock $(clock): launching" > "$out"
+    echo "  clock $(gate "$out"): launching" > "$out"
     env "${settings[@]}" "$binary" --chat-bench "$path" >> "$out" 2>&1 || status=$?
     echo "  clock $(clock): exited" >> "$out"
     if [[ $status -eq 4 ]] && starved "$out"; then
         mv "$out" "$out.starved"
         why "$out.starved" "$label, first attempt," >> "$outputs/starved.txt"
         status=0
-        gate "$out"
-        echo "  clock $(clock): launching" > "$out"
+        echo "  clock $(gate "$out"): launching" > "$out"
         env "${settings[@]}" "$binary" --chat-bench "$path" >> "$out" 2>&1 || status=$?
     echo "  clock $(clock): exited" >> "$out"
         [[ $status -eq 4 ]] && starved "$out" && status=starved && why "$out" "$label, second attempt too (recorded)," >> "$outputs/starved.txt"
@@ -210,9 +218,9 @@ for scenario in $scenarios; do for width in $widths; do for variant in $variants
     [[ $passed -eq $runs ]] || failed=1
 done; done; done
 # How close the runs' openings came, every attempt's: the stagger's doing.
-grep -ohE "^  clock [0-9.]+: opening$" "$outputs"/out/* 2> /dev/null | grep -oE "[0-9]+\.[0-9]+" | sort -n \
+grep -ohE "^  clock [0-9.]+: opening$" "$outputs"/out/* 2> /dev/null | sed -E 's/^  clock ([0-9.]+).*/\1/' | sort -n \
     | awk 'NR > 1 && (gap == "" || $1 - last < gap) { gap = $1 - last } { last = $1 } END {
-        if (NR > 1) printf "openings: %d, the closest two %.2f s apart (stagger %s s)\n", NR, gap, stagger }' stagger="$stagger"
+        if (NR > 1) printf "openings: %d, the closest two %.2f s apart (stagger %s s)\n", NR, gap, stagger }' stagger="$stagger" || true
 starved_runs=$(grep -c "first attempt," "$outputs/starved.txt" 2> /dev/null || true)
 recorded=$(grep -c "second attempt too" "$outputs/starved.txt" 2> /dev/null || true)
 echo "starved: ${starved_runs:-0} first attempts run again, ${recorded:-0} recorded starved (status=starved)"

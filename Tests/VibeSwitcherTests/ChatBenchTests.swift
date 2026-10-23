@@ -314,36 +314,64 @@ private final class Anchor {}
 
 /// scripts/chat-bench-settle.sh's verdict, on a fake build that prints what `--chat-bench` prints when a tick stalls: a
 /// starved longest tick is run once more and passes as starved when that one starves too, but never beside a tick the
-/// main thread worked through over the limit on the CPU. Run with the benches, by `scripts/test.sh --perf` (`Tag.perf`).
+/// main thread worked through over the limit on the CPU. The runs start staggered, and each starved attempt is recorded
+/// with why the main thread was off the CPU. Run with the benches, by `scripts/test.sh --perf` (`Tag.perf`).
 @Suite(.tags(.perf), .enabled(if: perfRun, perfOnly))
 struct ChatBenchSettleScriptTests {
     let scratch = Scratch()
+    /// Where the script puts what the runs printed (`-o`).
+    let outputs: URL
 
-    /// A fake build: counts its runs in `runs`, prints a settle and a starved longest tick, and after it `also` (another of
-    /// the verdict's FAIL lines); exits 4 as the bench does.
-    func fakeBuild(also: String? = nil, runs: URL) throws -> URL {
-        let url = scratch.url("fake-chat-bench")
+    init() { outputs = scratch.url("outputs") }
+
+    /// The bench's clock lines (`ChatBench.clock`): "  clock 1761000000.12: page 2", in the fake builds' bash.
+    static func clock(_ what: String) -> String {
+        "echo \"  clock $(/usr/bin/perl -MTime::HiRes=time -e 'printf q(%.2f), time'): \(what)\""
+    }
+
+    /// A fake build: counts its runs in `runs`, opens, pages back for `paging` seconds, prints a settle and a starved
+    /// longest tick that ended then, and after it `also` (another of the verdict's FAIL lines); exits 4 as the bench does.
+    func fakeBuild(also: String? = nil, paging: Double = 0, runs: URL) throws -> URL {
         let rule = "rule: the Mac's 1-minute load 3 is not over load_threshold 24 (workflow.md): any tick over 0.25s fails"
-        try """
-        #!/bin/bash
+        return try script("""
         echo run >> '\(runs.path)'
         echo "  stall \(rule)"
+        \(Self.clock("opening"))
+        \(Self.clock("page 2"))
+        sleep \(paging)
         echo 'settled 9 s after opening (loaded after 1 s): height=15526 heights=3 range=- layouts=1 last 3 s: 0 layouts longest tick=1.00s (cpu 0.10s)'
+        \(Self.clock("the longest tick's end"))
         echo "FAIL: a tick stalled 1.00s (t=12s, page 2, 0.10s of it on the CPU), over 0.25s; \(rule)"
         \(also.map { "echo \"\($0); \(rule)\"" } ?? "")
+        \(Self.clock("done"))
         exit 4
-        """.write(to: url, atomically: true, encoding: .utf8)
+        """)
+    }
+
+    /// A fake build that takes `launch` seconds to open, settles and passes.
+    func passingBuild(launch: Double) throws -> URL {
+        try script("""
+        sleep \(launch)
+        \(Self.clock("opening"))
+        echo 'settled 9 s after opening (loaded after 1 s): height=15526 heights=3 range=- layouts=1 last 3 s: 0 layouts longest tick=0.10s (cpu 0.08s)'
+        \(Self.clock("done"))
+        """)
+    }
+
+    func script(_ body: String) throws -> URL {
+        let url = scratch.url("fake-chat-bench")
+        try "#!/bin/bash\n\(body)\n".write(to: url, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
         return url
     }
 
-    func settle(_ build: URL) throws -> (status: Int32, output: String) {
+    func settle(_ build: URL, _ options: [String] = ["-n", "1", "-j", "1"]) throws -> (status: Int32, output: String) {
         let transcript = scratch.url("t.jsonl")
         FileManager.default.createFile(atPath: transcript.path, contents: Data("{}\n".utf8))
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
-        process.arguments = [ChatBenchTests.repo.appendingPathComponent("scripts/chat-bench-settle.sh").path, "-n", "1", "-j", "1", "-b", build.path,
-                             "-o", scratch.url("outputs").path, "-w", "700", "-s", "top", "-v", "plain", transcript.path, transcript.path]
+        process.arguments = [ChatBenchTests.repo.appendingPathComponent("scripts/chat-bench-settle.sh").path] + options + ["-b", build.path,
+                             "-o", outputs.path, "-w", "700", "-s", "top", "-v", "plain", transcript.path, transcript.path]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -354,6 +382,62 @@ struct ChatBenchSettleScriptTests {
     }
 
     func runs(_ url: URL) -> Int { ((try? String(contentsOf: url, encoding: .utf8)) ?? "").split(separator: "\n").count }
+
+    /// When each run (every attempt) began `phase`, from their outputs' clock lines, in order: the script's launching,
+    /// the bench's opening.
+    func clocks(_ phase: String) throws -> [Double] {
+        let out = outputs.appendingPathComponent("out")
+        return try FileManager.default.contentsOfDirectory(atPath: out.path).flatMap { name in
+            try String(contentsOf: out.appendingPathComponent(name), encoding: .utf8).split(separator: "\n")
+                .compactMap { $0.wholeMatch(of: #/  clock ([\d.]+): (.+)/#).flatMap { $0.2 == phase ? Double($0.1) : nil } }
+        }.sorted()
+    }
+
+    func gaps(_ clocks: [Double]) -> [Double] { zip(clocks.dropFirst(), clocks).map { $0 - $1 } }
+
+    /// Started together, six runs reached the first open and page 2 in the same instant and starved six at a time
+    /// (2026-10-20): each run starts STAGGER seconds after the last one did, and each line says when it opened.
+    @Test func theRunsStartStaggered() throws {
+        let run = try settle(try passingBuild(launch: 0), ["-n", "4", "-j", "4", "-S", "1"])
+        #expect(run.status == 0, "\(run.output)")
+        #expect(run.output.matches(of: #/#\d +open at \d\d:\d\d:\d\d\.\d\d +status=0 settled/#).count == 4, "\(run.output)")
+        #expect(run.output.contains("openings: 4, the closest two "), "\(run.output)")
+        // The starts are the stagger apart, and a start is half of it after the last one's opening: the launch varies from
+        // one run to the next (the fake's first: 0.6 s with the other tests running, the others' 0.03 s).
+        let starts = try clocks("launching"), openings = try clocks("opening")
+        #expect(starts.count == 4 && openings.count == 4)
+        #expect(gaps(starts).allSatisfy { $0 >= 0.99 }, "\(gaps(starts))")
+        #expect(gaps(openings).allSatisfy { $0 >= 0.5 }, "\(gaps(openings))")
+    }
+
+    /// And half the stagger after the last one started has opened: a launch slower than the stagger doesn't put two
+    /// openings together.
+    @Test func aRunStartsOnceTheLastOneOpened() throws {
+        let run = try settle(try passingBuild(launch: 1.2), ["-n", "3", "-j", "3", "-S", "0.3"])
+        #expect(run.status == 0, "\(run.output)")
+        let openings = try clocks("opening")
+        #expect(openings.count == 3)
+        #expect(gaps(openings).allSatisfy { $0 >= 1.2 }, "\(gaps(openings))")
+    }
+
+    /// A starved attempt's record: its tick's wall and CPU time and its clock, the load and the threads runnable then, and
+    /// how many of the other runs were opening or paging back (two runs paging for 2 s, 0.5 s apart, overlap).
+    @Test func aStarvedAttemptIsRecordedWithWhyItWasOffTheCPU() throws {
+        let runs = scratch.url("runs")
+        let run = try settle(try fakeBuild(paging: 2, runs: runs), ["-n", "2", "-j", "2", "-S", "0.5"])
+        #expect(run.status == 0, "\(run.output)")
+        #expect(self.runs(runs) == 4)
+        #expect(run.output.contains("starved: 2 first attempts run again, 2 recorded starved (status=starved)"), "\(run.output)")
+        let record = #/top/700/plain #[12], (first attempt|second attempt too \(recorded\)), starved on page 2 at t=12 s \(\d\d:\d\d:\d\d\.\d\d\): 1\.00 s with 0\.10 s CPU, at load [\d.]+, \d+ threads runnable; (\d) other runs? opening or paging/#
+        let records = run.output.matches(of: record)
+        #expect(records.count == 4, "\(run.output)")
+        #expect(run.output.contains("1 other run opening or paging (page 2 ×1)"), "\(run.output)")
+        let file = try String(contentsOf: outputs.appendingPathComponent("starved.txt"), encoding: .utf8)
+        #expect(file.matches(of: record).count == 4, "\(file)")
+        // The sampler's lines: the clock, the 1-minute load and the threads runnable.
+        let load = try String(contentsOf: outputs.appendingPathComponent("load.txt"), encoding: .utf8)
+        #expect(load.split(separator: "\n").first?.wholeMatch(of: #/[\d.]+ [\d.]+ \d+/#) != nil, "\(load)")
+    }
 
     @Test func aStarvedLongestTickIsRunAgainAndPassesStarved() throws {
         let runs = scratch.url("runs")
