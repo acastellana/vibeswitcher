@@ -23,32 +23,32 @@ struct SessionListView: View {
     var body: some View {
         let arranged = model.arranged
         let (sections, ended) = model.folded(arranged)
+        // The groups' headers are rows of their own, not Sections: AppKit keeps the sidebar group row under the pointer
+        // (its Show/Hide button's) without retaining it and never forgets it when the row goes, so a group that left
+        // the list while hovered (the attention grouping moving its rows, a project's last session ending) was looked
+        // up again once freed: the crash of 2026-10-23, in NSOutlineView rowForItem: under SwiftUI's diff expanding a
+        // group. Without group rows there's nothing for it to keep (SidebarDiffTests).
         List(selection: $selection) {
             ForEach(sections) { section in
-                Section {
-                    // Ended sessions of finished tasks leave with them (WL-1).
-                    ForEach(section.rows.filter { !arranged.nested.contains($0.id) || !TeamRows.isHistory($0, boards: leads.boards, now: Date()) }) { row in
-                        rowView(row, arranged: arranged)
+                HStack(spacing: 6) {
+                    Text(section.project).accessibilityAddTraits(.isHeader)
+                    Text("\(section.rows.count)").foregroundStyle(.tertiary).monospacedDigit()
+                    Spacer()
+                    if model.grouping == .projects {
+                        NewSessionMenu(folder: section.rows.first?.cwd, actions: actions)
                     }
-                } header: {
-                    HStack(spacing: 6) {
-                        Text(section.project)
-                        Text("\(section.rows.count)").foregroundStyle(.tertiary).monospacedDigit()
-                        Spacer()
-                        if model.grouping == .projects {
-                            NewSessionMenu(folder: section.rows.first?.cwd, actions: actions)
-                        }
-                    }
+                }
+                .groupHeader()
+                // Ended sessions of finished tasks leave with them (WL-1).
+                ForEach(section.rows.filter { !arranged.nested.contains($0.id) || !TeamRows.isHistory($0, boards: leads.boards, now: Date()) }) { row in
+                    rowView(row, arranged: arranged)
                 }
             }
             // Ended sessions fold away at the end (WL-1); Resume and Remove are in their menu, as anywhere.
             if !ended.isEmpty {
-                Section {
-                    if model.endedOpen {
-                        ForEach(ended) { row in rowView(row, arranged: arranged, showProject: true) }  // from any project
-                    }
-                } header: {
-                    EndedHeader(count: ended.count, open: $model.endedOpen)
+                EndedHeader(count: ended.count, open: $model.endedOpen).groupHeader()
+                if model.endedOpen {
+                    ForEach(ended) { row in rowView(row, arranged: arranged, showProject: true) }  // from any project
                 }
             }
         }
@@ -119,6 +119,16 @@ struct SessionListView: View {
     private var countText: String {
         let count = model.allRows.count
         return count == 1 ? "1 session" : "\(count) sessions"
+    }
+}
+
+private extension View {
+    /// A group's header as a row of the sidebar: a section header's type, never selected.
+    func groupHeader() -> some View {
+        font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(.secondary)
+            .padding(.top, 6)
+            .selectionDisabled()
     }
 }
 
