@@ -1023,3 +1023,5 @@
 - 2026-10-23 12:38 Update: Merged: phone replies sent once, honest ✓/✗, guarded ⏎ and arrows, pairing survives restarts — What changed:
 - 2026-10-23 12:38 Started a worker on redaction-a-slack
 - 2026-10-23 12:38 Started a worker on settle-script-staggered
+- 2026-10-23 12:52 Audit of host-orders-text-enter: complete, clean, round 1: 1 Important open, 1 Nit open
+- 2026-10-23 12:53 Review of redaction-a-slack: audit
