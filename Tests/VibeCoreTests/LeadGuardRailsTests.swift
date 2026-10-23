@@ -505,7 +505,9 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         // An untracked file left in the worktree is named in the report, never removed: the brief no longer asks for it,
         // and neither does the audit's word to the lead about leftovers.
         #expect(brief.contains("If an untracked file is left there anyway, don't rm it: name it in your report"))
-        for words in ["remove your leftovers", "the lead has you remove", "lists nothing untracked"] {
+        #expect(brief.contains("Cleanup removes them with the worktree, so don't rm what's there: name a big one in your report"))
+        for words in ["remove your leftovers", "the lead has you remove", "lists nothing untracked", "delete big files",
+                      "delete big scratch files", "once you're done with them"] {
             #expect(!brief.contains(words), "\(words)")
         }
         let note = LeadToolset.leftoversText([Worktrees.Leftover(path: "x.out", bytes: 2)])

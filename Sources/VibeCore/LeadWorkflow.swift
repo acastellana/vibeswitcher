@@ -720,7 +720,8 @@ public enum LeadPrompts {
         don't push, don't delete branches; the lead merges. At each milestone (a part working, checks \
         passing, what's next), call progress with one line: the lead and the user see it on your task's lane. \
         Keep your temporary folder small: build or download into the worktree's git-ignored build folders, not your \
-        scratchpad, and delete big files there once you're done with them (a full disk stops every session). Any \
+        scratchpad. Cleanup removes them with the worktree, so don't rm what's there: name a big one in your report \
+        (a full disk stops every session). Any \
         other scratch (test homes, bench output, notes) goes in your session's TMPDIR or your scratchpad, never inside \
         the worktree. If an untracked file is left there anyway, don't rm it: name it in your report (the merge \
         takes only commits, and cleanup removes the worktree).
