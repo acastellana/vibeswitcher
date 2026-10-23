@@ -1031,3 +1031,5 @@
 - 2026-10-23 13:18 Started a worker on composerdeliverytests
 - 2026-10-23 13:21 Merged redaction-a-slack: Redaction: a Slack webhook path is masked whole even when a broader rule matches part of it first
 - 2026-10-23 13:32 Update: Merged: redaction masks a Slack webhook (and other shapes holding a 40-character run) whole — What changed: in Redaction.swift the bare AWS-secret rule now runs after the token shapes. Before, a Slack webhook path, Discord/GitLab/PyPI token or SendGrid key containing a run of exactly 40 base64…
+- 2026-10-23 13:42 Audit of host-orders-text-enter: complete, clean, round 3: 2 Important closed, 1 Nit closed
+- 2026-10-23 14:13 Merged composerdeliverytests: ComposerDeliveryTests.afterTheAgentExitsToAShellNothingIsTypedIntoIt flakes in the full suite (no audit: review none)
