@@ -726,6 +726,9 @@ final class Harness {
         h.chat.show(path: h.transcript.path, key: h.key)
         #expect(await until(timeout: Harness.wait) { h.chat.state == .ready })
         try await h.paneShows { $0.contains("? for shortcuts") }
+        // The agent draws before it writes its state: its first screen can be up while `agent` is still empty (its pid
+        // read nil under load, 2026-10-23).
+        try await h.waitFor { h.agent["pid"] != nil }
         return h
     }
 
