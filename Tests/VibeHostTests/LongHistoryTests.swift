@@ -73,7 +73,7 @@ import Testing
     /// An ended session keeps its last 500 lines, more than its parser had.
     @Test func anEndedSessionKeepsItsLast500Lines() throws {
         let probe = SessionProbe()
-        let request = SpawnRequest(cwd: "/tmp", command: "\(Self.numbered(1_000)); exit 0", env: [:], cols: 80, rows: 24,
+        let request = SpawnRequest(cwd: scratchRoot.path, command: "\(Self.numbered(1_000)); exit 0", env: [:], cols: 80, rows: 24,
                                    keepShell: false, label: "Test", agent: nil)
         let session = try probe.queue.sync {
             let session = try HostedSession.spawn(request, shell: "/bin/sh", launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin"],
