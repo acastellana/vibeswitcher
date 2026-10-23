@@ -1039,3 +1039,11 @@
 - 2026-10-23 14:40 Merged host-orders-text-enter: Host orders text+Enter units from every writer (MCP server included)
 - 2026-10-23 14:40 Update: Merged: the host orders text+Enter units from every writer — What changed: a new host request, inputUnit (capability `inputUnits`), carries a writer's text and Enter as one unit. The host's InputOrder keeps each session's input in order: a unit's writes go in i…
 - 2026-10-23 14:48 Merged settle-script-staggered: Settle script: staggered job starts and a reason recorded for each starved tick (no audit: review none)
+- 2026-10-23 14:48 Update: Merged: settle script staggers job starts and records why a run starved — What changed: scripts/chat-bench-settle.sh starts runs through one gate (-S, default 2 s; 0 turns it off) so openings don't pile up; a 1 s sampler writes load and runnable threads to load.txt; every s…
+- 2026-10-23 14:50 Planned memory-the-host-parser: Memory: the host parser keeps a small scrollback; phone history is served on demand
+- 2026-10-23 14:50 Planned memory-the-app-s: Memory: the app's terminal views don't each hold 10,000 lines
+- 2026-10-23 14:50 Planned workers-and-verifiers: Workers and verifiers aren't counted as the user's sessions
+- 2026-10-23 14:50 Started a worker on memory-the-host-parser
+- 2026-10-23 14:50 Started a worker on memory-the-app-s
+- 2026-10-23 14:51 Started a worker on workers-and-verifiers
+- 2026-10-23 14:53 Merged new-tests-are-proven: New tests are proven under load before a worker reports done (no audit: review none)
