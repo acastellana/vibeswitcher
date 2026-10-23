@@ -470,6 +470,22 @@ public enum LeadPrompts {
         + "each. It stops a command still running after 60 min (exit 124): give a longer one `--timeout 2h`. Focused tests "
         + "(one file, a filter) don't need it."
 
+    /// What workers and verifiers are told about their scratch files: twice on 2026-10-23 a worker's
+    /// `...; rm -f $TMPDIR/*.out` waited on a permission prompt until the user answered it. The lead can't answer one,
+    /// and its messages reach a session only after it's answered. The TMPDIR goes with the session
+    /// (`SessionTemp.sweep`), and both it and the scratchpad with the task's cleanup.
+    public static let scratchFiles = "Scratch files: leave what's in your TMPDIR and your scratchpad where it is; don't rm it. "
+        + "Both go when your session ends or the task is cleaned up, and a removal outside the worktree waits on a "
+        + "permission prompt only the user can answer (the lead can't, and its messages reach you only after it's answered)."
+
+    /// What workers and verifiers are told about debuggers (`LeadLaunch.debuggers` refuses the usual ones): on
+    /// 2026-10-23 a worker's lldb put a password dialog on the user's screen and stalled two merges behind it.
+    public static let debuggers = "Debuggers: never attach one or run a tool that inspects another process (lldb, debugserver, "
+        + "sample, leaks, heap, vmmap, dtrace: anything that takes its task port, task_for_pid) outside the test suite's "
+        + "own checks. With Developer mode off, macOS puts a Developer Tools Access password dialog on the user's screen, "
+        + "and every leaks and sample on this Mac waits behind it. For a crash, read its report in "
+        + "~/Library/Logs/DiagnosticReports; for compiled code, `dyld_info -disassemble`."
+
     /// The user's working policy (2026-10-21): one agent owns each change through completion; an audit only where the
     /// risk calls for one; the tests a change affects while editing, and the merge's run as the one full suite; a
     /// re-audit checks only what is still open; cosmetic findings never block and never become tasks. Each role's
@@ -704,9 +720,11 @@ public enum LeadPrompts {
         don't push, don't delete branches; the lead merges. At each milestone (a part working, checks \
         passing, what's next), call progress with one line: the lead and the user see it on your task's lane. \
         Keep your temporary folder small: build or download into the worktree's git-ignored build folders, not your \
-        scratchpad, and delete big scratch files once you're done with them (a full disk stops every session). Any \
+        scratchpad, and delete big files there once you're done with them (a full disk stops every session). Any \
         other scratch (test homes, bench output, notes) goes in your session's TMPDIR or your scratchpad, never inside \
         the worktree: an untracked file there is a leftover the lead has you remove.
+        \(scratchFiles) A file your change deletes goes with `git rm <path>`.
+        \(debuggers)
         Processes: stop one you started by its pid (`kill <pid>`; `$!` or `pgrep -f <your worktree path>` finds it). \
         pkill and killall are refused: their patterns match the other sessions on this Mac too.
         \(loadTests)
@@ -920,6 +938,8 @@ public enum LeadPrompts {
         \(notesRule)
         \(loadTests) Reproduce at the contract's load and stop there.
         \(heavyWork)
+        \(scratchFiles)
+        \(debuggers)
         Then call submit_audit with: completion complete / incomplete / blocked; integrity clean, suspect (you're not \
         sure) or violation (edits outside the boundaries the lead's notes don't accept, tests weakened, results faked, files you changed); a \
         summary with the evidence (commands run and their results); and findings, one for each problem you found, \

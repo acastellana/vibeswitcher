@@ -457,6 +457,56 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         #expect(brief.contains("pkill"))
     }
 
+    // MARK: Scratch files stay, debuggers stay out (2026-10-23)
+
+    /// Twice a worker's `...; rm -f $TMPDIR/*.out` sat on a permission prompt until the user answered it: the lead can't
+    /// answer one. A worker and a verifier are told their TMPDIR's and scratchpad's files stay (they go at cleanup), and
+    /// a worker removes a file of its worktree's with `git rm`; no rule lets rm through anywhere, so a removal elsewhere
+    /// still asks (a verifier's is refused). And a worker's lldb put a Developer Tools Access dialog on the user's screen:
+    /// both are told never to attach one, and the usual ones are refused.
+    @Test func scratchFilesStayAndRmElsewhereStillAsksAndDebuggersAreRefused() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        let worktree = try reported(lead, runtime, root: root)
+        _ = lead.call("audit", ["task": "add-b"])
+        let other = Worktrees.path(root: root, slug: "other")
+        for name in ["worker-add-b", "verify-add-b"] {
+            let rules = try permissions(name, runtime)
+            let brief = String(decoding: try launchFile("--append-system-prompt-file", name, runtime), as: UTF8.self)
+            let spawn = try #require(runtime.spawned.last { $0.command.contains("--name '\(name)'") })
+            let tmpdir = try #require(runtime.environments[spawn.id]?["TMPDIR"])
+            // Explained away: the TMPDIR's files stay.
+            #expect(brief.contains(LeadPrompts.scratchFiles), "\(name)")
+            for words in ["TMPDIR", "scratchpad", "don't rm", "cleaned up", "permission prompt"] {
+                #expect(LeadPrompts.scratchFiles.contains(words), "\(words)")
+            }
+            // No rule lets rm through: in the TMPDIR it isn't needed, anywhere else it asks.
+            #expect(!rules.allow.contains { $0 == "Bash" || $0.hasPrefix("Bash(*") || $0.hasPrefix("Bash(rm") }, "\(name): \(rules.allow)")
+            for command in ["rm -f $TMPDIR/x", "rm -f \(tmpdir)x", "rm -f $TMPDIR/*.log $TMPDIR/new_send.swift", "rm -f ~/x", "rm -rf ~/",
+                            "rm -f \(other)/b.txt", "rm -f \(root)/a.txt", "rm -f ../../../a.txt", "rm -f \(worktree)/b.txt"] {
+                #expect(!Self.allowed(command, by: rules), "\(name): \(command)")
+            }
+            // Debuggers: said, and refused.
+            #expect(brief.contains(LeadPrompts.debuggers), "\(name)")
+            for words in ["lldb", "sample", "leaks", "dtrace", "task_for_pid", "outside the test suite's own checks", "Developer Tools Access"] {
+                #expect(LeadPrompts.debuggers.contains(words), "\(words)")
+            }
+            for command in ["lldb -p 4242", "xcrun lldb -p 4242", "debugserver localhost:1 --attach=4242", "sample 4242 1",
+                            "leaks 4242", "leaks --atExit -- .build/debug/x", "heap 4242", "vmmap 4242", "dtrace -p 4242", "sudo dtrace -n x"] {
+                #expect(Self.denied(command, by: rules.deny), "\(name): \(command)")
+            }
+        }
+        // A worker removes a file of its worktree's with git rm (never the lead's records); a verifier removes nothing.
+        let worker = try permissions("worker-add-b", runtime), verifier = try permissions("verify-add-b", runtime)
+        #expect(Self.allowed("git rm b.txt", by: worker))
+        #expect(LeadPrompts.worker(task: try #require(BoardStore(root: root).load().task("add-b")), root: root, workflow: LeadWorkflow())
+            .contains("`git rm <path>`"))
+        let records = LeadLaunch.deny(.worker, base: "main", records: "docs/lead")
+        for command in ["git rm docs/lead/board.md", "git rm -r -- docs/lead/board.md"] { #expect(Self.denied(command, by: records), "\(command)") }
+        for command in ["git rm b.txt", "rm b.txt"] { #expect(Self.denied(command, by: verifier.deny), "verifier: \(command)") }
+    }
+
     // MARK: A worker brings its own branch up to date
 
     /// A file a session was started with (`--settings`, `--append-system-prompt-file`).

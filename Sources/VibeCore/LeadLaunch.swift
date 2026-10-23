@@ -44,12 +44,23 @@ public enum LeadLaunch {
     /// role's `--name`), every tool server and the app ("cat" is in /Applications). `kill <pid>` stays open.
     static let killsByName = ["Bash(pkill:*)", "Bash(killall:*)", "Bash(/usr/bin/pkill:*)", "Bash(/usr/bin/killall:*)"]
 
+    /// Debuggers and the other tools that take another process's task port (task_for_pid). With Developer mode off,
+    /// macOS asks for the user's password in a "Developer Tools Access" dialog on their screen, and every leaks and
+    /// sample on the Mac waits behind it: on 2026-10-23 a worker's lldb stalled two merges. The test suite's own leak
+    /// checks run them from inside the tests, which these rules don't see (`LeadPrompts.debuggers`).
+    static let debuggers = ["Bash(lldb:*)", "Bash(xcrun lldb:*)", "Bash(/usr/bin/lldb:*)", "Bash(debugserver:*)", "Bash(gdb:*)",
+                            "Bash(sample:*)", "Bash(/usr/bin/sample:*)", "Bash(leaks:*)", "Bash(/usr/bin/leaks:*)", "Bash(heap:*)",
+                            "Bash(vmmap:*)", "Bash(malloc_history:*)", "Bash(dtrace:*)", "Bash(dtruss:*)",
+                            "Bash(sudo dtrace:*)", "Bash(sudo dtruss:*)"]
+
     /// What each role may not do. `records`: the workflow's `records_dir`, which only the lead's tool server writes
     /// (and commits to the base branch): a worker editing it would conflict with those commits.
     public static func deny(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
         switch role {
-        case .lead, .verifier:
+        case .lead:
             return readOnly + gitWrites + gitAround + fileWrites + privateFiles + killsByName
+        case .verifier:
+            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + killsByName + debuggers
         case .worker:
             // Edits and commits on its own branch, and brings it up to date with the lead's (`git merge <base>`, what
             // the brief gives, or `git rebase <base>`); nothing that moves the lead's branch or another one. Rebase and merge only move
@@ -69,8 +80,11 @@ public enum LeadLaunch {
                       "Bash(git switch --ignore-other-worktrees:*)", "Bash(git branch -f:*)", "Bash(git branch --force:*)",
                       "Bash(git branch -m:*)", "Bash(git branch -M:*)", "Bash(git commit-tree:*)"]
             rules += ["Bash(git branch -D:*)", "Bash(git branch -d:*)", "Bash(git worktree:*)", "Bash(git tag:*)", "Bash(git commit --amend:*)"]
-            if let records { rules += ["Edit(\(records)/**)", "Write(\(records)/**)", "Bash(git add \(records)*)", "Bash(git rm \(records)*)"] }
-            return rules + gitAround + privateFiles + killsByName
+            if let records {
+                rules += ["Edit(\(records)/**)", "Write(\(records)/**)", "Bash(git add \(records)*)", "Bash(git rm \(records)*)",
+                          "Bash(git rm * \(records)*)"]
+            }
+            return rules + gitAround + privateFiles + killsByName + debuggers
         }
     }
 
@@ -80,12 +94,13 @@ public enum LeadLaunch {
 
     /// What each role may do without asking, the deny rules permitting: its VibeSwitcher tools (they never wait on a
     /// prompt, whether or not auto mode, the default since Claude Code 2.1.284, is on), reading git at any time
-    /// (after a denied command too), and for a worker, committing and bringing its branch up to date with `base`.
+    /// (after a denied command too), and for a worker, committing, removing a file its change deletes (`git rm`: only
+    /// files git tracks in this checkout, so nothing outside its worktree), and bringing its branch up to date with `base`.
     public static func allow(_ role: Role, base: String? = nil) -> [String] {
         let reads = [ownTools, "Bash(git log:*)", "Bash(git diff:*)", "Bash(git status:*)", "Bash(git show:*)", "Bash(git rev-parse:*)",
                      "Bash(git merge-base:*)", "Bash(git ls-files:*)", "Bash(git blame:*)", "Bash(git branch --show-current)"]
         guard role == .worker else { return reads }
-        var rules = reads + ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git rebase --continue)", "Bash(git rebase --abort)",
+        var rules = reads + ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git rm:*)", "Bash(git rebase --continue)", "Bash(git rebase --abort)",
                              "Bash(git rebase --skip)", "Bash(git merge --continue)", "Bash(git merge --abort)"]
         if let base { rules += ["Bash(git rebase \(base))", "Bash(git merge \(base))", "Bash(git merge --no-edit \(base))"] }
         return rules
