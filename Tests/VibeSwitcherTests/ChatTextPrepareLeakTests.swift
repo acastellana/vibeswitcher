@@ -15,18 +15,72 @@ import Testing
 struct ChatTextPrepareLeakTests {
     let scratch = Scratch()
 
-    /// The leaks `leaks` finds in process `pid` (`nil` when it can't look).
-    static func leakCount(_ pid: Int32) -> (count: Int, text: String)? {
+    /// How long `leaks` may take to look at the bench (1-5 s at load 14) before it's ended: 2026-10-23 two runs sat 24
+    /// min behind one at 0 % CPU. An lldb attach had put up the "Developer Tools Access" password dialog (authd's
+    /// system.privilege.taskport.debug, asked by taskgated) and every `leaks` and `sample` after it waited behind it.
+    static let leaksLimit: TimeInterval = 120
+
+    /// Why `leaks` gave no count.
+    enum LeaksFailure: Error, CustomStringConvertible {
+        case couldNotRun(String)
+        case timedOut(seconds: TimeInterval, pid: Int32)
+        case noCount(String)
+
+        var description: String {
+            switch self {
+            case .couldNotRun(let error): "leaks couldn't run: \(error)"
+            case .timedOut(let seconds, let pid):
+                "leaks (pid \(pid)) gave no answer in \(Int(seconds)) s and was ended, so it couldn't look. Is a Developer "
+                    + "Tools Access password dialog waiting on the screen? An attach (lldb, sample) puts one up and leaks waits behind it."
+            case .noCount(let output): "leaks gave no count:\n\(output.prefix(4000))"
+            }
+        }
+    }
+
+    /// The leaks `leaks` finds in process `pid`, or why it couldn't look; `leaks` is ended after `limit` seconds. `tool`
+    /// stands in for /usr/bin/leaks in the test of that bound, given `pid` as its one argument as leaks is.
+    static func leakCount(_ pid: Int32, tool: String = "/usr/bin/leaks",
+                          limit: TimeInterval = leaksLimit) throws -> (count: Int, text: String) {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/leaks")
+        process.executableURL = URL(fileURLWithPath: tool)
         process.arguments = ["\(pid)"]
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
-        guard (try? process.run()) != nil else { return nil }
-        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
-        return output.firstMatch(of: #/: (\d+) leaks? for /#).flatMap { Int($0.1) }.map { ($0, output) }
+        let ended = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in ended.signal() }
+        do { try process.run() } catch { throw LeaksFailure.couldNotRun("\(error)") }
+        // Read as it writes (its report can outgrow the pipe), off this thread so the wait below can give up.
+        let read = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var data = Data()
+        Thread.detachNewThread {
+            data = pipe.fileHandleForReading.readDataToEndOfFile()
+            read.signal()
+        }
+        if ended.wait(timeout: .now() + limit) == .timedOut {
+            kill(process.processIdentifier, SIGKILL)
+            ended.wait()
+            throw LeaksFailure.timedOut(seconds: limit, pid: process.processIdentifier)
+        }
+        read.wait()
+        let output = String(decoding: data, as: UTF8.self)
+        guard let count = output.firstMatch(of: #/: (\d+) leaks? for /#).flatMap({ Int($0.1) }) else {
+            throw LeaksFailure.noCount(output)
+        }
+        return (count, output)
+    }
+
+    @Test func leaksIsEndedWhenItGivesNoAnswer() throws {
+        let start = Date()
+        // /bin/sleep given 600 for a pid: a leaks that never answers.
+        #expect {
+            try Self.leakCount(600, tool: "/bin/sleep", limit: 1)
+        } throws: { error in
+            guard case .timedOut(let seconds, let pid)? = error as? LeaksFailure else { return false }
+            return seconds == 1 && kill(pid, 0) == -1 && errno == ESRCH
+                && "\(error)".contains("gave no answer in 1 s and was ended")
+        }
+        #expect(Date().timeIntervalSince(start) < 30)
     }
 
     @Test func buildingTextsOnEightThreadsLeaksNothing() throws {
@@ -46,18 +100,26 @@ struct ChatTextPrepareLeakTests {
         process.standardInput = input
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice
+        let ended = DispatchGroup()
+        ended.enter()
+        process.terminationHandler = { _ in ended.leave() }
         try process.run()
+        // A bench that hangs (or is left suspended) is killed after hangGuard: the reads below then end and so does this.
+        let pid = process.processIdentifier
+        DispatchQueue.global().async {
+            if ended.wait(timeout: .now() + hangGuard) == .timedOut { kill(pid, SIGKILL) }
+        }
         defer {
             try? input.fileHandleForWriting.close()
-            process.waitUntilExit()
+            ended.wait()
         }
         let lines = LineReader(output.fileHandleForReading)
         let ready = try #require(lines.next())
         #expect(ready == "ready 160 texts", "\(ready)")
-        let before = try #require(Self.leakCount(process.processIdentifier), "leaks couldn't look at the bench")
+        let before = try Self.leakCount(process.processIdentifier)
         input.fileHandleForWriting.write(Data("go\n".utf8))
         #expect(lines.next() == "built")
-        let after = try #require(Self.leakCount(process.processIdentifier))
+        let after = try Self.leakCount(process.processIdentifier)
         print("leaks: \(before.count) before building, \(after.count) after")
         #expect(after.count <= before.count, "leaks: \(before.count) before building, \(after.count) after\n\(after.text.prefix(4000))")
     }
