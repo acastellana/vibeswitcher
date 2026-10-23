@@ -70,6 +70,28 @@ import Testing
         #expect(eventually { ParserCostTests.parsers(of: host.pid).count == 1 }, "the history read's parser is left")
     }
 
+    /// Lines printed before a clear (Ctrl-L) or a full-screen pager or editor (the alternate screen) still come back,
+    /// as they did from the long-lived parser's scrollback: the read takes all the replay buffer holds, not only what
+    /// follows its last reset.
+    @Test(arguments: ["\\033[2J\\033[H", "\\033[?1049hin the pager\\n\\033[?1049l"])
+    func linesBeforeAClearOrAPagerComeBack(reset: String) throws {
+        let host = try ScratchHostProcess()
+        let (client, _, _, _, _, _, _) = try TestClient.welcomed(host.socket, appKey: host.appKey)
+        let session = try client.spawn("\(Self.numbered(1_000)); printf '\(reset)'; printf 'after-%s\\n' 1 2 3; echo after-done; \(keepRunning)")
+        defer {
+            kill(-session.childPID, SIGKILL)
+            host.stop()
+        }
+        #expect(eventually { client.screen(session.id)?.contains("after-done") == true })
+        let seq = client.send(.history(id: session.id, lines: 5_000))
+        #expect(eventually { client.reply(to: seq) != nil })
+        guard case .historyText(_, let history, _) = client.reply(to: seq) else { Issue.record("no history reply"); return }
+        // The lines the clear wiped off the screen are gone, as in any terminal; those above it are all there.
+        let numbers = Self.numbers(history).compactMap { $0 }
+        #expect(numbers.first == 1, "\(history.prefix(300))")
+        #expect(numbers.count > SessionParser.scrollback && Self.consecutive(numbers), "\(numbers.count) lines: \(history.suffix(300))")
+    }
+
     /// An ended session keeps its last 500 lines, more than its parser had.
     @Test func anEndedSessionKeepsItsLast500Lines() throws {
         let probe = SessionProbe()

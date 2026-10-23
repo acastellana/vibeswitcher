@@ -40,6 +40,17 @@ struct OutputRingTests {
         #expect(ring.replay() == data("bbbbbbbbbb\ncc"))
     }
 
+    /// What history is read from: everything held, resets or not; once older output was dropped, from a line start.
+    @Test func heldGoesPastResetsAndStartsAtALineStart() {
+        var ring = OutputRing(capacity: 1024)
+        ring.append(data("old\n\u{1b}[2Jfirst\u{1b}[?1049hpager\u{1b}[?1049lback"))
+        #expect(ring.held() == data("old\n\u{1b}[2Jfirst\u{1b}[?1049hpager\u{1b}[?1049lback"))
+        var small = OutputRing(capacity: 16)
+        small.append(data("\u{1b}]0;a title\u{7}aaa\nbb\u{1b}[2Jcccccccc\ndd"))   // 33 bytes > 16 + 4: trims to the last 16
+        // Kept: "b\u{1b}[2Jcccccccc\ndd"; held skips the partial first line.
+        #expect(small.held() == data("dd"))
+    }
+
     @Test func resetsInDroppedOutputAreForgotten() {
         var ring = OutputRing(capacity: 16)
         ring.append(data("\u{1b}[2Jxxxxxxxxxxxxxxxxxxxxxxxxx\nyy"))

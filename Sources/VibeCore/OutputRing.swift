@@ -51,6 +51,15 @@ public struct OutputRing: Sendable {
         }
     }
 
+    /// Everything still held, past resets too: the lines a clear, a pager or an editor left in the scrollback (see
+    /// the host's `HistoryRead`). Once older output was dropped it starts at the first line start, as `replay` does: a
+    /// fresh parser fed it starts on a line, not in the middle of an escape sequence or a character.
+    public func held() -> Data {
+        guard base > 0 else { return bytes }
+        guard let newline = bytes.firstIndex(of: 0x0a) else { return Data() }
+        return Data(bytes[(newline + 1)...])
+    }
+
     /// From the latest reset still held; else, once older output was dropped, from the first line start;
     /// else everything. At most `limit` bytes: beyond that it starts at the first line start inside the
     /// last `limit` bytes (the program redraws its screen after a re-attach, so older output only feeds

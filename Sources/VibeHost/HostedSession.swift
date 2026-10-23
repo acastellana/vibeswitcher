@@ -631,7 +631,7 @@ public final class HostedSession {
         if let ended = endedView(historyLines: historyLines) { return completion(ended) }
         guard let asked = parser else { return completion(fallbackView(historyLines: historyLines)) }
         if let lines = historyLines, lines > SessionParser.scrollback, let ring {
-            return longView(lines: lines, replay: ring.replay(), completion)
+            return longView(lines: lines, replay: ring.held(), completion)
         }
         asked.view(historyLines: historyLines) { [weak self] view in
             guard let self else { return }
@@ -646,7 +646,7 @@ public final class HostedSession {
     }
 
     /// More lines than the parser keeps: the screen and the lines it keeps from the parser, and the rest from a
-    /// `HistoryRead` of the replay buffer as it is now, which the parser's view also reflects (it answers after
+    /// `HistoryRead` of all the replay buffer holds now (past its resets: lines before a clear or a pager count), which the parser's view also reflects (it answers after
     /// everything fed before). The parser's lines when the read fails or has fewer (a replay buffer that lost its start).
     private func longView(lines: Int, replay: Data, _ completion: @escaping (ParserView) -> Void) {
         var short: ParserView?, long: String?
@@ -685,7 +685,7 @@ public final class HostedSession {
             let short = viewNow(historyLines: SessionParser.scrollback)
             let done = DispatchSemaphore(value: 0)
             nonisolated(unsafe) var long: String?
-            let read = HistoryRead(replay: ring.replay(), lines: lines, cols: info.cols, rows: info.rows, launcher: launcher, options: parserOptions) {
+            let read = HistoryRead(replay: ring.held(), lines: lines, cols: info.cols, rows: info.rows, launcher: launcher, options: parserOptions) {
                 long = $0
                 done.signal()
             }
