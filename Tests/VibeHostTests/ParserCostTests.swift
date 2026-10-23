@@ -41,17 +41,47 @@ struct ParserCostTests {
         return Sample(rss: rss, footprint: footprint, cpu: cpu)
     }
 
-    static func run(_ tool: String, _ arguments: [String]) -> String {
+    /// How long `tool` may take before it's ended: footprint, like leaks, waits with no end behind a Developer Tools
+    /// Access password dialog an attach (lldb, sample) puts up (2026-10-23, see ChatTextPrepareLeakTests.leaksLimit).
+    static let toolLimit: TimeInterval = 120
+
+    /// What `tool` prints, "" (and an issue) when it gives no answer within `limit` seconds and is ended.
+    static func run(_ tool: String, _ arguments: [String], limit: TimeInterval = toolLimit) -> String {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: tool)
         process.arguments = arguments
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = FileHandle.nullDevice
-        try? process.run()
-        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        process.waitUntilExit()
-        return output
+        let ended = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in ended.signal() }
+        guard (try? process.run()) != nil else { return "" }
+        let read = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var data = Data()
+        Thread.detachNewThread {
+            data = pipe.fileHandleForReading.readDataToEndOfFile()
+            read.signal()
+        }
+        if ended.wait(timeout: .now() + limit) == .timedOut {
+            kill(process.processIdentifier, SIGKILL)
+            ended.wait()
+            Issue.record(Comment(rawValue: "\(tool) (pid \(process.processIdentifier)) gave no answer in \(Int(limit)) s and was ended. "
+                                 + "Is a Developer Tools Access password dialog waiting on the screen? An attach (lldb, sample) puts one "
+                                 + "up and it waits behind it."))
+            return ""
+        }
+        read.wait()
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    @Test func aToolThatGivesNoAnswerIsEnded() {
+        let start = Date()
+        withKnownIssue {
+            #expect(Self.run("/bin/sleep", ["600"], limit: 1) == "")
+        } matching: { issue in
+            issue.comments.contains { $0.rawValue.hasPrefix("/bin/sleep") && $0.rawValue.contains("gave no answer in 1 s and was ended") }
+        }
+        #expect(Date().timeIntervalSince(start) < 30)
     }
 
     static func parsers(of host: pid_t) -> [pid_t] {
