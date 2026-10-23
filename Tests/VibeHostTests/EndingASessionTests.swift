@@ -63,9 +63,14 @@ struct EndingASessionTests {
         client.send(.kill(id: session.id))
         #expect(eventually(timeout: 10) { kill(setsid, 0) != 0 && kill(job, 0) != 0 && !carrying.isRunning },
                 "setsid \(kill(setsid, 0) == 0), job \(kill(job, 0) == 0), carrying \(carrying.isRunning)")
-        // Asked first, not killed: the 5 s mark is for what doesn't end on that.
-        // (Read only once it ended: a running process's raise.)
-        if !carrying.isRunning { #expect(carrying.terminationReason == .uncaughtSignal && carrying.terminationStatus == SIGTERM) }
+        // Asked first, not killed: the 5 s mark is for what doesn't end on that. The tool server ends on SIGTERM by
+        // itself (exit 0, as on its input's end) once it has set that up, a few ms after it started, and by the signal
+        // before: which one depends on how soon the session's SIGTERM comes, 17 ms after at a load of 16 (2026-10-23),
+        // and either is ending when asked. (Read only once it ended: a running process's raise.)
+        if !carrying.isRunning {
+            let reason = carrying.terminationReason, status = carrying.terminationStatus
+            #expect(reason == .uncaughtSignal ? status == SIGTERM : status == 0, "ended by \(reason == .uncaughtSignal ? "signal" : "exit") \(status)")
+        }
         // Past the 5 s mark too, the others run.
         Thread.sleep(until: ended.addingTimeInterval(6))
         for process in spared { #expect(process.isRunning, "\(process.executableURL?.path ?? "") was signalled") }
