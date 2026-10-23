@@ -736,7 +736,7 @@ public final class HostServer {
     /// as its agent's end would have; nothing but that build's own tool servers is touched.
     private func endOrphans() {
         // A session's program or a parser it holds is known; only another child's arguments are read.
-        let known = Set(sessions.values.compactMap(\.parserPID) + sessions.values.map { $0.info.childPID })
+        let known = Set(sessions.values.flatMap(\.parserPIDs) + sessions.values.map { $0.info.childPID })
         for child in config.endsStrayParsers ? HostProcesses.children(of: getpid()) : []
         where !known.contains(child) && HostProcesses.isParser(child) {
             log.note("host: ended parser pid \(child), which no session holds")

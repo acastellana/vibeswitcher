@@ -65,6 +65,8 @@ public final class HostedSession {
     /// What an ended session keeps: its last screen, how it was drawn, and the last lines above it.
     private var ended: (screen: String, runs: [ScreenRun], history: String)?
     static let endedHistoryLines = 500
+    /// Reads of more history than the parser keeps, under way (see `longView`).
+    private var historyReads: [HistoryRead] = []
     private var readSource: DispatchSourceRead?
     private var writeSource: DispatchSourceWrite?
     private var exitSource: DispatchSourceProcess?
@@ -435,7 +437,7 @@ public final class HostedSession {
     }
 
     /// Lets go of what only a running session needs: the PTY (from the system's pool, shared with Terminal), the
-    /// replay buffer and the parser with its 5,000 lines. Kept: the last screen and the lines just above it.
+    /// replay buffer and the parser with its lines. Kept: the last screen and the lines just above it.
     /// Whatever the program left running on the terminal loses it, as when a Terminal tab closes.
     private func release(with view: ParserView) {
         guard ended == nil else { return }
@@ -446,12 +448,13 @@ public final class HostedSession {
         close()
     }
 
-    /// Ends the parser and its watchdog.
+    /// Ends the parser and its watchdog, and any history read under way (its view falls back on the parser's lines).
     private func stopParser() {
         parser?.stop()
         parser = nil
         watchdog?.cancel()
         watchdog = nil
+        historyReads.forEach { $0.cancel() }
     }
 
     /// The parser goes before a handover's exec (the new build starts its own): no parser process is left behind
@@ -464,10 +467,10 @@ public final class HostedSession {
     }
 
     /// Whether it still holds a running session's PTY, replay buffer or parser.
-    var holdsLiveResources: Bool { !closed || parser != nil || ring != nil }
+    var holdsLiveResources: Bool { !closed || parser != nil || ring != nil || !historyReads.isEmpty }
 
-    /// The parser's process id, nil when it has none.
-    var parserPID: pid_t? { parser?.pid }
+    /// Its parsers' process ids: the parser's and those of its history reads under way.
+    var parserPIDs: [pid_t] { (parser.map { [$0.pid] } ?? []) + historyReads.map(\.pid) }
 
     /// Replays at most 1 MB: the program redraws its screen on attach anyway (see `OutputRing.replay`). An ended
     /// session's replay draws its last screen (see `drawing`).
@@ -621,11 +624,15 @@ public final class HostedSession {
     }
 
     /// The screen, the lines above it when `historyLines` isn't nil (at most `endedHistoryLines` once the session
-    /// ended) and how the screen is drawn, once the parser got through everything printed before. Without a parser to
-    /// ask (or once it failed), what it showed last.
+    /// ended; more than the parser keeps are read from the replay buffer, see `longView`) and how the screen is drawn,
+    /// once the parser got through everything printed before. Without a parser to ask (or once it failed), what it
+    /// showed last.
     public func view(historyLines: Int?, _ completion: @escaping (ParserView) -> Void) {
         if let ended = endedView(historyLines: historyLines) { return completion(ended) }
         guard let asked = parser else { return completion(fallbackView(historyLines: historyLines)) }
+        if let lines = historyLines, lines > SessionParser.scrollback, let ring {
+            return longView(lines: lines, replay: ring.replay(), completion)
+        }
         asked.view(historyLines: historyLines) { [weak self] view in
             guard let self else { return }
             guard let view else {
@@ -638,10 +645,53 @@ public final class HostedSession {
         }
     }
 
-    /// `view`, waited for (up to 2 s, then what the parser showed last). Never on a host's queue, which `view` keeps
-    /// free: for tests.
+    /// More lines than the parser keeps: the screen and the lines it keeps from the parser, and the rest from a
+    /// `HistoryRead` of the replay buffer as it is now, which the parser's view also reflects (it answers after
+    /// everything fed before). The parser's lines when the read fails or has fewer (a replay buffer that lost its start).
+    private func longView(lines: Int, replay: Data, _ completion: @escaping (ParserView) -> Void) {
+        var short: ParserView?, long: String?
+        let both = DispatchGroup()
+        both.enter()
+        both.enter()
+        let read = HistoryRead(replay: replay, lines: lines, cols: info.cols, rows: info.rows, launcher: launcher, options: parserOptions) { history in
+            long = history
+            both.leave()
+        }
+        if let read { historyReads.append(read) } else { both.leave() }
+        view(historyLines: SessionParser.scrollback) { view in
+            short = view
+            both.leave()
+        }
+        both.notify(queue: queue) { [weak self] in
+            if let read { self?.historyReads.removeAll { $0 === read } }
+            completion(Self.longer(short ?? .empty, long, lines: lines))
+        }
+    }
+
+    /// `short` with the read's `long` history instead when that has as many lines or more, its last `lines` lines.
+    static func longer(_ short: ParserView, _ long: String?, lines: Int) -> ParserView {
+        func count(_ text: String?) -> Int { text.map { $0.isEmpty ? 0 : $0.split(separator: "\n", omittingEmptySubsequences: false).count } ?? -1 }
+        guard let long, count(long) >= count(short.history) else { return short }
+        var view = short
+        view.history = long.split(separator: "\n", omittingEmptySubsequences: false).suffix(lines).joined(separator: "\n")
+        return view
+    }
+
+    /// `view`, waited for (up to 2 s, then what the parser showed last; a long one as long as its history read takes).
+    /// Never on a host's queue, which `view` keeps free: for tests.
     func viewNow(historyLines: Int?) -> ParserView {
         if let ended = endedView(historyLines: historyLines) { return ended }
+        if let lines = historyLines, lines > SessionParser.scrollback, parser != nil, let ring {
+            let short = viewNow(historyLines: SessionParser.scrollback)
+            let done = DispatchSemaphore(value: 0)
+            nonisolated(unsafe) var long: String?
+            let read = HistoryRead(replay: ring.replay(), lines: lines, cols: info.cols, rows: info.rows, launcher: launcher, options: parserOptions) {
+                long = $0
+                done.signal()
+            }
+            if read != nil { done.wait() }
+            return Self.longer(short, long, lines: lines)
+        }
         guard let view = parser?.viewNow(historyLines: historyLines, timeout: 2) else { return fallbackView(historyLines: historyLines) }
         lastView = ParserView(screen: view.screen, runs: view.runs, history: nil)
         return view

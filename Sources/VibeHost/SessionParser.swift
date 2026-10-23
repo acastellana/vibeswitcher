@@ -42,9 +42,17 @@ public enum SessionParser {
     /// `trap` crashes it.
     static let testHookCode = 7599
 
-    /// What the parser does with `--parse-session`; call it first thing in `main`. Never returns then.
+    /// The lines a session's parser keeps above its screen: what the host itself reads (an ended session's last lines
+    /// come from a `HistoryRead`). A SwiftTerm line costs 3-5 KB, so the 5,000 kept before made each parser 15-55 MB.
+    static let scrollback = 200
+    /// The lines of history the phone can ask for, read on demand (see `HistoryRead`).
+    static let historyScrollback = 5_000
+
+    /// What the parser does with `--parse-session COLS ROWS [--scrollback LINES]`; call it first thing in `main`. Never
+    /// returns then.
     public static func runIfAsked(_ arguments: [String]) {
         guard arguments.count >= 4, arguments[1] == "--parse-session", let cols = Int(arguments[2]), let rows = Int(arguments[3]) else { return }
+        let scrollback = arguments.firstIndex(of: "--scrollback").flatMap { arguments.indices.contains($0 + 1) ? Int(arguments[$0 + 1]) : nil }
         signal(SIGPIPE, SIG_IGN)
         // Ends with the host, even while stuck mid-parse (when it would never read the end of the link).
         let host = getppid()
@@ -52,13 +60,15 @@ public enum SessionParser {
         watch.setEventHandler { _exit(0) }
         watch.resume()
         if getppid() != host || host == 1 { _exit(0) }
-        withExtendedLifetime(watch) { run(fd: 0, cols: cols, rows: rows, testHooks: arguments.contains("--parser-test-hooks")) }
+        withExtendedLifetime(watch) {
+            run(fd: 0, cols: cols, rows: rows, scrollback: scrollback ?? Self.scrollback, testHooks: arguments.contains("--parser-test-hooks"))
+        }
         exit(0)
     }
 
-    static func run(fd: Int32, cols: Int, rows: Int, testHooks: Bool) {
+    static func run(fd: Int32, cols: Int, rows: Int, scrollback: Int = SessionParser.scrollback, testHooks: Bool) {
         let delegate = HeadlessDelegate()
-        let terminal = Terminal(delegate: delegate, options: TerminalOptions(cols: cols, rows: rows, scrollback: 5_000))
+        let terminal = Terminal(delegate: delegate, options: TerminalOptions(cols: cols, rows: rows, scrollback: scrollback))
         var quiet = false
         let send: (FromParser, Data) -> Void = { kind, payload in writeAll(fd, Wire.frame(kind.rawValue, payload)) }
         delegate.onReply = { data in if !quiet { send(.reply, data) } }
@@ -231,10 +241,11 @@ final class ParserLink {
         self.queue = queue
     }
 
-    /// Starts `launcher --parse-session` on a terminal of `cols` × `rows`, its descriptor 0 the link and 2 the host's
-    /// standard error (where a trap says why), in a process group of its own, with default signals and nothing else of
-    /// the host's (no PTY).
-    static func start(launcher: String, cols: Int, rows: Int, options: ParserOptions, queue: DispatchQueue) -> ParserLink? {
+    /// Starts `launcher --parse-session` on a terminal of `cols` × `rows` keeping `scrollback` lines above its screen,
+    /// its descriptor 0 the link and 2 the host's standard error (where a trap says why), in a process group of its own,
+    /// with default signals and nothing else of the host's (no PTY).
+    static func start(launcher: String, cols: Int, rows: Int, scrollback: Int = SessionParser.scrollback, options: ParserOptions,
+                      queue: DispatchQueue) -> ParserLink? {
         var pair: [Int32] = [-1, -1]
         guard socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0 else { return nil }
         let (ours, theirs) = (pair[0], pair[1])
@@ -259,7 +270,8 @@ final class ParserLink {
         posix_spawn_file_actions_addopen(&actions, 1, "/dev/null", O_WRONLY, 0)
         posix_spawn_file_actions_addinherit_np(&actions, 2)
 
-        let arguments = [launcher, "--parse-session", String(cols), String(rows)] + (options.testHooks ? ["--parser-test-hooks"] : [])
+        let arguments = [launcher, "--parse-session", String(cols), String(rows), "--scrollback", String(scrollback)]
+            + (options.testHooks ? ["--parser-test-hooks"] : [])
         let argv = arguments.map { strdup($0) } + [nil]
         let envp: [UnsafeMutablePointer<CChar>?] = [strdup("PATH=/usr/bin:/bin"), nil]
         defer { (argv + envp).forEach { free($0) } }
