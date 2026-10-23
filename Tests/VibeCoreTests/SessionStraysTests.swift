@@ -8,7 +8,7 @@ struct SessionStraysTests {
 
     /// A `sleep` this test started, in `cwd`, with `environment` and nothing else (not this test's own
     /// `VIBESWITCHER_SESSION`, if it runs in a session).
-    func sleeper(in cwd: String = NSTemporaryDirectory(), environment: [String: String] = [:]) throws -> Process {
+    func sleeper(in cwd: String = scratchRoot.path, environment: [String: String] = [:]) throws -> Process {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/sleep")
         process.arguments = ["300"]
