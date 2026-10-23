@@ -1063,3 +1063,4 @@
 - 2026-10-23 18:17 Planned long-lived-background: Long-lived background shells don't blind stall checks
 - 2026-10-23 18:17 Started a worker on bench-hosts-don-t
 - 2026-10-23 18:17 Started a worker on long-lived-background
+- 2026-10-23 18:33 Merged pickercardtests-the-mcp: PickerCardTests: the MCP picker card test doesn't fail on a busy Mac (no audit: review none)
