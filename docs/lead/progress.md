@@ -996,3 +996,6 @@
 - 2026-10-23 10:28 Merged phone-a-tap-meant: Phone: a tap meant for one prompt can't approve another (no audit: review none)
 - 2026-10-23 10:28 Update: Merged: a phone tap meant for one prompt can't approve another — What changed: a phone answer carries a fingerprint of the prompt it was meant for, now covering the dialog text above the options too; just before sending Enter the Mac re-checks the prompt on screen …
 - 2026-10-23 10:34 Merged host-a-session-ending: Host: a session ending while its PTY reading is paused no longer crashes the host (no audit: review none)
+- 2026-10-23 10:34 Update: Merged: host no longer crashes when a session ends while its reading is paused — What changed: HostedSession resumes a suspended PTY read source before cancelling it (cancelling a suspended DispatchSource crashed the host in drain()), and reads what's left on the way out. A new ki…
+- 2026-10-23 10:41 Audit of composer-messages-don-t: complete, clean, round 2: 4 Nit open, 1 Pre-existing open
+- 2026-10-23 11:13 Merged workers-don-t-stall: Workers don't stall on permission prompts for their own scratch files
