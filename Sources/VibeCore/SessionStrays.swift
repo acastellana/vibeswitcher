@@ -33,6 +33,20 @@ public enum SessionStrays {
         }
     }
 
+    /// Ends the session's processes (`of(session:started:)`) but those in `groups` (signalled by the caller): SIGTERM,
+    /// then SIGKILL after `grace` to whatever of the session's still runs. On a thread of its own, not a dispatch
+    /// queue's: on a busy Mac every thread of the global queues can be taken, and the ending would wait for one.
+    public static func end(session id: UUID, started: [Found], sparing groups: Set<pid_t> = [], grace: TimeInterval = 5) {
+        let thread = Thread {
+            let begun = Date()
+            for stray in of(session: id, started: started) where !groups.contains(stray.group) { kill(stray.pid, SIGTERM) }
+            Thread.sleep(until: begun.addingTimeInterval(grace))
+            of(session: id, started: started).forEach { kill($0.pid, SIGKILL) }
+        }
+        thread.name = "SessionStrays.end"
+        thread.start()
+    }
+
     /// What `pid` started that runs now, their children too, the user's only: to be found before it's asked to end
     /// (once it ended they're launchd's, as anyone's are).
     public static func descendants(of pid: pid_t, user: uid_t = geteuid()) -> [Found] {

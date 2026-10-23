@@ -66,7 +66,8 @@ struct SessionStraysTests {
         let ended = SessionStrays.endInside(folder: worktree)
         #expect(ended.map(\.pid) == [inside.processIdentifier])
         #expect(eventually { !inside.isRunning })
-        #expect(inside.terminationReason == .uncaughtSignal && inside.terminationStatus == SIGTERM)
+        // (Read only once it ended: a running process's raise.)
+        if !inside.isRunning { #expect(inside.terminationReason == .uncaughtSignal && inside.terminationStatus == SIGTERM) }
         #expect(outside.isRunning)
     }
 
@@ -87,6 +88,6 @@ struct SessionStraysTests {
         #expect(SessionStrays.endInside(folder: worktree, grace: 0.5).count == 1)
         #expect(Date().timeIntervalSince(started) >= 0.5)
         #expect(eventually { !process.isRunning })
-        #expect(process.terminationStatus == SIGKILL)
+        if !process.isRunning { #expect(process.terminationStatus == SIGKILL) }
     }
 }

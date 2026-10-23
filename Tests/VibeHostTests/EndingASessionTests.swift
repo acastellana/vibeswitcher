@@ -29,15 +29,19 @@ struct EndingASessionTests {
     @Test func endingASessionEndsWhatItStartedOnly() throws {
         let host = try TestHost()
         let client = try TestClient(host)
-        // A setsid'd child (launchd's once the shell ends), and a job in a group of its own that ignores SIGHUP:
-        // neither is in a group the session's SIGHUP reaches. Apple's perl: its environment can't be read.
-        let session = try client.spawn("perl -e 'setsid; $|=1; print qq(s=$$\\n); sleep 300' & "
+        // A setsid'd child (launchd's once the shell ends; forked first, since the job it's in leads its group and a
+        // group's leader can't start a session), and a job in a group of its own that ignores SIGHUP: neither is in a
+        // group the session's SIGHUP reaches. Apple's perl: its environment can't be read.
+        let session = try client.spawn("perl -MPOSIX -e 'if (fork) { wait; exit } POSIX::setsid() == $$ or die; $|=1; print qq(s=$$\\n); sleep 300' & "
             + "perl -e 'setpgrp(0, 0); $SIG{HUP} = q(IGNORE); $|=1; print qq(b=$$\\n); sleep 300' & \(keepRunning)")
         client.attach(session.id)
         #expect(eventually { Self.pid("s", in: client.text(session.id)) != nil && Self.pid("b", in: client.text(session.id)) != nil },
                 "\(client.text(session.id).debugDescription)")
         let setsid = try #require(Self.pid("s", in: client.text(session.id)))
         let job = try #require(Self.pid("b", in: client.text(session.id)))
+        // A group of its own (the setsid'd one printed only once it leads a session of its own, which getsid can't
+        // tell from another session): the shell's SIGHUP reaches neither.
+        #expect(getpgid(job) == job)
         // Started by the test, not by the session: one carrying its id (as a server a Bash command left behind does),
         // one another session's, one with none, and Apple's sleep, whose environment can't be read.
         let (carrying, carryingInput) = try Self.waiter(environment: ["VIBESWITCHER_SESSION": session.id.uuidString])
@@ -60,7 +64,8 @@ struct EndingASessionTests {
         #expect(eventually(timeout: 10) { kill(setsid, 0) != 0 && kill(job, 0) != 0 && !carrying.isRunning },
                 "setsid \(kill(setsid, 0) == 0), job \(kill(job, 0) == 0), carrying \(carrying.isRunning)")
         // Asked first, not killed: the 5 s mark is for what doesn't end on that.
-        #expect(carrying.terminationReason == .uncaughtSignal && carrying.terminationStatus == SIGTERM)
+        // (Read only once it ended: a running process's raise.)
+        if !carrying.isRunning { #expect(carrying.terminationReason == .uncaughtSignal && carrying.terminationStatus == SIGTERM) }
         // Past the 5 s mark too, the others run.
         Thread.sleep(until: ended.addingTimeInterval(6))
         for process in spared { #expect(process.isRunning, "\(process.executableURL?.path ?? "") was signalled") }

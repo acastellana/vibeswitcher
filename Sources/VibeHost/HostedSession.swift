@@ -700,18 +700,9 @@ public final class HostedSession {
         // Before the shell is asked to end: once it has, what it started is launchd's.
         let started = info.isLive ? SessionStrays.descendants(of: info.childPID) : []
         groups.forEach { Darwin.kill(-$0, SIGHUP) }
-        // The process table is read off the session's queue: a few hundred processes' environments.
-        let id = id
-        DispatchQueue.global(qos: .utility).async {
-            for stray in SessionStrays.of(session: id, started: started) where !groups.contains(stray.group) {
-                Darwin.kill(stray.pid, SIGTERM)
-            }
-        }
+        SessionStrays.end(session: id, started: started, sparing: groups)
         queue.asyncAfter(deadline: .now() + 5) {
             for group in groups where Darwin.kill(-group, 0) == 0 { Darwin.kill(-group, SIGKILL) }
-            DispatchQueue.global(qos: .utility).async {
-                SessionStrays.of(session: id, started: started).forEach { Darwin.kill($0.pid, SIGKILL) }
-            }
         }
     }
 
