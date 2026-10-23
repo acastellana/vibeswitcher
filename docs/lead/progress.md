@@ -974,3 +974,14 @@
 - 2026-10-23 03:06 Merged audit-2026-10-22-3: Audit 2026-10-22: process handling (no audit: review none)
 - 2026-10-23 03:08 Started a worker on app-crash-the-sidebar
 - 2026-10-23 03:15 Merged audit-2026-10-22: Audit 2026-10-22: memory and performance (no audit: review none)
+- 2026-10-23 03:15 Update: Audits 2026-10-22: all four reports merged, fixes under way — The four reports are now on project-lead, in docs/eval/: ui-, messaging-, processes- and memory-2026-10-22.md. They're documents only, and the merge test runs passed.
+- 2026-10-23 03:17 Planned workers-don-t-stall: Workers don't stall on permission prompts for their own scratch files
+- 2026-10-23 03:19 Started a worker on phone-a-tap-meant
+- 2026-10-23 03:30 Planned phone-replies-sent-once: Phone: replies sent once, honest ✓/✗, guarded ⏎ and arrows, pairing survives restarts
+- 2026-10-23 03:36 Audit of ending-a-session-ends: incomplete, clean, round 1: 3 Important open, 1 Nit open
+- 2026-10-23 03:47 Planned the-leaks-check-can: The leaks check can't hang a test run
+- 2026-10-23 03:47 Started a worker on the-leaks-check-can
+- 2026-10-23 03:57 Started a worker on workers-don-t-stall
+- 2026-10-23 03:59 Audit of composer-messages-don-t: complete, clean, round 1: 4 Nit open, 1 Pre-existing open
+- 2026-10-23 04:08 Review of workers-don-t-stall: audit
+- 2026-10-23 04:18 Update: Merges paused: a macOS "Developer Tools Access" dialog is waiting for you — **What happened:** at 03:21 the sidebar-crash worker attached lldb to a process. With Developer mode off, macOS put up a "Developer Tools Access" password dialog. Since then, every `leaks` and `footpr…
