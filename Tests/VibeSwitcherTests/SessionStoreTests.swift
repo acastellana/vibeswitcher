@@ -194,6 +194,74 @@ struct SessionStoreTests {
         #expect(row().map(LeadTeams.isLive) == false)
     }
 
+    /// A lead's workers and verifiers are the lead's team, not your sessions (UI audit 2026-10-22 #1): with a lead,
+    /// three workers, a verifier and two sessions of your own, three are yours (the menu bar's dots, the pill and the
+    /// counts), the four others its team. A worker turning done tells nobody (its lead reads its report); one needing
+    /// you still does, as your own session turning done does.
+    @Test func workersAndVerifiersArentCountedAsYourSessions() async throws {
+        AppStatus.enabled = false
+        try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: stateDir) }
+        let clock = Clock()
+        let started = clock.now.addingTimeInterval(-3600)
+        let worktrees = "/r/acme/.vibeswitcher/worktrees"
+        // tty, label (nil: in Terminal), cwd
+        let sessions: [(String, String?, String)] = [
+            ("ttys990", "Lead · acme", "/r/acme"), ("ttys991", "Worker: A", "\(worktrees)/a"),
+            ("ttys992", "Worker: B", "\(worktrees)/b"), ("ttys993", "Worker: C", "\(worktrees)/c"),
+            ("ttys994", "Verifier: A", "\(worktrees)/a"), ("ttys995", nil, "/r/notes"), ("ttys996", "w", "/r/site"),
+        ]
+        func hook(_ tty: String, _ event: String) throws {
+            var state = HookState(agent: .claude, tty: tty, lastEvent: event, lastEventAt: clock.now.timeIntervalSince1970)
+            state.agentPid = Int32(tty.dropFirst(4))!
+            try state.save(to: stateDir.appendingPathComponent("\(tty).json"))
+        }
+        var procs = [Int32(960): ProcInfo(pid: 960, ppid: 1, tty: nil, comm: "vibeswitcher-hos", startTime: started, agent: nil)]
+        var cwds: [Int32: String] = [:]
+        for (tty, _, cwd) in sessions {
+            let pid = Int32(tty.dropFirst(4))!
+            procs[pid] = ProcInfo(pid: pid, ppid: 960, tty: tty, comm: "claude", startTime: started, agent: .claude)
+            cwds[pid] = cwd
+            try hook(tty, "PreToolUse")
+        }
+        let table = procs, dir = stateDir
+        let store = SessionStore(scanner: SessionScanner(processes: { table }, stateDir: { dir }, cwd: { cwds[$0] },
+                                                         arguments: { _ in [] }))
+        store.clock = { clock.now }
+        var attention: [String] = []
+        store.onAttention = { attention.append($0.tty) }
+        store.updateHosted(sessions.compactMap { tty, label, cwd in
+            label.map { HostSession(id: UUID(), tty: tty, childPID: Int32(tty.dropFirst(4))!, cwd: cwd, command: "claude", label: $0,
+                                    agent: "claude", title: "", startedAt: started, cols: 80, rows: 24, exit: nil) }
+        })
+        try await refreshAndSettle(store)
+        #expect(store.sessions.count == 7)
+        #expect(store.sessions.first { $0.tty == "ttys990" }?.teamRole == .lead)
+        #expect(store.sessions.first { $0.tty == "ttys994" }?.teamRole == .verifier)
+        #expect(store.sessions.first { $0.tty == "ttys995" }?.teamRole == nil)
+        let split = store.split
+        #expect(Set(split.own.map(\.tty)) == ["ttys990", "ttys995", "ttys996"])
+        #expect(split.teams.map(\.project) == ["acme"])
+        #expect(Set(split.teams.flatMap(\.members).map(\.tty)) == ["ttys991", "ttys992", "ttys993", "ttys994"])
+        // The popover's numbers and keys: yours first, then the team.
+        #expect(split.listed.map(\.tty) == split.own.map(\.tty) + split.teams.flatMap(\.members).map(\.tty))
+
+        // A worker finishes its turn, another asks you something.
+        clock.advance(5)
+        try hook("ttys991", "Stop")
+        try hook("ttys992", "PermissionRequest")
+        try await refreshAndSettle(store)
+        #expect(store.sessions.first { $0.tty == "ttys991" }?.status == .done)
+        #expect(attention == ["ttys992"])
+        // Then your own session finishes: its "done" is told once it has stayed done a moment, later than the
+        // worker's would have been.
+        clock.advance(5)
+        try hook("ttys995", "Stop")
+        try await refreshAndSettle(store)
+        #expect(await until { attention.contains("ttys995") })
+        #expect(attention == ["ttys992", "ttys995"])
+    }
+
     private final class Readable: @unchecked Sendable {
         private let lock = NSLock()
         private var readable = true
