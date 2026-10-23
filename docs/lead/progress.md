@@ -985,3 +985,4 @@
 - 2026-10-23 03:59 Audit of composer-messages-don-t: complete, clean, round 1: 4 Nit open, 1 Pre-existing open
 - 2026-10-23 04:08 Review of workers-don-t-stall: audit
 - 2026-10-23 04:18 Update: Merges paused: a macOS "Developer Tools Access" dialog is waiting for you — **What happened:** at 03:21 the sidebar-crash worker attached lldb to a process. With Developer mode off, macOS put up a "Developer Tools Access" password dialog. Since then, every `leaks` and `footpr…
+- 2026-10-23 05:13 Audit of workers-don-t-stall: incomplete, clean, round 1: 1 Important open, 1 Pre-existing open
