@@ -1037,3 +1037,5 @@
 - 2026-10-23 14:16 Planned new-tests-are-proven: New tests are proven under load before a worker reports done
 - 2026-10-23 14:16 Started a worker on new-tests-are-proven
 - 2026-10-23 14:40 Merged host-orders-text-enter: Host orders text+Enter units from every writer (MCP server included)
+- 2026-10-23 14:40 Update: Merged: the host orders text+Enter units from every writer — What changed: a new host request, inputUnit (capability `inputUnits`), carries a writer's text and Enter as one unit. The host's InputOrder keeps each session's input in order: a unit's writes go in i…
+- 2026-10-23 14:48 Merged settle-script-staggered: Settle script: staggered job starts and a reason recorded for each starved tick (no audit: review none)
