@@ -688,16 +688,30 @@ public final class HostedSession {
     }
 
     /// Like closing a Terminal tab: SIGHUP to the shell's process group and to the job in the foreground
-    /// (the agent runs in its own group). Then SIGKILL after 5 s to whichever of those groups still exists:
-    /// a program that ignores SIGHUP would otherwise outlive the session, detached, once the shell exits.
+    /// (the agent runs in its own group), and SIGTERM to the rest of the session's processes (`SessionStrays`, by its
+    /// id): a Bash-tool command in a group of its own, a server run in the background, a setsid'd child launchd took
+    /// over. Then SIGKILL after 5 s to whichever of those groups still exists and to whatever of the session's still
+    /// runs: a program that ignores SIGHUP would otherwise outlive the session, detached, once the shell exits.
     /// `by`: the client that asked (its process id), which its exit names.
     public func terminate(by client: pid_t? = nil) {
         guard info.isLive || readSource != nil else { return }
         if let client, info.isLive, killer == nil { killer = (client, ProcessTable.info(pid: client)?.comm) }
         let groups = Set([info.childPID, tcgetpgrp(masterFD)].filter { $0 > 0 })
+        // Before the shell is asked to end: once it has, what it started is launchd's.
+        let started = info.isLive ? SessionStrays.descendants(of: info.childPID) : []
         groups.forEach { Darwin.kill(-$0, SIGHUP) }
+        // The process table is read off the session's queue: a few hundred processes' environments.
+        let id = id
+        DispatchQueue.global(qos: .utility).async {
+            for stray in SessionStrays.of(session: id, started: started) where !groups.contains(stray.group) {
+                Darwin.kill(stray.pid, SIGTERM)
+            }
+        }
         queue.asyncAfter(deadline: .now() + 5) {
             for group in groups where Darwin.kill(-group, 0) == 0 { Darwin.kill(-group, SIGKILL) }
+            DispatchQueue.global(qos: .utility).async {
+                SessionStrays.of(session: id, started: started).forEach { Darwin.kill($0.pid, SIGKILL) }
+            }
         }
     }
 

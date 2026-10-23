@@ -718,13 +718,7 @@ public final class HostServer {
 /// The processes the host's housekeeping looks at (see `HostServer.endOrphans`).
 enum HostProcesses {
     /// The processes `pid` started that run now.
-    static func children(of pid: pid_t) -> [pid_t] {
-        let count = proc_listchildpids(pid, nil, 0)
-        guard count > 0 else { return [] }
-        var pids = [pid_t](repeating: 0, count: Int(count) + 16)
-        let listed = pids.withUnsafeMutableBytes { proc_listchildpids(pid, $0.baseAddress, Int32($0.count)) }
-        return Array(pids.prefix(Int(max(0, listed)))).filter { $0 > 0 }
-    }
+    static func children(of pid: pid_t) -> [pid_t] { SessionStrays.children(of: pid) }
 
     /// Whether `pid` is a session's parser (`launcher --parse-session`, see `SessionParser`).
     static func isParser(_ pid: pid_t) -> Bool {
