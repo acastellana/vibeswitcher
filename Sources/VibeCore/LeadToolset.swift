@@ -1079,7 +1079,8 @@ public final class LeadToolset: MCPToolset {
         // Settings, hooks or MCP servers the branch brings would run in the verifier: it starts with project settings
         // off (see LeadLaunch), and VibeSwitcher doesn't say yes to Claude's trust question for that folder. What the
         // branch's commits change counts (what would merge), and what Claude reads there uncommitted (see localAgentConfig);
-        // any other untracked file (a bench's scratch home, .claude/ and all) is a leftover for the worker to remove.
+        // any other untracked file (a bench's scratch home, .claude/ and all) is a leftover: it doesn't merge, and cleanup
+        // removes the worktree, so the worker names it in its report instead of an rm that could wait on a prompt.
         let committed = Worktrees.committedAgentConfig(root: root, slug: slug, base: workflow.base)
         let local = Worktrees.localAgentConfig(root: root, slug: slug)
         let config = Array(Set(committed + local)).sorted()
@@ -1138,7 +1139,9 @@ public final class LeadToolset: MCPToolset {
         let shown = 10, total = leftovers.reduce(Int64(0)) { $0 + $1.bytes }
         let list = leftovers.prefix(shown).map(\.text).joined(separator: ", ") + (leftovers.count > shown ? ", and \(leftovers.count - shown) more" : "")
         return " The worktree has \(leftovers.count) untracked file\(leftovers.count == 1 ? "" : "s") (\(Worktrees.Leftover.size(total))), leftovers that don't merge: "
-            + "\(list). Tell the worker to remove them (scratch goes in its session's TMPDIR, never the worktree) so the worktree is clean; they don't change the audit."
+            + "\(list). Leave them: the merge takes only commits and cleanup removes the worktree, so don't have the worker rm "
+            + "them (a removal can wait on a permission prompt only the user answers). Scratch goes in its session's TMPDIR, "
+            + "never the worktree; they don't change the audit."
     }
 
     /// "finder 1: contract and acceptance, finder 2: bugs and regressions".

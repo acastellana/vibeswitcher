@@ -377,7 +377,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         let task = LeadTask(slug: "t", title: "T", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))
         let worker = LeadPrompts.worker(task: task, root: "/r", workflow: LeadWorkflow())
         #expect(worker.contains("goes in your session's TMPDIR or your scratchpad, never inside the worktree"))
-        #expect(worker.contains("the worktree is clean (`git status` lists nothing untracked: remove your leftovers)"))
+        #expect(worker.contains("an untracked file left in the worktree goes in your report, not through rm"))
         #expect(LeadPrompts.verifier(task: task, root: "/r", workflow: LeadWorkflow()).contains("leftovers"))
         let finder = LeadPrompts.Finder(index: 1, size: 2, focus: .contract, commit: "abc", logs: [], run: "passed", sensitive: [], nitCap: 5)
         #expect(LeadPrompts.verifier(task: task, root: "/r", workflow: LeadWorkflow(), finder: finder).contains("leftovers"))
@@ -500,8 +500,16 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         // A worker removes a file of its worktree's with git rm (never the lead's records); a verifier removes nothing.
         let worker = try permissions("worker-add-b", runtime), verifier = try permissions("verify-add-b", runtime)
         #expect(Self.allowed("git rm b.txt", by: worker))
-        #expect(LeadPrompts.worker(task: try #require(BoardStore(root: root).load().task("add-b")), root: root, workflow: LeadWorkflow())
-            .contains("`git rm <path>`"))
+        let brief = String(decoding: try launchFile("--append-system-prompt-file", "worker-add-b", runtime), as: UTF8.self)
+        #expect(brief.contains("`git rm <path>` is for tracked files your change deletes"))
+        // An untracked file left in the worktree is named in the report, never removed: the brief no longer asks for it,
+        // and neither does the audit's word to the lead about leftovers.
+        #expect(brief.contains("If an untracked file is left there anyway, don't rm it: name it in your report"))
+        for words in ["remove your leftovers", "the lead has you remove", "lists nothing untracked"] {
+            #expect(!brief.contains(words), "\(words)")
+        }
+        let note = LeadToolset.leftoversText([Worktrees.Leftover(path: "x.out", bytes: 2)])
+        #expect(note.contains("don't have the worker rm") && !note.contains("Tell the worker to remove"), "\(note)")
         let records = LeadLaunch.deny(.worker, base: "main", records: "docs/lead")
         for command in ["git rm docs/lead/board.md", "git rm -r -- docs/lead/board.md"] { #expect(Self.denied(command, by: records), "\(command)") }
         for command in ["git rm b.txt", "rm b.txt"] { #expect(Self.denied(command, by: verifier.deny), "verifier: \(command)") }

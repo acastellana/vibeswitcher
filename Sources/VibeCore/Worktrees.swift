@@ -823,7 +823,8 @@ public enum Worktrees {
         }.map(\.path).sorted()
     }
 
-    /// An untracked file in a worktree: nothing of it merges, and the worker should have removed it.
+    /// An untracked file in a worktree: nothing of it merges, and cleanup removes it with the worktree. The worker should
+    /// have kept it out (scratch goes in its TMPDIR) and names it in its report rather than rm it.
     public struct Leftover: Equatable, Sendable {
         public var path: String
         public var bytes: Int64

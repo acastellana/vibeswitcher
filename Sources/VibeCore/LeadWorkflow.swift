@@ -722,8 +722,9 @@ public enum LeadPrompts {
         Keep your temporary folder small: build or download into the worktree's git-ignored build folders, not your \
         scratchpad, and delete big files there once you're done with them (a full disk stops every session). Any \
         other scratch (test homes, bench output, notes) goes in your session's TMPDIR or your scratchpad, never inside \
-        the worktree: an untracked file there is a leftover the lead has you remove.
-        \(scratchFiles) A file your change deletes goes with `git rm <path>`.
+        the worktree. If an untracked file is left there anyway, don't rm it: name it in your report (the merge \
+        takes only commits, and cleanup removes the worktree).
+        \(scratchFiles) `git rm <path>` is for tracked files your change deletes.
         \(debuggers)
         Processes: stop one you started by its pid (`kill <pid>`; `$!` or `pgrep -f <your worktree path>` finds it). \
         pkill and killall are refused: their patterns match the other sessions on this Mac too.
@@ -738,7 +739,8 @@ public enum LeadPrompts {
         around a git command is refused. git log, diff, status and show are always open to you.
         \(Policy.workerTesting(test: workflow.testCommand))
         Done: every acceptance check passes, everything is \
-        committed, and the worktree is clean (`git status` lists nothing untracked: remove your leftovers). Then reply with a short report: what changed, how you checked it, the routine calls you made, anything left or doubtful. \
+        committed (`git status` lists nothing modified or staged; an untracked file left in the worktree goes in your \
+        report, not through rm). Then reply with a short report: what changed, how you checked it, the routine calls you made, anything left or doubtful. \
         \(Policy.workerCheck(task.reviewLevel))
         Stuck: say exactly what you need and stop. Don't fake a pass: never weaken or delete tests.
 
