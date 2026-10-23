@@ -231,13 +231,15 @@ public enum RemoteInputGate {
 
     /// Runs `writes` one after another (`after` waits that long, then runs the block), asking `check`
     /// right before each one. The first verdict that isn't `.allowed` stops it: that write and the ones
-    /// after it are dropped, and `stopped` gets the verdict and how many writes went out.
+    /// after it are dropped, and `stopped` gets the verdict and how many writes went out. `finished` runs once
+    /// they all have.
     public static func deliver(_ writes: [HostInput.Write], check: @escaping () -> Verdict,
                                after: @escaping (TimeInterval, @escaping () -> Void) -> Void,
                                send: @escaping ([UInt8]) -> Void,
-                               stopped: @escaping (Verdict, _ sent: Int) -> Void = { _, _ in }) {
+                               stopped: @escaping (Verdict, _ sent: Int) -> Void = { _, _ in },
+                               finished: @escaping () -> Void = {}) {
         func step(_ index: Int) {
-            guard index < writes.count else { return }
+            guard index < writes.count else { return finished() }
             after(writes[index].delay) {
                 let verdict = check()
                 guard verdict == .allowed else { return stopped(verdict, index) }

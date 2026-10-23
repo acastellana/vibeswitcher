@@ -66,6 +66,11 @@ public struct ScreenMenu: Equatable, Sendable {
     /// sit between them), one of them marked with ❯ / › / > (or a multi-select's Submit row under them).
     /// `highlights`: per line, the stretches drawn on a coloured background or inverted (Claude's open tab).
     public static func parse(_ screen: [String], highlights: [[String]] = []) -> ScreenMenu? {
+        located(screen, highlights: highlights)?.menu
+    }
+
+    /// `parse`, and the line of `screen` its first option is on.
+    static func located(_ screen: [String], highlights: [[String]] = []) -> (menu: ScreenMenu, firstOption: Int)? {
         let lines = screen.map(clean)
         guard let last = lines.lastIndex(where: { option($0) != nil }), let lastOption = option(lines[last]) else { return nil }
         // Walk up from the last option, number by number, down to 1.
@@ -127,8 +132,9 @@ public struct ScreenMenu: Equatable, Sendable {
             index -= 1
         }
         let hint = lines[found[found.count - 1].index...].last(where: isHint)
-        return ScreenMenu(question: question.joined(separator: "\n"), options: labels, descriptions: descriptions, selected: selected,
-                          tabs: tabs, hint: hint, checked: checked, submit: submit?.label, openTab: openTab)
+        let menu = ScreenMenu(question: question.joined(separator: "\n"), options: labels, descriptions: descriptions, selected: selected,
+                              tabs: tabs, hint: hint, checked: checked, submit: submit?.label, openTab: openTab)
+        return (menu, found[0].index)
     }
 
     /// Arrow keys from the cursor to `index`, then Enter.

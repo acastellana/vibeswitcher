@@ -242,7 +242,7 @@ struct PhoneMenuTests {
     }
 
     @Test func theStateCarriesTheMenuMasked() throws {
-        let menu = try #require(PhoneMenu.detect(screen: prompt(cursor: 1), needsInput: true))
+        let menu = try #require(PhoneMenu.read(screen: prompt(cursor: 1), needsInput: true))
         let object = PhoneMenu.json(menu, sid: sid)
         #expect(JSONSerialization.isValidJSONObject(object))
         let text = String(decoding: try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]), as: UTF8.self)
@@ -261,7 +261,7 @@ struct PhoneMenuTests {
     @Test func descriptionsAndAMultiSelectsBoxesAndSubmitRowGoToo() throws {
         let screen = ["☐ Toppings", "Which toppings?", "❯ 1. [✔] Cream", "     Whipped, with TOKEN=abcdefgh1234", "  2. [ ] Nuts", "    Submit", "",
                       "Enter to select · ↑/↓ to navigate · Esc to cancel"].joined(separator: "\n")
-        let menu = try #require(PhoneMenu.detect(screen: screen, needsInput: false))
+        let menu = try #require(PhoneMenu.read(screen: screen, needsInput: false))
         let object = PhoneMenu.json(menu, sid: sid)
         #expect(object["options"] as? [String] == ["Cream", "Nuts"])
         #expect((object["descriptions"] as? [Any])?.first as? String == "Whipped, with TOKEN=•••")
@@ -284,17 +284,59 @@ struct PhoneMenuTests {
     }
 
     @Test func theFingerprintIsTheQuestionNotTheCursor() throws {
-        let first = try #require(PhoneMenu.detect(screen: prompt(cursor: 0), needsInput: true))
-        let moved = try #require(PhoneMenu.detect(screen: prompt(cursor: 2), needsInput: true))
-        let other = try #require(PhoneMenu.detect(screen: prompt(command: "rm -rf build"), needsInput: true))
+        let first = try #require(PhoneMenu.read(screen: prompt(cursor: 0), needsInput: true))
+        let moved = try #require(PhoneMenu.read(screen: prompt(cursor: 2), needsInput: true))
+        let other = try #require(PhoneMenu.read(screen: prompt(command: "rm -rf build"), needsInput: true))
         #expect(PhoneMenu.fingerprint(first, sid: sid) == PhoneMenu.fingerprint(moved, sid: sid))
         #expect(PhoneMenu.fingerprint(first, sid: sid) != PhoneMenu.fingerprint(other, sid: sid))
         // Another session showing the same prompt has its own.
         #expect(PhoneMenu.fingerprint(first, sid: sid) != PhoneMenu.fingerprint(first, sid: "4243-1700000000"))
     }
 
+    /// An edit prompt as Claude Code 2.1 draws it: the dialog under a rule, its diff between dashed rules, the
+    /// conversation above it (`progress`: a subagent's line that moves while the question waits).
+    func edit(_ diff: [String], cursor: Int = 0, progress: String = "⎿  Read 3 files (12s)") -> String {
+        let rule = String(repeating: "─", count: 60), dashed = String(repeating: "╌", count: 60)
+        let options = ["Yes", "Yes, allow all edits during this session (shift+tab)", "No, and tell Claude what to do differently (esc)"]
+        let rows = options.enumerated().map { index, option in " \(index == cursor ? "❯" : " ") \(index + 1). \(option)" }
+        return (["⏺ Task(Review the parser)", "  \(progress)", "", rule, " Edit file", " Sources/Foo.swift", dashed]
+                + diff.map { " \($0)" } + [dashed, " Do you want to make this edit to Foo.swift?"] + rows
+                + ["", " Esc to cancel · Tab to amend", "", ""]).joined(separator: "\n")
+    }
+
+    @Test func twoEditsOfOneFileDifferByTheirDiff() throws {
+        let a = edit(["12 - let x = 1", "12 + let x = 2"]), b = edit(["40 - try deleteAll()", "40 + // removed"])
+        let shownA = try #require(PhoneMenu.read(screen: a, needsInput: true))
+        let shownB = try #require(PhoneMenu.read(screen: b, needsInput: true))
+        // The same question and options: only what's above them tells them apart.
+        #expect(shownA.menu.question == "Do you want to make this edit to Foo.swift?")
+        #expect(shownA.menu == shownB.menu)
+        #expect(shownA.above == ["Edit file", "Sources/Foo.swift", String(repeating: "╌", count: 60), "12 - let x = 1", "12 + let x = 2",
+                                 String(repeating: "╌", count: 60), "Do you want to make this edit to Foo.swift?"])
+        let fingerprint = PhoneMenu.fingerprint(shownA, sid: sid)
+        #expect(fingerprint != PhoneMenu.fingerprint(shownB, sid: sid))
+        // A tap drawn from A, arriving once B is up (A was answered on the Mac): refused, nothing typed.
+        #expect(PhoneMenu.answer(choose: 0, fingerprint: fingerprint, screen: b, needsInput: true, sid: sid) == .stale)
+        #expect(!PhoneMenu.readyToEnter(0, fingerprint: fingerprint, screen: b, sid: sid))
+        // Still A: answered, whatever moves in the conversation above the dialog.
+        let progressed = edit(["12 - let x = 1", "12 + let x = 2"], progress: "⎿  Read 5 files (14s)")
+        #expect(PhoneMenu.answer(choose: 0, fingerprint: fingerprint, screen: progressed, needsInput: true, sid: sid)
+                == .keys([HostInput.Write(bytes: [13], delay: 0)], label: "Yes"))
+    }
+
+    @Test func enterWaitsForTheQuestionTappedWithTheCursorOnTheOption() throws {
+        let screen = edit(["12 - let x = 1", "12 + let x = 2"])
+        let fingerprint = PhoneMenu.fingerprint(try #require(PhoneMenu.read(screen: screen, needsInput: true)), sid: sid)
+        #expect(PhoneMenu.readyToEnter(0, fingerprint: fingerprint, screen: screen, sid: sid))
+        #expect(PhoneMenu.readyToEnter(2, fingerprint: fingerprint, screen: edit(["12 - let x = 1", "12 + let x = 2"], cursor: 2), sid: sid))
+        // The cursor isn't on it (yet), the question went, or another session has the tab.
+        #expect(!PhoneMenu.readyToEnter(1, fingerprint: fingerprint, screen: screen, sid: sid))
+        #expect(!PhoneMenu.readyToEnter(0, fingerprint: fingerprint, screen: "⏺ Done.\n> ", sid: sid))
+        #expect(!PhoneMenu.readyToEnter(0, fingerprint: fingerprint, screen: screen, sid: "4243-1700000000"))
+    }
+
     @Test func aTapTypesTheKeysFromWhereTheCursorIsNow() throws {
-        let drawn = try #require(PhoneMenu.detect(screen: prompt(cursor: 0), needsInput: true))
+        let drawn = try #require(PhoneMenu.read(screen: prompt(cursor: 0), needsInput: true))
         let fingerprint = PhoneMenu.fingerprint(drawn, sid: sid)
         let down: [UInt8] = [27, 91, 66], up: [UInt8] = [27, 91, 65]
         guard case .keys(let writes, let label) = PhoneMenu.answer(choose: 2, fingerprint: fingerprint, screen: prompt(cursor: 0),
@@ -314,7 +356,7 @@ struct PhoneMenuTests {
     }
 
     @Test func aStaleTapIsRefusedNotTyped() throws {
-        let drawn = try #require(PhoneMenu.detect(screen: prompt(), needsInput: true))
+        let drawn = try #require(PhoneMenu.read(screen: prompt(), needsInput: true))
         let fingerprint = PhoneMenu.fingerprint(drawn, sid: sid)
         // Another question took its place.
         #expect(PhoneMenu.answer(choose: 0, fingerprint: fingerprint, screen: prompt(command: "rm -rf build"), needsInput: true, sid: sid)

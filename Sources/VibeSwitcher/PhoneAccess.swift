@@ -96,7 +96,7 @@ final class PhoneAccess: ObservableObject {
     /// The question, permission prompt or picker on each session's screen (see `PhoneMenu`), per session, as last
     /// read (nil: read, none there): from the phone's screen reads and, while a session waits on you, a read of its
     /// own every few seconds while a phone asks for the state.
-    private var menus: [String: (at: Date, menu: ScreenMenu?)] = [:]
+    private var menus: [String: (at: Date, menu: PhoneMenu.Shown?)] = [:]
     private var menuReads: Set<String> = []
     /// An answer typed in from the phone, per session: until its keys show on the screen, the menu it answered is
     /// neither offered nor answered again (a second tap would land on whatever comes next with this one's keys).
@@ -107,6 +107,7 @@ final class PhoneAccess: ObservableObject {
     /// How long an answer's keys may take to show before its menu may be answered again.
     private static let answerWait: TimeInterval = 2.5
     static let menuChanged = "That question changed or is gone, so nothing was typed. Here it is now."
+    static let menuMoved = "That question changed while choosing, so Enter wasn't pressed. Check the screen."
     /// Brief me from the phone: writes one briefing with its audio (`PhoneBriefer`) and calls back on the main thread;
     /// nil, the route answers 503.
     var brief: ((@escaping (PhoneBriefing) -> Void) -> Void)?
@@ -535,7 +536,7 @@ final class PhoneAccess: ObservableObject {
     }
 
     /// The menu to offer as buttons for `session`: read lately, and not one the phone has just answered.
-    private func offeredMenu(_ session: Session) -> ScreenMenu? {
+    private func offeredMenu(_ session: Session) -> PhoneMenu.Shown? {
         let key = session.identity
         guard let entry = menus[key], entry.at.timeIntervalSinceNow > -Self.menuFresh, let menu = entry.menu else { return nil }
         if let answer = answered[key], answer.until > Date(), answer.fingerprint == PhoneMenu.fingerprint(menu, sid: key) { return nil }
@@ -555,7 +556,7 @@ final class PhoneAccess: ObservableObject {
             if let entry = menus[key], entry.at.timeIntervalSinceNow > -Self.menuReadEvery { continue }
             menuReads.insert(key)
             readScreen(session) { raw in
-                let menu = raw.flatMap { PhoneMenu.detect(screen: $0, needsInput: true) }
+                let menu = raw.flatMap { PhoneMenu.read(screen: $0, needsInput: true) }
                 DispatchQueue.main.async {
                     self.menuReads.remove(key)
                     // The tab may have changed hands during the read: then it's not this session's menu.
@@ -602,7 +603,7 @@ final class PhoneAccess: ObservableObject {
             while let last = lines.last, last.trimmingCharacters(in: .whitespaces).isEmpty { lines.removeLast() }
             let text = lines.joined(separator: "\n")
             // The menu on it too, for the next state the phone asks for.
-            let menu = raw.flatMap { PhoneMenu.detect(screen: $0, needsInput: needsInput) }
+            let menu = raw.flatMap { PhoneMenu.read(screen: $0, needsInput: needsInput) }
             DispatchQueue.main.async {
                 if raw != nil, self.store.sessions.first(where: { $0.tty == tty })?.identity == key {
                     self.menus[key] = (Date(), menu)
@@ -920,7 +921,7 @@ final class PhoneAccess: ObservableObject {
             if busy() { return .refuse(stillAnswering) }
             guard let raw else { return .refuse(.error(503, "Couldn't read that tab right now.")) }
             let needsInput = self.store.sessions.first { $0.identity == sid }?.status == .needsInput
-            self.menus[sid] = (Date(), PhoneMenu.detect(screen: raw, needsInput: needsInput))
+            self.menus[sid] = (Date(), PhoneMenu.read(screen: raw, needsInput: needsInput))
             switch PhoneMenu.answer(choose: index, fingerprint: fingerprint, screen: raw, needsInput: needsInput, sid: sid) {
             case .stale: return .refuse(.error(409, Self.menuChanged))
             case .invalid: return .refuse(.error(400, "No such option."))
@@ -935,14 +936,17 @@ final class PhoneAccess: ObservableObject {
                 self?.windowInputVerdict(device: device.id, tty: tty, sid: sid, agent: (session.pid, session.startedAt))
                     ?? .notAllowed
             }
-            switch check() {
-            case .allowed: break
-            case .locked:
-                audit("input to \(session.displayName) from \(device.name) refused: \(RemoteInput.Failure.locked)")
-                return respond(.error(423, RemoteInput.Failure.locked.description))
-            case .notAllowed: return respond(.error(409, RemoteInput.Failure.notAllowed.description))
-            case .sessionChanged: return respond(.error(409, Self.sessionChanged))
+            let refusal = { [weak self] (verdict: RemoteInputGate.Verdict) -> HTTPResponse? in
+                switch verdict {
+                case .allowed: return nil
+                case .locked:
+                    self?.audit("input to \(session.displayName) from \(device.name) refused: \(RemoteInput.Failure.locked)")
+                    return .error(423, RemoteInput.Failure.locked.description)
+                case .notAllowed: return .error(409, RemoteInput.Failure.notAllowed.description)
+                case .sessionChanged: return .error(409, Self.sessionChanged)
+                }
             }
+            if let refused = refusal(check()) { return respond(refused) }
             hostClient.screen(hostID) { raw in
                 DispatchQueue.main.async { [weak self] in
                     guard let self else { return }
@@ -951,18 +955,44 @@ final class PhoneAccess: ObservableObject {
                     case .refuse(let refusal): return respond(refusal)
                     case .type(let keys, let chosen): (writes, label) = (keys, chosen)
                     }
-                    RemoteInputGate.deliver(writes, check: check, after: { delay, block in
+                    let stop = { [weak self] (why: String, sent: Int) in
+                        self?.answered[sid] = nil
+                        self?.audit("input to \(session.displayName) from \(device.name) stopped after \(sent) of \(writes.count) writes: \(why)")
+                    }
+                    // The arrows, then the screen read again: Enter only while it's the question tapped (its diff or
+                    // command too), the cursor on the option. The highlighted one's too, with no arrows before it.
+                    let arrows = Array(writes.dropLast()), enter = writes[writes.count - 1]
+                    RemoteInputGate.deliver(arrows, check: check, after: { delay, block in
                         DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: block)
                     }, send: { [weak self] bytes in
                         self?.hostClient?.send(hostID, bytes: Data(bytes), reply: false)
-                    }, stopped: { [weak self] verdict, sent in
-                        self?.answered[sid] = nil
-                        self?.audit("input to \(session.displayName) from \(device.name) stopped after \(sent) of \(writes.count) writes: \(verdict)")
+                    }, stopped: { verdict, sent in
+                        stop("\(verdict)", sent)
+                        respond(refusal(verdict) ?? .error(409, Self.menuMoved))
+                    }, finished: {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + enter.delay) { [weak self] in
+                            guard let self, let hostClient = self.hostClient else { return respond(.error(409, Self.menuMoved)) }
+                            hostClient.screen(hostID) { raw in
+                                DispatchQueue.main.async { [weak self] in
+                                    guard let self else { return }
+                                    guard let raw, PhoneMenu.readyToEnter(index, fingerprint: fingerprint, screen: raw, sid: sid) else {
+                                        stop("the menu moved", arrows.count)
+                                        return respond(.error(409, Self.menuMoved))
+                                    }
+                                    let verdict = check()
+                                    if let refused = refusal(verdict) {
+                                        stop("\(verdict)", arrows.count)
+                                        return respond(refused)
+                                    }
+                                    hostClient.send(hostID, bytes: Data(enter.bytes), reply: false)
+                                    self.audit("\(device.name) \(summary(label)) in \(session.displayName)")
+                                    self.onEvent?("\(device.name) answered \(session.displayName)", summary(label))
+                                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { self.store.refresh() }
+                                    respond(.json(["ok": true]))
+                                }
+                            }
+                        }
                     })
-                    self.audit("\(device.name) \(summary(label)) in \(session.displayName)")
-                    self.onEvent?("\(device.name) answered \(session.displayName)", summary(label))
-                    DispatchQueue.main.asyncAfter(deadline: .now() + ScreenMenu.duration(writes) + 0.1) { self.store.refresh() }
-                    respond(.json(["ok": true]))
                 }
             }
             return
@@ -990,11 +1020,11 @@ final class PhoneAccess: ObservableObject {
             var moved = false
             for (position, write) in writes.enumerated() {
                 guard let key = Self.terminalKey(write.bytes) else { break }
-                if position > 0, position == writes.count - 1 {
-                    // Before Enter: the cursor is on the option tapped, and the question is still that one.
-                    usleep(useconds_t(max(write.delay, 0.08) * 1_000_000))
-                    let menu = readTab(tty).flatMap { PhoneMenu.detect(screen: $0, needsInput: true) }
-                    guard let menu, PhoneMenu.fingerprint(menu, sid: sid) == fingerprint, menu.selected == index else {
+                if key == .enter {
+                    // Before Enter, the highlighted option's too: the question is still the one tapped (its diff or
+                    // command too), the cursor on the option.
+                    if position > 0 { usleep(useconds_t(max(write.delay, 0.08) * 1_000_000)) }
+                    guard let screen = readTab(tty), PhoneMenu.readyToEnter(index, fingerprint: fingerprint, screen: screen, sid: sid) else {
                         moved = true
                         break
                     }
@@ -1008,7 +1038,7 @@ final class PhoneAccess: ObservableObject {
                     self.answered[sid] = nil
                     self.audit("input to \(session.displayName) from \(device.name) refused: \(failure.map { "\($0)" } ?? "the menu moved")")
                     if let failure { return respond(.error(failure == .locked ? 423 : 409, failure.description)) }
-                    return respond(.error(409, "That question changed while choosing, so Enter wasn't pressed. Check the screen."))
+                    return respond(.error(409, Self.menuMoved))
                 }
                 self.answered[sid] = (fingerprint, Date().addingTimeInterval(Self.answerWait))
                 self.audit("\(device.name) \(summary(label)) in \(session.displayName)")
