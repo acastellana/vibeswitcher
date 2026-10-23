@@ -13,6 +13,68 @@ struct MCPServerTests {
         }
     }
 
+    /// A call that runs a grouped `sleep 60` (`Shell.run` starts it in a process group of its own, as merge's test
+    /// command), its pid in `<marks>/sleep`, and notes its cleanup in `<marks>/cleaned` as it ends.
+    final class Sleeper: MCPToolset {
+        let marks: String
+        init(marks: String) { self.marks = marks }
+        var tools: [MCPToolInfo] { [MCPToolInfo(name: "sleep", description: "Sleeps a minute")] }
+        func call(_ name: String, _ arguments: [String: Any]) -> MCPToolResult {
+            defer { FileManager.default.createFile(atPath: marks + "/cleaned", contents: nil) }
+            let slept = Shell.run(executable: "/bin/sh", args: ["-c", "sleep 60 & echo $! > sleep; wait"], in: marks, timeout: 120)
+            return MCPToolResult(text: slept.cancelled ? "cancelled" : "slept", isError: slept.cancelled)
+        }
+    }
+
+    /// A server whose input ends (its lead closed or restarted) cancels its running calls and returns once they've
+    /// ended, their cleanup run: it exited at once, leaving a merge's tests running on unlocked and its scratch
+    /// worktree behind (process audit 2026-10-22, #6).
+    @Test func aServerWhoseInputEndsEndsItsCallsFirst() throws {
+        let temp = Scratch()
+        let marks = temp.url("mcp-stop").path
+        try FileManager.default.createDirectory(atPath: marks, withIntermediateDirectories: true)
+        let server = MCPServer(name: "vibeswitcher", version: "1", toolset: Sleeper(marks: marks))
+        let input = Pipe(), output = Pipe()
+        let done = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            server.serve(input: input.fileHandleForReading.fileDescriptor, output: output.fileHandleForWriting.fileDescriptor)
+            done.signal()
+        }
+        input.fileHandleForWriting.write(Data((#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"sleep","arguments":{}}}"# + "\n").utf8))
+        let pidFile = marks + "/sleep"
+        #expect(eventually { (try? String(contentsOfFile: pidFile, encoding: .utf8))?.hasSuffix("\n") == true })
+        let sleep = try #require((try? String(contentsOfFile: pidFile, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
+        #expect(kill(sleep, 0) == 0)
+        try input.fileHandleForWriting.close()
+        #expect(done.wait(timeout: .now() + hangGuard) == .success)
+        #expect(FileManager.default.fileExists(atPath: marks + "/cleaned"), "the call's cleanup didn't run")
+        #expect(eventually(timeout: 5) { kill(sleep, 0) != 0 })
+        // It answered that it was cancelled, the client still reading.
+        try output.fileHandleForWriting.close()
+        let said = String(decoding: output.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        #expect(said.contains(#""text":"cancelled""#), "\(said)")
+
+        // `stop` (SIGTERM, in vibeswitcher-mcp) ends it the same way, its input still open.
+        let again = MCPServer(name: "vibeswitcher", version: "1", toolset: Sleeper(marks: marks))
+        try? FileManager.default.removeItem(atPath: pidFile)
+        try? FileManager.default.removeItem(atPath: marks + "/cleaned")
+        let open = Pipe(), quiet = Pipe()
+        let ended = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            again.serve(input: open.fileHandleForReading.fileDescriptor, output: quiet.fileHandleForWriting.fileDescriptor)
+            ended.signal()
+        }
+        open.fileHandleForWriting.write(Data((#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"sleep","arguments":{}}}"# + "\n").utf8))
+        #expect(eventually { (try? String(contentsOfFile: pidFile, encoding: .utf8))?.hasSuffix("\n") == true })
+        let second = try #require((try? String(contentsOfFile: pidFile, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) })
+        again.stop()
+        #expect(ended.wait(timeout: .now() + hangGuard) == .success)
+        #expect(FileManager.default.fileExists(atPath: marks + "/cleaned"))
+        #expect(eventually(timeout: 5) { kill(second, 0) != 0 })
+        try open.fileHandleForWriting.close()
+        try quiet.fileHandleForWriting.close()
+    }
+
     func send(_ server: MCPServer, _ object: [String: Any]) throws -> [String: Any]? {
         guard let reply = server.handle(try JSONSerialization.data(withJSONObject: object)) else { return nil }
         return try JSONSerialization.jsonObject(with: reply) as? [String: Any]

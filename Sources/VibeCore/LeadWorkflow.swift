@@ -467,7 +467,8 @@ public enum LeadPrompts {
     public static let heavyWork = "Heavy work: run a full test suite or a release build under `vs-heavy` (`vs-heavy <command>`, "
         + "e.g. `vs-heavy npm test`; it's on PATH in this session), never bare: it runs a few at a time on this Mac (its "
         + "slots), every project's workers and merges included, and while every slot is held it waits, saying who holds "
-        + "each. Focused tests (one file, a filter) don't need it."
+        + "each. It stops a command still running after 60 min (exit 124): give a longer one `--timeout 2h`. Focused tests "
+        + "(one file, a filter) don't need it."
 
     /// The user's working policy (2026-10-21): one agent owns each change through completion; an audit only where the
     /// risk calls for one; the tests a change affects while editing, and the merge's run as the one full suite; a

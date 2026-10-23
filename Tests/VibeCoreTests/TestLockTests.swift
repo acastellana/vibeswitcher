@@ -209,6 +209,9 @@ struct TestLockTests {
         a.process.waitUntilExit()
         let note = url("heavy-locks/test-build.lock.holder").path
         #expect(lines(note).first?.contains(", a in ") == true)
+        // Its supervisor ends its command (in a group of its own), then the slot is let go.
+        #expect(eventually { TestLock(directory: url("heavy-locks").path).holders().isEmpty })
+        #expect(lines(log) == ["a start"])
         let b = try heavy("b", log: log)
         b.process.waitUntilExit()
         #expect(b.process.terminationStatus == 0 && !lines(b.output).joined().contains("waiting for"), "\(lines(b.output))")
@@ -240,6 +243,116 @@ struct TestLockTests {
         #expect(lock.holder(1).note?.contains("merge of a") == true)
         held.release()
         #expect(!FileManager.default.fileExists(atPath: lock.path + ".holder"))
+    }
+
+    func pid(in file: String) -> Int32? {
+        (try? String(contentsOfFile: file, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+    }
+
+    /// Killed by its pid (how workers stop what they started) or outright, vs-heavy ends its command before its slot
+    /// is let go: on 2026-10-22 the slot went with the script while its suite ran on, unlocked (process audit, #4).
+    @Test(arguments: [SIGTERM, SIGKILL]) func killingVsHeavyEndsItsCommandBeforeTheSlotIsLetGo(_ signal: Int32) throws {
+        let log = url("heavy.log").path, sleeper = url("sleep.pid").path, locks = url("heavy-locks").path
+        let q = RecentProjects.shellQuote
+        let a = try Self.runVsHeavy(["--as", "a", "/bin/sh", "-c", "echo $$ > \(q(sleeper)); exec sleep 5"], lockDirectory: locks, output: url("a.out").path)
+        #expect(eventually { pid(in: sleeper) != nil })
+        let sleep = try #require(pid(in: sleeper))
+        // In line behind it: when it gets the slot, it says whether a's sleep is still there.
+        let check = "if kill -0 \(sleep) 2> /dev/null; then echo b: the sleep runs; else echo b: the sleep is gone; fi >> \(q(log))"
+        let b = try Self.runVsHeavy(["--as", "b", "/bin/sh", "-c", check], lockDirectory: locks, output: url("b.out").path)
+        #expect(eventually { lines(url("b.out").path).joined().contains("waiting for") })
+        kill(a.processIdentifier, signal)
+        a.waitUntilExit()
+        if signal == SIGTERM {
+            // It exits once its command has: 128 + TERM.
+            #expect(a.terminationStatus == 128 + SIGTERM, "\(lines(url("a.out").path))")
+            #expect(kill(sleep, 0) != 0)
+        }
+        b.waitUntilExit()
+        #expect(b.terminationStatus == 0, "\(lines(url("b.out").path))")
+        #expect(lines(log) == ["b: the sleep is gone"])
+        #expect(kill(sleep, 0) != 0)
+    }
+
+    /// Past --timeout, vs-heavy ends its command's group (what it started too) and exits 124; no holder keeps a slot
+    /// for good (a pytest held the only one 3 h 23 min at 0 % CPU, 2026-10-22).
+    @Test func pastItsTimeoutVsHeavyEndsItsCommandsGroupAndExits124() throws {
+        let sleeper = url("sleep.pid").path, locks = url("heavy-locks").path
+        let q = RecentProjects.shellQuote
+        let started = Date()
+        let run = try Self.runVsHeavy(["--as", "hung", "--timeout", "1s", "/bin/sh", "-c", "sleep 60 & echo $! > \(q(sleeper)); wait"],
+                                      lockDirectory: locks, output: url("hung.out").path)
+        run.waitUntilExit()
+        #expect(run.terminationStatus == 124)
+        #expect(Date().timeIntervalSince(started) < 30, "it waited for the sleep")
+        #expect(lines(url("hung.out").path).joined().contains("vs-heavy: hung: ran past 1 s (--timeout): stopping it, with everything it started (exit 124)."),
+                "\(lines(url("hung.out").path))")
+        let sleep = try #require(pid(in: sleeper))
+        #expect(eventually { kill(sleep, 0) != 0 })
+        #expect(TestLock(directory: locks).holders().isEmpty)
+        // Its own status within the time; the environment's when none is given; a bad one refused.
+        let quick = try Self.runVsHeavy(["--timeout", "5m", "/bin/sh", "-c", "exit 3"], lockDirectory: locks, output: url("quick.out").path)
+        quick.waitUntilExit()
+        #expect(quick.terminationStatus == 3)
+        let set = try Self.runVsHeavy(["/bin/sh", "-c", "sleep 60"], lockDirectory: locks, output: url("set.out").path,
+                                      environment: ["VIBESWITCHER_HEAVY_TIMEOUT": "1s"])
+        set.waitUntilExit()
+        #expect(set.terminationStatus == 124)
+        let bad = try Self.runVsHeavy(["--timeout", "soon", "/usr/bin/true"], lockDirectory: locks, output: url("bad.out").path)
+        bad.waitUntilExit()
+        #expect(bad.terminationStatus == 2)
+    }
+
+    /// A holder whose work has used almost no CPU for a while says so, to waiters and to status: "idle 40 min" (from
+    /// its .active note, when that's its own); vs-heavy touches the note only while its command's group uses CPU.
+    @Test func aHolderThatUsedNoCPUForLongSaysIdle() throws {
+        let lock = TestLock(directory: url("heavy-locks").path)
+        let holder = try outsideHolder(lock)
+        defer { kill(holder.processIdentifier, SIGKILL); holder.waitUntilExit() }
+        try note(lock, "pid \(holder.processIdentifier), .venv/bin/python -m pytest -q in /Users/a/dev/TGE-ANALYSIS, since 02:53:22", ago: 45 * 60)
+        let active = lock.slotPath(1) + ".active"
+        try "pid \(holder.processIdentifier)\n".write(toFile: active, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-(40 * 60 + 5))], ofItemAtPath: active)
+        let held = lock.holder(1)
+        #expect(held.isIdle() && held.text().hasSuffix("(TGE-ANALYSIS), for 45 min, long, idle 40 min"), "\(held.text())")
+        #expect(held.short() == "TGE-ANALYSIS (.venv/bin/python -m pytest -q) for 45 min, idle 40 min")
+        let log = url("heavy.log").path
+        let waiting = try heavy("build", sleep: 0, log: log)
+        #expect(eventually { lines(waiting.output).joined().contains("waiting for") })
+        let said = lines(waiting.output).joined(separator: "\n")
+        #expect(said.contains("(TGE-ANALYSIS), for 45 min, long, idle 40 min."), "\(said)")
+        // Under 10 min it isn't idle; a note another holder left (another pid) says nothing.
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-9 * 60)], ofItemAtPath: active)
+        #expect(!lock.holder(1).isIdle() && !lock.holder(1).text().contains("idle"))
+        try "pid 1\n".write(toFile: active, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-60 * 60)], ofItemAtPath: active)
+        #expect(lock.holder(1).active == nil && !lock.holder(1).isIdle())
+        kill(holder.processIdentifier, SIGKILL)
+        waiting.process.waitUntilExit()
+        #expect(waiting.process.terminationStatus == 0)
+        #expect(!FileManager.default.fileExists(atPath: active), "the run's own .active stayed")
+
+        // vs-heavy's own: written when it takes the slot, then touched only while its command's group uses CPU.
+        let fast = [TestLock.sampleVariable: "0.2"]
+        let idle = try Self.runVsHeavy(["--as", "idle", "/bin/sh", "-c", "sleep 2"], lockDirectory: lock.directory, output: url("idle.out").path, environment: fast)
+        #expect(eventually { FileManager.default.fileExists(atPath: active) })
+        let written = try #require(lock.holder(1).active)
+        #expect(lines(active) == ["pid \(idle.processIdentifier)"])
+        Thread.sleep(forTimeInterval: 1)
+        #expect(lock.holder(1).active == written, "touched while its command slept")
+        idle.waitUntilExit()
+        #expect(idle.terminationStatus == 0 && !FileManager.default.fileExists(atPath: active))
+        var touched = false
+        // Most of a core for 0.8 s.
+        let busy = try Self.runVsHeavy(["--as", "busy", "/usr/bin/perl", "-MTime::HiRes=time", "-e", "my $end = time + 0.8; 1 while time < $end; sleep 1"], lockDirectory: lock.directory,
+                                       output: url("busy.out").path, environment: fast)
+        #expect(eventually { FileManager.default.fileExists(atPath: active) })
+        let first = lock.holder(1).active
+        while busy.isRunning {
+            if let now = lock.holder(1).active, let first, now > first { touched = true }
+            usleep(50_000)
+        }
+        #expect(touched, "never touched while it used CPU")
     }
 
     /// A note naming a process that has ended (killed outright, or the slot held by something its run left running)
@@ -405,6 +518,8 @@ struct TestLockTests {
         let note = url("script-locks/test-build.lock.holder").path
         #expect(lines(note).first?.contains(", scripts/test.sh in \(Self.repo.path)") == true)
         let killed = lines(note).first
+        // vs-heavy's supervisor ends the swift it ran (in a group of its own), then the slot is let go.
+        #expect(eventually { TestLock(directory: url("script-locks").path).holders().isEmpty })
         let b = try start("B", bin: bin)
         b.process.waitUntilExit()
         #expect(b.process.terminationStatus == 0, "\(lines(b.output))")

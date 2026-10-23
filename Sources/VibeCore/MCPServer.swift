@@ -474,6 +474,11 @@ public final class ToolProgress: @unchecked Sendable {
 /// calls run side by side (a 20-minute merge doesn't make `status` or `ping` wait), and a cancelled call's commands
 /// are stopped. With a `watch`, the server switches to a new build of itself when one is installed, between requests
 /// (see `MCPHandover`); it tells the client when the new build's tools differ.
+///
+/// Its input's end (a lead closed or restarted) and `stop` (SIGTERM, from the host's orphan sweep) end it the same way:
+/// every running call is cancelled, and `serve` returns once they have all ended, `stopGrace` at most. A process that
+/// just exited left a merge's test command running on in its own group without the test and build lock (its fd went
+/// with the process), and the merge's scratch worktree registered (its cleanup never ran): process audit 2026-10-22, #6.
 public final class MCPServer: @unchecked Sendable {
     private let name: String
     private let version: String
@@ -481,6 +486,12 @@ public final class MCPServer: @unchecked Sendable {
     private let watch: BinaryWatch?
     private let lock = NSLock()
     private var running: [String: ShellCancel] = [:]
+    /// Ending: asked to stop, or its input ended.
+    private var stopping = false
+    /// How long an ending server waits for its cancelled calls to end (their commands stopped, their cleanup run).
+    public var stopGrace: TimeInterval = 10
+    /// The signal sources `stop(on:)` made, kept while it serves.
+    private var signalSources: [DispatchSourceSignal] = []
     private var session: MCPSession
     /// Input the build before read but didn't handle (see `MCPHandover.State.input`).
     private var carried: Data
@@ -521,14 +532,63 @@ public final class MCPServer: @unchecked Sendable {
         return session
     }
 
-    /// Reads requests from `input` until it closes, answering on `output`. Between requests, with no tool call
-    /// running, it switches to a new build when one is installed (and goes on here when that fails).
+    /// Ends `serve`: its running calls are cancelled, and it returns once they've ended (see the type's comment). From
+    /// any thread.
+    public func stop() {
+        lock.lock()
+        stopping = true
+        let wake = self.wake
+        lock.unlock()
+        if wake >= 0 { _ = Darwin.write(wake, [UInt8(1)], 1) }
+    }
+
+    /// `stop` on any of `signals`: each caught (so a command a call starts gets it at its default, not ignored) and
+    /// heard by a dispatch source.
+    public func stop(on signals: [Int32]) {
+        for number in signals {
+            signal(number) { _ in }
+            let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
+            source.setEventHandler { [weak self] in self?.stop() }
+            source.resume()
+            lock.lock()
+            signalSources.append(source)
+            lock.unlock()
+        }
+    }
+
+    /// Cancels every running call and waits, `stopGrace` at most, for them to end.
+    private func end() {
+        lock.lock()
+        stopping = true
+        let calls = Array(running.values)
+        lock.unlock()
+        calls.forEach { $0.cancel() }
+        let deadline = Date().addingTimeInterval(stopGrace)
+        while Date() < deadline {
+            lock.lock()
+            let idle = running.isEmpty
+            lock.unlock()
+            if idle { return }
+            usleep(20_000)
+        }
+    }
+
+    /// Reads requests from `input` until it closes (or `stop`), answering on `output`, then ends its calls. Between
+    /// requests, with no tool call running, it switches to a new build when one is installed (and goes on here when
+    /// that fails).
     public func serve(input: Int32 = STDIN_FILENO, output: Int32 = STDOUT_FILENO) {
-        let out = FileHandle(fileDescriptor: output, closeOnDealloc: false)
+        // A reader that has gone (a closed client) makes a write fail, not kill this process with SIGPIPE: an ending
+        // server's cancelled calls still answer.
+        _ = fcntl(output, F_SETNOSIGPIPE, 1)
         let writing = NSLock()
         let respond: (Data) -> Void = { reply in
+            let line = Array(reply + Data([0x0A]))
             writing.lock()
-            out.write(reply + Data([0x0A]))
+            var sent = 0
+            while sent < line.count {
+                let count = line[sent...].withUnsafeBytes { Darwin.write(output, $0.baseAddress, $0.count) }
+                if count > 0 { sent += count } else if count < 0 && errno == EINTR { continue } else { break }
+            }
             writing.unlock()
         }
         var wakeup: [Int32] = [-1, -1]
@@ -545,6 +605,7 @@ public final class MCPServer: @unchecked Sendable {
         carried = Data()
         lock.unlock()
         defer {
+            end()
             lock.lock()
             wake = -1
             announce = nil
@@ -555,6 +616,10 @@ public final class MCPServer: @unchecked Sendable {
 
         var chunk = [UInt8](repeating: 0, count: 65_536)
         while true {
+            lock.lock()
+            let stopped = stopping
+            lock.unlock()
+            if stopped { return }
             switchIfDue(pending: pending)
             if let end = pending.firstIndex(of: 0x0A) {
                 var line = Data(pending[pending.startIndex..<end])

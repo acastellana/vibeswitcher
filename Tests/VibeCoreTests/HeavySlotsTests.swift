@@ -124,6 +124,13 @@ extension LeadToolsetTests {
         defer { end(holders) }
         let header = try #require(call(lead, "status").text.split(separator: "\n").first.map(String.init))
         #expect(header.contains("; a test and build slot held long: TGE-ANALYSIS (.venv/bin/python -m pytest -q) for 38 min."), "\(header)")
+        // Held under 30 min, but its work idle over 10 (its .active note): named too.
+        let lock = testLock.with(slots: 1)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-(12 * 60 + 5))], ofItemAtPath: lock.slotPath(1) + ".holder")
+        try "pid \(holders[0].processIdentifier)\n".write(toFile: lock.slotPath(1) + ".active", atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-(11 * 60 + 5))], ofItemAtPath: lock.slotPath(1) + ".active")
+        let idle = try #require(call(lead, "status").text.split(separator: "\n").first.map(String.init))
+        #expect(idle.contains("; a test and build slot held long or idle: TGE-ANALYSIS (.venv/bin/python -m pytest -q) for 12 min, idle 11 min."), "\(idle)")
         // The workflow shows the count merge and audits take.
         #expect(call(lead, "configure").text.contains("- heavy_slots: 1 (not set: "))
         #expect(!call(lead, "configure", ["heavy_slots": "4"]).isError)

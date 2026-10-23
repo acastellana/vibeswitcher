@@ -1,37 +1,69 @@
 #!/bin/bash
-# vs-heavy [--as WHAT] COMMAND [ARGS...]: runs COMMAND in one of the Mac-wide slots for heavy work (a full test suite, a
-# release build), so that every project's workers, merges and audits run at most N at a time on this Mac. Two suites
-# side by side starved each other and the benches (3–4 min each at load 30–50, measured 2026-10-21); one slot, though,
-# let a 38-minute pytest hold up every project's builds, suites and merges (2026-10-22). N is VIBESWITCHER_HEAVY_SLOTS,
-# else the Mac's cores ÷ 4 (at least 1): 3 on a 12-core Mac. While every slot is held, this run waits in line (first
-# come, first served, with merges and audits too), saying its place ("2nd in line, behind merge of x (vibeswitcher)")
-# and who holds each slot (pid, what, where, which project, and how long: "long" past 30 min, only said, never acted on),
-# again each time that changes and every 5 minutes, then runs COMMAND and exits with its status. VibeSwitcher puts it on
-# PATH in every session it starts (the app bundle's Contents/Resources/bin); merge and an audit's shared run take a slot
-# around their test command too (`TestLock` in VibeCore).
+# vs-heavy [--as WHAT] [--timeout TIME] COMMAND [ARGS...]: runs COMMAND in one of the Mac-wide slots for heavy work (a
+# full test suite, a release build), so that every project's workers, merges and audits run at most N at a time on this
+# Mac. Two suites side by side starved each other and the benches (3–4 min each at load 30–50, measured 2026-10-21); one
+# slot, though, let a 38-minute pytest hold up every project's builds, suites and merges (2026-10-22). N is
+# VIBESWITCHER_HEAVY_SLOTS, else the Mac's cores ÷ 4 (at least 1): 3 on a 12-core Mac. While every slot is held, this
+# run waits in line (first come, first served, with merges and audits too), saying its place ("2nd in line, behind merge
+# of x (vibeswitcher)") and who holds each slot (pid, what, where, which project, how long: "long" past 30 min, and
+# "idle 40 min" once its work has used almost no CPU for 10 min or more: only said, never acted on), again each time
+# that changes and every 5 minutes, then runs COMMAND and exits with its status. VibeSwitcher puts it on PATH in every
+# session it starts (the app bundle's Contents/Resources/bin); merge and an audit's shared run take a slot around their
+# test command too (`TestLock` in VibeCore).
 #
 # Slot 1 is a flock on $VIBESWITCHER_TEST_LOCK_DIR/test-build.lock (default /private/tmp/vibeswitcher-<uid>/), slot k
 # on test-build-k.lock beside it (an older vs-heavy, with only test-build.lock, contends for slot 1). The slot taken is
-# held on this script's fd 9: the kernel lets go of it when the script exits, Ctrl-C and kill -9 too, so a run that died
-# leaves no lock behind. Its slot's .holder note goes when it exits; one a kill -9 left names a pid that's gone, and
-# readers take it as saying nothing (the next holder writes its own). macOS has no
-# flock(1): /usr/bin/perl takes it on one of the slots' fds and exits, and the lock stays with the script's fd. COMMAND
-# runs without it, so nothing it leaves running keeps the slot.
+# held on this script's fd 9 and its supervisor's (below): the kernel lets go of it once both have exited, so a run that
+# died leaves no lock behind. Its slot's .holder note goes when it exits; one a kill -9 left names a pid that's gone,
+# and readers take it as saying nothing (the next holder writes its own). macOS has no flock(1): /usr/bin/perl takes it
+# on one of the slots' fds and exits, and the lock stays with the script's fd.
+#
+# The slot is let go only once COMMAND has ended: killed while it ran (`kill <pid>` of this script, how workers stop
+# what they started), this script freed the slot while a suite ran on, unlocked (process audit 2026-10-22, #4). COMMAND
+# runs in a process group of its own, started and watched by a supervisor (perl, in a group of its own too, holding the
+# slot with this script): TERM, INT (Ctrl-C) and HUP to this script go to the supervisor, which sends them on to
+# COMMAND's group, gives it 10 s, kills what's left of the group, and only then exits, and this script after it. When
+# this script goes without a word (kill -9), the supervisor ends the group the same way. COMMAND ending by itself ends
+# the run: what it left running in its group is left alone (a daemon it started), and doesn't hold the slot (it hasn't
+# the fd). COMMAND's stdin is /dev/null when this script's is a terminal: its group isn't the terminal's, and a read
+# there would stop it.
+#
+# No holder keeps a slot for good (a TGE pytest sat at 0 % CPU for 3 h 23 min holding the only one, 2026-10-22):
+# --timeout TIME (VIBESWITCHER_HEAVY_TIMEOUT, else 60 min; "90" or "90m" minutes, "30s" seconds, "2h" hours) ends
+# COMMAND's group the same way once it has run that long, and this script exits 124. While COMMAND runs, the
+# supervisor looks at its group's CPU time every minute and touches the slot's .active note (its text this script's
+# "pid P") whenever the group used 1 % of a core or more since: how long ago it was last touched is how long the holder
+# has been idle, for waiters here and TestLock's (status, the witness).
 #
 # COMMAND gets VIBESWITCHER_TEST_LOCK naming the slot: a vs-heavy under one that holds any of this folder's slots (a
 # test script the merge's test command runs, a suite under a wrapped build) runs its command at once rather than wait
-# for its own ancestor.
+# for its own ancestor (the holder's own timeout and group are its).
 # --as WHAT: who the holder note names (default: the command line).
 set -uo pipefail
 
+# TIME as seconds: "90" and "90m" minutes, "30s" seconds, "2h" hours; above 0. Fails on anything else.
+seconds_of() {
+    [[ $1 =~ ^([0-9]+)([smh]?)$ ]] && (( 10#${BASH_REMATCH[1]} > 0 )) || return 1
+    case ${BASH_REMATCH[2]} in
+        s) echo $(( 10#${BASH_REMATCH[1]} )) ;;
+        h) echo $(( 10#${BASH_REMATCH[1]} * 3600 )) ;;
+        *) echo $(( 10#${BASH_REMATCH[1]} * 60 )) ;;
+    esac
+}
+usage="usage: vs-heavy [--as WHAT] [--timeout TIME] COMMAND [ARGS...]: runs COMMAND in a Mac-wide slot for heavy work"
+
 what=""
-if [[ ${1:-} == --as ]]; then
-    what=${2:?vs-heavy --as WHAT COMMAND [ARGS...]}
-    shift 2
-fi
-[[ ${1:-} == -- ]] && shift
+timeout=$(seconds_of "${VIBESWITCHER_HEAVY_TIMEOUT:-}") || timeout=3600
+while (( $# > 0 )); do
+    case $1 in
+        --as) what=${2:?vs-heavy --as WHAT COMMAND [ARGS...]}; shift 2 ;;
+        --timeout) timeout=$(seconds_of "${2:-}") || { echo "vs-heavy: --timeout ${2:-}: give minutes (90, 90m), seconds (30s) or hours (2h)" >&2; exit 2; }; shift 2 ;;
+        --) shift; break ;;
+        *) break ;;
+    esac
+done
 if (( $# == 0 )); then
-    echo "usage: vs-heavy [--as WHAT] COMMAND [ARGS...]: runs COMMAND in a Mac-wide slot for heavy work" >&2
+    echo "$usage" >&2
     exit 2
 fi
 [[ -n $what ]] || what=$(printf '%s' "$*" | tr '\n' ' ' | cut -c 1-120)
@@ -99,7 +131,17 @@ taken=$(/usr/bin/perl -MFcntl=:DEFAULT,:flock -MPOSIX=strftime -e '
         my $since = (stat($note))[9];
         my $who = $line;
         if (my ($pid, $cmd, $in) = parse($line)) { $who = "pid $pid, $cmd" . (defined $in ? " in $in (" . project($in) . ")" : ""); }
-        return ($who, $line, defined $since ? time - $since : undef);
+        return ($who, $line, defined $since ? time - $since : undef, idle($file, $line));
+    }
+    # How long the holder whose note is $line has used almost no CPU, from its .active note (when that is its own).
+    sub idle {
+        my ($file, $line) = @_;
+        my ($pid) = $line =~ /^pid (\d+),/ or return undef;
+        open(my $active, "<", "$file.active") or return undef;
+        my $of = <$active>;
+        return undef unless defined $of && $of =~ /^pid $pid$/;
+        my $at = (stat($active))[9];
+        return defined $at ? time - $at : undef;
     }
     sub numbers { opendir(my $d, $dir) or return (); my @all = map { /^ticket-(\d+)$/ ? $1 : () } readdir($d); return @all; }
     # Takes a number: its ticket, flocked from its making on $ticket.
@@ -154,9 +196,10 @@ taken=$(/usr/bin/perl -MFcntl=:DEFAULT,:flock -MPOSIX=strftime -e '
         if (!kill(0, $script) || getppid() == 1) { leave(); exit 1; }
         my (@told, @keys);
         for my $i (0 .. $#handles) {
-            my ($who, $key, $age) = holder($handles[$i][1]);
+            my ($who, $key, $age, $idle) = holder($handles[$i][1]);
             push @keys, $key;
-            push @told, "slot " . ($i + 1) . " held by $who" . (defined $age ? ", for " . held_for($age) : "");
+            push @told, "slot " . ($i + 1) . " held by $who" . (defined $age ? ", for " . held_for($age) : "")
+                . (defined $idle && $idle >= 600 ? ", idle " . int($idle / 60) . " min" : "");
         }
         my $where = place(@ahead);
         my $set = join("\n", $where, @keys);
@@ -179,8 +222,113 @@ exec 9>&$(( 19 + taken ))
 for (( k = 1; k <= slots; k++ )); do eval "exec $(( 19 + k ))>&-"; done
 
 echo "pid $$, $what in $PWD, since $(date +%H:%M:%S)" > "$lock_file.holder"
-# The note goes with this run (Ctrl-C too), while the slot is still ours: only our own, so no later holder's. A kill -9
-# leaves it, naming a pid that's gone, which readers (waiters here, TestLock's) take as saying nothing.
-trap '[[ $(head -n 1 "$lock_file.holder" 2>/dev/null) == "pid $$, "* ]] && rm -f "$lock_file.holder"' EXIT
+# Its work's last use of CPU (its time; touched by the supervisor).
+echo "pid $$" > "$lock_file.active"
+# The notes go with this run (Ctrl-C too), while the slot is still ours: only our own, so no later holder's. A kill -9
+# leaves them, naming a pid that's gone, which readers (waiters here, TestLock's) take as saying nothing.
+trap '[[ $(head -n 1 "$lock_file.holder" 2>/dev/null) == "pid $$, "* ]] && rm -f "$lock_file.holder"
+      [[ $(head -n 1 "$lock_file.active" 2>/dev/null) == "pid $$" ]] && rm -f "$lock_file.active"' EXIT
 export VIBESWITCHER_TEST_LOCK=$lock_file
-"$@" 9>&-
+
+# TERM, INT and HUP go to the supervisor (one that came before it started, once it has).
+supervisor="" stopping=""
+for signal in TERM INT HUP; do
+    trap "stopping=$signal; [[ -n \$supervisor ]] && kill -$signal \$supervisor 2> /dev/null" "$signal"
+done
+# The supervisor: in a group of its own (a kill -9 of this script's group leaves it to end COMMAND's), it starts
+# COMMAND in another, its id COMMAND's pid, and waits for it, holding the slot on fd 9 as this script does. Stopped
+# (TERM, INT, HUP, this script gone, or past --timeout), it sends COMMAND's group the signal (TERM for the last two),
+# kills what's left of it after 10 s, and exits once the group is empty: 128 + the signal, or 124 past --timeout.
+# Else it exits with COMMAND's status, 128 + the signal when a signal ended it. Every minute (VIBESWITCHER_HEAVY_SAMPLE
+# seconds, for tests) it reads the group's CPU time with ps and touches .active when the group used 1 % of a core or
+# more since the look before (CPU of processes that ended in between isn't seen; new ones count whole). Its stdin is this script's
+# (`<&0`: a script's background job's would be /dev/null).
+/usr/bin/perl -MPOSIX=:sys_wait_h -MTime::HiRes=time -e '
+    my ($script, $what, $limit, $active, $every, @command) = @ARGV;
+    my $stop;
+    $SIG{$_} = sub { $stop //= $_[0] } for qw(TERM INT HUP);
+    POSIX::setpgid(0, 0);
+    my $child = fork;
+    defined $child or do { print STDERR "vs-heavy: $what: could not start it: $!\n"; exit 126 };
+    if ($child == 0) {
+        POSIX::setpgid(0, 0);
+        $SIG{$_} = "DEFAULT" for qw(TERM INT HUP QUIT);
+        POSIX::close(9);
+        open(STDIN, "<", "/dev/null") if -t STDIN;
+        { exec { $command[0] } @command; }
+        print STDERR "vs-heavy: $command[0]: $!\n";
+        POSIX::_exit(127);
+    }
+    # Either side may run first: the group is made before anything is sent to it.
+    POSIX::setpgid($child, $child);
+    my ($start, $status, $timedOut) = (time, undef, 0);
+    # The group'\''s processes and their CPU seconds, from ps; undef when it did not answer in 5 s.
+    sub cpu {
+        my %cpu;
+        my $ps = open(my $out, "-|", "/bin/ps", "-A", "-o", "pgid=,pid=,time=") or return undef;
+        my @lines = eval { local $SIG{ALRM} = sub { die "late\n" }; alarm 5; my @all = <$out>; alarm 0; @all };
+        alarm 0;
+        if ($@) { kill "KILL", $ps; close $out; return undef; }
+        close $out;
+        for (@lines) {
+            my ($group, $pid, $time) = split;
+            next unless defined $time && $group == $child;
+            my $seconds = 0;
+            $seconds = $seconds * 60 + $_ for split /:/, $time;
+            $cpu{$pid} = $seconds;
+        }
+        return \%cpu;
+    }
+    my ($seen, $next) = (undef, time + $every);
+    while (1) {
+        if (waitpid($child, WNOHANG) == $child) { $status = $?; last; }
+        if (!defined $stop && (getppid() == 1 || !kill(0, $script))) {
+            print STDERR "vs-heavy: $what: vs-heavy (pid $script) went: stopping it.\n";
+            $stop = "TERM";
+        }
+        if (!defined $stop && time - $start >= $limit) {
+            my $past = $limit % 60 ? "$limit s" : $limit / 60 . " min";
+            print STDERR "vs-heavy: $what: ran past $past (--timeout): stopping it, with everything it started (exit 124).\n";
+            ($stop, $timedOut) = ("TERM", 1);
+        }
+        last if defined $stop;
+        if (time >= $next) {
+            if (my $now = cpu()) {
+                # The first look only sets where it starts from.
+                my $used = 0;
+                $used += $now->{$_} - (exists $seen->{$_} ? $seen->{$_} : 0) for $seen ? keys %$now : ();
+                utime(undef, undef, $active) if $used >= 0.01 * $every;
+                $seen = $now;
+            }
+            $next = time + $every;
+        }
+        select(undef, undef, undef, 0.1);
+    }
+    if (defined $stop) {
+        kill $stop, -$child;
+        my ($end, $killed) = (time + 10, 0);
+        while (1) {
+            $status //= $? if waitpid($child, WNOHANG) == $child;
+            last if defined $status && !kill(0, -$child);
+            if (time >= $end) {
+                last if $killed;
+                kill "KILL", -$child;
+                ($end, $killed) = (time + 5, 1);
+            }
+            select(undef, undef, undef, 0.05);
+        }
+        exit 124 if $timedOut;
+        exit 128 + ({TERM => 15, INT => 2, HUP => 1}->{$stop});
+    }
+    exit($status & 127 ? 128 + ($status & 127) : $status >> 8);
+' "$$" "$what" "$timeout" "$lock_file.active" "${VIBESWITCHER_HEAVY_SAMPLE:-60}" "$@" <&0 &
+supervisor=$!
+[[ -n $stopping ]] && kill -"$stopping" "$supervisor" 2> /dev/null
+# A trap ends a wait early: waited for again while the supervisor is there.
+status=0
+while :; do
+    wait "$supervisor"
+    status=$?
+    kill -0 "$supervisor" 2> /dev/null || break
+done
+exit "$status"

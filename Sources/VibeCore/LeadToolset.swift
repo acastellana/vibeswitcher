@@ -130,14 +130,15 @@ public final class LeadToolset: MCPToolset {
         return workflow.heavySlots == nil ? "\(count) (not set: VIBESWITCHER_HEAVY_SLOTS, else the Mac's cores ÷ 4)" : "\(count)"
     }
 
-    /// Status's word on a test and build slot held over `TestLock.longAfter`: "; a test and build slot held long:
-    /// TGE (pytest -q) for 38 min". Only said: nothing ends it.
+    /// Status's word on a test and build slot held over `TestLock.longAfter`, or whose holder has been idle over
+    /// `TestLock.idleAfter`: "; a test and build slot held long: TGE (pytest -q) for 38 min, idle 35 min". Only said.
     func longHolderText() -> String {
         guard let lock = heavyLock(workflow) else { return "" }
         let now = Date()
-        let long = lock.holders().filter { $0.isLong(now: now) }
+        let long = lock.holders().filter { $0.isLong(now: now) || $0.isIdle(now: now) }
         guard !long.isEmpty else { return "" }
-        return "; \(long.count == 1 ? "a test and build slot" : "\(long.count) test and build slots") held long: " + long.map { $0.short(now: now) }.joined(separator: ", ")
+        let how = long.allSatisfy { $0.isLong(now: now) } ? "held long" : "held long or idle"
+        return "; \(long.count == 1 ? "a test and build slot" : "\(long.count) test and build slots") \(how): " + long.map { $0.short(now: now) }.joined(separator: ", ")
     }
 
     /// The server for the session it runs in. `expected` and `expectedTask` are what it was started as (`--role`,

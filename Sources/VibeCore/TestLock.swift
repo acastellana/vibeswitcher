@@ -9,7 +9,9 @@ import Foundation
 /// workflow's heavy_slots for merge and audits, else the Mac's cores ÷ 4 (at least 1).
 /// Slot 1 is a flock on `<directory>/test-build.lock`, slot k on `<directory>/test-build-k.lock`: the kernel lets go of
 /// it when its holder exits, however it ends, so no stale slot outlives a run. `<slot>.holder` says who holds it, for
-/// the one waiting and for status.
+/// the one waiting and for status; `<slot>.active` ("pid P", P the note's) when its work last used CPU: touched by its
+/// holder (vs-heavy's supervisor, `Held` here) each `sampleEvery` its work used 1 % of a core or more, so a hung one
+/// reads "idle 40 min" (a TGE pytest held the only slot 3 h 23 min at 0 % CPU, 2026-10-22).
 ///
 /// Waiters take slots first come, first served (flock has no queue: on 2026-10-22 a merge waited over 90 minutes for a
 /// slot while pytests and merges arriving after it took it again and again). Each takes a number (a ticket) on
@@ -30,13 +32,19 @@ public struct TestLock: Sendable {
     public static let heldVariable = "VIBESWITCHER_TEST_LOCK"
     /// Where the slots are kept instead of /private/tmp/vibeswitcher-<uid> (tests).
     public static let directoryVariable = "VIBESWITCHER_TEST_LOCK_DIR"
+    /// How often `vs-heavy`'s supervisor looks at its command's CPU time, in seconds, when set (tests); else 60.
+    public static let sampleVariable = "VIBESWITCHER_HEAVY_SAMPLE"
     /// How many slots, when set (a whole number above 0); else `defaultSlots`.
     public static let slotsVariable = "VIBESWITCHER_HEAVY_SLOTS"
     /// A slot held this long is "long" in status, the witness and a waiter's words: only said, never acted on.
     public static let longAfter: TimeInterval = 30 * 60
+    /// A holder whose work has used almost no CPU this long is "idle" there: only said, never acted on.
+    public static let idleAfter: TimeInterval = 10 * 60
 
     public let directory: String
     public let slots: Int
+    /// How often a holder here looks at its work's CPU time (`Held`).
+    public var sampleEvery: TimeInterval = 60
     /// Slot 1's file (an older `vs-heavy` knows only this one).
     public var path: String { slotPath(1) }
 
@@ -46,7 +54,11 @@ public struct TestLock: Sendable {
     }
 
     /// The same slots, `count` of them.
-    public func with(slots count: Int) -> TestLock { TestLock(directory: directory, slots: count) }
+    public func with(slots count: Int) -> TestLock {
+        var lock = TestLock(directory: directory, slots: count)
+        lock.sampleEvery = sampleEvery
+        return lock
+    }
 
     /// Slot `index`'s file (from 1).
     public func slotPath(_ index: Int) -> String {
@@ -100,28 +112,81 @@ public struct TestLock: Sendable {
         return environment[heldVariable].map(lock.isSlot) == true ? nil : lock
     }
 
-    /// A slot while it's held: let go with `release` (or when it goes).
+    /// A slot while it's held: let go with `release` (or when it goes). While it's held, the commands this process
+    /// runs (its descendants: the test command's group, and whatever other calls run meanwhile) are looked at every
+    /// `every`, and its `.active` note touched when they used 1 % of a core or more.
     public final class Held: @unchecked Sendable {
+        private let lock = NSLock()
         private var fd: Int32
         /// The slot's file.
         public let path: String
-        init(fd: Int32, path: String) {
+        private let sampling = ShellCancel()
+        init(fd: Int32, path: String, every: TimeInterval) {
             self.fd = fd
             self.path = path
+            let active = path + ".active", stop = sampling
+            Thread.detachNewThread {
+                var seen: [pid_t: Double]?
+                var next = Date().addingTimeInterval(every)
+                while !stop.isCancelled {
+                    if Date() >= next {
+                        if let now = TestLock.descendantsCPU() {
+                            // The first look only sets where it starts from.
+                            let used = seen.map { seen in now.reduce(0) { $0 + $1.value - (seen[$1.key] ?? 0) } } ?? 0
+                            if used >= 0.01 * every, !stop.isCancelled { utimes(active, nil) }
+                            seen = now
+                        }
+                        next = Date().addingTimeInterval(every)
+                    }
+                    Thread.sleep(forTimeInterval: min(0.5, every / 4))
+                }
+            }
         }
 
         public func release() {
+            lock.lock()
+            defer { lock.unlock() }
             guard fd >= 0 else { return }
-            // Its note goes first, while the slot is still this process's: only its own (no other holder could write
+            sampling.cancel()
+            // Its notes go first, while the slot is still this process's: only its own (no other holder could write
             // one meanwhile).
-            let note = path + ".holder"
+            let note = path + ".holder", active = path + ".active"
             if (try? String(contentsOfFile: note, encoding: .utf8))?.hasPrefix("pid \(getpid()), ") == true { unlink(note) }
+            if TestLock.firstLine(active) == "pid \(getpid())" { unlink(active) }
             flock(fd, LOCK_UN)
             close(fd)
             fd = -1
         }
 
         deinit { release() }
+    }
+
+    /// The first line of the file at `path`, trimmed; nil when there's none.
+    static func firstLine(_ path: String) -> String? {
+        (try? String(contentsOfFile: path, encoding: .utf8))?.split(separator: "\n").first
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// CPU seconds (user and system) of this process's descendants, by pid; nil when the process table couldn't be read.
+    static func descendantsCPU(of root: pid_t = getpid()) -> [pid_t: Double]? {
+        guard let table = ProcessTable.trySnapshot() else { return nil }
+        var family: [pid_t] = [root], index = 0
+        while index < family.count {
+            let parent = family[index]
+            family += table.values.filter { $0.ppid == parent && $0.pid != parent && !family.contains($0.pid) }.map(\.pid)
+            index += 1
+        }
+        var timebase = mach_timebase_info_data_t()
+        mach_timebase_info(&timebase)
+        let seconds = Double(timebase.numer) / Double(max(1, timebase.denom)) / 1e9
+        var cpu: [pid_t: Double] = [:]
+        for pid in family.dropFirst() {
+            var info = proc_taskinfo()
+            let size = Int32(MemoryLayout<proc_taskinfo>.size)
+            guard proc_pidinfo(pid, PROC_PIDTASKINFO, 0, &info, size) == size else { continue }
+            cpu[pid] = Double(info.pti_total_user + info.pti_total_system) * seconds
+        }
+        return cpu
     }
 
     /// Who holds a slot, as its note says.
@@ -131,11 +196,14 @@ public struct TestLock: Sendable {
         public var note: String?
         /// When the note was written: when the slot was taken.
         public var since: Date?
+        /// When its work last used CPU, as its `.active` note says; nil when it says nothing (an older holder's).
+        public var active: Date?
 
-        public init(slot: Int, note: String?, since: Date?) {
+        public init(slot: Int, note: String?, since: Date?, active: Date? = nil) {
             self.slot = slot
             self.note = note
             self.since = since
+            self.active = active
         }
 
         /// The note's parts: "pid P, WHAT in DIR, since T" (vs-heavy's, merge's and audits'), or without " in DIR".
@@ -157,21 +225,26 @@ public struct TestLock: Sendable {
         public func held(now: Date = Date()) -> TimeInterval { since.map { max(0, now.timeIntervalSince($0)) } ?? 0 }
         public func isLong(now: Date = Date()) -> Bool { since != nil && held(now: now) >= TestLock.longAfter }
 
-        /// "pid 30098, pytest -q in /Users/a/dev/TGE (TGE), for 38 min, long".
+        /// How long its work has used almost no CPU (0 when it doesn't say).
+        public func idle(now: Date = Date()) -> TimeInterval { active.map { max(0, now.timeIntervalSince($0)) } ?? 0 }
+        public func isIdle(now: Date = Date()) -> Bool { active != nil && idle(now: now) >= TestLock.idleAfter }
+        private func idleText(now: Date) -> String { isIdle(now: now) ? ", idle \(Int(idle(now: now)) / 60) min" : "" }
+
+        /// "pid 30098, pytest -q in /Users/a/dev/TGE (TGE), for 38 min, long, idle 35 min".
         public func text(now: Date = Date()) -> String {
             var text = parts.map { parts in
                 "pid \(parts.pid), \(parts.what)" + (parts.directory.map { " in \($0) (\(project ?? "?"))" } ?? "")
             } ?? note ?? "a run that didn't say who it is"
             if since != nil {
                 let seconds = Int(held(now: now))
-                text += ", for " + (seconds < 60 ? "\(seconds) s" : "\(seconds / 60) min") + (isLong(now: now) ? ", long" : "")
+                text += ", for " + (seconds < 60 ? "\(seconds) s" : "\(seconds / 60) min") + (isLong(now: now) ? ", long" : "") + idleText(now: now)
             }
             return text
         }
 
-        /// Status's and the witness's words for a long one: "TGE (pytest -q) for 38 min".
+        /// Status's and the witness's words for a long or idle one: "TGE (pytest -q) for 38 min, idle 35 min".
         public func short(now: Date = Date()) -> String {
-            "\(project ?? "a run") (\((what ?? note ?? "it didn't say what").prefix(80))) for \(Int(held(now: now)) / 60) min"
+            "\(project ?? "a run") (\((what ?? note ?? "it didn't say what").prefix(80))) for \(Int(held(now: now)) / 60) min" + idleText(now: now)
         }
     }
 
@@ -287,12 +360,14 @@ public struct TestLock: Sendable {
     /// nothing: it outlived its run (killed outright, or the slot is held by something it left running), and naming it
     /// sent waiters, status and the witness after a worktree cleaned up long ago (2026-10-22, pid 56668).
     public func holder(_ index: Int) -> Holder {
-        let note = slotPath(index) + ".holder"
-        let line = (try? String(contentsOfFile: note, encoding: .utf8))?.split(separator: "\n").first
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 }
-            .flatMap { Self.isGone(note: $0) ? nil : $0 }
+        let note = slotPath(index) + ".holder", activeNote = slotPath(index) + ".active"
+        let line = Self.firstLine(note).flatMap { Self.isGone(note: $0) ? nil : $0 }
         let since = (try? FileManager.default.attributesOfItem(atPath: note))?[.modificationDate] as? Date
-        return Holder(slot: index, note: line, since: line == nil ? nil : since)
+        // Its own: the holder's pid. One another holder left says nothing.
+        let pid = line?.firstMatch(of: #/^pid (\d+),/#).map { String($0.1) }
+        let active = pid != nil && Self.firstLine(activeNote) == "pid \(pid!)"
+            ? (try? FileManager.default.attributesOfItem(atPath: activeNote))?[.modificationDate] as? Date : nil
+        return Holder(slot: index, note: line, since: line == nil ? nil : since, active: active)
     }
 
     /// Whether `note` ("pid P, …") names a process that has ended.
@@ -367,7 +442,8 @@ public struct TestLock: Sendable {
                 fds[free] = -1
                 let index = free + 1
                 try? VibePaths.writePrivate(Data((note() + "\n").utf8), to: URL(fileURLWithPath: slotPath(index) + ".holder"))
-                return .held(Held(fd: fd, path: slotPath(index)), waited: Date().timeIntervalSince(start), after: waitedFor)
+                try? VibePaths.writePrivate(Data("pid \(getpid())\n".utf8), to: URL(fileURLWithPath: slotPath(index) + ".active"))
+                return .held(Held(fd: fd, path: slotPath(index), every: sampleEvery), waited: Date().timeIntervalSince(start), after: waitedFor)
             }
             if waitedFor.isEmpty { waitedFor = (1...slots).map(holder) }
             if cancel?.isCancelled == true { return .cancelled }

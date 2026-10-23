@@ -65,6 +65,7 @@ if let build = environment["VIBESWITCHER_MCP_TEST_BUILD"], let installed = envir
                            watch: BinaryWatch(path: installed, running: handover?.binary), resuming: handover)
     if let host, environment["VIBESWITCHER_MCP_TEST_HOLD"] == "1" { server.switchWhen = { FileManager.default.fileExists(atPath: host) } }
     toolset.start { server.toolsSettled() }
+    server.stop(on: [SIGTERM, SIGHUP])
     server.serve()
     exit(0)
 }
@@ -285,4 +286,7 @@ let server = MCPServer(name: "vibeswitcher", version: "1", toolset: toolset, wat
 let quickVault = LeadVault(folder: LeadVault.standard.folder) { try HostCall.vault($0, timeout: 1) }
 server.switchWhen = { hostAnswers(quickVault) }
 toolset.start { server.toolsSettled() }
+// SIGTERM (the host's orphan sweep) and SIGHUP end it as its input's end does: its running calls are cancelled (a
+// merge's test command stopped, its scratch worktree removed) before it exits.
+server.stop(on: [SIGTERM, SIGHUP])
 server.serve()
