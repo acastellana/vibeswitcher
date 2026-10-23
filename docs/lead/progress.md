@@ -990,3 +990,5 @@
 - 2026-10-23 05:20 Audit of workers-don-t-stall: complete, clean, round 3: 1 Important closed, 1 Pre-existing open
 - 2026-10-23 05:30 Audit of ending-a-session-ends: complete, clean, round 2: 3 Important closed, 1 Nit open
 - 2026-10-23 10:10 Merged the-leaks-check-can: The leaks check can't hang a test run (no audit: review none)
+- 2026-10-23 10:10 Update: Merged: the leaks check can't hang a test run — What changed: ChatTextPrepareLeakTests ends /usr/bin/leaks after 120 s and fails with a message naming the likely cause (a pending Developer Tools Access dialog or a debugger attach) instead of hangin…
+- 2026-10-23 10:16 Merged vs-heavy-killing-it: vs-heavy: killing it ends its command, and a holder is bounded and checked (no audit: review none)
