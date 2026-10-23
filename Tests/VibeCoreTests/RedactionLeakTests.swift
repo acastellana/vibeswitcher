@@ -48,6 +48,23 @@ struct RedactionLeakTests {
         expectMasked("hook: \(discord)", hiding: "AbCdEf-GhIjKl_MnOpQrStUvWxYz0123456789")
     }
 
+    @Test func aShapeHoldingAFortyCharacterBase64RunIsMaskedWhole() {
+        // The bare AWS secret rule takes any run of exactly 40 base64 characters (upper, lower, digit); one inside a
+        // longer shape is masked with that shape, else the rest of the shape stays visible beside the run.
+        let run = fake("", 40), tail = "EXAMPLEtail"
+        // The Slack path from `com/` up to the hyphen is such a run too, and so is what follows the hyphen.
+        let slack = "https://hooks.slack.com/" + "services/" + "T00000000/B00000000/" + "EXAMPLE-" + run
+        expectMasked("curl -X POST \(slack)", hiding: run, as: "curl -X POST https://•••")
+        let discord = "https://discord.com/api/webhooks/" + "123456789012345678/" + "EXAMPLE_" + run + "_" + tail
+        expectMasked("hook: \(discord) end", hiding: tail, as: "hook: https://••• end")
+        let gitlab = "gl" + "pat-" + "EXAMPLE_" + run + "-" + tail
+        expectMasked("git push # \(gitlab) end", hiding: tail, as: "git push # ••• end")
+        let pypi = "py" + "pi-AgE" + "EXAMPLE_" + run + "-" + tail
+        expectMasked("twine upload \(pypi) end", hiding: tail, as: "twine upload ••• end")
+        let sendGrid = "SG" + "." + run + "_EXAMPLE" + "." + "StUvWxYz0123456789abcd"
+        expectMasked("mail \(sendGrid) end", hiding: "StUvWxYz0123456789abcd", as: "mail ••• end")
+    }
+
     @Test func aBareAWSSecretKeyIsMaskedButHashesAreNot() {
         let secret = "wJalrXUtnFEMI/K7MDENG/" + "bPxRfiCYEXAMPLEKEY"
         expectMasked("aws_secret = x\n\(secret)\n", hiding: secret)

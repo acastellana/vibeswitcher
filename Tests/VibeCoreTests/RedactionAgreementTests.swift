@@ -97,7 +97,15 @@ struct RedactionAgreementTests {
         let slack = "https://hooks.slack.com/" + "services/" + "T0123ABCD/B0456EFGH/" + fake("", 24)
         let discord = "https://discord.com/api/webhooks/" + "123456789012345678/" + "AbCdEf-GhIjKl_MnOpQrStUvWxYz0123456789"
         let awsSecret = "wJalrXUtnFEMI/K7MDENG/" + "bPxRfiCYEXAMPLEKEY"
-        let inputs = [
+        // Shapes holding a run of exactly 40 base64 characters, and one glued to such a run.
+        let run = fake("", 40), tail = "EXAMPLEtail"
+        let held = [
+            "https://hooks.slack.com/" + "services/" + "T00000000/B00000000/" + "EXAMPLE-" + run,
+            "https://discord.com/api/webhooks/" + "123456789012345678/" + "EXAMPLE_" + run + "_" + tail,
+            "gl" + "pat-" + "EXAMPLE_" + run + "-" + tail, "py" + "pi-AgE" + "EXAMPLE_" + run + "-" + tail,
+            "SG" + "." + run + "_EXAMPLE" + "." + "StUvWxYz0123456789abcd", run + "AIza" + "SyA0EXAMPLE0123456789abcdefghijkl",
+        ].map { "see \($0) end" }
+        let inputs = held + [
             "STRIPE=\(fake("sk" + "_live_", 24))", "key \(fake("sk" + "_live_", 24)) here", "use \(fake("rk" + "_live_", 24))",
             "git push https://oauth2@gitlab.com # \(gitlab)", "maps?key=\(google)&q=x",
             "echo \(fake("npm" + "_", 36))", "twine upload -p \(pypi)",

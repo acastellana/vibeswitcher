@@ -116,11 +116,13 @@ enum RedactionReference {
              words: ["sshpass"]),
         // Credentials inside URLs: scheme://user:pass@host
         Rule(#"(://[^/\s:@]++:)[^@\s/]++@"#, "$1\(mask)@", words: ["://"]),
+    ] + shapes + [
         // A bare AWS secret key: exactly 40 of base64's characters with upper, lower and a digit (a hex hash
-        // has one case only).
+        // has one case only). After the shapes since 2026-10-23, as in `Redaction`: a run inside one (a Slack
+        // webhook's path) masked first left the rest of it visible.
         Rule(#"([^A-Za-z0-9/+=])(?=[A-Za-z0-9/+]{40}(?![A-Za-z0-9/+=]))(?=[a-z0-9/+]{0,39}[A-Z])(?=[A-Z0-9/+]{0,39}[a-z])(?=[A-Za-z/+]{0,39}[0-9])[A-Za-z0-9/+]{40}"#,
              "$1\(mask)", gate: .base64Run),
-    ] + shapes
+    ]
 
     static func secrets(in text: String) -> String {
         // A leading newline lets rules start at the character before a word instead of at `^`. NSString all the
@@ -130,7 +132,12 @@ enum RedactionReference {
         let folded = Folded(text)
         for rule in keys where folded.allows(rule.gate) { text = replace(rule, in: text) }
         text = maskWrapped(text)
-        for rule in rules where folded.allows(rule.gate) { text = replace(rule, in: text) }
+        for rule in rules {
+            // A 40-character run can be what's left of a longer one beside a masked shape (`<40>AIza…`), so that
+            // gate is checked on the text as it is by then.
+            let allowed = if case .base64Run = rule.gate { Folded(text).allows(rule.gate) } else { folded.allows(rule.gate) }
+            if allowed { text = replace(rule, in: text) }
+        }
         return text.substring(from: 1)
     }
 

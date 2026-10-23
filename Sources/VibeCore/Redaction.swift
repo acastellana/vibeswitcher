@@ -47,8 +47,11 @@ public enum Redaction {
         Rule(words: ["mysql", "mariadb"], apply: mysql),
         Rule(words: ["sshpass"], apply: sshpass),
         Rule(words: ["://"], apply: urlCredentials),
+    ] + shapes + [
+        // After the shapes: a run of exactly 40 base64 characters can be part of one (a Slack webhook's path, a
+        // Discord, GitLab, PyPI or SendGrid token), which masked first would leave the rest of the shape visible.
         Rule(words: [], apply: awsSecret),
-    ] + shapes
+    ]
 
     /// Token shapes recognisable on their own, wherever they appear. Also looked for across a soft-wrapped
     /// line end (see `maskWrapped`).
