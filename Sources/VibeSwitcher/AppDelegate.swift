@@ -263,12 +263,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .receive(on: RunLoop.main)
             .sink { [weak self] sessions in
                 guard let self else { return }
-                let signature = sessions.map { "\($0.status.rawValue):\($0.isCurrent):\($0.isPaused)" }.joined(separator: ",")
+                // The dots are your own sessions: a lead's workers and verifiers are under it in the list.
+                let own = SessionTeams.split(sessions).own
+                let signature = own.map { "\($0.status.rawValue):\($0.isCurrent):\($0.isPaused)" }.joined(separator: ",")
                 if signature != self.iconSignature {
                     self.iconSignature = signature
-                    self.statusItem.button?.image = StatusIcon.image(for: sessions)
+                    self.statusItem.button?.image = StatusIcon.image(for: own)
                     // VoiceOver: "VibeSwitcher: 2 need you, 3 working".
-                    self.statusItem.button?.setAccessibilityLabel(StatusSummary.spoken(sessions))
+                    self.statusItem.button?.setAccessibilityLabel(StatusSummary.spoken(own))
                     DispatchQueue.main.async { self.updateDotToolTips() }
                 }
                 self.popoverState.selectedIndex = min(self.popoverState.selectedIndex, max(0, sessions.count - 1))
@@ -380,8 +382,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         if NSApp.currentEvent?.modifierFlags.contains(.command) == true { return showMainWindow() }
         let event = NSApp.currentEvent
         let secondary = event?.type == .rightMouseUp || event?.modifierFlags.contains(.control) == true
-        if !secondary, let event, let index = dotIndex(at: event, in: sender), store.sessions.indices.contains(index) {
-            open(store.sessions[index], source: "menu bar dot")
+        let own = store.split.own
+        if !secondary, let event, let index = dotIndex(at: event, in: sender), own.indices.contains(index) {
+            open(own[index], source: "menu bar dot")
             return
         }
         togglePopover()
@@ -389,7 +392,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
 
     /// Where the dots image sits inside the status bar button (AppKit centers it with some padding).
     private func dotsImageRect(in button: NSStatusBarButton) -> NSRect? {
-        let count = store.sessions.count
+        let count = store.split.own.count
         guard (1...MenuBarDots.maxDots).contains(count), let image = button.image else { return nil }
         let rect = button.cell?.imageRect(forBounds: button.bounds)
             ?? NSRect(x: (button.bounds.width - image.size.width) / 2, y: (button.bounds.height - image.size.height) / 2,
@@ -408,21 +411,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private func dotIndex(at event: NSEvent, in button: NSStatusBarButton) -> Int? {
         guard let rect = dotsImageRect(in: button), let image = button.image else { return nil }
         let point = button.convert(event.locationInWindow, from: nil)
-        return MenuBarDots.index(at: imagePoint(point, in: button, imageRect: rect, image: image), count: store.sessions.count)
+        return MenuBarDots.index(at: imagePoint(point, in: button, imageRect: rect, image: image), count: store.split.own.count)
     }
 
     /// One tooltip region per dot, naming that session.
     private func updateDotToolTips() {
         guard let button = statusItem.button else { return }
         button.removeAllToolTips()
+        let own = store.split.own
         guard let rect = dotsImageRect(in: button), let image = button.image else {
-            button.toolTip = Self.tooltip(for: store.sessions)
+            button.toolTip = Self.tooltip(for: own)
             return
         }
         button.toolTip = nil
         let sx = rect.width / image.size.width, sy = rect.height / image.size.height
-        for index in store.sessions.indices {
-            let hit = MenuBarDots.hitRect(at: index, count: store.sessions.count)
+        for index in own.indices {
+            let hit = MenuBarDots.hitRect(at: index, count: own.count)
             let y = button.isFlipped ? rect.maxY - hit.maxY * sy : rect.minY + hit.minY * sy
             let area = NSRect(x: rect.minX + hit.minX * sx, y: y, width: hit.width * sx, height: hit.height * sy)
             button.addToolTip(area, owner: self, userData: UnsafeMutableRawPointer(bitPattern: index + 1))
@@ -432,8 +436,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     func view(_ view: NSView, stringForToolTip tag: NSView.ToolTipTag, point: NSPoint,
               userData data: UnsafeMutableRawPointer?) -> String {
         let index = Int(bitPattern: data) - 1
-        guard store.sessions.indices.contains(index) else { return "" }
-        let session = store.sessions[index]
+        let own = store.split.own
+        guard own.indices.contains(index) else { return "" }
+        let session = own[index]
         let task = session.task.map { "\n\($0)" } ?? ""
         let paused = session.isPaused ? " · paused" : ""
         return "\(index + 1). \(session.displayName) · \(session.status.label)\(paused)\(task)\nClick to switch · right-click for the list"
@@ -488,8 +493,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         store.refresh(forceTerminal: true)
         notifier?.refreshAuthorization()
         loadRecentProjects()
-        popoverState.selectedIndex = store.sessions.firstIndex { $0.status == .needsInput && !$0.isPaused }
-            ?? store.sessions.firstIndex { $0.status == .done && !$0.isPaused } ?? 0
+        let listed = store.split.listed
+        popoverState.selectedIndex = listed.firstIndex { $0.status == .needsInput && !$0.isPaused }
+            ?? listed.firstIndex { $0.status == .done && !$0.isPaused } ?? 0
         hostingView.rootView = makePopoverContent()
         fitPopover()
         NSApp.activate()
@@ -752,7 +758,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
         keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.popover.isShown else { return event }
-            let sessions = self.store.sessions
+            // In the popover's order: your own sessions, then the leads' teams.
+            let sessions = self.store.split.listed
             switch Int(event.keyCode) {
             case kVK_DownArrow:
                 self.popoverState.selectedIndex = min(self.popoverState.selectedIndex + 1, max(0, sessions.count - 1))

@@ -245,7 +245,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         let needsInput = session.status == .needsInput
         guard needsInput ? preferences.notifyNeedsInput : preferences.notifyDone else { return }
         AppStatus.extras["lastAlert"] = "\(session.status.rawValue) \(session.tty) \(ISO8601DateFormatter().string(from: Date()))"
-        let title = needsInput ? "\(session.displayName) needs your input" : "\(session.displayName) is done"
+        // A lead's worker or verifier by its team: "acme · worker fix-login needs your input".
+        let name = SessionTeams.name(of: session) ?? session.displayName
+        let title = needsInput ? "\(name) needs your input" : "\(name) is done"
         onAlert?(title, [session.task, session.detail].compactMap { $0 }.joined(separator: "\n"), session.tty)
         // Without notification permission, at least make a sound when something is blocked on you.
         guard allowed == true else {
@@ -253,7 +255,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             return
         }
         let content = UNMutableNotificationContent()
-        content.title = needsInput ? "\(session.displayName) needs your input" : "\(session.displayName) is done"
+        content.title = title
         content.subtitle = session.task ?? session.agent.displayName
         if let detail = session.detail { content.body = detail }
         content.sound = needsInput && preferences.playSound ? .default : nil

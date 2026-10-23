@@ -44,37 +44,18 @@ struct PopoverView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(24)
             } else {
+                let split = store.split
                 ScrollView {
                     VStack(spacing: 2) {
-                        ForEach(Array(store.sessions.enumerated()), id: \.element.id) { index, session in
-                            Button { onOpen(session) } label: {
-                                SessionRow(session: session, index: index, isSelected: index == state.selectedIndex, compact: isSidebar)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            // "1, acme-web, needs input", then what it's doing.
-                            .accessibilityLabel(StatusSummary.spoken(number: index + 1, name: session.displayName,
-                                                                     status: session.status, paused: session.isPaused))
-                            .accessibilityValue(session.detail ?? session.task ?? "")
-                            .onHover { if $0 { state.selectedIndex = index } }
-                            .contextMenu {
-                                Button("Switch to Session") { onOpen(session) }
-                                Divider()
-                                if session.isPaused {
-                                    Button("Resume") { onResume(session) }
-                                } else {
-                                    Menu("Pause") {
-                                        Button("Until I Resume It") { onPause(session, .indefinitely) }
-                                        Button("For 1 Hour") { onPause(session, .hours(1)) }
-                                        Button("Until Tomorrow Morning") { onPause(session, .untilTomorrowMorning) }
-                                        Button("For 1 Week") { onPause(session, .hours(24 * 7)) }
-                                    }
-                                }
-                                Divider()
-                                Button("Rename…") { onRename(session) }
-                                if session.customName != nil {
-                                    Button("Reset Name to “\(session.project)”") { onResetName(session) }
-                                }
+                        ForEach(Array(split.own.enumerated()), id: \.element.id) { index, session in
+                            row(session, index: index)
+                        }
+                        // Each lead's workers and verifiers, after your own sessions, numbered on from them.
+                        ForEach(Array(split.teams.enumerated()), id: \.element.project) { offset, team in
+                            TeamHeader(team: team)
+                            let first = split.own.count + split.teams[..<offset].reduce(0) { $0 + $1.members.count }
+                            ForEach(Array(team.members.enumerated()), id: \.element.id) { index, session in
+                                row(session, index: first + index)
                             }
                         }
                     }
@@ -103,6 +84,38 @@ struct PopoverView: View {
         }
     }
 
+    private func row(_ session: Session, index: Int) -> some View {
+        Button { onOpen(session) } label: {
+            SessionRow(session: session, index: index, isSelected: index == state.selectedIndex, compact: isSidebar)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        // "1, acme-web, needs input", then what it's doing; a team member by its team ("acme · worker fix-login").
+        .accessibilityLabel(StatusSummary.spoken(number: index + 1, name: SessionTeams.name(of: session) ?? session.displayName,
+                                                 status: session.status, paused: session.isPaused))
+        .accessibilityValue(session.detail ?? session.task ?? "")
+        .onHover { if $0 { state.selectedIndex = index } }
+        .contextMenu {
+            Button("Switch to Session") { onOpen(session) }
+            Divider()
+            if session.isPaused {
+                Button("Resume") { onResume(session) }
+            } else {
+                Menu("Pause") {
+                    Button("Until I Resume It") { onPause(session, .indefinitely) }
+                    Button("For 1 Hour") { onPause(session, .hours(1)) }
+                    Button("Until Tomorrow Morning") { onPause(session, .untilTomorrowMorning) }
+                    Button("For 1 Week") { onPause(session, .hours(24 * 7)) }
+                }
+            }
+            Divider()
+            Button("Rename…") { onRename(session) }
+            if session.customName != nil {
+                Button("Reset Name to “\(session.project)”") { onResetName(session) }
+            }
+        }
+    }
+
     private var header: some View {
         HStack(spacing: 12) {
             Text(isSidebar ? "Sessions" : "VibeSwitcher").font(.headline).lineLimit(1).fixedSize()
@@ -124,8 +137,10 @@ struct PopoverView: View {
 
     private func statusCounts(words: Bool) -> some View {
         HStack(spacing: 12) {
+            // Your own sessions: a lead's workers and verifiers are counted under their team's header.
+            let own = store.split.own
             ForEach([SessionStatus.needsInput, .working, .background, .done], id: \.self) { status in
-                let count = store.sessions.filter { $0.status == status && !$0.isPaused }.count
+                let count = own.filter { $0.status == status && !$0.isPaused }.count
                 if count > 0 {
                     HStack(spacing: 4) {
                         StatusMarkView(StatusMark(status: status), color: status.color, size: 9)
@@ -137,7 +152,7 @@ struct PopoverView: View {
                     .accessibilityLabel(status.word.counted(count))
                 }
             }
-            let paused = store.sessions.filter(\.isPaused).count
+            let paused = own.filter(\.isPaused).count
             if paused > 0 {
                 HStack(spacing: 3) {
                     Image(systemName: "pause.circle").imageScale(.small).accessibilityHidden(true)
@@ -344,6 +359,7 @@ struct SessionRow: View {
                         .font(.system(size: 14, weight: .bold))
                         .lineLimit(1).truncationMode(.middle)
                     if !compact { AgentBadge(agent: session.agent) }
+                    if session.isTeamMember, let role = session.teamRole { RoleBadge(role: role) }
                     if session.customName != nil, !compact {
                         Text(session.project).font(.caption).foregroundStyle(.secondaryInk).lineLimit(1)
                     }
@@ -481,6 +497,41 @@ private struct PausedLabelStyle: LabelStyle {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(StateWord.paused.label)
+    }
+}
+
+/// "acme team · 3": over a lead's workers and verifiers in the list, apart from your own sessions.
+struct TeamHeader: View {
+    let team: SessionTeams.Team
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: "person.3.fill").imageScale(.small).accessibilityHidden(true)
+            Text("\(team.project) team").fontWeight(.semibold)
+            Text("· \(team.members.count)")
+            Spacer()
+        }
+        .font(.caption).foregroundStyle(.secondaryInk)
+        .padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 2)
+        .help("Workers and verifiers \(team.project)'s lead started: not counted as your sessions, and only their needing you notifies you")
+        .accessibilityElement(children: .ignore)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityLabel("\(team.project) team, \(team.members.count)")
+    }
+}
+
+/// "Worker" or "Verifier", on a team member's row.
+struct RoleBadge: View {
+    let role: LeadLaunch.Role
+
+    var body: some View {
+        Text(role == .verifier ? "Verifier" : "Worker")
+            .font(.system(size: 9, weight: .bold))
+            .lineLimit(1).fixedSize()
+            .padding(.horizontal, 4).padding(.vertical, 1)
+            .foregroundStyle(.secondaryInk)
+            .background(RoundedRectangle(cornerRadius: 3).fill(Color.primary.opacity(0.08)))
+            .help("Started by its project's lead, which reads its reports")
     }
 }
 

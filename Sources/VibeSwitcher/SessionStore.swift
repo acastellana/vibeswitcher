@@ -6,6 +6,8 @@ import VibeCore
 /// Polls processes, hook state files and Terminal tabs; publishes the ordered list of sessions.
 final class SessionStore: ObservableObject {
     @Published private(set) var sessions: [Session] = []
+    /// `sessions`, your own apart from the leads' workers and verifiers (see `SessionTeams`).
+    var split: SessionTeams.Split { SessionTeams.split(sessions) }
     @Published private(set) var terminalAccess: TerminalAccess = .unknown
     @Published private(set) var hooksInstalled: [Agent: Bool] = [:]
     /// Several sessions are native tabs of one window, but we can't read the tab order (no Accessibility).
@@ -19,9 +21,11 @@ final class SessionStore: ObservableObject {
     var tableReadAt: Date? { tableRead.at }
     /// The terminals that table couldn't tell an agent on or not (see `SessionScanner.undecided`).
     var undecided: Undecided { tableRead.undecided }
-    /// Called when a session newly turns red (needs input) or green (done, unseen).
+    /// Called when a session newly turns red (needs input) or green (done, unseen). A lead's worker or verifier turns
+    /// green for its lead, not for you: only its needing you is called.
     var onAttention: ((Session) -> Void)?
-    /// Called once per episode when a session has waited on you, or shown no progress, for too long.
+    /// Called once per episode when a session has waited on you, or shown no progress, for too long (never a lead's
+    /// worker or verifier: its lead watches it).
     var onNudge: ((Session, Nudge) -> Void)?
     /// Where today's time went; republished at most every 15 s (the popover shows it).
     @Published private(set) var today = ActivityLedger.load(day: ActivityLedger.dayKey(for: Date()), from: VibePaths.statsDir)
@@ -318,6 +322,7 @@ final class SessionStore: ObservableObject {
             session.eventAt = item.hook?.lastEventAt
             session.transcriptPath = transcripts[item.tty]
             session.hostID = window?.id
+            session.teamRole = LeadTeams.role(label: window?.label)
             session.agentSessionID = item.hook?.sessionId
             session.backgroundJobs = item.backgroundJobs
             // Only the visible tab counts: a window full of session tabs sits on one desktop, but
@@ -337,7 +342,7 @@ final class SessionStore: ObservableObject {
             if alerts, let previous = displayed[item.tty], previous != status {
                 if status == .needsInput {
                     onAttention?(session)
-                } else if status == .done {
+                } else if status == .done, !session.isTeamMember {
                     // Background work shows up in the footer a moment after the turn ends; only report
                     // "done" if it is still done once that has had time to appear.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
@@ -361,7 +366,7 @@ final class SessionStore: ObservableObject {
                 StatusRules.status(for: $0) == .working ? Date(timeIntervalSince1970: $0.lastEventAt) : nil
             }
             // Away from the Mac: hold reminders; they go out when you're back if still relevant.
-            if alerts, present, let due = Nudges.due(status: status, statusSince: since, lastSeen: acknowledged[item.tty],
+            if alerts, present, !session.isTeamMember, let due = Nudges.due(status: status, statusSince: since, lastSeen: acknowledged[item.tty],
                                                        lastActivity: hookActivity, now: now) {
                 let key = "\(item.tty)|\(due.episode.timeIntervalSince1970)"
                 // Only remind about what became overdue while we were running, not a backlog found at launch.
@@ -413,10 +418,13 @@ final class SessionStore: ObservableObject {
         }
         // Longer gaps are sleep or a stuck scan: nobody was working or waiting in any meaningful sense.
         if let last = lastLedgerAt, now.timeIntervalSince(last) <= 30 {
-            // A paused session's waiting is your choice, not a bottleneck; its agent work still counts.
+            // A paused session's waiting is your choice, not a bottleneck; its agent work still counts. A lead's worker or
+            // verifier that's done waits on its lead, not on you: its time goes under the lead's project.
             ledger.record(sessions.map { session in
                 let parkedWait = session.isPaused && [.needsInput, .done].contains(session.status)
-                return .init(project: session.project, status: parkedWait ? .idle : session.status, since: session.statusSince)
+                let leadsTurn = session.isTeamMember && session.status == .done
+                return .init(project: session.isTeamMember ? SessionTeams.project(of: session) : session.project,
+                             status: parkedWait || leadsTurn ? .idle : session.status, since: session.statusSince)
             },
                           seconds: now.timeIntervalSince(last), now: now, userPresent: userPresent)
         }

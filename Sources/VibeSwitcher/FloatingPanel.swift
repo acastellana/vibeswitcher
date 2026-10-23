@@ -78,10 +78,12 @@ struct FloatingDotsView: View {
     let onOpen: (Session) -> Void
     let onShowList: () -> Void
 
-    var body: some View { FloatingDots(sessions: store.sessions, onOpen: onOpen, onShowList: onShowList) }
+    // Your own sessions: a lead's workers and verifiers are in the list, under their team.
+    var body: some View { FloatingDots(sessions: store.split.own, onOpen: onOpen, onShowList: onShowList) }
 }
 
-/// The pill's content for a list of sessions.
+/// The pill's content for a list of sessions: a dot each, up to the menu bar's `MenuBarDots.maxDots`, then "+N" (the
+/// list has the rest), so it never grows across the screen.
 struct FloatingDots: View {
     let sessions: [Session]
     let onOpen: (Session) -> Void
@@ -93,7 +95,7 @@ struct FloatingDots: View {
             if sessions.isEmpty {
                 Image(systemName: "terminal").foregroundStyle(.secondaryInk).accessibilityLabel("No sessions")
             }
-            ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
+            ForEach(Array(sessions.prefix(MenuBarDots.maxDots).enumerated()), id: \.element.id) { index, session in
                 Button { onOpen(session) } label: {
                     ZStack {
                         if session.dotIsHollow {
@@ -125,6 +127,11 @@ struct FloatingDots: View {
                 .help("\(index + 1). \(session.title) · \(session.status.label)" + (session.isPaused ? " · paused" : ""))
                 .accessibilityLabel(StatusSummary.spoken(number: index + 1, name: session.title, status: session.status,
                                                          paused: session.isPaused))
+            }
+            if sessions.count > MenuBarDots.maxDots {
+                let more = sessions.count - MenuBarDots.maxDots
+                Text("+\(more)").font(.system(size: 11, weight: .semibold, design: .rounded)).foregroundStyle(.secondaryInk)
+                    .help("\(more) more in the list").accessibilityLabel("\(more) more sessions")
             }
             Button(action: onShowList) {
                 Image(systemName: "list.bullet").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondaryInk)

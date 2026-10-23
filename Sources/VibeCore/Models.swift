@@ -133,6 +133,11 @@ public struct Session: Identifiable, Equatable, Sendable {
     /// The session host's id for it when it runs in VibeSwitcher's window; nil in Terminal.app or elsewhere.
     public var hostID: UUID?
     public var inWindow: Bool { hostID != nil }
+    /// A lead, or a worker or verifier a lead started, from its window session's label (`LeadTeams.role`); nil for
+    /// the rest of your sessions.
+    public var teamRole: LeadLaunch.Role?
+    /// A lead's worker or verifier: the lead's team, not one of your own sessions (see `SessionTeams`).
+    public var isTeamMember: Bool { teamRole == .worker || teamRole == .verifier }
     /// The agent's own session id (from its hooks): what `--resume` takes.
     public var agentSessionID: String?
     /// Claude only: shells still running under the agent (background commands, monitor loops) as of the last scan,
