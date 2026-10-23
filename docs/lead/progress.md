@@ -958,3 +958,16 @@
 - 2026-10-23 01:46 Update: Merged: vs-heavy serves waiters in arrival order — **What changed:**
 - 2026-10-23 01:53 Audit of session-temp-folders: complete, clean, round 2: 1 Nit open
 - 2026-10-23 02:24 Merged session-temp-folders: Session temp folders: sweep and cap while a session is alive
+- 2026-10-23 02:24 Update: Merged: session temp folders are swept, the low-disk report stops flapping, dead holders aren't named — **What changed:**
+- 2026-10-23 02:43 Planned host-a-session-ending: Host: a session ending while its PTY reading is paused no longer crashes the host
+- 2026-10-23 02:43 Planned ending-a-session-ends: Ending a session ends what its agent started (review audit)
+- 2026-10-23 02:43 Planned composer-messages-don-t: Composer: messages don't merge, don't go into a shell, and a digit isn't an answer (review audit)
+- 2026-10-23 02:43 Planned phone-a-tap-meant: Phone: a tap meant for one prompt can't approve another
+- 2026-10-23 02:43 Planned vs-heavy-killing-it: vs-heavy: killing it ends its command, and a holder is bounded and checked
+- 2026-10-23 02:44 Started a worker on host-a-session-ending
+- 2026-10-23 02:44 Started a worker on ending-a-session-ends
+- 2026-10-23 02:44 Started a worker on composer-messages-don-t
+- 2026-10-23 02:44 Started a worker on vs-heavy-killing-it
+- 2026-10-23 02:45 Planned app-crash-the-sidebar: App crash: the sidebar list crashed in SwiftUI's outline diff
+- 2026-10-23 02:45 Planned host-orders-text-enter: Host orders text+Enter units from every writer (MCP server included)
+- 2026-10-23 03:00 Merged audit-2026-10-22-4: Audit 2026-10-22: messaging (no audit: review none)

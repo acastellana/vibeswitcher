@@ -372,3 +372,7 @@ Remaining causes of slowness after the first policy pass: one extra full suite p
 
 At the old cap the Mac sat at load 6–7 while starts were refused, because sessions spend most of their time waiting on the model, not on the CPU. The real limits are memory (36 GB, swap at 13.7 of 14 GB used, each session 0.3–0.5 GB) and concurrent builds, which the coming lock serializes. 10 sessions keeps memory headroom while roughly doubling the work in flight.
 
+## 2026-10-23 02:44:18 Ending a session ends only processes of the same uid carrying that session's VIBESWITCHER_SESSION id, plus at cleanup processes whose cwd is inside the removed worktree. Existing orphans on the Mac are not swept automatically; the user decides about those.
+
+The narrowest scope that catches everything an agent starts (the env var is inherited even through setsid) while never touching another session's, another project's or the user's own processes. Reversible: it can be widened later.
+
