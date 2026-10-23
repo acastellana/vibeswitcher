@@ -234,8 +234,13 @@ struct SessionStoreTests {
             label.map { HostSession(id: UUID(), tty: tty, childPID: Int32(tty.dropFirst(4))!, cwd: cwd, command: "claude", label: $0,
                                     agent: "claude", title: "", startedAt: started, cols: 80, rows: 24, exit: nil) }
         })
-        try await refreshAndSettle(store)
-        #expect(store.sessions.count == 7)
+        // A scan already under way may have read the hook files before they changed: wait for one that reads them now.
+        func scanned(_ condition: () -> Bool) async -> Bool {
+            store.refresh()
+            return await until(condition)
+        }
+        func status(_ tty: String) -> SessionStatus? { store.sessions.first { $0.tty == tty }?.status }
+        #expect(await scanned { store.sessions.count == 7 && store.sessions.allSatisfy { $0.status == .working } })
         #expect(store.sessions.first { $0.tty == "ttys990" }?.teamRole == .lead)
         #expect(store.sessions.first { $0.tty == "ttys994" }?.teamRole == .verifier)
         #expect(store.sessions.first { $0.tty == "ttys995" }?.teamRole == nil)
@@ -250,14 +255,13 @@ struct SessionStoreTests {
         clock.advance(5)
         try hook("ttys991", "Stop")
         try hook("ttys992", "PermissionRequest")
-        try await refreshAndSettle(store)
-        #expect(store.sessions.first { $0.tty == "ttys991" }?.status == .done)
+        #expect(await scanned { status("ttys991") == .done && status("ttys992") == .needsInput })
         #expect(attention == ["ttys992"])
         // Then your own session finishes: its "done" is told once it has stayed done a moment, later than the
         // worker's would have been.
         clock.advance(5)
         try hook("ttys995", "Stop")
-        try await refreshAndSettle(store)
+        #expect(await scanned { status("ttys995") == .done })
         #expect(await until { attention.contains("ttys995") })
         #expect(attention == ["ttys992", "ttys995"])
     }
