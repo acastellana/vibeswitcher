@@ -28,19 +28,16 @@ struct PickerCardTests {
             try await h.typed("/mcp\r")
             #expect(h.sync.watching)
             // The terminal draws the picker: the card is up from the watch's own reads of the screen, nothing new in
-            // the transcript and no heartbeat. At once: on the second read showing the picker (the first two that
-            // agree, `ScreenMenu.SettledPicker`), counted in reads, not seconds: under load a read comes late, never
-            // fewer of them. The read it came up on: the harness keeps each before it's answered.
+            // the transcript and no heartbeat. At once: as the second read showing the picker is answered (the first
+            // two that agree, `ScreenMenu.SettledPicker`), not a tick or a heartbeat later; counted in reads, not
+            // seconds: under load a read comes late, never fewer of them.
             let before = h.reads.count
-            var upAt: Int?
-            let watching = h.chat.$menu.sink { if $0?.picker == true, upAt == nil { upAt = h.reads.count } }
             h.draw("01-/mcp")
             #expect(await until(timeout: 30) { h.chat.menu?.picker == true })
-            watching.cancel()
             let first = h.reads.indices.dropFirst(before).first { ScreenMenu.parsePicker(h.reads[$0]) == h.chat.menu }
             let shown = try #require(first, "no read showed the card's picker")
-            let up = try #require(upAt)
-            #expect(up <= shown + 2, "the card came up on read \(up - before), the picker first read on \(shown + 1 - before)")
+            #expect(h.cards.indices.contains(shown + 1) && h.cards[shown + 1] == h.chat.menu,
+                    "the picker was read twice by read \(shown + 2 - before), the card: \(h.cards.dropFirst(before).map { $0?.question })")
             let card = try await h.requireCard()
             #expect(card.picker)
             #expect(card.question == "Manage MCP servers\n2 servers")
@@ -489,6 +486,7 @@ while True:
                 }
                 if let lines { self.reads.append(lines) }
                 done(lines)
+                if lines != nil { self.cards.append(self.chat.menu) }
             }
         }
         sync.hostScreen = { [weak self] id, done in
@@ -617,6 +615,8 @@ while True:
     var readsUnderWay = 0
     /// What each read answered with, in order.
     var reads: [[String]] = []
+    /// The card once each of `reads` was answered (ChatSync done with it).
+    var cards: [ScreenMenu?] = []
     /// Screens the next reads wait for, one each: a read is answered only once the host's screen passes the first (read
     /// again every 20 ms), which is then used up. A test decides what the watch gets to see.
     var awaited: [([String]) -> Bool] = []
