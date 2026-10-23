@@ -1050,3 +1050,6 @@
 - 2026-10-23 14:53 Update: Merged: new tests are proven under load before a worker reports done — What changed: the worker brief now says a test waits on the real event (a file, a reply, a semaphore, an injected clock), never a fixed sleep or wall-clock window, and that every test a branch adds or…
 - 2026-10-23 15:10 Review of memory-the-host-parser: audit
 - 2026-10-23 15:14 Merged workers-and-verifiers: Workers and verifiers aren't counted as the user's sessions (no audit: review none)
+- 2026-10-23 15:14 Update: Merged: workers and verifiers aren't counted as your sessions — What changed: sessions carry a team role (from the lead's window label). The menu bar dots, counts, pill and VoiceOver label show your own sessions only (leads included). The popover lists yours first…
+- 2026-10-23 15:17 Audit of memory-the-host-parser: incomplete, clean, round 1: 1 Important open, 1 Nit open, 1 Pre-existing open
+- 2026-10-23 15:18 Planned pickercardtests-the-mcp: PickerCardTests: the MCP picker card test doesn't fail on a busy Mac
