@@ -440,7 +440,7 @@ enum IdleBench {
             let awk = "BEGIN { for (i = 1; i <= \(lines); i++) printf \"\\033[3%dm%06d\\033[0m agent output: Compiling Module%d, "
                 + "reading Sources/VibeSwitcher/File%d.swift, 42 tests passed\\n\", i % 7 + 1, i, i % 50, i % 300; print \"\(marker)\" }"
             host.spawn(SpawnRequest(cwd: NSHomeDirectory(), command: "/usr/bin/awk '\(awk)'; exec /bin/cat", env: [:], cols: 120, rows: 40,
-                                    keepShell: false, label: "Busy \(count)", agent: nil)) { [weak self] result in
+                                    keepShell: false, label: "Printing \(count)", agent: nil)) { [weak self] result in
                 guard let self else { return }
                 guard case .success(let session) = result else {
                     if case .failure(let error) = result { print("couldn't start a busy session: \(error.message)") }
