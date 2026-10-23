@@ -1002,3 +1002,6 @@
 - 2026-10-23 11:14 Update: Merged: workers don't stall on permission prompts for their scratch files, and never attach debuggers — What changed: the worker and verifier briefs say scratch files stay (cleanup removes the TMPDIR and worktree) and leftovers are named in the report, never rm'd; workers may `git rm` tracked files. Wor…
 - 2026-10-23 11:16 Started a worker on phone-replies-sent-once
 - 2026-10-23 11:46 Merged composer-messages-don-t: Composer: messages don't merge, don't go into a shell, and a digit isn't an answer
+- 2026-10-23 11:46 Update: Merged: composer messages don't merge, don't go into a shell, and arrive once — What changed: each session has a FIFO of send units (text plus Enter as one unit), so a composer message, a lead message and a phone reply can't interleave; a message held while the session isn't an a…
+- 2026-10-23 11:51 Review of phone-replies-sent-once: audit
+- 2026-10-23 11:52 Merged app-crash-the-sidebar: App crash: the sidebar list crashed in SwiftUI's outline diff (no audit: review none)
