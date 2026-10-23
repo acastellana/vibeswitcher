@@ -76,8 +76,8 @@ on_exit 'kill "$sampler" 2> /dev/null'
 clock() { /usr/bin/perl -MTime::HiRes=time -e 'printf "%.2f\n", time'; }
 
 # Waits for this run's turn to start (see the top): $stagger seconds after the last start, and half that after that run
-# opened or ended (at most 10 s after its start): a slow launch doesn't put two openings together; then it's the last start, and prints its clock (the run's launching). One run at a
-# time holds $outputs/gate.lock.
+# opened or ended (at most 10 s after its start), so a slow launch doesn't put two openings together. Then it's the last
+# start, and prints its clock (the run's launching). One run at a time holds $outputs/gate.lock.
 gate() {
     local out=$1 last previous started
     [[ $stagger == 0 ]] && { clock; return; }
@@ -183,7 +183,7 @@ one() {
         status=0
         echo "  clock $(gate "$out"): launching" > "$out"
         env "${settings[@]}" "$binary" --chat-bench "$path" >> "$out" 2>&1 || status=$?
-    echo "  clock $(clock): exited" >> "$out"
+        echo "  clock $(clock): exited" >> "$out"
         [[ $status -eq 4 ]] && starved "$out" && status=starved && why "$out" "$label, second attempt too (recorded)," >> "$outputs/starved.txt"
     fi
     local verdict opened
