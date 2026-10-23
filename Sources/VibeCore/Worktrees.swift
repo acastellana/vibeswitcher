@@ -574,6 +574,7 @@ public enum Worktrees {
         // Not stopped by the cancel: a worktree left half removed stays in git's list.
         let remove = {
             ShellCancel.with(nil) {
+                SessionStrays.endInside(folder: path)
                 Git.run(["worktree", "remove", "--force", path], in: root)
                 try? FileManager.default.removeItem(atPath: path)
                 Git.run(["worktree", "prune"], in: root)
@@ -684,6 +685,7 @@ public enum Worktrees {
         let path = scratch.path, homePath = home.path
         let remove = {
             ShellCancel.with(nil) {
+                SessionStrays.endInside(folder: path)
                 Git.run(["worktree", "remove", "--force", path], in: root)
                 try? FileManager.default.removeItem(atPath: path)
                 Git.run(["worktree", "prune"], in: root)
@@ -961,9 +963,12 @@ public enum Worktrees {
 
     /// Removes a worker's worktree and its branch. Without `force` it refuses when either holds work that isn't
     /// merged or committed; `force` is for leftovers of merged work, or work the lead chose to abandon.
+    /// What still runs in the worktree is ended first (`SessionStrays.endInside`): a dev server or a suite left there
+    /// would run on for days in a folder that's gone.
     public static func remove(root: String, slug: String, force: Bool = false) throws {
         let path = path(root: root, slug: slug)
         if FileManager.default.fileExists(atPath: path) {
+            SessionStrays.endInside(folder: path)
             let removed = Git.run(["worktree", "remove"] + (force ? ["--force"] : []) + [path], in: root)
             guard removed.ok else { throw Failure(description: removed.error) }
         }

@@ -48,6 +48,28 @@ struct WorktreesTests {
             .filter { $0.hasPrefix("worktree ") }.map { String($0.dropFirst("worktree ".count)) }
     }
 
+    /// Cleanup: what runs in the worktree (a dev server left there) ends with it; what runs elsewhere doesn't. Only
+    /// `sleep`s this test started.
+    @Test func removingAWorktreeEndsWhatRunsInItOnly() throws {
+        let root = try repo()
+        let worktree = try Worktrees.create(root: root, slug: "serve")
+        try FileManager.default.createDirectory(atPath: worktree + "/web", withIntermediateDirectories: true)
+        func sleeper(in cwd: String) throws -> Process {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+            process.arguments = ["300"]
+            process.currentDirectoryURL = URL(fileURLWithPath: cwd)
+            try process.run()
+            return process
+        }
+        let inside = try sleeper(in: worktree + "/web"), outside = try sleeper(in: root)
+        defer { inside.terminate(); outside.terminate() }
+        try Worktrees.remove(root: root, slug: "serve", force: true)
+        #expect(eventually { !inside.isRunning })
+        #expect(outside.isRunning)
+        #expect(!FileManager.default.fileExists(atPath: worktree))
+    }
+
     @Test func aPassingBranchFastForwardsMainAndIsCleanedUp() throws {
         let root = try repo()
         let worktree = try Worktrees.create(root: root, slug: "add-b")

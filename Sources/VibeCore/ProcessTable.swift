@@ -354,25 +354,46 @@ public enum ProcessTable {
     /// A process's argv as it is now, read each time (no cache): empty when it can't be read.
     public static func commandLine(pid: Int32) -> [String] { readArguments(pid: pid) }
 
-    static func readArguments(pid: Int32) -> [String] {
+    static func readArguments(pid: Int32) -> [String] { procargs(pid: pid).map { parse(procargs: $0).arguments } ?? [] }
+
+    /// The environment a process was started with (what it set later isn't there): nil when it can't be read (another
+    /// user's, a zombie).
+    public static func environment(pid: Int32) -> [String]? { procargs(pid: pid).map { parse(procargs: $0).environment } }
+
+    /// The kernel's record of a process's argv and environment (KERN_PROCARGS2): only the user's own processes give it.
+    static func procargs(pid: Int32) -> [UInt8]? {
         var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
         var size = 0
-        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return [] }
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return nil }
         var buffer = [UInt8](repeating: 0, count: size)
-        guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0 else { return [] }
-        // Layout: argc (int32), exec path, NUL padding, argv[0] … argv[argc-1], environment…
-        let argc = buffer.withUnsafeBytes { $0.load(as: Int32.self) }
+        guard sysctl(&mib, 3, &buffer, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return nil }
+        return Array(buffer.prefix(size))
+    }
+
+    /// Layout: argc (int32), exec path, NUL padding, argv[0] … argv[argc-1], the environment up to an empty string,
+    /// then the kernel's own (`ptr_munge=`, `executable_file=`…).
+    static func parse(procargs buffer: [UInt8]) -> (arguments: [String], environment: [String]) {
+        let size = buffer.count
+        guard size > MemoryLayout<Int32>.size else { return ([], []) }
+        let argc = buffer.withUnsafeBytes { $0.loadUnaligned(as: Int32.self) }
         var index = MemoryLayout<Int32>.size
         while index < size, buffer[index] != 0 { index += 1 }   // exec path
         while index < size, buffer[index] == 0 { index += 1 }   // padding
-        var arguments: [String] = []
-        while arguments.count < argc, index < size {
+        func next() -> String {
             let begin = index
             while index < size, buffer[index] != 0 { index += 1 }
-            arguments.append(String(decoding: buffer[begin..<index], as: UTF8.self))
-            index += 1
+            defer { index += 1 }
+            return String(decoding: buffer[begin..<index], as: UTF8.self)
         }
-        return arguments
+        var arguments: [String] = []
+        while arguments.count < argc, index < size { arguments.append(next()) }
+        var environment: [String] = []
+        while index < size {
+            let entry = next()
+            if entry.isEmpty { break }
+            environment.append(entry)
+        }
+        return (arguments, environment)
     }
 }
 
