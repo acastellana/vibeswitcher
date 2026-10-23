@@ -43,9 +43,15 @@ final class HostTerminalView: TerminalView {
 }
 
 /// The middle pane: the selected window session's live terminal, or a placeholder. Views of the last few
-/// sessions stay attached, so switching back is instant.
+/// sessions stay attached for a while, so switching back is instant.
+///
+/// Each view holds its scrollback (about 30 MB at 10,000 lines and 120 columns) and parses its session's output on the
+/// main thread, shown or not. So few stay: the one on screen and the last ones shown, each for `parkedLifetime` off
+/// screen. A session shown again after that gets a new view, drawn from the host's replay.
 final class TerminalPaneController: NSViewController, TerminalViewDelegate {
-    static let keepAttached = 8
+    /// The view on screen and the last two shown.
+    static let keepAttached = 3
+    /// How long a view off screen stays attached before it's let go.
     static let parkedLifetime: TimeInterval = 30
 
     private let host: HostClient
@@ -61,6 +67,12 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     var scrollbackLines = 10_000
     /// Called for a bell in the session on screen.
     var onBell: (HostTerminalView) -> Void = { _ in NSSound.beep() }
+    /// Runs its argument once a view has been off screen for `parkedLifetime` (a test runs it when it chooses).
+    var afterParked: (@escaping () -> Void) -> Void = { release in
+        DispatchQueue.main.asyncAfter(deadline: .now() + TerminalPaneController.parkedLifetime, execute: release)
+    }
+    /// The views off screen waiting to be let go, each by the release that's still theirs (shown again: none).
+    private var releases: [UUID: UUID] = [:]
 
     init(host: HostClient) {
         self.host = host
@@ -84,6 +96,9 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
 
     var currentView: HostTerminalView? { current.flatMap { views[$0] } }
 
+    /// The session's view while it's attached.
+    func terminalView(_ id: UUID) -> HostTerminalView? { views[id] }
+
     /// The chat covers the pane: its terminal leaves the screen too (and keeps reading the session).
     var covered = false {
         didSet {
@@ -97,7 +112,8 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     func show(hostID: UUID, focus takesFocus: Bool = true) {
         placeholder?.removeFromSuperview()
         placeholder = nil
-        for (id, other) in views where id != hostID { park(other) }
+        for (id, other) in views where id != hostID { park(other, releasing: id) }
+        releases[hostID] = nil
         let terminal = views[hostID] ?? makeView(for: hostID)
         covered ? park(terminal) : unpark(terminal)
         setMargin(terminal.nativeBackgroundColor)
@@ -113,8 +129,8 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     }
 
     func show(placeholder content: AnyView) {
-        views.values.forEach(park)
         current = nil
+        for (id, terminal) in views { park(terminal, releasing: id) }
         placeholder?.removeFromSuperview()
         let hosting = NSHostingView(rootView: content)
         setMargin(nil)
@@ -130,6 +146,18 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         terminal.layer?.contents = nil
     }
 
+    /// Parks a view that's leaving the screen, and lets it go after `parkedLifetime` unless it's shown again.
+    private func park(_ terminal: HostTerminalView, releasing id: UUID) {
+        park(terminal)
+        guard releases[id] == nil else { return }
+        let release = UUID()
+        releases[id] = release
+        afterParked { [weak self] in
+            guard let self, self.releases[id] == release, id != self.current else { return }
+            self.forget(id)
+        }
+    }
+
     private func unpark(_ terminal: HostTerminalView) {
         guard terminal.superview == nil else { return }
         pin(terminal, inset: Self.inset)
@@ -140,6 +168,7 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     func forget(_ id: UUID) {
         views.removeValue(forKey: id)?.removeFromSuperview()
         gates[id] = nil
+        releases[id] = nil
         recent.removeAll { $0 == id }
         host.detach(id)
         if current == id { current = nil }
