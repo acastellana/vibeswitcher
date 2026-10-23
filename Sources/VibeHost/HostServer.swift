@@ -47,6 +47,11 @@ public final class HostServer {
         /// How long after a verifier gave its verdict (or cast its ballot) the host ends its session: its job is done,
         /// and this leaves its tool server the time to record the verdict on the board and hand the lead its message.
         public var submittedGrace: TimeInterval = HostServer.submittedGrace
+        /// What it says it can do in its welcome (see `HostProtocol.Capability`). A test's host older than one leaves
+        /// it out, and then doesn't take the request either (`inputUnit`).
+        public var capabilities: [String] = HostServer.capabilities
+        /// How long a held input unit waits for its sender's next part (see `InputOrder.holdLimit`). Tests shorten it.
+        public var inputUnitHold: TimeInterval = InputOrder.holdLimit
 
         /// Where a handover leaves the sessions for the next build: beside the lock, so a scratch host's stays its own.
         public var handoverPath: String { lockPath + ".handover" }
@@ -113,8 +118,10 @@ public final class HostServer {
     private var shuttingDown = false
     /// When this host started: a build it hands over to is the same host, started then.
     private var startedAt = Date()
-    static let capabilities = [HostProtocol.Capability.styledScreen, HostProtocol.Capability.inputRefusals, HostProtocol.Capability.handover,
-                               HostProtocol.Capability.leadVault, HostProtocol.Capability.appProof]
+    public static let capabilities = [HostProtocol.Capability.styledScreen, HostProtocol.Capability.inputRefusals, HostProtocol.Capability.handover,
+                                      HostProtocol.Capability.leadVault, HostProtocol.Capability.appProof, HostProtocol.Capability.inputUnits]
+    /// Per session, its input from every client in order (see `InputOrder`).
+    private var inputOrders: [UUID: InputOrder] = [:]
     private var handingOver = false
 
     public init(config: Config) {
@@ -312,7 +319,7 @@ public final class HostServer {
         switch envelope.request {
         case .hello:
             reply(.welcome(protocolVersion: HostProtocol.version, hostBuild: config.hostBuild, sessions: allInfo,
-                           capabilities: Self.capabilities, pid: getpid(), startedAt: startedAt))
+                           capabilities: config.capabilities, pid: getpid(), startedAt: startedAt))
         case .spawn(let request):
             // Started now, it would be torn down with the host a moment later.
             guard !shuttingDown else { return reply(.error(HostProtocol.shuttingDown)) }
@@ -354,32 +361,23 @@ public final class HostServer {
             updateAttachment(id)
             reply(.ok)
         case .input(let id, let bytes, let isReply):
-            guard let session = sessions[id] else { return }
-            // A session in a lead's team takes keys only from the app, itself or its lead: a worker's Bash can't
-            // type into the lead (as you).
-            if let vault = config.vault, !vault.mayType(into: id.uuidString, from: caller(of: client)) {
-                return log("refused input to \(id.uuidString.prefix(8)) from pid \(client.peer?.pid ?? 0)")
+            guard let session = sessions[id], admitInput(to: id, from: client, reply: isReply) else { return }
+            let refused = HostEvent.error("Input refused: the program isn't reading it and the host's buffer is full. None of these \(bytes.count) bytes went in.")
+            let write = { (taken: Bool) in
+                guard !(taken ? session.writeTaken(bytes) : session.write(bytes)), session.info.isLive else { return }
+                reply(refused)
             }
-            let from = caller(of: client)
-            let source: InputSource = from == .app ? .app : from == .session(id.uuidString) ? .itself : .another(from)
-            switch (lastInput[id], source) {
-            case (.another?, .app), (.another?, .itself): break
-            default:
-                if case .another(let typist) = source, isYours(id) {
-                    let who = if case .session(let other) = typist { "session \(other.prefix(8))" } else { "a process outside the sessions" }
-                    log.note("input to \(Self.short(id)) from \(who), not the app: its git commands no longer count as the user's, \(HostLog.peer(client.peerPID))")
-                }
-                lastInput[id] = source
+            // The terminal's answers to the program's queries aren't typing: they go at once, units or not.
+            guard !isReply else { return write(false) }
+            guard inputOrder(id, session).input(from: key, bytes: bytes.count, write) else { return reply(refused) }
+        case .inputUnit(let id, let writes, let more):
+            // As a host from before units: an app or tool server that sent it anyway is told, and nothing goes in.
+            guard config.capabilities.contains(HostProtocol.Capability.inputUnits) else {
+                return reply(.error("This session host doesn't know that request; it may be older than the app."))
             }
-            if isReply {
-                guard primary[id] == key else { return }
-            } else if client.attached.contains(id) {
-                // Typing makes a watching client the one whose size and replies count; a client that only sends
-                // keys (the lead's tool server, one connection per call) doesn't take the session over.
-                primary[id] = key
-            }
-            guard !session.write(bytes), session.info.isLive else { return }
-            reply(.error("Input refused: the program isn't reading it and the host's buffer is full. None of these \(bytes.count) bytes went in."))
+            guard let session = sessions[id] else { return reply(missing) }
+            guard admitInput(to: id, from: client, reply: false) else { return reply(.error("Input refused: this session takes keys only from VibeSwitcher, itself or its lead.")) }
+            inputOrder(id, session).part(from: key, writes: writes, more: more, reply: reply)
         case .resize(let id, let cols, let rows):
             guard let session = sessions[id], primary[id] == nil || primary[id] == key else { return }
             session.resize(cols: cols, rows: rows)
@@ -463,6 +461,43 @@ public final class HostServer {
                 self?.onExit?()
             }
         }
+    }
+
+    /// Whether input from `client` goes into `id` (a session in a lead's team takes keys only from the app, itself or
+    /// its lead), noting where it came from (see `lastInput`) and which client the session's replies and size follow.
+    private func admitInput(to id: UUID, from client: ClientConnection, reply isReply: Bool) -> Bool {
+        let key = ObjectIdentifier(client)
+        // A worker's Bash can't type into the lead (as you).
+        if let vault = config.vault, !vault.mayType(into: id.uuidString, from: caller(of: client)) {
+            log("refused input to \(id.uuidString.prefix(8)) from pid \(client.peer?.pid ?? 0)")
+            return false
+        }
+        let from = caller(of: client)
+        let source: InputSource = from == .app ? .app : from == .session(id.uuidString) ? .itself : .another(from)
+        switch (lastInput[id], source) {
+        case (.another?, .app), (.another?, .itself): break
+        default:
+            if case .another(let typist) = source, isYours(id) {
+                let who = if case .session(let other) = typist { "session \(other.prefix(8))" } else { "a process outside the sessions" }
+                log.note("input to \(Self.short(id)) from \(who), not the app: its git commands no longer count as the user's, \(HostLog.peer(client.peerPID))")
+            }
+            lastInput[id] = source
+        }
+        if isReply {
+            return primary[id] == key
+        } else if client.attached.contains(id) {
+            // Typing makes a watching client the one whose size and replies count; a client that only sends
+            // keys (the lead's tool server, one connection per call) doesn't take the session over.
+            primary[id] = key
+        }
+        return true
+    }
+
+    private func inputOrder(_ id: UUID, _ session: HostedSession) -> InputOrder {
+        if let order = inputOrders[id] { return order }
+        let order = InputOrder(session: session, queue: queue, holdLimit: config.inputUnitHold) { [weak self] in self?.log.note($0) }
+        inputOrders[id] = order
+        return order
     }
 
     /// Whether what `id`'s agent runs is the user's say: a session the app opened, that no session started, whose
@@ -650,10 +685,12 @@ public final class HostServer {
     private func dropClient(_ key: ObjectIdentifier) {
         guard let client = clients.removeValue(forKey: key) else { return }
         client.attached.forEach(updateAttachment)
+        inputOrders.values.forEach { $0.dropped(key) }
     }
 
     private func forget(_ id: UUID) {
         sessions.removeValue(forKey: id)?.close()
+        inputOrders.removeValue(forKey: id)?.close()
         startedBy[id] = nil
         openedByApp.remove(id)
         lastInput[id] = nil

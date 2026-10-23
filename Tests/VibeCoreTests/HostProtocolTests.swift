@@ -73,6 +73,7 @@ struct HostMessageTests {
                                 label: "Shell", agent: nil)),
             .attach(id: id, cols: 80, rows: 24), .detach(id: id),
             .input(id: id, bytes: Data([0x1b, 0x5b, 0x41]), reply: false), .resize(id: id, cols: 100, rows: 30),
+            .inputUnit(id: id, writes: [HostInput.Write(bytes: Array("hi".utf8), delay: 0), HostInput.Write(bytes: [13], delay: 0.06)], more: true),
             .screen(id: id), .styledScreen(id: id), .history(id: id, lines: 500), .kill(id: id), .remove(id: id), .shutdown,
             .handover(executable: "/Applications/VibeSwitcher.app/Contents/MacOS/vibeswitcher-host"),
             .proveApp(answer: Data(repeating: 1, count: 32)), .enrollApp(key: Data(repeating: 2, count: 32)), .replaceAppKey(key: Data(repeating: 6, count: 32)),
@@ -94,6 +95,9 @@ struct HostMessageTests {
             .sessionChanged(session), .sessionRemoved(id: id), .resync(id: id), .bell(id: id), .error("nope"), .ok,
             .challenge(Data(repeating: 3, count: 32), keyless: true), .vault(.startedOver(1_234)),
         ]
+        // A unit's bytes go as base64, not an array of numbers.
+        let unit = try HostCoding.encode(HostRequest.inputUnit(id: id, writes: [HostInput.Write(bytes: Array("hi".utf8), delay: 0)], more: false))
+        #expect(String(decoding: unit, as: UTF8.self).contains(#""aGk=""#))
         for event in events {
             let data = try HostCoding.encode(HostEventEnvelope(replyTo: 3, event: event))
             #expect(try HostCoding.decode(HostEventEnvelope.self, from: data) == HostEventEnvelope(replyTo: 3, event: event))

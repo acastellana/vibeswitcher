@@ -98,8 +98,34 @@ public enum HostCall {
         _ = try exchange(request, socket: socket, timeout: timeout, expectsReply: false)
     }
 
+    /// Writes these into the session as one unit (see `HostRequest.inputUnit`): a message's text and its Enter, with
+    /// nothing anyone else types into the session in between. Throws when they didn't all go in. A host from before
+    /// units gets them one by one as plain input, each `delay` after the one before, as before.
+    public static func type(_ writes: [HostInput.Write], into id: UUID, socket: String = VibePaths.hostSocket.path,
+                            timeout: TimeInterval = 40) throws {
+        guard !writes.isEmpty else { return }
+        // Long enough to wait behind another client's unit (a held one waits 10 s at most for its next part).
+        let answer = try exchange(.inputUnit(id: id, writes: writes, more: false), socket: socket, timeout: timeout,
+                                  requires: HostProtocol.Capability.inputUnits)
+        guard answer.capable else {
+            for write in writes {
+                if write.delay > 0 { usleep(useconds_t(write.delay * 1_000_000)) }
+                try send(.input(id: id, bytes: Data(write.bytes), reply: false), socket: socket)
+            }
+            return
+        }
+        switch answer.reply {
+        case .ok?: return
+        case .error(let message)?: throw Failure(description: message)
+        default: throw Failure(description: "The session host answered something else.")
+        }
+    }
+
+    /// `requires`: a capability the request needs (see `HostProtocol.Capability`); a host whose welcome doesn't list it
+    /// isn't sent the request, and `capable` is false.
     private static func exchange(_ request: HostRequest?, then follow: HostRequest? = nil, socket: String, timeout: TimeInterval,
-                                 expectsReply: Bool = true) throws -> (sessions: [HostSession], reply: HostEvent?, refusal: String?) {
+                                 expectsReply: Bool = true, requires: String? = nil) throws
+        -> (sessions: [HostSession], reply: HostEvent?, refusal: String?, capable: Bool) {
         let queue = DispatchQueue(label: "vibeswitcher.host-call")
         let connection = try HostConnection(path: socket, queue: queue)
         defer { queue.sync { connection.close() } }
@@ -110,15 +136,19 @@ public enum HostCall {
         var requestSeq: Int?
         var waitingFor: Int?
         var closed = false
+        var capable = true
         var unsent: Error?
         connection.onClose = {
             closed = true
             done.signal()
         }
         connection.onEvent = { envelope in
-            if case .welcome(_, _, let list, _, _, _) = envelope.event, sessions == nil {
+            if case .welcome(_, _, let list, let capabilities, _, _) = envelope.event, sessions == nil {
                 sessions = list
-                if let request {
+                if let requires, !(capabilities ?? []).contains(requires) {
+                    capable = false
+                    done.signal()
+                } else if let request {
                     // It didn't go out (too large for a frame): nothing that follows may be taken as its receipt.
                     do {
                         waitingFor = try connection.send(request)
@@ -151,10 +181,10 @@ public enum HostCall {
             guard let sessions else {
                 throw Failure(description: "The session host closed the connection before its welcome (it may be restarting).")
             }
-            if closed, request != nil, expectsReply, reply == nil, refusal == nil {
+            if closed, capable, request != nil, expectsReply, reply == nil, refusal == nil {
                 throw Failure(description: "The session host closed the connection before answering (it may be restarting).")
             }
-            return (sessions, reply, refusal)
+            return (sessions, reply, refusal, capable)
         }
     }
 }

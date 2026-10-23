@@ -83,6 +83,8 @@ public final class HostedSession {
     private var refusingInput = false
     private var closed = false
     static let maxPendingInput = 1 << 20
+    /// Told once the input waiting for room has all gone in (or can't: the session closed). See `whenInputWent`.
+    private var inputWaiters: [() -> Void] = []
 
     private init(info: HostSession, masterFD: Int32, queue: DispatchQueue, ringCapacity: Int, launcher: String, parser: ParserOptions,
                  timers: SessionTimers = .dispatch) {
@@ -508,7 +510,13 @@ public final class HostedSession {
     /// Writes to the program's input; what doesn't fit right now waits (up to 1 MB) for room. False: none of it went
     /// in (no room, the session ended or its terminal failed).
     @discardableResult
-    public func write(_ bytes: Data) -> Bool {
+    public func write(_ bytes: Data) -> Bool { put(bytes, taken: false) }
+
+    /// As `write(_:)`, for input the host already said it has (it waited behind a unit, see `InputOrder`, its room
+    /// counted then): it waits for room whatever waits already.
+    func writeTaken(_ bytes: Data) -> Bool { put(bytes, taken: true) }
+
+    private func put(_ bytes: Data, taken: Bool) -> Bool {
         guard !bytes.isEmpty else { return true }
         guard !closed else { return false }
         if pendingInput.isEmpty {
@@ -518,7 +526,7 @@ public final class HostedSession {
             guard written >= 0 || errno == EAGAIN || errno == EINTR else { return false }
             pendingInput = Data(rest)
         } else {
-            guard !refusingInput, pendingInput.count + bytes.count <= Self.maxPendingInput else {
+            guard taken || (!refusingInput && pendingInput.count + bytes.count <= Self.maxPendingInput) else {
                 refusingInput = true
                 return false
             }
@@ -541,7 +549,24 @@ public final class HostedSession {
             refusingInput = false
             writeSource?.cancel()
             writeSource = nil
+            tellInputWent()
         }
+    }
+
+    /// Input waiting for room, in bytes, and whether more is refused until it went in (see `write`).
+    var inputWaiting: (bytes: Int, refusing: Bool) { (pendingInput.count, refusingInput) }
+
+    /// Calls `body` (on `queue`) once what was written has all reached the program's terminal: at once when nothing
+    /// waits for room, or the session is closed.
+    func whenInputWent(_ body: @escaping () -> Void) {
+        guard !closed, !pendingInput.isEmpty else { return body() }
+        inputWaiters.append(body)
+    }
+
+    private func tellInputWent() {
+        let waiters = inputWaiters
+        inputWaiters = []
+        waiters.forEach { $0() }
     }
 
     /// `reason`: for the log line, "initial" (a view attached at its size) or "client" (a view's resize; the app's log
@@ -711,6 +736,7 @@ public final class HostedSession {
         stopParser()
         guard !closed else { return }
         closed = true
+        tellInputWent()
         // A suspended watcher can't be cancelled.
         resumeReading()
         // The PTY closes once its watchers are done with it (closing first could hand its number to a new

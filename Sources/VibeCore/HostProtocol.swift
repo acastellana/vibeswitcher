@@ -19,6 +19,9 @@ public enum HostProtocol {
         /// Sends each connection a `HostEvent.challenge` and takes nothing from it as the app's until it answered
         /// (`HostRequest.proveApp`, see `AppProof`): `handover`, `kill` of another's session and the app's vault requests.
         public static let appProof = "appProof"
+        /// Takes `HostRequest.inputUnit`: a unit of writes (a message's text and its Enter) goes into its session whole,
+        /// whoever else types into it meanwhile. Without it, a client writes the unit as plain `input`.
+        public static let inputUnits = "inputUnits"
     }
 
     /// The error a spawn gets once the host agreed to shut down.
@@ -232,6 +235,13 @@ public enum HostRequest: Codable, Equatable, Sendable {
     case detach(id: UUID)
     /// `reply`: an automatic answer to a terminal query (cursor position, colors…), not typing.
     case input(id: UUID, bytes: Data, reply: Bool)
+    /// Writes these into the session in order, each `delay` after the one before reached the program, the first a
+    /// moment after the session's last unit (see `HostProtocol.Capability.inputUnits`); the session's other input,
+    /// from every client, waits until the unit is in. `more`: the unit goes on with this connection's next
+    /// `inputUnit` (its sender checks something first, say the screen): the session stays held for it, for a few
+    /// seconds at most. Answered `ok` once the writes went in, or with an error once one couldn't (the rest aren't
+    /// written, and the unit is over). A part with no writes and `more` false ends a held unit.
+    case inputUnit(id: UUID, writes: [HostInput.Write], more: Bool)
     case resize(id: UUID, cols: Int, rows: Int)
     case screen(id: UUID)
     /// The screen's text and how its characters are drawn (see `ScreenRun`). A host older than this answers with

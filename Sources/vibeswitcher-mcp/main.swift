@@ -104,10 +104,7 @@ final class HostRuntime: LeadRuntime {
                 if case .screenText(_, let text)? = try? HostCall.request(.screen(id: session.id), socket: self.socket) { return text }
                 return nil
             }, send: { writes in
-                for write in writes {
-                    if write.delay > 0 { usleep(useconds_t(write.delay * 1_000_000)) }
-                    try? HostCall.send(.input(id: session.id, bytes: Data(write.bytes), reply: false), socket: self.socket)
-                }
+                try? HostCall.type(writes, into: session.id, socket: self.socket)
             })
             return session.id.uuidString
         case .error(let message): throw HostCall.Failure(description: message)
@@ -131,15 +128,12 @@ final class HostRuntime: LeadRuntime {
         _ = try? HostCall.request(.remove(id: id), socket: socket, timeout: 3)
     }
 
-    /// Types `text` as the session's prompt; false when the keys didn't all go out.
+    /// Types `text` as the session's prompt; false when the keys didn't all go in.
     func type(_ session: String, text: String) -> Bool {
         guard let id = UUID(uuidString: session) else { return false }
-        // Claude Code takes bracketed paste; Enter follows as its own write.
-        for write in ComposerText.writes(text, bracketed: true) {
-            if write.delay > 0 { usleep(useconds_t(write.delay * 1_000_000)) }
-            guard (try? HostCall.send(.input(id: id, bytes: Data(write.bytes), reply: false), socket: socket)) != nil else { return false }
-        }
-        return true
+        // Claude Code takes bracketed paste; Enter follows as its own write. One unit: what the app or another tool
+        // server types into the session meanwhile goes in before or after it, never between its text and its Enter.
+        return (try? HostCall.type(ComposerText.writes(text, bracketed: true), into: id, socket: socket)) != nil
     }
 
     let observer = LeadObserver()

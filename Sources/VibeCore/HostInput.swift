@@ -2,7 +2,7 @@ import Foundation
 
 /// Phone replies to a window session, written straight into its terminal.
 public enum HostInput {
-    public struct Write: Equatable, Sendable {
+    public struct Write: Codable, Equatable, Sendable {
         public var bytes: [UInt8]
         /// Wait this long after the previous write.
         public var delay: TimeInterval
@@ -10,6 +10,21 @@ public enum HostInput {
         public init(bytes: [UInt8], delay: TimeInterval) {
             self.bytes = bytes
             self.delay = delay
+        }
+
+        private enum CodingKeys: String, CodingKey { case bytes, delay }
+
+        // The bytes as `Data` (base64), not an array of numbers: a paste is up to a frame long.
+        public init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            bytes = Array(try container.decode(Data.self, forKey: .bytes))
+            delay = try container.decode(TimeInterval.self, forKey: .delay)
+        }
+
+        public func encode(to encoder: Encoder) throws {
+            var container = encoder.container(keyedBy: CodingKeys.self)
+            try container.encode(Data(bytes), forKey: .bytes)
+            try container.encode(delay, forKey: .delay)
         }
     }
 

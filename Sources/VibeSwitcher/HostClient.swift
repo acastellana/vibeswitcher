@@ -797,6 +797,11 @@ final class HostClient: ObservableObject {
 
     private func runUnit(_ id: UUID, at index: Int, after gap: TimeInterval = 0) {
         guard let unit = units[id]?.first else { return }
+        // The host writes the unit whole, whoever else types into the session (the lead's tool server); it keeps the
+        // gap after the unit before too.
+        if index == 0, hostCapabilities.contains(HostProtocol.Capability.inputUnits) {
+            return runHeldUnit(id, pieces: Self.pieces(of: unit.writes), at: 0)
+        }
         DispatchQueue.main.asyncAfter(deadline: .now() + gap + unit.writes[index].delay) { [weak self] in
             guard let self else { return unit.confirmed(false) }
             let write = { [weak self] in
@@ -813,6 +818,66 @@ final class HostClient: ObservableObject {
                     guard let self else { return unit.confirmed(false) }
                     go ? write() : self.finishUnit(id, ok: false)
                 }
+            }
+        }
+    }
+
+    /// A unit's writes with those longer than a piece cut into pieces (the rest of a write going at once), each first
+    /// piece with the index `gate` is asked by.
+    static func pieces(of writes: [HostInput.Write]) -> [(write: HostInput.Write, index: Int?)] {
+        writes.enumerated().flatMap { index, write in
+            stride(from: 0, to: max(write.bytes.count, 1), by: inputPiece).map { start in
+                let bytes = Array(write.bytes[start..<min(start + inputPiece, write.bytes.count)])
+                return (HostInput.Write(bytes: bytes, delay: start == 0 ? write.delay : 0), start == 0 ? index : nil)
+            }
+        }
+    }
+
+    /// How long a unit's part is waited for. The host answers each (written, refused, the session gone, or the
+    /// connection's end), but only once its turn came: behind other clients' units, each of which may wait 30 s on a
+    /// program that doesn't read and 10 s for its next part. Given up sooner, a part that went in later was told as
+    /// lost. This only catches a host that stopped answering.
+    static let unitWait: TimeInterval = 600
+
+    /// Sends the unit's pieces from `at` as parts the host writes whole (see `HostRequest.inputUnit`): as many as fit a
+    /// piece, up to the next one its gate is asked for. Between parts the host holds the session for this one; a gate
+    /// that says no ends the unit there, and the host lets the session go.
+    private func runHeldUnit(_ id: UUID, pieces: [(write: HostInput.Write, index: Int?)], at start: Int) {
+        guard let unit = units[id]?.first else { return }
+        // A paste going in piece by piece (`pacedInput`) was sent before this unit: it goes in first.
+        guard start > 0 || pacedInput[id] == nil else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in self?.runHeldUnit(id, pieces: pieces, at: start) }
+            return
+        }
+        let send = { [weak self] in
+            guard let self else { return unit.confirmed(false) }
+            var end = start + 1, size = pieces[start].write.bytes.count
+            while end < pieces.count, unit.gate == nil || pieces[end].index == nil, size + pieces[end].write.bytes.count <= Self.inputPiece {
+                size += pieces[end].write.bytes.count
+                end += 1
+            }
+            // Taken on the way: none of it goes to the session (a replaced lead's, see `LeadController.takeInput`).
+            let writes = pieces[start..<end].map(\.write).filter { write in !(self.inputGate?(id, Data(write.bytes)) ?? false) }
+            let more = end < pieces.count
+            self.request(.inputUnit(id: id, writes: writes, more: more), wait: Self.unitWait) { [weak self] event in
+                guard let self else { return unit.confirmed(false) }
+                guard case .ok = event else {
+                    if case .error(let message) = event { self.note("host: input unit to \(id.uuidString.prefix(8)) stopped: \(message)") }
+                    return self.finishUnit(id, ok: false)
+                }
+                more ? self.runHeldUnit(id, pieces: pieces, at: end) : self.finishUnit(id, ok: true)
+            }
+        }
+        guard let gate = unit.gate, let index = pieces[start].index else { return send() }
+        gate(index) { [weak self] go in
+            DispatchQueue.main.async {
+                guard let self else { return unit.confirmed(false) }
+                guard go else {
+                    // The host holds the session for the part that won't come: let it go now.
+                    if start > 0 { self.request(.inputUnit(id: id, writes: [], more: false)) }
+                    return self.finishUnit(id, ok: false)
+                }
+                send()
             }
         }
     }
