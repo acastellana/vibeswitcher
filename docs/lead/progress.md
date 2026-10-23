@@ -972,3 +972,5 @@
 - 2026-10-23 02:45 Planned host-orders-text-enter: Host orders text+Enter units from every writer (MCP server included)
 - 2026-10-23 03:00 Merged audit-2026-10-22-4: Audit 2026-10-22: messaging (no audit: review none)
 - 2026-10-23 03:06 Merged audit-2026-10-22-3: Audit 2026-10-22: process handling (no audit: review none)
+- 2026-10-23 03:08 Started a worker on app-crash-the-sidebar
+- 2026-10-23 03:15 Merged audit-2026-10-22: Audit 2026-10-22: memory and performance (no audit: review none)
