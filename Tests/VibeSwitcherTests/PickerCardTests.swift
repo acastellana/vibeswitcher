@@ -27,12 +27,20 @@ struct PickerCardTests {
             #expect(h.sync.type("/mcp"))
             try await h.typed("/mcp\r")
             #expect(h.sync.watching)
-            // The terminal draws the picker: the card is up within a second, nothing new in the transcript.
+            // The terminal draws the picker: the card is up from the watch's own reads of the screen, nothing new in
+            // the transcript and no heartbeat. At once: on the second read showing the picker (the first two that
+            // agree, `ScreenMenu.SettledPicker`), counted in reads, not seconds: under load a read comes late, never
+            // fewer of them. The read it came up on: the harness keeps each before it's answered.
+            let before = h.reads.count
+            var upAt: Int?
+            let watching = h.chat.$menu.sink { if $0?.picker == true, upAt == nil { upAt = h.reads.count } }
             h.draw("01-/mcp")
-            let drawn = Date()
             #expect(await until(timeout: 30) { h.chat.menu?.picker == true })
-            let took = Date().timeIntervalSince(drawn)
-            #expect(took < 1, "the card took \(took) s")
+            watching.cancel()
+            let first = h.reads.indices.dropFirst(before).first { ScreenMenu.parsePicker(h.reads[$0]) == h.chat.menu }
+            let shown = try #require(first, "no read showed the card's picker")
+            let up = try #require(upAt)
+            #expect(up <= shown + 2, "the card came up on read \(up - before), the picker first read on \(shown + 1 - before)")
             let card = try await h.requireCard()
             #expect(card.picker)
             #expect(card.question == "Manage MCP servers\n2 servers")
