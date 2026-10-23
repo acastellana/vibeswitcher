@@ -1020,3 +1020,6 @@
 - 2026-10-23 12:31 Merged endingasessiontests: EndingASessionTests.endingASessionEndsWhatItStartedOnly fails under a loaded full suite (no audit: review none)
 - 2026-10-23 12:31 Update: Merged: EndingASessionTests no longer races the tool server's SIGTERM handler — What changed: test only. endingASessionEndsWhatItStartedOnly expected the carrying vibeswitcher-mcp to die from SIGTERM, but that server catches SIGTERM and exits 0 once its handler is up (~10 ms afte…
 - 2026-10-23 12:38 Merged phone-replies-sent-once: Phone: replies sent once, honest ✓/✗, guarded ⏎ and arrows, pairing survives restarts
+- 2026-10-23 12:38 Update: Merged: phone replies sent once, honest ✓/✗, guarded ⏎ and arrows, pairing survives restarts — What changed:
+- 2026-10-23 12:38 Started a worker on redaction-a-slack
+- 2026-10-23 12:38 Started a worker on settle-script-staggered
