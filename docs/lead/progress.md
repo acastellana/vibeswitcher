@@ -1064,3 +1064,5 @@
 - 2026-10-23 18:17 Started a worker on bench-hosts-don-t
 - 2026-10-23 18:17 Started a worker on long-lived-background
 - 2026-10-23 18:33 Merged pickercardtests-the-mcp: PickerCardTests: the MCP picker card test doesn't fail on a busy Mac (no audit: review none)
+- 2026-10-23 18:33 Update: Merged: the MCP picker card test counts screen reads, not seconds — What changed: test only. theMCPPickerShowsAsACardAtOnceWithNoTranscriptLine dropped its `took < 1 s` check (failed twice today under load). It now records the card after each host-screen read and expe…
+- 2026-10-23 18:41 Merged bench-hosts-don-t: Bench hosts don't outlive a killed bench (no audit: review none)
