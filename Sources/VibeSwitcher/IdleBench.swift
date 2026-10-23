@@ -5,13 +5,18 @@ import SwiftUI
 import VibeCore
 
 /// Debug aid (`CFFIXED_USER_HOME=<scratch> VibeSwitcher --idle-bench [SECONDS] [--transcript PATH] [--sidebar]
-/// [--churn MINUTES [--churn-speed X] [--churn-warmup N] [--dump FOLDER]]`): what the app costs while nothing changes. In this process, on
+/// [--views N [--views-lines L]] [--churn MINUTES [--churn-speed X] [--churn-warmup N] [--dump FOLDER]]`): what the app costs while nothing changes. In this process, on
 /// a scratch home: the session store scanning made-up agent sessions (one with a background shell, whose age is in its
 /// detail), a private session host running a few quiet shells, the hang watchdog and the lead controller's timer, and
 /// the main window off screen. Each phase settles, then runs SECONDS (default 20) and prints its CPU, wakeups, how often
 /// the session list was published, memory (resident and phys_footprint, from task_vm_info) and, in debug builds, the
 /// terminal views and chat models alive: the window on the chat (with `--transcript`, copied into the scratch home), on
 /// a terminal, then closed, then closed with the sidebar docked on screen, drawing the popover's rows (`--sidebar`).
+///
+/// `--views N` (memory audit 2026-10-22, finding 2): after the window-on-a-terminal phase, N sessions that each print L
+/// (`--views-lines`, 20,000) coloured lines of agent-shaped output, shown one after another as you click through them,
+/// each until its output is on screen. Then the window open on the last one is measured twice: at once, and after the
+/// time a view off screen stays attached (`TerminalPaneController.parkedLifetime`). Each print gives the views attached.
 ///
 /// `--churn MINUTES` (R8, docs/eval/open-2026-10-19.md): after the window-closed phase, MINUTES of a working day's
 /// churn, one cycle per 15 s: a shell and an agent session start, the oldest of each ends (at most 3 live), the window
@@ -45,11 +50,12 @@ enum IdleBench {
         let churn = value("--churn").flatMap(Double.init).map {
             Churn(minutes: $0, speed: value("--churn-speed").flatMap(Double.init) ?? 10, warmup: value("--churn-warmup").flatMap(Int.init) ?? 4)
         }
+        let views = value("--views").flatMap(Int.init).map { (count: $0, lines: value("--views-lines").flatMap(Int.init) ?? 20_000) }
         let app = NSApplication.shared
         app.setActivationPolicy(.prohibited)
         VibePaths.ensurePrivateDirectories()
         let bench = Bench(seconds: seconds, transcript: transcript, sidebar: arguments.contains("--sidebar"), churn: churn,
-                          dump: value("--dump"))
+                          views: views, dump: value("--dump"))
         bench.start()
         app.run()
         exit(0)
@@ -171,6 +177,9 @@ enum IdleBench {
         let transcriptSource: String?
         let sidebarPhase: Bool
         let churn: Churn?
+        /// `--views N`: sessions that print, shown one after another.
+        let views: (count: Int, lines: Int)?
+        var viewSessions: [UUID] = []
         /// `--dump FOLDER`: vmmap, heap and leaks in full at the snapshots before and after churn.
         let dumpFolder: String?
         let churned: ChurnedAgents
@@ -196,8 +205,9 @@ enum IdleBench {
         var cold: Snapshot?
         var baseline: Snapshot?
 
-        init(seconds: TimeInterval, transcript: String?, sidebar: Bool, churn: Churn?, dump: String?) {
+        init(seconds: TimeInterval, transcript: String?, sidebar: Bool, churn: Churn?, views: (count: Int, lines: Int)?, dump: String?) {
             self.seconds = seconds
+            self.views = views
             dumpFolder = dump
             transcriptSource = transcript
             sidebarPhase = sidebar
@@ -306,6 +316,12 @@ enum IdleBench {
                 attach()
                 if let last = self?.shells.last { self?.model.selectedID = "host:\(last)" }
             }))
+            if let views {
+                steps.append(.views)
+                steps.append(.phase("window open, \(views.count) busy shown", {}))
+                steps.append(.pause(TerminalPaneController.parkedLifetime))
+                steps.append(.phase("window open, \(views.count) busy, later", {}))
+            }
             steps.append(.phase("window closed", { controller.window?.close() }))
             if let churn {
                 if churn.warmup > 0 {
@@ -339,12 +355,26 @@ enum IdleBench {
             case warmup
             /// The window-closed phase just measured is the baseline; then `--churn`'s cycles.
             case churn
+            /// `--views`' sessions, each shown until what it printed is on screen.
+            case views
+            case pause(TimeInterval)
         }
 
         static let afterChurn = "window closed, after churn"
 
         private func run(_ steps: ArraySlice<Step>) {
             guard let step = steps.first else { return finish() }
+            if case .views = step, let views {
+                let began = Date()
+                return showBusy(views.count, lines: views.lines) { [weak self] in
+                    print(String(format: "views: %d sessions of %d lines shown in %.0f s", views.count, views.lines, Date().timeIntervalSince(began)))
+                    fflush(stdout)
+                    self?.run(steps.dropFirst())
+                }
+            }
+            if case .pause(let seconds) = step {
+                return DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [weak self] in self?.run(steps.dropFirst()) }
+            }
             guard case .phase(let name, let setUp) = step else {
                 let warmup: Bool
                 if case .warmup = step { warmup = true } else { warmup = false }
@@ -398,6 +428,41 @@ enum IdleBench {
             let drawn = window.occlusionState.contains(.visible) ? "yes" : "no (occluded)"
             print("  window drawn: \(drawn), terminals attached \(pane.attachedIDs.count), holding a drawing \(stores.views)"
                   + String(format: " (%.1f MB)", Double(stores.bytes) / 1_048_576))
+        }
+
+        // MARK: Views
+
+        /// `count` sessions printing `lines` coloured lines each, each shown (and its view attached) while it prints, until
+        /// its last line is on screen.
+        private func showBusy(_ count: Int, lines: Int, then done: @escaping () -> Void) {
+            guard count > 0, let controller = window else { return done() }
+            let marker = "bench views: printed"
+            let awk = "BEGIN { for (i = 1; i <= \(lines); i++) printf \"\\033[3%dm%06d\\033[0m agent output: Compiling Module%d, "
+                + "reading Sources/VibeSwitcher/File%d.swift, 42 tests passed\\n\", i % 7 + 1, i, i % 50, i % 300; print \"\(marker)\" }"
+            host.spawn(SpawnRequest(cwd: NSHomeDirectory(), command: "/usr/bin/awk '\(awk)'; exec /bin/cat", env: [:], cols: 120, rows: 40,
+                                    keepShell: false, label: "Busy \(count)", agent: nil)) { [weak self] result in
+                guard let self else { return }
+                guard case .success(let session) = result else {
+                    if case .failure(let error) = result { print("couldn't start a busy session: \(error.message)") }
+                    return self.showBusy(count - 1, lines: lines, then: done)
+                }
+                self.viewSessions.append(session.id)
+                self.model.showsChat = false
+                self.model.selectedID = "host:\(session.id)"
+                controller.pane.show(hostID: session.id, focus: false)
+                controller.window?.displayIfNeeded()
+                let deadline = Date().addingTimeInterval(60)
+                func check() {
+                    let shown = controller.pane.screenLines(session.id).contains { $0.contains(marker) }
+                    guard shown || Date() > deadline else {
+                        return DispatchQueue.main.asyncAfter(deadline: .now() + 0.2, execute: check)
+                    }
+                    if !shown { print("busy session \(count): its output never reached the screen") }
+                    controller.window?.displayIfNeeded()
+                    self.showBusy(count - 1, lines: lines, then: done)
+                }
+                check()
+            }
         }
 
         // MARK: Churn
@@ -579,7 +644,7 @@ enum IdleBench {
         private func finish() {
             // The private host runs from this build's folder, under the scratch home: its sessions and then it end with
             // the bench. By pid (this process's child): other benches and tests run hosts from the same build.
-            shells.forEach(host.kill)
+            (shells + viewSessions).forEach(host.kill)
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
                 for process in ProcessTable.snapshot().values where process.ppid == getpid() && process.comm.hasPrefix("vibeswitcher-hos") {
                     kill(process.pid, SIGTERM)

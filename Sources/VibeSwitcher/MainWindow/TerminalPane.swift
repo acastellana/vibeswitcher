@@ -46,6 +46,7 @@ final class HostTerminalView: TerminalView {
 /// sessions stay attached, so switching back is instant.
 final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     static let keepAttached = 8
+    static let parkedLifetime: TimeInterval = 30
 
     private let host: HostClient
     private var views: [UUID: HostTerminalView] = [:]
