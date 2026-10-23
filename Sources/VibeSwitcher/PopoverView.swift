@@ -44,22 +44,8 @@ struct PopoverView: View {
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(24)
             } else {
-                let split = store.split
                 ScrollView {
-                    VStack(spacing: 2) {
-                        ForEach(Array(split.own.enumerated()), id: \.element.id) { index, session in
-                            row(session, index: index)
-                        }
-                        // Each lead's workers and verifiers, after your own sessions, numbered on from them.
-                        ForEach(Array(split.teams.enumerated()), id: \.element.project) { offset, team in
-                            TeamHeader(team: team)
-                            let first = split.own.count + split.teams[..<offset].reduce(0) { $0 + $1.members.count }
-                            ForEach(Array(team.members.enumerated()), id: \.element.id) { index, session in
-                                row(session, index: first + index)
-                            }
-                        }
-                    }
-                    .padding(6)
+                    list(store.split)
                 }
                 .frame(maxHeight: isSidebar ? .infinity : 640)
                 .fixedSize(horizontal: false, vertical: true)
@@ -82,6 +68,25 @@ struct PopoverView: View {
                 Rectangle().fill(.solidBackground)
             }
         }
+    }
+
+    /// The list: your own sessions, then each lead's workers and verifiers, numbered on from them (snapshots draw it
+    /// outside the scroll view, which an image renderer leaves blank).
+    func list(_ split: SessionTeams.Split) -> some View {
+        VStack(spacing: 2) {
+            ForEach(Array(split.own.enumerated()), id: \.element.id) { index, session in
+                row(session, index: index)
+            }
+            // Each lead's workers and verifiers, after your own sessions, numbered on from them.
+            ForEach(Array(split.teams.enumerated()), id: \.element.project) { offset, team in
+                TeamHeader(team: team)
+                let first = split.own.count + split.teams[..<offset].reduce(0) { $0 + $1.members.count }
+                ForEach(Array(team.members.enumerated()), id: \.element.id) { index, session in
+                    row(session, index: first + index)
+                }
+            }
+        }
+        .padding(6)
     }
 
     private func row(_ session: Session, index: Int) -> some View {
