@@ -105,4 +105,32 @@ import Testing
             #expect(LeadPrompts.loadTests.contains(words), "\(words)")
         }
     }
+
+    /// On 2026-10-23 three new tests passed in their workers and failed in a loaded merge run (a SIGTERM racing a
+    /// handler, a 1 s wall-clock window, a pid read before its state file existed). A worker proves the tests it adds
+    /// under load before reporting done, with the result line in its report, and is told what a test waits on; the
+    /// verifier (a panel's first finder only) runs them under load once.
+    @Test func newTestsAreProvenUnderLoadBeforeDone() {
+        let task = LeadTask(slug: "t", title: "T", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))
+        let worker = LeadPrompts.worker(task: task, root: "/r", workflow: LeadWorkflow())
+        #expect(worker.contains(LeadPrompts.newTests))
+        for words in ["every test your branch adds or changes under load", "scripts/test-under-load.sh", "Before you report done",
+                      "result line in your report", "-r 3 -f '<those tests>'", "waits on the real event",
+                      "a file, a reply, a semaphore, an injected clock", "never on a fixed sleep or a wall-clock window"] {
+            #expect(LeadPrompts.newTests.contains(words), "\(words)")
+        }
+        #expect(LeadPrompts.newTests.contains("--load \(2 * ProcessInfo.processInfo.activeProcessorCount) "))
+
+        let finder = { (index: Int) in
+            LeadPrompts.Finder(index: index, size: 3, focus: .contract, commit: "abc", logs: [], run: "passed", sensitive: [], nitCap: 5)
+        }
+        for verifier in [LeadPrompts.verifier(task: task, root: "/r", workflow: LeadWorkflow()),
+                         LeadPrompts.verifier(task: task, root: "/r", workflow: LeadWorkflow(), finder: finder(1))] {
+            #expect(verifier.contains(LeadPrompts.newTestsChecked))
+        }
+        #expect(!LeadPrompts.verifier(task: task, root: "/r", workflow: LeadWorkflow(), finder: finder(2)).contains(LeadPrompts.newTestsChecked))
+        for words in ["under load once", "scripts/test-under-load.sh", "result line in your summary", "Important finding"] {
+            #expect(LeadPrompts.newTestsChecked.contains(words), "\(words)")
+        }
+    }
 }

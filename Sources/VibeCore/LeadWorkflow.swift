@@ -462,6 +462,26 @@ public enum LeadPrompts {
         + "says what to wait for: wait, don't work around it). No `yes` loops, fork storms or burners of your own: "
         + "other sessions and the user share this Mac."
 
+    /// The load a branch's new tests are proven under: the most `loadTests` allows on this Mac.
+    static let proofLoad = 2 * ProcessInfo.processInfo.activeProcessorCount
+    static let proofCommand = "scripts/test-under-load.sh --load \(proofLoad) -r 3 -f '<those tests>'"
+
+    /// What workers are told about the tests they add: on 2026-10-23 three new tests passed in their workers and failed
+    /// in a loaded merge run (a SIGTERM racing the server's handler, a 1 s wall-clock dedupe window, a pid read before
+    /// the state file existed), each a failed merge and a rework.
+    public static let newTests = "New tests: a test waits on the real event it checks (a file, a reply, a semaphore, an "
+        + "injected clock), never on a fixed sleep or a wall-clock window: on a loaded Mac those race. Before you report done, "
+        + "run every test your branch adds or changes under load once, through scripts/test-under-load.sh (e.g. "
+        + "`\(proofCommand)`), and put its result line in your report (`all 3 runs passed and left nothing behind`, or the "
+        + "run that failed). A test that fails there isn't done: fix its wait, not the load. A project without the script: "
+        + "say so in your report."
+
+    /// The verifier's part of `newTests`: one run under load of the branch's new tests (a finder panel's first finder
+    /// only, so the panel puts that load on the Mac once).
+    public static let newTestsChecked = "Run the tests this branch adds or changes under load once (`\(proofCommand)`) and "
+        + "give its result line in your summary. A new test that fails there, or that waits on a fixed sleep or a wall-clock "
+        + "window instead of the real event (a file, a reply, a semaphore, an injected clock), is an Important finding."
+
     /// What workers and verifiers are told about heavy work: a few full suites or release builds at a time on this
     /// Mac, whatever the project (`vs-heavy`, on PATH in every session VibeSwitcher starts; see Resources/bin/vs-heavy).
     public static let heavyWork = "Heavy work: run a full test suite or a release build under `vs-heavy` (`vs-heavy <command>`, "
@@ -730,6 +750,7 @@ public enum LeadPrompts {
         Processes: stop one you started by its pid (`kill <pid>`; `$!` or `pgrep -f <your worktree path>` finds it). \
         pkill and killall are refused: their patterns match the other sessions on this Mac too.
         \(loadTests)
+        \(newTests)
         \(heavyWork)
         Out of date: when the lead says your branch conflicts with \(workflow.base), bring it up to date here by \
         merging: run `git merge \(workflow.base)`, resolve each conflict, `git add` the files, then `git commit` \
@@ -939,7 +960,7 @@ public enum LeadPrompts {
         tests, hard-coded results, leftovers and anything that only looks done.
         """)
         \(notesRule)
-        \(loadTests) Reproduce at the contract's load and stop there.
+        \(loadTests) Reproduce at the contract's load and stop there.\((finder?.index ?? 1) == 1 ? " " + newTestsChecked : "")
         \(heavyWork)
         \(scratchFiles)
         \(debuggers)
