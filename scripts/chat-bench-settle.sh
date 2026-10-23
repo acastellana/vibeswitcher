@@ -18,7 +18,8 @@
 # Started together, a whole -j 6 batch reached page 2 at once and starved six at a time (2026-10-20: 37 of 768 runs,
 # docs/eval/chat-bench-settle-2026-10-20.md). Each starved attempt is recorded in OUTPUTS/starved.txt with why the
 # main thread was off the CPU: its tick's wall and CPU time, the 1-minute load and the threads runnable at the tick's
-# end (sampled every second into OUTPUTS/load.txt), and what the other runs were doing then.
+# end (sampled every second into OUTPUTS/load.txt), and what the other runs were doing then; a run that failed on a
+# stalled tick is recorded there too, the same way.
 #
 # scripts/chat-bench-settle.sh [-n RUNS] [-j JOBS] [-S STAGGER] [-b BINARY] [-B REPO] [-q] [-e PAGES] [-W WORKFLOW] [-o OUTPUTS] [-w "700 900"] [-s "switch top"] [-v "plain LIVE"] A.jsonl B.jsonl
 #   -S STAGGER: the seconds between two runs' starts (2; 0: started as the jobs free up, not waiting for an opening).
@@ -101,20 +102,20 @@ gate() {
     echo "$started"
 }
 
-# The record of the starved attempt in $1 (scenario/width/variant #run, and which attempt in $2): its longest tick, the
-# load and the threads runnable at its end, and the other runs' phases then (launching, opening, page N: busy; settled
-# or done: not).
+# The record of the attempt in $1 (scenario/width/variant #run, and which attempt in $2) that $3 (starved, or stalled:
+# failed) on its longest tick: the tick, the load and the threads runnable at its end, and the other runs' phases then
+# (launching, opening, page N: busy; settled or done: not).
 why() {
-    local out=$1 attempt=$2 line wall place cpu end
+    local out=$1 attempt=$2 verb=$3 line wall place cpu end
     line=$(grep -oE "FAIL: a tick stalled [0-9.]+s \(.*, [0-9.]+s of it on the CPU\)" "$out" | tail -1)
     wall=$(sed -E 's/FAIL: a tick stalled ([0-9.]+)s.*/\1/' <<< "$line")
     place=$(sed -E 's/FAIL: a tick stalled [0-9.]+s \((t=[0-9]+s, [^,]+),.*/\1/' <<< "$line")
     cpu=$(sed -E 's/.*, ([0-9.]+)s of it on the CPU\)/\1/' <<< "$line")
     end=$(grep -oE "^  clock [0-9.]+: the longest tick's end" "$out" | grep -oE "[0-9]+\.[0-9]+" | tail -1)
     /usr/bin/perl -MPOSIX=strftime -e '
-        my ($label, $out, $wall, $place, $cpu, $end, $loads, @others) = @ARGV;
+        my ($label, $verb, $out, $wall, $place, $cpu, $end, $loads, @others) = @ARGV;
         my ($t, $phase) = $place =~ /^t=(\d+)s, (.+)$/;
-        my $text = "$label starved on " . ($phase eq "opening" ? "the opening" : $phase) . " at t=$t s";
+        my $text = "$label $verb on " . ($phase eq "opening" ? "the opening" : $phase) . " at t=$t s";
         unless (length $end) { print "$text: $wall s with $cpu s CPU, the tick'"'"'s clock unknown\n"; exit }
         $text .= sprintf " (%s.%02d)", strftime("%H:%M:%S", localtime $end), ($end - int $end) * 100;
         my ($load, $runnable, $near);
@@ -140,7 +141,7 @@ why() {
         my $phases = join ", ", map { "$_ ×$busy{$_}" } sort { $busy{$b} <=> $busy{$a} || $a cmp $b } keys %busy;
         printf "%s: %s s with %s s CPU, at load %s, %s threads runnable; %d other run%s opening or paging%s, %d settled\n",
             $text, $wall, $cpu, $load // "unknown", $runnable // "unknown", $count, $count == 1 ? "" : "s",
-            $phases ? " ($phases)" : "", $idle // 0' "$attempt" "$out" "$wall" "$place" "$cpu" "$end" "$outputs/load.txt" \
+            $phases ? " ($phases)" : "", $idle // 0' "$attempt" "$verb" "$out" "$wall" "$place" "$cpu" "$end" "$outputs/load.txt" \
         "$outputs"/out/*.txt "$outputs"/out/*.starved
 }
 
@@ -179,13 +180,15 @@ one() {
     echo "  clock $(clock): exited" >> "$out"
     if [[ $status -eq 4 ]] && starved "$out"; then
         mv "$out" "$out.starved"
-        why "$out.starved" "$label, first attempt," >> "$outputs/starved.txt"
+        why "$out.starved" "$label, first attempt," starved >> "$outputs/starved.txt"
         status=0
         echo "  clock $(gate "$out"): launching" > "$out"
         env "${settings[@]}" "$binary" --chat-bench "$path" >> "$out" 2>&1 || status=$?
         echo "  clock $(clock): exited" >> "$out"
-        [[ $status -eq 4 ]] && starved "$out" && status=starved && why "$out" "$label, second attempt too (recorded)," >> "$outputs/starved.txt"
+        [[ $status -eq 4 ]] && starved "$out" && status=starved && why "$out" "$label, second attempt too (recorded)," starved >> "$outputs/starved.txt"
     fi
+    # A stall that failed the run, beside the starved ones and told apart by the same fields.
+    [[ $status == 4 ]] && grep -q "^FAIL: a tick stalled " "$out" && why "$out" "$label, failed," stalled >> "$outputs/starved.txt"
     local verdict opened
     verdict=$(grep -E '^(settled|FAIL|HANG)' "$out" | tail -1)
     # When it opened its conversation (the bench's first beat), to the hundredth of a second.
@@ -223,7 +226,8 @@ grep -ohE "^  clock [0-9.]+: opening$" "$outputs"/out/* 2> /dev/null | sed -E 's
         if (NR > 1) printf "openings: %d, the closest two %.2f s apart (stagger %s s)\n", NR, gap, stagger }' stagger="$stagger" || true
 starved_runs=$(grep -c "first attempt," "$outputs/starved.txt" 2> /dev/null || true)
 recorded=$(grep -c "second attempt too" "$outputs/starved.txt" 2> /dev/null || true)
-echo "starved: ${starved_runs:-0} first attempts run again, ${recorded:-0} recorded starved (status=starved)"
+failures=$(grep -c ", failed," "$outputs/starved.txt" 2> /dev/null || true)
+echo "starved: ${starved_runs:-0} first attempts run again, ${recorded:-0} recorded starved (status=starved); ${failures:-0} failed on a stalled tick"
 [[ -s $outputs/starved.txt ]] && sort "$outputs/starved.txt" | sed 's/^/  /'
 echo "outputs: $outputs/out"
 exit $failed

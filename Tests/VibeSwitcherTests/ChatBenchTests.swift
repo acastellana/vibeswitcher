@@ -329,9 +329,10 @@ struct ChatBenchSettleScriptTests {
         "echo \"  clock $(/usr/bin/perl -MTime::HiRes=time -e 'printf q(%.2f), time'): \(what)\""
     }
 
-    /// A fake build: counts its runs in `runs`, opens, pages back for `paging` seconds, prints a settle and a starved
-    /// longest tick that ended then, and after it `also` (another of the verdict's FAIL lines); exits 4 as the bench does.
-    func fakeBuild(also: String? = nil, paging: Double = 0, runs: URL) throws -> URL {
+    /// A fake build: counts its runs in `runs`, opens, pages back for `paging` seconds, prints a settle and a longest tick
+    /// of 1 s that ended then, `cpu` of it on the CPU (starved: under half), and after it `also` (another of the verdict's
+    /// FAIL lines); exits 4 as the bench does.
+    func fakeBuild(also: String? = nil, paging: Double = 0, cpu: String = "0.10", runs: URL) throws -> URL {
         let rule = "rule: the Mac's 1-minute load 3 is not over load_threshold 24 (workflow.md): any tick over 0.25s fails"
         return try script("""
         echo run >> '\(runs.path)'
@@ -341,7 +342,7 @@ struct ChatBenchSettleScriptTests {
         sleep \(paging)
         echo 'settled 9 s after opening (loaded after 1 s): height=15526 heights=3 range=- layouts=1 last 3 s: 0 layouts longest tick=1.00s (cpu 0.10s)'
         \(Self.clock("the longest tick's end"))
-        echo "FAIL: a tick stalled 1.00s (t=12s, page 2, 0.10s of it on the CPU), over 0.25s; \(rule)"
+        echo "FAIL: a tick stalled 1.00s (t=12s, page 2, \(cpu)s of it on the CPU), over 0.25s; \(rule)"
         \(also.map { "echo \"\($0); \(rule)\"" } ?? "")
         \(Self.clock("done"))
         exit 4
@@ -427,7 +428,7 @@ struct ChatBenchSettleScriptTests {
         let run = try settle(try fakeBuild(paging: 2, runs: runs), ["-n", "2", "-j", "2", "-S", "0.5"])
         #expect(run.status == 0, "\(run.output)")
         #expect(self.runs(runs) == 4)
-        #expect(run.output.contains("starved: 2 first attempts run again, 2 recorded starved (status=starved)"), "\(run.output)")
+        #expect(run.output.contains("starved: 2 first attempts run again, 2 recorded starved (status=starved); 0 failed on a stalled tick"), "\(run.output)")
         let record = #/top/700/plain #[12], (first attempt|second attempt too \(recorded\)), starved on page 2 at t=12 s \(\d\d:\d\d:\d\d\.\d\d\): 1\.00 s with 0\.10 s CPU, at load [\d.]+, \d+ threads runnable; (\d) other runs? opening or paging/#
         let records = run.output.matches(of: record)
         #expect(records.count == 4, "\(run.output)")
@@ -457,6 +458,18 @@ struct ChatBenchSettleScriptTests {
         #expect(run.output.contains("status=4 FAIL: a tick worked 0.30s on the CPU"), "\(run.output)")
         #expect(run.output.contains(" 0/1 "), "\(run.output)")
         #expect(run.output.contains("longest tick 1.00s, most CPU 0.30s"), "\(run.output)")
+    }
+
+    /// A stall the main thread worked through more than half of fails, not run again, and is recorded beside the starved
+    /// ones the same way: told apart by its CPU time.
+    @Test func aStallThatFailsIsRecordedTheSameWay() throws {
+        let runs = scratch.url("runs")
+        let run = try settle(try fakeBuild(cpu: "0.60", runs: runs))
+        #expect(run.status == 1, "\(run.output)")
+        #expect(self.runs(runs) == 1)
+        #expect(run.output.contains("starved: 0 first attempts run again, 0 recorded starved (status=starved); 1 failed on a stalled tick"), "\(run.output)")
+        let record = #/top/700/plain #1, failed, stalled on page 2 at t=12 s \(\d\d:\d\d:\d\d\.\d\d\): 1\.00 s with 0\.60 s CPU, at load [\d.]+, \d+ threads runnable; 0 other runs opening or paging, 0 settled/#
+        #expect(run.output.contains(record), "\(run.output)")
     }
 
     @Test func aRunNoTickOfWhichCarriedACPUReadingFails() throws {
