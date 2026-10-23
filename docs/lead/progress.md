@@ -1015,3 +1015,6 @@
 - 2026-10-23 12:05 Audit of phone-replies-sent-once: complete, clean, round 2: 1 Important closed, 2 Nit closed
 - 2026-10-23 12:11 Planned endingasessiontests: EndingASessionTests.endingASessionEndsWhatItStartedOnly fails under a loaded full suite
 - 2026-10-23 12:11 Started a worker on endingasessiontests
+- 2026-10-23 12:17 Audit of phone-replies-sent-once: complete, clean, round 3: 1 Important closed, 2 Nit closed
+- 2026-10-23 12:28 Review of host-orders-text-enter: audit
+- 2026-10-23 12:31 Merged endingasessiontests: EndingASessionTests.endingASessionEndsWhatItStartedOnly fails under a loaded full suite (no audit: review none)
