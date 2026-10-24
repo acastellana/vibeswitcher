@@ -514,6 +514,28 @@ public enum LeadPrompts {
                 + "and don't repeat runs or benches the contract doesn't ask for."
         }
 
+        /// The repository's lint tests, run with the affected ones before a worker reports done (`lints`: their filter
+        /// names, see `lintTests(in:)`; none found, the brief names them generically). On 2026-10-24 a worker ran only
+        /// its filtered tests, as `workerTesting` says, and the audit's full run found a PrivateWriteLint failure: an
+        /// audit round for a check that takes seconds.
+        public static func workerLints(_ lints: [String], test: String?) -> String {
+            let which = lints.isEmpty ? "your repository-wide lint or check tests, if any,"
+                : "the repository's lint tests (`\(test ?? "swift test") --filter '\(lints.joined(separator: "|"))'`)"
+            return "Lints: before you report done, run \(which) along with the affected tests. They take seconds and catch "
+                + "what a filtered run misses, which otherwise only the merge's full run finds."
+        }
+
+        /// The filter names of the lint tests under `root`'s Tests folder: every `*LintTests.swift`, as `swift test
+        /// --filter` matches it (`PrivateWriteLintTests.swift` → `PrivateWriteLint`), sorted.
+        public static func lintTests(in root: String) -> [String] {
+            let tests = URL(fileURLWithPath: root).appendingPathComponent("Tests")
+            guard let files = FileManager.default.enumerator(at: tests, includingPropertiesForKeys: nil) else { return [] }
+            return files.compactMap { ($0 as? URL)?.lastPathComponent }
+                .filter { $0.hasSuffix("LintTests.swift") }
+                .map { String($0.dropLast("Tests.swift".count)) }
+                .sorted()
+        }
+
         /// The worker owns its change, in two sentences.
         public static let workerOwnership = "You own this change through completion: make the routine calls yourself (a "
             + "small file outside the listed boundaries that the goal needs, such as UI wiring or a test helper; naming; layout) "
@@ -750,7 +772,9 @@ public enum LeadPrompts {
         return text
     }
 
-    public static func worker(task: LeadTask, root: String, workflow: LeadWorkflow, policy: String = WorkingPolicy.load()) -> String {
+    /// `lints`: the repository's lint tests (`Policy.lintTests(in: root)` unless given).
+    public static func worker(task: LeadTask, root: String, workflow: LeadWorkflow, policy: String = WorkingPolicy.load(),
+                              lints: [String]? = nil) -> String {
         """
         You are a worker for the project lead of \(root). You have one task, below. Work in this worktree on branch \
         agent/\(task.slug), and nowhere else.
@@ -783,6 +807,7 @@ public enum LeadPrompts {
         or ; after it, no 2>&1. git opens no editor here (the merge's commit keeps its message), and anything else \
         around a git command is refused. git log, diff, status and show are always open to you.
         \(Policy.workerTesting(test: workflow.testCommand))
+        \(Policy.workerLints(lints ?? Policy.lintTests(in: root), test: workflow.testCommand))
         Done: every acceptance check passes, everything is \
         committed (`git status` lists nothing modified or staged; an untracked file left in the worktree goes in your \
         report, not through rm). Then reply with a short report: what changed, how you checked it, the routine calls you made, anything left or doubtful. \

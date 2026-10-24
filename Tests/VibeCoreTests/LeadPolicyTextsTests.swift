@@ -79,6 +79,36 @@ struct LeadPolicyTextsTests {
         // add_task's acceptance says it too (LeadToolsetTests.addTasksAcceptanceSaysTheMergesRunIsTheOneFullSuite).
     }
 
+    /// 2026-10-24: a worker ran only its filtered tests and the audit's full run found a PrivateWriteLint failure.
+    @Test func theBriefTellsTheWorkerToRunTheRepositorysLintTestsBeforeReportingDone() throws {
+        let repository = Self.sources.deletingLastPathComponent().deletingLastPathComponent().path
+        let lints = LeadPrompts.Policy.lintTests(in: repository)
+        for name in ["PrivateWriteLint", "TemporaryFolderLint", "HomePathLint", "AccessibilityLint"] {
+            #expect(lints.contains(name), "missing \(name) in \(lints)")
+        }
+        #expect(lints == lints.sorted() && !lints.contains { $0.hasSuffix("Tests") })
+        let workflow = LeadWorkflow.parse("---\ntest_command: bash scripts/test.sh\n---")
+        let brief = LeadPrompts.worker(task: Self.task, root: repository, workflow: workflow)
+        let filter = "`bash scripts/test.sh --filter '\(lints.joined(separator: "|"))'`"
+        #expect(brief.contains("Lints: before you report done, run the repository's lint tests (\(filter)) along with the affected tests."))
+        #expect(brief.contains(LeadPrompts.Policy.workerTesting(test: "bash scripts/test.sh") + "\nLints:"))
+
+        // Another project's brief: its own lint tests, or a generic line when it has none.
+        let scratch = Scratch()
+        let other = scratch.url("lints")
+        let folder = other.appendingPathComponent("Tests/AppTests")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        for file in ["StyleLintTests.swift", "ModelTests.swift", "LintHelpers.swift"] {
+            try Data().write(to: folder.appendingPathComponent(file))
+        }
+        #expect(LeadPrompts.Policy.lintTests(in: other.path) == ["StyleLint"])
+        #expect(LeadPrompts.worker(task: Self.task, root: other.path, workflow: LeadWorkflow.parse(""))
+            .contains("run the repository's lint tests (`swift test --filter 'StyleLint'`) along with"))
+        let none = LeadPrompts.worker(task: Self.task, root: "/r/genswap", workflow: LeadWorkflow.parse(""))
+        #expect(none.contains("Lints: before you report done, run your repository-wide lint or check tests, if any, along with the affected tests."))
+        #expect(LeadPrompts.worker(task: Self.task, root: "/r", workflow: workflow, lints: ["A", "B"]).contains("--filter 'A|B'"))
+    }
+
     @Test func privacyIsAReasonForAnAuditAlongsideSecurity() {
         let review = LeadPrompts.Policy.leadReview
         for needle in ["security (", "privacy (the owner's private data in a contract or a file", "a repository's or a share's visibility",
