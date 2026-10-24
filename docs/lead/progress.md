@@ -1092,3 +1092,8 @@
 - 2026-10-24 17:26 Merged lead-prompts-and-tool: Lead prompts and tool texts follow the user's policy (no audit: review none)
 - 2026-10-24 17:26 Update: Merged: lead prompts and tool texts follow your policy — **What changed.** Six text and prompt fixes from the review of the other leads:
 - 2026-10-24 17:27 Started a worker on mac-wide-limits-are
+- 2026-10-24 17:36 Audit of fail-fast-sessions: complete, violation, round 1: 3 Important open, 1 Nit open
+- 2026-10-24 17:36 Dismissed fail-fast-sessions:F1: The lead accepted this file afterwards (task context, 2026-10-24). The host records whoami times, which the goal needs, and the verifier found it correct.
+- 2026-10-24 17:36 Dismissed fail-fast-sessions:F2: The lead accepted this file afterwards (task context, 2026-10-24). The app ends a session that never connected through the existing host.kill, which the goal needs, and the verifier found it correct.
+- 2026-10-24 17:36 Dismissed fail-fast-sessions:F3: The lead accepted this file afterwards (task context, 2026-10-24). The roster times reach the app, which the goal needs, and the verifier found it correct.
+- 2026-10-24 17:36 Planned boundary-excursions-a: Boundary excursions a worker reports don't fail an audit, and dismissed findings don't force another one (review audit)
