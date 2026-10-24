@@ -396,3 +396,7 @@ The 3-view cap gives most of the saving (290 → ~110–140 MB in the 12-session
 
 The user asked on 2026-10-24 at about 16:3x for an examination of how the other projects' leads are performing: overkill, mistakes, self-improvement. The earlier instruction 'don't touch the other leads' still holds for contacting or steering them.
 
+## 2026-10-24 16:59:30 Six VibeSwitcher fix tasks come out of the 2026-10-24 review of the other projects' leads, started on the user's 'Start all six'. Five are running: lead-prompts-and-tool, lead-record-commits, a-base-branch-the, fail-fast-sessions and the-mac-wide-test. mac-wide-limits-are starts once lead-prompts-and-tool has merged. Review levels: none for the text/prompt task and the limits task; audit for the record-commit conflict handling, the base-move guard, session ending in cleanup, and the test lock (merge machinery, guard rails, killing processes, concurrency).
+
+The review found that most of the leads' waste comes from VibeSwitcher's own texts and mechanics: the per-merge update instruction, retry-in-5-minutes polling, per-project Mac caps, trailers in record commits, base moves that need a restart, silent dead verifiers and cleanups, and false stalls on the test lock. Reports: scratchpad genswap/report.md and tge/report.md of session 9f1ce4d8.
+

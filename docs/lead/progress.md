@@ -1078,3 +1078,14 @@
 - 2026-10-24 15:44 Started a worker on chat-image-viewer-opens
 - 2026-10-24 16:01 Merged chat-image-viewer-opens: Chat image viewer opens large enough to show the whole image (no audit: review none)
 - 2026-10-24 16:01 Update: Merged: chat image viewer opens at the image's size — **What changed.** Opening an image in the chat used to give a small 640×420 box. A big image was cut off inside a scroll view.
+- 2026-10-24 16:58 Planned lead-prompts-and-tool: Lead prompts and tool texts follow the user's policy
+- 2026-10-24 16:58 Planned mac-wide-limits-are: Mac-wide limits are set once for the Mac, and a refused lead is woken when room frees
+- 2026-10-24 16:58 Planned lead-record-commits: Lead record commits carry no trailer, and conflicts in them resolve themselves (review audit)
+- 2026-10-24 16:58 Planned a-base-branch-the: A base branch the user moves never blocks merges until a restart (review audit)
+- 2026-10-24 16:58 Planned fail-fast-sessions: Fail fast: sessions without their tools are caught, and cleanup ends sessions and states the result (review audit)
+- 2026-10-24 16:58 Planned the-mac-wide-test: The Mac-wide test lock checks its holder and times out, and waiting on it isn't a stall (review audit)
+- 2026-10-24 16:59 Started a worker on lead-prompts-and-tool
+- 2026-10-24 16:59 Started a worker on lead-record-commits
+- 2026-10-24 16:59 Started a worker on a-base-branch-the
+- 2026-10-24 16:59 Started a worker on fail-fast-sessions
+- 2026-10-24 16:59 Started a worker on the-mac-wide-test
