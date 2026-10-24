@@ -10,7 +10,9 @@ enum FakeClaude {
 #
 # Usage: python3 -I -u fake_claude.py TRANSCRIPT CONTROL STATE
 # The test appends JSON lines to CONTROL ({"op": "ask" | "permission" | "work" | "take" | "done" | "freeze" | "thaw" |
-# "turns" (from now on a prompt starts a turn, as Claude's do: it works until "done") | "exit" (it quits, as /exit));
+# "turns" (from now on a prompt starts a turn, as Claude's do: it works until "done") | "slowShell" (from now on a `!`
+# command runs until "background", which moves it to the background as the 120 s Bash timeout does) | "exit" (it quits,
+# as /exit));
 # the agent writes its state (mode, tab, answers, the free-text field, queued messages) to STATE after every change.
 import datetime
 import json
@@ -37,6 +39,7 @@ state = {
     "pid": os.getpid(),
     "suggest": 0,            # the slash menu's chosen row
     "dismissed": False,      # Esc closed the slash menu (until the box changes)
+    "slowShell": False,      # a `!` command runs until "background" (Claude Code's 120 s Bash timeout)
 }
 # The slash commands its menu offers while "/…" is typed in the box.
 COMMANDS = [("/clear", "Clear conversation history"), ("/compact", "Clear history but keep a summary"),
@@ -240,12 +243,29 @@ def submit_prompt(text):
     if text == "/model":
         open_picker()
         return
+    if text.startswith("!"):
+        state["shell"] = {"command": text[1:].strip(), "at": now()}
+        if not state["slowShell"]:
+            finish_shell("ran " + state["shell"]["command"])
+        return
     record({"type": "user", "message": {"role": "user", "content": text}})
     if state["turns"]:
         state["mode"] = "working"
         return
     state["reply"] = "Got: " + text.replace("\n", " ")
     record({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": state["reply"]}]}})
+
+
+def finish_shell(stdout):
+    """A `!` command has run (or gone to the background): Claude Code writes it only now, as 2.1.302 does: the caveat,
+    the command (stamped when it was sent, `!` gone) and its output. No assistant turn follows."""
+    shell = state.pop("shell")
+    record({"type": "user", "isMeta": True, "message": {"role": "user", "content": "<local-command-caveat>The command below was run "
+            "directly in Claude Code, not sent to you as a request, and its output goes straight to the user. It's recorded here "
+            "as context for later messages.</local-command-caveat>"}})
+    record({"type": "user", "timestamp": shell["at"], "message": {"role": "user",
+            "content": "<bash-input>" + shell["command"] + "</bash-input>"}})
+    record({"type": "user", "message": {"role": "user", "content": "<bash-stdout>" + stdout + "</bash-stdout><bash-stderr></bash-stderr>"}})
 
 
 def open_question(questions):
@@ -556,6 +576,11 @@ def control():
             record({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": state["reply"]}]}})
         elif op == "turns":
             state["turns"] = True
+        elif op == "slowShell":
+            state["slowShell"] = True
+        elif op == "background":
+            finish_shell("Command did not complete within its 120s timeout and was moved to the background (ID: bfake). "
+                         "Output is being written to: /tmp/bfake.output. You will be notified when it completes.")
         elif op == "exit":
             state["mode"] = "exited"
             save_state()

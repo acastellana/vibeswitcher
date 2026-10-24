@@ -2,9 +2,12 @@ import Foundation
 
 /// The part of a user message that a person typed or pasted, as opposed to what the harness injected.
 enum TypedText {
-    /// Slash-command records Claude Code writes before the typed text (`/model` and its output).
+    /// Slash-command records Claude Code writes before the typed text (`/model` and its output), and a `!` command's
+    /// output.
     private static let commandBlock = try! NSRegularExpression(
-        pattern: "<(command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat)>[\\s\\S]*?</\\1>")
+        pattern: "<(command-name|command-message|command-args|local-command-stdout|local-command-stderr|local-command-caveat|bash-stdout|bash-stderr)>[\\s\\S]*?</\\1>")
+    /// A `!` command as Claude Code records it once it has run: `<bash-input>cd p\nmake</bash-input>`, the `!` gone.
+    private static let bashInput = try! NSRegularExpression(pattern: "^<bash-input>([\\s\\S]*?)</bash-input>$")
     /// Pasted text is wrapped (`<pasted_content id="…">…</pasted_content id="…">`): it's the user's, so it stays.
     private static let pasted = try! NSRegularExpression(pattern: "<pasted_content[^>]*>\\n?([\\s\\S]*?)\\n?</pasted_content[^>]*>")
 
@@ -43,8 +46,18 @@ enum TypedText {
         result = commandBlock.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "")
         result = pasted.stringByReplacingMatches(in: result, range: NSRange(result.startIndex..., in: result), withTemplate: "$1")
         let trimmed = result.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let command = shellCommand(trimmed) { return command }
         guard !trimmed.isEmpty, !isInjected(trimmed) else { return nil }
         return trimmed
+    }
+
+    /// A `!` command, as typed: `!` and the command.
+    static func shellCommand(_ text: String) -> String? {
+        guard text.hasPrefix("<bash-input>"),
+              let match = bashInput.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+              let range = Range(match.range(at: 1), in: text) else { return nil }
+        let command = text[range].trimmingCharacters(in: .whitespacesAndNewlines)
+        return command.isEmpty ? nil : "!" + command
     }
 
     /// Injected context starts with a tag whose name has a `-` or `_` (`<system-reminder>`, `<task-notification>`,

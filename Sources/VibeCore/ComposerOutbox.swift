@@ -59,7 +59,12 @@ public enum SentMatch {
         let range = NSRange(text.startIndex..., in: text)
         let placeholders = placeholder.numberOfMatches(in: text, range: range)
         text = placeholder.stringByReplacingMatches(in: text, range: range, withTemplate: " ")
-        let words = text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        var words = text.components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        // A `!` command typed `! ls` is recorded `ls` (it's shown as `!ls`).
+        if words.count > 1, words[0] == "!" {
+            words.removeFirst()
+            words[0] = "!" + words[0]
+        }
         return (words.joined(separator: " "), found, placeholders)
     }
 }

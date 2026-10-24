@@ -250,3 +250,67 @@ struct QueuedPromptTests {
         #expect(SentMatch.prompts(log.entries).map(\.text) == ["also update the docs"])
     }
 }
+
+/// A `!` command typed in the composer, as Claude Code 2.1.302 records it once it has run (2026-10-24: the chat
+/// left it "Not in the conversation yet" though Claude Code had run it and moved it to the background).
+struct ShellCommandTests {
+    let caveat = "<local-command-caveat>The command below was run directly in Claude Code, not sent to you as a request, and its output goes straight to the user. It's recorded here as context for later messages.</local-command-caveat>"
+
+    func log(_ command: String, stdout: String) -> ChatLog {
+        let objects: [[String: Any]] = [
+            ["type": "user", "uuid": "c", "isMeta": true, "timestamp": "2026-10-24T09:53:05.979Z", "message": ["role": "user", "content": caveat]],
+            ["type": "user", "uuid": "b", "timestamp": "2026-10-24T09:51:05.741Z",
+             "message": ["role": "user", "content": "<bash-input>\(command)</bash-input>"]],
+            ["type": "user", "uuid": "o", "timestamp": "2026-10-24T09:53:05.979Z",
+             "message": ["role": "user", "content": "<bash-stdout>\(stdout)</bash-stdout><bash-stderr></bash-stderr>"]],
+        ]
+        var data = Data()
+        for object in objects {
+            data.append(try! JSONSerialization.data(withJSONObject: object))
+            data.append(0x0A)
+        }
+        var log = ChatLog()
+        log.append(ChatReader.read(data, format: .claude).events)
+        return log
+    }
+
+    @Test func itShowsAsTheCommandTypedAndNothingElse() {
+        let log = log("cd /Users/x/dev/p\nscripts/build-app.sh --install",
+                      stdout: "Command did not complete within its 120s timeout and was moved to the background (ID: b1).")
+        #expect(log.entries.count == 1)
+        #expect(log.prompts == ["!cd /Users/x/dev/p\nscripts/build-app.sh --install"])
+        // Stamped when it was sent, though written two minutes later.
+        #expect(log.entries.first?.at == stamp("2026-10-24T09:51:05.741Z"))
+        // An older Claude Code kept the space typed after `!`.
+        #expect(self.log(" git stash", stdout: "Saved").prompts == ["!git stash"])
+        #expect(ChatReader.humanText("<bash-stdout>x</bash-stdout><bash-stderr></bash-stderr>") == nil)
+        #expect(ChatReader.humanText("<bash-input></bash-input>") == nil)
+    }
+
+    @Test func theComposersMessageMatchesIt() {
+        let sentAt = stamp("2026-10-24T09:51:05.500Z")!
+        let multi = PendingMessage(text: "!cd /Users/x/dev/p\nscripts/build-app.sh --install", afterPrompts: 0, expectsSoon: true, sentAt: sentAt)
+        let prompts = SentMatch.prompts(log("cd /Users/x/dev/p\nscripts/build-app.sh --install", stdout: "moved to the background").entries)
+        #expect(PendingMessage.remaining([multi], prompts: prompts).isEmpty)
+        #expect(PendingMessage.remaining([PendingMessage(text: "! git stash", afterPrompts: 0)], prompts: ["!git stash"]).isEmpty)
+        // Not the same as the words without the `!`.
+        #expect(PendingMessage.remaining([PendingMessage(text: "git stash", afterPrompts: 0)], prompts: ["!git stash"]).count == 1)
+    }
+
+    @Test func itIsNotLateWhileItCanStillBeRunning() {
+        let sentAt = Date(timeIntervalSince1970: 1_000_000)
+        let shell = PendingMessage(text: "!scripts/build-app.sh", afterPrompts: 0, expectsSoon: true, sentAt: sentAt)
+        // Recorded once it has run, or at Claude Code's 120 s Bash timeout.
+        #expect(!shell.late(at: sentAt.addingTimeInterval(125)))
+        #expect(shell.late(at: sentAt.addingTimeInterval(140)))
+        let text = PendingMessage(text: "fix it", afterPrompts: 0, expectsSoon: true, sentAt: sentAt)
+        #expect(text.late(at: sentAt.addingTimeInterval(16)))
+    }
+}
+
+/// A transcript's timestamp.
+private func stamp(_ text: String) -> Date? {
+    let formatter = ISO8601DateFormatter()
+    formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+    return formatter.date(from: text)
+}

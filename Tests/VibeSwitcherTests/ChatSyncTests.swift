@@ -958,6 +958,14 @@ final class Harness {
         }
     }
 
+    /// The text of each user line in the transcript, `isMeta` ones too (a `!` command's caveat is one).
+    var transcriptContents: [String] {
+        lines.compactMap { line in
+            guard line["type"] as? String == "user", let message = line["message"] as? [String: Any] else { return nil }
+            return message["content"] as? String
+        }
+    }
+
     /// The answers in the transcript's tool results, as the chat has them.
     var answers: String {
         chat.log.entries.compactMap { entry -> String? in

@@ -54,9 +54,14 @@ public struct PendingMessage: Equatable, Sendable, Identifiable {
         self.attachments = attachments
     }
 
+    /// Claude Code records a `!` command only once it has run, or gone to the background at its Bash timeout.
+    public static let shellTimeout: TimeInterval = 120
+
     /// Should be in the conversation by now and isn't: the keys may not have reached the agent.
     public func late(at now: Date = Date()) -> Bool {
-        expectsSoon && !text.hasPrefix("/") && now.timeIntervalSince(expectedFrom ?? sentAt) > 15
+        guard expectsSoon, !text.hasPrefix("/") else { return false }
+        let allowed: TimeInterval = 15 + (text.hasPrefix("!") ? Self.shellTimeout : 0)
+        return now.timeIntervalSince(expectedFrom ?? sentAt) > allowed
     }
 
     /// Those not yet among the prompts that came after them.

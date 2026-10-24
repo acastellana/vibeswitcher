@@ -281,6 +281,63 @@ struct ComposerDeliveryTests {
         #expect(h.chat.outbox.outbox.entries.isEmpty)
     }
 
+    // MARK: `!` commands (2026-10-24: one Claude Code ran and moved to the background stayed "Not in the conversation
+    // yet": it's recorded as a <bash-input> entry, `!` gone, and only once it has run)
+
+    /// The composer's `!` command, once Claude Code has recorded it: the caveat, the command and its output, and the
+    /// chat showing it as the prompt typed, delivered and off the outbox.
+    private func expectDelivered(_ h: Harness, _ command: String, stdout: String) async throws {
+        try await h.waitFor {
+            h.tickNow()
+            return h.chat.outbox.outbox.entries.isEmpty && h.chat.pending.isEmpty
+        }
+        let contents = h.transcriptContents
+        let input = try #require(contents.firstIndex(of: "<bash-input>\(command.dropFirst())</bash-input>"), "\(contents)")
+        #expect(input > 0 && contents[input - 1].hasPrefix("<local-command-caveat>"))
+        #expect(contents.dropFirst(input + 1).first?.hasPrefix("<bash-stdout>" + stdout) == true, "\(contents)")
+        #expect(h.prompts == ["start", command], "\(h.prompts)")
+        #expect(h.chat.log.entries.count == 3, "\(h.chat.log.entries.map(\.kind))")
+        #expect(h.chat.late.isEmpty)
+    }
+
+    @Test func aMultiLineShellCommandMovedToTheBackgroundIsDelivered() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "slowShell"])
+        let command = "!cd /Users/x/dev/p\nscripts/build-app.sh --install"
+        let entry = h.send(command)
+        try await h.waitFor { (h.agent["shell"] as? [String: Any])?["command"] as? String == String(command.dropFirst()) }
+        await h.tick()
+        let waiting = try #require(h.chat.pending.first { $0.id == entry.id })
+        #expect(h.chat.note(for: waiting) == .sending)
+        h.tell(["op": "background"])
+        try await expectDelivered(h, command, stdout: "Command did not complete within its 120s timeout and was moved to the background")
+    }
+
+    @Test func aOneLineShellCommandIsDelivered() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.send("!ls")
+        try await expectDelivered(h, "!ls", stdout: "ran ls")
+    }
+
+    @Test func aShellCommandIsNotLateWhileClaudeCodeStillRunsIt() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "slowShell"])
+        let entry = h.send("!sleep 300")
+        try await h.waitFor { h.agent["shell"] != nil }
+        // Two minutes on, nothing in the transcript yet: Claude Code writes it once the 120 s Bash timeout moves it on.
+        h.chat.now = { Date().addingTimeInterval(125) }
+        await h.tick()
+        let waiting = try #require(h.chat.pending.first { $0.id == entry.id })
+        #expect(h.chat.late.isEmpty)
+        #expect(h.chat.note(for: waiting) == .sending)
+        h.tell(["op": "background"])
+        try await expectDelivered(h, "!sleep 300", stdout: "Command did not complete")
+        h.chat.now = Date.init
+    }
+
     // MARK: Keys
 
     /// One key typed into the box, as AppKit hands it over.
