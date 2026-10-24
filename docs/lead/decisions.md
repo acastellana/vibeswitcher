@@ -408,3 +408,7 @@ About 8 extra worker turns went to conflict-free catch-up merges. Idle finished 
 
 It brings eight merged fixes to every project's lead without ending a session. Writing the verified state down saves the next lead from re-checking it.
 
+## 2026-10-24 20:52:03 New Project… always creates the git repository with its first commit and starts the project lead. The sheet no longer offers "Nothing" or "Open a session" as next steps, and has no git toggle.
+
+The user said a new project "always needs to start as a full fledged leader".
+

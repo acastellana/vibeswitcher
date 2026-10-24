@@ -1128,3 +1128,5 @@
 - 2026-10-24 19:13 Update: Merged: audits no longer fail on reported routine edits, and dismissed findings don't force another verifier — **What changed.**
 - 2026-10-24 19:42 Audit of audit-takes-a-branch: complete, clean, round 1: 1 Nit open
 - 2026-10-24 19:50 Merged audit-takes-a-branch: Audit takes a branch whose trial merge is clean, and makes room by ending the task's own idle worker
+- 2026-10-24 20:51 Planned new-project-always: New Project always starts the project lead
+- 2026-10-24 20:52 Started a worker on new-project-always
