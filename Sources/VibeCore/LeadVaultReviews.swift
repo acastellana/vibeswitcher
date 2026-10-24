@@ -30,3 +30,29 @@ extension LeadVault {
         return Unaudited(review: review ?? .none, reported: reported)
     }
 }
+
+/// How the verifier's own run of the tests went, as it said in submit_audit. Kept on the verdict: a verdict that
+/// failed only on findings the lead dismissed merges only when its tests passed.
+extension LeadVault {
+    public enum TestRun: String, Codable, CaseIterable, Sendable {
+        case passed, failed
+        case notRun = "not_run"
+    }
+}
+
+extension LeadVault.Verdict {
+    /// The lead's dismissals that are all that kept this verdict from passing: it's complete, its verifier's tests
+    /// passed, and every Important finding its audit left open the lead has dismissed since, on this audit's ledger
+    /// (2026-10-24: a verifier found the work correct with every test passing, marked it violation only for edits outside
+    /// the boundaries the worker had listed as routine calls, and the lead's dismissing all three still left merge
+    /// demanding a whole new verifier run). Nil when it doesn't stand that way: it passes by itself, it's incomplete or
+    /// blocked, its tests failed or weren't said to pass, the ledger is another audit's, an Important finding is still
+    /// open, or the lead dismissed none (nothing the lead looked at explains the failure).
+    public func dismissed(in ledger: LeadAuditLedger?) -> [LeadFinding]? {
+        guard !passes, completion == .complete, tests == .passed, let ledger, ledger.commit == commit, ledger.blocking.isEmpty else { return nil }
+        let dismissed = ledger.findings.filter {
+            $0.severity == .important && $0.status == .dismissed && $0.closedBy == "lead" && $0.closed == ledger.rounds
+        }
+        return dismissed.isEmpty ? nil : dismissed
+    }
+}

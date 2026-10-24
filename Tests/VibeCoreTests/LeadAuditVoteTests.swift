@@ -20,6 +20,23 @@ struct LeadAuditVoteTests {
 
     func nit(_ line: Int) -> Report { Report(severity: .nit, file: "Sources/N.swift", line: line, evidence: "nit \(line)") }
 
+    /// The finders' word on the tests: failed when any said so, passed when one did and none failed.
+    @Test func theVotesTestsAreTheWorstAnyFinderSaw() {
+        func tally(_ said: [LeadVault.TestRun?]) -> LeadVault.TestRun? {
+            let ballots = said.enumerated().map { index, tests in
+                var ballot = ballot(index + 1, [])
+                ballot.tests = tests
+                return ballot
+            }
+            return LeadAuditVote.tally(ballots, size: ballots.count, ledger: LeadAuditLedger(), nitCap: 5).tests
+        }
+        #expect(tally([.passed, .passed, .passed]) == .passed)
+        #expect(tally([.passed, .failed, .passed]) == .failed)
+        #expect(tally([.passed, nil, .notRun]) == .passed)
+        #expect(tally([nil, .notRun]) == .notRun)
+        #expect(tally([nil, nil]) == nil)
+    }
+
     @Test func aFindingMostFindersRaiseIsConfirmedOpen() throws {
         // Two of three at the same file and kind, two lines apart: the same finding.
         let vote = LeadAuditVote.tally([ballot(1, [important("Sources/A.swift", 12, "empty input crashes")]), ballot(2, [important("Sources/A.swift", 14)]), ballot(3, [])],

@@ -26,6 +26,40 @@ struct LeadAuditLedgerTests {
         #expect(ledger.bySeverity.map(\.severity) == [.important, .nit, .preExisting])
     }
 
+    func verdict(_ completion: LeadEvidence.Completion = .complete, tests: LeadVault.TestRun? = .passed, commit: String = "c1") -> LeadVault.Verdict {
+        LeadVault.Verdict(task: "t", completion: completion, integrity: .violation, summary: "s", commit: commit, verifier: "v", session: "s", at: 0, tests: tests)
+    }
+
+    /// What lets a failed verdict merge on the lead's dismissals: only the Important findings it left open, all dismissed
+    /// by the lead after it, on a complete audit whose tests passed.
+    @Test func aVerdictStandsOnTheLeadsDismissalsOnlyWhenTheyAreAllThatFailedIt() throws {
+        var ledger = LeadAuditLedger()
+        try ledger.record([important(), important("Sources/B.swift", 3)], commit: "c1", passes: false)
+        #expect(verdict().dismissed(in: ledger) == nil, "open ones")
+        try ledger.dismiss("F1", reason: "a routine call")
+        #expect(verdict().dismissed(in: ledger) == nil, "one still open")
+        try ledger.dismiss("F2", reason: "a routine call")
+        #expect(verdict().dismissed(in: ledger)?.map(\.id) == ["F1", "F2"])
+        #expect(verdict(.incomplete).dismissed(in: ledger) == nil)
+        #expect(verdict(.blocked).dismissed(in: ledger) == nil)
+        #expect(verdict(tests: .failed).dismissed(in: ledger) == nil)
+        #expect(verdict(tests: .notRun).dismissed(in: ledger) == nil)
+        #expect(verdict(tests: nil).dismissed(in: ledger) == nil)
+        #expect(verdict(commit: "c2").dismissed(in: ledger) == nil, "another audit's ledger")
+        // Dismissed before a later round that failed again: that round's failure isn't what the lead dismissed.
+        try ledger.record([], commit: "c2", passes: false, changed: [])
+        #expect(verdict(commit: "c2").dismissed(in: ledger) == nil)
+        // A failure with no Important finding at all: nothing the lead looked at explains it.
+        var none = LeadAuditLedger()
+        try none.record([Report(severity: .nit, file: "a", line: 1, evidence: "e")], commit: "c1", passes: false)
+        #expect(verdict().dismissed(in: none) == nil)
+        // The verifier closing one isn't the lead's dismissal.
+        var fixed = LeadAuditLedger()
+        try fixed.record([important()], commit: "c1", passes: false)
+        try fixed.record([important(id: "F1", status: .dismissed, reason: "not a problem")], commit: "c1", passes: false, changed: [])
+        #expect(verdict().dismissed(in: fixed) == nil)
+    }
+
     @Test func aCleanRoundWithOnlyNitsAndPreExistingOnesIsNotAFailure() throws {
         var ledger = LeadAuditLedger()
         try ledger.record([Report(severity: .nit, file: "a", line: 1, evidence: "e"), Report(severity: .preExisting, file: "b", line: 1, evidence: "e")],
@@ -606,5 +640,74 @@ struct LeadFindingsToolTests: LeadTeamFixture {
         #expect(!dismissed.text.contains("merge("), "\(dismissed.text)")
         let task = try #require(BoardStore(root: root).load().task("add-b"))
         #expect(task.status == .failed && task.setback != nil)
+        #expect(call(lead, "merge", ["task": "add-b"]).text.contains("no passing audit"))
+    }
+
+    /// Two Important findings, each a file outside the boundaries the worker listed as a routine call.
+    static let excursions: [[String: Any]] = [
+        ["severity": "Important", "file": "a.txt", "line": 1, "evidence": "a.txt is outside the boundaries; no lead's note accepts it", "status": "open"],
+        ["severity": "Important", "file": "c.txt", "line": 1, "evidence": "c.txt is outside the boundaries; no lead's note accepts it", "status": "open"],
+    ]
+
+    /// 2026-10-24: a verifier found the work correct with every test passing, gave violation only for files outside the
+    /// boundaries the worker had listed as routine calls, and after the lead dismissed all of them merge still refused
+    /// with "no passing audit". A complete audit whose tests passed merges once the lead has dismissed every Important
+    /// finding that failed it, and the merge names the dismissals.
+    @Test func aCompleteAuditWithPassingTestsMergesOnceTheLeadDismissesWhatFailedIt() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        _ = try audit(lead, runtime, ["completion": "complete", "integrity": "violation", "tests": "passed",
+                                      "summary": "correct; every test passes; a.txt and c.txt are outside the boundaries", "findings": Self.excursions])
+        #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)
+        let open = call(lead, "merge", ["task": "add-b"])
+        #expect(open.isError && open.text.contains("2 open Important findings"), "\(open.text)")
+        let first = call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "the worker's routine call: wiring the goal needs"])
+        #expect(!first.text.contains("merge("), "\(first.text)")
+        let half = call(lead, "merge", ["task": "add-b"])
+        #expect(half.isError && half.text.contains("1 open Important finding") && half.text.contains("F2"), "\(half.text)")
+        let second = call(lead, "dismiss_finding", ["task": "add-b", "id": "F2", "reason": "a test helper the worker listed"])
+        #expect(second.text.contains("complete with its tests passing") && second.text.contains("add-b is back in review; merge(add-b) when you're ready"), "\(second.text)")
+        let task = try #require(BoardStore(root: root).load().task("add-b"))
+        #expect(task.status == .review && task.setback == nil)
+        let merged = call(lead, "merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(merged.text.contains("the 2 Important findings that failed it you dismissed: F1 a.txt:1 (the worker's routine call: wiring the goal needs); F2 c.txt:1 (a test helper the worker listed)"), "\(merged.text)")
+        #expect(BoardStore(root: root).load().task("add-b")?.status == .done)
+    }
+
+    /// Dismissing every Important finding doesn't make a pass of an incomplete audit, one whose tests failed, or one
+    /// whose verifier didn't say they passed: each still needs a new verifier run.
+    @Test func dismissalsDontPassAnIncompleteAuditOrOneWhoseTestsFailed() throws {
+        let cases: [(verdict: [String: Any], says: String)] = [
+            (["completion": "incomplete", "integrity": "violation", "tests": "passed"], "this one is incomplete"),
+            (["completion": "complete", "integrity": "violation", "tests": "failed"], "this one's tests failed"),
+            (["completion": "complete", "integrity": "violation", "tests": "not_run"], "didn't say its tests passed"),
+            (["completion": "complete", "integrity": "violation"], "didn't say its tests passed"),
+        ]
+        for (verdict, says) in cases {
+            let root = try repo()
+            let runtime = FakeRuntime()
+            let lead = try lead(root, runtime)
+            try started(lead, runtime, root: root)
+            _ = try audit(lead, runtime, verdict.merging(["summary": "checked", "findings": Self.excursions]) { $1 })
+            for id in ["F1", "F2"] {
+                let dismissed = call(lead, "dismiss_finding", ["task": "add-b", "id": id, "reason": "a routine call"])
+                #expect(!dismissed.isError && !dismissed.text.contains("merge("), "\(dismissed.text)")
+            }
+            #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)
+            let merged = call(lead, "merge", ["task": "add-b"])
+            #expect(merged.isError && merged.text.contains("no passing audit") && merged.text.contains(says), "\(verdict): \(merged.text)")
+        }
+    }
+
+    @Test func testsMustBeOneOfThree() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        let refused = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "tests": "mostly", "summary": "checked"])
+        #expect(refused.isError && refused.text.contains("tests must be passed, failed or not_run"), "\(refused.text)")
     }
 }

@@ -334,6 +334,8 @@ public final class LeadToolset: MCPToolset {
                                              "integrity": P(type: "string", description: "clean; suspect (not sure); violation (edits outside the boundaries, weakened or deleted tests, faked results)",
                                                             options: ["clean", "suspect", "violation"]),
                                              "summary": P(type: "string", description: "The evidence: what you ran and what you saw"),
+                                             "tests": P(type: "string", description: "How the tests went when you ran them: passed, failed, or not_run (you didn't run them)",
+                                                        options: LeadVault.TestRun.allCases.map(\.rawValue)),
                                              "findings": P(type: "array", description: Self.findingsShape, items: "object")],
                                 required: ["completion", "integrity", "summary"])]
         case .lead?:
@@ -564,7 +566,7 @@ public final class LeadToolset: MCPToolset {
                 let ledger = try vault.dismissFinding(root: root, task: origin.slug, id: origin.finding.id, reason: "moved to task \(task.slug)", followUp: task.slug)
                 mirror(ledger, on: origin.slug)
                 closed = " \(origin.slug):\(origin.finding.id) is closed on \(origin.slug) as moved to it."
-                if backToReview(origin.slug, ledger) { closed += " No Important finding is open on \(origin.slug) now and its audit passed: it's back in review; merge(\(origin.slug)) when you're ready." }
+                if let why = backToReview(origin.slug, ledger) { closed += " No Important finding is open on \(origin.slug) now and \(why): it's back in review; merge(\(origin.slug)) when you're ready." }
             } catch {
                 closed = " \(origin.slug):\(origin.finding.id) couldn't be closed on \(origin.slug) (\(error)): dismiss_finding it."
             }
@@ -630,23 +632,45 @@ public final class LeadToolset: MCPToolset {
         mirror(ledger, on: slug)
         try? store.appendProgress("Dismissed \(slug):\(id): \(reason)")
         let left = ledger?.blocking ?? []
-        let mergeable = backToReview(slug, ledger) ? " No Important finding is open now and its audit passed: \(slug) is back in review; merge(\(slug)) when you're ready." : ""
+        let mergeable = backToReview(slug, ledger).map { " No Important finding is open now and \($0): \(slug) is back in review; merge(\(slug)) when you're ready." } ?? ""
         return MCPToolResult(text: "Dismissed \(slug):\(id).\(left.isEmpty ? "" : " Still open and holding the merge back: \(left.map(\.label).joined(separator: ", ")).")\(mergeable)")
     }
 
     /// A pass that only its open Important findings left failed goes back to review once the last one is closed,
-    /// its setback gone: the verdict stands on the branch's head, so merge can go ahead. Says whether it went back.
-    private func backToReview(_ slug: String, _ ledger: LeadAuditLedger?) -> Bool {
-        guard let ledger, ledger.blocking.isEmpty, ledger.passed == true, let verdict = vault.verdict(root: root, task: slug), verdict.passes,
-              verdict.commit == ledger.commit, verdict.commit == branchHead(Worktrees.branch(slug)) else { return false }
+    /// its setback gone: the verdict stands on the branch's head, so merge can go ahead. So does a complete audit whose
+    /// tests passed once the lead has dismissed every Important finding that failed it (see `Verdict.dismissed`).
+    /// Says why it went back (nil: it didn't).
+    private func backToReview(_ slug: String, _ ledger: LeadAuditLedger?) -> String? {
+        guard let ledger, ledger.blocking.isEmpty, let verdict = vault.verdict(root: root, task: slug),
+              verdict.commit == ledger.commit, verdict.commit == branchHead(Worktrees.branch(slug)) else { return nil }
+        let why: String
+        if ledger.passed == true && verdict.passes {
+            why = "its audit passed"
+        } else if verdict.dismissed(in: ledger) != nil {
+            why = "its audit was complete with its tests passing, with every Important finding that failed it dismissed"
+        } else {
+            return nil
+        }
         let moved = (try? store.update { board -> Bool in
             guard let index = board.taskIndex(slug), board.tasks[index].status == .failed else { return false }
             board.tasks[index].status = .review
             board.tasks[index].setback = nil
             return true
         }) ?? false
-        if moved { try? store.appendProgress("\(slug) back in review: no Important finding open on its passing audit") }
-        return moved
+        guard moved else { return nil }
+        try? store.appendProgress("\(slug) back in review: no Important finding open, and \(why)")
+        return why
+    }
+
+    /// Why dismissing findings doesn't let `verdict` merge, as the end of merge's refusal ("" for a passing one).
+    static func notDismissable(_ verdict: LeadVault.Verdict) -> String {
+        guard !verdict.passes else { return "" }
+        if verdict.completion != .complete { return " (this one is \(verdict.completion.rawValue), which dismissing findings doesn't change)" }
+        switch verdict.tests {
+        case .failed?: return " (this one's tests failed, which dismissing findings doesn't change)"
+        case .notRun?, nil: return " (its verifier didn't say its tests passed, so dismissing findings doesn't make it pass)"
+        case .passed?: return " (or a complete one whose tests passed with every Important finding that failed it dismissed: this one has none dismissed since that audit)"
+        }
     }
 
     /// Shows the vault's findings and rounds for `slug` on the board.
@@ -1131,7 +1155,8 @@ public final class LeadToolset: MCPToolset {
         } else {
             session = try launch(.verifier, task: slug, name: "verify-\(slug)", in: Worktrees.path(root: root, slug: slug),
                                  label: "Verifier: \(task.title)", trust: config.isEmpty,
-                                 prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, notes: leadNotes(task)),
+                                 prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, notes: leadNotes(task),
+                                                              report: doneReport(task, head: head)),
                                  start: "Verify the task now, then call submit_audit.", model: workflow.verifierModel, auditing: head)
         }
         try store.update { board in
@@ -1206,7 +1231,7 @@ public final class LeadToolset: MCPToolset {
         let changed = Git.run(["diff", "--name-only", "\(workflow.base)...\(head)"], in: root).output.split(whereSeparator: \.isNewline).map(String.init)
         let sensitive = changed.filter { path in workflow.sensitiveGlobs.contains { LeadWorkflow.matches(path, glob: $0) } }
         let focuses = LeadPrompts.Focus.panel(count, sensitive: !sensitive.isEmpty)
-        let notes = leadNotes(task)
+        let notes = leadNotes(task), report = doneReport(task, head: head)
         let id = UUID().uuidString
         var sessions: [String] = []
         for (offset, focus) in focuses.enumerated() {
@@ -1216,7 +1241,7 @@ public final class LeadToolset: MCPToolset {
             do {
                 sessions.append(try launch(.verifier, task: slug, name: index == 1 ? "verify-\(slug)" : "finder\(index)-\(slug)",
                                            in: Worktrees.path(root: root, slug: slug), label: "Verifier: \(task.title) (finder \(index)/\(count): \(focus.rawValue))",
-                                           trust: trust, prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, finder: finder, notes: notes),
+                                           trust: trust, prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, finder: finder, notes: notes, report: report),
                                            start: "Look for findings in your focus now, then call submit_audit.", model: workflow.verifierModel, auditing: head,
                                            finder: LeadVault.Finder(panel: id, index: index, size: count, focus: focus.rawValue, nitCap: workflow.auditNitCap)))
             } catch {
@@ -1366,6 +1391,13 @@ public final class LeadToolset: MCPToolset {
         return LeadPrompts.Notes(lead: held, unverified: notes.count - held.count)
     }
 
+    /// The worker's done report for its verifier: the board's copy, when the vault has the task's own worker
+    /// reporting done on `head` (the board is anyone's to write; the vault takes "done" only from that worker).
+    func doneReport(_ task: LeadTask, head: String) -> String? {
+        guard let report = task.report, (try? vault.unaudited(root: root, task: task.slug))?.reported == head else { return nil }
+        return report
+    }
+
     /// Sends `text` to the task's worker when it runs; what the lead's result says about it.
     private func tellWorker(_ task: LeadTask, _ text: String) -> String {
         guard let worker = task.worker, (try? listed())?.contains(where: { $0.id == worker && $0.live }) == true else {
@@ -1444,12 +1476,20 @@ public final class LeadToolset: MCPToolset {
         }
         // The commit that merges, and whether a passing audit let it in.
         let commit: String, audited: Bool
+        // The Important findings the lead dismissed on a verdict that failed only on them (see `Verdict.dismissed`).
+        var dismissed: [LeadFinding] = []
         // The verdict as the verifier's own tool server recorded it in the vault (the board's copy is for showing):
         // from the verifier VibeSwitcher started last for this task, on the commit it was started on.
         if let verdict = vault.verdict(root: root, task: slug) {
-            guard verdict.passes else {
-                throw Problem(text: vault.missingVerdictReason(root: root, task: slug)
-                    ?? "\(slug) has no passing audit. Run audit: merge takes a complete, clean verdict.")
+            if !verdict.passes {
+                let ledger = vault.audits(root: root, task: slug)
+                if let accepted = verdict.dismissed(in: ledger) {
+                    dismissed = accepted
+                } else if !(verdict.completion == .complete && verdict.tests == .passed && ledger?.commit == verdict.commit && ledger?.blocking.isEmpty == false) {
+                    throw Problem(text: vault.missingVerdictReason(root: root, task: slug)
+                        ?? "\(slug) has no passing audit. Run audit: merge takes a complete, clean verdict" + Self.notDismissable(verdict) + ".")
+                }
+                // Else it's open Important findings that hold it back, and the check below says which.
             }
             guard let verifier = vault.current(.verifier, root: root, task: slug), verifier.id == verdict.verifier,
                   verifier.session == verdict.session, verifier.auditing == verdict.commit else {
@@ -1558,11 +1598,14 @@ public final class LeadToolset: MCPToolset {
             // Nothing ran: say so, it isn't a pass.
             let untested = workflow.testCommand == nil
                 ? " (merged without tests: no test_command\(workflow.problem.map { "; \($0)" } ?? ""). Set one with configure.)" : ""
-            try? store.appendProgress("Merged \(slug): \(task.title)\(untested.isEmpty ? "" : " (without tests: no test_command)")\(audited ? "" : " (no audit: review none)")")
+            try? store.appendProgress("Merged \(slug): \(task.title)\(untested.isEmpty ? "" : " (without tests: no test_command)")\(audited ? "" : " (no audit: review none)")"
+                + (dismissed.isEmpty ? "" : " (its audit's Important findings dismissed by the lead: \(dismissed.map(\.id).joined(separator: ", ")))"))
             let ran = workflow.regressionCommand == nil ? "" : " (regression_command passed too.)"
             let patience = waited.map { " (The tests waited \(Worktrees.duration($0.after)) for the Mac's load to drop from \(MacLoad.number($0.from)) below load_threshold.)" } ?? ""
             let unaudited = audited ? "" : " (No audit: review none, on its worker's done report and the tests that just passed.)"
-            return MCPToolResult(text: "Merged \(slug) into \(base)\(untested). Next: cleanup(\(slug)). \(LeadPrompts.Policy.updates)\(unaudited)\(ran)\(patience)")
+            let overruled = dismissed.isEmpty ? "" : " (Its audit was complete with its tests passing, and \(dismissed.count == 1 ? "the one Important finding that failed it" : "the \(dismissed.count) Important findings that failed it") you dismissed: "
+                + dismissed.map { "\($0.id) \($0.place) (\(Self.clip($0.reason ?? "", 120)))" }.joined(separator: "; ") + ".)"
+            return MCPToolResult(text: "Merged \(slug) into \(base)\(untested). Next: cleanup(\(slug)). \(LeadPrompts.Policy.updates)\(overruled)\(unaudited)\(ran)\(patience)")
         case .refused(let reason):
             throw Problem(text: "Not merged: \(reason)")
         }
@@ -2367,6 +2410,12 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "completion must be complete, incomplete or blocked; integrity clean, suspect or violation.")
         }
         let summary = arguments["summary"] as? String ?? ""
+        let tests = try (arguments["tests"] as? String).map { said in
+            guard let tests = LeadVault.TestRun(rawValue: said.trimmingCharacters(in: .whitespaces).lowercased().replacingOccurrences(of: " ", with: "_")) else {
+                throw Problem(text: "tests must be passed, failed or not_run.")
+            }
+            return tests
+        }
         let reports = try Self.findingReports(arguments["findings"])
         // Checked here first against what a re-audit covers (the vault has no git; see reauditScope), then by the vault.
         let earlier = vault.audits(root: root, task: slug) ?? LeadAuditLedger()
@@ -2378,7 +2427,7 @@ public final class LeadToolset: MCPToolset {
             } catch { throw Problem(text: "Not recorded: \(error) Nothing was recorded; call submit_audit again.") }
         }
         let submission: LeadVault.Submission
-        do { submission = try vault.submit(root: root, completion: completion, integrity: integrity, summary: summary, findings: reports) } catch {
+        do { submission = try vault.submit(root: root, completion: completion, integrity: integrity, summary: summary, findings: reports, tests: tests) } catch {
             throw Problem(text: "\(error)")
         }
         let finder = member.finder?.index
@@ -2965,15 +3014,18 @@ public enum LeadAuditVote {
         public var integrity: LeadEvidence.Integrity
         public var summary: String
         public var findings: [LeadFinding.Report]
+        /// How its tests went, as it said (optional: ballots from before it was asked have none).
+        public var tests: LeadVault.TestRun?
 
         public init(finder: Int, focus: String, completion: LeadEvidence.Completion, integrity: LeadEvidence.Integrity,
-                    summary: String, findings: [LeadFinding.Report]) {
+                    summary: String, findings: [LeadFinding.Report], tests: LeadVault.TestRun? = nil) {
             self.finder = finder
             self.focus = focus
             self.completion = completion
             self.integrity = integrity
             self.summary = summary
             self.findings = findings
+            self.tests = tests
         }
 
         public var passes: Bool { completion == .complete && integrity == .clean }
@@ -3018,6 +3070,8 @@ public enum LeadAuditVote {
         public var integrity: LeadEvidence.Integrity
         public var summary: String
         public var outcome: Outcome
+        /// Failed when any finder's did; passed when one's did and none failed; nil when none said either.
+        public var tests: LeadVault.TestRun? = nil
 
         public var passes: Bool { completion == .complete && integrity == .clean }
     }
@@ -3133,7 +3187,9 @@ public enum LeadAuditVote {
                               nitsLeftOut: nitsLeftOut, nitCap: nitCap)
         let summary = ballots.map { "Finder \($0.finder) (\($0.focus); \($0.completion.rawValue), \($0.integrity.rawValue)): \($0.summary)" }
             .joined(separator: "\n") + "\n" + outcome.text + "."
-        return Result(reports: reports, unconfirmed: doubted, completion: completion, integrity: integrity, summary: summary, outcome: outcome)
+        let said = ballots.compactMap(\.tests)
+        let tests: LeadVault.TestRun? = said.contains(.failed) ? .failed : said.contains(.passed) ? .passed : said.first
+        return Result(reports: reports, unconfirmed: doubted, completion: completion, integrity: integrity, summary: summary, outcome: outcome, tests: tests)
     }
 
     /// What most said; without a majority, the worst any said (`worse`: best first).
