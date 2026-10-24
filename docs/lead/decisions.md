@@ -412,3 +412,7 @@ It brings eight merged fixes to every project's lead without ending a session. W
 
 The user said a new project "always needs to start as a full fledged leader".
 
+## 2026-10-24 22:42:24 All-done signal is app-side: VibeSwitcher detects from board.json that the board went from open work to clear, with at least one merge, and puts a green "All tasks finished" card in the lead's chat. The card has a plain-words summary written by headless Claude through Briefing's redaction, falling back to a written summary when the model is unavailable or AI summaries are off. A green check shows on the lead's sidebar row until the user opens that lead. No sound or push for now.
+
+The user asked for a clear signal plus a simple-terms AI summary when all tasks finish. Detecting it in the app makes it reliable without depending on the lead. Reusing Briefing keeps secrets out of the prompt and respects the user's AI-summaries setting.
+
