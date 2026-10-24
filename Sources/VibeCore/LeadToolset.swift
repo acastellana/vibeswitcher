@@ -1357,8 +1357,10 @@ public final class LeadToolset: MCPToolset {
     /// First a trial merge onto the base: a branch that conflicts can't land, and its worker is the one to resolve it
     /// (2026-10-20: a-role-session-s passed its audit, then its verifier found by hand that it conflicted with work
     /// merged meanwhile; one more audit and verifier for the resolution). What this returns says how far behind the
-    /// base a branch that merges cleanly is.
+    /// base a branch that merges cleanly is. The lead's records (`records_dir`) count in neither check: merge takes
+    /// the base's of them (`Worktrees.takeBaseRecords`), and the worker may not touch them.
     private func checkUpToDate(_ slug: String, head: String, base: String) throws -> String {
+        let records = Set(workflow.recordsDir.map(LeadRecords.paths) ?? [])
         let since: Worktrees.BaseSince
         switch Worktrees.baseSince(root: root, base: base, commit: head) {
         case .success(let found): since = found
@@ -1366,7 +1368,7 @@ public final class LeadToolset: MCPToolset {
         }
         let conflicts: [String]
         switch Worktrees.trialMerge(root: root, base: base, commit: head) {
-        case .success(let found): conflicts = found
+        case .success(let found): conflicts = found.filter { !records.contains($0) }
         case .failure(let error): throw Problem(text: "No verifier started: whether agent/\(slug) merges cleanly onto \(base) can't be told (\(error)).")
         }
         if !conflicts.isEmpty {
@@ -1383,7 +1385,7 @@ public final class LeadToolset: MCPToolset {
                           + "then run the test suite once and report.\" (start_worker again if it has stopped). Then audit again: a verifier only checks a branch that merges cleanly.")
         }
         let behind = since.commits.isEmpty ? "" : "agent/\(slug) is \(since.commits.count) commit\(since.commits.count == 1 ? "" : "s") behind \(base); a trial merge onto it is clean. "
-        let files = since.overlap
+        let files = since.overlap.filter { !records.contains($0) }
         guard !files.isEmpty else { return behind }
         let commits = since.commits(touching: files)
         let listed = commits.prefix(8).map { commit in
@@ -1492,7 +1494,7 @@ public final class LeadToolset: MCPToolset {
         let tested: String
         switch Worktrees.rebaseAndTest(root: root, commit: commit, onto: current, setup: workflow.initCommand, test: workflow.mergeChecks,
                                        scratch: vault.scratch(root: root, "merge-\(slug)"), home: vault.scratch(root: root, "merge-\(slug)-home"),
-                                       timeout: workflow.testTimeout, lock: heavyLock(workflow)) {
+                                       timeout: workflow.testTimeout, lock: heavyLock(workflow), records: workflow.recordsDir) {
         case .passed(let commit): tested = commit
         case .cancelled:
             // Stopped by the caller: nothing is known about the work, and the task stays as it was.

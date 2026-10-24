@@ -128,6 +128,10 @@ struct LeadRecordsTests: LeadTeamFixture {
         #expect(head("\(commit)^@", root) == parent)
         #expect(files(of: commit, root) == Self.logs)
         #expect(Git.run(["log", "-1", "--format=%s", commit], in: root).output == LeadRecords.subject)
+        // No trailer of any kind (a workflow may refuse them: genswap's regression_command does).
+        let body = Git.run(["log", "-1", "--format=%B", commit], in: root).output
+        #expect(Git.run(["log", "-1", "--format=%(trailers)", commit], in: root).output.isEmpty, "\(body)")
+        #expect(!body.lowercased().contains("co-authored-by") && body == LeadRecords.message("docs/lead"), "\(body)")
         #expect(Git.run(["show", "\(commit):docs/lead/decisions.md"], in: root).output.contains("Use SQLite"))
         #expect(Git.run(["show", "\(commit):docs/lead/progress.md"], in: root).output.contains("Update: Plan"))
         // None of the user's changes went in, and every one is where it was.

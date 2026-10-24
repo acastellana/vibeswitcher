@@ -153,6 +153,48 @@ struct StaleBranchTests: LeadTeamFixture {
         #expect(verifierStarted(runtime))
     }
 
+    /// genswap, 2026-10-23: a branch that held another base's records (`records_dir`) was refused for conflicting in
+    /// them, and its worker may not touch them. merge takes the base's records, so audit counts neither their
+    /// conflicts nor their changes; a conflict in another file is refused as before, naming only that file.
+    @Test func aConflictOnlyInTheLeadsRecordsIsAuditedAndAnotherFileStillRefused() throws {
+        let root = try repo()
+        try commit("docs/lead/progress.md", "# Progress\n\n- one\n", in: root, LeadRecords.subject)
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        started(lead, runtime)
+        let worktree = Worktrees.path(root: root, slug: "add-b")
+        try commit("docs/lead/progress.md", "# Progress\n\n- one\n- the other base's\n", in: worktree, LeadRecords.subject)
+        try commit("b.txt", "bee\n", in: worktree, "add b")
+        try reported(runtime)
+        try commit("docs/lead/progress.md", "# Progress\n\n- one\n- the base's\n", in: root, LeadRecords.subject)
+        #expect(try Worktrees.trialMerge(root: root, base: "main", commit: "agent/add-b").get() == ["docs/lead/progress.md"])
+
+        let audit = lead.call("audit", ["task": "add-b"])
+        #expect(!audit.isError, "\(audit.text)")
+        #expect(audit.text.contains("Verifier started on add-b") && !audit.text.contains("docs/lead"), "\(audit.text)")
+        #expect(verifierStarted(runtime))
+    }
+
+    /// As above, with a conflict in a.txt too: refused for a.txt only.
+    @Test func aConflictInTheLeadsRecordsAndAnotherFileIsRefusedForThatFile() throws {
+        let root = try repo()
+        try commit("docs/lead/progress.md", "# Progress\n\n- one\n", in: root, LeadRecords.subject)
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        started(lead, runtime)
+        let worktree = Worktrees.path(root: root, slug: "add-b")
+        try commit("docs/lead/progress.md", "# Progress\n\n- one\n- the other base's\n", in: worktree, LeadRecords.subject)
+        try commit("a.txt", "one, the worker's\n", in: worktree, "worker edits a")
+        try reported(runtime)
+        try commit("docs/lead/progress.md", "# Progress\n\n- one\n- the base's\n", in: root, LeadRecords.subject)
+        try commit("a.txt", "one, the base's\n", in: root, "base edits a")
+        let refused = lead.call("audit", ["task": "add-b"])
+        #expect(refused.isError)
+        #expect(refused.text.contains("Not audited, no verifier started: a trial merge of agent/add-b"), "\(refused.text)")
+        #expect(refused.text.contains("Files: a.txt.") && !refused.text.contains("docs/lead/progress.md"), "\(refused.text)")
+        #expect(!verifierStarted(runtime))
+    }
+
     /// Both sides changed a file in lines apart: the trial merge is clean, and the branch is still refused as behind
     /// where it matters (it could break the build at merge).
     @Test func aCleanTrialMergeInAFileBothChangedIsStillRefusedAsBehind() throws {

@@ -46,10 +46,15 @@ public final class LeadRecords: @unchecked Sendable {
 
     public static let subject = "Lead: decisions and progress"
 
+    /// No trailer (Co-Authored-By or any other): a project's workflow may refuse them (genswap's regression_command
+    /// does), and these commits land on its base among its own.
     static func message(_ dir: String) -> String {
         "\(subject)\n\nThe project lead's \(dir)/decisions.md, \(dir)/progress.md and \(dir)/incidents.md, committed by VibeSwitcher for the lead "
-            + "(its tool server); nothing else is in this commit.\n\nCo-Authored-By: Claude <noreply@anthropic.com>"
+            + "(its tool server); nothing else is in this commit."
     }
+
+    /// The records' paths in the repository with `records_dir` `dir`.
+    public static func paths(_ dir: String) -> [String] { Kind.allCases.map { "\(dir)/\($0.name)" } }
 
     let store: BoardStore
     let vault: LeadVault
@@ -124,7 +129,7 @@ public final class LeadRecords: @unchecked Sendable {
     private func commit(base: String) -> Outcome {
         guard let dir = store.recordsDir, Git.run(["rev-parse", "--git-dir"], in: root).ok else { return .local }
         do { try store.withRecordsLock { try Self.migrate(store) } } catch { return .failed("moving the old logs from .vibeswitcher failed (\(error)).") }
-        let paths = Kind.allCases.map { "\(dir)/\($0.name)" }
+        let paths = Self.paths(dir)
         guard changed(paths, on: base) else { return .unchanged }
         // As a merge into the branch does: one at a time, and never between its tests and its fast-forward.
         let baseLock = Self.baseLock(vault: vault, root: root, base: base)

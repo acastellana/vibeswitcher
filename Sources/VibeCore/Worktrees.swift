@@ -565,9 +565,11 @@ public enum Worktrees {
     /// Keychain or app.log. A failed or hung run's output starts by naming it.
     /// The commands hold the test and build lock `lock` while they run (nil: none): the app's merge gives the Mac-wide
     /// one (`TestLock.standard()`), tests a scratch one.
+    /// The lead's records under `records` (`records_dir`) land as the base has them, conflicted or merged cleanly
+    /// (`baseRecords`), and conflicts only in them don't stop it (`takeBaseRecords`).
     public static func rebaseAndTest(root: String, commit: String, onto base: String, setup: String? = nil, test: String?,
                                      scratch: URL, home: URL? = nil, timeout: TimeInterval = testTimeout,
-                                     lock: TestLock?) -> Check {
+                                     lock: TestLock?, records: String? = nil) -> Check {
         let path = scratch.path
         let home = (home ?? scratch.deletingLastPathComponent().appendingPathComponent(scratch.lastPathComponent + "-home")).path
         let cancel = ShellCancel.current
@@ -595,14 +597,20 @@ public enum Worktrees {
         // the commits before it, conflicts and all, so such a branch lands as one commit on top of the base; either
         // way the base's history stays a line.
         if Git.run(["rev-list", "--merges", "--max-count=1", "\(base)..HEAD"], in: path).output.isEmpty {
-            let rebase = Git.run(["rebase", "-q", base], in: path)
+            // Each commit picked keeps the base's records (`baseRecordsExec`). A stop only on the records goes on
+            // with the base's; a commit that leaves empty is dropped, as one that only repeats the base's.
+            var rebase = Git.run(["rebase", "-q"] + (records.map { ["--exec", baseRecordsExec($0, base: base)] } ?? []) + [base], in: path)
+            while !rebase.ok, cancel?.isCancelled != true, takeBaseRecords(records, base: base, in: path) {
+                let empty = Git.run(["diff", "--cached", "--quiet"], in: path).ok
+                rebase = noEditor(["rebase", empty ? "--skip" : "--continue"], in: path)
+            }
             if !rebase.ok {
                 let conflict = unmerged(in: path)
                 Git.run(["rebase", "--abort"], in: path)
                 if cancel?.isCancelled == true { return .cancelled }
                 return conflict ? .conflict : .error("Rebasing \(commit.prefix(8)) onto \(base.prefix(8)) failed, and not on a conflict: \(said(rebase))")
             }
-        } else if let stopped = squash(onto: base, in: path) {
+        } else if let stopped = squash(onto: base, in: path, records: records) {
             return cancel?.isCancelled == true ? .cancelled : stopped
         }
         guard cancel?.isCancelled != true else { return .cancelled }
@@ -768,6 +776,49 @@ public enum Worktrees {
         !Git.run(["diff", "--name-only", "--diff-filter=U"], in: path).output.isEmpty
     }
 
+    /// The lead's records under `records` (`records_dir`) as `base` has them, whole, where a rebase or merge at
+    /// `path` stopped on them, when they're all it stopped on (`baseRecords`). False, with nothing resolved, when no
+    /// file is unmerged, one outside the records is, or git fails.
+    static func takeBaseRecords(_ records: String?, base: String, in path: String) -> Bool {
+        guard let records else { return false }
+        let unmerged = Git.run(["diff", "--name-only", "-z", "--diff-filter=U"], in: path).output
+            .split(separator: "\0").map(String.init)
+        let logs = Set(LeadRecords.paths(records))
+        guard !unmerged.isEmpty, unmerged.allSatisfy(logs.contains) else { return false }
+        return baseRecords(records, base: base, in: path)
+    }
+
+    /// Puts every one of the lead's records under `records` (`records_dir`) in the index and worktree at `path` as
+    /// `base` has them (gone where it has none), conflicted or not: workers may not edit the records (`LeadLaunch`), so
+    /// a branch's copy differs only because it holds another or an older base's, or a hand resolution of one, and the
+    /// base's is the right one. False when git fails.
+    static func baseRecords(_ records: String, base: String, in path: String) -> Bool {
+        LeadRecords.paths(records).allSatisfy { file in
+            (Git.run(["cat-file", "-e", "\(base):\(file)"], in: path).ok
+                ? Git.run(["checkout", base, "--", file], in: path)
+                : Git.run(["rm", "-q", "-f", "--ignore-unmatch", "--", file], in: path)).ok
+        }
+    }
+
+    /// A rebase's `--exec` (one line: the todo list's) doing `baseRecords` for the commit just picked: amended when
+    /// that changes it (no hooks: it keeps the message the worker gave it), dropped when that leaves it empty.
+    static func baseRecordsExec(_ records: String, base: String) -> String {
+        let quote = RecentProjects.shellQuote
+        let restore = LeadRecords.paths(records).map { file in
+            "if git cat-file -e \(quote(base + ":" + file)) 2>/dev/null; then git checkout -q \(quote(base)) -- \(quote(file)); "
+                + "else git rm -q -f --ignore-unmatch -- \(quote(file)); fi || exit 1"
+        }
+        let amend = "if ! git diff-index --cached --quiet HEAD; then git commit -q --amend --no-edit --allow-empty --no-verify || exit 1; "
+            + "if git diff-tree --quiet HEAD~1 HEAD; then git reset -q --soft HEAD~1; fi; fi"
+        return (restore + [amend]).joined(separator: "; ")
+    }
+
+    /// Git, as `Git.run`, with an editor that takes the message as it is: a rebase's `--continue` opens one.
+    static func noEditor(_ args: [String], in path: String) -> Git.Result {
+        Shell.run(executable: "/usr/bin/git", args: ["-c", "core.editor=true"] + args, in: path,
+                  env: Git.environment.merging(["GIT_EDITOR": "true"]) { $1 }, timeout: 120)
+    }
+
     /// What git said when a command failed.
     static func said(_ result: Git.Result) -> String {
         let text = [result.error, result.output].first { !$0.isEmpty } ?? ""
@@ -777,7 +828,8 @@ public enum Worktrees {
     /// Replaces the detached HEAD at `path` with one commit on `base` holding the branch's changes, titled after the
     /// branch's own commits (merges left out) and authored by the last of them. Nil when that's done; `conflict` when
     /// they conflict with `base`; `error`, saying what failed, when something else stops it (a hook, a missing commit).
-    static func squash(onto base: String, in path: String) -> Check? {
+    /// The records under `records` land as the base has them (`baseRecords`), and conflicts only in them don't stop it.
+    static func squash(onto base: String, in path: String, records: String? = nil) -> Check? {
         let tip = Git.run(["rev-parse", "HEAD"], in: path).output
         let subjects = Git.run(["log", "--reverse", "--no-merges", "--format=%s", "\(base)..\(tip)"], in: path).output
             .split(whereSeparator: \.isNewline).map(String.init)
@@ -785,10 +837,14 @@ public enum Worktrees {
         let checkout = Git.run(["checkout", "-q", "--detach", base], in: path)
         guard checkout.ok else { return .error("Checking out \(base.prefix(8)) to put the branch on failed: \(said(checkout))") }
         let merge = Git.run(["merge", "--squash", "-q", tip], in: path)
-        guard merge.ok else {
+        guard merge.ok || takeBaseRecords(records, base: base, in: path) else {
             let conflict = unmerged(in: path)
             Git.run(["reset", "-q", "--hard"], in: path)
             return conflict ? .conflict : .error("Squashing \(tip.prefix(8)) onto \(base.prefix(8)) failed, and not on a conflict: \(said(merge))")
+        }
+        if let records, !baseRecords(records, base: base, in: path) {
+            Git.run(["reset", "-q", "--hard"], in: path)
+            return .error("Taking \(base.prefix(8))'s lead records (\(records)) into the squashed branch failed.")
         }
         // Nothing of its own beyond what it merged: the base is the result, as a rebase would leave it.
         if Git.run(["diff", "--cached", "--quiet"], in: path).ok { return nil }

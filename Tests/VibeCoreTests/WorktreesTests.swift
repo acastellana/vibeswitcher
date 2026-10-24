@@ -195,6 +195,151 @@ struct WorktreesTests {
         #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: moved, test: "true", scratch: scratch(), lock: lock) == .conflict)
     }
 
+    /// The lead's records in `docs/lead` (`records_dir`) at `dir`: `files` by name, committed as the lead's tool server does.
+    func records(_ files: [String: String], in dir: String) throws {
+        try FileManager.default.createDirectory(atPath: dir + "/docs/lead", withIntermediateDirectories: true)
+        for (name, text) in files {
+            try text.write(toFile: dir + "/docs/lead/" + name, atomically: true, encoding: .utf8)
+            _ = Git.run(["add", "docs/lead/" + name], in: dir)
+        }
+        _ = Git.run(["commit", "-q", "-m", LeadRecords.subject], in: dir)
+    }
+
+    /// The tree of `docs/lead` at `ref`: the same as another's when every record in it is the same.
+    func recordsTree(_ ref: String, _ root: String) -> String { Git.run(["rev-parse", "\(ref):docs/lead"], in: root).output }
+
+    /// genswap, 2026-10-23: a branch that held another base's records conflicted with the base only in them, and waited
+    /// 13.9 h for the user to resolve them by hand. Workers may not edit the records, so the base's are the right ones:
+    /// a rebase that stops only on them takes the base's and goes on.
+    @Test func aRebaseThatConflictsOnlyInTheLeadsRecordsLandsWithTheBasesRecords() throws {
+        let root = try repo()
+        try records(["progress.md": "# Progress\n\n- one\n", "decisions.md": "# Decisions\n\n## one\n"], in: root)
+        let worktree = try Worktrees.create(root: root, slug: "r")
+        // The branch's history holds another base's records commit (no merges), then its own work, which also edits
+        // a record.
+        try records(["progress.md": "# Progress\n\n- one\n- the other base's\n"], in: worktree)
+        try "w\n".write(toFile: worktree + "/w.txt", atomically: true, encoding: .utf8)
+        try "# Decisions\n\n## one\n## the other base's\n".write(toFile: worktree + "/docs/lead/decisions.md", atomically: true, encoding: .utf8)
+        _ = Git.run(["add", "w.txt", "docs/lead/decisions.md"], in: worktree)
+        _ = Git.run(["commit", "-q", "-m", "add w"], in: worktree)
+        try records(["progress.md": "# Progress\n\n- one\n- the base's\n", "decisions.md": "# Decisions\n\n## one\n## the base's\n"], in: root)
+        let main = Git.run(["rev-parse", "main"], in: root).output
+        let tip = Git.run(["rev-parse", "HEAD"], in: worktree).output
+        #expect(Git.run(["rev-list", "--merges", "\(main)..\(tip)"], in: root).output.isEmpty)
+
+        // Without records_dir, as before: a conflict.
+        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch(), lock: lock) == .conflict)
+        let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test -f w.txt", scratch: scratch(), lock: lock,
+                                              records: "docs/lead")
+        guard case .passed(let tested) = checked else { Issue.record("\(checked)"); return }
+        #expect(recordsTree(tested, root) == recordsTree(main, root))
+        // The records-only commit left nothing and is dropped; the work keeps its own commit.
+        #expect(Git.run(["log", "--format=%s", "\(main)..\(tested)"], in: root).output == "add w")
+        #expect(Git.run(["show", "\(tested):w.txt"], in: root).output == "w")
+        #expect(Worktrees.fastForward(root: root, base: "main", to: tested, from: main) == .merged)
+        #expect(listed(root).count == 2)
+        #expect(heads(root, "r").tip == tip)
+
+        // A conflict in another file too still stops it, and the branch is left as it was.
+        try commit("w.txt", "the base's w\n", in: root)
+        let moved = Git.run(["rev-parse", "main"], in: root).output
+        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: moved, test: "true", scratch: scratch(), lock: lock, records: "docs/lead")
+            == .conflict)
+        #expect(heads(root, "r").tip == tip && listed(root).count == 2)
+    }
+
+    /// As above, for a branch that merged an older base in (squashed onto the base): its records conflict, the base's
+    /// stay as they are.
+    @Test func aSquashThatConflictsOnlyInTheLeadsRecordsLandsWithTheBasesRecords() throws {
+        let root = try repo()
+        try records(["progress.md": "# Progress\n\n- one\n", "incidents.md": "# Incidents\n\n"], in: root)
+        let worktree = try Worktrees.create(root: root, slug: "s")
+        // The older base the worker merged in: the lead's branch before the base changed, with records of its own.
+        let older = try Worktrees.create(root: root, slug: "older")
+        try records(["progress.md": "# Progress\n\n- one\n- the older base's\n", "incidents.md": "# Incidents\n\n## the older base's\n"],
+                    in: older)
+        try commit("s.txt", "s\n", in: worktree)
+        #expect(Git.run(["merge", "-q", "--no-edit", Worktrees.branch("older")], in: worktree).ok)
+        try records(["progress.md": "# Progress\n\n- one\n- the base's\n", "incidents.md": "# Incidents\n\n## the base's\n"], in: root)
+        try commit("c.txt", "c\n", in: root)
+        let main = Git.run(["rev-parse", "main"], in: root).output
+        let tip = Git.run(["rev-parse", "HEAD"], in: worktree).output
+
+        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch(), lock: lock) == .conflict)
+        let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test -f s.txt && test -f c.txt", scratch: scratch(),
+                                              lock: lock, records: "docs/lead")
+        guard case .passed(let tested) = checked else { Issue.record("\(checked)"); return }
+        #expect(Git.run(["rev-parse", "\(tested)~1"], in: root).output == main)
+        #expect(Git.run(["rev-list", "--merges", tested], in: root).output.isEmpty)
+        #expect(recordsTree(tested, root) == recordsTree(main, root))
+        #expect(Git.run(["show", "\(tested):s.txt"], in: root).output == "s")
+        #expect(listed(root).count == 3)
+
+        // A conflict in another file too still stops it.
+        try commit("s.txt", "main's s\n", in: root)
+        let moved = Git.run(["rev-parse", "main"], in: root).output
+        #expect(Worktrees.rebaseAndTest(root: root, commit: tip, onto: moved, test: "true", scratch: scratch(), lock: lock, records: "docs/lead")
+            == .conflict)
+        #expect(heads(root, "s").tip == tip && listed(root).count == 3)
+    }
+
+    /// A branch's records that merge with the base's without a conflict (another base's lines apart from the base's
+    /// own, or a worker's hand resolution in a merge) still land as the base has them, byte for byte, through both the
+    /// rebase and the squash; the branch's work lands with them.
+    @Test func recordsThatMergeCleanlyStillLandAsTheBasesRecords() throws {
+        let lines = "# Progress\n\n- one\n- two\n- three\n- four\n- five\n"
+        // Rebase: no merges. A records-only commit from another base (dropped once it holds the base's), then work that
+        // also touches a record (kept, without it).
+        let root = try repo()
+        try records(["progress.md": lines], in: root)
+        let worktree = try Worktrees.create(root: root, slug: "r")
+        try records(["progress.md": lines.replacingOccurrences(of: "- one", with: "- one, the other base's")], in: worktree)
+        try "w\n".write(toFile: worktree + "/w.txt", atomically: true, encoding: .utf8)
+        try "# Incidents\n\n## the worker's\n".write(toFile: worktree + "/docs/lead/incidents.md", atomically: true, encoding: .utf8)
+        _ = Git.run(["add", "w.txt", "docs/lead/incidents.md"], in: worktree)
+        _ = Git.run(["commit", "-q", "-m", "add w"], in: worktree)
+        try records(["progress.md": lines.replacingOccurrences(of: "- five", with: "- five, the base's")], in: root)
+        let main = Git.run(["rev-parse", "main"], in: root).output
+        let tip = Git.run(["rev-parse", "HEAD"], in: worktree).output
+        // As before without records_dir: it rebases cleanly, and the branch's records go in.
+        guard case .passed(let unfixed) = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "true", scratch: scratch(),
+                                                                  lock: lock) else { Issue.record("no clean rebase"); return }
+        #expect(recordsTree(unfixed, root) != recordsTree(main, root))
+        let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test -f w.txt", scratch: scratch(), lock: lock,
+                                              records: "docs/lead")
+        guard case .passed(let tested) = checked else { Issue.record("\(checked)"); return }
+        #expect(recordsTree(tested, root) == recordsTree(main, root))
+        #expect(Git.run(["log", "--format=%s", "\(main)..\(tested)"], in: root).output == "add w")
+        #expect(Git.run(["diff", "--name-only", main, tested], in: root).output == "w.txt")
+        #expect(heads(root, "r").tip == tip)
+
+        // Squash: the worker merged an older base in, resolving its records' conflict by hand; the base moved on in
+        // lines apart, so the squash merges them cleanly.
+        let other = try repo()
+        try records(["progress.md": lines], in: other)
+        let branch = try Worktrees.create(root: other, slug: "s")
+        let older = try Worktrees.create(root: other, slug: "older")
+        try records(["progress.md": lines.replacingOccurrences(of: "- one", with: "- one, the older base's")], in: older)
+        try records(["progress.md": lines.replacingOccurrences(of: "- one", with: "- one, the worker's")], in: branch)
+        #expect(!Git.run(["merge", "-q", "--no-edit", Worktrees.branch("older")], in: branch).ok)
+        try records(["progress.md": lines.replacingOccurrences(of: "- one", with: "- one, the worker's hand")], in: branch)
+        try commit("s.txt", "s\n", in: branch)
+        #expect(!Git.run(["rev-list", "--merges", "main..HEAD"], in: branch).output.isEmpty)
+        try records(["progress.md": lines.replacingOccurrences(of: "- five", with: "- five, the base's")], in: other)
+        let base = Git.run(["rev-parse", "main"], in: other).output
+        let head = Git.run(["rev-parse", "HEAD"], in: branch).output
+        guard case .passed(let squashedUnfixed) = Worktrees.rebaseAndTest(root: other, commit: head, onto: base, test: "true", scratch: scratch(),
+                                                                          lock: lock) else { Issue.record("no clean squash"); return }
+        #expect(recordsTree(squashedUnfixed, other) != recordsTree(base, other))
+        let squashed = Worktrees.rebaseAndTest(root: other, commit: head, onto: base, test: "test -f s.txt", scratch: scratch(), lock: lock,
+                                               records: "docs/lead")
+        guard case .passed(let landed) = squashed else { Issue.record("\(squashed)"); return }
+        #expect(Git.run(["rev-parse", "\(landed)~1"], in: other).output == base)
+        #expect(recordsTree(landed, other) == recordsTree(base, other))
+        #expect(Git.run(["diff", "--name-only", base, landed], in: other).output == "s.txt")
+        #expect(heads(other, "s").tip == head)
+    }
+
     /// The user's own work in progress in the main checkout, on files the merge doesn't change, doesn't stop it,
     /// and is there afterwards as it was: modified, not staged.
     @Test func uncommittedChangesTheMergeDoesntTouchStay() throws {
