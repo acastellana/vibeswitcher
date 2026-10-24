@@ -1089,3 +1089,4 @@
 - 2026-10-24 16:59 Started a worker on a-base-branch-the
 - 2026-10-24 16:59 Started a worker on fail-fast-sessions
 - 2026-10-24 16:59 Started a worker on the-mac-wide-test
+- 2026-10-24 17:26 Merged lead-prompts-and-tool: Lead prompts and tool texts follow the user's policy (no audit: review none)
