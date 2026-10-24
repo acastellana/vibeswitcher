@@ -1097,3 +1097,8 @@
 - 2026-10-24 17:36 Dismissed fail-fast-sessions:F2: The lead accepted this file afterwards (task context, 2026-10-24). The app ends a session that never connected through the existing host.kill, which the goal needs, and the verifier found it correct.
 - 2026-10-24 17:36 Dismissed fail-fast-sessions:F3: The lead accepted this file afterwards (task context, 2026-10-24). The roster times reach the app, which the goal needs, and the verifier found it correct.
 - 2026-10-24 17:36 Planned boundary-excursions-a: Boundary excursions a worker reports don't fail an audit, and dismissed findings don't force another one (review audit)
+- 2026-10-24 17:43 Audit of lead-record-commits: incomplete, clean, round 1: 1 Important open, 1 Nit open
+- 2026-10-24 17:43 Started a worker on lead-record-commits
+- 2026-10-24 17:44 Audit of fail-fast-sessions: complete, clean, round 2: 3 Important closed, 1 Nit open
+- 2026-10-24 17:46 Review of mac-wide-limits-are: audit
+- 2026-10-24 17:50 Merged fail-fast-sessions: Fail fast: sessions without their tools are caught, and cleanup ends sessions and states the result
