@@ -199,6 +199,90 @@ extension LeadToolsetTests {
         #expect(runtime.spawned.count == 2)
     }
 
+    /// A task worked on and reported done, the neighbours' six sessions on the Mac and room for one more: the
+    /// verifier fits only in its worker's place.
+    func reportedOnAFullMac(_ runtime: FakeRuntime) throws -> (root: String, lead: LeadToolset, worker: String) {
+        let root = try repo()
+        let lead = try lead(root, runtime)
+        _ = call(lead, "add_task", ["title": "Add b", "goal": "g", "acceptance": ["a"]])
+        #expect(!call(lead, "start_worker", ["task": "add-b"]).isError)
+        _ = call(try seat("worker-add-b", runtime), "report", ["status": "done", "summary": "added"])
+        runtime.others = Self.neighbours
+        lead.macLimits = { MacLimits(maxSessions: 7) }
+        return (root, lead, try #require(BoardStore(root: root).load().task("add-b")?.worker))
+    }
+
+    /// 2026-10-24: finished workers waiting for their audits held 4 to 5 of the Mac's 10 slots, verifiers were
+    /// refused for mac_max_sessions, and the lead ended the idle workers by hand. audit ends the task's own worker,
+    /// idle since its done report, when the Mac has no room for the verifier beside it.
+    @Test func auditEndsTheTasksOwnIdleWorkerToMakeRoom() throws {
+        let runtime = FakeRuntime()
+        let (root, lead, worker) = try reportedOnAFullMac(runtime)
+        runtime.statuses[worker] = LeadActivity.idle(background: nil).text
+        let audit = call(lead, "audit", ["task": "add-b"])
+        #expect(!audit.isError, "\(audit.text)")
+        #expect(runtime.killed == [worker])
+        #expect(audit.text.contains("Ended add-b's worker, idle since its done report on "), "\(audit.text)")
+        #expect(audit.text.contains("(8 with it, 7 at most), and the audit takes its slot"), "\(audit.text)")
+        #expect(audit.text.contains("Verifier started on add-b"), "\(audit.text)")
+        #expect(runtime.spawned.contains { $0.command.contains("--name 'verify-add-b'") })
+        let task = BoardStore(root: root).load().task("add-b")
+        #expect(task?.stopped == worker && task?.status == .review)
+    }
+
+    /// The worker is mid-turn (working, waiting on its background task or on a prompt), its last report isn't done on
+    /// the branch's head, or the Mac has room beside it: it's never ended, and the verifier starts as before.
+    @Test func auditNeverEndsAWorkerMidTurnOrNotDoneOrWithRoomBesideIt() throws {
+        for case_ in ["working", "background", "prompt", "not done on head", "room"] {
+            let runtime = FakeRuntime()
+            let (root, lead, worker) = try reportedOnAFullMac(runtime)
+            runtime.statuses[worker] = LeadActivity.idle(background: nil).text
+            switch case_ {
+            case "working": runtime.statuses[worker] = LeadActivity.working("Bash").text
+            case "background": runtime.statuses[worker] = LeadActivity.idle(background: "swift test").text
+            case "prompt": runtime.waiting[worker] = PendingPrompt(text: "Run: ls?")
+            case "not done on head":
+                let worktree = Worktrees.path(root: root, slug: "add-b")
+                try "more\n".write(toFile: worktree + "/more.txt", atomically: true, encoding: .utf8)
+                Git.run(["add", "more.txt"], in: worktree)
+                Git.run(["commit", "-q", "-m", "more after the report"], in: worktree)
+            default: lead.macLimits = { MacLimits(maxSessions: 8) }
+            }
+            let audit = call(lead, "audit", ["task": "add-b"])
+            #expect(!audit.isError, "\(case_): \(audit.text)")
+            #expect(runtime.killed.isEmpty, "\(case_)")
+            #expect(!audit.text.contains("Ended add-b's worker"), "\(case_): \(audit.text)")
+            #expect(BoardStore(root: root).load().task("add-b")?.stopped == nil, "\(case_)")
+        }
+    }
+
+    /// Refused for the load, or with the neighbours alone at the cap (its slot wouldn't be enough): the idle worker
+    /// stays, and nothing starts.
+    @Test func anAuditRefusedAnywayEndsNoWorker() throws {
+        for case_ in ["load", "full without it"] {
+            let runtime = FakeRuntime()
+            let (_, lead, worker) = try reportedOnAFullMac(runtime)
+            runtime.statuses[worker] = LeadActivity.idle(background: nil).text
+            if case_ == "load" { runtime.load = 190 } else { lead.macLimits = { MacLimits(maxSessions: 6) } }
+            let refused = call(lead, "audit", ["task": "add-b"])
+            #expect(refused.isError && refused.text.contains("No verifier started"), "\(case_): \(refused.text)")
+            #expect(runtime.killed.isEmpty, "\(case_)")
+            #expect(!runtime.spawned.contains { $0.command.contains("--name 'verify-add-b'") }, "\(case_)")
+        }
+    }
+
+    /// The host refuses to end the worker: the verifier starts beside it, as before, and the reply says so.
+    @Test func aWorkerTheHostWontEndIsSaidAndTheVerifierStillStarts() throws {
+        let runtime = FakeRuntime()
+        let (_, lead, worker) = try reportedOnAFullMac(runtime)
+        runtime.statuses[worker] = LeadActivity.idle(background: nil).text
+        runtime.refusals[worker] = "no such session"
+        let audit = call(lead, "audit", ["task": "add-b"])
+        #expect(!audit.isError, "\(audit.text)")
+        #expect(audit.text.contains("wasn't ended to make room for the verifier") && audit.text.contains("no such session"), "\(audit.text)")
+        #expect(audit.text.contains("Verifier started on add-b"), "\(audit.text)")
+    }
+
     // MARK: merge
 
     @Test func mergeWaitsForTheLoadToDropBeforeTesting() throws {

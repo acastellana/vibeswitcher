@@ -1021,8 +1021,8 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].stopped = worker
         }
         try? store.appendProgress("Ended \(task.slug)'s worker (idle since its done report on \(head.prefix(8))) to make room on the Mac for its audit")
-        return "Ended \(task.slug)'s worker, idle since its done report on \(head.prefix(8)), to make room: with it the Mac's team sessions would go past "
-            + "mac_max_sessions (\(others.sessions + 1) with it, \(limits.maxSessions) at most), and the audit takes its slot (\(ending.said)). "
+        return "Ended \(task.slug)'s worker, idle since its done report on \(head.prefix(8)), to make room: beside it the audit would take the Mac's team sessions past "
+            + "mac_max_sessions (\(others.sessions + 1 + need) with it, \(limits.maxSessions) at most), and the audit takes its slot (\(ending.said)). "
             + "Its worktree and commits stay; start_worker continues there if there's rework. "
     }
 
