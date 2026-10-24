@@ -91,7 +91,7 @@ extension LeadToolsetTests {
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         _ = try audited(lead, runtime, root: root)
-        #expect(!call(lead, "configure", ["load_threshold": "24"]).isError)
+        lead.macLimits = { MacLimits(maxSessions: 6, loadThreshold: 24) }
         lead.loadPoll = 0.01
         runtime.loadReadings = [150, 120, 3]
         let told = Told()
@@ -139,7 +139,7 @@ extension LeadToolsetTests {
         #expect(LeadWorkflow.load(from: root + "/.vibeswitcher/workflow.md").heavySlots == 4)
         #expect(LeadWorkflow.parse("---\nheavy_slots: 0\n---").heavySlots == nil)
         #expect(LeadWorkflow.template.contains("\nheavy_slots:\n"))
-        // A limit a worker could loosen: a guard rail, as mac_max_sessions is.
+        // A limit a worker could loosen: a guard rail, as max_workers is.
         #expect(LeadVault.guardedKeys.contains("heavy_slots"))
         #expect(LeadVault.guardedValue("heavy_slots", in: LeadWorkflow.parse("---\nheavy_slots: 4\n---")) == "4")
     }

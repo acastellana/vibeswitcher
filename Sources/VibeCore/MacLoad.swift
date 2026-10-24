@@ -78,5 +78,54 @@ public struct MacLoad: Equatable, Sendable {
     }
 
     /// 24 → "24", 2.5 → "2.5".
-    static func number(_ value: Double) -> String { String(format: "%g", value) }
+    public static func number(_ value: Double) -> String { String(format: "%g", value) }
+}
+
+/// The Mac-wide limits every project's lead starts teams under, set once for the Mac in Settings › Project lead and
+/// kept in `~/.vibeswitcher/mac-limits.json` (the leads' tool servers read it at each call). They were keys in each
+/// project's workflow.md: TGE-ANALYSIS had 20 there after a refusal suggested raising it while vibeswitcher had 10, so
+/// the cap held no project back. A project's workflow.md values for them are ignored (see `LeadWorkflow.ignoredKeys`).
+public struct MacLimits: Codable, Equatable, Sendable {
+    public static let defaultMaxSessions = 10
+
+    /// How many workers and verifiers may run at once across every project the session host knows; start_worker and
+    /// audit refuse at it.
+    public var maxSessions: Int
+    /// The 1-minute load average above which start_worker and audit refuse, and merge waits before its tests; nil:
+    /// twice the cores (`loadLimit`).
+    public var loadThreshold: Double?
+
+    public init(maxSessions: Int = MacLimits.defaultMaxSessions, loadThreshold: Double? = nil) {
+        self.maxSessions = max(1, maxSessions)
+        self.loadThreshold = loadThreshold.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(maxSessions: (try? container.decodeIfPresent(Int.self, forKey: .maxSessions)) ?? Self.defaultMaxSessions,
+                  loadThreshold: try? container.decodeIfPresent(Double.self, forKey: .loadThreshold))
+    }
+
+    /// The load threshold in force: the one set, else twice the Mac's cores.
+    public var loadLimit: Double { loadThreshold ?? Double(2 * MacLoad.processors) }
+
+    /// load_threshold as said to a lead: "30 in Settings", or "24, twice the 12 cores" when it isn't set.
+    public var loadLimitText: String {
+        MacLoad.number(loadLimit) + (loadThreshold == nil ? ", twice the \(MacLoad.processors) cores" : " in Settings")
+    }
+
+    public static var file: URL { VibePaths.root.appendingPathComponent("mac-limits.json") }
+
+    /// The limits as set; the defaults while there's no file (or it can't be read).
+    public static func load(from file: URL = file) -> MacLimits {
+        (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(MacLimits.self, from: $0) } ?? MacLimits()
+    }
+
+    /// Writes them (0600).
+    public func save(to file: URL = MacLimits.file) throws {
+        try VibePaths.ensurePrivate(file.deletingLastPathComponent())
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try VibePaths.writePrivate(try encoder.encode(self), to: file)
+    }
 }

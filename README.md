@@ -237,7 +237,7 @@ program of its choosing (only the app may ask for a handover; anyone else's is r
 anything), or end another session through the host (only the app, the session itself or one started from it, and
 its team's lead may). Nor can it get its own commands run as the lead, or loosen the rules its work is merged by:
 `workflow.md`'s guard rails (its test and setup commands, which `merge` runs as the lead; `merge_policy` and
-`sensitive_paths`; `records_dir`; `max_workers`, `mac_max_sessions`, `heavy_slots`, `load_threshold`, `audit_finders` and `audit_nit_cap`, each as the team reads it,
+`sensitive_paths`; `records_dir`; `max_workers`, `heavy_slots`, `audit_finders` and `audit_nit_cap`, each as the team reads it,
 so a line left out is its default) count only as the lead last
 set them with `configure` (the host keeps a hash of each, and takes one only from the app or the lead). When the file
 says anything else, whether a worker's Bash wrote it or a branch's committed copy was merged over it, `merge` and
@@ -307,6 +307,13 @@ that are still running. `message` with `clear_draft` sends one ^C and types the 
 host too old to say what's dim, Claude's suggestion drawn again unchanged after the ^C is typed over too. If the box
 still holds something, the reply says what it saw and doesn't ask the lead to try `clear_draft` again. The window
 drops, and logs once, unsent messages to a session the host no longer has.
+
+The Mac-wide limits are set once for the Mac, not per project: in Settings › Project lead, the most team sessions
+(workers and verifiers of all projects together, 10 at first) and the 1-minute load above which leads start nothing
+(empty: twice the cores), kept in `~/.vibeswitcher/mac-limits.json`. A project's `workflow.md` lines for
+`mac_max_sessions` and `load_threshold` are ignored (status says so once), and `configure` refuses them. A lead whose
+`start_worker`, `audit` or `merge` was refused for room or load gets one message once there's room again, whichever
+project's sessions ended to make it.
 
 New sessions (⊕, ⌘N) start **in the window** by default: VibeSwitcher runs them itself, in a small background
 process (`vibeswitcher-host`) that keeps them going when VibeSwitcher quits, crashes or updates; reopening the

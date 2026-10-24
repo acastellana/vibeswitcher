@@ -452,3 +452,83 @@ public enum LeadWitness {
         return now.timeIntervalSince1970 - quietSince > quiet ? ("\(session)|stopped-\(since)", stopped) : nil
     }
 }
+
+extension LeadWitness {
+    /// The leads whose start_worker, audit or merge was refused for the Mac's room or load (see `MacLimits`), each
+    /// woken once when there's room again, whichever project's sessions ended to make it. The refusal tells the lead
+    /// not to poll; before this nothing woke it when another project's sessions ended, so leads slept and polled
+    /// (genswap's on 10-23 and 10-24). Each refusal is a file of its own in `folder`, written by the lead's tool server;
+    /// the app looks once a minute (`look`) and removes the ones it told, so a refusal written meanwhile isn't lost.
+    public struct RoomWaits {
+        /// One refused call.
+        public struct Wait: Codable, Equatable, Sendable {
+            /// The project's root.
+            public var root: String
+            /// What was refused, as the lead would call it again: "start_worker(one)".
+            public var what: String
+            /// The team sessions it needs room for (a worker 1, an audit its finders); 0: only the load (merge).
+            public var need: Int
+            /// When it was refused (seconds since 1970).
+            public var at: Double
+        }
+
+        public let folder: URL
+
+        public static var folder: URL { VibePaths.root.appendingPathComponent("room-waits") }
+        /// A wait this old is dropped untold: its lead has moved on, or ended.
+        public static let expiry: TimeInterval = 12 * 3600
+
+        public init(folder: URL = RoomWaits.folder) { self.folder = folder }
+
+        /// Keeps a refusal for the lead of `root` until there's room for it.
+        public func record(root: String, what: String, need: Int, now: Date = Date()) {
+            let wait = Wait(root: (root as NSString).standardizingPath, what: what, need: max(0, need), at: now.timeIntervalSince1970)
+            guard let data = try? JSONEncoder().encode(wait) else { return }
+            try? VibePaths.ensurePrivate(folder)
+            try? VibePaths.writePrivate(data, to: folder.appendingPathComponent(UUID().uuidString + ".json"))
+        }
+
+        /// The waits kept now, with their files.
+        func waits() -> [(file: URL, wait: Wait)] {
+            let files = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)) ?? []
+            return files.filter { $0.pathExtension == "json" }.compactMap { file in
+                (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(Wait.self, from: $0) }.map { (file, $0) }
+            }
+        }
+
+        /// What to tell each refused lead now that the Mac has room, one message per project: the waits `mac` has
+        /// room for under `limits` (the 1-minute load not over load_threshold, and with a wait's sessions the team
+        /// sessions within mac_max_sessions). Those told are removed; the rest stay until there's room for them too.
+        public func look(mac: MacLoad, limits: MacLimits, now: Date = Date()) -> [(root: String, text: String)] {
+            var due: [String: [Wait]] = [:]
+            for (file, wait) in waits() {
+                if now.timeIntervalSince1970 - wait.at > Self.expiry {
+                    try? FileManager.default.removeItem(at: file)
+                    continue
+                }
+                guard Self.hasRoom(for: wait, mac: mac, limits: limits) else { continue }
+                try? FileManager.default.removeItem(at: file)
+                due[wait.root, default: []].append(wait)
+            }
+            return due.keys.sorted().map { root in
+                let waits = due[root]!.sorted { $0.at < $1.at }
+                var whats: [String] = []
+                for wait in waits where !whats.contains(wait.what) { whats.append(wait.what) }
+                return (root, LeadWitness.roomText(whats, mac: mac, limits: limits))
+            }
+        }
+
+        static func hasRoom(for wait: Wait, mac: MacLoad, limits: MacLimits) -> Bool {
+            guard !mac.isBusy(threshold: limits.loadLimit) else { return false }
+            return wait.need == 0 || mac.sessions + wait.need <= limits.maxSessions
+        }
+    }
+
+    /// "The Mac has room again for what was refused: start_worker(one), audit(two). Now: load 3.0 (load_threshold 24,
+    /// twice the 12 cores), 4 team sessions across 2 projects (…) (mac_max_sessions 10). Retry what's still wanted."
+    public static func roomText(_ whats: [String], mac: MacLoad, limits: MacLimits) -> String {
+        "The Mac has room again for what was refused: \(whats.joined(separator: ", ")). Now: load \(mac.loadText) "
+            + "(load_threshold \(limits.loadLimitText)), \(mac.sessionsText) (mac_max_sessions \(limits.maxSessions)). "
+            + "Retry what's still wanted; other projects' leads may take the room too."
+    }
+}

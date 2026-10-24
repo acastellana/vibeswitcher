@@ -23,22 +23,22 @@ struct MacLineTests {
     ]
 
     @Test func theLineCountsEveryProjectsLiveTeamAndTheLoad() {
-        let line = MacLine.make(Self.sessions, load: 12.34, workflow: LeadWorkflow.parse("---\nload_threshold: 24\n---"))
+        let line = MacLine.make(Self.sessions, load: 12.34, limits: MacLimits(loadThreshold: 24))
         #expect(line.text == "Mac: load 12.3, 3 team sessions across 2 projects")
         #expect(!line.isOver)
         #expect(line.spoken == "Whole Mac, all projects: load average 12.3 over the last minute; 3 team sessions across 2 projects (vibeswitcher 2, genswap 1)")
     }
 
     @Test func overALimitItSaysWhichAndThatTheLeadWaits() {
-        let loaded = MacLine.make(Self.sessions, load: 150, workflow: LeadWorkflow.parse("---\nload_threshold: 24\n---"))
+        let loaded = MacLine.make(Self.sessions, load: 150, limits: MacLimits(loadThreshold: 24))
         #expect(loaded.text == "Mac: load 150.0, 3 team sessions across 2 projects")
         #expect(loaded.isOver)
         #expect(loaded.spoken.contains("over the load limit of 24: new workers and audits wait"))
         #expect(!loaded.spoken.contains("limit of 3 team sessions"))
-        let full = MacLine.make(Self.sessions, load: 1, workflow: LeadWorkflow.parse("---\nmac_max_sessions: 3\n---"))
+        let full = MacLine.make(Self.sessions, load: 1, limits: MacLimits(maxSessions: 3))
         #expect(full.isOver)
         #expect(full.spoken.contains("at the limit of 3 team sessions: new workers and audits wait"))
-        let unknown = MacLine.make([], load: nil, workflow: LeadWorkflow())
+        let unknown = MacLine.make([], load: nil, limits: MacLimits())
         #expect(unknown.text == "Mac: load unknown, 0 team sessions across 0 projects")
         #expect(unknown.spoken.contains("load average unknown") && !unknown.isOver)
     }

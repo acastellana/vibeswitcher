@@ -16,13 +16,10 @@ import VibeCore
 struct ChatBenchTests {
     static let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/chat-bench.jsonl")
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
-    /// The lead's workflow.md (its load_threshold): this checkout's, or the one whose worktree this is.
-    static let workflow: String? = {
-        var candidates = [repo.appendingPathComponent(".vibeswitcher/workflow.md")]
-        if repo.deletingLastPathComponent().lastPathComponent == "worktrees" {
-            candidates.append(repo.deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("workflow.md"))
-        }
-        return candidates.first { FileManager.default.fileExists(atPath: $0.path) }?.path
+    /// The Mac-wide limits (their load_threshold) as Settings › Project lead keeps them for the account, when set.
+    static let limits: String? = {
+        let file = URL(fileURLWithPath: VibePaths.accountHome).appendingPathComponent(".vibeswitcher/mac-limits.json")
+        return FileManager.default.fileExists(atPath: file.path) ? file.path : nil
     }()
     /// The chat pane in the window at its first size (1280x800, the toolbar taking 52) beside the session list (260),
     /// with the inspector (240) showing or hidden: the chat's column (at most 900) is narrower than 900, or not.
@@ -47,7 +44,7 @@ struct ChatBenchTests {
         environment["HOME"] = home.path
         environment["CFFIXED_USER_HOME"] = home.path
         environment["VIBESWITCHER_HOME"] = nil  // the run's own (scripts/test.sh) would come before this home
-        environment["VIBESWITCHER_BENCH_WORKFLOW"] = Self.workflow
+        environment["VIBESWITCHER_BENCH_LIMITS"] = Self.limits
         for (key, value) in settings { environment[key] = value }
         process.environment = environment
         process.standardOutput = try FileHandle(forWritingTo: output)
@@ -333,7 +330,7 @@ struct ChatBenchSettleScriptTests {
     /// of 1 s that ended then, `cpu` of it on the CPU (starved: under half), and after it `also` (another of the verdict's
     /// FAIL lines); exits 4 as the bench does.
     func fakeBuild(also: String? = nil, paging: Double = 0, cpu: String = "0.10", runs: URL) throws -> URL {
-        let rule = "rule: the Mac's 1-minute load 3 is not over load_threshold 24 (workflow.md): any tick over 0.25s fails"
+        let rule = "rule: the Mac's 1-minute load 3 is not over load_threshold 24 (Settings): any tick over 0.25s fails"
         return try script("""
         echo run >> '\(runs.path)'
         echo "  stall \(rule)"

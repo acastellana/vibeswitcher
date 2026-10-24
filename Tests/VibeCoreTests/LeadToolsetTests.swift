@@ -138,8 +138,14 @@ extension LeadTeamFixture {
         try vault.bind(grant, root: root, session: try #require(runtime.me.session))
         let lead = LeadToolset(root: root, runtime: runtime, vault: vault(for: runtime))
         lead.testLock = testLock
+        // The Mac-wide cap these tests' scenes were written for, and refusals kept in the vault's folder (removed with it).
+        lead.macLimits = { MacLimits(maxSessions: 6) }
+        lead.roomWaits = roomWaits
         return lead
     }
+
+    /// Where this fixture's leads keep the refusals the app's witness wakes them for.
+    var roomWaits: LeadWitness.RoomWaits { LeadWitness.RoomWaits(folder: vault.folder.appendingPathComponent("room-waits")) }
 
     /// The test and build lock this fixture's merges and audits take: a scratch one in its vault's folder (removed
     /// with it), never the Mac-wide one (other workers' suites and builds hold that).

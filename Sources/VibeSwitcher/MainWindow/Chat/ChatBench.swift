@@ -416,7 +416,7 @@ enum ChatBench {
     }
 
     /// A tick is the main thread's longest gap between the bench's 20 ms beats. One over 0.25 s fails the bench. On a
-    /// Mac whose 1-minute load is over load_threshold (VIBESWITCHER_BENCH_WORKFLOW's workflow.md, else twice the cores,
+    /// Mac whose 1-minute load is over load_threshold (VIBESWITCHER_BENCH_LIMITS's Mac-wide limits, else twice the cores,
     /// as the lead's) stalls say how busy the Mac is rather than what the layout does: the first open's ticks are only
     /// recorded (paging back: up to the first settle), and later ones fail over 4 × the first open's longest, never
     /// under 0.25 s:
@@ -433,9 +433,9 @@ enum ChatBench {
         let fakeLoad: Double?
 
         static func fromEnvironment(_ env: [String: String]) -> StallRule {
-            let workflow = env["VIBESWITCHER_BENCH_WORKFLOW"].map(LeadWorkflow.load(from:)) ?? LeadWorkflow()
-            return StallRule(threshold: workflow.loadLimit,
-                             source: workflow.loadThreshold == nil ? "twice the \(MacLoad.processors) cores" : "workflow.md",
+            let limits = env["VIBESWITCHER_BENCH_LIMITS"].map { MacLimits.load(from: URL(fileURLWithPath: $0)) } ?? MacLimits()
+            return StallRule(threshold: limits.loadLimit,
+                             source: limits.loadThreshold == nil ? "twice the \(MacLoad.processors) cores" : "Settings",
                              fakeLoad: env["VIBESWITCHER_BENCH_LOAD"].flatMap(Double.init))
         }
 

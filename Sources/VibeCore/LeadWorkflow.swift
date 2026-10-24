@@ -24,12 +24,8 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// How many minutes merge lets init_command and test_command run before they're taken as hung and stopped
     /// (`test_timeout_min:`).
     public var testTimeoutMinutes: Double = Worktrees.testTimeout / 60
-    /// The Mac's 1-minute load average above which start_worker and audit refuse, and merge waits before its tests
-    /// (`load_threshold:`); nil: twice the cores (`loadLimit`). Other projects' teams count: the load is the Mac's.
-    public var loadThreshold: Double?
-    /// How many workers and verifiers may run at once across every project the session host knows
-    /// (`mac_max_sessions:`); start_worker and audit refuse at it.
-    public var macMaxSessions = 6
+    /// The Mac-wide keys (`macKeys`) set in this file: ignored, the Mac's are set once in Settings (see `MacLimits`).
+    public var ignoredKeys: [String] = []
     /// How many test and build slots merge and an audit's shared run share with every project's `vs-heavy`
     /// (`heavy_slots:`, see `TestLock`); nil: VIBESWITCHER_HEAVY_SLOTS, else the Mac's cores ÷ 4.
     public var heavySlots: Int?
@@ -94,8 +90,8 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "disk_warning_gb": workflow.diskWarningGB = gigabytes(value) ?? 10
                 case "disk_floor_gb": workflow.diskFloorGB = gigabytes(value) ?? 3
                 case "test_timeout_min": workflow.testTimeoutMinutes = minutes(value) ?? Worktrees.testTimeout / 60
-                case "load_threshold": workflow.loadThreshold = positive(value)
-                case "mac_max_sessions": workflow.macMaxSessions = max(1, Int(value) ?? 6)
+                case _ where macKeys.contains(key):
+                    if !value.isEmpty, !workflow.ignoredKeys.contains(key) { workflow.ignoredKeys.append(key) }
                 case "heavy_slots": workflow.heavySlots = Int(value).flatMap { $0 >= 1 ? $0 : nil }
                 case "audit_finders": workflow.auditFinders = min(maxFinders, max(1, Int(value) ?? 1))
                 case "audit_nit_cap": workflow.auditNitCap = max(0, Int(value) ?? 5)
@@ -236,9 +232,6 @@ public struct LeadWorkflow: Equatable, Sendable {
 
     var testTimeout: TimeInterval { testTimeoutMinutes * 60 }
 
-    /// The load threshold in force: the one set, else twice the Mac's cores.
-    public var loadLimit: Double { loadThreshold ?? Double(2 * MacLoad.processors) }
-
     /// Reads `workflow.md` whatever its line endings, BOM or stray bytes; `problem` says when it couldn't be used.
     public static func load(from path: String) -> LeadWorkflow {
         guard FileManager.default.fileExists(atPath: path) else {
@@ -291,9 +284,13 @@ public struct LeadWorkflow: Equatable, Sendable {
 
     // MARK: Changing settings
 
+    /// The Mac-wide limits' keys, once workflow.md's: set in Settings › Project lead now (see `MacLimits`), ignored
+    /// here, and refused by `configure`.
+    public static let macKeys = ["load_threshold", "mac_max_sessions"]
+
     /// The settings the lead may change with `configure`.
     public static let configurable = ["test_command", "regression_command", "init_command", "base_branch", "verifier_model", "max_workers",
-                                      "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "load_threshold", "mac_max_sessions",
+                                      "disk_warning_gb", "disk_floor_gb", "test_timeout_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "records_dir"]
 
     /// Writes the workflow file (`.vibeswitcher/workflow.md`), private to you (0600), atomically: the template the first
@@ -420,17 +417,13 @@ public struct LeadWorkflow: Equatable, Sendable {
     # biggest task folders); below disk_floor_gb start_worker refuses.
     disk_warning_gb: 10
     disk_floor_gb: 3
-    # The Mac is shared by every project's team. Above this 1-minute load average start_worker and audit refuse,
-    # and merge waits (up to test_timeout_min) before testing. Empty: twice the Mac's cores.
-    load_threshold:
-    # How many workers and verifiers may run at once across all projects on this Mac.
-    mac_max_sessions: 6
     # How many builds and full test runs (vs-heavy's, merge's, audits') may run at once across all projects on this
     # Mac; one more waits, saying who holds each slot. Empty: the Mac's cores ÷ 4 (VIBESWITCHER_HEAVY_SLOTS when set).
     heavy_slots:
     # How many finders an audit runs: 1 is one verifier. 2 or 3 run that many with different focuses (contract and
     # acceptance; bugs and regressions; security when sensitive_paths are touched, else tests), on one build and test
-    # run the audit makes first; a vote keeps the findings most of them found. Each counts against mac_max_sessions.
+    # run the audit makes first; a vote keeps the findings most of them found. Each counts against mac_max_sessions
+    # (Mac-wide, set in VibeSwitcher's Settings › Project lead).
     audit_finders: 1
     # How many new Nit findings one audit's vote keeps.
     audit_nit_cap: 5
@@ -601,7 +594,9 @@ public enum LeadPrompts {
     }
 
     /// `policy`: the user's working policy (see `WorkingPolicy`), in every role's prompt.
-    public static func lead(project: String, root: String, workflow: LeadWorkflow, policy: String = WorkingPolicy.load()) -> String {
+    /// `limits`: the Mac-wide limits (see `MacLimits`).
+    public static func lead(project: String, root: String, workflow: LeadWorkflow, policy: String = WorkingPolicy.load(),
+                            limits: MacLimits = MacLimits.load()) -> String {
         """
         You are the project lead for "\(project)" (\(root)). The user talks to you; you get the work done through \
         other sessions. You never write code yourself: no edits, no commits. You plan, delegate, verify, merge and \
@@ -682,7 +677,7 @@ public enum LeadPrompts {
         task for a test or lint rule) or a workflow or policy tweak (configure), never just a note. Post it with \
         post_update (title "Retrospective: …"; it goes into the progress log) and record_decision for each change.
 
-        \(macLimits(workflow))
+        \(macLimits(workflow, limits))
 
         \(mergePolicy(workflow))
 
@@ -698,13 +693,14 @@ public enum LeadPrompts {
 
     /// The Mac-wide limits, so the lead plans around them instead of discovering refusals: every project's lead
     /// starts teams on the same Mac.
-    static func macLimits(_ workflow: LeadWorkflow) -> String {
-        let limit = MacLoad.number(workflow.loadLimit) + (workflow.loadThreshold == nil ? ", twice the cores" : "")
+    static func macLimits(_ workflow: LeadWorkflow, _ limits: MacLimits) -> String {
+        let limit = MacLoad.number(limits.loadLimit) + (limits.loadThreshold == nil ? ", twice the cores" : "")
         return """
         The Mac is shared: other projects' leads run their teams on it too, and a loaded Mac slows every build and \
         fails timing-sensitive tests. start_worker and audit refuse while its 1-minute load average is above \
         load_threshold (\(limit)) or the workers and verifiers of all projects together are at mac_max_sessions \
-        (\(workflow.macMaxSessions)); merge waits up to test_timeout_min (\(MacLoad.number(workflow.testTimeoutMinutes)) min) for \
+        (\(limits.maxSessions)); both are set once for the Mac by the user in VibeSwitcher's Settings, not in workflow.md. \
+        After such a refusal VibeSwitcher sends you one message once there's room again. merge waits up to test_timeout_min (\(MacLoad.number(workflow.testTimeoutMinutes)) min) for \
         the load to drop before its tests, then refuses. status shows the Mac's load and every project's team \
         sessions: plan around them. When it's busy, start fewer workers, merge and cleanup finished tasks first \
         (cleanup ends their sessions), and don't retry a refusal at once. \(retryWhenWoken)

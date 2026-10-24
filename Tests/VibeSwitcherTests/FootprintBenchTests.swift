@@ -8,7 +8,7 @@ import Testing
 /// and ending, the window and the chat opening and closing), in a process of its own on a scratch home: with the window
 /// closed its phys_footprint is under 150 MB, after churn it's at most 10 % more than after a warm-up cycle of churn, and
 /// the terminal views and chat models alive are what they were before any. Judged only while the Mac's 1-minute load is
-/// under load_threshold (workflow.md, else twice the cores); over it the numbers are printed, not judged. A bench, run
+/// under load_threshold (Settings › Project lead's, else twice the cores); over it the numbers are printed, not judged. A bench, run
 /// only by `scripts/test.sh --perf` (`Tag.perf`); the vmmap parser's test runs in every run.
 struct FootprintBenchTests {
     private let scratch = Scratch()
@@ -23,15 +23,9 @@ struct FootprintBenchTests {
         return results
     }
 
-    /// load_threshold from the workflow.md of the repository this file is in (a worktree's is its project's).
+    /// The Mac-wide load_threshold as Settings › Project lead keeps it for the account (else twice the cores).
     static var loadLimit: Double {
-        var folder = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        while folder.path != "/" {
-            let workflow = folder.appendingPathComponent(".vibeswitcher/workflow.md")
-            if FileManager.default.fileExists(atPath: workflow.path) { return LeadWorkflow.load(from: workflow.path).loadLimit }
-            folder.deleteLastPathComponent()
-        }
-        return LeadWorkflow().loadLimit
+        MacLimits.load(from: URL(fileURLWithPath: VibePaths.accountHome).appendingPathComponent(".vibeswitcher/mac-limits.json")).loadLimit
     }
 
     @Test(.tags(.perf), .enabled(if: perfRun, perfOnly)) func theWindowClosedIsUnder150MBAndChurnGrowsItAtMost10Percent() throws {

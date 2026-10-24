@@ -39,6 +39,12 @@ public enum LeadLaunch {
     static let privateFiles = ["Read(~/.vibeswitcher/lead/**)", "Edit(~/.vibeswitcher/lead/**)",
                                "Read(~/.vibeswitcher/steer/**)", "Edit(~/.vibeswitcher/steer/**)"]
 
+    /// The user's own settings for every project, edited in Settings › Project lead (the app writes them; no role's
+    /// session does): the Mac-wide limits on sessions and load (`MacLimits`) and the working policy (`WorkingPolicy`).
+    /// They aren't among the vault's guarded settings, so a worker that wrote them could raise its own cap.
+    static let userSettings = ["Edit(~/.vibeswitcher/mac-limits.json)", "Write(~/.vibeswitcher/mac-limits.json)",
+                               "Edit(~/.vibeswitcher/policy.md)", "Write(~/.vibeswitcher/policy.md)"]
+
     /// Killing by name. Its pattern matches every command line it's in, other sessions' too: on 2026-10-17 a worker's
     /// `pkill -f "cat" -n` (BSD pkill takes the `-n` as a second pattern) ended three workers, two verifiers (each
     /// role's `--name`), every tool server and the app ("cat" is in /Applications). `kill <pid>` stays open.
@@ -58,9 +64,9 @@ public enum LeadLaunch {
     public static func deny(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
         switch role {
         case .lead:
-            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + killsByName
+            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + userSettings + killsByName
         case .verifier:
-            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + killsByName + debuggers
+            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + userSettings + killsByName + debuggers
         case .worker:
             // Edits and commits on its own branch, and brings it up to date with the lead's (`git merge <base>`, what
             // the brief gives, or `git rebase <base>`); nothing that moves the lead's branch or another one. Rebase and merge only move
@@ -84,7 +90,7 @@ public enum LeadLaunch {
                 rules += ["Edit(\(records)/**)", "Write(\(records)/**)", "Bash(git add \(records)*)", "Bash(git rm \(records)*)",
                           "Bash(git rm * \(records)*)"]
             }
-            return rules + gitAround + privateFiles + killsByName + debuggers
+            return rules + gitAround + privateFiles + userSettings + killsByName + debuggers
         }
     }
 

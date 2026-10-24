@@ -41,40 +41,87 @@ extension LeadToolsetTests {
         #expect(MacLoad.oneMinute().map { $0 >= 0 } == true)
     }
 
-    // MARK: The keys
+    // MARK: The limits
 
-    @Test func theMacLimitsAreWorkflowKeysWithDefaults() {
-        let defaults = LeadWorkflow.parse(LeadWorkflow.template)
-        #expect(defaults.loadThreshold == nil)
-        #expect(defaults.loadLimit == 2 * Self.cores)
-        #expect(defaults.macMaxSessions == 6)
-        #expect(LeadWorkflow().macMaxSessions == 6 && LeadWorkflow().loadLimit == 2 * Self.cores)
-        let set = LeadWorkflow.parse("---\nload_threshold: 30.5\nmac_max_sessions: 4\n---")
-        #expect(set.loadThreshold == 30.5 && set.loadLimit == 30.5)
-        #expect(set.macMaxSessions == 4)
-        // What isn't a limit reads as the default.
-        let wrong = LeadWorkflow.parse("---\nload_threshold: -3\nmac_max_sessions: lots\n---")
-        #expect(wrong.loadThreshold == nil && wrong.macMaxSessions == 6)
-        #expect(LeadWorkflow.parse("---\nmac_max_sessions: 0\n---").macMaxSessions == 1)
-        #expect(LeadWorkflow.configurable.contains("load_threshold") && LeadWorkflow.configurable.contains("mac_max_sessions"))
+    @Test func theMacLimitsAreSetOnceForTheMacNotInWorkflowMd() throws {
+        let defaults = MacLimits()
+        #expect(defaults.maxSessions == 10 && defaults.loadThreshold == nil && defaults.loadLimit == 2 * Self.cores)
+        #expect(defaults.loadLimitText == "\(MacLoad.number(2 * Self.cores)), twice the \(MacLoad.processors) cores")
+        let folder = URL(fileURLWithPath: try repo()).appendingPathComponent("limits")
+        let file = folder.appendingPathComponent("mac-limits.json")
+        #expect(MacLimits.load(from: file) == defaults)
+        try MacLimits(maxSessions: 4, loadThreshold: 30.5).save(to: file)
+        #expect(MacLimits.load(from: file) == MacLimits(maxSessions: 4, loadThreshold: 30.5))
+        #expect(MacLimits.load(from: file).loadLimitText == "30.5 in Settings")
+        // What isn't a limit is kept as the nearest one: at least one session, a threshold more than 0 or none.
+        #expect(MacLimits(maxSessions: 0, loadThreshold: -3) == MacLimits(maxSessions: 1))
+        try Data("{\"maxSessions\": \"lots\"}".utf8).write(to: file)
+        #expect(MacLimits.load(from: file) == defaults)
+        #expect(MacLimits.file == VibePaths.root.appendingPathComponent("mac-limits.json"))
+        // workflow.md's keys are ignored, and said so; the template no longer has them.
+        let set = LeadWorkflow.parse("---\nload_threshold: 30.5\nmac_max_sessions: 20\nmax_workers: 4\n---")
+        #expect(set.ignoredKeys == ["load_threshold", "mac_max_sessions"] && set.maxWorkers == 4)
+        #expect(LeadWorkflow.parse("---\nload_threshold:\nmac_max_sessions: 20\n---").ignoredKeys == ["mac_max_sessions"])
+        #expect(LeadWorkflow.parse(LeadWorkflow.template).ignoredKeys.isEmpty)
+        #expect(!LeadWorkflow.configurable.contains("load_threshold") && !LeadWorkflow.configurable.contains("mac_max_sessions"))
     }
 
-    @Test func configureSetsTheMacLimits() throws {
+    @Test func configureRefusesTheMacLimitsAndPointsToSettings() throws {
         let root = try repo()
         let lead = try lead(root, FakeRuntime())
-        let set = call(lead, "configure", ["load_threshold": 30, "mac_max_sessions": "4"])
-        #expect(!set.isError, "\(set.text)")
-        #expect(set.text.contains("- load_threshold: 30 in workflow.md"))
-        #expect(set.text.contains("- mac_max_sessions: 4"))
-        let read = LeadWorkflow.load(from: root + "/.vibeswitcher/workflow.md")
-        #expect(read.loadThreshold == 30 && read.macMaxSessions == 4)
-        #expect(call(lead, "configure", ["load_threshold": "busy"]).isError)
-        #expect(call(lead, "configure", ["mac_max_sessions": 0]).isError)
-        // Cleared: the defaults again.
-        let cleared = call(lead, "configure", ["load_threshold": "", "mac_max_sessions": ""])
-        #expect(!cleared.isError, "\(cleared.text)")
-        #expect(cleared.text.contains("- load_threshold: \(MacLoad.number(2 * Self.cores)), twice the \(MacLoad.processors) cores"))
-        #expect(cleared.text.contains("- mac_max_sessions: 6"))
+        lead.macLimits = { MacLimits(maxSessions: 10, loadThreshold: 30) }
+        let before = FileManager.default.contents(atPath: root + "/.vibeswitcher/workflow.md")
+        for arguments: [String: Any] in [["mac_max_sessions": "20"], ["load_threshold": 50, "max_workers": 5], ["mac_max_sessions": ""]] {
+            let refused = call(lead, "configure", arguments)
+            #expect(refused.isError, "\(refused.text)")
+            #expect(refused.text.hasPrefix("Nothing was changed"), "\(refused.text)")
+            #expect(refused.text.contains("Settings › Project lead"), "\(refused.text)")
+            #expect(refused.text.contains("load_threshold 30 in Settings, mac_max_sessions 10"), "\(refused.text)")
+        }
+        #expect(FileManager.default.contents(atPath: root + "/.vibeswitcher/workflow.md") == before)
+        // configure shows them, as the Mac's.
+        let shown = call(lead, "configure").text
+        #expect(shown.contains("Mac-wide, set by the user in VibeSwitcher's Settings › Project lead"), "\(shown)")
+        #expect(shown.contains("- load_threshold: 30 in Settings") && shown.contains("- mac_max_sessions: 10"), "\(shown)")
+    }
+
+    @Test func workflowMdsMacLimitsAreIgnoredAndStatusSaysSoOnce() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = call(lead, "add_task", ["title": "One", "goal": "g", "acceptance": ["a"]])
+        // TGE-ANALYSIS's: 20 in its workflow.md, while the Mac's cap is 6 and the neighbours hold 6.
+        try workflow(root, "mac_max_sessions: 20\nload_threshold: 999")
+        runtime.others = Self.neighbours
+        let refused = call(lead, "start_worker", ["task": "one"])
+        #expect(refused.isError && refused.text.contains("(mac_max_sessions 6)"), "\(refused.text)")
+        let said = "workflow.md's mac_max_sessions and load_threshold are ignored: the Mac-wide limits are set once for every project in VibeSwitcher's Settings › Project lead."
+        #expect(call(lead, "status").text.contains(said))
+        #expect(!call(lead, "status").text.contains("are ignored"))
+        // configure still says it, as the file's settings.
+        #expect(call(lead, "configure").text.contains(said))
+    }
+
+    @Test func noRefusalSuggestsRaisingTheCap() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        for title in ["One", "Two"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
+        runtime.others = Self.neighbours
+        runtime.load = 150
+        var texts = [call(lead, "start_worker", ["task": "one"]).text]
+        runtime.others = []
+        runtime.load = 1
+        _ = call(lead, "start_worker", ["task": "one"])
+        _ = call(try seat("worker-one", runtime), "report", ["status": "done", "summary": "done"])
+        runtime.others = Self.neighbours
+        texts.append(call(lead, "audit", ["task": "one"]).text)
+        for text in texts {
+            #expect(text.contains("mac_max_sessions 6"), "\(text)")
+            for advice in ["raise", "Raise", "higher", "increase", "configure", "workflow.md"] {
+                #expect(!text.contains(advice), "\(advice): \(text)")
+            }
+        }
     }
 
     // MARK: start_worker
@@ -94,9 +141,9 @@ extension LeadToolsetTests {
         #expect(refused.text.contains(LeadPrompts.retryWhenWoken) && !refused.text.contains("about 5 minutes"))
         #expect(runtime.spawned.isEmpty)
         #expect(BoardStore(root: root).load().task("one")?.status == .planned)
-        // A threshold the owner set is said as theirs (the lead sets it: merge and start_worker take guard rails only so).
-        #expect(!call(lead, "configure", ["load_threshold": "100"]).isError)
-        #expect(call(lead, "start_worker", ["task": "one"]).text.contains("load_threshold 100 in workflow.md"))
+        // A threshold the user set in Settings is said as theirs.
+        lead.macLimits = { MacLimits(maxSessions: 6, loadThreshold: 100) }
+        #expect(call(lead, "start_worker", ["task": "one"]).text.contains("load_threshold 100 in Settings"))
         // Once it eases, it starts.
         runtime.load = 3
         let started = call(lead, "start_worker", ["task": "one"])
@@ -117,8 +164,8 @@ extension LeadToolsetTests {
         #expect(refused.text.contains("7 team sessions across 3 projects (genswap 4, films 2, \((root as NSString).lastPathComponent) 1) (mac_max_sessions 6)"))
         #expect(!refused.text.contains("above load_threshold"))
         #expect(runtime.spawned.count == 1)
-        // The owner raises the cap (through the lead): it starts.
-        #expect(!call(lead, "configure", ["mac_max_sessions": "8"]).isError)
+        // The user raises the Mac's cap in Settings: it starts.
+        lead.macLimits = { MacLimits(maxSessions: 8) }
         #expect(!call(lead, "start_worker", ["task": "two"]).isError)
     }
 
@@ -146,7 +193,7 @@ extension LeadToolsetTests {
         #expect(runtime.spawned.count == 1)
         // Its own worker, done, isn't counted: with a cap of one and nobody else, the verifier starts.
         runtime.others = []
-        try workflow(root, "mac_max_sessions: 1")
+        lead.macLimits = { MacLimits(maxSessions: 1) }
         let audit = call(lead, "audit", ["task": "add-b"])
         #expect(!audit.isError, "\(audit.text)")
         #expect(runtime.spawned.count == 2)
@@ -159,7 +206,7 @@ extension LeadToolsetTests {
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         _ = try audited(lead, runtime, root: root)
-        #expect(!call(lead, "configure", ["load_threshold": "24"]).isError)
+        lead.macLimits = { MacLimits(maxSessions: 6, loadThreshold: 24) }
         lead.loadPoll = 0.01
         runtime.loadReadings = [150, 120, 40, 3]
         let reads = runtime.loadReads
@@ -217,14 +264,13 @@ extension LeadToolsetTests {
         runtime.load = 1
         #expect(!call(lead, "status").text.contains("refuse until it eases"))
 
-        var workflow = LeadWorkflow()
-        workflow.loadThreshold = 30
-        workflow.macMaxSessions = 4
-        let prompt = LeadPrompts.lead(project: "p", root: root, workflow: workflow)
+        let prompt = LeadPrompts.lead(project: "p", root: root, workflow: LeadWorkflow(), limits: MacLimits(maxSessions: 4, loadThreshold: 30))
         #expect(prompt.contains("other projects' leads run their teams on it too"))
         #expect(prompt.contains("load_threshold (30)"))
-        #expect(prompt.contains("mac_max_sessions (4)"))
+        #expect(prompt.contains("mac_max_sessions (4); both are set once for the Mac by the user in VibeSwitcher's Settings"))
+        #expect(prompt.contains("VibeSwitcher sends you one message once there's room again"))
         #expect(prompt.contains("merge waits up to test_timeout_min"))
-        #expect(LeadPrompts.lead(project: "p", root: root, workflow: LeadWorkflow()).contains("load_threshold (\(MacLoad.number(2 * Self.cores)), twice the cores)"))
+        #expect(LeadPrompts.lead(project: "p", root: root, workflow: LeadWorkflow(), limits: MacLimits())
+            .contains("load_threshold (\(MacLoad.number(2 * Self.cores)), twice the cores)"))
     }
 }

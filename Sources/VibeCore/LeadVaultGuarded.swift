@@ -2,14 +2,14 @@ import Foundation
 
 /// workflow.md's guard rails: its test, regression and setup commands, which run under the lead's tool server when merge tests a
 /// branch (whoever writes them runs code as the lead), and the settings a worker could loosen to get its work merged
-/// or to start more of itself (the merge policy and what it holds back, the records' folder, the limits on sessions
-/// and load). The file is in the project's `.vibeswitcher` folder, which every session of the team can write (Bash
+/// or to start more of itself (the merge policy and what it holds back, the records' folder, the limits on workers,
+/// slots and finders; the Mac-wide limits on sessions and load are Settings', see `MacLimits`). The file is in the project's `.vibeswitcher` folder, which every session of the team can write (Bash
 /// isn't held by the roles' deny rules), and a worker edits its worktree's copy freely. So the vault keeps a hash of
 /// each as the lead last set it with configure, and merge and start_worker refuse, naming the setting, when the file
 /// says something else.
 extension LeadVault {
     public static let guardedKeys = ["test_command", "regression_command", "init_command", "merge_policy", "sensitive_paths", "records_dir",
-                                     "max_workers", "mac_max_sessions", "heavy_slots", "load_threshold", "audit_finders", "audit_nit_cap"]
+                                     "max_workers", "heavy_slots", "audit_finders", "audit_nit_cap"]
 
     /// A guard rail as the team reads it (a limit left out is its default, "ask-all" is ask_all); a key this build
     /// doesn't read itself, as written. Empty when it isn't set.
@@ -21,11 +21,9 @@ extension LeadVault {
         case "merge_policy": return workflow.mergePolicy?.rawValue ?? ""
         case "sensitive_paths": return workflow.sensitivePaths?.joined(separator: ", ") ?? ""
         case "max_workers": return String(workflow.maxWorkers)
-        case "mac_max_sessions": return String(workflow.macMaxSessions)
         case "heavy_slots": return workflow.heavySlots.map(String.init) ?? ""
         case "audit_finders": return String(workflow.auditFinders)
         case "audit_nit_cap": return String(workflow.auditNitCap)
-        case "load_threshold": return workflow.loadThreshold.map { String(format: "%g", $0) } ?? ""
         // Left out: docs/lead; empty (or not a folder in the repository): local, in .vibeswitcher.
         case "records_dir": return workflow.recordsDir ?? ""
         default: return workflow.settings[key] ?? ""

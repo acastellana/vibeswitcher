@@ -198,6 +198,12 @@ final class LeadController: ObservableObject {
     /// `LeadWitness.HeavySlots`); none until the app starts it (`watchHeavySlots`).
     private var heavySlots: LeadWitness.HeavySlots?
     private var heavySlotsTimer: Heartbeat.Subscription?
+    /// The leads refused for the Mac's room or load, looked at once a minute: each is woken once there's room, whichever
+    /// project's sessions ended (see `LeadWitness.RoomWaits`); none until the app starts it (`watchRoom`).
+    private var roomWaits: LeadWitness.RoomWaits?
+    private var roomTimer: Heartbeat.Subscription?
+    /// The Mac's 1-minute load as the room watch reads it (see `MacLoad.oneMinute`); faked in tests.
+    var macLoad: () -> Double? = MacLoad.oneMinute
     /// Ended team sessions the host has been asked to drop.
     private var forgetting: Set<UUID> = []
     /// Ends the sessions of finished tasks from the vault's roster, in every project (see `RoleSweep`); nil in tests
@@ -928,6 +934,20 @@ final class LeadController: ObservableObject {
     func lookAtHeavySlots() {
         guard let text = heavySlots?.look() else { return }
         for root in leadSessions.keys { deliver(text, from: .system("witness"), root: root) }
+    }
+
+    /// Looks once a minute from now on for leads refused for the Mac's room or load that have room now.
+    func watchRoom(_ waits: LeadWitness.RoomWaits = LeadWitness.RoomWaits()) {
+        roomWaits = waits
+        roomTimer = Heartbeat.shared.every(60) { [weak self] in self?.lookAtRoom() }
+    }
+
+    /// The Mac has room again: one message to each lead that was refused for it, as the witness, against every
+    /// project's team sessions the host lists and the Mac-wide limits in Settings.
+    func lookAtRoom(limits: MacLimits = MacLimits.load()) {
+        guard let roomWaits else { return }
+        let mac = MacLoad.count(host.sessions.map { ($0.label, $0.cwd, $0.isLive) }, load: macLoad())
+        for (root, text) in roomWaits.look(mac: mac, limits: limits) { deliver(text, from: .system("witness"), root: root) }
     }
 
     /// Tells each running lead the working policy once a minute from now on, when it isn't the one it has (the first a

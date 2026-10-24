@@ -152,7 +152,7 @@ extension LeadGuardRailsTests {
     /// The limits that hold how many of itself a worker's lead starts: a worker raising one doesn't get more started.
     @Test func aLimitAWorkerLoosenedStopsStartWorker() throws {
         // The records' folder too: pointed elsewhere in the repository, or outside it (which keeps them local).
-        for (key, loose, leads) in [("max_workers", "10", "3"), ("mac_max_sessions", "50", "6"), ("load_threshold", "999", ""),
+        for (key, loose, leads) in [("max_workers", "10", "3"), ("heavy_slots", "50", ""),
                                     ("records_dir", "notes", "docs/lead"), ("records_dir", "/tmp/elsewhere", "docs/lead")] {
             let root = try repo()
             let runtime = FakeRuntime()
@@ -224,10 +224,12 @@ extension LeadGuardRailsTests {
         let hashes = { (front: String) in LeadVault.guardedHashes(LeadWorkflow.parse("---\n\(front)\n---\n")) }
         let omitted = hashes("")
         #expect(hashes("records_dir: docs/lead\nmax_workers: 3\nmac_max_sessions: 6\nload_threshold:") == omitted)
+        // The Mac-wide limits aren't workflow.md's (see `MacLimits`): a worker writing them there changes nothing.
+        #expect(hashes("mac_max_sessions: 50\nload_threshold: 999") == omitted)
         #expect(hashes("records_dir: ./docs/lead/") == omitted)
         #expect(LeadVault.guardedHashes(LeadWorkflow.parse(LeadWorkflow.template)) == omitted)
         #expect(hashes("merge_policy: ask-all") == hashes("merge_policy: ask_all"))
-        for changed in ["records_dir:", "records_dir: notes", "max_workers: 4", "load_threshold: 30", "merge_policy: auto"] {
+        for changed in ["records_dir:", "records_dir: notes", "max_workers: 4", "heavy_slots: 2", "merge_policy: auto"] {
             #expect(hashes(changed) != omitted, "\(changed)")
         }
         // Empty and a folder outside the repository both keep the records local: the same value.

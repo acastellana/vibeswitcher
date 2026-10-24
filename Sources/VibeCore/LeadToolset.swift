@@ -117,6 +117,13 @@ public final class LeadToolset: MCPToolset {
     var power: () -> PowerState? = { PowerState.load() }
     /// How often merge reads the load again while it waits for it to drop below load_threshold.
     var loadPoll: TimeInterval = 15
+    /// The Mac-wide limits as set in Settings (see `MacLimits`), read at each call. Faked in tests.
+    var macLimits: () -> MacLimits = { MacLimits.load() }
+    /// Where a call refused for the Mac's room or load is kept, so the app's witness wakes this lead once there's room.
+    var roomWaits = LeadWitness.RoomWaits()
+    /// Status said once that workflow.md's Mac-wide keys are ignored.
+    private var toldIgnoredKeys = false
+    private let tellingIgnoredKeys = NSLock()
     /// The slots merge's and an audit's test runs take one of (see `TestLock`; the workflow's heavy_slots sets how
     /// many): the tool server sets the Mac-wide ones, every project's merges sharing them with `vs-heavy`; nil (tests
     /// that don't give scratch ones): none.
@@ -865,7 +872,7 @@ public final class LeadToolset: MCPToolset {
         // task's worktree (an ended worker's earlier verifier) is the one this worker replaces.
         let mac = MacLoad.count(sessions.map { ($0.label, $0.cwd, $0.live) }, load: runtime.loadAverage(),
                                 except: Worktrees.path(root: root, slug: slug))
-        if let refusal = macRefusal(mac, workflow, not: "Not started") { throw Problem(text: refusal) }
+        if let refusal = macRefusal(mac, not: "Not started", what: "start_worker(\(slug))", need: 1) { throw Problem(text: refusal) }
         // A worker on a full disk fails, and takes every other session with it (none can write its output).
         if let free = freeSpace(worktreesFolder), free < workflow.diskFloor {
             throw Problem(text: "Not started: only \(DiskSpace.text(free)) free on the volume holding the worktrees, under disk_floor_gb (\(Self.gb(workflow.diskFloorGB)) GB in workflow.md). A worker started now would fail once the disk fills. Free space first: cleanup finished tasks (status lists the biggest task folders), or tell the user.")
@@ -1091,13 +1098,15 @@ public final class LeadToolset: MCPToolset {
         // Several finders: the audit itself runs init_command and test_command as the lead first (a scratch home is
         // no boundary), so every guard rail must be the lead's, as for merge.
         if workflow.auditFinders > 1 { try checkSettings(workflow, not: "Not audited, nothing built or tested, no finder started") }
-        if let refusal = macRefusal(mac, workflow, not: "No verifier started") { throw Problem(text: refusal) }
-        // Each finder is a session of its own: the Mac must have room for all of them.
         let finders = workflow.auditFinders
-        if finders > 1, mac.sessions + finders > workflow.macMaxSessions {
-            let room = max(0, workflow.macMaxSessions - mac.sessions)
+        if let refusal = macRefusal(mac, not: "No verifier started", what: "audit(\(slug))", need: finders) { throw Problem(text: refusal) }
+        // Each finder is a session of its own: the Mac must have room for all of them.
+        let limits = macLimits()
+        if finders > 1, mac.sessions + finders > limits.maxSessions {
+            let room = max(0, limits.maxSessions - mac.sessions)
+            roomWaits.record(root: root, what: "audit(\(slug))", need: finders)
             throw Problem(text: "Not audited, no finder started: audit_finders is \(finders), and mac_max_sessions leaves room for \(room) more session\(room == 1 ? "" : "s") now "
-                          + "(each finder is one, counted with every project's workers and verifiers). Now: \(Self.macText(mac, workflow)). "
+                          + "(each finder is one, counted with every project's workers and verifiers). Now: \(Self.macText(mac, limits)). "
                           + "Set audit_finders lower with configure (1 is one verifier), or audit again once sessions have ended. " + LeadPrompts.retryWhenWoken)
         }
         // Settings, hooks or MCP servers the branch brings would run in the verifier: it starts with project settings
@@ -1833,24 +1842,23 @@ public final class LeadToolset: MCPToolset {
         (session.cwd as NSString).standardizingPath == folder && [.worker, .verifier].contains(LeadTeams.role(label: session.label))
     }
 
-    /// load_threshold as said in a refusal: "24 in workflow.md", or "24, twice the 12 cores" when it isn't set.
-    private static func loadLimitText(_ workflow: LeadWorkflow) -> String {
-        "\(MacLoad.number(workflow.loadLimit))" + (workflow.loadThreshold == nil ? ", twice the \(MacLoad.processors) cores" : " in workflow.md")
-    }
-
-    /// The Mac's load and every project's team sessions, against this project's limits, in one line.
-    private static func macText(_ mac: MacLoad, _ workflow: LeadWorkflow) -> String {
-        "load \(mac.loadText) (load_threshold \(loadLimitText(workflow))), \(mac.sessionsText) (mac_max_sessions \(workflow.macMaxSessions))"
+    /// The Mac's load and every project's team sessions, against the Mac-wide limits, in one line.
+    private static func macText(_ mac: MacLoad, _ limits: MacLimits) -> String {
+        "load \(mac.loadText) (load_threshold \(limits.loadLimitText)), \(mac.sessionsText) (mac_max_sessions \(limits.maxSessions))"
     }
 
     /// Why no worker or verifier may start now on the Mac as `mac` has it (`not`: what didn't happen); nil when one may.
-    private func macRefusal(_ mac: MacLoad, _ workflow: LeadWorkflow, not: String) -> String? {
+    /// With `what`, a refusal is kept (see `LeadWitness.RoomWaits`) so this lead is woken once there's room for `need`
+    /// more sessions. The limits are the user's, Mac-wide: the text never suggests changing them.
+    private func macRefusal(_ mac: MacLoad, not: String, what: String? = nil, need: Int = 1) -> String? {
+        let limits = macLimits()
         var over: [String] = []
-        if mac.isBusy(threshold: workflow.loadLimit) { over.append("its 1-minute load is above load_threshold") }
-        if mac.isFull(max: workflow.macMaxSessions) { over.append("the team sessions of all its projects are at mac_max_sessions") }
+        if mac.isBusy(threshold: limits.loadLimit) { over.append("its 1-minute load is above load_threshold") }
+        if mac.isFull(max: limits.maxSessions) { over.append("the team sessions of all its projects are at mac_max_sessions") }
         guard !over.isEmpty else { return nil }
-        return "\(not): the Mac is shared by every project's team, and \(over.joined(separator: " and ")). Now: \(Self.macText(mac, workflow)). "
-            + LeadPrompts.retryWhenWoken + " "
+        if let what { roomWaits.record(root: root, what: what, need: need) }
+        return "\(not): the Mac is shared by every project's team, and \(over.joined(separator: " and ")). Now: \(Self.macText(mac, limits)). "
+            + (what == nil ? "" : "VibeSwitcher sends you one message once there's room again. ") + LeadPrompts.retryWhenWoken + " "
             + "Meanwhile merge and cleanup finished tasks (cleanup ends their sessions), plan, or answer the user."
     }
 
@@ -1860,21 +1868,23 @@ public final class LeadToolset: MCPToolset {
     private func waitForLoad(_ workflow: LeadWorkflow, slug: String) throws -> (after: TimeInterval, from: Double)? {
         let start = Date()
         let deadline = start.addingTimeInterval(workflow.testTimeout)
-        guard let first = runtime.loadAverage(), first > workflow.loadLimit else { return nil }
+        let limits = macLimits()
+        guard let first = runtime.loadAverage(), first > limits.loadLimit else { return nil }
         var load: Double? = first
         let progress = ToolProgress.current
         var told: Date?
-        while let current = load, current > workflow.loadLimit {
+        while let current = load, current > limits.loadLimit {
             if let progress, told.map({ Date().timeIntervalSince($0) >= progress.every }) ?? true {
                 told = Date()
-                progress.send("Waiting \(Worktrees.duration(Date().timeIntervalSince(start))) for the Mac's 1-minute load (\(MacLoad.number(current))) to drop below load_threshold (\(MacLoad.number(workflow.loadLimit))) before testing \(slug).")
+                progress.send("Waiting \(Worktrees.duration(Date().timeIntervalSince(start))) for the Mac's 1-minute load (\(MacLoad.number(current))) to drop below load_threshold (\(MacLoad.number(limits.loadLimit))) before testing \(slug).")
             }
             if ShellCancel.current?.isCancelled == true {
                 throw Problem(text: "The merge of \(slug) was cancelled while it waited for the Mac's load to drop; nothing was merged, and \(slug) stays as it was.")
             }
             guard Date() < deadline else {
                 let mac = MacLoad.count(((try? listed()) ?? []).map { ($0.label, $0.cwd, $0.live) }, load: current)
-                throw Problem(text: "Not merged (nothing was tested): the Mac's 1-minute load stayed above load_threshold for the \(Worktrees.duration(workflow.testTimeout)) merge waits (test_timeout_min). Now: \(Self.macText(mac, workflow)). "
+                roomWaits.record(root: root, what: "merge(\(slug))", need: 0)
+                throw Problem(text: "Not merged (nothing was tested): the Mac's 1-minute load stayed above load_threshold for the \(Worktrees.duration(workflow.testTimeout)) merge waits (test_timeout_min). Now: \(Self.macText(mac, limits)). "
                               + "Timing-sensitive tests fail on a Mac this busy, so \(slug) wasn't tested and stays as it was. \(LeadPrompts.retryWhenWoken) Meanwhile start no workers or audits (they'd add to the load), and tell the user if it stays this busy.")
             }
             Thread.sleep(forTimeInterval: min(loadPoll, progress?.every ?? loadPoll, max(0, deadline.timeIntervalSinceNow)))
@@ -2112,6 +2122,12 @@ public final class LeadToolset: MCPToolset {
     }
 
     private func configure(_ arguments: [String: Any]) throws -> MCPToolResult {
+        let mac = LeadWorkflow.macKeys.filter { arguments[$0] != nil }
+        guard mac.isEmpty else {
+            throw Problem(text: "Nothing was changed: \(mac.joined(separator: " and ")) \(mac.count == 1 ? "is" : "are") set once for the whole Mac, "
+                          + "by the user in VibeSwitcher's Settings › Project lead (every project's leads share it), not in workflow.md. "
+                          + "Now: \(Self.macLimitsText(macLimits())).")
+        }
         let unknown = Set(arguments.keys).subtracting(LeadWorkflow.configurable)
         guard unknown.isEmpty else {
             throw Problem(text: "configure sets only \(LeadWorkflow.configurable.joined(separator: ", ")); not \(unknown.sorted().joined(separator: ", ")).")
@@ -2133,14 +2149,6 @@ public final class LeadToolset: MCPToolset {
                 guard !value.isEmpty else { break }
                 guard let size = LeadWorkflow.gigabytes(value) else { throw Problem(text: "\(key) must be a number of GB, 0 or more.") }
                 value = Self.gb(size)
-            case "load_threshold":
-                guard !value.isEmpty else { break }
-                guard let load = LeadWorkflow.positive(value) else { throw Problem(text: "load_threshold must be a load average, more than 0 (empty: twice the cores).") }
-                value = Self.gb(load)
-            case "mac_max_sessions":
-                guard !value.isEmpty else { break }
-                guard let count = Int(value), count >= 1 else { throw Problem(text: "mac_max_sessions must be a whole number, at least 1.") }
-                value = String(count)
             case "heavy_slots":
                 guard !value.isEmpty else { break }
                 guard let count = Int(value), count >= 1 else { throw Problem(text: "heavy_slots must be a whole number, at least 1 (empty: the Mac's cores ÷ 4).") }
@@ -2193,14 +2201,13 @@ public final class LeadToolset: MCPToolset {
                                       "max_workers": String(after.maxWorkers),
                                       "disk_warning_gb": Self.gb(after.diskWarningGB), "disk_floor_gb": Self.gb(after.diskFloorGB),
                                       "test_timeout_min": Self.gb(after.testTimeoutMinutes),
-                                      "load_threshold": after.loadThreshold.map(Self.gb) ?? "", "mac_max_sessions": String(after.macMaxSessions),
                                       "heavy_slots": after.heavySlots.map(String.init) ?? "",
                                       "audit_finders": String(after.auditFinders), "audit_nit_cap": String(after.auditNitCap),
                                       "merge_policy": after.mergePolicy?.rawValue ?? "", "sensitive_paths": after.sensitivePaths?.joined(separator: ", ") ?? "",
                                       "records_dir": after.recordsDir ?? ""]
         // A limit cleared reads back as its default.
         let defaults = ["disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB),
-                        "test_timeout_min": Self.gb(LeadWorkflow().testTimeoutMinutes), "mac_max_sessions": String(LeadWorkflow().macMaxSessions),
+                        "test_timeout_min": Self.gb(LeadWorkflow().testTimeoutMinutes),
                         "audit_finders": String(LeadWorkflow().auditFinders), "audit_nit_cap": String(LeadWorkflow().auditNitCap)]
         for change in changes where read[change.key] != (change.value.isEmpty ? defaults[change.key] ?? "" : change.value) {
             throw Problem(text: "Wrote workflow.md, but \(change.key) reads back as \"\(read[change.key] ?? "")\", not \"\(change.value)\". Check the file.")
@@ -2519,12 +2526,13 @@ public final class LeadToolset: MCPToolset {
         let power = self.power()?.statusText.map { "; \($0)" } ?? ""
         var lines = ["Project \(project) on branch \(workflow.base) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once\(power)\(longHolderText())."]
         lines += workflowWarnings(workflow)
+        if let ignored = ignoredKeysOnce(workflow) { lines.append(ignored) }
         lines += diskWarning(workflow, board: board, sessions: listing)
         if let line = records.statusLine { lines.append(line) }
         if let listing {
             let mac = MacLoad.count(listing.map { ($0.label, $0.cwd, $0.live) }, load: runtime.loadAverage())
-            let full = macRefusal(mac, workflow, not: "") != nil
-            lines.append("Mac (every project's team): \(Self.macText(mac, workflow)).\(full ? " start_worker and audit refuse until it eases; merge waits for the load." : "")")
+            let full = macRefusal(mac, not: "") != nil
+            lines.append("Mac (every project's team): \(Self.macText(mac, macLimits())).\(full ? " start_worker and audit refuse until it eases; merge waits for the load." : "")")
         }
         if let line = heavyLockLine(board) { lines.append(line) }
         if sessions == nil {
@@ -2803,6 +2811,28 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// What's missing from the workflow, with what to set (status and configure say it; nothing stays silent).
+    /// "load_threshold 24, twice the 12 cores, mac_max_sessions 10", as configure's refusal says them.
+    static func macLimitsText(_ limits: MacLimits) -> String {
+        "load_threshold \(limits.loadLimitText), mac_max_sessions \(limits.maxSessions)"
+    }
+
+    /// workflow.md's Mac-wide keys, ignored: "workflow.md's mac_max_sessions is ignored: …".
+    static func ignoredText(_ workflow: LeadWorkflow) -> String {
+        let keys = workflow.ignoredKeys.joined(separator: " and ")
+        return "workflow.md's \(keys) \(workflow.ignoredKeys.count == 1 ? "is" : "are") ignored: the Mac-wide limits are set once for every "
+            + "project in VibeSwitcher's Settings › Project lead."
+    }
+
+    /// `ignoredText`, the first time status meets ignored keys in this tool server; nil after, or with none.
+    private func ignoredKeysOnce(_ workflow: LeadWorkflow) -> String? {
+        guard !workflow.ignoredKeys.isEmpty else { return nil }
+        tellingIgnoredKeys.lock()
+        defer { tellingIgnoredKeys.unlock() }
+        guard !toldIgnoredKeys else { return nil }
+        toldIgnoredKeys = true
+        return Self.ignoredText(workflow)
+    }
+
     private func workflowWarnings(_ workflow: LeadWorkflow) -> [String] {
         var lines: [String] = []
         if let problem = workflow.problem { lines.append("workflow.md: \(problem). Fix it with configure.") }
@@ -2829,14 +2859,17 @@ public final class LeadToolset: MCPToolset {
                      "- disk_warning_gb: \(Self.gb(workflow.diskWarningGB)) (the lead is told below this much free space)",
                      "- disk_floor_gb: \(Self.gb(workflow.diskFloorGB)) (start_worker refuses below it)",
                      "- test_timeout_min: \(Self.gb(workflow.testTimeoutMinutes)) (merge stops init_command and test_command past it, as hung)",
-                     "- load_threshold: \(Self.loadLimitText(workflow)) (above this 1-minute load, Mac-wide, start_worker and audit refuse and merge waits)",
-                     "- mac_max_sessions: \(workflow.macMaxSessions) (workers and verifiers of all projects on this Mac; start_worker and audit refuse at it)",
                      "- heavy_slots: \(heavySlotsText(workflow)) (builds and full test runs at once, Mac-wide: vs-heavy's, merges', audits'; one more waits)",
                      "- audit_finders: \(workflow.auditFinders) (" + (workflow.auditFinders == 1 ? "one verifier per audit" : "finders per audit, on one shared build and test run, with a vote; each counts against mac_max_sessions") + ")",
                      "- audit_nit_cap: \(workflow.auditNitCap) (new Nit findings one audit's vote keeps)"]
         let policy = workflow.mergePolicy.map { "\($0.rawValue) (\($0.meaning))" } ?? "not set: ask the owner once; until then merges are handled as ask_sensitive"
         lines.append("- merge_policy: \(policy)")
         lines.append("- sensitive_paths: \(workflow.sensitiveGlobs.joined(separator: ", "))\(workflow.sensitivePaths == nil ? " (the defaults)" : "")")
+        let limits = macLimits()
+        lines += ["", "Mac-wide, set by the user in VibeSwitcher's Settings › Project lead (not here; configure doesn't set them):",
+                  "- load_threshold: \(limits.loadLimitText) (above this 1-minute load start_worker and audit refuse and merge waits)",
+                  "- mac_max_sessions: \(limits.maxSessions) (workers and verifiers of all projects on this Mac; start_worker and audit refuse at it)"]
+        if !workflow.ignoredKeys.isEmpty { lines.append(Self.ignoredText(workflow)) }
         let warnings = workflowWarnings(workflow)
         if !warnings.isEmpty { lines += [""] + warnings }
         return lines.joined(separator: "\n")
