@@ -1116,3 +1116,8 @@
 - 2026-10-24 18:19 Started a worker on boundary-excursions-a
 - 2026-10-24 18:21 Audit of a-base-branch-the: complete, clean, round 2: 2 Important closed, 1 Nit closed
 - 2026-10-24 18:27 Merged a-base-branch-the: A base branch the user moves never blocks merges until a restart
+- 2026-10-24 18:27 Update: Merged: a base branch you move yourself no longer blocks merges until a restart — **What changed.** On 2026-10-22 genswap lost about 16 h after you committed on its base branch as the lead asked. There were three causes: the app kept watching the previous base branch after the lead…
+- 2026-10-24 18:27 Planned audit-takes-a-branch: Audit takes a branch whose trial merge is clean, and makes room by ending the task's own idle worker (review audit)
+- 2026-10-24 18:27 Planned workers-run-the-project: Workers run the project's lint tests before reporting done
+- 2026-10-24 18:27 Started a worker on workers-run-the-project
+- 2026-10-24 18:27 Update: Retrospective: the review-fix batch (6 merged) — **Landed (about 4 h, no reverts):** lead prompts and tool texts follow your policy; fail-fast on sessions without their tools plus an honest cleanup; record commits without trailers; a test lock that …
