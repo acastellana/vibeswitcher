@@ -1144,3 +1144,4 @@
 - 2026-10-24 23:43 Started a worker on pasted-image-plus-text
 - 2026-10-25 00:17 Audit of pasted-image-plus-text: complete, clean, round 1: 2 Nit open
 - 2026-10-25 00:22 Merged pasted-image-plus-text: Pasted image plus text sometimes isn't sent
+- 2026-10-25 00:22 Update: Pasted images with a message always get sent — **What changed:** A message with a pasted image sometimes stayed typed in Claude's box and was never sent. Claude Code reads a pasted image in the background and throws away an Enter that arrives duri…
