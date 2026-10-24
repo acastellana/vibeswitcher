@@ -1134,3 +1134,4 @@
 - 2026-10-24 21:03 Update: New Project… always starts the project lead — **What changed:** Home's New Project… always creates the git repository with a first commit, then starts the project lead in it. The main window opens with the lead selected, and the optional First go…
 - 2026-10-24 21:11 Planned tests-leave-no: Tests leave no preference files in the user's Library
 - 2026-10-24 21:11 Started a worker on tests-leave-no
+- 2026-10-24 21:41 Merged tests-leave-no: Tests leave no preference files in the user's Library (no audit: review none)
