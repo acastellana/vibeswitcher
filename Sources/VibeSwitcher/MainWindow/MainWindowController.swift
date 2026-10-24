@@ -425,7 +425,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             return true
         }
         Breadcrumbs.shared.note("composer: send \(text.count) chars to \(row.id)")
-        return sync.type(text)
+        guard sync.type(text) else { return false }
+        // A `!` git command you sent: what lets the lead's base move it makes be taken as yours.
+        if let cwd = row.cwd { leads.baseMoves.typed(text, session: id.uuidString, cwd: cwd) }
+        return true
     }
 
     /// Hands the message to the selected session's agent at its next step: through its hook for Claude (window or

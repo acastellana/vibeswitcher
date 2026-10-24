@@ -1499,12 +1499,7 @@ public final class LeadToolset: MCPToolset {
         if let known = vault.head(root: root, branch: base), known != current {
             let move = Result { try vault.acceptMove(root: root, branch: base) }
             guard case .success(let taken) = move, taken.accepted, taken.to == current else {
-                let why: String
-                switch move {
-                case .success(let taken): why = (taken.reason.map { " \($0)" } ?? "") + (taken.waiting == true ? " A command of the user's is still running there: merge again in a moment." : "")
-                case .failure(let error): why = " (\(error))"
-                }
-                throw Problem(text: "Not merged: \(base) moved since the lead last left it (\(known.prefix(8)) → \(current.prefix(8))), and not through merge.\(why) VibeSwitcher shows the user the commits that came in to accept (`git log \(known.prefix(8))..\(base)` shows them too); merge again once they have. Tell the user if it's not theirs.")
+                throw Problem(text: LeadVault.moveRefusal(base: base, known: known, current: current, move: move, root: root))
             }
             try? store.update { $0.updates.append(LeadUpdate(title: "Took \(taken.count) on \(base)", body: taken.acceptedLine)) }
             try? store.appendProgress(taken.acceptedLine)

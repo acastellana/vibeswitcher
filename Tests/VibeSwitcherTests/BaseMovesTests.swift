@@ -14,6 +14,7 @@ final class BaseMovesTests {
     let reads = LeadReads()
     var asked: [String] = []
     var taken: [(to: String, byYou: Bool)] = []
+    var takers: [BaseMoves.Taker] = []
     var logged: [String] = []
 
     init() throws {
@@ -28,6 +29,14 @@ final class BaseMovesTests {
         _ = try app.startLead(root: root, branch: "main")
     }
 
+    /// What was asked of the queue lands before the scratch folder goes: a board or note written after would make
+    /// the repository again.
+    deinit {
+        let done = DispatchSemaphore(value: 0)
+        reads.async { _ in done.signal() }
+        done.wait()
+    }
+
     func commit(_ file: String) throws {
         try "\(file)\n".write(toFile: root + "/" + file, atomically: true, encoding: .utf8)
         Git.run(["add", file], in: root)
@@ -37,7 +46,10 @@ final class BaseMovesTests {
     func moves() -> BaseMoves {
         let moves = BaseMoves(vault: app, reads: reads, background: { $0() }, main: { $0() })
         moves.onAsk = { [unowned self] _, move in asked.append(move.to) }
-        moves.onTaken = { [unowned self] _, move, byYou in taken.append((move.to, byYou)) }
+        moves.onTaken = { [unowned self] _, move, taker in
+            taken.append((move.to, taker == .you))
+            takers.append(taker)
+        }
         moves.log = { [unowned self] in logged.append($0) }
         return moves
     }
@@ -155,6 +167,141 @@ final class BaseMovesTests {
         moves.look([root])
         #expect(taken.map(\.to) == [head()])
         #expect(asked.isEmpty)
+    }
+
+    /// genswap, 2026-10-22: the window looked while the base was another branch; the lead then set base_branch to
+    /// fair-launch, and the user committed on it from its worktree in .claude/worktrees. The window has to see that.
+    func switchedBase() throws -> (moves: BaseMoves, worktree: String) {
+        Git.run(["branch", "fair-launch"], in: root)
+        let worktree = root + "/.claude/worktrees/fair-launch"
+        #expect(Git.run(["worktree", "add", "-q", worktree, "fair-launch"], in: root).ok)
+        let moves = moves()
+        moves.look([root])
+        #expect(moves.asking.isEmpty)
+        _ = try app.startLead(root: root, branch: "fair-launch")
+        try FileManager.default.createDirectory(atPath: root + "/.vibeswitcher", withIntermediateDirectories: true)
+        try "---\nbase_branch: fair-launch\n---\n".write(toFile: BaseMoves.workflow(root: root), atomically: true, encoding: .utf8)
+        return (moves, worktree)
+    }
+
+    func commit(_ file: String, in dir: String) {
+        try? "\(file)\n".write(toFile: dir + "/" + file, atomically: true, encoding: .utf8)
+        Git.run(["add", file], in: dir)
+        #expect(Git.run(["commit", "-q", "-m", "add \(file)"], in: dir).ok)
+    }
+
+    @Test func aCommitOnABaseSwitchedSinceTheLastLookIsAskedAboutAndTheMergeSaysSo() throws {
+        let (moves, worktree) = try switchedBase()
+        let left = try #require(app.head(root: root, branch: "fair-launch"))
+        // A terminal, or a `!` line typed straight into the session's terminal: nothing accounts for it.
+        commit("README.md", in: worktree)
+        let now = Git.run(["rev-parse", "fair-launch"], in: root).output
+        // At once, not 30 s on: the base it watches is the one workflow.md names now.
+        moves.look([root])
+        let move = try #require(moves.asking[root])
+        #expect(move.branch == "fair-launch" && move.to == now)
+        #expect(asked == [now])
+        // The lead's merge says the window is asking, and that no restart is needed.
+        _ = board()
+        let note = try #require(LeadVault.BaseMoveNote.load(root: root))
+        #expect(note.state == .asking && note.from == left && note.to == now && note.commits == 1)
+        let refusal = LeadVault.moveRefusal(base: "fair-launch", known: left, current: now,
+                                            move: .success(try app.acceptMove(root: root, branch: "fair-launch")), root: root)
+        #expect(refusal.contains("VibeSwitcher is asking the user: a card in your chat"), "\(refusal)")
+        #expect(refusal.contains("Don't ask them to restart you"), "\(refusal)")
+        #expect(!refusal.contains("starting the lead again"))
+
+        moves.accept(root)
+        #expect(app.headMoved(root: root, branch: "fair-launch") == nil)
+        _ = board()
+        #expect(LeadVault.BaseMoveNote.load(root: root) == nil)
+    }
+
+    @Test func aBangGitCommandYouSentFromTheWindowIsTakenWithoutAsking() throws {
+        let (moves, worktree) = try switchedBase()
+        // Run on the lead's code block: `!` makes it a shell command in the lead's session, which no hook sees.
+        moves.typed("! cd \(worktree) && git add README.md && git commit -m 'Fair launch: README'", session: "lead-session", cwd: root)
+        commit("README.md", in: worktree)
+        let now = Git.run(["rev-parse", "fair-launch"], in: root).output
+        moves.look([root])
+        #expect(moves.asking.isEmpty)
+        #expect(asked.isEmpty)
+        #expect(takers == [.typed])
+        #expect(app.head(root: root, branch: "fair-launch") == now)
+        let update = try #require(board().updates.last)
+        #expect(update.body.hasPrefix("accepted 1 commit on fair-launch that you ran from VibeSwitcher's window"), "\(update.body)")
+        // Used up: a later commit nobody accounts for is asked about.
+        commit("b.txt", in: worktree)
+        moves.look([root])
+        #expect(moves.asking[root]?.commits.count == 1)
+    }
+
+    @Test func whatYouSentDoesntTakeAMoveATeamSessionCouldHaveMade() throws {
+        let (moves, worktree) = try switchedBase()
+        moves.typed("! cd \(worktree) && git commit -am 'mine'", session: "lead-session", cwd: root)
+        // A session the app didn't open (a team member's, or one a session started) commits there too, its hooks say.
+        let team = book.vault(folder: app.folder, as: { .session("worker-session") }, userOpened: false)
+        let event: (String) -> [String: Any] = { ["hook_event_name": $0, "tool_name": "Bash", "tool_input": ["command": "git commit -am x"], "cwd": worktree, "tool_use_id": "w1"] }
+        for (root, step) in GitMoves.steps(for: event("PreToolUse")) { try team.record(step, root: root) }
+        commit("README.md", in: worktree)
+        for (root, step) in GitMoves.steps(for: event("PostToolUse")) { try team.record(step, root: root) }
+        moves.look([root])
+        let move = try #require(moves.asking[root])
+        #expect(move.team == true)
+        #expect(move.reason?.contains("isn't one of yours") == true, "\(move.reason ?? "")")
+        #expect(takers.isEmpty)
+    }
+
+    @Test func whatYouSentDoesntTakeAMoveATeamCommandStillRunningCouldHaveMade() throws {
+        let (moves, worktree) = try switchedBase()
+        moves.typed("! cd \(worktree) && git commit -am 'mine'", session: "lead-session", cwd: root)
+        // A team session's commit there has started, and its hooks haven't said it ended when the entry appears.
+        let team = book.vault(folder: app.folder, as: { .session("worker-session") }, userOpened: false)
+        let event: [String: Any] = ["hook_event_name": "PreToolUse", "tool_name": "Bash", "tool_input": ["command": "git commit -am x"], "cwd": worktree, "tool_use_id": "w1"]
+        for (root, step) in GitMoves.steps(for: event) { try team.record(step, root: root) }
+        commit("README.md", in: worktree)
+        moves.look([root])
+        let move = try #require(moves.asking[root])
+        #expect(move.team == true)
+        #expect(takers.isEmpty)
+        #expect(app.headMoved(root: root, branch: "fair-launch") != nil)
+    }
+
+    /// A line counts only for what appeared after it was sent, within `Typed.lasts`, and once: a `! git commit` that
+    /// committed nothing doesn't vouch for a commit that comes later.
+    @Test func aLineYouSentCountsOnlyForWhatAppearedSoonAfterItAndOnce() throws {
+        let (moves, worktree) = try switchedBase()
+        let line = "! cd \(worktree) && git commit -am 'mine'"
+        // Sent after the commit (its reflog entry is older): not what it made.
+        commit("README.md", in: worktree)
+        moves.typed(line, session: "lead-session", cwd: root, at: Date().addingTimeInterval(3))
+        moves.look([root], now: Date().addingTimeInterval(4))
+        #expect(moves.asking[root] != nil)
+        #expect(takers.isEmpty)
+        // Looked at for that move: used up, though it was asked about.
+        #expect(moves.sent.isEmpty)
+        moves.accept(root)
+
+        // Sent long before the commit (a commit that failed, say): not what it made either.
+        moves.typed(line, session: "lead-session", cwd: root, at: Date().addingTimeInterval(-(LeadVault.Typed.lasts + 10)))
+        commit("b.txt", in: worktree)
+        moves.look([root])
+        #expect(moves.asking[root] != nil)
+        #expect(takers == [.you])
+        #expect(moves.sent.isEmpty)
+    }
+
+    @Test func aMessageToTheAgentIsNotWhatYouRan() throws {
+        let (moves, worktree) = try switchedBase()
+        // Without `!` it's a prompt: the agent runs the git, and its own hooks say whose that is.
+        moves.typed("cd \(worktree) && git commit -am 'mine'", session: "lead-session", cwd: root)
+        #expect(moves.sent.isEmpty)
+        moves.typed("! git status", session: "lead-session", cwd: root)
+        #expect(moves.sent.isEmpty)
+        commit("README.md", in: worktree)
+        moves.look([root])
+        #expect(moves.asking[root] != nil)
+        #expect(takers.isEmpty)
     }
 
     @Test func aRewriteIsAskedAboutWithNothingListed() throws {

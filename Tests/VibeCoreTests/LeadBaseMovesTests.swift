@@ -107,6 +107,90 @@ struct LeadBaseMovesTests: LeadTeamFixture {
         #expect(vault.headMoved(root: root, branch: "main") == nil)
     }
 
+    /// genswap keeps its base checked out in .claude/worktrees/fair-launch: a session of yours there commits on it.
+    @Test func aCommitFromYourSessionInALinkedWorktreeIsTaken() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        _ = try lead(root, runtime)
+        Git.run(["switch", "-q", "-c", "elsewhere"], in: root)
+        let worktree = root + "/.claude/worktrees/main"
+        #expect(Git.run(["worktree", "add", "-q", worktree, "main"], in: root).ok)
+        #expect(GitMoves.checkout(at: worktree).map { GitMoves.resolved($0.root) } == GitMoves.resolved(root))
+        #expect(GitMoves.checkout(at: worktree)?.branch == "main")
+        try ran("git commit -am 'fix the README'", in: worktree, as: yours) { try commit("c.txt", "see\n", in: worktree) }
+        let move = try vault.acceptMove(root: root, branch: "main")
+        #expect(move.accepted, "\(move.reason ?? "")")
+        #expect(move.sessions == ["user-session"])
+    }
+
+    /// genswap, 2026-10-22 18:07: the user ran the lead's `!` commit, so nothing told the host about it. The merge
+    /// says what the window does about it (asks, here), never to restart the lead.
+    @Test func theMergeSaysTheWindowIsAskingAndNeedsNoRestart() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try audited(lead, runtime, root: root)
+        let left = head("main", root)
+        try commit("c.txt", "see\n", in: root)
+        let now = head("main", root)
+
+        // Before the window looked.
+        let early = lead.call("merge", ["task": "add-b"])
+        #expect(early.isError)
+        #expect(early.text.contains("VibeSwitcher's window looks at main every few seconds"), "\(early.text)")
+        #expect(early.text.contains("No restart is needed"))
+        #expect(!early.text.contains("starting the lead again"))
+
+        // It asks you.
+        try LeadVault.BaseMoveNote(branch: "main", from: left, to: now, state: .asking, commits: 1, reason: nil).save(root: root)
+        let asking = lead.call("merge", ["task": "add-b"])
+        #expect(asking.isError)
+        #expect(asking.text.contains("No command VibeSwitcher saw"), "\(asking.text)")
+        #expect(asking.text.contains("VibeSwitcher is asking the user: a card in your chat in its window lists the 1 commit"), "\(asking.text)")
+        // A note about another move says nothing about this one.
+        try LeadVault.BaseMoveNote(branch: "main", from: left, to: left, state: .kept, commits: 1, reason: nil).save(root: root)
+        #expect(lead.call("merge", ["task": "add-b"]).text.contains("every few seconds"))
+
+        // You accept: the same lead merges.
+        try vault.setHead(now, root: root, branch: "main")
+        let merged = lead.call("merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+    }
+
+    @Test func aBaseCheckedOutInAWorktreeOutsideTheTeamsIsNamedWithTheOneCommandThatFreesIt() throws {
+        let root = try repo()
+        Git.run(["switch", "-q", "-c", "elsewhere"], in: root)
+        let worktree = root + "/.claude/worktrees/main"
+        #expect(Git.run(["worktree", "add", "-q", worktree, "main"], in: root).ok)
+        let from = head("main", root)
+        Git.run(["switch", "-q", "-c", "work", "main"], in: root)
+        try commit("b.txt", "bee\n", in: root)
+        let commit = head("work", root)
+
+        guard case .refused(let clean) = Worktrees.fastForward(root: root, base: "main", to: commit, from: from) else {
+            Issue.record("merged under the worktree")
+            return
+        }
+        #expect(clean.contains("main is checked out in .claude/worktrees/main, a worktree outside VibeSwitcher's"), "\(clean)")
+        #expect(clean.contains("it's clean"), "\(clean)")
+        #expect(clean.contains("`git switch --detach` in that worktree"), "\(clean)")
+        #expect(clean.contains("`! cd /") && clean.contains("/.claude/worktrees/main && git switch --detach` in your chat"), "\(clean)")
+
+        try "changed\n".write(toFile: worktree + "/a.txt", atomically: true, encoding: .utf8)
+        guard case .refused(let dirty) = Worktrees.fastForward(root: root, base: "main", to: commit, from: from) else {
+            Issue.record("merged under the worktree")
+            return
+        }
+        #expect(dirty.contains("1 uncommitted file: a.txt (modified)"), "\(dirty)")
+        #expect(dirty.contains("Its uncommitted files stay as they are."), "\(dirty)")
+
+        // The one command: the merge goes through, and the worktree keeps its files.
+        #expect(Git.run(["switch", "-q", "--detach"], in: worktree).ok)
+        #expect(Worktrees.fastForward(root: root, base: "main", to: commit, from: from) == .merged)
+        #expect(head("main", root) == commit)
+        #expect((try? String(contentsOfFile: worktree + "/a.txt", encoding: .utf8)) == "changed\n")
+    }
+
     // MARK: Refused
 
     @Test func aWorkersCommitOnTheBaseIsRefused() throws {
@@ -258,6 +342,23 @@ struct LeadBaseMovesTests: LeadTeamFixture {
         let move = LeadVault.judge(from: "h", history: moves, branch: "main", runs: [run("commit", "h", nil, 99, nil)], now: 101)
         #expect(!move.accepted)
         #expect(move.waiting == true)
+    }
+
+    /// A team session's git command that ran when an entry was made marks the move as possibly the team's, also when
+    /// it hasn't ended yet (no heads said) or ended within the hook's slack after it: what the window saw you send
+    /// never takes such a move.
+    @Test func aTeamCommandRunningWhenTheEntryWasMadeMarksTheMoveTheTeams() {
+        let moves = history([("h", "u", 100, "commit: x")], parents: ["u": ["h"]])
+        let judge = { (runs: [LeadVault.GitRun]) in LeadVault.judge(from: "h", history: moves, branch: "main", runs: runs, now: 101) }
+        // Still in flight at the entry's time.
+        #expect(judge([run("commit", "h", nil, 99, nil, user: false)]).team == true)
+        // Started before it, ended within the slack after it, wherever it says it ended.
+        #expect(judge([run("merge", "h", "h", 98, 101.5, user: false)]).team == true)
+        // Ended before it, or started after it: not the team's.
+        #expect(judge([run("commit", "h", "h", 90, 97, user: false)]).team == nil)
+        #expect(judge([run("commit", "u", nil, 103, nil, user: false)]).team == nil)
+        // The guard itself is unchanged: none of these is taken.
+        #expect(!judge([run("commit", "h", nil, 99, nil, user: false)]).accepted)
     }
 
     @Test func aCommandOfYoursOnlyAccountsForWhatItCouldHaveMade() {

@@ -302,10 +302,18 @@ final class LeadController: ObservableObject {
         baseMoves.onAsk = { [weak self] root, move in
             self?.notify("\(move.branch) moved outside the lead's merges", "\(move.count) in \((root as NSString).lastPathComponent): accept them in the lead's chat, or keep its merges refused.")
         }
-        baseMoves.onTaken = { [weak self] root, move, byYou in
-            guard byYou, let self else { return }
-            self.deliver("The user accepted the \(move.count) on \(move.branch) (\(move.from.prefix(8)) → \(move.to.prefix(8))) in VibeSwitcher: merges start from there now.",
-                         from: .system("the user, in the window"), root: root)
+        baseMoves.onTaken = { [weak self] root, move, taker in
+            guard let self else { return }
+            let span = "\(move.count) on \(move.branch) (\(move.from.prefix(8)) → \(move.to.prefix(8)))"
+            switch taker {
+            case .vault: return
+            case .typed:
+                self.deliver("VibeSwitcher took the \(span) as the user's: they ran it from its window. Merges start from there now.",
+                             from: .system("VibeSwitcher, from what the user sent in the window"), root: root)
+            case .you:
+                self.deliver("The user accepted the \(span) in VibeSwitcher: merges start from there now.",
+                             from: .system("the user, in the window"), root: root)
+            }
         }
     }
 

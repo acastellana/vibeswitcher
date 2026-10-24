@@ -78,6 +78,8 @@ extension LeadVault {
         /// A command of the user's that may account for it hasn't finished (its hooks haven't said so): look again
         /// in a moment.
         public var waiting: Bool?
+        /// A command a team session ran could have made one of its entries: never taken on what the window saw typed.
+        public var team: Bool?
 
         /// "1 commit", "3 commits".
         public var count: String { "\(commits.count) commit\(commits.count == 1 ? "" : "s")" }
@@ -183,8 +185,9 @@ extension LeadVault {
     /// Whether the move from `recorded` to `history.head` is the user's own: a fast-forward whose every reflog entry
     /// since `recorded` is one the user's sessions' recorded `runs` account for (the command made it, while it ran,
     /// between the heads it ran from and to, and it is what that command makes), and that no team session's could.
+    /// `slack`: how long before a command was seen starting an entry may be its (a hook tells it a moment late).
     public static func judge(from recorded: String, history: BaseHistory, branch: String, runs: [GitRun],
-                             now: Double = Date().timeIntervalSince1970) -> BaseMove {
+                             now: Double = Date().timeIntervalSince1970, slack: Double = 2) -> BaseMove {
         var move = BaseMove(branch: branch, from: recorded, to: history.head, accepted: false,
                             commits: history.order.map { BaseMove.Commit(sha: $0, subject: history.commits[$0]?.subject ?? "") },
                             sessions: [], reason: nil)
@@ -207,6 +210,21 @@ extension LeadVault {
             return move
         }
         let runs = runs.filter { $0.branch == branch }
+        // The command made the entry: while it ran, between the heads it ran from and to, and it's what it makes.
+        func made(_ run: GitRun, _ entry: BaseHistory.Entry, _ kind: MoveKind) -> Bool {
+            guard let after = run.after, let ended = run.ended, kind.madeBy(run.verb) else { return false }
+            return entry.time >= run.started.rounded(.down) - slack && entry.time <= ended + 2
+                && history.descends(entry.old, from: run.before) && history.descends(after, from: entry.new)
+        }
+        // A team session's command was running when the entry was made: it may be what made it, whatever it was and
+        // wherever it ended (one still running hasn't said), the hook's slack included. Over the whole chain, also past
+        // the first entry nobody accounts for.
+        func mayHaveMade(_ run: GitRun, _ entry: BaseHistory.Entry) -> Bool {
+            entry.time >= run.started.rounded(.down) - 2 && run.ended.map { entry.time <= $0 + 2 } ?? true
+        }
+        if chain.contains(where: { entry in runs.contains { !$0.user && mayHaveMade($0, entry) } }) {
+            move.team = true
+        }
         var used: Set<Int> = []
         for entry in chain {
             let commit = entry.new.prefix(8)
@@ -220,11 +238,7 @@ extension LeadVault {
                 return move
             }
             let candidates = runs.indices.filter { index in
-                let run = runs[index]
-                guard let after = run.after, let ended = run.ended, kind.madeBy(run.verb) else { return false }
-                return entry.time >= run.started.rounded(.down) - 2 && entry.time <= ended + 2
-                    && history.descends(entry.old, from: run.before) && history.descends(after, from: entry.new)
-                    && !(MoveKind.single(run.verb) && used.contains(index))
+                made(runs[index], entry, kind) && !(MoveKind.single(runs[index].verb) && used.contains(index))
             }
             if let team = candidates.first(where: { !runs[$0].user }) {
                 move.reason = "\(commit) (‘\(entry.message)’) came from a session that isn't one of yours (\(runs[team].session.prefix(8)): a team member's, or one a session started)."
@@ -255,6 +269,123 @@ extension LeadVault {
     /// A session's hooks: a git command it's about to run, or just ran (see `GitMoves`).
     public func record(_ step: GitStep, root: String) throws {
         _ = try call(.ranGit(root: root, step: step))
+    }
+
+    /// A shell line you sent from VibeSwitcher's window into a session (the composer, or Run on a code block): the
+    /// app's own process saw you send it. `!` makes it a shell command the agent runs as it is, with no hooks and no
+    /// agent in between, so nothing else tells the host about it.
+    public struct Typed: Equatable, Sendable {
+        public var session: String
+        public var line: String
+        public var cwd: String
+        public var at: Double
+
+        /// How long after it was sent a line accounts for what it moved: such a command runs as soon as it's sent.
+        public static let lasts: Double = 30
+
+        public init(session: String, line: String, cwd: String, at: Double) {
+            self.session = session
+            self.line = line
+            self.cwd = cwd
+            self.at = at
+        }
+
+        /// The shell line in what was sent: what follows a leading `!`. Anything else is a message to the agent,
+        /// whose own commands its hooks tell.
+        public static func shell(_ text: String) -> String? {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard trimmed.hasPrefix("!") else { return nil }
+            let line = trimmed.dropFirst().trimmingCharacters(in: .whitespaces)
+            return line.isEmpty ? nil : line
+        }
+    }
+
+    /// The window's typed lines as the runs they are on `branch` in `root` (for `judge`, with no slack: only what
+    /// appeared after it was sent): each git command among them that can move a branch, in a checkout of `branch`
+    /// there now, from when it was sent until `Typed.lasts` later (or `now`), between where the lead left it
+    /// (`recorded`) and `head`.
+    public static func runs(typed: [Typed], root: String, branch: String, recorded: String, head: String, now: Double,
+                            checkout: (String) -> (root: String, branch: String, head: String)? = GitMoves.checkout(at:)) -> [GitRun] {
+        let root = GitMoves.resolved(root)
+        var known: [String: (root: String, branch: String, head: String)?] = [:]
+        return typed.flatMap { typed in
+            GitMoves.commands(in: typed.line, cwd: typed.cwd).compactMap { command -> GitRun? in
+                let place = known[command.folder] ?? checkout(command.folder)
+                known[command.folder] = place
+                guard let place, GitMoves.resolved(place.root) == root, place.branch == branch else { return nil }
+                return GitRun(session: typed.session, user: true, call: nil, verb: command.verb, branch: branch, before: recorded,
+                              after: head, started: typed.at, ended: min(now, typed.at + Typed.lasts))
+            }
+        }
+    }
+
+    /// What VibeSwitcher's window does about a move the vault didn't take, for the lead's merge to say. It words the
+    /// refusal only: what takes a move is the vault's head, which the app sets when you accept.
+    public struct BaseMoveNote: Codable, Equatable, Sendable {
+        public enum State: String, Codable, Sendable {
+            /// The window asks you: a card in the lead's chat, and a notification.
+            case asking
+            /// You answered Keep Refused.
+            case kept
+        }
+
+        public var branch: String
+        public var from: String
+        public var to: String
+        public var state: State
+        public var commits: Int
+        public var reason: String?
+
+        public init(branch: String, from: String, to: String, state: State, commits: Int, reason: String?) {
+            self.branch = branch
+            self.from = from
+            self.to = to
+            self.state = state
+            self.commits = commits
+            self.reason = reason
+        }
+
+        static func path(root: String) -> String {
+            (BoardStore(root: root).folder as NSString).appendingPathComponent("run/base-move.json")
+        }
+
+        public static func load(root: String) -> BaseMoveNote? {
+            (try? Data(contentsOf: URL(fileURLWithPath: path(root: root)))).flatMap { try? JSONDecoder().decode(BaseMoveNote.self, from: $0) }
+        }
+
+        public func save(root: String) throws {
+            let url = URL(fileURLWithPath: Self.path(root: root))
+            try VibePaths.ensurePrivate(url.deletingLastPathComponent(), within: URL(fileURLWithPath: BoardStore(root: root).folder))
+            try VibePaths.writePrivate(try JSONEncoder().encode(self), to: url)
+        }
+
+        public static func clear(root: String) {
+            try? FileManager.default.removeItem(atPath: path(root: root))
+        }
+    }
+
+    /// The merge's refusal when `base` moved from `known` to `current` and the vault didn't take it (`move`, or the
+    /// error asking for it): why, and what the window does about it, from its note.
+    public static func moveRefusal(base: String, known: String, current: String, move: Result<BaseMove, Error>, root: String) -> String {
+        let head = "Not merged: \(base) moved since the lead last left it (\(known.prefix(8)) → \(current.prefix(8))), and not through merge."
+        let why: String
+        switch move {
+        case .success(let move) where move.waiting == true:
+            return head + (move.reason.map { " \($0)" } ?? "") + " A command of the user's that may account for it is still running: merge again in a moment."
+        case .success(let move): why = move.reason ?? ""
+        case .failure(let error): why = "(\(error))"
+        }
+        let commits = "`git log \(known.prefix(8))..\(base)` lists them"
+        guard let note = BaseMoveNote.load(root: root), note.branch == base, note.from == known, note.to == current else {
+            return head + " \(why) VibeSwitcher's window looks at \(base) every few seconds: it takes the move as the user's when they ran it from the window, and otherwise asks them to accept it in your chat (\(commits)). Merge again in a minute: this then says which. No restart is needed."
+        }
+        let count = "\(note.commits) commit\(note.commits == 1 ? "" : "s")"
+        switch note.state {
+        case .asking:
+            return head + " \(why) So VibeSwitcher is asking the user: a card in your chat in its window lists the \(count) (\(commits)) with Accept, and it sent them a notification. You get a message when they accept; merge then. Don't ask them to restart you or to run anything: Accept is all it takes. Tell them if the commits aren't theirs."
+        case .kept:
+            return head + " \(why) The user answered Keep Refused in VibeSwitcher's window, so nothing merges onto these \(count) (\(commits)). Ask them what to do with them; a restart doesn't change it."
+        }
     }
 }
 
@@ -317,13 +448,19 @@ public enum GitMoves {
         }
     }
 
-    /// The repository `folder` is in, its checked-out branch and that branch's head.
+    /// The repository `folder` is in (its main checkout, also from a linked worktree such as .claude/worktrees/x,
+    /// where a lead works), its checked-out branch and that branch's head.
     public static func checkout(at folder: String) -> (root: String, branch: String, head: String)? {
-        let top = Git.run(["rev-parse", "--show-toplevel", "HEAD"], in: folder).output.split(separator: "\n").map(String.init)
+        let top = Git.run(["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir", "HEAD"], in: folder).output
+            .split(separator: "\n").map(String.init)
         let branch = Git.run(["symbolic-ref", "-q", "--short", "HEAD"], in: folder)
-        guard top.count == 2, branch.ok, !branch.output.isEmpty else { return nil }
-        return (top[0], branch.output, top[1])
+        guard top.count == 3, branch.ok, !branch.output.isEmpty else { return nil }
+        let common = top[1] as NSString
+        return (common.lastPathComponent == ".git" ? common.deletingLastPathComponent : top[0], branch.output, top[2])
     }
+
+    /// A path with its symlinks resolved, to compare roots by.
+    static func resolved(_ path: String) -> String { URL(fileURLWithPath: path).resolvingSymlinksInPath().path }
 
     private static func resolve(_ path: String, in folder: String) -> String {
         let expanded = (path as NSString).expandingTildeInPath

@@ -2,24 +2,37 @@ import Foundation
 import VibeCore
 
 /// Each lead's base, watched: when it moved since the lead last left it, and not through its merges, the session host's
-/// vault is asked to take the move as the user's own (`LeadVault.judge`). When it can't (a commit no session of yours
-/// is seen making, a rewrite, a team member's), the window asks you, once per move, listing what came in: Accept
-/// takes the base as it is in the vault, with the lead and its team running on; Keep Refused leaves the lead's merges
-/// refused. Only this, the app's own process, takes a move on your word.
+/// vault is asked to take the move as the user's own (`LeadVault.judge`). When it can't, and a `!` git command you sent
+/// from this window accounts for it (no team session's command could have made it), it's taken as yours too: only
+/// this, the app's own process, saw you send it. Otherwise (a commit no session of yours is seen making, a rewrite, a
+/// team member's) the window asks you, once per move, listing what came in: Accept takes the base as it is in the
+/// vault, with the lead and its team running on; Keep Refused leaves the lead's merges refused. Only this process takes
+/// a move on your word. What it does is noted for the lead's merge to say (`LeadVault.BaseMoveNote`).
 final class BaseMoves: ObservableObject {
     /// The move waiting for your answer, by repository root.
     @Published private(set) var asking: [String: LeadVault.BaseMove] = [:]
     /// What went wrong taking one you accepted, by root.
     @Published private(set) var failures: [String: String] = [:]
 
+    /// Who took a move.
+    enum Taker: Equatable {
+        /// The vault, from your sessions' hooks.
+        case vault
+        /// The window, from a git command you sent from it.
+        case typed
+        /// You, with Accept.
+        case you
+    }
+
     enum Outcome: Equatable {
         /// Where the lead left it (or nothing to tell).
         case still
-        /// The vault took it as yours.
-        case taken(LeadVault.BaseMove)
+        /// The vault took it as yours, or the window did from what you sent it (those lines, used up).
+        case taken(LeadVault.BaseMove, Taker, used: [LeadVault.Typed])
         /// A command of yours that may account for it is still running.
         case waiting
-        case ask(LeadVault.BaseMove)
+        /// Asked about; the lines you sent that were looked at for it are used up all the same.
+        case ask(LeadVault.BaseMove, used: [LeadVault.Typed] = [])
     }
 
     private let vault: LeadVault
@@ -29,19 +42,29 @@ final class BaseMoves: ObservableObject {
     private let main: (@escaping () -> Void) -> Void
     /// A move to ask about appeared (to tell you once, outside the window too).
     var onAsk: (String, LeadVault.BaseMove) -> Void = { _, _ in }
-    /// A move was taken, by the vault or by you: the lead hears it (its merges go ahead now).
-    var onTaken: (String, LeadVault.BaseMove, _ byYou: Bool) -> Void = { _, _, _ in }
+    /// A move was taken: the lead hears it when the window or you took it (its merges go ahead now).
+    var onTaken: (String, LeadVault.BaseMove, Taker) -> Void = { _, _, _ in }
     /// app.log.
     var log: (String) -> Void = { Breadcrumbs.shared.note($0) }
 
-    /// Each root's base branch and its reflog's stamp at the last look: looked at again only when that changed, a
-    /// command was still running, or (every 30 s) while it asks or the reflog can't be found.
+    /// Each root's base branch, and its reflog's and workflow.md's stamps at the last look: looked at again when one
+    /// changed (workflow.md says which branch is the base), a command was still running, or every 30 s.
     private var branches: [String: String] = [:]
-    private var stamps: [String: LeadFiles.Stamp] = [:]
+    private var stamps: [String: Stamps] = [:]
     private var lookedAt: [String: Date] = [:]
     private var looking: Set<String> = []
     /// The moves you kept refused (root → the commit it moved to): not asked again.
     private var kept: [String: String] = [:]
+    /// The `!` git commands you sent from the window lately (see `typed`).
+    private(set) var sent: [LeadVault.Typed] = []
+    /// How long one is kept for a look to come (what it accounts for is `Typed.lasts` after it was sent), and used
+    /// once: by the move it's looked at for, taken or asked about.
+    static let typedFor: TimeInterval = 300
+
+    struct Stamps: Equatable {
+        var reflog: LeadFiles.Stamp?
+        var workflow: LeadFiles.Stamp?
+    }
 
     init(vault: LeadVault = .standard, reads: LeadReads = LeadReads(),
          background: @escaping (@escaping () -> Void) -> Void = { DispatchQueue.global(qos: .utility).async(execute: $0) },
@@ -52,29 +75,48 @@ final class BaseMoves: ObservableObject {
         self.main = main
     }
 
+    /// You sent `text` from the window (the composer, or Run on a code block) into the session `session`, which runs
+    /// in `cwd`: kept when it's a `!` line with a git command that can move a branch.
+    func typed(_ text: String, session: String, cwd: String, at: Date = Date()) {
+        let now = at.timeIntervalSince1970
+        sent.removeAll { now - $0.at > Self.typedFor }
+        guard let line = LeadVault.Typed.shell(text), !GitMoves.commands(in: line, cwd: cwd).isEmpty else { return }
+        sent = Array((sent + [LeadVault.Typed(session: session, line: line, cwd: cwd, at: now)]).suffix(50))
+    }
+
     /// The leads' roots, every few seconds (the lead controller's refresh).
     func look(_ roots: Set<String>, now: Date = Date()) {
         if !Set(asking.keys).isSubset(of: roots) { asking = asking.filter { roots.contains($0.key) } }
+        let typed = sent.filter { now.timeIntervalSince1970 - $0.at <= Self.typedFor }
         for root in roots where !looking.contains(root) {
-            let stamp = branches[root].flatMap { LeadFiles.Stamp(Self.reflog(root: root, branch: $0)) }
+            let stamp = branches[root].map { Self.stamps(root: root, branch: $0) }
             let due = lookedAt[root].map { now.timeIntervalSince($0) >= 30 } ?? true
-            guard stamp == nil || stamp != stamps[root] || (asking[root] != nil && due) else { continue }
-            if stamp == nil, !due { continue }
+            guard due || stamp != stamps[root] else { continue }
             looking.insert(root)
             lookedAt[root] = now
             background { [vault] in
                 let branch = Self.base(root: root)
-                let outcome = Self.check(vault: vault, root: root, branch: branch)
+                let outcome = Self.check(vault: vault, root: root, branch: branch, typed: typed, now: now)
                 self.main { self.looked(root, branch: branch, outcome) }
             }
         }
     }
 
-    /// Asks the vault about the base's move, if it moved.
-    static func check(vault: LeadVault, root: String, branch: String) -> Outcome {
+    /// Asks the vault about the base's move, if it moved; when it doesn't take it, whether what you sent from the
+    /// window accounts for it.
+    static func check(vault: LeadVault, root: String, branch: String, typed: [LeadVault.Typed] = [], now: Date = Date()) -> Outcome {
         guard vault.headMoved(root: root, branch: branch) != nil, let move = try? vault.acceptMove(root: root, branch: branch) else { return .still }
-        if move.accepted { return move.from == move.to ? .still : .taken(move) }
-        return move.waiting == true ? .waiting : .ask(move)
+        if move.accepted { return move.from == move.to ? .still : .taken(move, .vault, used: []) }
+        if move.waiting == true { return .waiting }
+        // A team session's command could have made it: only you say so.
+        guard move.team != true, !typed.isEmpty,
+              let history = LeadVault.BaseHistory.read(root: root, branch: branch, since: move.from), history.head == move.to else { return .ask(move) }
+        let at = now.timeIntervalSince1970
+        let used = typed.filter { !LeadVault.runs(typed: [$0], root: root, branch: branch, recorded: move.from, head: history.head, now: at).isEmpty }
+        let runs = LeadVault.runs(typed: used, root: root, branch: branch, recorded: move.from, head: history.head, now: at)
+        let yours = LeadVault.judge(from: move.from, history: history, branch: branch, runs: runs, now: at, slack: 0)
+        guard yours.accepted, (try? vault.setHead(yours.to, root: root, branch: branch)) != nil else { return .ask(move, used: used) }
+        return .taken(yours, .typed, used: used)
     }
 
     func looked(_ root: String, branch: String, _ outcome: Outcome) {
@@ -82,18 +124,23 @@ final class BaseMoves: ObservableObject {
         branches[root] = branch
         // Still running: look again at the next refresh, whatever the reflog says.
         guard outcome != .waiting else { return }
-        stamps[root] = LeadFiles.Stamp(Self.reflog(root: root, branch: branch))
+        stamps[root] = Self.stamps(root: root, branch: branch)
         switch outcome {
         case .still, .waiting:
             asking[root] = nil
-        case .taken(let move):
+            note(nil, root)
+        case .taken(let move, let taker, let used):
             asking[root] = nil
-            tell(root, move, byYou: false)
-            onTaken(root, move, false)
-        case .ask(let move):
+            sent.removeAll { used.contains($0) }
+            note(nil, root)
+            tell(root, move, taker)
+            onTaken(root, move, taker)
+        case .ask(let move, let used):
+            sent.removeAll { used.contains($0) }
             guard kept[root] != move.to, asking[root] != move else { return }
             let new = asking[root]?.to != move.to
             asking[root] = move
+            note(LeadVault.BaseMoveNote(branch: move.branch, from: move.from, to: move.to, state: .asking, commits: move.commits.count, reason: move.reason), root)
             if new {
                 log("lead: \(move.branch) moved to \(move.to.prefix(8)) (left at \(move.from.prefix(8))), not taken: \(move.reason ?? ""); asking")
                 onAsk(root, move)
@@ -109,8 +156,9 @@ final class BaseMoves: ObservableObject {
             do {
                 try vault.setHead(move.to, root: root, branch: move.branch)
                 self.main {
-                    self.tell(root, move, byYou: true)
-                    self.onTaken(root, move, true)
+                    self.note(nil, root)
+                    self.tell(root, move, .you)
+                    self.onTaken(root, move, .you)
                 }
             } catch {
                 self.main {
@@ -126,14 +174,19 @@ final class BaseMoves: ObservableObject {
         guard let move = asking.removeValue(forKey: root) else { return }
         kept[root] = move.to
         failures[root] = nil
+        note(LeadVault.BaseMoveNote(branch: move.branch, from: move.from, to: move.to, state: .kept, commits: move.commits.count, reason: move.reason), root)
         log("lead: you kept \(move.branch) at \(move.to.prefix(8)) refused")
     }
 
     /// The board's updates and progress, and app.log, say what was taken.
-    private func tell(_ root: String, _ move: LeadVault.BaseMove, byYou: Bool) {
-        let line = byYou ? "You accepted \(move.count) on \(move.branch) in VibeSwitcher: "
-            + move.commits.prefix(3).map { "\($0.sha.prefix(7)) \($0.subject)" }.joined(separator: "; ") + (move.commits.count > 3 ? "; …" : "")
-            : move.acceptedLine
+    private func tell(_ root: String, _ move: LeadVault.BaseMove, _ taker: Taker) {
+        let commits = move.commits.prefix(3).map { "\($0.sha.prefix(7)) \($0.subject)" }.joined(separator: "; ") + (move.commits.count > 3 ? "; …" : "")
+        let line: String
+        switch taker {
+        case .vault: line = move.acceptedLine
+        case .typed: line = "accepted \(move.count) on \(move.branch) that you ran from VibeSwitcher's window: " + commits
+        case .you: line = "You accepted \(move.count) on \(move.branch) in VibeSwitcher: " + commits
+        }
         log("lead: \(line) (\(move.from.prefix(8)) → \(move.to.prefix(8)))")
         let store = BoardStore(root: root)
         reads.async { _ in
@@ -142,15 +195,29 @@ final class BaseMoves: ObservableObject {
         }
     }
 
+    /// What the lead's merge says about the move (nil: nothing to say), written on the lead controller's queue.
+    private func note(_ note: LeadVault.BaseMoveNote?, _ root: String) {
+        reads.async { _ in
+            if let note { try? note.save(root: root) } else { LeadVault.BaseMoveNote.clear(root: root) }
+        }
+    }
+
     /// The branch the lead merges into, as its tools resolve it.
     static func base(root: String) -> String {
         let store = BoardStore(root: root)
-        return LeadWorkflow.load(from: (store.folder as NSString).appendingPathComponent("workflow.md")).baseBranch
-            ?? store.load().baseBranch ?? Worktrees.mainBranch(root: root)
+        return LeadWorkflow.load(from: workflow(root: root)).baseBranch ?? store.load().baseBranch ?? Worktrees.mainBranch(root: root)
+    }
+
+    static func workflow(root: String) -> String {
+        (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md")
     }
 
     /// Where git logs the branch's moves, in a main checkout.
     static func reflog(root: String, branch: String) -> String {
         (root as NSString).appendingPathComponent(".git/logs/refs/heads/\(branch)")
+    }
+
+    static func stamps(root: String, branch: String) -> Stamps {
+        Stamps(reflog: LeadFiles.Stamp(reflog(root: root, branch: branch)), workflow: LeadFiles.Stamp(workflow(root: root)))
     }
 }

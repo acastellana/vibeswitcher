@@ -547,12 +547,44 @@ public enum Worktrees {
             let landed = Git.run(["rev-parse", "refs/heads/\(main)"], in: root).output
             return landed == commit ? .merged : .refused("\(main) ended at \(landed.prefix(8)), not \(commit.prefix(8)); it moved during the merge.")
         case .some(let place):
-            return .refused("\(main) is checked out in \(place); merge there.")
+            return .refused(checkedOut(main, in: place, root: root))
         case .none:
             // Only from the head that was checked: a merge that landed in between makes this fail, not vanish.
             let update = Git.run(["update-ref", "refs/heads/\(main)", commit, expected], in: root)
             return update.ok ? .merged : .refused(update.error)
         }
+    }
+
+    /// The refusal when `branch` is checked out in the worktree `place`, not the main checkout: which worktree,
+    /// whether it's clean, and the one thing that frees the branch. A merge moves the branch only where nobody has it
+    /// checked out, or in the main checkout: never under someone's worktree.
+    static func checkedOut(_ branch: String, in place: String, root: String) -> String {
+        let resolvedRoot = URL(fileURLWithPath: root).resolvingSymlinksInPath().path
+        let resolvedPlace = URL(fileURLWithPath: place).resolvingSymlinksInPath().path
+        let name = resolvedPlace.hasPrefix(resolvedRoot + "/") ? String(resolvedPlace.dropFirst(resolvedRoot.count + 1)) : place
+        let team = name.hasPrefix(".vibeswitcher/")
+        let whose = team ? "a worktree of the team's" : "a worktree outside VibeSwitcher's (the user's, or another tool's)"
+        guard FileManager.default.fileExists(atPath: place) else {
+            return "\(branch) is checked out in \(name), \(whose), whose folder is gone. `git worktree prune` in \(root) frees \(branch) (the user runs it: in a terminal, or as `! cd \(OffBranch.quoted(root)) && git worktree prune` in your chat); then merge again."
+        }
+        let status = Git.run(["status", "--porcelain=v2", "-z", "--untracked-files=all"], in: place)
+        let files = status.ok ? uncommitted(porcelain: status.output) : []
+        let state: String
+        if !status.ok {
+            state = "its state can't be read (\(status.error))"
+        } else if files.isEmpty {
+            state = "clean"
+        } else {
+            let shown = files.prefix(5).map { "\($0.path) (\($0.state))" }.joined(separator: ", ")
+            state = "\(files.count) uncommitted file\(files.count == 1 ? "" : "s"): \(shown)\(files.count > 5 ? ", …" : "")"
+        }
+        if files.contains(where: { $0.state == "unmerged" }) {
+            return "\(branch) is checked out in \(name), \(whose), which is in the middle of a merge or rebase (\(state)). It has to be finished or aborted there first; then `git switch --detach` there frees \(branch). Ask the user."
+        }
+        let keep = files.isEmpty ? "" : " Its uncommitted files stay as they are."
+        return "\(branch) is checked out in \(name), \(whose), and it's \(state). A merge doesn't move a branch under someone's worktree. "
+            + "The one thing that frees it: `git switch --detach` in that worktree, which keeps its files and its commit and only lets go of \(branch).\(keep) "
+            + "The user runs it, in a terminal or as `! cd \(OffBranch.quoted(place)) && git switch --detach` in your chat; then merge again."
     }
 
     /// Rebases `commit` (the audited one) onto `base` and runs the setup and test commands on the result, in a
