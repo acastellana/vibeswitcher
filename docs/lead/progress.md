@@ -1114,3 +1114,5 @@
 - 2026-10-24 18:16 Merged mac-wide-limits-are: Mac-wide limits are set once for the Mac, and a refused lead is woken when room frees
 - 2026-10-24 18:16 Update: Merged: Mac-wide limits are set once for the Mac, and a refused lead is woken when room frees — **What changed.**
 - 2026-10-24 18:19 Started a worker on boundary-excursions-a
+- 2026-10-24 18:21 Audit of a-base-branch-the: complete, clean, round 2: 2 Important closed, 1 Nit closed
+- 2026-10-24 18:27 Merged a-base-branch-the: A base branch the user moves never blocks merges until a restart
