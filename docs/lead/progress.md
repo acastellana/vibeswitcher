@@ -1110,3 +1110,5 @@
 - 2026-10-24 18:02 Update: Merged: the lead's record commits carry no trailer, and conflicts in them resolve themselves — **What changed.**
 - 2026-10-24 18:07 Audit of mac-wide-limits-are: complete, clean, round 1: 2 Nit open
 - 2026-10-24 18:08 Merged the-mac-wide-test: The Mac-wide test lock checks its holder and times out, and waiting on it isn't a stall
+- 2026-10-24 18:10 Update: Merged: the Mac-wide test lock knows its holder and times out, and waiting on it isn't a stall — **What changed.**
+- 2026-10-24 18:16 Merged mac-wide-limits-are: Mac-wide limits are set once for the Mac, and a refused lead is woken when room frees
