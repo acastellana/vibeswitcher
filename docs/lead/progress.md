@@ -1135,3 +1135,4 @@
 - 2026-10-24 21:11 Planned tests-leave-no: Tests leave no preference files in the user's Library
 - 2026-10-24 21:11 Started a worker on tests-leave-no
 - 2026-10-24 21:41 Merged tests-leave-no: Tests leave no preference files in the user's Library (no audit: review none)
+- 2026-10-24 21:41 Update: Tests no longer leave files in ~/Library/Preferences — **What changed:** Our tests had been leaving a preference file in your real ~/Library/Preferences for every UserDefaults suite they created, about 19,400 files so far. macOS's preferences daemon ignor…
