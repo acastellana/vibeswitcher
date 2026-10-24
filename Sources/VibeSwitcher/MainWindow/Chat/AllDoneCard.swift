@@ -10,12 +10,15 @@ struct AllDoneCard: View {
     let chat: ChatModel
     let expanded: Set<String>
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @IncreasedContrast private var increased
 
     static func key(_ mark: LeadAllDone) -> String { "all-done:\(mark.id)" }
 
     /// The done status's green: text-safe on the chat's background, and on the card's tint of it (`tintOpacity`).
     static var tint: Color { SessionStatus.done.color }
-    static let tintOpacity = 0.08
+    /// The tint's strength; none with Increase Contrast, where the 7:1 inks are measured on the plain background (the
+    /// border still marks the card).
+    static func tintOpacity(increased: Bool) -> Double { increased ? 0 : 0.08 }
 
     var body: some View {
         let open = expanded.contains(Self.key(mark))
@@ -67,7 +70,7 @@ struct AllDoneCard: View {
                         let task = mark.tasks[index]
                         Label { Text(task.title).foregroundStyle(.primary) } icon: {
                             Image(systemName: Self.symbol(task.outcome)).foregroundStyle(task.outcome == .merged ? Self.tint : .secondary)
-                                .accessibilityHidden(true)
+                                .frame(width: 14).accessibilityHidden(true)
                         }
                         .font(.system(size: 12))
                         .accessibilityElement(children: .ignore)
@@ -79,8 +82,8 @@ struct AllDoneCard: View {
             }
         }
         .padding(.horizontal, 14).padding(.vertical, 11)
-        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Self.tint.opacity(Self.tintOpacity)))
-        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Self.tint.opacity(0.45), lineWidth: 1.5))
+        .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Self.tint.opacity(Self.tintOpacity(increased: increased))))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Self.tint.opacity(increased ? 1 : 0.45), lineWidth: 1.5))
         .contextMenu { Button("Copy Summary") { Pasteboard.copy(Self.text(mark)) } }
     }
 

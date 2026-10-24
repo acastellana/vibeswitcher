@@ -1265,10 +1265,10 @@ private struct FileThumbnail: View {
 }
 
 private extension ChatItem {
-    /// Tool groups and team messages open and close.
+    /// Tool groups, team messages and all-done cards open and close.
     var opens: Bool {
         switch self {
-        case .tools, .team: return true
+        case .tools, .team, .allDone: return true
         default: return false
         }
     }
