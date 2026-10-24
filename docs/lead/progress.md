@@ -1107,3 +1107,6 @@
 - 2026-10-24 17:58 Audit of a-base-branch-the: incomplete, clean, round 1: 2 Important open, 1 Nit open
 - 2026-10-24 18:00 Audit of the-mac-wide-test: complete, clean, round 1: 1 Nit open
 - 2026-10-24 18:02 Merged lead-record-commits: Lead record commits carry no trailer, and conflicts in them resolve themselves
+- 2026-10-24 18:02 Update: Merged: the lead's record commits carry no trailer, and conflicts in them resolve themselves — **What changed.**
+- 2026-10-24 18:07 Audit of mac-wide-limits-are: complete, clean, round 1: 2 Nit open
+- 2026-10-24 18:08 Merged the-mac-wide-test: The Mac-wide test lock checks its holder and times out, and waiting on it isn't a stall
