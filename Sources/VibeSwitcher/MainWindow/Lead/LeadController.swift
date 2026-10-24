@@ -161,6 +161,8 @@ final class LeadController: ObservableObject {
     @Published private(set) var decisions: [String: [LeadDecision]] = [:]
     /// The Team view's plain-language lines.
     let summaries = TeamSummaryModel()
+    /// The all-done cards: each board clearing after merges, its summary, and the user opening the lead.
+    let allDone: AllDoneWatch
     /// The leads' bases, when they moved other than through merges (see `BaseMoves`).
     let baseMoves: BaseMoves
     /// The Mac kept awake while a team works.
@@ -276,6 +278,7 @@ final class LeadController: ObservableObject {
         let reads = LeadReads()
         self.reads = reads
         baseMoves = BaseMoves(vault: vault, reads: reads)
+        allDone = AllDoneWatch(reads: reads)
         self.claudeCommand = claudeCommand
         summaries.lookup = { [weak host, weak store] id in
             (host?.sessions.first { $0.id.uuidString == id }, store?.sessions.first { $0.hostID?.uuidString == id }?.transcriptPath)
@@ -291,6 +294,8 @@ final class LeadController: ObservableObject {
         roleSweep?.tools = { [weak self] tools in
             DispatchQueue.main.async { self?.toolTimes = tools }
         }
+        allDone.enabled = { [weak summaries] in summaries?.enabled ?? false }
+        allDone.changed = { [weak self] _ in self?.refresh() }
         timer = Heartbeat.shared.every(3) { [weak self] in self?.refresh() }
         // Whatever is typed into a replaced lead (its terminal, the composer, the phone) comes here, never to it.
         host.inputGate = { [weak self] id, bytes in self?.takeInput(bytes, for: id) ?? false }
@@ -347,6 +352,12 @@ final class LeadController: ObservableObject {
         guard let id = row.hostID, host.sessions.first(where: { $0.id == id }).map({ LeadTeams.role(label: $0.label) == .lead }) == true,
               let board = boards[root] else { return nil }
         return (root, board)
+    }
+
+    /// The user opened this lead: its all-done cards are seen, and the sidebar's check goes at once.
+    func seeAllDone(for row: WindowRow) {
+        guard let lead = lead(for: row), lead.board.hasUnseenAllDone, let seen = allDone.see(root: lead.root, board: lead.board) else { return }
+        boards[lead.root] = seen
     }
 
     // MARK: Starting
@@ -885,6 +896,7 @@ final class LeadController: ObservableObject {
                            decisions read: [String: [LeadDecision]], teams: [String: TeamReading]) {
         dispatchPrecondition(condition: .onQueue(.main))
         tell(timers: fired)
+        let previous = boards
         if loaded != boards { boards = loaded }
         if read != decisions { decisions = read }
         baseMoves.look(roots)
@@ -895,6 +907,7 @@ final class LeadController: ObservableObject {
                 notify(question.version > 1 ? "The lead of \(project) updated a question" : "The lead of \(project) asks", timer + question.text)
             }
             witness(root: root, board: board, team: teams[root] ?? TeamReading())
+            allDone.look(root: root, previous: previous[root], board: board)
         }
         forgetFinished(loaded)
         keepAwake.update(working: KeepAwake.working(loaded, teams: teams))

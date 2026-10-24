@@ -851,6 +851,9 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     /// Records the lead removed (made by mistake, never ran), oldest first: kept for the record, shown and counted
     /// nowhere. Optional: older boards have none.
     public var removed: [LeadTask]?
+    /// Each moment the board cleared after merges (see `BatchSummary`), oldest first, with its summary once written.
+    /// Optional: older boards have none.
+    public var allDone: [LeadAllDone]?
 
     public static let keptReports = 50
 

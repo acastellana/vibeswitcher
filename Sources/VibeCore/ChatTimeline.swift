@@ -10,6 +10,8 @@ public enum ChatItem: Equatable, Sendable, Identifiable {
     case team(ChatEntry, TeamMessage)
     /// "New since you looked", with what happened since.
     case newMarker(summary: String)
+    /// The lead's board cleared here: every task finished (see `BatchSummary.place`).
+    case allDone(LeadAllDone)
 
     public static func toolsID(_ firstToolID: String) -> String { "tools:\(firstToolID)" }
 
@@ -18,6 +20,7 @@ public enum ChatItem: Equatable, Sendable, Identifiable {
         case .prompt(let entry), .reply(let entry), .team(let entry, _): return entry.id
         case .tools(let id, _): return id
         case .newMarker: return "new-marker"
+        case .allDone(let mark): return "all-done:\(mark.id)"
         }
     }
 }
@@ -119,6 +122,9 @@ public enum ChatSearch {
                 }
             case .newMarker:
                 return false
+            case .allDone(let mark):
+                let summary = mark.summary.map { [$0.headline] + $0.bullets } ?? []
+                return (["All tasks finished"] + summary + mark.tasks.map(\.title)).contains { $0.localizedCaseInsensitiveContains(needle) }
             }
         }.map(\.id)
     }

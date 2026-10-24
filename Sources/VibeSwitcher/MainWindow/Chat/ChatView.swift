@@ -44,6 +44,8 @@ struct ChatContainer: View {
                 .environment(\.chatFolder, model.selectedRow?.cwd)
                 .environment(\.chatRunner, chat.runner)
                 .environment(\.teamSummaries, leads.summaries)
+                // The lead's all-done cards, in its own conversation only.
+                .onChange(of: lead?.board.allDone ?? [], initial: true) { _, marks in chat.showAllDone(marks) }
             Divider()
             if let row = model.selectedRow {
                 if row.hostID != nil, actions.isLive(row), row.session == nil {
@@ -553,6 +555,8 @@ struct ChatItemRow: View {
             }
         case .team(let entry, let message):
             TeamMessageCard(entry: entry, message: message, chat: chat, expanded: expanded).padding(.trailing, 40)
+        case .allDone(let mark):
+            AllDoneCard(mark: mark, chat: chat, expanded: expanded).padding(.trailing, 40)
         case .tools(let id, let tools):
             ToolGroupView(id: id, tools: tools, chat: chat, expanded: expanded, openImage: openImage).padding(.leading, 30)
         case .newMarker(let summary):

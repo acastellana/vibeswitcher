@@ -110,6 +110,7 @@ struct SessionListView: View {
         WindowRowView(row: row, showProject: showProject ?? (model.grouping == .attention), role: model.role(of: row),
                       team: arranged.teams[row.id], board: arranged.teams[row.id] == nil ? nil : leads.lead(for: row)?.board,
                       questions: model.role(of: row) == .lead ? leads.lead(for: row).map { ($0.board.openQuestions.count, $0.board.blockingQuestions) } : nil,
+                      allDone: model.role(of: row) == .lead && leads.lead(for: row)?.board.hasUnseenAllDone == true,
                       label: model.label(of:), replaced: model.replaced(row), nested: arranged.nested.contains(row.id),
                       teamOpen: model.expandedTeams.contains(row.id)) { model.toggleTeam(row.id) }
             .tag(row.id as String?)
@@ -182,6 +183,8 @@ struct WindowRowView: View {
     var board: LeadBoard?
     /// A lead's open questions for you, and how many of them block.
     var questions: (open: Int, blocking: Int)?
+    /// A lead whose board cleared (every task finished) since you last opened it: a green check.
+    var allDone = false
     /// Window sessions' labels (who's a verifier).
     var label: (WindowRow) -> String? = { $0.hosted?.label }
     /// A lead another session replaced: it says where to continue instead of its status.
@@ -210,6 +213,11 @@ struct WindowRowView: View {
                                 .foregroundStyle(.white).background(Capsule().fill(replaced == nil ? Color.accentColor : Color.gray))
                         }
                         Text(row.title).font(.system(size: nested ? 12 : 13, weight: .medium)).lineLimit(1)
+                        if allDone {
+                            Image(systemName: "checkmark.seal.fill").font(.system(size: 11)).foregroundStyle(SessionStatus.done.color)
+                                .help("All tasks finished")
+                                .accessibilityLabel("All tasks finished")
+                        }
                         Spacer(minLength: 4)
                         if let since = state.since {
                             Text(Durations.short(context.date.timeIntervalSince(since)))

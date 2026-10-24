@@ -170,7 +170,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             }
             .store(in: &cancellables)
         leads.$boards.receive(on: RunLoop.main)
-            .sink { [weak self] _ in DispatchQueue.main.async { self?.updateTitleAndBadge() } }
+            .sink { [weak self] _ in
+                DispatchQueue.main.async {
+                    self?.updateTitleAndBadge()
+                    self?.seeSelectedLead()
+                }
+            }
             .store(in: &cancellables)
         leads.$replacedLeads.receive(on: RunLoop.main)
             .sink { [weak self] replaced in
@@ -307,6 +312,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             updateChat()
             updateViewing()
             updateTitleAndBadge()
+            seeSelectedLead()
         }
         guard let row = model.selectedRow else {
             guard shownID != "" else { return }
@@ -335,6 +341,12 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             }
         }
         shownID = row.id
+    }
+
+    /// The lead you're looking at: its all-done cards are seen (the sidebar's check goes).
+    private func seeSelectedLead() {
+        guard window?.isVisible == true, let row = model.selectedRow else { return }
+        leads.seeAllDone(for: row)
     }
 
     /// Shows the selected row's conversation over the terminal when Chat is chosen and it has one.

@@ -70,6 +70,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         controller.watchPolicy()
         controller.watchHeavySlots()
         controller.watchRoom()
+        // The all-done cards' summaries, by headless Claude (benches and tests leave it unset: the written fallback).
+        controller.allDone.generate = ClaudeHeadless.allDone
         return controller
     }()
     /// The ElevenLabs key for the briefing, the Mac's and the phone's: the one saved in the login Keychain, else your

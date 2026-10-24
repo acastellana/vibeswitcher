@@ -148,8 +148,18 @@ final class ChatModel: ObservableObject {
     private(set) var reading = false
     private let queue = DispatchQueue(label: "vibeswitcher.chat-reads", qos: .userInitiated)
 
+    /// The lead's all-done marks, when this is a project lead's conversation: each a card where its board cleared.
+    private(set) var allDone: [LeadAllDone] = []
+
+    /// Shows the lead's all-done cards (none: this isn't a lead's conversation).
+    func showAllDone(_ marks: [LeadAllDone]) {
+        guard marks != allDone else { return }
+        allDone = marks
+        updateItems()
+    }
+
     private func updateItems() {
-        let new = ChatTimeline.items(log.entries, newAfter: markerAfter)
+        let new = BatchSummary.place(allDone, in: ChatTimeline.items(log.entries, newAfter: markerAfter))
         guard new != items else { return }
         // Its indices are the old items': whatever was still to come is shown now.
         stopStaging()
