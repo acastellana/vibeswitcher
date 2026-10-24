@@ -1076,3 +1076,4 @@
 - 2026-10-24 12:09 Update: Merged: `!` commands from the chat show as delivered — **What changed.** A `!` command typed in the chat composer used to show the orange "Not in the conversation yet" label even though Claude Code had run it.
 - 2026-10-24 15:44 Planned chat-image-viewer-opens: Chat image viewer opens large enough to show the whole image
 - 2026-10-24 15:44 Started a worker on chat-image-viewer-opens
+- 2026-10-24 16:01 Merged chat-image-viewer-opens: Chat image viewer opens large enough to show the whole image (no audit: review none)
