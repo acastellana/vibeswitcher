@@ -1139,3 +1139,4 @@
 - 2026-10-24 22:42 Planned all-done-card-a: All-done card: a signal and a plain-words summary when the board clears
 - 2026-10-24 22:42 Started a worker on all-done-card-a
 - 2026-10-24 23:26 Merged all-done-card-a: All-done card: a signal and a plain-words summary when the board clears (no audit: review none)
+- 2026-10-24 23:27 Update: All-done card: a signal and a plain-words summary when the board clears — **What changed:** When a lead's board goes from open work to empty after at least one merge, a green "All tasks finished" card appears in that lead's chat at that moment. It has a headline and 3–6 sho…
