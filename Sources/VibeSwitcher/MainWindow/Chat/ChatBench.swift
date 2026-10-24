@@ -33,7 +33,7 @@ enum ChatBench {
         // VIBESWITCHER_BENCH_LIVE=1: as for a session that's working (its live line ticks every second).
         var row: WindowRow?
         // VIBESWITCHER_BENCH_WINDOW=1: the chat pane as the window has it (ChatContainer): a lead's team strip above
-        // (VIBESWITCHER_BENCH_BOARD=REPO: its .vibeswitcher/board.json), a window session you can type into, the
+        // (VIBESWITCHER_BENCH_BOARD=REPO: its .vibeswitcher/board.json, and its all-done cards), a window session you can type into, the
         // composer below; replies resolve paths against VIBESWITCHER_BENCH_FOLDER and offer Run on code blocks.
         let whole = env["VIBESWITCHER_BENCH_WINDOW"] == "1"
         if env["VIBESWITCHER_BENCH_LIVE"] == "1" || whole {
@@ -624,6 +624,8 @@ enum ChatBench {
                         .id(chat.path ?? "")
                         .environment(\.chatFolder, folder)
                         .environment(\.chatRunner, chat.runner)
+                        // The lead's all-done cards, as `ChatContainer` gives them.
+                        .onChange(of: board?.allDone ?? [], initial: true) { _, marks in chat.showAllDone(marks) }
                     Divider()
                     ComposerView(chat: chat, composer: chat.composer, rowID: row.draftKey, agent: .claude, working: true,
                                  actions: ComposerActions(send: { _ in false }, steer: { _ in false }, stop: {}, cycleMode: {}))
