@@ -389,17 +389,38 @@ enum ImageCache {
     static func full(_ image: ChatImage) -> NSImage? { NSImage(data: image.data) }
 }
 
-/// Full-size image with Copy and Save.
+/// The whole image, scaled down to fit the room it opens with (`ImageViewerLayout`), with Copy and Save. Actual Size
+/// shows a scaled-down one 1:1, scrolling.
 struct ImageViewer: View {
     let image: ChatImage
+    /// The most the viewer may take: `ImageViewerLayout.room(over:)` for the window it opens from.
+    let room: CGSize
     let close: () -> Void
     @State private var full: NSImage?
+    @State private var actualSize = false
+
+    /// `full`: the image already decoded (snapshots); otherwise it's decoded off the main thread once shown.
+    init(image: ChatImage, room: CGSize, full: NSImage? = nil, close: @escaping () -> Void) {
+        self.image = image
+        self.room = room
+        self.close = close
+        _full = State(initialValue: full)
+    }
 
     var body: some View {
+        let pixels = ImageViewerLayout.pixelSize(image.data)
+        let size = ImageViewerLayout.size(image: pixels, room: room)
         VStack(spacing: 0) {
             HStack {
                 Text(image.mediaType).font(.system(size: 11)).foregroundStyle(.secondary)
+                if let pixels {
+                    Text(verbatim: "\(Int(pixels.width)) × \(Int(pixels.height))").font(.system(size: 11)).foregroundStyle(.secondary)
+                }
                 Spacer()
+                if size.scaled {
+                    Toggle("Actual Size", isOn: $actualSize).toggleStyle(.button)
+                        .help("Show the image 1:1, scrolling, or fitted to the viewer")
+                }
                 Button("Copy") {
                     guard let nsImage = full else { return }
                     NSPasteboard.general.clearContents()
@@ -408,18 +429,32 @@ struct ImageViewer: View {
                 Button("Save…") { save() }
                 Button("Done", action: close).keyboardShortcut(.cancelAction)
             }
-            .padding(10)
+            .padding(.horizontal, 10)
+            .frame(height: ImageViewerLayout.barHeight)
             Divider()
-            if let nsImage = full {
-                ScrollView([.horizontal, .vertical]) {
-                    Image(nsImage: nsImage).resizable().aspectRatio(contentMode: .fit)
-                        .frame(maxWidth: min(nsImage.size.width, 1400))
-                        .padding(12)
+            Group {
+                if let nsImage = full {
+                    if actualSize, let pixels {
+                        ScrollView([.horizontal, .vertical]) {
+                            Image(nsImage: nsImage).resizable().frame(width: pixels.width, height: pixels.height)
+                                .padding(ImageViewerLayout.padding)
+                        }
+                    } else {
+                        Image(nsImage: nsImage).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+                            .frame(maxWidth: size.image.width > 0 ? size.image.width : .infinity,
+                                   maxHeight: size.image.height > 0 ? size.image.height : .infinity)
+                            .padding(ImageViewerLayout.padding)
+                    }
+                } else {
+                    ProgressView().controlSize(.small)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(minWidth: 640, idealWidth: 1000, minHeight: 420, idealHeight: 720)
+        // Exact: a sheet comes up at its content's minimum size, not its ideal one.
+        .frame(width: size.content.width, height: size.content.height)
         .task(id: image.id) {
+            guard full == nil else { return }
             let data = image.data
             full = await Task.detached(priority: .userInitiated) { NSImage(data: data) }.value
         }

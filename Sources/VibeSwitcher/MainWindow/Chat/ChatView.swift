@@ -106,6 +106,8 @@ struct ChatView: View {
     /// redrawing for that.
     @State private var bottom = BottomTracker()
     @State private var viewing: ChatImage?
+    /// The room the image viewer opens with: from the window a thumbnail was clicked in, read then.
+    @State private var viewerRoom = ImageViewerLayout.room(window: nil, screen: nil)
     @State private var didInitialScroll = false
     /// Scrolled to where it opens, shown the turn after (once that scroll is laid out).
     @State private var placing = false
@@ -148,7 +150,10 @@ struct ChatView: View {
                                      current: chunk.items.contains { $0.id == current } ? current : nil,
                                      matches: matches.isEmpty ? [] : matches.intersection(chunk.items.map(\.id)),
                                      agent: row?.markKind ?? .agent(.claude), rowID: row?.draftKey, canSend: live,
-                                     resend: resend) { viewing = $0 }
+                                     resend: resend) { image in
+                                         viewerRoom = ImageViewerLayout.room(over: NSApp.keyWindow)
+                                         viewing = image
+                                     }
                                 .equatable()
                         }
                         ForEach(chat.steering) { message in
@@ -292,7 +297,7 @@ struct ChatView: View {
                 }
             }
         }
-        .sheet(item: $viewing) { image in ImageViewer(image: image) { viewing = nil } }
+        .sheet(item: $viewing) { image in ImageViewer(image: image, room: viewerRoom) { viewing = nil } }
     }
 
     /// The conversation out of sight: being laid out, or just scrolled to where it opens.
