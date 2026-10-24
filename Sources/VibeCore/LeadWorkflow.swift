@@ -924,6 +924,52 @@ public enum LeadPrompts {
         public var nitCap: Int
     }
 
+    /// A branch behind the base in files it changes too, whose trial merge onto the base is clean: the audit tests
+    /// the merged result, not the branch's head (see `Worktrees.mergedCommit`), and the verifier checks what the
+    /// merge made of the files both changed.
+    public struct Merged: Equatable, Sendable {
+        /// The merge commit (the base's tip, then the branch's head, as parents).
+        public var commit: String
+        public var base: String
+        /// The branch's head the verdict covers.
+        public var head: String
+        /// The files the base's commits since the branch last took it in changed, which the branch changes too.
+        public var files: [String]
+        /// The audit's run of `commit` for a single verifier: its logs and how it went (a finder has its own, the same).
+        public var logs: [String] = []
+        public var run: String?
+    }
+
+    /// The verifier's part of its prompt about a merged result: what it is, what to read in it, and (a single
+    /// verifier) the audit's run of it in place of a run of its own.
+    static func merged(_ merged: Merged) -> String {
+        let files = merged.files.prefix(12).joined(separator: " ") + (merged.files.count > 12 ? " …" : "")
+        var text = """
+        The base moved in files this branch changes too: \(merged.base)'s commits since the branch last took it in \
+        changed \(merged.files.prefix(12).joined(separator: ", "))\(merged.files.count > 12 ? ", …" : ""). A trial merge onto \(merged.base) \
+        is clean, so this audit checks the branch as it would land: \(merged.commit.prefix(8)) is \(merged.base) with \
+        the branch at \(merged.head.prefix(8)) merged in (nothing points at it; it isn't the branch's to commit to). \
+        Review the branch's own change as usual (`git diff \(merged.base)...HEAD`), and read what the merge made of \
+        the files both changed (`git diff \(merged.head.prefix(8)) \(merged.commit.prefix(8)) -- \(files)`): a break \
+        there (a build error, a test that fails only on the merged result) is the branch's to fix, so make it a finding \
+        on the branch's file and line. Your verdict covers \(merged.head.prefix(8)); merge runs the full suite on the \
+        result again before it lands.
+        """
+        if let run = merged.run {
+            let logs = merged.logs.isEmpty ? "(no log was written)" : merged.logs.map { "- \($0)" }.joined(separator: "\n")
+            text += """
+
+            The audit built \(merged.commit.prefix(8)) and ran the whole test suite on it once, in a scratch worktree \
+            under a scratch home, before starting you: \(run). Its logs:
+            \(logs)
+            Read them (grep for what you need; they're long). Don't build the whole project or run the whole suite \
+            again on HEAD: the logs are the tests' run, and submit_audit's tests is how it went. Run only focused \
+            tests (one test or a filter) for what you need to see yourself.
+            """
+        }
+        return text
+    }
+
     /// A finder's part of the verifier's prompt: its focus, the shared run's logs instead of a run of its own, and
     /// the vote its findings go to.
     static func finding(_ finder: Finder) -> String {
@@ -1017,7 +1063,7 @@ public enum LeadPrompts {
     }
 
     public static func verifier(task: LeadTask, root: String, workflow: LeadWorkflow, reaudit: Reaudit? = nil, finder: Finder? = nil,
-                                notes: Notes = Notes(), report: String? = nil, policy: String = WorkingPolicy.load()) -> String {
+                                merged: Merged? = nil, notes: Notes = Notes(), report: String? = nil, policy: String = WorkingPolicy.load()) -> String {
         """
         You are the verifier for a task of the project lead of \(root). You are read-only: don't edit, fix, commit or \
         stage anything. Check the branch agent/\(task.slug) in this worktree against its contract, independently of \
@@ -1025,8 +1071,9 @@ public enum LeadPrompts {
 
         \(WorkingPolicy.section(policy))
         \(finder.map { "\n" + finding($0) + "\n" } ?? "")
+        \(merged.map { Self.merged($0) + "\n" } ?? "")
         \(reaudit.map(recheck) ?? """
-        Check: run every acceptance check\(finder != nil ? "" : workflow.testCommand.map { " and `\($0)`" } ?? ""); read the whole change \
+        Check: run every acceptance check\(finder != nil || merged?.run != nil ? "" : workflow.testCommand.map { " and `\($0)`" } ?? ""); read the whole change \
         (`git diff \(workflow.base)...HEAD`, `git log \(workflow.base)..HEAD`); look for edits outside the boundaries, weakened or deleted \
         tests, hard-coded results, leftovers and anything that only looks done.
         """)
@@ -1039,7 +1086,7 @@ public enum LeadPrompts {
         Then call submit_audit with: completion complete / incomplete / blocked; integrity clean, suspect (you're not \
         sure) or violation (edits outside the boundaries that neither the lead's notes nor the worker's listed routine \
         calls accept, tests weakened, results faked, files you changed); tests passed, failed or not_run (how the tests \
-        went\(finder != nil ? " in the audit's shared run" : " when you ran them")); a \
+        went\(finder != nil ? " in the audit's shared run" : merged?.run != nil ? " in the audit's run of the merged result" : " when you ran them")); a \
         summary with the evidence (commands run and their results); and findings, one for each problem you found, \
         minor ones included: {severity, file, line, evidence, status}. severity: Important (must be fixed before \
         it merges: an acceptance check that fails, a bug, a weakened test, an edit outside the boundaries that neither \

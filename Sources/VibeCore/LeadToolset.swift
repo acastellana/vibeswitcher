@@ -999,6 +999,33 @@ public final class LeadToolset: MCPToolset {
                              + " Its worktree and commits stay; start_worker continues there.")
     }
 
+    /// audit's verifier takes the place of the task's own worker: `MacLoad.count` leaves the task's worktree out. Where
+    /// the Mac would be past mac_max_sessions with that worker still there, a worker idle since its done report on
+    /// `head` is ended as stop_worker ends one, so the place is real (2026-10-24: finished workers waiting for their
+    /// audits held 4 to 5 of the Mac's 10 slots, verifiers were refused for mac_max_sessions, and the lead ended them by
+    /// hand). One mid-turn, waiting on a prompt, or whose last report wasn't done on `head` is never ended. What audit's
+    /// reply says of it; "" when nothing was ended.
+    private func makeRoom(_ task: LeadTask, head: String, need: Int, limits: MacLimits) -> String {
+        let refused = "\(task.slug)'s worker wasn't ended to make room"
+        guard let worker = task.worker, worker != task.stopped, let sessions = try? hostSessions(refused),
+              let info = sessions.first(where: { $0.id == worker && $0.live }) else { return "" }
+        let others = MacLoad.count(sessions.map { ($0.label, $0.cwd, $0.live) }, load: nil, except: Worktrees.path(root: root, slug: task.slug))
+        guard others.sessions + need + 1 > limits.maxSessions, info.waiting == nil, info.status == LeadActivity.idle(background: nil).text,
+              (try? vault.unaudited(root: root, task: task.slug))?.reported == head else { return "" }
+        guard let ending = try? end([info], refused: refused).first else { return "" }
+        if ending.failure != nil {
+            return "\(task.slug)'s worker, idle since its done report, wasn't ended to make room for the verifier (\(ending.said)): the verifier starts beside it. "
+        }
+        try? store.update { board in
+            guard let index = board.taskIndex(task.slug) else { return }
+            board.tasks[index].stopped = worker
+        }
+        try? store.appendProgress("Ended \(task.slug)'s worker (idle since its done report on \(head.prefix(8))) to make room on the Mac for its audit")
+        return "Ended \(task.slug)'s worker, idle since its done report on \(head.prefix(8)), to make room: with it the Mac's team sessions would go past "
+            + "mac_max_sessions (\(others.sessions + 1) with it, \(limits.maxSessions) at most), and the audit takes its slot (\(ending.said)). "
+            + "Its worktree and commits stay; start_worker continues there if there's rework. "
+    }
+
     private func message(_ slug: String, _ arguments: [String: Any]) throws -> MCPToolResult {
         let text = try self.text(arguments, "text", missing: "Nothing to send.")
         guard let worker = store.load().task(slug)?.worker else { throw Problem(text: "\(slug) has no worker.") }
@@ -1111,7 +1138,8 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "\(slug) has no worktree to check.")
         }
         let workflow = self.workflow
-        let behind = try checkUpToDate(slug, head: head, base: workflow.base)
+        let upToDate = try checkUpToDate(slug, head: head, base: workflow.base)
+        let behind = upToDate.said
         // Not on a Mac every project's teams already load: the task's own worker (done) and earlier verifier aren't
         // counted, the verifier takes their place.
         let sessions = try hostSessions("whether the Mac has room for a verifier isn't known; no verifier was started")
@@ -1119,9 +1147,11 @@ public final class LeadToolset: MCPToolset {
                                 except: Worktrees.path(root: root, slug: slug))
         // The finders' number and their Nits' cap as the lead set them, not as a worker rewrote them.
         try checkSettings(workflow, not: "Not audited, no verifier started", keys: ["audit_finders", "audit_nit_cap"])
-        // Several finders: the audit itself runs init_command and test_command as the lead first (a scratch home is
-        // no boundary), so every guard rail must be the lead's, as for merge.
-        if workflow.auditFinders > 1 { try checkSettings(workflow, not: "Not audited, nothing built or tested, no finder started") }
+        // Several finders, or a merged result to test: the audit itself runs init_command and test_command as the lead
+        // first (a scratch home is no boundary), so every guard rail must be the lead's, as for merge.
+        if workflow.auditFinders > 1 || upToDate.merged != nil {
+            try checkSettings(workflow, not: "Not audited, nothing built or tested, no " + (workflow.auditFinders > 1 ? "finder" : "verifier") + " started")
+        }
         let finders = workflow.auditFinders
         if let refusal = macRefusal(mac, not: "No verifier started", what: "audit(\(slug))", need: finders) { throw Problem(text: refusal) }
         // Each finder is a session of its own: the Mac must have room for all of them.
@@ -1147,16 +1177,25 @@ public final class LeadToolset: MCPToolset {
         let recheck = ledger.flatMap { ledger in ledger.isReaudit ? reaudit(ledger, slug: slug, head: head) : nil }
         // Named before its grant goes to the new one.
         let noTools = noToolsBefore(task, .verifier, sessions: sessions)
+        let room = makeRoom(task, head: head, need: finders, limits: limits)
         let session: String
         var panel: LeadAuditPanel?
+        var merged = upToDate.merged
         if finders > 1 {
-            panel = try startFinders(finders, task: task, head: head, workflow: workflow, recheck: recheck, trust: config.isEmpty)
+            panel = try startFinders(finders, task: task, head: head, merged: merged, workflow: workflow, recheck: recheck, trust: config.isEmpty)
             session = panel!.sessions[0]
         } else {
+            // Behind the base where it matters: its tests run once on the merged result, which the verifier reads.
+            if let commit = merged?.commit {
+                let run = try auditRun(slug, commit: commit, workflow: workflow, not: "no verifier started")
+                merged?.logs = run.logs
+                merged?.run = run.outcome.text
+                try? store.appendProgress("Audit of \(slug) at \(head.prefix(8)) tested its merged result \(commit.prefix(8)) onto \(workflow.base): \(run.outcome.text)")
+            }
             session = try launch(.verifier, task: slug, name: "verify-\(slug)", in: Worktrees.path(root: root, slug: slug),
                                  label: "Verifier: \(task.title)", trust: config.isEmpty,
-                                 prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, notes: leadNotes(task),
-                                                              report: doneReport(task, head: head)),
+                                 prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, merged: merged,
+                                                              notes: leadNotes(task), report: doneReport(task, head: head)),
                                  start: "Verify the task now, then call submit_audit.", model: workflow.verifierModel, auditing: head)
         }
         try store.update { board in
@@ -1185,12 +1224,13 @@ public final class LeadToolset: MCPToolset {
             return " It's a re-audit (round \(recheck.round)): the verifier checks the \(recheck.open.count) open finding\(recheck.open.count == 1 ? "" : "s") and \(covers)."
         } ?? ""
         let cap = ledger?.reconsider == true ? " " + Self.reconsiderText(ledger!, of: slug) : ""
+        let tested = merged.map { " One build and test run of its merged result \($0.commit.prefix(8)) came first, and the verifier reads its logs (\($0.run ?? "")): \($0.logs.joined(separator: ", "))." } ?? ""
         if let panel {
-            return MCPToolResult(text: noTools + putBack + behind + "\(panel.size) finders started on \(slug) (checking \(head.prefix(8))): " + Self.focusesText(panel.focuses) + ". "
-                                 + "One build and test run came first, and every finder reads its logs (\(panel.run)): \(panel.logs.joined(separator: ", ")). "
+            return MCPToolResult(text: noTools + putBack + behind + room + "\(panel.size) finders started on \(slug) (checking \(head.prefix(8))): " + Self.focusesText(panel.focuses) + ". "
+                                 + "One build and test run\(merged.map { " of its merged result \($0.commit.prefix(8))" } ?? "") came first, and every finder reads its logs (\(panel.run)): \(panel.logs.joined(separator: ", ")). "
                                  + "Their findings are voted into one verdict, which arrives as a message once all \(panel.size) have submitted.\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
         }
-        return MCPToolResult(text: noTools + putBack + behind + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
+        return MCPToolResult(text: noTools + putBack + behind + room + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(tested)\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
     }
 
     /// " The worktree has 3 untracked files (12.0 KB), leftovers …: path (size), …", or "" for none.
@@ -1212,22 +1252,12 @@ public final class LeadToolset: MCPToolset {
     /// An audit by `count` finders: one build and test run of `head` first (its logs kept per commit, so an audit
     /// of the same commit again reuses them), then each finder started with its focus and those logs, as one panel
     /// in the vault. A finder that fails to start ends the ones started before it.
-    private func startFinders(_ count: Int, task: LeadTask, head: String, workflow: LeadWorkflow,
+    /// A branch behind the base where it matters is tested as it would land: `merged`'s commit, not `head`.
+    private func startFinders(_ count: Int, task: LeadTask, head: String, merged: LeadPrompts.Merged?, workflow: LeadWorkflow,
                               recheck: LeadPrompts.Reaudit?, trust: Bool) throws -> LeadAuditPanel {
         let slug = task.slug
-        guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/audit-\(slug).lock")) else {
-            throw Problem(text: "An audit of \(slug) is already making its build and test run; its verdict comes as a report.")
-        }
-        defer { lock.release() }
-        let logs = URL(fileURLWithPath: store.folder).appendingPathComponent("audit/\(slug)/\(head.prefix(12))")
-        let run = Self.sharedRun(at: logs) ?? {
-            Worktrees.auditRun(root: root, commit: head, setup: workflow.initCommand, test: workflow.testCommand,
-                               scratch: vault.scratch(root: root, "audit-\(slug)"), home: vault.scratch(root: root, "audit-\(slug)-home"),
-                               logs: logs, timeout: workflow.testTimeout, lock: heavyLock(workflow))
-        }()
-        if case .cancelled = run.outcome {
-            throw Problem(text: "The audit of \(slug) was cancelled during its build and test run; no finder started.")
-        }
+        let tested = merged?.commit ?? head
+        let run = try auditRun(slug, commit: tested, workflow: workflow, not: "no finder started")
         let changed = Git.run(["diff", "--name-only", "\(workflow.base)...\(head)"], in: root).output.split(whereSeparator: \.isNewline).map(String.init)
         let sensitive = changed.filter { path in workflow.sensitiveGlobs.contains { LeadWorkflow.matches(path, glob: $0) } }
         let focuses = LeadPrompts.Focus.panel(count, sensitive: !sensitive.isEmpty)
@@ -1236,12 +1266,13 @@ public final class LeadToolset: MCPToolset {
         var sessions: [String] = []
         for (offset, focus) in focuses.enumerated() {
             let index = offset + 1
-            let finder = LeadPrompts.Finder(index: index, size: count, focus: focus, commit: head, logs: run.logs, run: run.outcome.text,
+            let finder = LeadPrompts.Finder(index: index, size: count, focus: focus, commit: tested, logs: run.logs, run: run.outcome.text,
                                             sensitive: sensitive, nitCap: workflow.auditNitCap)
             do {
                 sessions.append(try launch(.verifier, task: slug, name: index == 1 ? "verify-\(slug)" : "finder\(index)-\(slug)",
                                            in: Worktrees.path(root: root, slug: slug), label: "Verifier: \(task.title) (finder \(index)/\(count): \(focus.rawValue))",
-                                           trust: trust, prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, finder: finder, notes: notes, report: report),
+                                           trust: trust, prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, finder: finder,
+                                                                                      merged: merged, notes: notes, report: report),
                                            start: "Look for findings in your focus now, then call submit_audit.", model: workflow.verifierModel, auditing: head,
                                            finder: LeadVault.Finder(panel: id, index: index, size: count, focus: focus.rawValue, nitCap: workflow.auditNitCap)))
             } catch {
@@ -1249,8 +1280,28 @@ public final class LeadToolset: MCPToolset {
                 throw Problem(text: "Not audited: finder \(index) of \(count) couldn't start (\(error))" + (sessions.isEmpty ? "." : "; the \(sessions.count) started before it were ended."))
             }
         }
-        try? store.appendProgress("Audit of \(slug) at \(head.prefix(8)) by \(count) finders (\(focuses.map(\.rawValue).joined(separator: "; "))); the shared run: \(run.outcome.text)")
+        try? store.appendProgress("Audit of \(slug) at \(head.prefix(8)) by \(count) finders (\(focuses.map(\.rawValue).joined(separator: "; "))); the shared run"
+                                  + (merged == nil ? "" : " of its merged result \(tested.prefix(8))") + ": \(run.outcome.text)")
         return LeadAuditPanel(focuses: focuses.map(\.rawValue), sessions: sessions, commit: head, logs: run.logs, run: run.outcome.text)
+    }
+
+    /// The audit's one build and test run of `commit` (the branch's head, or its merged result), its logs kept per
+    /// commit, so an audit of the same commit again reuses them. `not`: what didn't start when it was cancelled.
+    private func auditRun(_ slug: String, commit: String, workflow: LeadWorkflow, not: String) throws -> Worktrees.AuditRun {
+        guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/audit-\(slug).lock")) else {
+            throw Problem(text: "An audit of \(slug) is already making its build and test run; its verdict comes as a report.")
+        }
+        defer { lock.release() }
+        let logs = URL(fileURLWithPath: store.folder).appendingPathComponent("audit/\(slug)/\(commit.prefix(12))")
+        let run = Self.sharedRun(at: logs) ?? {
+            Worktrees.auditRun(root: root, commit: commit, setup: workflow.initCommand, test: workflow.testCommand,
+                               scratch: vault.scratch(root: root, "audit-\(slug)"), home: vault.scratch(root: root, "audit-\(slug)-home"),
+                               logs: logs, timeout: workflow.testTimeout, lock: heavyLock(workflow))
+        }()
+        if case .cancelled = run.outcome {
+            throw Problem(text: "The audit of \(slug) was cancelled during its build and test run; \(not).")
+        }
+        return run
     }
 
     /// A finished shared run kept at `logs` (its run.txt is written last), for an audit of the same commit again.
@@ -1411,15 +1462,24 @@ public final class LeadToolset: MCPToolset {
         }
     }
 
-    /// A branch that hasn't taken in what the base did since to files it changes too breaks or conflicts once it's
-    /// rebased at merge: refused before a verifier spends its runs on it (2026-10-19, twice: base commits that came
-    /// after a worker's last `git merge` changed the test file it changed, and the merge's build failed).
-    /// First a trial merge onto the base: a branch that conflicts can't land, and its worker is the one to resolve it
+    /// What `checkUpToDate` found of a branch that may be audited: how far behind the base it is, said in a line, and
+    /// the merged result the audit checks when the base changed files it changes too.
+    struct UpToDate {
+        var said: String
+        var merged: LeadPrompts.Merged?
+    }
+
+    /// A trial merge onto the base first: a branch that conflicts can't land, and its worker is the one to resolve it
     /// (2026-10-20: a-role-session-s passed its audit, then its verifier found by hand that it conflicted with work
-    /// merged meanwhile; one more audit and verifier for the resolution). What this returns says how far behind the
-    /// base a branch that merges cleanly is. The lead's records (`records_dir`) count in neither check: merge takes
-    /// the base's of them (`Worktrees.takeBaseRecords`), and the worker may not touch them.
-    private func checkUpToDate(_ slug: String, head: String, base: String) throws -> String {
+    /// merged meanwhile; one more audit and verifier for the resolution). A branch that hasn't taken in what the base
+    /// did since to files it changes too can still break once it's rebased at merge (2026-10-19, twice: base commits
+    /// that came after a worker's last `git merge` changed the test file it changed, and the merge's build failed);
+    /// it used to be refused, and every merge sent the other branches back for a catch-up their trial merges didn't
+    /// need (2026-10-24: about 8 worker turns, all conflict-free). Now its audit checks the merged result instead
+    /// (`UpToDate.merged`), and merge's full suite runs on the result as ever. The lead's records (`records_dir`)
+    /// count in neither check: merge takes the base's of them (`Worktrees.takeBaseRecords`), and the worker may not
+    /// touch them.
+    private func checkUpToDate(_ slug: String, head: String, base: String) throws -> UpToDate {
         let records = Set(workflow.recordsDir.map(LeadRecords.paths) ?? [])
         let since: Worktrees.BaseSince
         switch Worktrees.baseSince(root: root, base: base, commit: head) {
@@ -1446,19 +1506,24 @@ public final class LeadToolset: MCPToolset {
         }
         let behind = since.commits.isEmpty ? "" : "agent/\(slug) is \(since.commits.count) commit\(since.commits.count == 1 ? "" : "s") behind \(base); a trial merge onto it is clean. "
         let files = since.overlap.filter { !records.contains($0) }
-        guard !files.isEmpty else { return behind }
+        guard !files.isEmpty else { return UpToDate(said: behind) }
+        let merge: String
+        switch Worktrees.mergedCommit(root: root, base: base, commit: head) {
+        case .success(let made): merge = made
+        case .failure(let error): throw Problem(text: "No verifier started: agent/\(slug) is behind \(base) in files it changes too, and the merged result its audit checks couldn't be made (\(error)).")
+        }
         let commits = since.commits(touching: files)
-        let listed = commits.prefix(8).map { commit in
+        let listed = commits.prefix(4).map { commit in
             "\(commit.line) (\(commit.files.filter(files.contains).joined(separator: ", ")))"
         }
-        throw Problem(text: "Not audited, no verifier started: \(base) has \(commits.count) commit\(commits.count == 1 ? "" : "s") since agent/\(slug) last took it in (at \(since.mergeBase.prefix(8))) "
-                      + "that change files the branch changes too, so it would break or conflict at merge. "
-                      + "\(base)'s commits: \(listed.joined(separator: "; "))\(commits.count > 8 ? "; …" : ""). "
-                      + "Files: \(files.prefix(12).joined(separator: ", "))\(files.count > 12 ? ", …" : ""). "
-                      + Self.bringUpToDate(base))
+        let said = "agent/\(slug) is \(since.commits.count) commit\(since.commits.count == 1 ? "" : "s") behind \(base), and \(commits.count) of them change files it changes too "
+            + "(\(files.prefix(12).joined(separator: ", "))\(files.count > 12 ? ", …" : "")): \(listed.joined(separator: "; "))\(commits.count > 4 ? "; …" : ""). "
+            + "A trial merge onto \(base) is clean, so the audit checks the merged result, \(merge.prefix(8)) (\(base) with the branch merged in; its worker needn't catch up), "
+            + "and merge runs the full suite on the result again. "
+        return UpToDate(said: said, merged: LeadPrompts.Merged(commit: merge, base: base, head: head, files: files))
     }
 
-    /// What the lead tells a worker whose branch is behind the base where it matters.
+    /// What the lead tells a worker whose branch conflicts with the base.
     private static func bringUpToDate(_ base: String) -> String {
         "Message its worker to bring its branch up to date by merging, in its worktree: `git merge \(base)`, resolve the conflicts, `git add` the files, then `git commit`, each command on its own (no pipes, && or 2>&1); then run the tests and report again (start_worker again if it has stopped). Then audit again; merge puts the work on top of \(base) itself."
     }

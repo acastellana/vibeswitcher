@@ -20,10 +20,12 @@ public enum Git {
 
     /// A run that was stopped (out of time, or cancelled) gives no output, only `error` saying so: its callers take
     /// `output` as git's answer, and what it wrote until then isn't one (a shell it ran may even answer after its
-    /// time is up, and exit 0).
+    /// time is up, and exit 0). `env` adds to `environment` (a commit's identity and dates, say).
     @discardableResult
-    public static func run(_ args: [String], in directory: String, timeout: TimeInterval = 120, grace: TimeInterval = 5) -> Result {
-        var result = Shell.run(executable: "/usr/bin/git", args: args, in: directory, env: environment, timeout: timeout, grace: grace)
+    public static func run(_ args: [String], in directory: String, env: [String: String] = [:], timeout: TimeInterval = 120,
+                           grace: TimeInterval = 5) -> Result {
+        var result = Shell.run(executable: "/usr/bin/git", args: args, in: directory, env: environment.merging(env) { $1 },
+                               timeout: timeout, grace: grace)
         if result.timedOut || result.cancelled {
             result.output = ""
             let stopped = result.cancelled ? "git was stopped: cancelled." : "git was stopped: it ran past \(Worktrees.duration(timeout))."
@@ -1021,6 +1023,11 @@ public enum Worktrees {
     /// The files a merge of `commit` into `base` conflicts in (empty: it merges cleanly), from a trial merge that
     /// touches no worktree, index or ref (`git merge-tree --write-tree`); what git said when it can't be told.
     public static func trialMerge(root: String, base: String, commit: String) -> Swift.Result<[String], Failure> {
+        mergeTree(root: root, base: base, commit: commit).map(\.conflicts)
+    }
+
+    /// The tree a merge of `commit` into `base` makes and the files it conflicts in (`git merge-tree --write-tree`).
+    private static func mergeTree(root: String, base: String, commit: String) -> Swift.Result<(tree: String, conflicts: [String]), Failure> {
         let merged = Git.run(["merge-tree", "--write-tree", "--name-only", "--no-messages", "-z", base, commit], in: root)
         // "tree\0file\0file\0": status 0 clean, 1 conflicted; 1 is also what a ref it can't merge gives, with no tree.
         let parts = merged.output.split(separator: "\0").map(String.init)
@@ -1028,7 +1035,35 @@ public enum Worktrees {
               let tree = parts.first, tree.count >= 40, tree.allSatisfy(\.isHexDigit) else {
             return .failure(Failure(description: "git merge-tree \(base) \(commit.prefix(8)) failed: \(said(merged))"))
         }
-        return .success(merged.status == 0 ? [] : Array(parts.dropFirst()))
+        return .success((tree, merged.status == 0 ? [] : Array(parts.dropFirst())))
+    }
+
+    /// The commit a clean merge of `commit` into `base` makes (`base` its first parent, `commit` its second), for an
+    /// audit to test the branch as it would land: written to the object store only, no worktree, index or ref (and
+    /// nothing points at it). The same two commits make the same one (its identity and dates are fixed: `commit`'s
+    /// committer date), so the audit's run of it is kept for an audit of the same branch on the same base again.
+    /// A merge that conflicts, or what git said, is a failure.
+    public static func mergedCommit(root: String, base: String, commit: String) -> Swift.Result<String, Failure> {
+        mergeTree(root: root, base: base, commit: commit).flatMap { merged -> Swift.Result<String, Failure> in
+            guard merged.conflicts.isEmpty else {
+                return .failure(Failure(description: "a merge of \(commit.prefix(8)) into \(base) conflicts in \(merged.conflicts.joined(separator: ", "))"))
+            }
+            let parents = Git.run(["rev-parse", base + "^{commit}", commit + "^{commit}"], in: root)
+            let date = Git.run(["show", "-s", "--format=%ct", commit], in: root)
+            let shas = parents.output.split(whereSeparator: \.isNewline).map(String.init)
+            guard parents.ok, shas.count == 2, date.ok, !date.output.isEmpty else {
+                return .failure(Failure(description: "git rev-parse \(base) \(commit.prefix(8)) failed: \(said(parents.ok ? date : parents))"))
+            }
+            let when = "@\(date.output) +0000"
+            let identity = ["GIT_AUTHOR_NAME": "VibeSwitcher", "GIT_AUTHOR_EMAIL": "audit@vibeswitcher.invalid", "GIT_AUTHOR_DATE": when,
+                            "GIT_COMMITTER_NAME": "VibeSwitcher", "GIT_COMMITTER_EMAIL": "audit@vibeswitcher.invalid", "GIT_COMMITTER_DATE": when]
+            let made = Git.run(["commit-tree", merged.tree, "-p", shas[0], "-p", shas[1], "-m", "Audit: \(shas[1].prefix(8)) merged into \(shas[0].prefix(8))"],
+                               in: root, env: identity)
+            guard made.ok, made.output.count >= 40, made.output.allSatisfy(\.isHexDigit) else {
+                return .failure(Failure(description: "git commit-tree failed: \(said(made))"))
+            }
+            return .success(made.output)
+        }
     }
 
     /// Under `.claude/`, what Claude Code reads as settings or instructions (the rest there is its own state: locks,

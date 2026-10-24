@@ -195,25 +195,121 @@ struct StaleBranchTests: LeadTeamFixture {
         #expect(!verifierStarted(runtime))
     }
 
-    /// Both sides changed a file in lines apart: the trial merge is clean, and the branch is still refused as behind
-    /// where it matters (it could break the build at merge).
-    @Test func aCleanTrialMergeInAFileBothChangedIsStillRefusedAsBehind() throws {
-        let root = try repo()
-        try commit("a.txt", "one\ntwo\nthree\nfour\nfive\n", in: root, "a has lines")
-        let runtime = FakeRuntime()
-        let lead = try lead(root, runtime)
+    /// The verifier's prompt.
+    func verifierPrompt(_ runtime: FakeRuntime) throws -> String {
+        let spawn = try #require(runtime.spawned.last { $0.command.contains("--name 'verify-add-b'") })
+        let range = try #require(spawn.command.range(of: #"--append-system-prompt-file '([^']+)'"#, options: .regularExpression))
+        return try String(contentsOfFile: String(spawn.command[range].dropFirst("--append-system-prompt-file '".count).dropLast()), encoding: .utf8)
+    }
+
+    /// A branch and the base both changed a.txt, in lines apart: the trial merge is clean.
+    func behindInACleanFile(_ lead: LeadToolset, _ runtime: FakeRuntime, root: String) throws {
         started(lead, runtime)
         try commit("a.txt", "one, the worker's\ntwo\nthree\nfour\nfive\n", in: Worktrees.path(root: root, slug: "add-b"), "worker edits a")
         try reported(runtime)
         try commit("a.txt", "one\ntwo\nthree\nfour\nfive, the base's\n", in: root, "base edits a")
-        let edit = sha("main", root)
+        try commit("c.txt", "see\n", in: root, "add c")
+        try vault.setHead(Git.run(["rev-parse", "main"], in: root).output, root: root, branch: "main")
         #expect(try Worktrees.trialMerge(root: root, base: "main", commit: "agent/add-b").get() == [])
+    }
+
+    /// 2026-10-24: every merge sent the other branches back for a catch-up, though each of their trial merges was
+    /// clean (about 8 worker turns). Behind the base in a file it changes, with a clean trial merge, a branch is
+    /// audited on the merged result: its tests run once on that merge, and the verifier is told what it is.
+    @Test func aCleanTrialMergeInAFileBothChangedIsAuditedOnTheMergedResult() throws {
+        let root = try repo()
+        try commit("a.txt", "one\ntwo\nthree\nfour\nfive\n", in: root, "a has lines")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        // The run says which commit it tested and what a.txt held there.
+        #expect(!lead.call("configure", ["test_command": "git rev-parse HEAD && cat a.txt"]).isError)
+        try behindInACleanFile(lead, runtime, root: root)
+        let edit = sha("main~1", root), unrelated = sha("main", root)
+        let head = Git.run(["rev-parse", "agent/add-b"], in: root).output
+        let merge = try Worktrees.mergedCommit(root: root, base: "main", commit: "agent/add-b").get()
+        let refs = Git.run(["show-ref"], in: root).output, worktrees = Git.run(["worktree", "list"], in: root).output
 
         let audit = lead.call("audit", ["task": "add-b"])
-        #expect(audit.isError)
-        #expect(!audit.text.contains("trial merge"), "\(audit.text)")
-        #expect(audit.text.contains("\(edit) base edits a (a.txt)") && audit.text.contains("Files: a.txt."), "\(audit.text)")
+        #expect(!audit.isError, "\(audit.text)")
+        #expect(audit.text.contains("agent/add-b is 2 commits behind main, and 1 of them change files it changes too (a.txt): \(edit) base edits a (a.txt)."), "\(audit.text)")
+        #expect(!audit.text.contains(unrelated), "\(audit.text)")
+        #expect(audit.text.contains("the audit checks the merged result, \(merge.prefix(8)) (main with the branch merged in"), "\(audit.text)")
+        #expect(audit.text.contains("Verifier started on add-b (checking \(head.prefix(8)))"), "\(audit.text)")
+        #expect(audit.text.contains("One build and test run of its merged result \(merge.prefix(8)) came first"), "\(audit.text)")
+        #expect(!audit.text.contains("`git merge main`"), "\(audit.text)")
+        #expect(verifierStarted(runtime))
+        // The merge: main, then the branch, as parents, with both edits; no ref points at it, and the run's scratch
+        // worktree is gone.
+        #expect(Git.run(["rev-list", "--parents", "-n", "1", merge], in: root).output
+                == "\(merge) \(Git.run(["rev-parse", "main"], in: root).output) \(head)")
+        #expect(Git.run(["show", "\(merge):a.txt"], in: root).output == "one, the worker's\ntwo\nthree\nfour\nfive, the base's")
+        #expect(Git.run(["show-ref"], in: root).output == refs)
+        #expect(Git.run(["worktree", "list"], in: root).output == worktrees)
+        #expect(Git.run(["status", "--porcelain"], in: Worktrees.path(root: root, slug: "add-b")).output.isEmpty)
+        // Its tests ran on the merge.
+        let logs = root + "/.vibeswitcher/audit/add-b/\(merge.prefix(12))"
+        let test = try String(contentsOfFile: logs + "/test.log", encoding: .utf8)
+        #expect(test.contains(merge) && test.contains("one, the worker's") && test.contains("five, the base's"), "\(test)")
+        // The verifier is told what the merge is, where its run's logs are, and not to run the suite on HEAD again.
+        let prompt = try verifierPrompt(runtime)
+        #expect(prompt.contains("\(merge.prefix(8)) is main with the branch at \(head.prefix(8)) merged in"), "\(prompt)")
+        #expect(prompt.contains("`git diff \(head.prefix(8)) \(merge.prefix(8)) -- a.txt`"), "\(prompt)")
+        #expect(prompt.contains("- \(logs)/test.log"), "\(prompt)")
+        #expect(prompt.contains("Don't build the whole project or run the whole suite again on HEAD"), "\(prompt)")
+        #expect(prompt.contains("Your verdict covers \(head.prefix(8))"), "\(prompt)")
+        #expect(!prompt.contains("and `git rev-parse HEAD && cat a.txt`"), "\(prompt)")
+        #expect(prompt.contains("in the audit's run of the merged result"), "\(prompt)")
+
+        // Its verdict covers the branch's head, and merge lands it, its own suite run on the result.
+        let verdict = try seat("verify-add-b", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "tests": "passed", "summary": "ok"])
+        #expect(!verdict.isError, "\(verdict.text)")
+        #expect(vault.verdict(root: root, task: "add-b")?.commit == head)
+        let merged = lead.call("merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(try String(contentsOfFile: root + "/a.txt", encoding: .utf8) == "one, the worker's\ntwo\nthree\nfour\nfive, the base's\n")
+    }
+
+    /// Audit runs the test command as the lead on a merged result: one a worker wrote isn't run.
+    @Test func aCommandAWorkerWroteIsntRunOnTheMergedResult() throws {
+        let root = try repo()
+        try commit("a.txt", "one\ntwo\nthree\nfour\nfive\n", in: root, "a has lines")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        #expect(!lead.call("configure", ["test_command": "true"]).isError)
+        try behindInACleanFile(lead, runtime, root: root)
+        let ran = temp.url("ran-as-lead").path
+        let path = root + "/.vibeswitcher/workflow.md"
+        try LeadWorkflow.updating(try Data(contentsOf: URL(fileURLWithPath: path)), with: [("test_command", "touch \(ran); true")]).write(to: URL(fileURLWithPath: path))
+
+        let refused = lead.call("audit", ["task": "add-b"])
+        #expect(refused.isError)
+        #expect(refused.text.hasPrefix("Not audited, nothing built or tested, no verifier started"), "\(refused.text)")
+        #expect(refused.text.contains("test_command is now `touch \(ran); true`"), "\(refused.text)")
+        #expect(!FileManager.default.fileExists(atPath: ran))
+        #expect(!FileManager.default.fileExists(atPath: root + "/.vibeswitcher/audit"))
         #expect(!verifierStarted(runtime))
+    }
+
+    @Test func aMergedCommitIsTheSameForTheSameTwoCommitsAndRefusedWhenItConflicts() throws {
+        let root = try repo()
+        Git.run(["switch", "-q", "-c", "side"], in: root)
+        try commit("b.txt", "bee\n", in: root, "side adds b")
+        Git.run(["switch", "-q", "main"], in: root)
+        try commit("c.txt", "see\n", in: root, "main adds c")
+        let first = try Worktrees.mergedCommit(root: root, base: "main", commit: "side").get()
+        #expect(try Worktrees.mergedCommit(root: root, base: "main", commit: "side").get() == first)
+        #expect(Git.run(["ls-tree", "--name-only", first], in: root).output == "a.txt\nb.txt\nc.txt")
+        #expect(Git.run(["rev-parse", "main"], in: root).output == Git.run(["rev-parse", "\(first)^1"], in: root).output)
+        // A conflict makes none.
+        Git.run(["switch", "-q", "side"], in: root)
+        try commit("a.txt", "side's\n", in: root, "side edits a")
+        Git.run(["switch", "-q", "main"], in: root)
+        try commit("a.txt", "main's\n", in: root, "main edits a")
+        guard case .failure(let error) = Worktrees.mergedCommit(root: root, base: "main", commit: "side") else {
+            Issue.record("a conflicting merge made a commit")
+            return
+        }
+        #expect("\(error)".contains("conflicts in a.txt"), "\(error)")
     }
 
     @Test func aBranchThatMergedTheBaseInIsAuditedAndNotBehind() throws {
