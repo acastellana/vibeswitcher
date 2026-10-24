@@ -404,3 +404,7 @@ The review found that most of the leads' waste comes from VibeSwitcher's own tex
 
 About 8 extra worker turns went to conflict-free catch-up merges. Idle finished workers held 4 to 5 of 10 Mac slots and blocked verifiers. One audit failed only on a missing lead note, and one only on a lint a filtered run doesn't cover. The audits also caught three real defects: records that merged cleanly kept the branch's copy, a team command in flight could pass as the user's, and the limits file was writable by agents.
 
+## 2026-10-24 19:21:40 The install of the review-fix batch was done at 19:21 CEST on 2026-10-24 by the lead, on the user's "Install now". Verified: host pid 31589 unchanged, 12 sessions and 62,778 bytes of secrets handed over, all three leads (vibeswitcher, genswap, TGE-ANALYSIS) alive with their sessions, and this lead's tool server swapped in place: status shows the new 'mac_max_sessions is ignored' line and the test-lock line. No main-thread stall since the install; the last one was 14:53. audit-takes-a-branch is still running and goes into a later install.
+
+It brings eight merged fixes to every project's lead without ending a session. Writing the verified state down saves the next lead from re-checking it.
+
