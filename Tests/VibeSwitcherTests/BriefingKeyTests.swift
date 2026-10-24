@@ -122,10 +122,8 @@ struct BriefingKeyTests {
     /// Settings › General › Briefing looks again on each opening of the window, never on a tab switch within one
     /// (the window is kept for the launch; the General tab appears again each time it's chosen).
     @Test func eachOpeningOfSettingsRefreshesTheKeyOnce() async throws {
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let presets = scratchRoot.appendingPathComponent("\(suite).json")
-        defer { try? FileManager.default.removeItem(at: presets) }
+        let defaults = temp.defaults("briefing-key-tests")
+        let presets = temp.url("briefing-key-presets")
         let (key, _, shell) = key(shell: Self.fromShell, refreshEvery: 0)
         let model = model(key, voice: .init(), defaults: defaults)
         let preferences = Preferences(defaults: defaults, presetsFile: presets)
@@ -211,7 +209,7 @@ struct BriefingKeyTests {
     // MARK: - Settings and the briefing
 
     let voiceID = "key-voice-\(UUID().uuidString.prefix(8))"
-    let suite = "briefing-key-tests-\(UUID().uuidString)"
+    let temp = Scratch()
 
     func model(_ key: BriefingKey, voice: BriefingButtonTests.FakeVoice, defaults: UserDefaults) -> BriefingModel {
         let configuration = URLSessionConfiguration.ephemeral
@@ -243,8 +241,7 @@ struct BriefingKeyTests {
     /// Settings names the shell's variable, offers Save to Keychain, and never shows the value; Test voice reads with
     /// the shell's key; Save to Keychain saves it, Remove takes it out again and the shell's is back.
     @Test func aShellKeyInSettingsAndTestVoice() async throws {
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = temp.defaults("briefing-key-tests")
         let (key, store, _) = key(shell: Self.fromShell)
         let voice = BriefingButtonTests.FakeVoice()
         let model = model(key, voice: voice, defaults: defaults)
@@ -277,8 +274,7 @@ struct BriefingKeyTests {
 
     /// Each state's line, with the file's name and never its key.
     @Test func settingsNamesTheFileAndNothingWhenThereIsNone() async {
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = temp.defaults("briefing-key-tests")
         let file = model(key(file: Self.fileText).0, voice: .init(), defaults: defaults)
         file.checkKey()
         #expect(await until { file.keySource != nil })

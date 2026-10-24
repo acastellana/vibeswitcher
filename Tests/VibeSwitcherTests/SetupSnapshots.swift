@@ -21,10 +21,8 @@ struct SetupSnapshots {
         #expect(scratch, "home is \(NSHomeDirectory()), not \(home)")
         guard scratch else { return }
 
-        let suite = "dev.vibeswitcher.snapshots"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let temp = Scratch()
+        let defaults = temp.defaults("setup-snapshots")
         let preferences = Preferences(defaults: defaults, presetsFile: URL(fileURLWithPath: home).appendingPathComponent("presets.json"))
         preferences.notificationsAllowed = false
         let hooks: [Agent: Bool] = [.claude: true, .codex: false]

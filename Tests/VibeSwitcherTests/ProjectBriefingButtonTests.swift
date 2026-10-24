@@ -14,15 +14,15 @@ struct ProjectBriefingButtonTests {
     typealias FakeClaude = BriefingButtonTests.FakeClaude
 
     let now = 1_800_000_000.0
-    let suite = "project-briefing-tests-\(UUID().uuidString)"
+    let temp = Scratch()
     let defaults: UserDefaults
     let folder: URL
     let vibeswitcher: String
     let genswap: String
 
     init() throws {
-        defaults = UserDefaults(suiteName: suite)!
-        folder = scratchRoot.appendingPathComponent(suite)
+        defaults = temp.defaults("project-briefing-tests")
+        folder = temp.url("project-briefing-tests")
         vibeswitcher = folder.appendingPathComponent("vibeswitcher").path
         genswap = folder.appendingPathComponent("genswap").path
         try write(log: [(20, "Merged docs: Docs"), (10, "Started a worker on phone-menu")], root: vibeswitcher)
@@ -58,15 +58,9 @@ struct ProjectBriefingButtonTests {
                              now: { now })
     }
 
-    func cleanUp() {
-        defaults.removePersistentDomain(forName: suite)
-        try? FileManager.default.removeItem(at: folder)
-    }
-
     /// One project with news: its log, board and questions, nothing of another project's; written in the chosen
     /// language and read by the same voice.
     @Test func aProjectBriefingIsWrittenFromThatProjectAlone() async {
-        defer { cleanUp() }
         let claude = FakeClaude("En vibeswitcher aterrizó la documentación y una pregunta te espera.")
         let voice = FakeVoice()
         let global = model(claude: claude, voice: voice)
@@ -97,7 +91,6 @@ struct ProjectBriefingButtonTests {
 
     /// A quiet project: one line, its questions still named (the template, Claude not there).
     @Test func aQuietProjectsTemplateNamesItsQuestions() async throws {
-        defer { cleanUp() }
         try write(log: [(600, "Merged old: Old work")], root: vibeswitcher)
         let voice = FakeVoice()
         let project = model(claude: FakeClaude(nil), voice: voice).project(vibeswitcher)
@@ -110,7 +103,6 @@ struct ProjectBriefingButtonTests {
     /// Each scope keeps its own 'since': the project's briefing leaves the global stamp where it was, the global one
     /// leaves the project's, and another project's stays unset.
     @Test func eachProjectKeepsItsOwnSince() async {
-        defer { cleanUp() }
         let claude = FakeClaude("Hecho.")
         let voice = FakeVoice()
         let global = model(claude: claude, voice: voice)
@@ -142,7 +134,6 @@ struct ProjectBriefingButtonTests {
 
     /// One voice: a briefing that starts stops the one being read, whichever it was; its end idles the one speaking.
     @Test func oneBriefingSpeaksAtATime() async {
-        defer { cleanUp() }
         let voice = FakeVoice()
         let global = model(claude: FakeClaude("Todo bien."), voice: voice)
         global.press()
@@ -171,7 +162,6 @@ struct ProjectBriefingButtonTests {
 
     /// From the window's menu: pressed, and the panel asked to show.
     @Test func theMenuPressesItAndShowsThePanel() async {
-        defer { cleanUp() }
         let voice = FakeVoice()
         let project = model(claude: FakeClaude("Hecho."), voice: voice).project(vibeswitcher)
         project.panelHidden = true

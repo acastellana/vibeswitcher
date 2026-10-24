@@ -15,14 +15,14 @@ struct PhoneBriefingTests {
     typealias Stub = BriefingButtonTests.Stub
 
     let access: PhoneAccess
-    let suite = "phone-briefing-tests-\(UUID().uuidString)"
+    let temp = Scratch()
     let defaults: UserDefaults
     let voiceID = "phone-voice-\(UUID().uuidString.prefix(8))"
 
     init() {
         access = PhoneAccess(store: SessionStore())
         access.serveForTests(.init(dnsName: Self.host, login: Self.login, httpsAvailable: true))
-        defaults = UserDefaults(suiteName: suite)!
+        defaults = temp.defaults("phone-briefing-tests")
     }
 
     struct Answer {
@@ -75,8 +75,6 @@ struct PhoneBriefingTests {
         for _ in 0..<500 where !condition() { try await Task.sleep(nanoseconds: 10_000_000) }
         #expect(condition())
     }
-
-    func cleanUp() { defaults.removePersistentDomain(forName: suite) }
 
     // MARK: - The gate
 
@@ -185,7 +183,6 @@ struct PhoneBriefingTests {
     }
 
     @Test func withAKeyElevenLabsAudioIsSentButNeverTheKey() async throws {
-        defer { cleanUp() }
         let key = BriefingButtonTests.key
         Stub.expect(voice: voiceID, body: Data("ID3-phone-mp3".utf8))
         let claude = BriefingButtonTests.FakeClaude("Dos tareas han terminado y una pregunta te espera.")
@@ -209,7 +206,6 @@ struct PhoneBriefingTests {
 
     /// A key from the shell or the key file (nothing saved) reads it on the phone too, and is never in the reply.
     @Test(arguments: ["shell", "file"]) func aKeyFoundOutsideTheKeychainIsUsedButNeverSent(_ source: String) async throws {
-        defer { cleanUp() }
         let key = BriefingKeyTests.fromShell
         let found = source == "shell"
             ? BriefingKey(saved: AppProof.MemorySecret(), shell: { key })
@@ -224,7 +220,6 @@ struct PhoneBriefingTests {
     }
 
     @Test func aRefusedKeyFallsBackToTheMacsVoiceStillWithoutTheKey() async throws {
-        defer { cleanUp() }
         let key = BriefingButtonTests.key
         Stub.expect(voice: voiceID, status: 401, body: Data(#"{"detail":"invalid key \#(key)"}"#.utf8))
         let claude = BriefingButtonTests.FakeClaude("Todo tranquilo.")
@@ -237,7 +232,6 @@ struct PhoneBriefingTests {
     }
 
     @Test func withoutAKeyTheMacsVoiceIsSentAndElevenLabsIsntAsked() async throws {
-        defer { cleanUp() }
         let claude = BriefingButtonTests.FakeClaude(nil)   // Claude isn't there: the English template
         let answer = try await briefed(briefer(key: nil, claude: claude))
         #expect(answer.json["voice"] as? String == "mac")

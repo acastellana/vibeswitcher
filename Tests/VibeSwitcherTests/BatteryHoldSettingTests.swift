@@ -7,12 +7,8 @@ import Testing
 /// or 0 (never); the stepper goes 5 at a time and from 10 down to off.
 struct BatteryHoldSettingTests {
     func preferences(_ body: (UserDefaults, URL) throws -> Void) throws {
-        let suite = "BatteryHoldSettingTests-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let presets = scratchRoot.appendingPathComponent("\(suite).json")
-        defer { try? FileManager.default.removeItem(at: presets) }
-        try body(defaults, presets)
+        let temp = Scratch()
+        try body(temp.defaults("battery-hold"), temp.url("battery-hold-presets"))
     }
 
     @Test func itIs50AtFirstAndKept() throws {

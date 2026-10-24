@@ -240,11 +240,9 @@ struct KeepAwakeTests {
     }
 
     @Test func theSettingDefaultsToOnPowerOnly() throws {
-        let suite = "KeepAwakeTests-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let presets = scratchRoot.appendingPathComponent("\(suite).json")
-        defer { try? FileManager.default.removeItem(at: presets) }
+        let temp = Scratch()
+        let defaults = temp.defaults("keep-awake")
+        let presets = temp.url("keep-awake-presets")
         let preferences = Preferences(defaults: defaults, presetsFile: presets)
         #expect(preferences.keepAwake == .onPower)
         preferences.keepAwake = .always

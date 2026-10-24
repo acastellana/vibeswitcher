@@ -882,9 +882,10 @@ struct HTTPParserTests {
 }
 
 struct PauseStoreTests {
+    let temp = Scratch()
+
     func store() -> PauseStore {
-        let defaults = UserDefaults(suiteName: "vibeswitcher-tests-\(UUID().uuidString)")!
-        return PauseStore(defaults: defaults)
+        PauseStore(defaults: temp.defaults("pause-store"))
     }
 
     @Test func pausesExpireAndResume() {
@@ -900,7 +901,7 @@ struct PauseStoreTests {
     }
 
     @Test func survivesRestartsAndPrunesDeadProcesses() {
-        let defaults = UserDefaults(suiteName: "vibeswitcher-tests-\(UUID().uuidString)")!
+        let defaults = temp.defaults("pause-store")
         let now = Date()
         PauseStore(defaults: defaults).pause(["proc:1", "session:a"], for: .indefinitely, now: now)
         let reloaded = PauseStore(defaults: defaults)

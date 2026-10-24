@@ -26,9 +26,8 @@ struct BriefingSnapshots {
     }
 
     @Test(.enabled(if: folder != nil)) func drawBriefing() async throws {
-        let suite = "briefing-snapshots-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let temp = Scratch()
+        let defaults = temp.defaults("briefing-snapshots")
         let voice = BriefingButtonTests.FakeVoice()
         let text = "In vibeswitcher, nine fixes landed and the install waits on your signing setup. Genswap has one question for you about the release notes, and its two workers are still running. Films was quiet. Two sessions need you: the api session and the docs session. Nothing else is stuck, so after those you're clear to step away for a while."
         let model = BriefingModel(snapshot: { .init(boards: [:], sessions: []) }, language: { .english },
@@ -39,7 +38,7 @@ struct BriefingSnapshots {
                                      keyStore: AppProof.MemorySecret(), generate: { _ in nil }, voice: voice, defaults: defaults)
         template.press()
         #expect(await until { template.phase == .speaking })
-        let preferences = Preferences(defaults: defaults, presetsFile: scratchRoot.appendingPathComponent("\(suite).json"))
+        let preferences = Preferences(defaults: defaults, presetsFile: temp.url("briefing-presets"))
         for scheme in [ColorScheme.light, .dark] {
             try draw(VStack(spacing: 0) {
                 HStack { Text("VibeSwitcher").font(.headline); BriefMeButton(model: model); Spacer() }.padding(10)
@@ -50,15 +49,13 @@ struct BriefingSnapshots {
             try draw(Form { BriefingSettings(preferences: preferences, briefing: model) }.formStyle(.grouped),
                      size: CGSize(width: 620, height: 260), scheme: scheme, name: "briefing-settings")
         }
-        try? FileManager.default.removeItem(at: scratchRoot.appendingPathComponent("\(suite).json"))
     }
 
     /// Settings › General › Briefing in each state of the key: saved in the Keychain, from your shell, none.
     @Test(.enabled(if: folder != nil)) func drawKeySources() async throws {
-        let suite = "briefing-key-snapshots-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
-        let preferences = Preferences(defaults: defaults, presetsFile: scratchRoot.appendingPathComponent("\(suite).json"))
+        let temp = Scratch()
+        let defaults = temp.defaults("briefing-key-snapshots")
+        let preferences = Preferences(defaults: defaults, presetsFile: temp.url("briefing-presets"))
         let made = BriefingKeyTests.saved
         let states: [(name: String, key: BriefingKey)] = [
             ("keychain", BriefingKey(saved: AppProof.MemorySecret(made))),
@@ -75,6 +72,5 @@ struct BriefingSnapshots {
                          size: CGSize(width: 620, height: 300), scheme: scheme, name: "briefing-key-\(state.name)")
             }
         }
-        try? FileManager.default.removeItem(at: scratchRoot.appendingPathComponent("\(suite).json"))
     }
 }

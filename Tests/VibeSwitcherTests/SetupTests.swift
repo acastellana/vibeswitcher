@@ -7,17 +7,12 @@ import Testing
 /// Preferences written by earlier versions, the first-run decision and the setup model's words.
 @MainActor
 struct SetupTests {
-    /// A defaults suite of its own, emptied before and after.
+    /// A defaults suite of its own, empty, and a presets file beside it; both gone after.
     private func withSuite(_ body: (UserDefaults, URL) throws -> Void) throws {
-        let name = "dev.vibeswitcher.tests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: name))
-        let folder = scratchRoot.appendingPathComponent(name)
+        let temp = Scratch()
+        let folder = temp.url("setup-prefs")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        defer {
-            defaults.removePersistentDomain(forName: name)
-            try? FileManager.default.removeItem(at: folder)
-        }
-        try body(defaults, folder.appendingPathComponent("presets.json"))
+        try body(temp.defaults("setup-defaults"), folder.appendingPathComponent("presets.json"))
     }
 
     /// Every key the ⚙︎ menu and the old Settings wrote, set to its non-default value, reads back unchanged.
@@ -148,12 +143,8 @@ struct SetupTests {
     }
 
     @Test func setupReadsTheLiveStateAndSaysItInWords() async throws {
-        let folder = scratchRoot.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: folder) }
-        let name = "dev.vibeswitcher.tests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: name))
-        defer { defaults.removePersistentDomain(forName: name) }
-        let preferences = Preferences(defaults: defaults, presetsFile: folder.appendingPathComponent("presets.json"))
+        let temp = Scratch()
+        let preferences = Preferences(defaults: temp.defaults("setup-defaults"), presetsFile: temp.url("setup-presets"))
         let model = SetupModel(preferences: preferences,
                                system: .fixed(hooks: [.claude: true, .codex: false], terminal: .denied, notifications: .notAsked))
         model.refresh()

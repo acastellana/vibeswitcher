@@ -13,12 +13,9 @@ struct NewProjectTests {
     let temp = Scratch()
 
     private func withSuite(_ body: (UserDefaults, URL) throws -> Void) throws {
-        let name = "dev.vibeswitcher.tests.\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: name))
         let folder = temp.url("newproject-prefs")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        defer { defaults.removePersistentDomain(forName: name) }
-        try body(defaults, folder.appendingPathComponent("presets.json"))
+        try body(temp.defaults("newproject-defaults"), folder.appendingPathComponent("presets.json"))
     }
 
     @Test func theProjectsFolderIsTildeDevUntilSetAndIsKept() throws {

@@ -96,10 +96,10 @@ struct BriefingButtonTests {
     }
 
     let voiceID = "test-voice-\(UUID().uuidString.prefix(8))"
+    let temp = Scratch()
     let defaults: UserDefaults
-    let suite = "briefing-tests-\(UUID().uuidString)"
 
-    init() { defaults = UserDefaults(suiteName: suite)! }
+    init() { defaults = temp.defaults("briefing-tests") }
 
     func client() -> ElevenLabs {
         let configuration = URLSessionConfiguration.ephemeral
@@ -115,8 +115,6 @@ struct BriefingButtonTests {
                                   generate: { claude.generate($0) }, client: client(), voice: voice, defaults: defaults)
         return (model, store)
     }
-
-    func cleanUp() { defaults.removePersistentDomain(forName: suite) }
 
     /// The request: the URL names the voice, the body the text (redacted), the model and the language; the key is in
     /// the xi-api-key header and nowhere else.
@@ -143,7 +141,6 @@ struct BriefingButtonTests {
     /// A press writes it (the fake model's words are what's shown), remembers when, and has ElevenLabs read it: the
     /// one request, sent only then, through the stub.
     @Test func aPressWritesItAndElevenLabsReadsIt() async throws {
-        defer { cleanUp() }
         Stub.expect(voice: voiceID)
         let claude = FakeClaude("En vibeswitcher aterrizaron nueve arreglos y una instalación espera tu firma.")
         let voice = FakeVoice()
@@ -190,7 +187,6 @@ struct BriefingButtonTests {
 
     /// The key is in the store and nowhere in the defaults.
     @Test func theKeyNeverReachesTheDefaults() async {
-        defer { cleanUp() }
         let (model, store) = model(key: nil, claude: FakeClaude(nil), voice: FakeVoice())
         model.saveKey("  \(Self.key)\n")
         #expect(await until { model.keySaved == true })
@@ -205,7 +201,6 @@ struct BriefingButtonTests {
 
     /// No key: the Mac's voice, and nothing goes to ElevenLabs.
     @Test func withoutAKeyTheMacsVoiceReadsIt() async {
-        defer { cleanUp() }
         Stub.expect(voice: voiceID)
         let voice = FakeVoice()
         let (model, _) = model(key: nil, claude: FakeClaude("Nada nuevo."), voice: voice)
@@ -222,7 +217,6 @@ struct BriefingButtonTests {
                       (503, false, "ElevenLabs answered HTTP 503, so the Mac's voice reads it."),
                       (200, true, "ElevenLabs couldn't be reached, so the Mac's voice reads it.")])
     func aFailureFallsBackToTheMacsVoice(status: Int, offline: Bool, notice: String) async {
-        defer { cleanUp() }
         Stub.expect(voice: voiceID, status: status, body: Data("{\"detail\":\"no\"}".utf8), fail: offline)
         let voice = FakeVoice()
         let (model, _) = model(key: Self.key, claude: FakeClaude("Two fixes landed."), voice: voice, language: "en")
@@ -237,7 +231,6 @@ struct BriefingButtonTests {
 
     /// No Claude: the English template, said so in the panel, and read in English.
     @Test func withoutClaudeTheTemplateIsReadInEnglish() async {
-        defer { cleanUp() }
         let voice = FakeVoice()
         let waiting = Session(tty: "ttys001", agent: .claude, pid: 1, startedAt: .distantPast, cwd: nil, project: "genswap", task: nil,
                               status: .needsInput, statusSince: Date(), detail: nil, hasHooks: true, inTerminalApp: false)
@@ -252,7 +245,6 @@ struct BriefingButtonTests {
 
     /// Pressed while it's written: cancelled; what the model says later is dropped, nothing is read.
     @Test func pressingWhileItsWrittenCancelsIt() async {
-        defer { cleanUp() }
         Stub.expect(voice: voiceID)
         let claude = FakeClaude("Late words.")
         claude.held = true
@@ -273,7 +265,6 @@ struct BriefingButtonTests {
 
     /// Test voice: one sentence in the chosen language, through the same voice, without writing a briefing.
     @Test func testVoiceSaysOneSentence() async {
-        defer { cleanUp() }
         let voice = FakeVoice()
         let claude = FakeClaude("x")
         let (model, _) = model(key: nil, claude: claude, voice: voice, language: "ca")

@@ -74,3 +74,14 @@ final class Scratch: @unchecked Sendable {
         for url in paths { try? FileManager.default.removeItem(at: url) }
     }
 }
+
+extension Scratch {
+    /// A UserDefaults of a test's own, empty, kept in `defaults.plist` in a new folder `scratchRoot/<prefix>-<uuid>`
+    /// that goes with this. Its suite is named by that path, not by a domain: cfprefsd writes a named suite
+    /// (`UserDefaults(suiteName: "x.y")`) to the real ~/Library/Preferences whatever HOME and CFFIXED_USER_HOME say,
+    /// and leaves the file there after `removePersistentDomain`, so 8,012 dev.vibeswitcher.tests.<UUID>.plist and
+    /// 11,000 more piled up by 2026-10-24. scripts/test.sh fails a run that adds one again (`check_preferences`).
+    func defaults(_ prefix: String) -> UserDefaults {
+        UserDefaults(suiteName: url(prefix).appendingPathComponent("defaults").path)!
+    }
+}

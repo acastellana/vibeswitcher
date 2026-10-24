@@ -98,7 +98,6 @@ extension PhoneBriefingTests {
     /// The real briefer: the project's briefing is written from that project, moves only its own 'since', and the
     /// ElevenLabs key goes to ElevenLabs only.
     @Test func aPhonesProjectBriefingKeepsItsOwnSinceAndNoKey() async throws {
-        defer { cleanUp() }
         let key = BriefingButtonTests.key
         Stub.expect(voice: voiceID, body: Data("ID3-project-mp3".utf8))
         let root = scratchRoot.appendingPathComponent("phone-project-\(UUID().uuidString)/genswap").path

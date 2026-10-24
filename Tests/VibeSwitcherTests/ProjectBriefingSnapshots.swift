@@ -10,9 +10,8 @@ import VibeCore
 @MainActor
 struct ProjectBriefingSnapshots {
     @Test(.enabled(if: BriefingSnapshots.folder != nil)) func drawProjectBriefing() async throws {
-        let suite = "project-briefing-snapshots-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let temp = Scratch()
+        let defaults = temp.defaults("project-briefing-snapshots")
         let root = "/Users/me/dev/vibeswitcher"
         var board = LeadBoard()
         let contract = LeadContract(goal: "", acceptance: [], boundaries: [], context: "")
