@@ -1130,3 +1130,4 @@
 - 2026-10-24 19:50 Merged audit-takes-a-branch: Audit takes a branch whose trial merge is clean, and makes room by ending the task's own idle worker
 - 2026-10-24 20:51 Planned new-project-always: New Project always starts the project lead
 - 2026-10-24 20:52 Started a worker on new-project-always
+- 2026-10-24 21:03 Merged new-project-always: New Project always starts the project lead (no audit: review none)
