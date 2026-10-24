@@ -933,11 +933,15 @@ final class Harness {
     func send(_ text: String, queue: Bool = false) -> OutboxEntry {
         let entry = OutboxEntry(key: key, message: text, text: text, expectsSoon: !working)
         chat.outbox.add(entry)
-        let actions = ComposerActions(send: { [unowned self] in self.sync.type($0) },
-                                      steer: { [unowned self] in self.sync.steer($0, key: self.key, tty: self.session.tty, agentPid: self.session.childPID) },
-                                      stop: {}, cycleMode: {})
         _ = chat.deliver(entry, steering: working && !queue, working: working, actions: actions)
         return entry
+    }
+
+    /// The composer's actions, as the window wires them to this session.
+    var actions: ComposerActions {
+        ComposerActions(send: { [unowned self] in self.sync.type($0) },
+                        steer: { [unowned self] in self.sync.steer($0, key: self.key, tty: self.session.tty, agentPid: self.session.childPID) },
+                        stop: {}, cycleMode: {})
     }
 
     /// The prompts the chat shows.
@@ -946,13 +950,22 @@ final class Harness {
     }
 
     /// The prompts the agent took (its transcript).
-    var agentPrompts: [String] {
+    var agentPrompts: [String] { agentInputs.map(\.text) }
+
+    /// The prompts the agent took, each with the images that came with it (a prompt's image blocks).
+    var agentInputs: [(text: String, images: Int)] {
         lines.compactMap { line in
-            if line["type"] as? String == "user", let message = line["message"] as? [String: Any], let text = message["content"] as? String {
-                return text
+            if line["type"] as? String == "user", let message = line["message"] as? [String: Any] {
+                if let text = message["content"] as? String { return (text, 0) }
+                // A prompt with pasted images: its text, then the images (a tool result's images are inside it).
+                if let parts = message["content"] as? [[String: Any]], parts.contains(where: { $0["type"] as? String == "image" }) {
+                    let text = parts.compactMap { $0["type"] as? String == "text" ? $0["text"] as? String : nil }.joined()
+                    return (text, parts.filter { $0["type"] as? String == "image" }.count)
+                }
             }
-            if let attachment = line["attachment"] as? [String: Any], attachment["type"] as? String == "queued_command" {
-                return attachment["prompt"] as? String
+            if let attachment = line["attachment"] as? [String: Any], attachment["type"] as? String == "queued_command",
+               let prompt = attachment["prompt"] as? String {
+                return (prompt, 0)
             }
             return nil
         }

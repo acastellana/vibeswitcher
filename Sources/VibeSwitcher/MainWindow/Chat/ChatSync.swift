@@ -574,9 +574,45 @@ final class ChatSync {
         let key = target.key
         // A slash command may open a picker: read the screen fast until it shows (or doesn't).
         if text.hasPrefix("/") { watchScreen() }
-        host.send(target.id, writes: ComposerText.writes(text, bracketed: bracketedPaste(target.id))) { [weak self] ok in
+        let bracketed = bracketedPaste(target.id)
+        // Claude Code reads pasted image paths before it takes the paste, and drops an Enter that comes meanwhile: sent
+        // 60 ms after the paste, the Enter of a message with a screenshot was lost whenever the read took longer, and the
+        // message sat in Claude's box (2026-10-24). The Enter waits until the box shows the images.
+        let images = target.agent == .claude && bracketed
+            ? AttachedImages.paths(in: text).filter { ComposerText.pastedImageExtensions.contains(($0 as NSString).pathExtension.lowercased()) }
+            : []
+        let gate: ((Int, @escaping (Bool) -> Void) -> Void)? = images.isEmpty ? nil : { [weak self] index, go in
+            guard index > 0, let self else { return go(true) }
+            self.waitForImages(images, in: target.id, until: self.now().addingTimeInterval(Self.imageWait), go)
+        }
+        host.send(target.id, writes: ComposerText.writes(text, bracketed: bracketed), gate: gate) { [weak self] ok in
             if !ok { Breadcrumbs.shared.note("composer: the host didn't confirm \(text.count) chars") }
             self?.chat.confirmed(key: key, message: text, ok: ok)
+        }
+    }
+
+    /// How long a message's Enter waits for Claude Code to show its pasted images (`ComposerText.imagesTaken`), then
+    /// goes anyway: within the host's hold of the session between a unit's parts (`InputOrder.holdLimit`, 10 s).
+    static let imageWait: TimeInterval = 8
+    /// How often the host's screen is read meanwhile.
+    static let imageReadEvery: TimeInterval = 0.1
+
+    /// Answers `go` once the session's input box shows `images` taken, or at `deadline`.
+    private func waitForImages(_ images: [String], in id: UUID, until deadline: Date, _ go: @escaping (Bool) -> Void) {
+        hostScreen(id) { [weak self] lines in
+            guard let self else { return go(true) }
+            if let lines, case .draft(let typed) = LeadDelivery.box(in: lines.joined(separator: "\n")),
+               ComposerText.imagesTaken(typed, images: images) {
+                return go(true)
+            }
+            guard self.now() < deadline else {
+                Breadcrumbs.shared.note("composer: Claude's box didn't show \(images.count) pasted image(s) in time, Enter sent anyway")
+                return go(true)
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + Self.imageReadEvery) { [weak self] in
+                guard let self else { return go(true) }
+                self.waitForImages(images, in: id, until: deadline, go)
+            }
         }
     }
 

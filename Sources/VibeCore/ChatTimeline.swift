@@ -153,6 +153,21 @@ public enum ComposerText {
         }
         return [HostInput.Write(bytes: body, delay: 0), HostInput.Write(bytes: [13], delay: 0.06)]
     }
+
+    /// The extensions Claude Code reads a pasted path as an image by (others it takes as text at once).
+    public static let pastedImageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp"]
+
+    /// Whether Claude Code's input box (`box`: what's typed in it, see `LeadDelivery.box`) shows the `images` pasted
+    /// into it as taken: each as its `[Image #N]`, or as its path (one it couldn't read goes in as text). Claude reads
+    /// a pasted image path in the background, puts the images and the rest of the paste in only then, and drops an
+    /// Enter that came meanwhile (2.1.310's paste handler): the message's Enter waits for this. Spaces don't count (a
+    /// long box wraps).
+    public static func imagesTaken(_ box: String, images: [String]) -> Bool {
+        let shown = box.filter { !$0.isWhitespace }
+        let placeholders = shown.components(separatedBy: "[Image#").count - 1
+        let paths = images.filter { shown.contains($0.filter { !$0.isWhitespace }) }.count
+        return !images.isEmpty && placeholders + paths >= images.count
+    }
 }
 
 /// The part of a conversation the chat lays out: the newest items. A long session has thousands, and every one

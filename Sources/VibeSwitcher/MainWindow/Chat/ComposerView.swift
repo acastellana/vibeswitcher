@@ -41,9 +41,7 @@ struct ComposerView: View {
     private var images: [String] { (composer.attachments[rowID] ?? []).filter { FileManager.default.fileExists(atPath: $0) } }
 
     private func attachImage(_ url: URL) {
-        var list = composer.attachments[rowID] ?? []
-        if !list.contains(url.path) { list.append(url.path) }
-        composer.attachments[rowID] = list
+        composer.attach(url, to: rowID)
     }
 
     var body: some View {
@@ -114,36 +112,17 @@ struct ComposerView: View {
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
     }
 
-    /// ↩: steers while the agent works, sends otherwise. ⌥↩ (`queue`): typed in for after the turn.
+    /// ↩ and the Send button: steers while the agent works, sends otherwise. ⌥↩ (`queue`): typed in for after the turn.
     private func submit(queue: Bool) {
-        let typed = text.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Attached images go as their paths (that's how the agent reads them); the box only showed thumbnails.
-        let paths = images.map(RecentProjects.shellQuote).joined(separator: " ")
-        let message = [typed, paths].filter { !$0.isEmpty }.joined(separator: typed.isEmpty ? "" : "\n\n")
-        guard !message.isEmpty else { return }
-        let steering = working && (steerOnly || !queue)
-        let limit = steering ? ComposerLimits.maxSteerCharacters : ComposerLimits.maxBytes
-        guard (steering ? message.count : message.utf8.count) <= limit else {
-            notice = "Too long to \(steering ? "steer" : "type into the terminal"). Save it to a file and mention it instead."
-            return
+        switch ComposerSend(chat: chat, composer: composer, rowID: rowID, working: working, steerOnly: steerOnly, actions: actions)
+            .submit(queue: queue) {
+        case .empty: break
+        case .tooLong(let why): notice = why
+        case .refused: notice = nil
+        case .sent:
+            notice = nil
+            suggestions = Suggestions()
         }
-        notice = nil
-        // On disk before anything goes out, and the box emptied on disk too: whatever happens next (a hang, a
-        // crash, a relaunch), the message is in the outbox, never lost and never in two places.
-        let entry = OutboxEntry(key: rowID, message: message, text: typed, attachments: images, expectsSoon: !working)
-        let draft = text.wrappedValue, attached = composer.attachments[rowID] ?? []
-        chat.outbox.add(entry)
-        text.wrappedValue = ""
-        composer.attachments[rowID] = []
-        composer.save()
-        guard chat.deliver(entry, steering: steering, working: working, actions: actions) else {
-            // Refused (not connected, too long to steer): it stays in the box, as it was.
-            text.wrappedValue = draft
-            composer.attachments[rowID] = attached
-            composer.save()
-            return
-        }
-        suggestions = Suggestions()
     }
 
     /// A key the answer card may take (WC-1): only while it shows a question and nothing's in the box (attached
@@ -184,6 +163,63 @@ struct ComposerView: View {
                 Suggestion(title: ($0 as NSString).lastPathComponent, subtitle: $0, insert: "@" + $0 + " ", symbol: "doc")
             }
         }
+    }
+}
+
+/// What ↩ and the Send button do with the box (`ComposerView.submit`): its text and attached images as one message,
+/// into the outbox and handed to the session, the box emptied; kept in the box when it's refused.
+struct ComposerSend {
+    let chat: ChatModel
+    let composer: ComposerDrafts
+    let rowID: String
+    let working: Bool
+    var steerOnly = false
+    let actions: ComposerActions
+
+    enum Outcome: Equatable {
+        /// Nothing in the box.
+        case empty
+        /// Not sent, and why (said under the box).
+        case tooLong(String)
+        /// Refused (not connected, no agent): it's back in the box, as it was.
+        case refused
+        case sent
+    }
+
+    /// The box's text, then the attached images as their quoted paths (that's how the agent reads them; the box only
+    /// showed thumbnails), one per line: Claude Code takes a pasted image path for one when it's a line of its own or
+    /// starts with "/" after a space, and two quoted paths on a line were one path that isn't a file.
+    static func message(text: String, images: [String]) -> String {
+        let paths = images.map(RecentProjects.shellQuote).joined(separator: "\n")
+        return [text, paths].filter { !$0.isEmpty }.joined(separator: text.isEmpty ? "" : "\n\n")
+    }
+
+    func submit(queue: Bool) -> Outcome {
+        let draft = composer.drafts[rowID] ?? "", attached = composer.attachments[rowID] ?? []
+        let typed = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let images = attached.filter { FileManager.default.fileExists(atPath: $0) }
+        let message = Self.message(text: typed, images: images)
+        guard !message.isEmpty else { return .empty }
+        let steering = working && (steerOnly || !queue)
+        let limit = steering ? ComposerLimits.maxSteerCharacters : ComposerLimits.maxBytes
+        guard (steering ? message.count : message.utf8.count) <= limit else {
+            return .tooLong("Too long to \(steering ? "steer" : "type into the terminal"). Save it to a file and mention it instead.")
+        }
+        // On disk before anything goes out, and the box emptied on disk too: whatever happens next (a hang, a
+        // crash, a relaunch), the message is in the outbox, never lost and never in two places.
+        let entry = OutboxEntry(key: rowID, message: message, text: typed, attachments: images, expectsSoon: !working)
+        chat.outbox.add(entry)
+        composer.drafts[rowID] = ""
+        composer.attachments[rowID] = []
+        composer.save()
+        guard chat.deliver(entry, steering: steering, working: working, actions: actions) else {
+            // Refused (not connected, too long to steer): it stays in the box, as it was.
+            composer.drafts[rowID] = draft
+            composer.attachments[rowID] = attached
+            composer.save()
+            return .refused
+        }
+        return .sent
     }
 }
 
@@ -423,7 +459,7 @@ private struct AttachedThumbnail: View {
     }
 }
 
-private struct ComposerTextView: NSViewRepresentable {
+struct ComposerTextView: NSViewRepresentable {
     @Binding var text: String
     @Binding var height: CGFloat
     @Binding var suggestions: Suggestions
@@ -633,6 +669,10 @@ final class ComposerNSTextView: NSTextView {
     /// ⌘1–⌘9: the answer card's when it takes them (see `ComposerTextView.cardKey`). A digit typed alone is text:
     /// "1 more thing…" typed with a question up went in as option 1 (usually Yes).
     var cardKey: (AnswerKeys.Key) -> Bool = { _ in false }
+    /// Where ⌘V reads from (a test's own pasteboard: never the user's clipboard).
+    var pasteboard: NSPasteboard = .general
+    /// Where a pasted or dropped image is saved (a test's scratch folder).
+    var attachments: URL = Attachments.folder
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if window?.firstResponder === self, !hasMarkedText(), let digit = Self.digit(event), cardKey(digit) { return true }
@@ -657,19 +697,19 @@ final class ComposerNSTextView: NSTextView {
     }
 
     override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
-        if item.action == #selector(paste(_:)), NSPasteboard.general.availableType(from: [.fileURL, .png, .tiff]) != nil {
+        if item.action == #selector(paste(_:)), pasteboard.availableType(from: [.fileURL, .png, .tiff]) != nil {
             return isEditable
         }
         return super.validateUserInterfaceItem(item)
     }
 
     override func paste(_ sender: Any?) {
-        let board = NSPasteboard.general
+        let board = pasteboard
         if let urls = board.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL], !urls.isEmpty {
             return take(urls)
         }
         // Image data wins over the text flavor that browsers, Preview and Slack copy along with it.
-        if board.availableType(from: [.png, .tiff]) != nil, let image = NSImage(pasteboard: board), let url = Attachments.save(image) {
+        if board.availableType(from: [.png, .tiff]) != nil, let image = NSImage(pasteboard: board), let url = Attachments.save(image, in: attachments) {
             return attachImage(url)
         }
         super.paste(sender)
@@ -681,7 +721,7 @@ final class ComposerNSTextView: NSTextView {
             take(urls)
             return true
         }
-        if let image = NSImage(pasteboard: board), let url = Attachments.save(image) {
+        if let image = NSImage(pasteboard: board), let url = Attachments.save(image, in: attachments) {
             attachImage(url)
             return true
         }
@@ -709,12 +749,12 @@ final class ComposerNSTextView: NSTextView {
 enum Attachments {
     static var folder: URL { VibePaths.root.appendingPathComponent("attachments", isDirectory: true) }
 
-    static func save(_ image: NSImage) -> URL? {
+    static func save(_ image: NSImage, in folder: URL = folder) -> URL? {
         guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
               let png = bitmap.representation(using: .png, properties: [:]) else { return nil }
         let fileManager = FileManager.default
         try? fileManager.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-        prune()
+        prune(folder)
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd-HHmmss"
         let url = folder.appendingPathComponent("pasted-\(formatter.string(from: Date()))-\(UUID().uuidString.prefix(4)).png")
@@ -723,7 +763,7 @@ enum Attachments {
     }
 
     /// Pasted images older than 30 days go (the agents have long read them).
-    private static func prune() {
+    private static func prune(_ folder: URL) {
         let fileManager = FileManager.default
         let cutoff = Date().addingTimeInterval(-30 * 86_400)
         for url in (try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] {

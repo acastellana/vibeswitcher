@@ -11,14 +11,16 @@ enum FakeClaude {
 # Usage: python3 -I -u fake_claude.py TRANSCRIPT CONTROL STATE
 # The test appends JSON lines to CONTROL ({"op": "ask" | "permission" | "work" | "take" | "done" | "freeze" | "thaw" |
 # "turns" (from now on a prompt starts a turn, as Claude's do: it works until "done") | "slowShell" (from now on a `!`
-# command runs until "background", which moves it to the background as the 120 s Bash timeout does) | "exit" (it quits,
-# as /exit));
+# command runs until "background", which moves it to the background as the 120 s Bash timeout does) | "imageRead" (how
+# long a pasted image path takes to read, "seconds") | "exit" (it quits, as /exit));
 # the agent writes its state (mode, tab, answers, the free-text field, queued messages) to STATE after every change.
 import datetime
 import json
 import os
+import re
 import select
 import sys
+import time
 import tty
 import uuid
 
@@ -40,6 +42,11 @@ state = {
     "suggest": 0,            # the slash menu's chosen row
     "dismissed": False,      # Esc closed the slash menu (until the box changes)
     "slowShell": False,      # a `!` command runs until "background" (Claude Code's 120 s Bash timeout)
+    "imageRead": 1.0,        # how long a pasted image path takes to read (see `take_paste`)
+    "reading": False,        # pasted image paths are being read
+    "images": 0,             # the session's images so far ([Image #N])
+    "attached": 0,           # the images in the box
+    "droppedEnters": 0,      # Enters held back while images were read, then dropped
 }
 # The slash commands its menu offers while "/…" is typed in the box.
 COMMANDS = [("/clear", "Clear conversation history"), ("/compact", "Clear history but keep a summary"),
@@ -49,6 +56,10 @@ permission = None
 picker = None
 control_offset = 0
 paste = None                 # bytes of a bracketed paste being read
+reading = None               # a paste whose image paths are being read (see `take_paste`)
+# Claude Code's image extensions for a pasted path (c0t).
+IMAGE = re.compile(r"\.(png|jpe?g|gif|webp)$", re.IGNORECASE)
+PNG = "iVBORw0KGgo="
 
 
 def now():
@@ -235,6 +246,7 @@ def run_command(name):
 
 def submit_prompt(text):
     text = text.strip()
+    images, state["attached"] = state["attached"], 0
     if not text:
         return
     if state["mode"] == "working":
@@ -248,7 +260,12 @@ def submit_prompt(text):
         if not state["slowShell"]:
             finish_shell("ran " + state["shell"]["command"])
         return
-    record({"type": "user", "message": {"role": "user", "content": text}})
+    content = text
+    if images:
+        # As Claude writes a prompt with pasted images: its text (with the [Image #N] placeholders), then the images.
+        content = [{"type": "text", "text": text}] + [{"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                                                                   "data": PNG}}] * images
+    record({"type": "user", "message": {"role": "user", "content": content}})
     if state["turns"]:
         state["mode"] = "working"
         return
@@ -494,8 +511,51 @@ def key(name):
             state["input"] += " " if name == "space" else name
 
 
+def unquote(part):
+    """A pasted part as Claude Code reads it for a path (x()): its outer quotes dropped."""
+    part = part.strip()
+    if len(part) >= 2 and part[0] == part[-1] and part[0] in "'\"":
+        return part[1:-1]
+    return part
+
+
+def take_paste(text):
+    """A paste into the box, as Claude Code 2.1.310's paste handler takes it (usePasteHandler). Split at a space before a
+    "/" and at newlines, the parts that are image paths (outer quotes dropped, an image extension) are read first, in
+    the background: only once they're read do the images go in, as [Image #N], and the rest of the text after them. An
+    Enter that comes while they're read is held back, and then dropped (its `V()` clears the held Enter; only a text
+    paste's `J()` replays it). A paste of text alone goes in as it is."""
+    global reading
+    parts = [p for chunk in re.split(r" (?=/|[A-Za-z]:\\)", text) for p in chunk.split("\n") if p.strip()]
+    paths = [p for p in parts if IMAGE.search(unquote(p))]
+    if not paths:
+        state["input"] += text
+        return
+    reading = {"until": time.monotonic() + state["imageRead"], "paths": paths, "rest": [p for p in parts if p not in paths],
+               "raw": text, "enter": False}
+    state["reading"] = True
+
+
+def finish_reading():
+    """The pasted image paths are read: the images that are files go in (the text after them); none: the paste as text."""
+    global reading
+    found = [unquote(p) for p in reading["paths"] if os.path.isfile(unquote(p))]
+    if found:
+        for _ in found:
+            state["images"] += 1
+            state["attached"] += 1
+            state["input"] += "[Image #%d] " % state["images"]
+        state["input"] += "\n".join(reading["rest"])
+    else:
+        state["input"] += reading["raw"]
+    if reading["enter"]:
+        state["droppedEnters"] += 1
+    reading = None
+    state["reading"] = False
+
+
 def feed(data):
-    """Turns what came in into keys (a paste goes into the box whole, as Claude Code takes it)."""
+    """Turns what came in into keys (a paste goes into the box as Claude Code takes it, see `take_paste`)."""
     global paste
     text = data.decode("utf-8", "replace")
     i = 0
@@ -507,7 +567,7 @@ def feed(data):
                 return
             paste += text[i:end]
             if state["mode"] in ("idle", "working"):
-                state["input"] += paste
+                take_paste(paste)
             else:
                 for c in paste:
                     key(c)
@@ -529,7 +589,9 @@ def feed(data):
             key("esc")
             i += 1
             continue
-        if c == "\r" or c == "\n":
+        if (c == "\r" or c == "\n") and reading is not None:
+            reading["enter"] = True
+        elif c == "\r" or c == "\n":
             key("enter")
         elif c == "\t":
             key("tab")
@@ -578,6 +640,8 @@ def control():
             state["turns"] = True
         elif op == "slowShell":
             state["slowShell"] = True
+        elif op == "imageRead":
+            state["imageRead"] = command["seconds"]
         elif op == "background":
             finish_shell("Command did not complete within its 120s timeout and was moved to the background (ID: bfake). "
                          "Output is being written to: bfake.output. You will be notified when it completes.")
@@ -609,6 +673,10 @@ def main():
                 changed = True
         else:
             select.select([], [], [], 0.02)
+        # After what came in: an Enter read in the same moment as the paste is one held back.
+        if reading is not None and time.monotonic() >= reading["until"]:
+            finish_reading()
+            changed = True
         if changed:
             draw()
 

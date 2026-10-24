@@ -76,6 +76,23 @@ struct ChatTimelineTests {
         #expect(typed.map(\.bytes) == [Array("a b c".utf8), [13]])
         #expect(ComposerText.writes(" \n\u{7}", bracketed: true).isEmpty)
     }
+
+    /// The Enter of a message with pasted images waits for Claude's box to show them (its paste handler drops an Enter
+    /// that comes while it reads them, 2026-10-24).
+    @Test func pastedImagesAreTakenOnceTheBoxShowsThemOrTheirPaths() {
+        let one = "/Users/x/.vibeswitcher/attachments/pasted-2026-10-24-233904-AB12.png"
+        let two = "/Users/x/.vibeswitcher/attachments/pasted-2026-10-24-233911-CD34.png"
+        // Still being read: nothing of the paste in the box yet.
+        #expect(!ComposerText.imagesTaken("", images: [one]))
+        #expect(ComposerText.imagesTaken("[Image #3] look at this", images: [one]))
+        #expect(!ComposerText.imagesTaken("[Image #3] look", images: [one, two]))
+        #expect(ComposerText.imagesTaken("[Image #3] [Image #4] look", images: [one, two]))
+        // A long box wraps, a pill split over two lines.
+        #expect(ComposerText.imagesTaken("[Image #3] [Image\n#4] look", images: [one, two]))
+        // One Claude couldn't read went in as its path.
+        #expect(ComposerText.imagesTaken("look\n'\(one)'", images: [one]))
+        #expect(!ComposerText.imagesTaken("[Image #1]", images: []))
+    }
 }
 
 struct ChatWindowTests {

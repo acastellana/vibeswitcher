@@ -27,6 +27,13 @@ final class ComposerDrafts: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5, execute: work)
     }
 
+    /// A pasted, dropped or chosen image, attached to `rowID`'s box (once).
+    func attach(_ url: URL, to rowID: String) {
+        var list = attachments[rowID] ?? []
+        if !list.contains(url.path) { list.append(url.path) }
+        attachments[rowID] = list
+    }
+
     func save() {
         pendingSave?.cancel()
         pendingSave = nil

@@ -1,6 +1,7 @@
 import AppKit
 import Carbon.HIToolbox
 import Foundation
+import SwiftUI
 import Testing
 import VibeCore
 @testable import VibeSwitcher
@@ -338,12 +339,151 @@ struct ComposerDeliveryTests {
         h.chat.now = Date.init
     }
 
+    // MARK: Pasted images (2026-10-24: "pasting an image with a message and then send, doesn't always get sent")
+
+    /// A message with pasted images, as you'd make it in the composer and send it.
+    struct PasteCase: Sendable, CustomTestStringConvertible {
+        enum Step: Sendable { case type, paste }
+        enum Press: Sendable { case enter, button, queue }
+        var name: String
+        var text = "look at this"
+        /// What you do in the box, in order: type the text, paste an image (each `paste` is another one).
+        var steps: [Step]
+        var press: Press
+        /// The agent is in its turn: ↩ and the button steer, ⌥↩ queues.
+        var busy = false
+        var images: Int { steps.filter { $0 == .paste }.count }
+        var testDescription: String { name }
+    }
+
+    static let pasteCases: [PasteCase] = [
+        PasteCase(name: "an image pasted, then text typed, ↩", steps: [.paste, .type], press: .enter),
+        PasteCase(name: "text typed, then an image pasted, the Send button", steps: [.type, .paste], press: .button),
+        PasteCase(name: "two images around the text, ↩", steps: [.paste, .type, .paste], press: .enter),
+        PasteCase(name: "an image alone, the Send button", text: "", steps: [.paste], press: .button),
+        PasteCase(name: "busy: an image then text, ⌥↩ (typed in for after the turn)", steps: [.paste, .type], press: .queue, busy: true),
+        PasteCase(name: "busy: text then two images, ↩ (steered)", steps: [.type, .paste, .paste], press: .enter, busy: true),
+    ]
+
+    /// Claude Code reads a pasted image path before it takes the paste, and drops an Enter that comes meanwhile (the fake
+    /// does as its paste handler does, see `FakeClaude.take_paste`). The Enter went 60 ms after the paste: whenever the
+    /// read took longer, the message sat in Claude's box, image and text, not sent. And two images' paths on one line
+    /// were one path to Claude, which isn't a file: neither went as an image. Each case ends with the images and the text
+    /// delivered once, the composer empty, nothing in the outbox or flagged.
+    @Test(arguments: pasteCases) func pastedImagesAndTheirTextArriveOnce(_ c: PasteCase) async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        if c.busy {
+            h.tell(["op": "work"])
+            try await h.waitFor { h.agent["mode"] as? String == "working" }
+        }
+        // The composer's own text view, in a window, wired as ComposerView wires it: its ↩ to the same send as its button.
+        let send = ComposerSend(chat: h.chat, composer: h.chat.composer, rowID: h.key, working: c.busy, actions: h.actions)
+        var outcome: ComposerSend.Outcome?
+        let composer = h.chat.composer, key = h.key
+        let view = ComposerTextView(text: Binding(get: { composer.drafts[key] ?? "" }, set: { composer.drafts[key] = $0 }),
+                                    height: .constant(22), suggestions: .constant(Suggestions()), history: { [] }, focusRequests: 0,
+                                    complete: { _ in [] }, submit: { outcome = send.submit(queue: false) },
+                                    queue: { outcome = send.submit(queue: true) }, attachImage: { composer.attach($0, to: key) })
+        let coordinator = view.makeCoordinator()
+        let box = ComposerNSTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 40))
+        box.isEditable = true
+        box.isRichText = false
+        box.delegate = coordinator
+        box.attachImage = view.attachImage
+        // A pasteboard and an attachments folder of the test's own: never the user's clipboard or ~/.vibeswitcher.
+        let board = NSPasteboard(name: NSPasteboard.Name("vibeswitcher-test-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        box.pasteboard = board
+        box.attachments = h.scratch.appendingPathComponent("attachments-\(UUID().uuidString)")
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 40), styleMask: [.titled], backing: .buffered, defer: true)
+        window.contentView = box
+        #expect(window.makeFirstResponder(box))
+        for (index, step) in c.steps.enumerated() {
+            switch step {
+            case .type:
+                for character in c.text { type(character, into: box) }
+            case .paste:
+                board.clearContents()
+                board.setData(Self.png(shade: index), forType: .png)
+                box.paste(nil)
+            }
+        }
+        #expect(box.string == c.text)
+        let images = composer.attachments[key] ?? []
+        #expect(images.count == c.images)
+        #expect(images.allSatisfy { $0.hasPrefix(box.attachments.path) && FileManager.default.fileExists(atPath: $0) }, "\(images)")
+        switch c.press {
+        case .enter: type("\r", into: box)
+        case .button: outcome = send.submit(queue: false)
+        case .queue: outcome = send.submit(queue: true)
+        }
+        #expect(outcome == .sent)
+        // The box is empty at once: the message is in the outbox, on its way.
+        #expect(composer.drafts[key] ?? "" == "" && (composer.attachments[key] ?? []).isEmpty)
+        let placeholders = (1...c.images).map { "[Image #\($0)]" }.joined(separator: " ")
+        let expected = c.text.isEmpty ? placeholders : placeholders + " " + c.text
+        if c.busy && c.press != .queue {
+            // Steered: into the agent's inbox, its hook hands it over at the next step (the images as their paths).
+            try await h.waitFor { h.chat.steerSending.isEmpty && h.chat.outbox.outbox.entries.isEmpty }
+            h.hookTakes()
+            try await h.waitFor {
+                h.tickNow()
+                return h.chat.log.entries.contains { if case .steered = $0.kind { return true } else { return false } }
+            }
+            await h.tick()
+            let steered = h.chat.log.entries.compactMap { entry -> String? in
+                if case .steered(let text, _) = entry.kind { return text } else { return nil }
+            }
+            #expect(steered.count == 1, "\(steered)")
+            #expect(steered.first.map { text in images.allSatisfy { text.contains($0) } && text.hasPrefix(c.text) } == true, "\(steered)")
+            #expect(h.chat.steering.isEmpty)
+        } else {
+            // Typed in: the Enter waits until Claude's box shows the images, so it isn't dropped.
+            try await h.waitFor { c.busy ? (h.agent["queued"] as? [String])?.isEmpty == false : h.agentInputs.count > 1 }
+            if c.busy {
+                #expect(h.agent["queued"] as? [String] == [expected], "\(h.agent)")
+                h.tell(["op": "take"])
+            }
+            try await h.waitFor {
+                h.tickNow()
+                return h.chat.outbox.outbox.entries.isEmpty && h.chat.pending.isEmpty
+            }
+            let inputs = h.agentInputs.map { "\($0.text) | \($0.images) image(s)" }
+            // Queued, Claude writes the prompt alone (its images go with it, as the placeholders say).
+            #expect(inputs == ["start | 0 image(s)", "\(expected) | \(c.busy ? 0 : c.images) image(s)"], "\(inputs)")
+            #expect(h.agent["droppedEnters"] as? Int == 0, "\(h.agent)")
+            #expect(h.agent["input"] as? String == "", "\(h.agent)")
+        }
+        try await h.quiet()
+        #expect(h.chat.outbox.outbox.entries.isEmpty)
+        #expect(h.chat.pending.isEmpty && h.chat.late.isEmpty)
+        #expect(h.chat.sendNotice == nil)
+        #expect(composer.drafts[key] ?? "" == "" && (composer.attachments[key] ?? []).isEmpty)
+    }
+
+    /// Each image path on a line of its own: Claude Code reads two quoted paths on one line as one path, not a file.
+    @Test func aMessagesImagesAreEachOnALineAfterItsText() {
+        let one = "/Users/x/.vibeswitcher/attachments/a.png", two = "/Users/x/My Shots/b.png"
+        #expect(ComposerSend.message(text: "look", images: [one, two]) == "look\n\n'\(one)'\n'\(two)'")
+        #expect(ComposerSend.message(text: "", images: [one]) == "'\(one)'")
+        #expect(ComposerSend.message(text: "look", images: []) == "look")
+    }
+
+    /// A small PNG (`shade`: a different one each paste).
+    private static func png(shade: Int) -> Data {
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 4, pixelsHigh: 4, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true,
+                                   isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+        rep.setColor(NSColor(deviceRed: CGFloat(shade % 4) / 3, green: 0.5, blue: 0.2, alpha: 1), atX: 0, y: 0)
+        return rep.representation(using: .png, properties: [:])!
+    }
+
     // MARK: Keys
 
     /// One key typed into the box, as AppKit hands it over.
     private func type(_ character: Character, into box: NSTextView) {
         let text = String(character)
-        let codes: [Character: Int] = ["1": kVK_ANSI_1, " ": kVK_Space]
+        let codes: [Character: Int] = ["1": kVK_ANSI_1, " ": kVK_Space, "\r": kVK_Return]
         let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: box.window?.windowNumber ?? 0,
                                      context: nil, characters: text, charactersIgnoringModifiers: text, isARepeat: false,
                                      keyCode: UInt16(codes[character] ?? kVK_ANSI_A))!
