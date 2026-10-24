@@ -1142,3 +1142,5 @@
 - 2026-10-24 23:27 Update: All-done card: a signal and a plain-words summary when the board clears — **What changed:** When a lead's board goes from open work to empty after at least one merge, a green "All tasks finished" card appears in that lead's chat at that moment. It has a headline and 3–6 sho…
 - 2026-10-24 23:43 Planned pasted-image-plus-text: Pasted image plus text sometimes isn't sent (review audit)
 - 2026-10-24 23:43 Started a worker on pasted-image-plus-text
+- 2026-10-25 00:17 Audit of pasted-image-plus-text: complete, clean, round 1: 2 Nit open
+- 2026-10-25 00:22 Merged pasted-image-plus-text: Pasted image plus text sometimes isn't sent
