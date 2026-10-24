@@ -542,7 +542,8 @@ public enum LeadPrompts {
         public static let leadReview = "Give each task a review level (add_task or update_task, review): none, the default, "
             + "when its worker can own it through merge; audit only for security (permissions, secrets, authentication, the "
             + "guard rails), privacy (the owner's private data in a contract or a file, a repository's or a share's "
-            + "visibility, anything that exposes it to others), irreversible operations (migrations, deleting or rewriting data, anything outward-facing) or complex "
+            + "visibility, anything that exposes it to others), irreversible operations (migrations, deleting or rewriting "
+            + "data, anything outward-facing) or complex "
             + "changes (concurrency, many parts at once, hard to test). A task whose branch touches sensitive_paths is audited "
             + "whatever you set."
 
