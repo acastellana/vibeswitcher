@@ -1122,3 +1122,5 @@
 - 2026-10-24 18:27 Started a worker on workers-run-the-project
 - 2026-10-24 18:27 Update: Retrospective: the review-fix batch (6 merged) — **Landed (about 4 h, no reverts):** lead prompts and tool texts follow your policy; fail-fast on sessions without their tools plus an honest cleanup; record commits without trailers; a test lock that …
 - 2026-10-24 18:43 Merged workers-run-the-project: Workers run the project's lint tests before reporting done (no audit: review none)
+- 2026-10-24 18:52 Audit of boundary-excursions-a: complete, clean
+- 2026-10-24 19:12 Merged boundary-excursions-a: Boundary excursions a worker reports don't fail an audit, and dismissed findings don't force another one
