@@ -319,7 +319,7 @@ public final class LeadToolset: MCPToolset {
                 MCPToolInfo(name: "add_task", description: "Put a task on the board with its contract (title, goal and acceptance), or make one of an audit's finding (from_finding: the contract comes from it, anything you pass replaces that part, and the finding is closed as moved to the new task).",
                             properties: ["title": P(type: "string", description: "Short title"),
                                          "goal": P(type: "string", description: "What must be true when it's done"),
-                                         "acceptance": P(type: "array", description: "Checks that can be run or seen", items: "string"),
+                                         "acceptance": P(type: "array", description: "Checks that can be run or seen. " + LeadPrompts.Policy.leadContracts, items: "string"),
                                          "boundaries": P(type: "array", description: "Files or areas it may touch; what it must not do", items: "string"),
                                          "context": P(type: "string", description: "What a fresh worker needs to know"),
                                          "from_finding": P(type: "string", description: "A finding as status and board name it, <task>:<id> (e.g. add-b:F2)"),
@@ -757,7 +757,7 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "\(slug)'s worker is still running: stop_worker first, then \(verb) it. Nothing was changed.")
         }
         guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/merge-\(slug).lock")) else {
-            throw Problem(text: "A merge of \(slug) is under way: wait for its result before you \(verb) it. Nothing was changed.")
+            throw Problem(text: "A merge of \(slug) is under way: \(verb) it once its result is back. Nothing was changed.")
         }
         lock.release()
     }
@@ -1074,7 +1074,7 @@ public final class LeadToolset: MCPToolset {
             let room = max(0, workflow.macMaxSessions - mac.sessions)
             throw Problem(text: "Not audited, no finder started: audit_finders is \(finders), and mac_max_sessions leaves room for \(room) more session\(room == 1 ? "" : "s") now "
                           + "(each finder is one, counted with every project's workers and verifiers). Now: \(Self.macText(mac, workflow)). "
-                          + "Try again in about \(MacLoad.retryMinutes) minutes, when sessions have ended, or set audit_finders lower with configure (1 is one verifier).")
+                          + "Set audit_finders lower with configure (1 is one verifier), or audit again once sessions have ended. " + LeadPrompts.retryWhenWoken)
         }
         // Settings, hooks or MCP servers the branch brings would run in the verifier: it starts with project settings
         // off (see LeadLaunch), and VibeSwitcher doesn't say yes to Claude's trust question for that folder. What the
@@ -1156,7 +1156,7 @@ public final class LeadToolset: MCPToolset {
                               recheck: LeadPrompts.Reaudit?, trust: Bool) throws -> LeadAuditPanel {
         let slug = task.slug
         guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/audit-\(slug).lock")) else {
-            throw Problem(text: "An audit of \(slug) is already making its build and test run; wait for its result.")
+            throw Problem(text: "An audit of \(slug) is already making its build and test run; its verdict comes as a report.")
         }
         defer { lock.release() }
         let logs = URL(fileURLWithPath: store.folder).appendingPathComponent("audit/\(slug)/\(head.prefix(12))")
@@ -1412,7 +1412,7 @@ public final class LeadToolset: MCPToolset {
         if let verdict = vault.verdict(root: root, task: slug) {
             guard verdict.passes else {
                 throw Problem(text: vault.missingVerdictReason(root: root, task: slug)
-                    ?? "\(slug) has no passing audit. Run audit and wait for a complete, clean verdict.")
+                    ?? "\(slug) has no passing audit. Run audit: merge takes a complete, clean verdict.")
             }
             guard let verifier = vault.current(.verifier, root: root, task: slug), verifier.id == verdict.verifier,
                   verifier.session == verdict.session, verifier.auditing == verdict.commit else {
@@ -1428,7 +1428,7 @@ public final class LeadToolset: MCPToolset {
             let head = branchHead(Worktrees.branch(slug))
             if let needed = reviewNeeded(slug, commit: head) {
                 throw Problem(text: (vault.missingVerdictReason(root: root, task: slug)
-                    ?? "\(slug) has no passing audit. Run audit and wait for a complete, clean verdict.") + " " + needed)
+                    ?? "\(slug) has no passing audit. Run audit: merge takes a complete, clean verdict.") + " " + needed)
             }
             // review none: its worker's "done" on the head, and the merge's own test run below, are the check.
             commit = try unauditedCommit(slug, head: head)
@@ -1442,7 +1442,7 @@ public final class LeadToolset: MCPToolset {
         }
         try checkMergePolicy(task, commit: commit)
         guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/merge-\(slug).lock")) else {
-            throw Problem(text: "A merge of \(slug) is already running; wait for its result.")
+            throw Problem(text: "A merge of \(slug) is already running; its result comes back to the call that started it.")
         }
         defer { lock.release() }
         let workflow = self.workflow
@@ -1530,7 +1530,7 @@ public final class LeadToolset: MCPToolset {
             let ran = workflow.regressionCommand == nil ? "" : " (regression_command passed too.)"
             let patience = waited.map { " (The tests waited \(Worktrees.duration($0.after)) for the Mac's load to drop from \(MacLoad.number($0.from)) below load_threshold.)" } ?? ""
             let unaudited = audited ? "" : " (No audit: review none, on its worker's done report and the tests that just passed.)"
-            return MCPToolResult(text: "Merged \(slug) into \(base)\(untested). Post an update for the user, then cleanup.\(unaudited)\(ran)\(patience)")
+            return MCPToolResult(text: "Merged \(slug) into \(base)\(untested). Next: cleanup(\(slug)). \(LeadPrompts.Policy.updates)\(unaudited)\(ran)\(patience)")
         case .refused(let reason):
             throw Problem(text: "Not merged: \(reason)")
         }
@@ -1729,7 +1729,7 @@ public final class LeadToolset: MCPToolset {
         if mac.isFull(max: workflow.macMaxSessions) { over.append("the team sessions of all its projects are at mac_max_sessions") }
         guard !over.isEmpty else { return nil }
         return "\(not): the Mac is shared by every project's team, and \(over.joined(separator: " and ")). Now: \(Self.macText(mac, workflow)). "
-            + "Try again in about \(MacLoad.retryMinutes) minutes: other projects' sessions ending send you no message (your own do). "
+            + LeadPrompts.retryWhenWoken + " "
             + "Meanwhile merge and cleanup finished tasks (cleanup ends their sessions), plan, or answer the user."
     }
 
@@ -1754,7 +1754,7 @@ public final class LeadToolset: MCPToolset {
             guard Date() < deadline else {
                 let mac = MacLoad.count(((try? listed()) ?? []).map { ($0.label, $0.cwd, $0.live) }, load: current)
                 throw Problem(text: "Not merged (nothing was tested): the Mac's 1-minute load stayed above load_threshold for the \(Worktrees.duration(workflow.testTimeout)) merge waits (test_timeout_min). Now: \(Self.macText(mac, workflow)). "
-                              + "Timing-sensitive tests fail on a Mac this busy, so \(slug) wasn't tested and stays as it was. Merge again in about \(MacLoad.retryMinutes) minutes; meanwhile start no workers or audits (they'd add to the load), and tell the user if it stays this busy.")
+                              + "Timing-sensitive tests fail on a Mac this busy, so \(slug) wasn't tested and stays as it was. \(LeadPrompts.retryWhenWoken) Meanwhile start no workers or audits (they'd add to the load), and tell the user if it stays this busy.")
             }
             Thread.sleep(forTimeInterval: min(loadPoll, progress?.every ?? loadPoll, max(0, deadline.timeIntervalSinceNow)))
             load = runtime.loadAverage()

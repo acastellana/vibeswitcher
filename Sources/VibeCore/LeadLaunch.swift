@@ -88,6 +88,19 @@ public enum LeadLaunch {
         }
     }
 
+    /// The git commands `deny` refuses `role`, as its prompt lists them: each `Bash(...)` rule that runs git, without
+    /// its `:*` ("git worktree", "git checkout * main", "env git"). Made from the rules, so the list never drifts from them.
+    public static func deniedGit(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
+        var seen = Set<String>()
+        return deny(role, base: base, records: records).compactMap { rule -> String? in
+            guard rule.hasPrefix("Bash("), rule.hasSuffix(")") else { return nil }
+            var command = String(rule.dropFirst("Bash(".count).dropLast())
+            if command.hasSuffix(":*") { command.removeLast(2) }
+            guard command.hasPrefix("git ") || command.hasSuffix(" git") || command.hasSuffix("/git") else { return nil }
+            return seen.insert(command).inserted ? command : nil
+        }
+    }
+
     /// The VibeSwitcher tool server's tools, by the server's whole name (Claude Code 2.1.299+ reads `mcp__<server>__*`
     /// as that server only). Which tools a role gets is its capability's business (see `LeadVault`).
     static let ownTools = "mcp__vibeswitcher__*"

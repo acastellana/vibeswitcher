@@ -536,6 +536,48 @@ public struct TranscriptTail: Equatable, Sendable {
         return read(data)
     }
 
+    /// The latest compaction of the conversation (Claude Code's `compact_boundary`) in the file's tail (see `window`):
+    /// its id and time; nil when there's none there. Read again only once the file changed.
+    public static func lastCompaction(url: URL) -> Compaction? {
+        noteRead()
+        return compactions.value(at: url.path) {
+            guard let handle = try? FileHandle(forReadingFrom: url) else { return nil }
+            defer { try? handle.close() }
+            guard let size = try? handle.seekToEnd() else { return nil }
+            let start = size > UInt64(window) ? size - UInt64(window) : 0
+            guard (try? handle.seek(toOffset: start)) != nil, var data = try? handle.readToEnd() else { return nil }
+            if start > 0 { data = data.subdata(in: (data.startIndex + TranscriptReader.tailStart(data))..<data.endIndex) }
+            return lastCompaction(data)
+        }
+    }
+
+    /// A compaction of the conversation: the boundary's uuid (each compaction has its own) and when it was made.
+    public struct Compaction: Equatable, Sendable {
+        public var id: String
+        public var at: Double
+
+        public init(id: String, at: Double) {
+            self.id = id
+            self.at = at
+        }
+    }
+
+    static let compactions = UnchangedFiles<Compaction?>()
+
+    /// From complete transcript lines: the main thread's last compaction boundary (a subagent's isn't the session's).
+    public static func lastCompaction(_ data: Data) -> Compaction? {
+        var lines = TranscriptReader.lines(data)
+        if data.last != 0x0A, !lines.isEmpty { lines.removeLast() }
+        for line in lines.reversed() where line.range(of: Data("compact_boundary".utf8)) != nil {
+            guard let object = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any],
+                  object["type"] as? String == "system", object["subtype"] as? String == "compact_boundary",
+                  object["isSidechain"] as? Bool != true, let id = object["uuid"] as? String,
+                  let at = ChatReader.date(object["timestamp"])?.timeIntervalSince1970 else { continue }
+            return Compaction(id: id, at: at)
+        }
+        return nil
+    }
+
     /// How many times a transcript's end was read (a tail or its progress, see `TranscriptProgress`), in this
     /// process, and how many of those on the main thread. The app reads none there: a team's transcripts are a few
     /// hundred KB each to parse, and reading them there froze the window (`--board-bench` checks).

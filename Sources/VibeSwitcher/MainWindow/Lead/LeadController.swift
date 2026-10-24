@@ -923,13 +923,24 @@ final class LeadController: ObservableObject {
         policyTimer = Heartbeat.shared.every(60) { [weak self] in self?.lookAtPolicy() }
     }
 
-    /// The working policy, to each running lead that hasn't got it (changed since, or started before this build), as
-    /// the witness; Settings looks at once after a save.
+    /// The working policy, to each running lead that hasn't got it (changed since, started before this build, or
+    /// compacted since it was told), as the witness; Settings looks at once after a save. The leads' transcripts are
+    /// read off the main thread for their compactions.
     func lookAtPolicy() {
+        guard let watch = policyWatch else { return }
         let running = leadSessions
-        guard let watch = policyWatch, let news = watch.look(running: running.values.map(\.id.uuidString)) else { return }
-        for (root, session) in running where news.leads.contains(session.id.uuidString) {
-            deliver(news.text, from: .system("witness"), root: root)
+        let ids = Set(running.values.map(\.id))
+        let transcripts = Dictionary(store.sessions.compactMap { session in
+            session.hostID.flatMap { id in ids.contains(id) ? session.transcriptPath.map { (id.uuidString, $0) } : nil }
+        }, uniquingKeysWith: { $1 })
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let compactions = transcripts.compactMapValues { TranscriptTail.lastCompaction(url: URL(fileURLWithPath: $0)) }
+            DispatchQueue.main.async {
+                guard let self, let news = watch.look(running: running.values.map(\.id.uuidString), compactions: compactions) else { return }
+                for (root, session) in running where news.leads.contains(session.id.uuidString) {
+                    self.deliver(news.text, from: .system("witness"), root: root)
+                }
+            }
         }
     }
 

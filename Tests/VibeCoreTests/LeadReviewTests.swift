@@ -247,7 +247,7 @@ struct LeadPolicyPromptTests {
         let testing = LeadPrompts.Policy.workerTesting(test: "make test")
         #expect(Self.sentences(testing) == 2, "\(testing)")
         #expect(Self.sentences(LeadPrompts.Policy.workerOwnership) == 2)
-        for needle in ["affects while you edit", "merge runs the full suite (`make test`) once", "shared infrastructure", "after a failed merge",
+        for needle in ["affects while you edit", "merge runs the full suite (`make test`) once", "that run is the one full suite", "shared test or build infrastructure", "after a failed merge",
                        "summary line", "don't repeat runs or benches"] {
             #expect(testing.contains(needle), "missing \(needle)")
         }

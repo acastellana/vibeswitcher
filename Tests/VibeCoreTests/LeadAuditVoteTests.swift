@@ -380,6 +380,7 @@ struct LeadAuditFindersTests: LeadTeamFixture {
         #expect(refused.isError)
         #expect(refused.text.contains("audit_finders is 3, and mac_max_sessions leaves room for 2 more sessions now"), "\(refused.text)")
         #expect(refused.text.contains("4 team sessions across 1 project (genswap 4) (mac_max_sessions 6)"), "\(refused.text)")
+        #expect(refused.text.contains(LeadPrompts.retryWhenWoken), "\(refused.text)")
         #expect(runtime.spawned.count == before)
         #expect(lines(runs).isEmpty, "nothing built or tested")
         // Two fit.

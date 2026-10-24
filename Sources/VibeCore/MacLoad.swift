@@ -19,10 +19,6 @@ public struct MacLoad: Equatable, Sendable {
 
     public var sessions: Int { holders.reduce(0) { $0 + $1.sessions } }
 
-    /// How long a refused lead is told to wait before trying again: the 1-minute average settles within a few
-    /// minutes of the builds that raised it ending, and other projects' sessions ending send this lead no message.
-    public static let retryMinutes = 5
-
     /// The Mac's 1-minute load average; nil when the system doesn't say.
     public static func oneMinute() -> Double? {
         var loads = [Double](repeating: 0, count: 3)

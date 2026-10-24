@@ -214,6 +214,12 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(names(.verifier) == ["submit_audit"])
     }
 
+    @Test func addTasksAcceptanceSaysTheMergesRunIsTheOneFullSuite() throws {
+        let lead = try lead(try repo(), FakeRuntime())
+        let acceptance = lead.tools.first { $0.name == "add_task" }?.properties["acceptance"]?.description ?? ""
+        #expect(acceptance.contains(LeadPrompts.Policy.leadContracts), "\(acceptance)")
+    }
+
     @Test func theWholeLoop() throws {
         let root = try repo()
         let runtime = FakeRuntime()

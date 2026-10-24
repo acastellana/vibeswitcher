@@ -273,7 +273,7 @@ struct LeadMergePolicyTests: LeadTeamFixture {
 
     @Test func theLeadChecksInAndRunsRetrospectives() {
         let prompt = LeadPrompts.lead(project: "acme", root: "/r", workflow: LeadWorkflow.parse("---\nmerge_policy: auto\n---"))
-        for needle in ["Check in", "every few merges", "couple of hours", "what landed", "what's stuck", "what you plan next",
+        for needle in ["Check in", "once a day", "daily summary", "Today: …", "merges you didn't post one by one", "what landed", "what's stuck", "what you plan next",
                        "one open question", "retrospective", "same kind of setback happens twice", "what went well", "what went wrong",
                        "failed audits", "reverted merges", "stranded workers", "the user's complaints", "add_task", "a check",
                        "Retrospective:", "progress log", "record_decision"] {

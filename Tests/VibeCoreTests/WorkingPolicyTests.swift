@@ -117,6 +117,86 @@ struct WorkingPolicyTests: LeadTeamFixture {
         #expect(watch.look(running: ["new-lead", "old-lead"]) == nil)
     }
 
+    /// A compaction a lead's transcript shows, `minutes` after the epoch-ish start of these tests.
+    static func compaction(_ id: String, at minutes: Double) -> TranscriptTail.Compaction {
+        TranscriptTail.Compaction(id: id, at: 1_800_000_000 + minutes * 60)
+    }
+
+    static func at(_ minutes: Double) -> Date { Date(timeIntervalSince1970: 1_800_000_000 + minutes * 60) }
+
+    @Test func aLeadToldInAMessageIsToldAgainOnceAfterEachCompaction() {
+        let policy = Locked(WorkingPolicy.defaultText)
+        let watch = watch(policy)
+        // TGE's lead, started before the policy, compacted once already: told now, and not again for that compaction.
+        let old = Self.compaction("c0", at: 0)
+        #expect(watch.look(running: ["tge-lead"], compactions: ["tge-lead": old], now: Self.at(1))?.leads == ["tge-lead"])
+        #expect(watch.look(running: ["tge-lead"], compactions: ["tge-lead": old], now: Self.at(2)) == nil)
+        // Its context compacted since: told again, once.
+        let first = Self.compaction("c1", at: 10)
+        let again = watch.look(running: ["tge-lead"], compactions: ["tge-lead": first], now: Self.at(11))
+        #expect(again?.leads == ["tge-lead"])
+        #expect(again?.text == WorkingPolicy.witnessText(WorkingPolicy.defaultText))
+        #expect(watch.look(running: ["tge-lead"], compactions: ["tge-lead": first], now: Self.at(12)) == nil)
+        // Never twice for the same one, after a relaunch too (a new watch on the same file).
+        #expect(self.watch(policy).look(running: ["tge-lead"], compactions: ["tge-lead": first], now: Self.at(13)) == nil)
+        // The next compaction: once more.
+        let second = Self.compaction("c2", at: 20)
+        #expect(watch.look(running: ["tge-lead"], compactions: ["tge-lead": second], now: Self.at(21))?.leads == ["tge-lead"])
+        #expect(watch.look(running: ["tge-lead"], compactions: ["tge-lead": second], now: Self.at(22)) == nil)
+        // The transcript's tail no longer showing it (it scrolled past): nothing.
+        #expect(watch.look(running: ["tge-lead"], now: Self.at(23)) == nil)
+    }
+
+    @Test func aCompactionBeforeTheTellingIsntToldAgainAndAPromptedLeadKeepsItThroughCompactions() {
+        let policy = Locked(WorkingPolicy.defaultText)
+        let watch = watch(policy)
+        // Told at minute 5; a compaction it shows from minute 3 (another id than any told) came before that.
+        #expect(watch.look(running: ["genswap-lead"], now: Self.at(5))?.leads == ["genswap-lead"])
+        #expect(watch.look(running: ["genswap-lead"], compactions: ["genswap-lead": Self.compaction("g0", at: 3)], now: Self.at(6)) == nil)
+        // A lead started with it in its prompt has it after any compaction: not told.
+        watch.started("films-lead", with: WorkingPolicy.defaultText)
+        let compacted = ["films-lead": Self.compaction("f1", at: 30), "genswap-lead": Self.compaction("g1", at: 30)]
+        #expect(watch.look(running: ["films-lead", "genswap-lead"], compactions: compacted, now: Self.at(31))?.leads == ["genswap-lead"])
+        // The policy changed: the prompted lead has the old one in its prompt, so it's told, and from then on it's
+        // told again after a compaction like any lead told in a message.
+        policy.set(Self.custom)
+        #expect(watch.look(running: ["films-lead", "genswap-lead"], compactions: compacted, now: Self.at(40))?.leads == ["films-lead", "genswap-lead"])
+        let later = ["films-lead": Self.compaction("f2", at: 50)]
+        #expect(watch.look(running: ["films-lead", "genswap-lead"], compactions: later, now: Self.at(51))?.leads == ["films-lead"])
+        #expect(watch.look(running: ["films-lead", "genswap-lead"], compactions: later, now: Self.at(52)) == nil)
+    }
+
+    @Test func aTranscriptsLastCompactionIsItsLatestMainThreadBoundary() throws {
+        func line(_ object: [String: Any]) -> String {
+            String(decoding: try! JSONSerialization.data(withJSONObject: object), as: UTF8.self)
+        }
+        let lines = [
+            line(["type": "user", "uuid": "u1", "timestamp": "2026-10-24T10:00:00.000Z", "message": ["role": "user", "content": "hi"]]),
+            line(["type": "system", "subtype": "compact_boundary", "uuid": "b1", "timestamp": "2026-10-24T10:05:00.000Z",
+                  "content": "Conversation compacted", "isSidechain": false]),
+            line(["type": "user", "isCompactSummary": true, "uuid": "s1", "timestamp": "2026-10-24T10:05:01.000Z",
+                  "message": ["role": "user", "content": "This session is being continued from a previous conversation that mentions compact_boundary."]]),
+            line(["type": "system", "subtype": "compact_boundary", "uuid": "b2", "timestamp": "2026-10-24T11:00:00.000Z",
+                  "content": "Conversation compacted", "isSidechain": false]),
+            line(["type": "system", "subtype": "compact_boundary", "uuid": "side", "timestamp": "2026-10-24T11:30:00.000Z",
+                  "content": "Conversation compacted", "isSidechain": true]),
+            line(["type": "assistant", "uuid": "a1", "timestamp": "2026-10-24T11:31:00.000Z", "message": ["role": "assistant", "content": []]]),
+        ]
+        let found = try #require(TranscriptTail.lastCompaction(Data((lines.joined(separator: "\n") + "\n").utf8)))
+        #expect(found.id == "b2")
+        #expect(found.at == ChatReader.date("2026-10-24T11:00:00.000Z")?.timeIntervalSince1970)
+        // A partial last line isn't read yet; none at all: nil.
+        #expect(TranscriptTail.lastCompaction(Data((lines.prefix(3).joined(separator: "\n") + "\n" + lines[3].dropLast(5)).utf8))?.id == "b1")
+        #expect(TranscriptTail.lastCompaction(Data((lines[0] + "\n").utf8)) == nil)
+        // From a file, read again once it changed.
+        let file = temp.url("transcript.jsonl")
+        try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try (lines.prefix(2).joined(separator: "\n") + "\n").write(to: file, atomically: true, encoding: .utf8)
+        #expect(TranscriptTail.lastCompaction(url: file)?.id == "b1")
+        try (lines.joined(separator: "\n") + "\n").write(to: file, atomically: true, encoding: .utf8)
+        #expect(TranscriptTail.lastCompaction(url: file)?.id == "b2")
+    }
+
     // MARK: vs-heavy on every session's PATH
 
     @Test func sessionsGetTheBundlesVsHeavyFirstOnTheirPath() throws {

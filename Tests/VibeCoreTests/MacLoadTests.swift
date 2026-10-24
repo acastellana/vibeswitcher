@@ -91,7 +91,7 @@ extension LeadToolsetTests {
         #expect(refused.text.contains("Not started"))
         #expect(refused.text.contains("load 150.0 (load_threshold \(MacLoad.number(2 * Self.cores)), twice the \(MacLoad.processors) cores)"))
         #expect(refused.text.contains("2 team sessions across 2 projects (films 1, genswap 1) (mac_max_sessions 6)"))
-        #expect(refused.text.contains("Try again in about 5 minutes"))
+        #expect(refused.text.contains(LeadPrompts.retryWhenWoken) && !refused.text.contains("about 5 minutes"))
         #expect(runtime.spawned.isEmpty)
         #expect(BoardStore(root: root).load().task("one")?.status == .planned)
         // A threshold the owner set is said as theirs (the lead sets it: merge and start_worker take guard rails only so).
@@ -187,6 +187,7 @@ extension LeadToolsetTests {
         #expect(refused.isError)
         #expect(refused.text.contains("Not merged (nothing was tested)"))
         #expect(refused.text.contains("stayed above load_threshold"))
+        #expect(refused.text.contains(LeadPrompts.retryWhenWoken))
         #expect(refused.text.contains("load 150.0"))
         // The task's own worker and verifier count too, here: the Mac as it is.
         #expect(refused.text.contains("8 team sessions across 3 projects (genswap 4, films 2, \((root as NSString).lastPathComponent) 2)"))

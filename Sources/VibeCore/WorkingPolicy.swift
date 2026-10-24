@@ -52,8 +52,10 @@ public enum WorkingPolicy {
 extension LeadWitness {
     /// The working policy, told to each running lead once: when it changes (a lead running then has the old one in
     /// its prompt), and once when a build that has it first runs (leads started before it have none). A lead started
-    /// with it in its prompt (`started`) isn't told it again. What was told to which lead is kept in `file`, so a
-    /// relaunch doesn't tell it again.
+    /// with it in its prompt (`started`) isn't told it again. A lead told it in a message loses that message to the
+    /// next compaction of its context (TGE's lead kept it only as a note it wrote itself), so it's told again once
+    /// after each compaction its transcript shows; one started with it keeps it in its prompt through any compaction.
+    /// What was told to which lead is kept in `file`, so a relaunch doesn't tell it again.
     public struct PolicyWatch {
         let read: () -> String
         let file: URL
@@ -63,30 +65,58 @@ extension LeadWitness {
             self.file = file
         }
 
-        /// The policy's digest, and the leads (their sessions) that have it.
+        /// The policy's digest, and the leads (their sessions) that have it. Per lead, when it was last told and the
+        /// compaction it was told after; the leads started with it in their prompt. (Not in a file an older build wrote.)
         struct Told: Codable, Equatable {
             var digest: String
             var leads: [String]
+            var toldAt: [String: Double]? = nil
+            var compactions: [String: String]? = nil
+            var prompted: [String]? = nil
+
+            /// Only what's kept for the leads in `leads`.
+            mutating func keep(_ count: Int) {
+                leads = Array(leads.suffix(count))
+                let kept = Set(leads)
+                toldAt = toldAt?.filter { kept.contains($0.key) }
+                compactions = compactions?.filter { kept.contains($0.key) }
+                prompted = prompted?.filter(kept.contains)
+            }
         }
 
         /// The most leads kept as told: the oldest go first (they ended long ago).
         static let kept = 200
 
         /// The leads of `running` (their sessions) to tell now, and what: none when each was told this policy or
-        /// started with it. Those returned count as told from now on.
-        public func look(running: [String]) -> (text: String, leads: [String])? {
+        /// started with it, and has had no compaction since it was told. `compactions`: each running lead's latest
+        /// compaction its transcript shows (see `TranscriptTail.lastCompaction`). Those returned count as told from now on.
+        public func look(running: [String], compactions: [String: TranscriptTail.Compaction] = [:], now: Date = Date()) -> (text: String, leads: [String])? {
             let policy = read()
             let digest = WorkingPolicy.digest(policy)
             let before = load()
             var told = before.flatMap { $0.digest == digest ? $0 : nil } ?? Told(digest: digest, leads: [])
             var seen = Set(told.leads)
-            let due = running.filter { seen.insert($0).inserted }
+            let prompted = Set(told.prompted ?? [])
+            let due = running.filter { lead in
+                guard seen.insert(lead).inserted else {
+                    // Told before: again once after a compaction made since then (its message went with it).
+                    guard !prompted.contains(lead), let compaction = compactions[lead], told.compactions?[lead] != compaction.id else { return false }
+                    return told.toldAt?[lead].map { compaction.at > $0 } ?? true
+                }
+                return true
+            }
             guard !due.isEmpty else {
                 // Changed, with no lead to tell: leads started from now on have it in their prompts.
                 if before != told { save(told) }
                 return nil
             }
-            told.leads = Array((told.leads + due).suffix(Self.kept))
+            for lead in due {
+                if !told.leads.contains(lead) { told.leads.append(lead) }
+                told.toldAt = (told.toldAt ?? [:]).merging([lead: now.timeIntervalSince1970]) { $1 }
+                // A compaction made before this telling isn't told about again.
+                if let compaction = compactions[lead] { told.compactions = (told.compactions ?? [:]).merging([lead: compaction.id]) { $1 } }
+            }
+            told.keep(Self.kept)
             save(told)
             return (WorkingPolicy.witnessText(policy), due)
         }
@@ -97,8 +127,10 @@ extension LeadWitness {
             let digest = WorkingPolicy.digest(policy)
             guard digest == WorkingPolicy.digest(read()) else { return }
             var told = load().flatMap { $0.digest == digest ? $0 : nil } ?? Told(digest: digest, leads: [])
-            guard !told.leads.contains(session) else { return }
-            told.leads = Array((told.leads + [session]).suffix(Self.kept))
+            guard !(told.prompted ?? []).contains(session) else { return }
+            if !told.leads.contains(session) { told.leads.append(session) }
+            told.prompted = (told.prompted ?? []) + [session]
+            told.keep(Self.kept)
             save(told)
         }
 

@@ -673,12 +673,14 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         #expect(merged.text.contains("conflicts with main"))
         for step in ["`git merge main`", "`git add`", "`git commit`"] { #expect(merged.text.contains(step), "\(step)") }
         #expect(!merged.text.contains("rebase"))
-        let brief = LeadPrompts.worker(task: try #require(BoardStore(root: root).load().task("add-b")), root: root,
-                                       workflow: LeadWorkflow.parse("---\nbase_branch: main\n---"))
+        let workflow = LeadWorkflow.parse("---\nbase_branch: main\n---")
+        let brief = LeadPrompts.worker(task: try #require(BoardStore(root: root).load().task("add-b")), root: root, workflow: workflow)
         for step in ["`git merge main`", "`git add`", "`git commit`", "`git merge --abort`", "without `git -C`"] {
             #expect(brief.contains(step), "\(step)")
         }
-        #expect(!brief.contains("`git rebase"))
+        // No rebase to run: the brief names one only in the list of what its rules refuse.
+        #expect(brief.contains(LeadPrompts.deniedGit(workflow)))
+        #expect(!brief.replacingOccurrences(of: LeadPrompts.deniedGit(workflow), with: "").contains("`git rebase"))
 
         // The worker does just that, reports, passes its audit again, and merge lands it: main stays a line, the work
         // one commit on top of what main was, holding the worker's resolution.

@@ -514,9 +514,10 @@ public enum LeadPrompts {
         /// The worker's testing rule, in two sentences (`test`: the project's test command).
         public static func workerTesting(test: String?) -> String {
             let suite = test.map { "the full suite (`\($0)`)" } ?? "the full suite"
-            return "Tests: run the tests your change affects while you edit; the lead's merge runs \(suite) once, so run it "
-                + "yourself only when you changed shared infrastructure (test scripts, the test harness, build settings) or after "
-                + "a failed merge, and again only if you changed something after that run. Report each suite run's summary line, "
+            return "Tests: run the tests your change affects while you edit; the lead's merge runs \(suite) once, and that run "
+                + "is the one full suite: run it yourself only when you changed shared test or build infrastructure (test scripts, "
+                + "the test harness, build settings) or after a failed merge, and again only if you changed something after that "
+                + "run. Report each suite run's summary line, "
                 + "and don't repeat runs or benches the contract doesn't ask for."
         }
 
@@ -531,16 +532,29 @@ public enum LeadPrompts {
                 : "The lead merges it on your report after the merge's own full test run (a branch that touches sensitive paths is audited first)."
         }
 
+        /// What a contract asks of the worker's tests (add_task's acceptance): the merge's run is the one full suite.
+        public static let leadContracts = "Acceptance checks name the focused tests or checks that show the goal works, never "
+            + "a full suite run by the worker: merge(task) runs test_command, and that run is the one full suite. A worker runs "
+            + "the full suite itself only when its change touches shared test or build infrastructure (test scripts, the test "
+            + "harness, build settings); its brief already says so."
+
         /// When the lead chooses an audit (add_task's review).
         public static let leadReview = "Give each task a review level (add_task or update_task, review): none, the default, "
             + "when its worker can own it through merge; audit only for security (permissions, secrets, authentication, the "
-            + "guard rails), irreversible operations (migrations, deleting or rewriting data, anything outward-facing) or complex "
+            + "guard rails), privacy (the owner's private data in a contract or a file, a repository's or a share's "
+            + "visibility, anything that exposes it to others), irreversible operations (migrations, deleting or rewriting data, anything outward-facing) or complex "
             + "changes (concurrency, many parts at once, hard to test). A task whose branch touches sensitive_paths is audited "
             + "whatever you set."
 
         /// What the lead does with a worker's done report on a review none task.
         public static let leadUnaudited = "A review none task needs no audit: merge(task) takes its worker's done report on "
             + "the branch's head and runs the full test suite as its check; a failure goes back to the worker with the output."
+
+        /// What the lead tells the user about a merge: an update only for one they'd notice (decision 2026-10-21 22:52,
+        /// item 6); merge's result says it too.
+        public static let updates = "post_update only for a merge the user would notice (a change they'll see or use, a "
+            + "risk they should know of): what changed, how it was checked (screenshots when there's UI), the risk and how to "
+            + "revert it. Every other merge goes into your daily summary."
 
         /// Findings that are cosmetic.
         public static let nits = "Nits never block a merge and never become tasks by themselves; fix one only while the "
@@ -549,6 +563,16 @@ public enum LeadPrompts {
         /// What a re-audit checks (the verifier's prompt).
         public static let reaudit = "A re-audit checks only the concerns the open findings below raise: whether each is fixed, "
             + "with the focused tests or acceptance checks that show it, not the whole suite or every check again."
+    }
+
+    /// What a refusal for the Mac's load or room tells the lead: no sleeping or polling, the next wake is the retry.
+    public static let retryWhenWoken = "Don't sleep or poll: retry when you're next woken (a report, the user, or a "
+        + "VibeSwitcher message)."
+
+    /// The git commands every worker is refused (its permission rules, `LeadLaunch.deny`), as a list for its brief and
+    /// for the lead writing one: a brief that needs one can never be followed.
+    public static func deniedGit(_ workflow: LeadWorkflow) -> String {
+        LeadLaunch.deniedGit(.worker, base: workflow.base, records: workflow.recordsDir).map { "`\($0)`" }.joined(separator: ", ")
     }
 
     /// How every lead's start prompt opens (a replaced lead's last turns leave it out: it isn't the user's).
@@ -600,10 +624,11 @@ public enum LeadPrompts {
         they wait for the user's say.
         2. Break the work into tasks on the board (add_task), each with a contract: a goal, acceptance checks that can \
         be run or seen, boundaries (which files or areas, what not to touch) and the context a fresh worker needs. \
+        \(Policy.leadContracts) Workers are refused these git commands, so no brief may need one: \(deniedGit(workflow)).
         \(Policy.leadReview)
         3. Start workers (start_worker) only for tasks that don't depend on each other, at most \(workflow.maxWorkers) \
         workers at once. Each works alone in its own worktree on its own branch. Fewer, sharper tasks beat many vague ones.
-        4. Don't wait or poll. VibeSwitcher sends you a message when a worker finishes, needs input or stalls, and \
+        4. Don't sleep, wait or poll. VibeSwitcher sends you a message when a worker finishes, needs input or stalls, and \
         reports wake you even between turns: a short prompt from VibeSwitcher says what came in. When woken, call \
         status and act on the reports. Meanwhile plan the next tasks, review, or answer the user.
         5. When a worker says it's done: \(Policy.leadUnaudited) An audit task: run audit(task). A worker's own report is \
@@ -614,8 +639,7 @@ public enum LeadPrompts {
         (decisions.md), the task's own contract or notes, or something the user said (e.g. "prototype: never merge \
         until the user has looked"). If something does, don't merge and don't cleanup: update_task(task, status: \
         kept, reason: what holds it) keeps its branch and worktree, and merge refuses it until you set it back. \
-        Otherwise merge(task) as the merge policy below says, then post_update with what changed, how it was checked \
-        (screenshots when there's UI), the risk and how to revert it, then cleanup(task). If the audit didn't pass: \
+        Otherwise merge(task) as the merge policy below says, then cleanup(task); \(Policy.updates) If the audit didn't pass: \
         tell the worker exactly what failed (message) or start a fresh worker with a sharper contract.
         A task that won't merge by itself is never marked failed for it: failed is for work that was tried and didn't \
         pass, blocked for work that waits on something. Folded when another task carries its work (overtaken, or \
@@ -639,7 +663,8 @@ public enum LeadPrompts {
         first builds and tests the commit once (it takes as long as the suite) and starts that many finders on its \
         logs, each with a focus; the verdict arrives once all have submitted, voted: a finding most of them raised is \
         open, the rest unconfirmed (shown, never blocking: dismiss_finding or add_task(from_finding:) one that's a real Important problem). \
-        Each finder counts against mac_max_sessions; when audit says there's no room, wait or lower audit_finders.
+        Each finder counts against mac_max_sessions; when audit says there's no room, lower audit_finders or retry \
+        it when you're next woken.
         7. Keep the board, the progress log and decisions (record_decision) current. They are your memory: when your \
         context fills up, a new lead continues from them.
         8. Every incident becomes a check that runs before merge. When something broke the user's work (a hang, a \
@@ -647,8 +672,8 @@ public enum LeadPrompts {
         right away: it goes into incidents.md and plans a task that turns it into a check (a test, or a case in \
         regression_command's corpus, which merge runs after test_command), not a note. When a question to the user is \
         about one task, ask_user with its task: its wait on the user counts on that task's score.
-        9. Check in: after every few merges (about 3), or about every couple of hours of active work, post_update a \
-        short "How it's going": what landed, what's stuck, what you plan next. If one open question matters (a \
+        9. Check in once a day of active work with a daily summary: post_update (title "Today: …") what landed (the \
+        merges you didn't post one by one, a line each), what's stuck, what you plan next. If one open question matters (a \
         direction, a priority), ask it with ask_user; don't ask for the sake of asking.
         10. Run a retrospective after a batch of work (a goal's tasks merged), or as soon as the same kind of setback \
         happens twice: what went well, what went wrong (failed audits, reverted merges, stranded workers, merge \
@@ -681,8 +706,7 @@ public enum LeadPrompts {
         (\(workflow.macMaxSessions)); merge waits up to test_timeout_min (\(MacLoad.number(workflow.testTimeoutMinutes)) min) for \
         the load to drop before its tests, then refuses. status shows the Mac's load and every project's team \
         sessions: plan around them. When it's busy, start fewer workers, merge and cleanup finished tasks first \
-        (cleanup ends their sessions), and don't retry a refusal at once: try again in about \(MacLoad.retryMinutes) \
-        minutes, since other projects' sessions ending send you no message.
+        (cleanup ends their sessions), and don't retry a refusal at once. \(retryWhenWoken)
         \(onBattery)
         """
     }
@@ -714,16 +738,17 @@ public enum LeadPrompts {
         switch policy {
         case .auto:
             text += " Merge without asking once a task's review passes (its audit; for review none, its worker's done report "
-                + "and the merge's own test run). After each merge, post_update what changed, how it was checked, the risk "
-                + "and how to revert it (the commits it brought, to `git revert`)."
+                + "and the merge's own test run). A merge the user would notice gets a post_update: what changed, how it was "
+                + "checked, the risk and how to revert it (the commits it brought, to `git revert`); the rest go into your "
+                + "daily summary."
         case .askSensitive, .askAll:
             if policy == .askSensitive {
                 text += " Sensitive paths: \(workflow.sensitiveGlobs.joined(separator: ", ")); every other commit merges without asking."
             }
             text += " When a commit needs the user's approval, merge refuses it and says what to ask: ask_user with the options "
                 + "\"\(LeadWorkflow.approval(of: "<the full commit>"))\" and \"Not yet\", blocking, with no timer. The approval covers "
-                + "that commit only: a new commit needs a new one. After each merge, post_update what changed, how it was checked, "
-                + "the risk and how to revert it."
+                + "that commit only: a new commit needs a new one. A merge the user would notice gets a post_update: what "
+                + "changed, how it was checked, the risk and how to revert it; the rest go into your daily summary."
         }
         return text
     }
@@ -752,6 +777,7 @@ public enum LeadPrompts {
         \(loadTests)
         \(newTests)
         \(heavyWork)
+        Git commands refused here, by your permission rules: \(deniedGit(workflow)).
         Out of date: when the lead says your branch conflicts with \(workflow.base), bring it up to date here by \
         merging: run `git merge \(workflow.base)`, resolve each conflict, `git add` the files, then `git commit` \
         (`git merge --abort` starts over). Then run the affected tests again, commit and report. The lead's merge puts your \

@@ -73,6 +73,9 @@ struct LeadBaseMovesTests: LeadTeamFixture {
         let merged = lead.call("merge", ["task": "add-b"])
         #expect(!merged.isError, "\(merged.text)")
         #expect(merged.text.contains("Merged add-b"))
+        // An update only for a merge the user would notice (decision 2026-10-21 22:52, item 6), not one per merge.
+        #expect(merged.text.contains("Next: cleanup(add-b). " + LeadPrompts.Policy.updates), "\(merged.text)")
+        #expect(!merged.text.contains("Post an update for the user"))
         #expect(Git.run(["merge-base", "--is-ancestor", mine, "main"], in: root).ok)
         #expect(vault.head(root: root, branch: "main") == head("main", root))
         let update = try #require(BoardStore(root: root).load().updates.last)
