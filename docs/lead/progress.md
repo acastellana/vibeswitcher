@@ -1124,3 +1124,5 @@
 - 2026-10-24 18:43 Merged workers-run-the-project: Workers run the project's lint tests before reporting done (no audit: review none)
 - 2026-10-24 18:52 Audit of boundary-excursions-a: complete, clean
 - 2026-10-24 19:12 Merged boundary-excursions-a: Boundary excursions a worker reports don't fail an audit, and dismissed findings don't force another one
+- 2026-10-24 19:13 Started a worker on audit-takes-a-branch
+- 2026-10-24 19:13 Update: Merged: audits no longer fail on reported routine edits, and dismissed findings don't force another verifier — **What changed.**
