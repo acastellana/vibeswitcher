@@ -4,31 +4,24 @@ import Testing
 @testable import VibeCore
 @testable import VibeSwitcher
 
-/// Pictures of Home's New Project… sheet, light and dark, drawn offscreen in a real window: empty, and filled in with
-/// the lead and a first goal chosen. Only with `NEWPROJECT_SNAPSHOT_DIR=/some/folder`.
+/// Pictures of Home's New Project… sheet, light and dark, drawn offscreen in a real window: empty, and filled in with a
+/// first goal. Only with `NEWPROJECT_SNAPSHOT_DIR=/some/folder`.
 @MainActor
 struct NewProjectSnapshots {
     static let folder = ProcessInfo.processInfo.environment["NEWPROJECT_SNAPSHOT_DIR"]
 
     @Test(.enabled(if: folder != nil)) func drawTheSheet() throws {
         let folder = try #require(Self.folder)
-        let presets = LaunchPresets.builtIns().global
         for scheme in [NSAppearance.Name.aqua, .darkAqua] {
             let suffix = scheme == .darkAqua ? "dark" : "light"
-            let empty = NewProjectModel(location: "~/dev", presets: presets)
+            let empty = NewProjectModel(location: "~/dev")
             try write(render(NewProjectSheet(model: empty, created: { _, _ in }, close: {}), appearance: scheme),
                       to: folder, name: "new-project-\(suffix).png")
-            let filled = NewProjectModel(location: "~/nonexistent-projects", presets: presets)
+            let filled = NewProjectModel(location: "~/nonexistent-projects")
             filled.name = "Weather Station"
-            filled.then = .lead
             filled.goal = "a page with today's forecast"
             try write(render(NewProjectSheet(model: filled, created: { _, _ in }, close: {}), appearance: scheme),
-                      to: folder, name: "new-project-lead-\(suffix).png")
-            let session = NewProjectModel(location: "~/dev", presets: presets)
-            session.name = "Notes"
-            session.then = .session
-            try write(render(NewProjectSheet(model: session, created: { _, _ in }, close: {}), appearance: scheme),
-                      to: folder, name: "new-project-session-\(suffix).png")
+                      to: folder, name: "new-project-filled-\(suffix).png")
         }
     }
 

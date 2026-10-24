@@ -6,10 +6,10 @@ struct ProjectCreationTests {
     let temp = Scratch()
     let home = "/Users/someone"
 
-    func plan(_ name: String, folder: String? = nil, location: String = "~/dev", initializeGit: Bool = true,
+    func plan(_ name: String, folder: String? = nil, location: String = "~/dev",
               existing: [String: ProjectCreation.Existing] = ["/Users/someone/dev": .folder]) -> Result<ProjectCreation.Plan, ProjectCreation.Problem> {
         ProjectCreation.plan(name: name, folderName: folder ?? ProjectCreation.folderName(for: name), location: location,
-                             options: .init(initializeGit: initializeGit), home: home) { existing[$0] ?? .none }
+                             home: home) { existing[$0] ?? .none }
     }
 
     func message(_ result: Result<ProjectCreation.Plan, ProjectCreation.Problem>) -> String? {
@@ -59,12 +59,12 @@ struct ProjectCreationTests {
                                                    ["commit", "--quiet", "-m", "Initial commit"]])
     }
 
-    @Test func anEditedFolderNameAndAMissingLocationAndNoGit() throws {
-        let made = try plan("My App", folder: "app-2", location: "/Volumes/Work/projects", initializeGit: false).get()
+    @Test func anEditedFolderNameAndAMissingLocation() throws {
+        let made = try plan("My App", folder: "app-2", location: "/Volumes/Work/projects").get()
         #expect(made.folder == "/Volumes/Work/projects/app-2")
         #expect(made.createsLocation)
-        #expect(made.files.isEmpty)
-        #expect(made.gitSteps(branch: "main").isEmpty)
+        #expect(made.files.map(\.name) == ["README.md", ".gitignore"])
+        #expect(made.gitSteps(branch: "main").first == ["init", "--quiet", "--initial-branch=main"])
     }
 
     @Test func theBranchIsGitsDefaultElseMain() {
@@ -213,12 +213,5 @@ struct ProjectCreationTests {
         #expect(ProjectCreation.create(made, git: git) == .exists(folder: "race", location: ProjectCreation.tildePath(dev)))
         #expect(try String(contentsOfFile: made.folder + "/notes.txt", encoding: .utf8) == "mine\n")
         #expect(ProjectCreation.existing(made.folder + "/.git") == .none)
-    }
-
-    @Test func withoutGitItsAnEmptyFolder() throws {
-        let dev = try location()
-        let made = try ProjectCreation.plan(name: "Bare", folderName: "bare", location: dev, options: .init(initializeGit: false)).get()
-        #expect(ProjectCreation.create(made, git: { _, _ in Issue.record("git ran"); return .init(status: 1, output: "", error: "") }) == nil)
-        #expect(try FileManager.default.contentsOfDirectory(atPath: made.folder).isEmpty)
     }
 }

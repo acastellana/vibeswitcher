@@ -5,12 +5,12 @@ import Testing
 @testable import VibeCore
 @testable import VibeSwitcher
 
-/// Home's New Project… sheet: what it derives and offers, that it makes the project off the main thread, and the
-/// projects folder setting. Git runs with a scratch HOME and config, never the user's.
+/// Home's New Project… sheet: what it derives, that it makes the project (always with git and a first commit) off the
+/// main thread and hands back the first goal, and the projects folder setting. Git runs with a scratch HOME and config,
+/// never the user's.
 @MainActor
 struct NewProjectTests {
     let temp = Scratch()
-    let presets = LaunchPresets.builtIns().global
 
     private func withSuite(_ body: (UserDefaults, URL) throws -> Void) throws {
         let name = "dev.vibeswitcher.tests.\(UUID().uuidString)"
@@ -44,7 +44,7 @@ struct NewProjectTests {
     }
 
     @Test func theFolderNameFollowsTheNameUntilEdited() {
-        let model = NewProjectModel(location: "~/dev", presets: presets)
+        let model = NewProjectModel(location: "~/dev")
         model.name = "  My Big App "
         #expect(model.folderName == "my-big-app")
         model.editFolderName("big")
@@ -56,9 +56,8 @@ struct NewProjectTests {
         #expect(model.folderName == "other")
     }
 
-    @Test func itOffersClaudeAndSaysWhatsWrong() {
-        let model = NewProjectModel(location: "/nonexistent-location-\(UUID().uuidString)", presets: presets)
-        #expect(model.preset?.name == "Claude")
+    @Test func itSaysWhatsWrongAndTrimsTheGoal() {
+        let model = NewProjectModel(location: "/nonexistent-location-\(UUID().uuidString)")
         #expect(model.problem == nil)  // nothing typed yet, nothing tried
         model.create { _, _ in Issue.record("made with no name") }
         #expect(model.problem == "Give the project a name.")
@@ -67,25 +66,21 @@ struct NewProjectTests {
         model.name = "Fine"
         #expect(model.problem == nil)
         #expect(model.locationNote?.hasSuffix("isn't there yet: it will be made.") == true)
-        model.then = .lead
-        model.initializeGit = false
-        #expect(model.problem == NewProjectModel.leadNeedsGit)
-        model.initializeGit = true
+        #expect(model.firstGoal == nil)
         model.goal = "  "
-        #expect(model.next == .lead(goal: nil))
+        #expect(model.firstGoal == nil)
         model.goal = " add a login page "
-        #expect(model.next == .lead(goal: "add a login page"))
-        model.then = .session
-        #expect(model.next == .session(presets[0]))
-        model.then = .nothing
-        #expect(model.next == .nothing)
+        #expect(model.firstGoal == "add a login page")
     }
 
-    func scratchGit() throws -> ProjectCreation.GitRunner {
+    /// git with a scratch HOME and config; `defaultBranch` is its init.defaultBranch, when set.
+    func scratchGit(defaultBranch: String? = nil) throws -> ProjectCreation.GitRunner {
         let home = temp.url("newproject-home")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
         let config = home.appendingPathComponent(".gitconfig")
-        try "[user]\n\tname = Test\n\temail = test@example.com\n[commit]\n\tgpgsign = false\n".write(to: config, atomically: true, encoding: .utf8)
+        let initSection = defaultBranch.map { "[init]\n\tdefaultBranch = \($0)\n" } ?? ""
+        try ("[user]\n\tname = Test\n\temail = test@example.com\n[commit]\n\tgpgsign = false\n" + initSection)
+            .write(to: config, atomically: true, encoding: .utf8)
         let env = Git.environment.merging(["HOME": home.path, "GIT_CONFIG_GLOBAL": config.path, "GIT_CONFIG_NOSYSTEM": "1",
                                            "XDG_CONFIG_HOME": home.path]) { $1 }
         return { args, directory in
@@ -94,28 +89,50 @@ struct NewProjectTests {
         }
     }
 
-    @Test func createMakesItOffTheMainThreadAndHandsBackTheFolder() async throws {
-        let dev = temp.url("newproject-dev").path
-        let model = NewProjectModel(location: dev, presets: presets)
-        model.git = try scratchGit()
-        model.name = "Hello World"
-        model.then = .lead
-        model.goal = "ship it"
-        var made: (String, ProjectCreation.Next)?
+    /// Makes the project with `git` and returns its folder and the goal `create` handed back.
+    private func make(_ name: String, goal: String, in dev: String,
+                      git: @escaping ProjectCreation.GitRunner) async throws -> (folder: String, goal: String?) {
+        let model = NewProjectModel(location: dev)
+        model.git = git
+        model.name = name
+        model.goal = goal
+        var made: (folder: String, goal: String?)?
         model.create { made = ($0, $1) }
         #expect(model.creating)
         #expect(await until { made != nil })
-        #expect(made?.0 == URL(fileURLWithPath: dev).appendingPathComponent("hello-world").path)
-        #expect(made?.1 == .lead(goal: "ship it"))
         #expect(!model.creating)
         #expect(model.failure == nil)
-        let log = Git.run(["log", "--oneline"], in: made?.0 ?? "/nonexistent")
+        return try #require(made)
+    }
+
+    /// README.md, .gitignore and one commit with both, on `branch`.
+    private func expectRepository(_ folder: String, on branch: String) {
+        #expect(ProjectCreation.existing(folder + "/README.md") == .file)
+        #expect(ProjectCreation.existing(folder + "/.gitignore") == .file)
+        let log = Git.run(["log", "--oneline"], in: folder)
         #expect(log.output.split(separator: "\n").count == 1)
+        #expect(Git.run(["rev-parse", "--abbrev-ref", "HEAD"], in: folder).output.trimmingCharacters(in: .whitespacesAndNewlines) == branch)
+        #expect(Git.run(["status", "--porcelain"], in: folder).output.isEmpty)
+    }
+
+    @Test func createMakesItOffTheMainThreadWithGitAndHandsBackTheGoal() async throws {
+        let dev = temp.url("newproject-dev").path
+        let made = try await make("Hello World", goal: "  ship it ", in: dev, git: try scratchGit(defaultBranch: "trunk"))
+        #expect(made.folder == URL(fileURLWithPath: dev).appendingPathComponent("hello-world").path)
+        #expect(made.goal == "ship it")
+        expectRepository(made.folder, on: "trunk")
+    }
+
+    @Test func withNoGoalOrDefaultBranchItsMainAndNoGoal() async throws {
+        let dev = temp.url("newproject-dev").path
+        let made = try await make("Plain", goal: " ", in: dev, git: try scratchGit())
+        #expect(made.goal == nil)
+        expectRepository(made.folder, on: "main")
     }
 
     @Test func aGitFailureIsOneAlertAndNoFolder() async throws {
         let dev = temp.url("newproject-dev").path
-        let model = NewProjectModel(location: dev, presets: presets)
+        let model = NewProjectModel(location: dev)
         model.git = { args, _ in Git.Result(status: 128, output: "", error: "fatal: not today") }
         model.name = "Broken"
         model.create { _, _ in Issue.record("reported as made") }

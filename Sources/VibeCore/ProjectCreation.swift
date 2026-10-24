@@ -12,20 +12,6 @@ public enum ProjectCreation {
         "# \(name.trimmingCharacters(in: .whitespacesAndNewlines))\n"
     }
 
-    public struct Options: Equatable, Sendable {
-        /// `git init` on the default branch, README.md and .gitignore, and a first commit.
-        public var initializeGit: Bool
-        public init(initializeGit: Bool = true) { self.initializeGit = initializeGit }
-    }
-
-    /// What's done once the project is made.
-    public enum Next: Equatable, Sendable {
-        case nothing
-        case session(LaunchPreset)
-        /// The project lead, with a first goal when one was given.
-        case lead(goal: String?)
-    }
-
     /// Why a project can't be made; `message` is what the sheet shows.
     public enum Problem: Error, Equatable, Sendable {
         case emptyName
@@ -97,21 +83,19 @@ public enum ProjectCreation {
         public var folder: String
         /// The projects folder isn't there yet: it's made first (0755).
         public var createsLocation: Bool
+        /// README.md and .gitignore.
         public var files: [File]
-        public var initializeGit: Bool
 
-        /// What git runs in `folder`, in order (none without `initializeGit`).
+        /// What git runs in `folder`, in order: `git init` on the default branch, then the first commit of `files`.
         public func gitSteps(branch: String) -> [[String]] {
-            guard initializeGit else { return [] }
-            return [["init", "--quiet", "--initial-branch=\(branch)"], ["add", "--"] + files.map(\.name),
-                    ["commit", "--quiet", "-m", ProjectCreation.commitMessage]]
+            [["init", "--quiet", "--initial-branch=\(branch)"], ["add", "--"] + files.map(\.name),
+             ["commit", "--quiet", "-m", ProjectCreation.commitMessage]]
         }
     }
 
     /// What making the project `name` in `location` writes and runs, or why it can't. `folderName` is what the sheet
     /// shows under the name (derived from it, or edited). `existing` says what's at a path (the file system's, here).
-    public static func plan(name: String, folderName: String, location: String, options: Options = Options(),
-                            home: String = NSHomeDirectory(),
+    public static func plan(name: String, folderName: String, location: String, home: String = NSHomeDirectory(),
                             existing: (String) -> Existing = ProjectCreation.existing) -> Result<Plan, Problem> {
         let title = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let folderName = folderName.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -130,9 +114,8 @@ public enum ProjectCreation {
         case .file: return .failure(.isFile(name: folderName, location: shown))
         case .none: break
         }
-        let files = options.initializeGit
-            ? [File(name: "README.md", contents: readme(name: title)), File(name: ".gitignore", contents: gitignore)] : []
-        return .success(Plan(folder: folder, createsLocation: place == .none, files: files, initializeGit: options.initializeGit))
+        let files = [File(name: "README.md", contents: readme(name: title)), File(name: ".gitignore", contents: gitignore)]
+        return .success(Plan(folder: folder, createsLocation: place == .none, files: files))
     }
 
     /// Runs git: arguments and the folder it runs in.
@@ -181,7 +164,6 @@ public enum ProjectCreation {
         } catch {
             return undo(.failed("The project's folder couldn't be made: \(error.localizedDescription)"))
         }
-        guard plan.initializeGit else { return nil }
         let branch = branch(fromConfig: git(["config", "--get", "init.defaultBranch"], plan.folder))
         for step in plan.gitSteps(branch: branch) {
             let result = git(step, plan.folder)

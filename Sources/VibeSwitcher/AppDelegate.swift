@@ -56,7 +56,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         projectsFolder: { [weak self] in
             ProjectCreation.tildePath(self?.preferences.projectsFolderPath ?? ProjectCreation.expand(ProjectCreation.defaultLocation))
         },
-        projectCreated: { [weak self] folder, next in self?.projectCreated(folder, then: next) })
+        projectCreated: { [weak self] folder, goal in self?.projectCreated(folder, goal: goal) })
     private(set) lazy var leadController: LeadController = {
         let controller = LeadController(host: hostClient, store: store, sweepsRoles: true) { [weak self] root in
             let presets = self?.presets(for: root) ?? []
@@ -834,20 +834,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         }
     }
 
-    /// A project Home's New Project… made: on Home at once (and after a relaunch, before any agent ran in it), then a
-    /// session or the lead in it, as asked.
-    private func projectCreated(_ folder: String, then next: ProjectCreation.Next) {
+    /// A project Home's New Project… made: on Home at once (and after a relaunch, before any agent ran in it), then the
+    /// project lead in it, with the first goal when one was given.
+    private func projectCreated(_ folder: String, goal: String?) {
         preferences.noteCreatedProject(folder)
         windowModel.recentProjects.removeAll { $0 == folder }
         windowModel.recentProjects.insert(folder, at: 0)
         loadRecentProjects()
-        switch next {
-        case .nothing: break
-        case .session(let preset): newSession(preset: preset, in: folder)
-        case .lead(let goal):
-            showMainWindow()
-            leadController.startLead(in: folder, goal: goal)
-        }
+        showMainWindow()
+        leadController.startLead(in: folder, goal: goal)
     }
 
     private func loadRecentProjects() {

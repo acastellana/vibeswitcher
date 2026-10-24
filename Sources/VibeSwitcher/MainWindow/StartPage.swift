@@ -40,7 +40,7 @@ struct StartPage: View {
             .frame(maxWidth: .infinity)
         }
         .sheet(isPresented: $newProject) {
-            NewProjectSheet(model: NewProjectModel(location: actions.projectsFolder(), presets: actions.presets(nil)),
+            NewProjectSheet(model: NewProjectModel(location: actions.projectsFolder()),
                             created: actions.projectCreated, close: { newProject = false })
         }
     }

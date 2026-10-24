@@ -2,10 +2,9 @@ import AppKit
 import SwiftUI
 import VibeCore
 
-/// Home's New Project… sheet: a name, where it goes, git with a first commit, and what to do once it's made.
+/// Home's New Project… sheet: a name, where it goes, and a first goal. It's made with git and a first commit, and the
+/// project lead starts in it.
 final class NewProjectModel: ObservableObject {
-    enum Then: Hashable { case nothing, session, lead }
-
     @Published var name = "" {
         didSet { if !folderEdited { folderName = ProjectCreation.folderName(for: name) } }
     }
@@ -14,24 +13,17 @@ final class NewProjectModel: ObservableObject {
     private var folderEdited = false
     /// As shown: "~/dev".
     @Published var location: String
-    @Published var initializeGit = true
-    @Published var then: Then = .nothing
-    @Published var presetID: UUID?
     @Published var goal = ""
     @Published private(set) var creating = false
     /// Create was pressed: an empty name says so from then on.
     @Published private(set) var attempted = false
     /// What went wrong making it (git's message), for the one alert.
     @Published var failure: String?
-    let presets: [LaunchPreset]
     /// How git runs (tests give it a scratch HOME and config).
     var git: ProjectCreation.GitRunner = { Git.run($0, in: $1) }
 
-    init(location: String, presets: [LaunchPreset]) {
+    init(location: String) {
         self.location = location
-        self.presets = presets
-        presetID = (presets.first { $0.kind == .claude && $0.place == .window } ?? presets.first { $0.kind == .claude }
-                    ?? presets.first)?.id
     }
 
     func editFolderName(_ text: String) {
@@ -40,30 +32,19 @@ final class NewProjectModel: ObservableObject {
     }
 
     var plan: Result<ProjectCreation.Plan, ProjectCreation.Problem> {
-        ProjectCreation.plan(name: name, folderName: folderName, location: location,
-                             options: .init(initializeGit: initializeGit))
+        ProjectCreation.plan(name: name, folderName: folderName, location: location)
     }
-
-    static let leadNeedsGit = "The project lead needs the git repository and its first commit: turn that on, or pick another next step."
 
     /// The line under the form saying why Create won't go; nil while the name is still empty and untried.
     var problem: String? {
         if case .failure(let problem) = plan, attempted || problem != .emptyName { return problem.message }
-        if then == .lead && !initializeGit { return Self.leadNeedsGit }
-        if then == .session && preset == nil { return "There's no launch preset to open: add one in Settings › Launch." }
         return nil
     }
 
-    var preset: LaunchPreset? { presets.first { $0.id == presetID } }
-
-    var next: ProjectCreation.Next {
-        switch then {
-        case .nothing: return .nothing
-        case .session: return preset.map { .session($0) } ?? .nothing
-        case .lead:
-            let text = goal.trimmingCharacters(in: .whitespacesAndNewlines)
-            return .lead(goal: text.isEmpty ? nil : text)
-        }
+    /// The lead's first goal: trimmed, nil when there's none.
+    var firstGoal: String? {
+        let text = goal.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
     }
 
     /// "~/dev isn't there yet" while it isn't.
@@ -72,19 +53,20 @@ final class NewProjectModel: ObservableObject {
         return "\(ProjectCreation.tildePath((plan.folder as NSString).deletingLastPathComponent)) isn't there yet: it will be made."
     }
 
-    /// Makes the project off the main thread (git can be slow); `done` gets its folder on the main thread.
-    func create(_ done: @escaping (String, ProjectCreation.Next) -> Void) {
+    /// Makes the project off the main thread (git can be slow); `done` gets its folder and the first goal on the main
+    /// thread.
+    func create(_ done: @escaping (_ folder: String, _ goal: String?) -> Void) {
         guard !creating else { return }
         attempted = true
         guard problem == nil, case .success(let plan) = plan else { return }
         creating = true
-        let next = next, git = git
+        let goal = firstGoal, git = git
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let problem = ProjectCreation.create(plan, git: git)
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.creating = false
-                if let problem { self.failure = problem.message } else { done(plan.folder, next) }
+                if let problem { self.failure = problem.message } else { done(plan.folder, goal) }
             }
         }
     }
@@ -92,12 +74,11 @@ final class NewProjectModel: ObservableObject {
 
 struct NewProjectSheet: View {
     @StateObject private var model: NewProjectModel
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var nameFocused: Bool
-    let created: (String, ProjectCreation.Next) -> Void
+    let created: (_ folder: String, _ goal: String?) -> Void
     let close: () -> Void
 
-    init(model: NewProjectModel, created: @escaping (String, ProjectCreation.Next) -> Void, close: @escaping () -> Void) {
+    init(model: NewProjectModel, created: @escaping (_ folder: String, _ goal: String?) -> Void, close: @escaping () -> Void) {
         _model = StateObject(wrappedValue: model)
         self.created = created
         self.close = close
@@ -136,34 +117,15 @@ struct NewProjectSheet: View {
                     }
                 }
                 Section {
-                    Toggle("Initialize a git repository with a first commit", isOn: $model.initializeGit)
+                    TextField("First goal", text: $model.goal, prompt: Text("Optional: what the lead should build first"))
+                        .accessibilityLabel("First goal")
                 } footer: {
-                    SettingsFooter("On git's default branch (init.defaultBranch, else main), with a README.md titled with the name and a .gitignore for .DS_Store and .build/.")
-                }
-                Section {
-                    Picker("Then", selection: $model.then) {
-                        Text("Nothing").tag(NewProjectModel.Then.nothing)
-                        Text("Open a session").tag(NewProjectModel.Then.session)
-                        Text("Start the project lead").tag(NewProjectModel.Then.lead)
-                    }
-                    .pickerStyle(.radioGroup)
-                    .accessibilityLabel("Then")
-                    if model.then == .session {
-                        Picker("Preset", selection: $model.presetID) {
-                            ForEach(model.presets) { Text($0.name).tag(Optional($0.id)) }
-                        }
-                        .accessibilityLabel("Preset")
-                    }
-                    if model.then == .lead {
-                        TextField("First goal", text: $model.goal, prompt: Text("Optional: what the lead should build first"))
-                            .accessibilityLabel("First goal")
-                    }
+                    SettingsFooter("Made with a git repository and a first commit on git's default branch (init.defaultBranch, else main): a README.md titled with the name and a .gitignore for .DS_Store and .build/. The project lead starts in it.")
                 }
             }
             .formStyle(.grouped)
             .scrollContentBackground(.hidden)
             .disabled(model.creating)
-            .animation(reduceMotion ? nil : .easeInOut(duration: 0.15), value: model.then)
             HStack(spacing: 10) {
                 if let problem = model.problem {
                     Text(problem).font(.caption).foregroundStyle(.red)
@@ -175,7 +137,7 @@ struct NewProjectSheet: View {
                 }
                 Spacer(minLength: 8)
                 Button("Cancel", action: close).keyboardShortcut(.cancelAction).disabled(model.creating)
-                Button("Create") { model.create { folder, next in close(); created(folder, next) } }
+                Button("Create") { model.create { folder, goal in close(); created(folder, goal) } }
                     .keyboardShortcut(.defaultAction).disabled(model.creating)
             }
             .padding(.horizontal, 20).padding(.bottom, 16)

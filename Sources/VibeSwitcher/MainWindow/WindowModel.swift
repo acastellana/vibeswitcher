@@ -194,6 +194,6 @@ struct WindowActions {
     var startLead: (String) -> Void
     /// Where Home's New Project… makes projects (Settings › General), as shown: "~/dev".
     var projectsFolder: () -> String = { ProjectCreation.defaultLocation }
-    /// A project New Project… just made: listed on Home, then a session or the lead started in it, as asked.
-    var projectCreated: (_ folder: String, _ next: ProjectCreation.Next) -> Void = { _, _ in }
+    /// A project New Project… just made: listed on Home, then the project lead started in it with the first goal, if any.
+    var projectCreated: (_ folder: String, _ goal: String?) -> Void = { _, _ in }
 }
