@@ -14,7 +14,8 @@ struct TestLockTests {
 
     /// `vs-heavy arguments` on the lock in `lockDirectory`, in a process group of its own (as a terminal runs it, so
     /// Ctrl-C reaches all of it), its output (both streams) to `output`.
-    static func runVsHeavy(_ arguments: [String], lockDirectory: String, output: String, environment extra: [String: String] = [:]) throws -> Process {
+    static func runVsHeavy(_ arguments: [String], lockDirectory: String, output: String, environment extra: [String: String] = [:],
+                           in directory: String? = nil) throws -> Process {
         try FileManager.default.createDirectory(atPath: (output as NSString).deletingLastPathComponent, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: output, contents: nil)
         let process = Process()
@@ -31,6 +32,7 @@ struct TestLockTests {
         process.standardOutput = handle
         process.standardError = handle
         process.standardInput = FileHandle.nullDevice
+        if let directory { process.currentDirectoryURL = URL(fileURLWithPath: directory) }
         try process.run()
         return process
     }
@@ -303,6 +305,32 @@ struct TestLockTests {
         #expect(bad.terminationStatus == 2)
     }
 
+    /// Past its timeout a hung run's own group ends, and nothing else: not a process it started in a group of its own (a
+    /// daemon), not another program beside it, not the run waiting in line, which takes the slot and runs.
+    @Test func pastItsTimeoutOnlyTheHungRunsGroupEnds() throws {
+        let locks = url("heavy-locks").path, q = RecentProjects.shellQuote
+        let sleeper = url("sleep.pid").path, daemon = url("daemon.pid").path, ran = url("next.ran").path
+        let bystander = Process()
+        bystander.executableURL = URL(fileURLWithPath: "/bin/sleep")
+        bystander.arguments = ["60"]
+        try bystander.run()
+        defer { kill(bystander.processIdentifier, SIGKILL); bystander.waitUntilExit() }
+        let hung = "sleep 60 & echo $! > \(q(sleeper)); /usr/bin/perl -e 'setpgrp(0, 0); exec \"sleep\", 60' & echo $! > \(q(daemon)); wait"
+        let run = try Self.runVsHeavy(["--as", "hung", "--timeout", "2s", "/bin/sh", "-c", hung], lockDirectory: locks, output: url("hung.out").path)
+        #expect(eventually { pid(in: daemon) != nil })
+        let next = try Self.runVsHeavy(["--as", "next", "/bin/sh", "-c", "echo ran > \(q(ran))"], lockDirectory: locks, output: url("next.out").path)
+        #expect(eventually { lines(url("next.out").path).joined().contains("waiting for") }, "\(lines(url("next.out").path))")
+        run.waitUntilExit()
+        #expect(run.terminationStatus == 124, "\(lines(url("hung.out").path))")
+        let sleep = try #require(pid(in: sleeper)), started = try #require(pid(in: daemon))
+        defer { kill(started, SIGKILL) }
+        #expect(eventually { kill(sleep, 0) != 0 })
+        next.waitUntilExit()
+        #expect(next.terminationStatus == 0 && lines(ran) == ["ran"], "\(lines(url("next.out").path))")
+        #expect(kill(started, 0) == 0, "the daemon it started in a group of its own was killed")
+        #expect(kill(bystander.processIdentifier, 0) == 0 && bystander.isRunning, "a process beside it was killed")
+    }
+
     /// A holder whose work has used almost no CPU for a while says so, to waiters and to status: "idle 40 min" (from
     /// its .active note, when that's its own); vs-heavy touches the note only while its command's group uses CPU.
     @Test func aHolderThatUsedNoCPUForLongSaysIdle() throws {
@@ -381,6 +409,86 @@ struct TestLockTests {
         kill(holder.processIdentifier, SIGKILL)
         waiting.process.waitUntilExit()
         #expect(waiting.process.terminationStatus == 0 && lines(log) == ["build start", "build end"])
+    }
+
+    /// A holder's note records who holds the slot: its pid and when that process started, when it took the slot, and the
+    /// project and task it runs for (a worktree of VibeSwitcher's: the repository's and the slug), vs-heavy's and
+    /// merge's alike.
+    @Test func aHoldersNoteRecordsItsPidStartProjectAndTask() throws {
+        let worktree = url("alpha/.vibeswitcher/worktrees/fix-x/Sources").path
+        try FileManager.default.createDirectory(atPath: worktree, withIntermediateDirectories: true)
+        let before = Int(Date().timeIntervalSince1970)
+        guard case .held(let held, _, _) = lock.acquire(as: "merge of x", in: worktree, timeout: 5) else { Issue.record("not taken"); return }
+        let note = Self.lines(lock.path + ".holder")
+        #expect(note.count == 5 && note[0].hasPrefix("pid \(getpid()), merge of x in \(worktree), since "), "\(note)")
+        let taken = try #require(note[1].hasPrefix("taken ") ? Int(note[1].dropFirst(6)) : nil)
+        #expect(taken >= before && taken <= Int(Date().timeIntervalSince1970))
+        let own = try #require(TestLock.startTime(of: getpid()))
+        #expect(note[2] == "pid started \(Int(own))", "\(note)")
+        #expect(Array(note[3...]) == ["project alpha", "task fix-x"])
+        let holder = lock.holder(1)
+        #expect(holder.project == "alpha" && holder.task == "fix-x" && holder.who == "alpha/fix-x" && holder.since == Date(timeIntervalSince1970: TimeInterval(taken)))
+        held.release()
+        // vs-heavy's, from the folder it runs in; its pid's start from ps, near enough to be taken as its own.
+        let locks = url("heavy-locks").path, go = url("go").path
+        let a = try Self.runVsHeavy(["--as", "suite", "/bin/sh", "-c", "while [ ! -f \(RecentProjects.shellQuote(go)) ]; do sleep 0.05; done"],
+                                    lockDirectory: locks, output: url("a.out").path, in: worktree)
+        let heavyLock = TestLock(directory: locks)
+        #expect(eventually { Self.lines(heavyLock.path + ".holder").count == 5 })
+        let heavy = Self.lines(heavyLock.path + ".holder")
+        #expect(heavy[0].hasPrefix("pid \(a.processIdentifier), suite in "), "\(heavy)")
+        let started = try #require(heavy[2].hasPrefix("pid started ") ? TimeInterval(heavy[2].dropFirst(12)) : nil)
+        #expect(abs(started - (try #require(TestLock.startTime(of: a.processIdentifier)))) <= 3, "\(heavy)")
+        #expect(Array(heavy[3...]) == ["project alpha", "task fix-x"])
+        let holding = heavyLock.holder(1)
+        #expect(holding.note != nil && holding.who == "alpha/fix-x" && holding.held() < 60, "\(holding)")
+        FileManager.default.createFile(atPath: go, contents: nil)
+        a.waitUntilExit()
+        #expect(a.terminationStatus == 0)
+        // Elsewhere: the folder's name, and no task.
+        #expect(TestLock.whose("/Users/a/dev/TGE").project == "TGE" && TestLock.whose("/Users/a/dev/TGE/").task == nil)
+        #expect(TestLock.whose("/Users/a/dev/p/.vibeswitcher/worktrees/s").project == "p" && TestLock.whose("/Users/a/dev/p/.vibeswitcher/worktrees/s").task == "s")
+    }
+
+    /// A note naming a live pid that's another process's now (given again since its holder ended: its start time isn't
+    /// the one recorded) says nothing, as one naming a pid that's gone.
+    @Test func aNoteNamingAPidGivenAgainSaysNothing() throws {
+        let holder = try outsideHolder(lock)
+        defer { kill(holder.processIdentifier, SIGKILL); holder.waitUntilExit() }
+        let started = try #require(TestLock.startTime(of: holder.processIdentifier))
+        let line = "pid \(holder.processIdentifier), scripts/test.sh in /Users/a/dev/p/.vibeswitcher/worktrees/old, since 01:00:00"
+        try "\(line)\npid started \(Int(started) - 3600)\nproject p\ntask old\n".write(toFile: lock.path + ".holder", atomically: true, encoding: .utf8)
+        #expect(lock.holder(1).note == nil)
+        #expect(TestLock.text(lock.holders()) == "slot 1 held by a run that didn't say who it is")
+        try "\(line)\npid started \(Int(started))\nproject p\ntask old\n".write(toFile: lock.path + ".holder", atomically: true, encoding: .utf8)
+        #expect(lock.holder(1).note == line && lock.holder(1).who == "p/old")
+    }
+
+    /// A holder that dies is taken over: the run in line takes its slot at once and writes its own note over the dead
+    /// one's; while it waited, its folder's wait named whom it waited for.
+    @Test func aWaiterTakesOverFromADeadHolder() throws {
+        let locks = url("heavy-locks").path, lock = TestLock(directory: locks), q = RecentProjects.shellQuote
+        let first = url("p/.vibeswitcher/worktrees/slug-a").path, second = url("p/.vibeswitcher/worktrees/slug-b").path
+        for folder in [first, second] { try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true) }
+        let started = url("b.started").path, go = url("go").path
+        let a = try Self.runVsHeavy(["--as", "a", "/bin/sleep", "60"], lockDirectory: locks, output: url("a.out").path, in: first)
+        #expect(eventually { lock.holder(1).task == "slug-a" })
+        let b = try Self.runVsHeavy(["--as", "b", "/bin/sh", "-c", "touch \(q(started)); while [ ! -f \(q(go)) ]; do sleep 0.05; done"],
+                                    lockDirectory: locks, output: url("b.out").path, in: second)
+        #expect(eventually { lock.waits(for: ["b": second])["b"] != nil })
+        let wait = try #require(lock.waits(for: ["b": second, "a": first])["b"])
+        #expect(lock.waits(for: ["a": first])["a"] == nil)
+        #expect(wait.ahead == 0 && wait.text().hasPrefix("waiting for the Mac-wide test lock (held by p/slug-a for "), "\(wait.text())")
+        // a dies outright, its note left behind.
+        kill(-a.processIdentifier, SIGKILL)
+        a.waitUntilExit()
+        #expect(eventually { FileManager.default.fileExists(atPath: started) }, "\(Self.lines(url("b.out").path))")
+        let holder = lock.holder(1)
+        #expect(holder.task == "slug-b" && holder.note?.hasPrefix("pid \(b.processIdentifier), b in ") == true, "\(holder)")
+        #expect(lock.waits(for: ["b": second]).isEmpty)
+        FileManager.default.createFile(atPath: go, contents: nil)
+        b.waitUntilExit()
+        #expect(b.terminationStatus == 0)
     }
 
     @Test func underAHolderOfTheSameLockVsHeavyRunsAtOnce() throws {

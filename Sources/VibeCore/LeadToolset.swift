@@ -144,6 +144,21 @@ public final class LeadToolset: MCPToolset {
         return "; \(long.count == 1 ? "a test and build slot" : "\(long.count) test and build slots") \(how): " + long.map { $0.short(now: now) }.joined(separator: ", ")
     }
 
+    /// Status's line on the Mac-wide test and build lock while a slot is held or a running task's worker waits for one:
+    /// who holds each, and each such worker's wait ("the-y: waiting for the Mac-wide test lock (held by vibeswitcher/x
+    /// for 12 min), 2nd in line"), which isn't a stall (see `LeadStall`). Nil otherwise.
+    func heavyLockLine(_ board: LeadBoard, now: Date = Date()) -> String? {
+        guard let lock = heavyLock(workflow) else { return nil }
+        let running = board.tasks.filter { $0.status == .running }.map { ($0.slug, Worktrees.path(root: root, slug: $0.slug)) }
+        let waits = lock.waits(for: Dictionary(running, uniquingKeysWith: { first, _ in first }))
+        let holders = lock.holders()
+        guard !holders.isEmpty || !waits.isEmpty else { return nil }
+        var line = "Mac-wide test and build lock: " + (holders.isEmpty ? "a slot just freed" : "held by " + holders.map { $0.whoFor(now: now) }.joined(separator: ", "))
+        let waiting = waits.sorted { $0.value.waiter.number < $1.value.waiter.number }.map { "\($0.key): \($0.value.text(now: now))" }
+        if !waiting.isEmpty { line += "; " + waiting.joined(separator: "; ") + " (not stalled)" }
+        return Self.clip(line + ".", 400)
+    }
+
     /// The server for the session it runs in. `expected` and `expectedTask` are what it was started as (`--role`,
     /// `--task`): when they don't match the session's role, it serves nothing. `wait`: how long to wait for the
     /// session's role while VibeSwitcher is still binding it (the session can start first).
@@ -1041,6 +1056,10 @@ public final class LeadToolset: MCPToolset {
             // The project's heavy_slots for its sessions' vs-heavy too.
             var environment = launch.environment
             if let slots = workflow.heavySlots { environment[TestLock.slotsVariable] = String(slots) }
+            // And its test_timeout_min, when it sets one of its own, as vs-heavy's: no run holds a slot past it.
+            if workflow.testTimeoutMinutes != LeadWorkflow().testTimeoutMinutes {
+                environment[TestLock.timeoutVariable] = "\(Int(workflow.testTimeout.rounded(.up)))s"
+            }
             let session = try runtime.spawn(cwd: folder, command: launch.command, env: environment, label: label,
                                             agent: "claude", trust: trust)
             try vault.bind(grant, root: root, session: session)
@@ -2507,6 +2526,7 @@ public final class LeadToolset: MCPToolset {
             let full = macRefusal(mac, workflow, not: "") != nil
             lines.append("Mac (every project's team): \(Self.macText(mac, workflow)).\(full ? " start_worker and audit refuse until it eases; merge waits for the load." : "")")
         }
+        if let line = heavyLockLine(board) { lines.append(line) }
         if sessions == nil {
             lines.append("The session host can't be read right now: what the workers are doing isn't known; the states below are the board's.")
         }

@@ -9,7 +9,10 @@ import Foundation
 /// workflow's heavy_slots for merge and audits, else the Mac's cores ÷ 4 (at least 1).
 /// Slot 1 is a flock on `<directory>/test-build.lock`, slot k on `<directory>/test-build-k.lock`: the kernel lets go of
 /// it when its holder exits, however it ends, so no stale slot outlives a run. `<slot>.holder` says who holds it, for
-/// the one waiting and for status; `<slot>.active` ("pid P", P the note's) when its work last used CPU: touched by its
+/// the one waiting and for status: its first line "pid P, WHAT in DIR, since T" (all an older reader reads), then
+/// "taken <seconds since 1970>" (when it took the slot), "pid started <seconds>" (when process P started: a note naming a
+/// pid that's gone, or that's another process's since, says nothing), and "project <name>" and "task <slug>" (DIR's,
+/// see `whose`). `<slot>.active` ("pid P", P the note's) when its work last used CPU: touched by its
 /// holder (vs-heavy's supervisor, `Held` here) each `sampleEvery` its work used 1 % of a core or more, so a hung one
 /// reads "idle 40 min" (a TGE pytest held the only slot 3 h 23 min at 0 % CPU, 2026-10-22).
 ///
@@ -36,6 +39,9 @@ public struct TestLock: Sendable {
     public static let sampleVariable = "VIBESWITCHER_HEAVY_SAMPLE"
     /// How many slots, when set (a whole number above 0); else `defaultSlots`.
     public static let slotsVariable = "VIBESWITCHER_HEAVY_SLOTS"
+    /// How long `vs-heavy` lets its command run before it ends its group, when set ("90", "90m", "30s", "2h"); else 60
+    /// min. The lead gives its sessions the project's test_timeout_min, when the workflow sets one of its own.
+    public static let timeoutVariable = "VIBESWITCHER_HEAVY_TIMEOUT"
     /// A slot held this long is "long" in status, the witness and a waiter's words: only said, never acted on.
     public static let longAfter: TimeInterval = 30 * 60
     /// A holder whose work has used almost no CPU this long is "idle" there: only said, never acted on.
@@ -198,12 +204,17 @@ public struct TestLock: Sendable {
         public var since: Date?
         /// When its work last used CPU, as its `.active` note says; nil when it says nothing (an older holder's).
         public var active: Date?
+        /// The project and task its note's "project" and "task" lines name (nil: an older note's, read from its folder).
+        var recordedProject: String?
+        var recordedTask: String?
 
-        public init(slot: Int, note: String?, since: Date?, active: Date? = nil) {
+        public init(slot: Int, note: String?, since: Date?, active: Date? = nil, project: String? = nil, task: String? = nil) {
             self.slot = slot
             self.note = note
             self.since = since
             self.active = active
+            recordedProject = project
+            recordedTask = task
         }
 
         /// The note's parts: "pid P, WHAT in DIR, since T" (vs-heavy's, merge's and audits'), or without " in DIR".
@@ -215,14 +226,30 @@ public struct TestLock: Sendable {
         /// The command (or what it said it is).
         public var what: String? { parts?.what }
 
+        /// The folder it runs in, as its note says.
+        public var directory: String? { parts?.directory ?? nil }
+
         /// The project it runs for: the folder it ran in, or the repository a worktree of VibeSwitcher's belongs to.
-        public var project: String? {
-            guard var directory = parts?.directory ?? nil else { return nil }
-            if let range = directory.range(of: "/.vibeswitcher/worktrees/") { directory = String(directory[..<range.lowerBound]) }
-            return URL(fileURLWithPath: directory).lastPathComponent
+        public var project: String? { recordedProject ?? directory.map { TestLock.whose($0).project } }
+
+        /// The task whose worktree it runs in (`<repo>/.vibeswitcher/worktrees/<slug>`); nil elsewhere (a merge's run).
+        public var task: String? { recordedTask ?? directory.flatMap { TestLock.whose($0).task } }
+
+        /// "vibeswitcher/the-mac-wide-test" for a task's run, else "TGE (pytest -q)", or what its note says.
+        public var who: String {
+            if let project, let task { return "\(project)/\(task)" }
+            guard let what else { return note ?? "a run that didn't say who it is" }
+            return project.map { "\($0) (\(what.prefix(80)))" } ?? String(what.prefix(80))
         }
 
         public func held(now: Date = Date()) -> TimeInterval { since.map { max(0, now.timeIntervalSince($0)) } ?? 0 }
+
+        /// "vibeswitcher/the-x for 12 min" ("for 40 s" under a minute), or "a run that didn't say who it is".
+        public func whoFor(now: Date = Date()) -> String {
+            guard note != nil else { return "a run that didn't say who it is" }
+            let seconds = Int(held(now: now))
+            return who + " for " + (seconds < 60 ? "\(seconds) s" : "\(seconds / 60) min")
+        }
         public func isLong(now: Date = Date()) -> Bool { since != nil && held(now: now) >= TestLock.longAfter }
 
         /// How long its work has used almost no CPU (0 when it doesn't say).
@@ -277,13 +304,18 @@ public struct TestLock: Sendable {
 
     /// A place in line: "1st in line", "3rd in line, behind merge of a (alpha) and pytest -q (TGE)".
     public static func place(behind ahead: [Waiter]) -> String {
-        let place = ahead.count + 1
-        let suffix = (11...13).contains(place % 100) ? "th" : [1: "st", 2: "nd", 3: "rd"][place % 10] ?? "th"
-        guard !ahead.isEmpty else { return "\(place)\(suffix) in line" }
+        let place = ordinal(ahead.count + 1)
+        guard !ahead.isEmpty else { return "\(place) in line" }
         var names = ahead.prefix(3).map(\.name)
         if ahead.count > 3 { names.append("\(ahead.count - 3) more") }
         let list = names.count == 1 ? names[0] : names.dropLast().joined(separator: ", ") + " and " + names.last!
-        return "\(place)\(suffix) in line, behind " + list
+        return "\(place) in line, behind " + list
+    }
+
+    /// "1st", "2nd", "11th", "23rd".
+    static func ordinal(_ number: Int) -> String {
+        let suffix = (11...13).contains(number % 100) ? "th" : [1: "st", 2: "nd", 3: "rd"][number % 10] ?? "th"
+        return "\(number)\(suffix)"
     }
 
     /// How a wait for a slot ended.
@@ -361,19 +393,112 @@ public struct TestLock: Sendable {
     /// sent waiters, status and the witness after a worktree cleaned up long ago (2026-10-22, pid 56668).
     public func holder(_ index: Int) -> Holder {
         let note = slotPath(index) + ".holder", activeNote = slotPath(index) + ".active"
-        let line = Self.firstLine(note).flatMap { Self.isGone(note: $0) ? nil : $0 }
-        let since = (try? FileManager.default.attributesOfItem(atPath: note))?[.modificationDate] as? Date
+        let lines = ((try? String(contentsOfFile: note, encoding: .utf8)) ?? "").split(separator: "\n")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        func value(_ key: String) -> String? {
+            lines.dropFirst().first { $0.hasPrefix(key + " ") }.map { String($0.dropFirst(key.count + 1)) }.flatMap { $0.isEmpty ? nil : $0 }
+        }
+        let started = value("pid started").flatMap(TimeInterval.init)
+        let line = lines.first.flatMap { $0.isEmpty || Self.isGone(note: $0, started: started) ? nil : $0 }
+        let since = value("taken").flatMap(TimeInterval.init).map { Date(timeIntervalSince1970: $0) }
+            ?? (try? FileManager.default.attributesOfItem(atPath: note))?[.modificationDate] as? Date
         // Its own: the holder's pid. One another holder left says nothing.
         let pid = line?.firstMatch(of: #/^pid (\d+),/#).map { String($0.1) }
         let active = pid != nil && Self.firstLine(activeNote) == "pid \(pid!)"
             ? (try? FileManager.default.attributesOfItem(atPath: activeNote))?[.modificationDate] as? Date : nil
-        return Holder(slot: index, note: line, since: line == nil ? nil : since, active: active)
+        guard line != nil else { return Holder(slot: index, note: nil, since: nil) }
+        return Holder(slot: index, note: line, since: since, active: active, project: value("project"), task: value("task"))
     }
 
-    /// Whether `note` ("pid P, …") names a process that has ended.
-    static func isGone(note: String) -> Bool {
+    /// Whether `note` ("pid P, …") names a process that has ended, or, when its process's start time (`started`,
+    /// seconds since 1970) is known, a process that started at another time: its pid given again since.
+    static func isGone(note: String, started: TimeInterval? = nil) -> Bool {
         guard let match = note.firstMatch(of: #/^pid (\d+),/#), let pid = pid_t(match.1) else { return false }
-        return kill(pid, 0) != 0 && errno == ESRCH
+        if kill(pid, 0) != 0 && errno == ESRCH { return true }
+        guard let started, let now = startTime(of: pid) else { return false }
+        // vs-heavy's is from ps's elapsed time: to a second or two.
+        return abs(now - started) > 3
+    }
+
+    /// When process `pid` started, in seconds since 1970; nil when it can't be told (it's gone).
+    static func startTime(of pid: pid_t) -> TimeInterval? {
+        var info = proc_bsdinfo()
+        let size = Int32(MemoryLayout<proc_bsdinfo>.size)
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, size) == size else { return nil }
+        return TimeInterval(info.pbi_start_tvsec) + TimeInterval(info.pbi_start_tvusec) / 1e6
+    }
+
+    /// The project and task a run in `directory` is for: in a worktree of VibeSwitcher's
+    /// (`<repo>/.vibeswitcher/worktrees/<slug>`, or a folder in it), the repository's name and the slug; elsewhere the
+    /// folder's name, and no task.
+    public static func whose(_ directory: String) -> (project: String, task: String?) {
+        var folder = directory
+        while folder.count > 1, folder.hasSuffix("/") { folder.removeLast() }
+        guard let range = folder.range(of: "/.vibeswitcher/worktrees/") else { return (URL(fileURLWithPath: folder).lastPathComponent, nil) }
+        let slug = folder[range.upperBound...].split(separator: "/").first.map(String.init)
+        return (URL(fileURLWithPath: String(folder[..<range.lowerBound])).lastPathComponent, slug)
+    }
+
+    /// The lines after a note's first that record its holder (see the type's notes): taken now by process `pid`, run in
+    /// `directory`.
+    static func record(pid: pid_t = getpid(), in directory: String?, now: Date = Date()) -> String {
+        var lines = ["taken \(Int(now.timeIntervalSince1970))"]
+        if let started = startTime(of: pid) { lines.append("pid started \(Int(started))") }
+        if let directory {
+            let whose = whose(directory)
+            lines.append("project \(whose.project)")
+            if let task = whose.task { lines.append("task \(task)") }
+        }
+        return lines.joined(separator: "\n") + "\n"
+    }
+
+    /// A run in line for a slot (`waiter`, its ticket), and who held the slots when it was looked at: what a worker
+    /// queued for the lock is doing, not a stall (see `LeadStall`).
+    public struct Wait: Equatable, Sendable {
+        public var waiter: Waiter
+        /// How many are in line before it.
+        public var ahead: Int
+        public var holders: [Holder]
+
+        public init(waiter: Waiter, ahead: Int, holders: [Holder]) {
+            self.waiter = waiter
+            self.ahead = ahead
+            self.holders = holders
+        }
+
+        /// How long it has waited.
+        public func waited(now: Date = Date()) -> TimeInterval { waiter.who.held(now: now) }
+
+        /// "waiting for the Mac-wide test lock (held by vibeswitcher/the-x for 12 min), 2nd in line".
+        public func text(now: Date = Date()) -> String {
+            let held = holders.map { $0.whoFor(now: now) }
+            let by = held.isEmpty ? "" : " (held by " + (held.count == 1 ? held[0] : held.dropLast().joined(separator: ", ") + " and " + held.last!) + ")"
+            return "waiting for the Mac-wide test lock\(by)" + (ahead > 0 ? ", \(TestLock.ordinal(ahead + 1)) in line" : "")
+        }
+    }
+
+    /// For each of `folders` (any key: a session's id), its first run in line for a slot, if any: a ticket whose note's
+    /// folder is that folder or one in it. One look at the line and the slots for all of them.
+    public func waits(for folders: [String: String]) -> [String: Wait] {
+        let line = waiters()
+        var found: [String: Wait] = [:]
+        var holders: [Holder]?
+        // As the kernel spells them: a shell's $PWD may be a folder's real path (/private/var/… for /var/…).
+        func real(_ path: String) -> String {
+            guard let resolved = realpath(path, nil) else { return path }
+            defer { free(resolved) }
+            return String(cString: resolved)
+        }
+        let directories = line.map { $0.who.directory.map(real) }
+        for (key, folder) in folders {
+            let folder = real(folder)
+            guard folder.count > 1, let index = directories.firstIndex(where: { directory in
+                directory.map { $0 == folder || $0.hasPrefix(folder + "/") } ?? false
+            }) else { continue }
+            if holders == nil { holders = self.holders() }
+            found[key] = Wait(waiter: line[index], ahead: index, holders: holders ?? [])
+        }
+        return found
     }
 
     /// The slots held now, with who holds them: a slot is tried (and let go at once), so a holder that died isn't
@@ -441,7 +566,7 @@ public struct TestLock: Sendable {
                 let fd = fds[free]
                 fds[free] = -1
                 let index = free + 1
-                try? VibePaths.writePrivate(Data((note() + "\n").utf8), to: URL(fileURLWithPath: slotPath(index) + ".holder"))
+                try? VibePaths.writePrivate(Data((note() + "\n" + Self.record(in: directory)).utf8), to: URL(fileURLWithPath: slotPath(index) + ".holder"))
                 try? VibePaths.writePrivate(Data("pid \(getpid())\n".utf8), to: URL(fileURLWithPath: slotPath(index) + ".active"))
                 return .held(Held(fd: fd, path: slotPath(index), every: sampleEvery), waited: Date().timeIntervalSince(start), after: waitedFor)
             }

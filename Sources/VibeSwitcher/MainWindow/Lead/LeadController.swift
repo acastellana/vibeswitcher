@@ -105,6 +105,8 @@ struct TeamReading {
     var sessions: [String: Session] = [:]
     var watched: [String: Watched] = [:]
     var held: [String: SteerMessage] = [:]
+    /// The live workers with a run in line for the Mac-wide test and build lock (see `LeadWitness.Seen.lockWait`).
+    var lockWaits: [String: TestLock.Wait] = [:]
     var workflow = LeadWorkflow()
 
     /// A worker's transcript is read whatever it shows: a stall is one that reads as working too (see `LeadStall`). A
@@ -120,6 +122,10 @@ struct TeamReading {
             if workers.contains(id) {
                 team.held[id] = SteerInbox.pending(tty: session.tty).filter { $0.agentPid == session.pid }.min { $0.at < $1.at }
             }
+        }
+        let folders = workers.compactMap { id in hosted[id].flatMap { $0.isLive ? (id, $0.cwd) : nil } }
+        if !folders.isEmpty, let lock = TestLock.standard() {
+            team.lockWaits = lock.waits(for: Dictionary(folders, uniquingKeysWith: { first, _ in first }))
         }
         team.workflow = LeadWorkflow.load(from: (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md"))
         return team
@@ -1014,7 +1020,7 @@ final class LeadController: ObservableObject {
                                         lastActivity: watched?.progress?.lastWritten, compactedAt: watched?.progress?.compactedAt,
                                         shells: shells, heldSince: held?.at, heldFrom: held.map { Self.sender($0.from) },
                                         started: info.startedAt.timeIntervalSince1970, submittedAt: submitted[id],
-                                        boundAt: toolTimes[id]?.bound, toolsAt: toolTimes[id]?.tools)
+                                        boundAt: toolTimes[id]?.bound, toolsAt: toolTimes[id]?.tools, lockWait: team.lockWaits[id])
             if info.isLive, let session { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
         }
         // A worker or verifier whose tools never connected only holds a Mac slot: it ends (`events` tells the lead).

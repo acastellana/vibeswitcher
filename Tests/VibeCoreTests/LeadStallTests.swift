@@ -199,6 +199,42 @@ struct LeadStallTests {
         #expect(LeadWitness.events(board: Self.board(), seen: ["w1": building], now: now).isEmpty)
     }
 
+    /// TGE, after the policy (2026-10-22/23): 11 of 19 stall alarms were workers in line for the Mac-wide test and
+    /// build lock, and the lead read each session to answer "isn't stuck". While a run of its waits in line, a worker
+    /// is neither silent, idle nor compacted, and a message to it waits for its command as for any other; the lead's
+    /// status says whom it waits for.
+    @Test func aWorkerWaitingForTheMacWideTestLockIsntStalled() throws {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let last = now.timeIntervalSince1970 - 50 * 60
+        let holder = TestLock.Holder(slot: 1, note: "pid 1, scripts/test.sh in /Users/a/dev/TGE/.vibeswitcher/worktrees/redesign, since 01:00:00",
+                                     since: now.addingTimeInterval(-(38 * 60 + 5)))
+        let waiter = TestLock.Waiter(number: 7, slots: 1, who: TestLock.Holder(
+            slot: 0, note: "pid 2, scripts/test.sh in /Users/a/dev/p/.vibeswitcher/worktrees/fix, since 01:30:00", since: now.addingTimeInterval(-40 * 60)))
+        let wait = TestLock.Wait(waiter: waiter, ahead: 1, holders: [holder])
+        #expect(wait.text(now: now) == "waiting for the Mac-wide test lock (held by TGE/redesign for 38 min), 2nd in line")
+        #expect(wait.waited(now: now) == 40 * 60)
+        // Mid-turn (its vs-heavy in the foreground, past the Bash tool's ceiling), with a message held; between turns
+        // (its vs-heavy in the background, past its ceiling); after a compaction mid-turn.
+        let held = now.timeIntervalSince1970 - 6 * 60
+        var cases = [(Self.seen(Self.midTurn(at: last), heldSince: held), [LeadStall.Reason.silent, .undelivered]),
+                     (Self.seen(Self.turnOver(at: last), shells: [Self.shell("vs-heavy bash scripts/test.sh", startedAt: last)]), [.idle])]
+        var compacted = Self.seen(Self.midTurn(at: last))
+        compacted.compactedAt = last
+        cases.append((compacted, [.compacted]))
+        for (seen, stalls) in cases {
+            #expect(LeadStall.detect(seen, task: Self.task(), now: now).map(\.reason) == stalls)
+            var waiting = seen
+            waiting.lockWait = wait
+            #expect(LeadStall.detect(waiting, task: Self.task(), now: now).isEmpty)
+            #expect(LeadWitness.events(board: Self.board(), seen: ["w1": waiting], now: now).allSatisfy { !$0.text.contains("stalled") })
+            #expect(LeadWitness.stalls(board: Self.board(), seen: ["w1": waiting], now: now).isEmpty)
+        }
+        // Between turns a message held is told all the same: its turn isn't running anything to deliver it after.
+        var between = Self.seen(Self.turnOver(at: last), heldSince: held)
+        between.lockWait = wait
+        #expect(LeadStall.detect(between, task: Self.task(), now: now).map(\.reason) == [.undelivered])
+    }
+
     static func shell(_ command: String, startedAt: Double, pid: Int32 = 5151) -> BackgroundJob {
         BackgroundJob(pid: pid, command: command, startedAt: Date(timeIntervalSince1970: startedAt))
     }

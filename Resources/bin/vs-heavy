@@ -14,9 +14,10 @@
 # Slot 1 is a flock on $VIBESWITCHER_TEST_LOCK_DIR/test-build.lock (default /private/tmp/vibeswitcher-<uid>/), slot k
 # on test-build-k.lock beside it (an older vs-heavy, with only test-build.lock, contends for slot 1). The slot taken is
 # held on this script's fd 9 and its supervisor's (below): the kernel lets go of it once both have exited, so a run that
-# died leaves no lock behind. Its slot's .holder note goes when it exits; one a kill -9 left names a pid that's gone,
-# and readers take it as saying nothing (the next holder writes its own). macOS has no flock(1): /usr/bin/perl takes it
-# on one of the slots' fds and exits, and the lock stays with the script's fd.
+# died leaves no lock behind. Its slot's .holder note (its pid, what, where and since when; then when it took the slot,
+# when its pid's process started, and its project and task, as TestLock reads them) goes when it exits; one a kill -9
+# left names a pid that's gone, and readers take it as saying nothing (the next holder writes its own). macOS has no
+# flock(1): /usr/bin/perl takes it on one of the slots' fds and exits, and the lock stays with the script's fd.
 #
 # The slot is let go only once COMMAND has ended: killed while it ran (`kill <pid>` of this script, how workers stop
 # what they started), this script freed the slot while a suite ran on, unlocked (process audit 2026-10-22, #4). COMMAND
@@ -221,7 +222,27 @@ lock_file=$(slot_file "$taken")
 exec 9>&$(( 19 + taken ))
 for (( k = 1; k <= slots; k++ )); do eval "exec $(( 19 + k ))>&-"; done
 
-echo "pid $$, $what in $PWD, since $(date +%H:%M:%S)" > "$lock_file.holder"
+# Its note (TestLock's): who, then its record: when it took the slot, when this script started (ps's elapsed time, to a
+# second: with the pid, who it is), and the project and task $PWD is for (a worktree of VibeSwitcher's,
+# <repo>/.vibeswitcher/worktrees/<slug>, is <repo>'s and <slug>'s).
+now=$(date +%s)
+started=""
+elapsed=$(ps -o etime= -p $$ 2> /dev/null | tr -d ' ')
+if [[ $elapsed =~ ^(([0-9]+)-)?(([0-9]+):)?([0-9]+):([0-9]+)$ ]]; then
+    started=$(( now - (10#${BASH_REMATCH[2]:-0} * 86400 + 10#${BASH_REMATCH[4]:-0} * 3600 + 10#${BASH_REMATCH[5]} * 60 + 10#${BASH_REMATCH[6]}) ))
+fi
+project=${PWD%/} task=""
+if [[ $PWD =~ ^(.*)/\.vibeswitcher/worktrees/([^/]+) ]]; then
+    project=${BASH_REMATCH[1]} task=${BASH_REMATCH[2]}
+fi
+project=${project##*/}
+{
+    echo "pid $$, $what in $PWD, since $(date -r "$now" +%H:%M:%S)"
+    echo "taken $now"
+    [[ -n $started ]] && echo "pid started $started"
+    echo "project ${project:-/}"
+    [[ -n $task ]] && echo "task $task"
+} > "$lock_file.holder"
 # Its work's last use of CPU (its time; touched by the supervisor).
 echo "pid $$" > "$lock_file.active"
 # The notes go with this run (Ctrl-C too), while the slot is still ours: only our own, so no later holder's. A kill -9

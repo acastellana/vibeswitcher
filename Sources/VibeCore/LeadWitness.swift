@@ -45,6 +45,9 @@ public enum LeadWitness {
         /// it is (see `LeadVault.RosterEntry.toolsAt`). Bound `toolsWithin` ago with neither, it never got its tools.
         public var boundAt: Double?
         public var toolsAt: Double?
+        /// Its place in line for the Mac-wide test and build lock, while a run in its folder waits for a slot (see
+        /// `TestLock.waits`): it waits on the lock, not stalled (11 of 19 stall alarms in TGE were workers in line).
+        public var lockWait: TestLock.Wait?
 
         /// How it ended, in words; its exit code when that wasn't said.
         var ending: String { cause ?? "exit \(exit ?? 0)" }
@@ -82,8 +85,9 @@ public enum LeadWitness {
                     pending: PendingPrompt? = nil, agentQuit: Bool = false, apiError: String? = nil, apiErrorAt: Double? = nil, activity: LeadActivity? = nil,
                     lastActivity: Double? = nil, compactedAt: Double? = nil, shells: [BackgroundJob] = [],
                     heldSince: Double? = nil, heldFrom: String? = nil, started: Double? = nil, submittedAt: Double? = nil,
-                    boundAt: Double? = nil, toolsAt: Double? = nil) {
+                    boundAt: Double? = nil, toolsAt: Double? = nil, lockWait: TestLock.Wait? = nil) {
             self.live = live
+            self.lockWait = lockWait
             self.started = started
             self.submittedAt = submittedAt
             self.boundAt = boundAt

@@ -155,6 +155,40 @@ extension LeadToolsetTests {
         _ = call(lead, "add_task", ["title": "Two", "goal": "g", "acceptance": ["a"]])
         _ = call(lead, "start_worker", ["task": "two"])
         #expect(runtime.environments["session-2"]?[TestLock.slotsVariable] == "2")
+        // vs-heavy's timeout: its own 60 min unless the workflow sets a test_timeout_min, then that.
+        #expect(runtime.environments["session-2"]?[TestLock.timeoutVariable] == nil)
+        #expect(!call(lead, "configure", ["test_timeout_min": "30"]).isError)
+        _ = call(lead, "add_task", ["title": "Three", "goal": "g", "acceptance": ["a"]])
+        _ = call(lead, "start_worker", ["task": "three"])
+        #expect(runtime.environments["session-3"]?[TestLock.timeoutVariable] == "1800s")
+    }
+
+    /// Status names who holds the Mac-wide test and build lock, and a worker in line for it as waiting for it, with
+    /// whom it waits for: not stalled (11 of 19 of TGE's stall alarms were workers in line).
+    @Test func statusSaysWhoHoldsTheLockAndWhichWorkerWaitsForIt() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = call(lead, "add_task", ["title": "One", "goal": "g", "acceptance": ["a"]])
+        _ = call(lead, "start_worker", ["task": "one"])
+        #expect(!call(lead, "status").text.contains("Mac-wide test and build lock:"))
+        let holders = try fillSlots(1, notes: ["scripts/test.sh in /Users/a/dev/TGE/.vibeswitcher/worktrees/redesign"], ago: 12 * 60 + 5)
+        defer { end(holders) }
+        let held = call(lead, "status").text
+        #expect(held.contains("\nMac-wide test and build lock: held by TGE/redesign for 12 min.\n"), "\(held)")
+        // The worker's suite in line, in its worktree.
+        let lock = testLock.with(slots: 1), cancel = ShellCancel(), done = DispatchSemaphore(value: 0)
+        let worktree = Worktrees.path(root: root, slug: "one")
+        Thread {
+            if case .held(let taken, _, _) = lock.acquire(as: "scripts/test.sh", in: worktree, timeout: hangGuard, cancel: cancel) { taken.release() }
+            done.signal()
+        }.start()
+        #expect(eventually { !lock.waiters().isEmpty })
+        let waiting = call(lead, "status").text
+        cancel.cancel()
+        done.wait()
+        #expect(waiting.contains("\nMac-wide test and build lock: held by TGE/redesign for 12 min; one: waiting for the Mac-wide test lock (held by TGE/redesign for 12 min) (not stalled).\n"),
+                "\(waiting)")
     }
 }
 

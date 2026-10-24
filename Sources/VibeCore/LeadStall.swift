@@ -104,7 +104,9 @@ public struct LeadStall: Codable, Equatable, Sendable {
 
     /// The stalls a running task's worker is in, the most telling first (at most one of silent, idle and
     /// compacted, with undelivered beside it). Nothing for a worker that waits on a prompt, ended, or stopped on an
-    /// API error: the witness tells those its own way.
+    /// API error: the witness tells those its own way. Nor silent, idle or compacted while a run of its waits in line
+    /// for the Mac-wide test and build lock (`Seen.lockWait`): it goes on once a slot is free, and every holder's run
+    /// ends within its timeout (status says whom it waits for).
     public static func detect(_ seen: LeadWitness.Seen, task: LeadTask, now: Date = Date()) -> [LeadStall] {
         guard task.status == .running, seen.live, !seen.agentQuit, seen.apiError == nil,
               seen.status != .needsInput, !(seen.activity.map { if case .needsInput = $0 { return true } else { return false } } ?? false)
@@ -123,7 +125,7 @@ public struct LeadStall: Codable, Equatable, Sendable {
         // session started: one first seen before its hooks fire reads as between turns since ever (`.distantPast`),
         // one on a reused terminal as the earlier session left it.
         let since = seen.lastActivity ?? (betweenTurns ? seen.since?.timeIntervalSince1970 : nil)
-        if let last = since.flatMap({ known(max($0, seen.started ?? -.infinity)) }) {
+        if seen.lockWait == nil, let last = since.flatMap({ known(max($0, seen.started ?? -.infinity)) }) {
             let quiet = at - last
             // A compaction once its turn was over is Claude tidying an idle session: it's idle, if anything.
             if let compacted = seen.compactedAt, !betweenTurns, quiet >= compactedAfter {
@@ -135,8 +137,8 @@ public struct LeadStall: Codable, Equatable, Sendable {
                                         shells: background == nil ? shells : nil))
             }
         }
-        // A worker at work with its turn's command running takes the message at its next step.
-        if let held = seen.heldSince, at - held >= undeliveredAfter, !(working && !turnShells.isEmpty) {
+        // A worker at work with its turn's command running (or waiting for the lock) takes the message at its next step.
+        if let held = seen.heldSince, at - held >= undeliveredAfter, !(working && (!turnShells.isEmpty || seen.lockWait != nil)) {
             stalls.append(LeadStall(reason: .undelivered, lastActivity: seen.lastActivity ?? held, at: at,
                                     waitingSince: held, waitingFrom: seen.heldFrom))
         }
