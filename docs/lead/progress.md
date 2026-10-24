@@ -1112,3 +1112,5 @@
 - 2026-10-24 18:08 Merged the-mac-wide-test: The Mac-wide test lock checks its holder and times out, and waiting on it isn't a stall
 - 2026-10-24 18:10 Update: Merged: the Mac-wide test lock knows its holder and times out, and waiting on it isn't a stall — **What changed.**
 - 2026-10-24 18:16 Merged mac-wide-limits-are: Mac-wide limits are set once for the Mac, and a refused lead is woken when room frees
+- 2026-10-24 18:16 Update: Merged: Mac-wide limits are set once for the Mac, and a refused lead is woken when room frees — **What changed.**
+- 2026-10-24 18:19 Started a worker on boundary-excursions-a
