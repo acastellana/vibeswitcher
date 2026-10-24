@@ -104,6 +104,9 @@ public final class LeadToolset: MCPToolset {
     /// How long cleanup and stop_worker wait for a session's process to be gone (the host hangs up, then kills
     /// after 5 s).
     var stopWait: TimeInterval = 10
+    /// A session's processes cleanup may end itself when the host didn't: the user's carrying its
+    /// `VIBESWITCHER_SESSION` id (decision 2026-10-23 02:44; see `SessionStrays.carrying`). Faked in tests.
+    var sessionProcesses: (String) -> [SessionStrays.Found] = { id in UUID(uuidString: id).map { SessionStrays.carrying(session: $0) } ?? [] }
     /// The bytes free on the volume holding a path (see `DiskSpace.free`), and where Claude Code keeps its sessions'
     /// temporary folders (see `ClaudeScratch`). Faked in tests.
     var freeSpace: (String) -> Int64? = DiskSpace.free(at:)
@@ -903,6 +906,8 @@ public final class LeadToolset: MCPToolset {
                 finish += " In your worktree, \(lock).\(wait)"
             }
         }
+        // Named before its grant goes to the new one.
+        let noTools = noToolsBefore(task, .worker, sessions: sessions)
         let session = try launch(.worker, task: slug, name: "worker-\(slug)", in: worktree, label: "Worker: \(task.title)", trust: true,
                                  prompt: LeadPrompts.worker(task: task, root: root, workflow: workflow),
                                  start: "Start on your task (it's in your instructions)." + finish + " Call progress at each milestone. When done, call report.", branch: base)
@@ -924,7 +929,7 @@ public final class LeadToolset: MCPToolset {
         try? store.appendProgress("Started a worker on \(slug)")
         let recovered = merging.map { "Its worktree is in the middle of a merge, which the worker was told to finish (start_worker with recover: true aborts it instead): \($0) " }
             ?? stuck.map { "Aborted the \($0.kind.rawValue) its worktree was stuck in; it's back on \($0.branch) at \($0.head.prefix(8)). " } ?? ""
-        return MCPToolResult(text: offSaid + recovered + locked + "Worker started on \(slug) in \(worktree) (branch agent/\(slug)). You'll get a message when it reports, needs input or stalls.")
+        return MCPToolResult(text: noTools + offSaid + recovered + locked + "Worker started on \(slug) in \(worktree) (branch agent/\(slug)). You'll get a message when it reports, needs input or stalls.")
     }
 
     private func stopWorker(_ slug: String) throws -> MCPToolResult {
@@ -1088,6 +1093,8 @@ public final class LeadToolset: MCPToolset {
         // A re-audit checks the open findings and the diff since the commit the last audit covered, not everything again.
         let ledger = vault.audits(root: root, task: slug)
         let recheck = ledger.flatMap { ledger in ledger.isReaudit ? reaudit(ledger, slug: slug, head: head) : nil }
+        // Named before its grant goes to the new one.
+        let noTools = noToolsBefore(task, .verifier, sessions: sessions)
         let session: String
         var panel: LeadAuditPanel?
         if finders > 1 {
@@ -1126,11 +1133,11 @@ public final class LeadToolset: MCPToolset {
         } ?? ""
         let cap = ledger?.reconsider == true ? " " + Self.reconsiderText(ledger!, of: slug) : ""
         if let panel {
-            return MCPToolResult(text: putBack + behind + "\(panel.size) finders started on \(slug) (checking \(head.prefix(8))): " + Self.focusesText(panel.focuses) + ". "
+            return MCPToolResult(text: noTools + putBack + behind + "\(panel.size) finders started on \(slug) (checking \(head.prefix(8))): " + Self.focusesText(panel.focuses) + ". "
                                  + "One build and test run came first, and every finder reads its logs (\(panel.run)): \(panel.logs.joined(separator: ", ")). "
                                  + "Their findings are voted into one verdict, which arrives as a message once all \(panel.size) have submitted.\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
         }
-        return MCPToolResult(text: putBack + behind + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
+        return MCPToolResult(text: noTools + putBack + behind + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
     }
 
     /// " The worktree has 3 untracked files (12.0 KB), leftovers …: path (size), …", or "" for none.
@@ -1674,7 +1681,8 @@ public final class LeadToolset: MCPToolset {
         let sessions = try hostSessions(refused).filter { session in
             session.live && ([task.worker, task.verifier].contains(session.id) || Self.isTeamSession(session, in: folder))
         }
-        let endings = try end(sessions, refused: refused)
+        // One the host didn't end, cleanup ends itself: its processes, the user's carrying its session's id.
+        let endings = try endItself(try end(sessions, refused: refused), refused: refused)
         // Not under a session that's still writing there (its next write would leave a stray folder behind).
         let failed = endings.filter { $0.failure != nil }
         guard failed.isEmpty else {
@@ -1694,17 +1702,109 @@ public final class LeadToolset: MCPToolset {
         freed += temporary.reduce(0) { $0 + removeFolder($1.path) }
         freed += sweepFinished(board, except: slug)
         try? vault.retire(root: root, task: slug)
-        try store.update { board in
-            guard let index = board.taskIndex(slug) else { return }
+        let after = try store.update { board -> LeadTask? in
+            guard let index = board.taskIndex(slug) else { return nil }
             board.tasks[index].worktree = nil
             if ![.done, .folded, .abandoned].contains(board.tasks[index].status) { board.tasks[index].status = .failed }
+            return board.tasks[index]
         }
         // Its workers and verifiers, this one and any before it, are history now: off the session list.
         for session in (try? listed()) ?? [] where !session.live && Self.isTeamSession(session, in: folder) {
             runtime.forget(session.id)
         }
         let ended = endings.isEmpty ? "" : "; " + endings.map(\.said).joined(separator: ", ")
-        return MCPToolResult(text: "Cleaned up \(slug)" + ended + (freed > 0 ? " (freed \(DiskSpace.text(freed)) of build output and temporary folders)." : "."))
+        return MCPToolResult(text: "Cleaned up \(slug)" + ended + (freed > 0 ? " (freed \(DiskSpace.text(freed)) of build output and temporary folders)." : ".")
+                             + (after.map { " " + Self.cleanedState(before: task, after: $0) } ?? ""))
+    }
+
+    /// A task's state as status and the board say it: folded, abandoned (`LeadTask.isAbandoned`), or its status.
+    static func shownState(_ task: LeadTask) -> String {
+        task.status == .folded ? "folded" : task.isAbandoned ? "abandoned" : task.status.rawValue
+    }
+
+    /// What cleanup left the task as, the way status and the board show it: "It stays done.", "It was failed: now
+    /// abandoned.". A failed task that never had a worker stays failed there, which is said with what to do.
+    static func cleanedState(before: LeadTask, after: LeadTask) -> String {
+        let was = shownState(before), now = shownState(after)
+        let state = was == now ? "It stays \(now)." : "It was \(was): now \(now)."
+        guard now == LeadTask.Status.failed.rawValue else { return state }
+        return state + " It never had a worker, so status and the board count it as failed, not abandoned: update_task it to abandoned with a reason if nothing will carry it."
+    }
+
+    /// Ends itself each session `endings` says the host didn't end: SIGTERM to its processes (`sessionProcesses`: the
+    /// user's carrying its `VIBESWITCHER_SESSION` id, its agent among them), SIGKILL to those still running after
+    /// `stopWait` (5 s at most), then waits as long again for the host to see it gone. What still runs is named, by pid
+    /// and command, with the host's answer.
+    private func endItself(_ endings: [Ending], refused: String) throws -> [Ending] {
+        guard endings.contains(where: { $0.failure != nil }) else { return endings }
+        let grace = min(5, stopWait)
+        var found: [String: [SessionStrays.Found]] = [:]
+        for ending in endings where ending.failure != nil {
+            let processes = sessionProcesses(ending.session.id)
+            processes.forEach { Darwin.kill($0.pid, SIGTERM) }
+            found[ending.session.id] = processes
+        }
+        var running = found.values.joined().filter(SessionStrays.isRunning)
+        let killAt = Date().addingTimeInterval(grace)
+        while !running.isEmpty, Date() < killAt {
+            usleep(50_000)
+            running = running.filter(SessionStrays.isRunning)
+        }
+        running.forEach { Darwin.kill($0.pid, SIGKILL) }
+        // The host sees the session end once its agent's process is gone.
+        let ids = Set(found.filter { !$0.value.isEmpty }.keys)
+        var live = ids
+        let deadline = Date().addingTimeInterval(stopWait)
+        while !live.isEmpty {
+            live.formIntersection(try hostSessions(refused).filter(\.live).map(\.id))
+            guard !live.isEmpty, Date() < deadline else { break }
+            usleep(200_000)
+        }
+        return endings.map { ending in
+            guard let failure = ending.failure else { return ending }
+            let processes = found[ending.session.id] ?? []
+            if ids.contains(ending.session.id), !live.contains(ending.session.id) {
+                return Ending(session: ending.session, failure: nil,
+                              itself: "itself, after the host didn't (\(failure)): \(processes.count) process\(processes.count == 1 ? "" : "es") carrying its session's id")
+            }
+            // What still runs of it: its agent, and those of its processes that outlived the signals.
+            let pids = ([ending.session.pid].compactMap { $0 }.filter { Darwin.kill($0, 0) == 0 }
+                        + processes.filter(SessionStrays.isRunning).map(\.pid))
+            let remaining = pids.reduce(into: [Int32]()) { if !$0.contains($1) { $0.append($1) } }
+            let named = remaining.isEmpty ? "" : "; still running: " + remaining.prefix(8).map { "pid \($0) (\(Self.command(of: $0)))" }.joined(separator: ", ")
+                + (remaining.count > 8 ? ", and \(remaining.count - 8) more" : "")
+            let none = processes.isEmpty ? "; no process carries its session's id, so cleanup ended none itself" : ""
+            return Ending(session: ending.session, failure: failure + none + named)
+        }
+    }
+
+    /// A process's command line, cut short ("node server.js"); its name from the kernel when that can't be read.
+    static func command(of pid: Int32) -> String {
+        let line = ProcessTable.commandLine(pid: pid).joined(separator: " ")
+        let command = line.isEmpty ? ProcessTable.info(pid: pid)?.comm ?? "?" : line
+        return command.count > 80 ? String(command.prefix(79)) + "…" : command
+    }
+
+    /// The task's worker or verifier that never got its tools (its tool server never asked the host who it is), in a
+    /// sentence that comes first in start_worker's or audit's reply, before another is started: "" when none, or the
+    /// roster can't be read. One that ended before `LeadWitness.toolsWithin` without them counts too.
+    private func noToolsBefore(_ task: LeadTask, _ role: LeadLaunch.Role, sessions: [LeadSessionInfo]) -> String {
+        let mine = role == .worker ? [task.worker].compactMap { $0 } : (task.panel?.sessions ?? []) + [task.verifier].compactMap { $0 }
+        guard !mine.isEmpty, let roster = try? vault.roster(root: root) else { return "" }
+        let now = Date()
+        let live = Set(sessions.filter(\.live).map(\.id))
+        let dead = roster.filter { entry in
+            // Not one the lead stopped (it may have, before its tools had a moment to connect).
+            guard entry.holds, entry.role == role, mine.contains(entry.session), entry.session != task.stopped, let bound = entry.boundAt else { return false }
+            return LeadWitness.neverGotTools(boundAt: bound, toolsAt: entry.toolsAt, submittedAt: entry.submittedAt, now: now)
+                || (!live.contains(entry.session) && entry.toolsAt == nil && entry.submittedAt == nil)
+        }
+        guard !dead.isEmpty else { return "" }
+        let which = dead.map { entry in "session \(entry.session.prefix(8)), started \(LeadBoard.clock(entry.boundAt ?? 0))" }.joined(separator: "; ")
+        let who = role == .worker ? "worker" : dead.count == 1 ? "verifier" : "verifiers"
+        let lost = role == .worker ? "no report could come from it" : "no verdict could come from \(dead.count == 1 ? "it" : "them")"
+        return "The earlier \(who) on \(task.slug) (\(which)) never got \(dead.count == 1 ? "its" : "their") tools: its vibeswitcher tool server never answered, so \(lost). "
+            + "If this one doesn't get them either, tell the user (the session host or the tool server is broken) instead of starting more. "
     }
 
     /// A worker's or verifier's session in the worktree `folder` (standardized).
@@ -1766,11 +1866,15 @@ public final class LeadToolset: MCPToolset {
     struct Ending {
         let session: LeadSessionInfo
         let failure: String?
+        /// Ended by cleanup itself after the host didn't: how (see `endItself`).
+        var itself: String? = nil
 
-        /// "ended pid N (label)", or "couldn't end pid N (label): why".
+        /// "ended pid N (label)", "ended pid N (label) itself, after the host didn't (…): …", or "couldn't end pid N
+        /// (label): why".
         var said: String {
             let which = session.pid.map { "pid \($0)" } ?? "session \(session.id.prefix(8))"
-            return failure.map { "couldn't end \(which) (\(session.label)): \($0)" } ?? "ended \(which) (\(session.label))"
+            return failure.map { "couldn't end \(which) (\(session.label)): \($0)" }
+                ?? "ended \(which) (\(session.label))" + (itself.map { " \($0)" } ?? "")
         }
     }
 

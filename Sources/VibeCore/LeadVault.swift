@@ -30,6 +30,10 @@ public struct LeadVault: Sendable {
         public var issuedAt: Double
         /// Who asked for it: only they bind or withdraw it.
         public var issuer: Caller
+        /// When it was bound to its session, and when that session's tool server first asked who it is (its tools
+        /// connected): nil from a host that predates them (see `RosterEntry.boundAt`).
+        public var boundAt: Double? = nil
+        public var toolsAt: Double? = nil
     }
 
     /// One of an audit's finders: its findings and verdict go in as its ballot, and once every finder of its panel
@@ -76,14 +80,22 @@ public struct LeadVault: Sendable {
         public var holds: Bool
         /// A verifier that gave its verdict (or cast its ballot): when. Its job is done.
         public var submittedAt: Double?
+        /// Holding its role: when it was bound to its session, and when its tool server first asked who it is. A session
+        /// bound a while ago with no `toolsAt` never got its tools (see `LeadWitness.withoutTools`); nil `boundAt` (an
+        /// older host, or one bound before it kept the time) says nothing either way.
+        public var boundAt: Double?
+        public var toolsAt: Double?
 
-        public init(root: String, session: String, role: LeadLaunch.Role, task: String?, holds: Bool, submittedAt: Double? = nil) {
+        public init(root: String, session: String, role: LeadLaunch.Role, task: String?, holds: Bool, submittedAt: Double? = nil,
+                    boundAt: Double? = nil, toolsAt: Double? = nil) {
             self.root = root
             self.session = session
             self.role = role
             self.task = task
             self.holds = holds
             self.submittedAt = submittedAt
+            self.boundAt = boundAt
+            self.toolsAt = toolsAt
         }
     }
 
@@ -492,7 +504,7 @@ extension LeadVault {
             func roster() -> [RosterEntry] {
                 let holding = members.filter { $0.role != .lead }.compactMap { member in
                     member.session.map { RosterEntry(root: root, session: $0, role: member.role, task: member.task, holds: true,
-                                                     submittedAt: submitted?[$0]) }
+                                                     submittedAt: submitted?[$0], boundAt: member.boundAt, toolsAt: member.toolsAt) }
                 }
                 let held = Set(holding.map(\.session))
                 let formers = (former ?? []).filter { !held.contains($0) }.map { session in
@@ -700,6 +712,7 @@ extension LeadVault {
                 }
                 change(root, &changed) { team in
                     guard let index = team.members.firstIndex(where: { $0.id == grant }) else { return }
+                    if team.members[index].session == nil { team.members[index].boundAt = Date().timeIntervalSince1970 }
                     team.members[index].session = session
                 }
                 return .ok
@@ -723,7 +736,16 @@ extension LeadVault {
                 return .ok
             case .whoami(let root):
                 guard case .session(let session) = caller else { return .member(nil) }
-                return .member(team(root)?.members.first { $0.session == session })
+                guard var member = team(root)?.members.first(where: { $0.session == session }) else { return .member(nil) }
+                // Its tool server asking is its tools connecting: the first time is kept (see `RosterEntry.toolsAt`).
+                if member.toolsAt == nil {
+                    member.toolsAt = Date().timeIntervalSince1970
+                    change(root, &changed) { team in
+                        guard let index = team.members.firstIndex(where: { $0.id == member.id }) else { return }
+                        team.members[index].toolsAt = member.toolsAt
+                    }
+                }
+                return .member(member)
             case .current(let role, let root, let task):
                 return .member(team(root)?.members.first { $0.role == role && $0.task == task })
             case .submitVerdict(let root, let completion, let integrity, let summary, let findings):

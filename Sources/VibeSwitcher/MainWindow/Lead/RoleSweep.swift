@@ -21,6 +21,9 @@ final class RoleSweep: @unchecked Sendable {
     var tell: (String) -> Void
     /// What the roster says each verifier submitted, by session (see `LeadWitness.Seen.submittedAt`).
     var submitted: ([String: Double]) -> Void = { _ in }
+    /// When each worker and verifier holding its role was bound to its session, and when its tools connected, by
+    /// session (see `LeadWitness.Seen.boundAt`): one bound by a host that keeps the time.
+    var tools: ([String: (bound: Double, tools: Double?)]) -> Void = { _ in }
     /// How long a session asked to end has before it's asked again (and before it may be told as stranded).
     var askAgainAfter: TimeInterval = 60
 
@@ -47,6 +50,9 @@ final class RoleSweep: @unchecked Sendable {
     func look(hosted: [HostSession], idleSince: (HostSession) -> Double?, agent: (HostSession) -> (pid: Int32?, memory: Int64?), now: Date = Date()) {
         guard let roster = try? roster() else { return }
         submitted(roster.reduce(into: [:]) { all, entry in if let at = entry.submittedAt { all[entry.session] = at } })
+        tools(roster.reduce(into: [:]) { all, entry in
+            if entry.holds, let bound = entry.boundAt { all[entry.session] = (bound, entry.toolsAt) }
+        })
         let live = Set(hosted.filter(\.isLive).map(\.id.uuidString))
         let roots = Set(roster.filter { live.contains($0.session) }.map(\.root))
         let boards = Dictionary(uniqueKeysWithValues: roots.map { ($0, board($0)) })

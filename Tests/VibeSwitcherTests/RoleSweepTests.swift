@@ -114,4 +114,24 @@ struct RoleSweepTests {
         sweep.look(hosted: [session], idleSince: { _ in 0 }, agent: { _ in (nil, nil) }, now: Self.now)
         #expect(world.ended == [session.id])
     }
+
+    /// The roster's bind and tools times reach the witness (see `LeadWitness.Seen.boundAt`): a role holder's only, one
+    /// bound by a host that keeps the time.
+    @Test func theRostersToolTimesReachTheWitness() {
+        let world = World()
+        let bound = Self.now.timeIntervalSince1970 - 600
+        world.roster = [
+            LeadVault.RosterEntry(root: root, session: "never", role: .verifier, task: "t", holds: true, boundAt: bound),
+            LeadVault.RosterEntry(root: root, session: "connected", role: .worker, task: "t", holds: true, boundAt: bound, toolsAt: bound + 3),
+            LeadVault.RosterEntry(root: root, session: "older-host", role: .worker, task: "u", holds: true),
+            LeadVault.RosterEntry(root: root, session: "former", role: .verifier, task: "t", holds: false, boundAt: bound),
+        ]
+        let sweep = sweep(world)
+        var tools: [String: (bound: Double, tools: Double?)] = [:]
+        sweep.tools = { tools = $0 }
+        sweep.look(hosted: [], idleSince: { _ in nil }, agent: { _ in (nil, nil) }, now: Self.now)
+        #expect(Set(tools.keys) == ["never", "connected"])
+        #expect(tools["never"]?.bound == bound && tools["never"]?.tools == nil)
+        #expect(tools["connected"]?.tools == bound + 3)
+    }
 }

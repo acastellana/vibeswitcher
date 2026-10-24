@@ -202,6 +202,11 @@ final class LeadController: ObservableObject {
     private var sweptAt = Date.distantPast
     /// What the roster said each verifier submitted, by session: its end is expected (see `LeadWitness.Seen`).
     private var submitted: [String: Double] = [:]
+    /// What the roster said of each worker's and verifier's tools: when it was bound, and when they connected (see
+    /// `LeadWitness.Seen.boundAt`).
+    private var toolTimes: [String: (bound: Double, tools: Double?)] = [:]
+    /// Sessions that never got their tools, asked to end, and when last (asked again a minute on while they run).
+    private var endingNoTools: [String: Date] = [:]
     /// Terminals being flushed, and when a message was last typed into each (its hooks need a moment to say it's
     /// working again; until then another flush would type a second prompt).
     private var flushing: Set<String> = []
@@ -270,6 +275,9 @@ final class LeadController: ObservableObject {
         }) : nil
         roleSweep?.submitted = { [weak self] submitted in
             DispatchQueue.main.async { self?.submitted = submitted }
+        }
+        roleSweep?.tools = { [weak self] tools in
+            DispatchQueue.main.async { self?.toolTimes = tools }
         }
         timer = Heartbeat.shared.every(3) { [weak self] in self?.refresh() }
         // Whatever is typed into a replaced lead (its terminal, the composer, the phone) comes here, never to it.
@@ -1005,8 +1013,16 @@ final class LeadController: ObservableObject {
                                         apiErrorAt: apiError?.at, activity: watched?.activity,
                                         lastActivity: watched?.progress?.lastWritten, compactedAt: watched?.progress?.compactedAt,
                                         shells: shells, heldSince: held?.at, heldFrom: held.map { Self.sender($0.from) },
-                                        started: info.startedAt.timeIntervalSince1970, submittedAt: submitted[id])
+                                        started: info.startedAt.timeIntervalSince1970, submittedAt: submitted[id],
+                                        boundAt: toolTimes[id]?.bound, toolsAt: toolTimes[id]?.tools)
             if info.isLive, let session { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
+        }
+        // A worker or verifier whose tools never connected only holds a Mac slot: it ends (`events` tells the lead).
+        for id in LeadWitness.withoutTools(board: board, seen: seen, now: now) {
+            guard let uuid = UUID(uuidString: id), endingNoTools[id].map({ now.timeIntervalSince($0) >= 60 }) ?? true else { continue }
+            endingNoTools[id] = now
+            Breadcrumbs.shared.note("witness: ending session \(id.prefix(8)) in \((root as NSString).lastPathComponent): its tools never connected")
+            host.kill(uuid)
         }
         // Sessions that ended together (a stray kill, the app relaunched over them) are told in one message.
         for message in LeadWitness.messages(board: board, seen: seen, now: now, told: { told.contains("\(root)|\($0)") }) {

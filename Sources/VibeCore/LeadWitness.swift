@@ -41,6 +41,10 @@ public enum LeadWitness {
         /// A verifier that gave its verdict (or cast its ballot), by the vault's roster: when. The host ends it
         /// shortly after (its job is done), so its end is expected, never news.
         public var submittedAt: Double?
+        /// By the vault's roster: when it was bound to its session, and when its tool server first asked the host who
+        /// it is (see `LeadVault.RosterEntry.toolsAt`). Bound `toolsWithin` ago with neither, it never got its tools.
+        public var boundAt: Double?
+        public var toolsAt: Double?
 
         /// How it ended, in words; its exit code when that wasn't said.
         var ending: String { cause ?? "exit \(exit ?? 0)" }
@@ -77,10 +81,13 @@ public enum LeadWitness {
         public init(live: Bool, exit: Int32? = nil, cause: String? = nil, status: SessionStatus? = nil, since: Date? = nil, detail: String? = nil,
                     pending: PendingPrompt? = nil, agentQuit: Bool = false, apiError: String? = nil, apiErrorAt: Double? = nil, activity: LeadActivity? = nil,
                     lastActivity: Double? = nil, compactedAt: Double? = nil, shells: [BackgroundJob] = [],
-                    heldSince: Double? = nil, heldFrom: String? = nil, started: Double? = nil, submittedAt: Double? = nil) {
+                    heldSince: Double? = nil, heldFrom: String? = nil, started: Double? = nil, submittedAt: Double? = nil,
+                    boundAt: Double? = nil, toolsAt: Double? = nil) {
             self.live = live
             self.started = started
             self.submittedAt = submittedAt
+            self.boundAt = boundAt
+            self.toolsAt = toolsAt
             self.activity = activity
             self.lastActivity = lastActivity
             self.compactedAt = compactedAt
@@ -102,6 +109,48 @@ public enum LeadWitness {
         public var prompt: PendingPrompt {
             PendingPrompt.waiting(asked: detail, pending: pending, since: since?.timeIntervalSince1970)
         }
+
+        /// Its tool server never asked the host who it is, `toolsWithin` after its session was bound (see `neverGotTools`).
+        public func neverGotTools(now: Date) -> Bool {
+            LeadWitness.neverGotTools(boundAt: boundAt, toolsAt: toolsAt, submittedAt: submittedAt, now: now)
+        }
+    }
+
+    /// How long a worker's or verifier's tool server has, from its session's start, to ask the session host who it
+    /// is (it does first thing, in seconds): one that hasn't by then never got its tools, and can neither report nor
+    /// give a verdict, however long it works.
+    public static let toolsWithin: TimeInterval = 5 * 60
+
+    /// A session bound to its role `toolsWithin` ago whose tool server never asked who it is (and gave no verdict). A
+    /// bind time not known (an older host) says nothing.
+    public static func neverGotTools(boundAt: Double?, toolsAt: Double?, submittedAt: Double?, now: Date) -> Bool {
+        guard let boundAt, toolsAt == nil, submittedAt == nil else { return false }
+        return now.timeIntervalSince1970 - boundAt >= toolsWithin
+    }
+
+    /// "The verifier on a never got its tools: …", for the lead (`ended`: its session was gone already).
+    static func noToolsText(_ who: String, task: LeadTask, session: String, info: Seen, ended: Bool) -> String {
+        let started = (info.started ?? info.boundAt).map { ", started \(LeadBoard.clock($0))" } ?? ""
+        let again = who == "worker"
+            ? "start_worker(\(task.slug)) starts another in its worktree, its commits kept"
+            : "audit(\(task.slug)) starts another verifier"
+        return "The \(who) on \(task.slug) never got its tools: its vibeswitcher tool server didn't answer within "
+            + "\(Int(toolsWithin / 60)) min of its start (session \(session.prefix(8))\(started)), so it can't \(who == "worker" ? "report" : "give a verdict"). "
+            + (ended ? "Its session has ended. " : "VibeSwitcher ends its session, freeing its Mac slot. ")
+            + "\(again); if that one doesn't get its tools either, tell the user (the session host or the tool server is broken) instead of starting more."
+    }
+
+    /// The live workers and verifiers that never got their tools, which VibeSwitcher ends (`events` tells each once).
+    public static func withoutTools(board: LeadBoard, seen: [String: Seen], now: Date = Date()) -> [String] {
+        board.tasks.flatMap { task in noToolsSessions(task, seen: seen, now: now) }.filter { seen[$0]?.live == true }
+    }
+
+    /// The task's worker (running) and awaited verifiers (in review) that never got their tools.
+    private static func noToolsSessions(_ task: LeadTask, seen: [String: Seen], now: Date) -> [String] {
+        var sessions: [String] = []
+        if task.status == .running, let worker = task.worker, worker != task.stopped { sessions.append(worker) }
+        if task.status == .review, task.evidence == nil { sessions += task.awaitedVerifiers }
+        return sessions.filter { seen[$0]?.neverGotTools(now: now) == true }
     }
 
     /// How long a session may sit finished before it counts as stopped.
@@ -110,8 +159,15 @@ public enum LeadWitness {
     public static func events(board: LeadBoard, seen: [String: Seen], now: Date = Date()) -> [(key: String, text: String)] {
         var events: [(key: String, text: String)] = []
         for task in board.tasks where task.status != .done {
+            // One whose tools never connected is told so, once, and nothing else of it is (its end is VibeSwitcher's).
+            let noTools = noToolsSessions(task, seen: seen, now: now)
+            for session in noTools {
+                guard let info = seen[session] else { continue }
+                let who = session == task.worker ? "worker" : "verifier"
+                events.append(("\(session)|no-tools", noToolsText(who, task: task, session: session, info: info, ended: !info.live)))
+            }
             // A worker the lead stopped itself ended because it was told to.
-            if let worker = task.worker, worker != task.stopped, let info = seen[worker] {
+            if let worker = task.worker, worker != task.stopped, !noTools.contains(worker), let info = seen[worker] {
                 if !info.live, [.running, .failed].contains(task.status) {
                     events.append(("\(worker)|ended", "The worker on \(task.slug) ended (\(info.ending)) without reporting. Its commits are on agent/\(task.slug); read_session to see why, then start_worker(\(task.slug)) starts it again where it was (the task needn't be set to blocked first), or re-plan."))
                 } else if info.live, info.agentQuit, [.running, .failed].contains(task.status) {
@@ -131,7 +187,7 @@ public enum LeadWitness {
             }
             // With several finders, each that hasn't submitted yet.
             for verifier in task.status == .review && task.evidence == nil ? task.awaitedVerifiers : [] {
-                guard let info = seen[verifier], !gaveVerdict(info, on: task) else { continue }
+                guard !noTools.contains(verifier), let info = seen[verifier], !gaveVerdict(info, on: task) else { continue }
                 if info.live, !info.agentQuit, let error = info.apiError {
                     events.append(("\(verifier)|api-error-\(Int(info.apiErrorAt ?? 0))", "The verifier on \(task.slug) stopped mid-audit: its turn ended on an API error (\(error)). Tell the user, or audit again."))
                 } else if !info.live || info.agentQuit {
@@ -200,7 +256,7 @@ public enum LeadWitness {
     public static func stalls(board: LeadBoard, seen: [String: Seen], now: Date = Date()) -> [String: LeadStall] {
         var found: [String: LeadStall] = [:]
         for task in board.tasks {
-            guard let worker = task.worker, worker != task.stopped, let info = seen[worker],
+            guard let worker = task.worker, worker != task.stopped, let info = seen[worker], !info.neverGotTools(now: now),
                   let stall = LeadStall.detect(info, task: task, now: now).first else { continue }
             found[task.id] = stall
         }
