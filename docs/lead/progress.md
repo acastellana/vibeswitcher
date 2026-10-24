@@ -1126,3 +1126,5 @@
 - 2026-10-24 19:12 Merged boundary-excursions-a: Boundary excursions a worker reports don't fail an audit, and dismissed findings don't force another one
 - 2026-10-24 19:13 Started a worker on audit-takes-a-branch
 - 2026-10-24 19:13 Update: Merged: audits no longer fail on reported routine edits, and dismissed findings don't force another verifier — **What changed.**
+- 2026-10-24 19:42 Audit of audit-takes-a-branch: complete, clean, round 1: 1 Nit open
+- 2026-10-24 19:50 Merged audit-takes-a-branch: Audit takes a branch whose trial merge is clean, and makes room by ending the task's own idle worker
