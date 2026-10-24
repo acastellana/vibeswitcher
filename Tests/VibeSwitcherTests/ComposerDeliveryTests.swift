@@ -395,7 +395,7 @@ struct ComposerDeliveryTests {
         let board = NSPasteboard(name: NSPasteboard.Name("vibeswitcher-test-\(UUID().uuidString)"))
         defer { board.releaseGlobally() }
         box.pasteboard = board
-        box.attachments = h.scratch.appendingPathComponent("attachments-\(UUID().uuidString)")
+        box.attachments = temp.url("attachments")
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 40), styleMask: [.titled], backing: .buffered, defer: true)
         window.contentView = box
         #expect(window.makeFirstResponder(box))
