@@ -55,7 +55,7 @@ struct ProjectBriefingButtonTests {
                                 status: .needsInput, statusSince: Date(), detail: nil, hasHooks: true, inTerminalApp: false)]
         return BriefingModel(snapshot: { .init(boards: boards, sessions: sessions) }, language: { BriefingLanguage.named("es")! },
                              keyStore: AppProof.MemorySecret(nil), generate: { claude.generate($0) }, voice: voice, defaults: defaults,
-                             now: { now })
+                             now: { [now] in now })
     }
 
     /// One project with news: its log, board and questions, nothing of another project's; written in the chosen
