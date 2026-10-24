@@ -111,7 +111,7 @@ public enum BatchSummary {
     static func batchStart(_ board: LeadBoard) -> Double {
         if let last = board.allDone?.last { return last.at }
         var start = -Double.infinity, end = -Double.infinity
-        for span in board.tasks.filter(isClosed).map({ (from: $0.createdAt, to: closedAt($0)) }).sorted(by: { $0.from < $1.from }) {
+        for span in board.tasks.filter(isClosed).map({ (from: min($0.createdAt, closedAt($0)), to: closedAt($0)) }).sorted(by: { $0.from < $1.from }) {
             if span.from > end { start = span.from }
             end = max(end, span.to)
         }

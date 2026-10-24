@@ -18,6 +18,7 @@ struct ChatTimelineTests {
             case .team(let entry, _): return "team:\(entry.id)"
             case .tools(_, let tools): return "tools:" + tools.map(\.id).joined(separator: ",")
             case .newMarker(let summary): return "new:\(summary)"
+            case .allDone(let mark): return "all-done:\(mark.id)"
             }
         }
     }
