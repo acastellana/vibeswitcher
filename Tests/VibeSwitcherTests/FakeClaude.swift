@@ -580,7 +580,7 @@ def control():
             state["slowShell"] = True
         elif op == "background":
             finish_shell("Command did not complete within its 120s timeout and was moved to the background (ID: bfake). "
-                         "Output is being written to: /tmp/bfake.output. You will be notified when it completes.")
+                         "Output is being written to: bfake.output. You will be notified when it completes.")
         elif op == "exit":
             state["mode"] = "exited"
             save_state()
