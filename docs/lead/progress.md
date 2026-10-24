@@ -1072,3 +1072,4 @@
 - 2026-10-23 18:47 Update: Retrospective: the 2026-10-23 afternoon batch (13 merged) — Landed: phone replies sent once, host orders text+Enter from every writer, Slack redaction, settle script, team sessions apart from yours, host and app memory cuts, bench hosts end with their bench, b…
 - 2026-10-24 11:53 Planned chat-a-shell-command: Chat: a `!` shell command typed in the composer shows as delivered, not "Not in the conversation yet"
 - 2026-10-24 11:54 Started a worker on chat-a-shell-command
+- 2026-10-24 12:09 Merged chat-a-shell-command: Chat: a `!` shell command typed in the composer shows as delivered, not "Not in the conversation yet" (no audit: review none)
