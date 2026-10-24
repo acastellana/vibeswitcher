@@ -1103,3 +1103,7 @@
 - 2026-10-24 17:46 Review of mac-wide-limits-are: audit
 - 2026-10-24 17:50 Merged fail-fast-sessions: Fail fast: sessions without their tools are caught, and cleanup ends sessions and states the result
 - 2026-10-24 17:50 Update: Merged: sessions that never get their tools are caught, and cleanup ends sessions and says the result — **What changed.**
+- 2026-10-24 17:56 Audit of lead-record-commits: complete, clean, round 2: 1 Important closed, 1 Nit closed
+- 2026-10-24 17:58 Audit of a-base-branch-the: incomplete, clean, round 1: 2 Important open, 1 Nit open
+- 2026-10-24 18:00 Audit of the-mac-wide-test: complete, clean, round 1: 1 Nit open
+- 2026-10-24 18:02 Merged lead-record-commits: Lead record commits carry no trailer, and conflicts in them resolve themselves
