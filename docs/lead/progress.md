@@ -1102,3 +1102,4 @@
 - 2026-10-24 17:44 Audit of fail-fast-sessions: complete, clean, round 2: 3 Important closed, 1 Nit open
 - 2026-10-24 17:46 Review of mac-wide-limits-are: audit
 - 2026-10-24 17:50 Merged fail-fast-sessions: Fail fast: sessions without their tools are caught, and cleanup ends sessions and states the result
+- 2026-10-24 17:50 Update: Merged: sessions that never get their tools are caught, and cleanup ends sessions and says the result — **What changed.**
