@@ -558,6 +558,28 @@ public enum LeadPrompts {
                 + "what a filtered run misses, which otherwise only the merge's full run finds."
         }
 
+        /// The script that runs a sandboxed copy of the app for screenshots (VibeSwitcher's; see its Sandbox.swift).
+        public static let sandboxScript = "scripts/sandbox-app.sh"
+
+        /// What a worker on a UI change shows the change working with: the project's sandboxed app, driven and
+        /// photographed, the shots attached to the done report. Nil for a project without `sandboxScript`. Workers had
+        /// proved UI work through snapshot tests alone, and the user found 35 bugs by hand after installs (2026-10-25).
+        public static func workerScreenshots(in root: String) -> String? {
+            guard FileManager.default.fileExists(atPath: URL(fileURLWithPath: root).appendingPathComponent(sandboxScript).path)
+            else { return nil }
+            return workerScreenshots
+        }
+
+        public static let workerScreenshots = "UI changes: when your change shows in the app (a window, a view, the chat, "
+            + "Settings, a sheet), show it working in the real app as well as in snapshot tests: `bash \(sandboxScript) run` "
+            + "builds your worktree's app and runs a sandboxed copy (its own home, defaults and session host, fake sessions "
+            + "only, off screen and never active: never the user's app, sessions or Keychain); drive it with `bash "
+            + "\(sandboxScript) chat`, `type TEXT`, `send`, `settings TAB`, `sheet NAME` (`help` lists them all), take "
+            + "`shot NAME` (light and dark PNGs of each window in .build/sandbox-shots/), and `quit` when done. A sheet your "
+            + "change adds goes in the sandbox's sheet list (Sources/VibeSwitcher/Sandbox.swift) so it can be shown. Put "
+            + "the shots' paths in your done report's `evidence`, in the `screenshots` of the check each one shows, and look "
+            + "at them yourself before you report."
+
         /// The filter names of the lint tests under `root`'s Tests folder: every `*LintTests.swift`, as `swift test
         /// --filter` matches it (`PrivateWriteLintTests.swift` → `PrivateWriteLint`), sorted.
         public static func lintTests(in root: String) -> [String] {
@@ -837,7 +859,7 @@ public enum LeadPrompts {
 
     /// `lints`: the repository's lint tests (`Policy.lintTests(in: root)` unless given).
     public static func worker(task: LeadTask, root: String, workflow: LeadWorkflow, policy: String = WorkingPolicy.load(),
-                              lints: [String]? = nil) -> String {
+                              lints: [String]? = nil, screenshots: String?? = nil) -> String {
         """
         You are a worker for the project lead of \(root). You have one task, below. Work in this worktree on branch \
         agent/\(task.slug), and nowhere else.
@@ -871,7 +893,7 @@ public enum LeadPrompts {
         around a git command is refused. git log, diff, status and show are always open to you.
         \(Policy.workerTesting(test: workflow.testCommand))
         \(Policy.workerLints(lints ?? Policy.lintTests(in: root), test: workflow.testCommand))
-        Done: every acceptance check passes, everything is \
+        \((screenshots ?? Policy.workerScreenshots(in: root)).map { $0 + "\n" } ?? "")Done: every acceptance check passes, everything is \
         committed (`git status` lists nothing modified or staged; an untracked file left in the worktree goes in your \
         report, not through rm). Then reply with a short report: what changed, how you checked it, the routine calls you made, anything left or doubtful. \
         \(Policy.workerCheck(task.reviewLevel))

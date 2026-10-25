@@ -191,6 +191,8 @@ final class PhoneAccess: ObservableObject {
 
     /// `quiet`: a background retry; keep showing the last problem instead of flashing "Starting…".
     private func start(quiet: Bool = false) {
+        // The sandbox (scripts/sandbox-app.sh) serves nothing: no server, no tailnet mapping.
+        guard !Sandbox.isOn else { return }
         generation += 1
         let run = generation
         server?.stop()

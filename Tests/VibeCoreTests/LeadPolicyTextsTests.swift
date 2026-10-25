@@ -109,6 +109,34 @@ struct LeadPolicyTextsTests {
         #expect(LeadPrompts.worker(task: Self.task, root: "/r", workflow: workflow, lints: ["A", "B"]).contains("--filter 'A|B'"))
     }
 
+    /// 2026-10-25: workers proved UI work through snapshot tests alone, and the user found 35 bugs by hand after
+    /// installs. A worker on a UI change shows it in the sandboxed app and attaches the shots to its done report.
+    @Test func theBriefTellsAWorkerOnAUIChangeToAttachSandboxScreenshots() throws {
+        let repository = Self.sources.deletingLastPathComponent().deletingLastPathComponent().path
+        let text = try #require(LeadPrompts.Policy.workerScreenshots(in: repository))
+        for needle in ["UI changes:", "`bash scripts/sandbox-app.sh run`", "sandboxed copy", "fake sessions only",
+                       "never the user's app, sessions or Keychain", "`shot NAME`", ".build/sandbox-shots/", "`quit`",
+                       "`sheet NAME`", "Sources/VibeSwitcher/Sandbox.swift",
+                       "Put the shots' paths in your done report's `evidence`, in the `screenshots` of the check each one shows"] {
+            #expect(text.contains(needle), "missing \(needle)")
+        }
+        let workflow = LeadWorkflow.parse("---\ntest_command: bash scripts/test.sh\n---")
+        let brief = LeadPrompts.worker(task: Self.task, root: repository, workflow: workflow)
+        // Said after the lints, before Done: what a worker does last before reporting.
+        #expect(brief.contains("along with the affected tests. They take seconds and catch what a filtered run misses, "
+                               + "which otherwise only the merge's full run finds.\n" + text + "\nDone:"))
+        // The evidence it points to is the done report's (`workerEvidence`), which has a screenshots list per check.
+        #expect(LeadPrompts.Policy.workerEvidence(base: "main").contains("screenshots (the paths of any screenshots you took"))
+        // The script the brief names is the repository's.
+        #expect(FileManager.default.isExecutableFile(atPath: repository + "/" + LeadPrompts.Policy.sandboxScript))
+
+        // A project without the sandbox script: no such paragraph.
+        let none = LeadPrompts.worker(task: Self.task, root: "/r/genswap", workflow: LeadWorkflow.parse(""))
+        #expect(LeadPrompts.Policy.workerScreenshots(in: "/r/genswap") == nil)
+        #expect(!none.contains("UI changes:") && none.contains("along with the affected tests. They take seconds and catch "
+                                                                  + "what a filtered run misses, which otherwise only the merge's full run finds.\nDone:"))
+    }
+
     @Test func privacyIsAReasonForAnAuditAlongsideSecurity() {
         let review = LeadPrompts.Policy.leadReview
         for needle in ["security (", "privacy (the owner's private data in a contract or a file", "a repository's or a share's visibility",

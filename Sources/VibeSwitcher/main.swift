@@ -7,6 +7,11 @@ Breadcrumbs.shared.write { Breadcrumbs.appLog }
 
 // Command-line maintenance modes, e.g. `VibeSwitcher.app/Contents/MacOS/VibeSwitcher --dump`.
 let arguments = CommandLine.arguments
+if let index = arguments.firstIndex(of: "--sandbox") {
+    // A worker's copy of the window, built from its worktree, on a state folder of its own (scripts/sandbox-app.sh;
+    // see `Sandbox`). First, before anything else reads a default or makes the application.
+    Sandbox.run(arguments: Array(arguments[(index + 1)...]))
+}
 if let index = arguments.firstIndex(of: "--chat-bench"), arguments.indices.contains(index + 1) {
     // Debug aid: the chat view offscreen in this process on a transcript, timing its layouts (see `ChatBench`).
     ChatBench.run(path: arguments[index + 1])

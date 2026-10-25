@@ -503,7 +503,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     /// The chat is shown, in a window that's on screen and not behind others (or on another Space).
     private var chatInSight: Bool {
         guard let window else { return false }
-        return window.isVisible && window.occlusionState.contains(.visible) && !chatHost.isHidden
+        // The sandbox's window is off screen by design (scripts/sandbox-app.sh): it counts as in sight.
+        return window.isVisible && (window.occlusionState.contains(.visible) || Sandbox.isOn) && !chatHost.isHidden
     }
 
     /// Each second while the chat is shown and in sight: the transcript, the steering line and the terminal's screen.

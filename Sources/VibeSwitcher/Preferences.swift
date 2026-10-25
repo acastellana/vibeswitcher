@@ -143,6 +143,8 @@ final class Preferences: ObservableObject {
     }
 
     func setLaunchAtLogin(_ enabled: Bool) {
+        // The sandbox (scripts/sandbox-app.sh) never changes your login items.
+        guard !Sandbox.isOn else { return }
         do {
             if enabled { try SMAppService.mainApp.register() } else { try SMAppService.mainApp.unregister() }
         } catch {
