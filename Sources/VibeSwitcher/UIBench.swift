@@ -28,6 +28,8 @@ enum UIBench {
                   + "to one other than your ~/.vibeswitcher).")
             exit(1)
         }
+        // The lead's chat and Team tab while the host's sessions change (see `TeamChurnBench`).
+        if arguments.contains("--team-churn") { TeamChurnBench.run(arguments: arguments) }
         let minutes = arguments.first.flatMap(Double.init) ?? 5
         let transcript = arguments.firstIndex(of: "--transcript").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
         let app = NSApplication.shared

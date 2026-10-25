@@ -51,7 +51,8 @@ struct LeadGroupSnapshots {
         let team = arranged.teams[lead.row.id] ?? []
         for scheme in [ColorScheme.light, .dark] {
             let view = VStack(alignment: .leading, spacing: 2) {
-                WindowRowView(row: lead.row, showProject: false, role: .lead, team: team, board: board, label: { labels[$0.id] },
+                WindowRowView(row: lead.row, showProject: false, role: .lead, team: team,
+                              teamSummary: TeamRows.summary(TeamRows.rows(board, seen: TeamRows.seen(team, now: Date()))), label: { labels[$0.id] },
                               teamOpen: true)
                 ForEach(team) { row in
                     WindowRowView(row: row, showProject: false, role: LeadTeams.role(label: labels[row.id]), nested: true)

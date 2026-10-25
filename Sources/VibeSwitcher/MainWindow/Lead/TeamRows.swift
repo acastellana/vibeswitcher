@@ -128,6 +128,53 @@ struct TeamRow: Identifiable, Equatable {
     }
 }
 
+/// What a board's rows are made of besides the board: what its members' sessions are doing (`TeamRows.seen`, theirs
+/// only), and whether the host's sessions are known (any is seen: a member missing then is gone). Another session's
+/// change leaves it as it is, so the Team view isn't drawn again for it.
+struct TeamSeen: Equatable {
+    var members: [String: MemberSeen] = [:]
+    var listed = false
+}
+
+/// Each lead's Team rows as last made (`TeamRows.rows`), kept while its board and its members' sessions are the same.
+/// The Team tab and the sidebar ask on every draw, and every session the host changed redrew them: mapping and sorting
+/// a day's 200-odd tasks each time froze the window for seconds (10-24, 10-25).
+final class TeamRowsCache {
+    private var kept: [String: (board: LeadBoard, seen: TeamSeen, rows: [TeamRow])] = [:]
+    private var members: [String: (board: LeadBoard, ids: Set<String>)] = [:]
+    /// How many times rows were made (for tests).
+    private(set) var made = 0
+
+    /// What `board`'s rows read of the window's `rows` (`TeamRows.seen`), under `key`: only its members' rows are
+    /// looked at, and whether the host's sessions are known at all.
+    func seen(_ key: String, board: LeadBoard, rows: [WindowRow], now: Date) -> TeamSeen {
+        let ids: Set<String>
+        if let kept = members[key], kept.board == board {
+            ids = kept.ids
+        } else {
+            ids = TeamRows.members(board)
+            members[key] = (board, ids)
+        }
+        let theirs = rows.filter { row in row.hostID.map { ids.contains($0.uuidString) } ?? false }
+        return TeamSeen(members: TeamRows.seen(theirs, now: now), listed: rows.contains { $0.hostID != nil })
+    }
+
+    /// `board`'s rows (`TeamRows.rows`), made again only when it or `seen` changed since the last under `key`.
+    func rows(_ key: String, board: LeadBoard, seen: TeamSeen) -> [TeamRow] {
+        if let kept = kept[key], kept.seen == seen, kept.board == board { return kept.rows }
+        made += 1
+        let rows = TeamRows.rows(board, seen: seen)
+        kept[key] = (board, seen, rows)
+        return rows
+    }
+
+    /// Only these keys still have a lead.
+    func keep(where keep: (String) -> Bool) {
+        kept = kept.filter { keep($0.key) }
+        members = members.filter { keep($0.key) }
+    }
+}
+
 enum TeamRows {
     /// What the team's sessions are doing, by host id (the board's `worker` and `verifier`).
     static func seen(_ rows: [WindowRow], now: Date) -> [String: MemberSeen] {
@@ -154,8 +201,12 @@ enum TeamRows {
     /// The host's sessions are known once any is seen (the lead's own, at least): a worker or verifier missing from
     /// them then is gone (a replaced host takes its sessions with it).
     static func rows(_ board: LeadBoard, seen: [String: MemberSeen]) -> [TeamRow] {
+        rows(board, seen: TeamSeen(members: seen, listed: !seen.isEmpty))
+    }
+
+    static func rows(_ board: LeadBoard, seen: TeamSeen) -> [TeamRow] {
         let position = Dictionary(board.tasks.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
-        return board.tasks.map { row($0, seen: seen, listed: !seen.isEmpty, board: board) }.sorted { a, b in
+        return board.tasks.map { row($0, seen: seen.members, listed: seen.listed, board: board) }.sorted { a, b in
             if a.group != b.group { return a.group < b.group }
             switch a.group {
             case .needsYou:
@@ -167,6 +218,22 @@ enum TeamRows {
             case .finished: return finishedAt(a.task) > finishedAt(b.task)
             }
         }
+    }
+
+    /// The sessions a board names, the only ones its rows read: each task's worker, verifier and finders.
+    static func members(_ board: LeadBoard) -> Set<String> {
+        var ids: Set<String> = []
+        for task in board.tasks {
+            if let worker = task.worker { ids.insert(worker) }
+            if let verifier = task.verifier { ids.insert(verifier) }
+            if let panel = task.panel { ids.formUnion(panel.sessions) }
+        }
+        return ids
+    }
+
+    /// `seen` as a board's rows read it: its members' sessions only, and whether the host's are known at all.
+    static func seen(_ seen: [String: MemberSeen], members: Set<String>) -> TeamSeen {
+        TeamSeen(members: seen.filter { members.contains($0.key) }, listed: !seen.isEmpty)
     }
 
     private static func finishedAt(_ task: LeadTask) -> Double { task.merged?.at ?? task.since ?? task.createdAt }
@@ -442,8 +509,25 @@ struct MacLine: Equatable {
     /// At or over a limit: the lead's start_worker and audit refuse now.
     let isOver: Bool
 
+    /// What the line reads of a host session: a title or a screen changing leaves it the same.
+    struct Session: Equatable {
+        var label: String
+        var cwd: String
+        var live: Bool
+
+        init(_ session: HostSession) {
+            label = session.label
+            cwd = session.cwd
+            live = session.isLive
+        }
+    }
+
     static func make(_ sessions: [HostSession], load: Double?, limits: MacLimits) -> MacLine {
-        let mac = MacLoad.count(sessions.map { ($0.label, $0.cwd, $0.isLive) }, load: load)
+        make(listed: sessions.map(Session.init), load: load, limits: limits)
+    }
+
+    static func make(listed sessions: [Session], load: Double?, limits: MacLimits) -> MacLine {
+        let mac = MacLoad.count(sessions.map { ($0.label, $0.cwd, $0.live) }, load: load)
         return MacLine(text: mac.line, spoken: mac.spoken(threshold: limits.loadLimit, max: limits.maxSessions),
                        isOver: mac.isBusy(threshold: limits.loadLimit) || mac.isFull(max: limits.maxSessions))
     }

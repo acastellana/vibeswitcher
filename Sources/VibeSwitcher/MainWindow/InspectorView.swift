@@ -13,15 +13,7 @@ struct InspectorView: View {
     var body: some View {
         let lead = model.selectedRow.flatMap(leads.lead(for:))
         VStack(spacing: 0) {
-            Picker("Inspector", selection: $tab) {
-                if lead != nil { Text("Team").tag("team") }
-                Text("Overview").tag("overview")
-                Text("Activity").tag("activity")
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
+            InspectorTabs(team: lead != nil)
             Divider()
             if let row = model.selectedRow {
                 if tab == "team", let lead {
@@ -29,11 +21,15 @@ struct InspectorView: View {
                         ProjectBriefingBar(model: briefing.project(lead.root))
                         Divider()
                     }
-                    LeadTeamPane(root: lead.root, board: lead.board, decisions: leads.decisions[lead.root] ?? [],
-                                 seen: TeamRows.seen(model.allRows, now: Date()), open: { session in
+                    // Only what the board's rows read: another session's change leaves the pane as it is.
+                    let seen = leads.teamRows.seen(lead.root, board: lead.board, rows: model.allRows, now: Date())
+                    LeadTeamPane(root: lead.root, board: lead.board, decisions: leads.decisions[lead.root] ?? [], seen: seen.members,
+                                 rows: leads.teamRows.rows(lead.root, board: lead.board, seen: seen), open: { session in
                         if let id = UUID(uuidString: session) { model.select(hostID: id) }
                     }, answer: { question, text in leads.answer(question, root: lead.root, with: text) }, notices: leads.answerNotices,
-                                 summaries: leads.summaries, keepAwake: leads.keepAwake, hosted: host.sessions)
+                                 summaries: leads.summaries, keepAwake: leads.keepAwake, hosted: host.sessions.map(MacLine.Session.init),
+                                 recordsDir: leads.recordsDirs[lead.root] ?? LeadWorkflow.defaultRecordsDir)
+                        .equatable()
                 } else if tab == "activity" {
                     ActivityView(session: row.session).id(row.id)
                 } else {
@@ -45,6 +41,25 @@ struct InspectorView: View {
                 Spacer()
             }
         }
+    }
+}
+
+/// The inspector's tabs: Team (a lead's), Overview, Activity. Its own view, so the segmented control is updated only
+/// when a Team tab comes or goes, not each time the inspector is drawn again.
+private struct InspectorTabs: View {
+    let team: Bool
+    @AppStorage("inspectorTab") private var tab = "overview"
+
+    var body: some View {
+        Picker("Inspector", selection: $tab) {
+            if team { Text("Team").tag("team") }
+            Text("Overview").tag("overview")
+            Text("Activity").tag("activity")
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
     }
 }
 

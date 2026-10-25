@@ -411,12 +411,15 @@ struct DecisionFeedView: View {
 }
 
 /// The Team tab as the window shows it: `LeadTeamView` with the plain-language lines, asked for every few seconds
-/// while it's on screen.
-struct LeadTeamPane: View {
+/// while it's on screen. Equal (its actions aside: they're the same ones), SwiftUI leaves it as it is: the inspector is
+/// drawn again for every session the host changes.
+struct LeadTeamPane: View, Equatable {
     let root: String
     let board: LeadBoard
     let decisions: [LeadDecision]
     let seen: [String: MemberSeen]
+    /// The board's rows, made already (`TeamRowsCache`); nil: made here from `seen`.
+    var rows: [TeamRow]? = nil
     let open: (String) -> Void
     let answer: (LeadQuestion, String) -> Void
     let notices: [String: String]
@@ -424,7 +427,9 @@ struct LeadTeamPane: View {
     /// Whether the Mac is kept awake for this team (see `KeepAwake`).
     @ObservedObject var keepAwake: KeepAwake
     /// Every session the host lists, of every project (the Mac-wide line counts their teams).
-    var hosted: [HostSession] = []
+    var hosted: [MacLine.Session] = []
+    /// Where the lead's records are kept (`LeadController.recordsDirs`).
+    var recordsDir: String? = LeadWorkflow.defaultRecordsDir
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Counts 5-second ticks while it's on screen (a `.task`, so a re-render of the window doesn't restart it).
     @State private var tick = 0
@@ -432,10 +437,18 @@ struct LeadTeamPane: View {
     @State private var load: Double?
     @State private var limits = MacLimits()
 
+    static func == (a: LeadTeamPane, b: LeadTeamPane) -> Bool {
+        a.root == b.root && a.board == b.board && a.decisions == b.decisions && a.seen == b.seen && a.rows == b.rows
+            && a.notices == b.notices && a.summaries === b.summaries && a.keepAwake === b.keepAwake && a.hosted == b.hosted
+            && a.recordsDir == b.recordsDir
+    }
+
+    private var teamRows: [TeamRow] { rows ?? TeamRows.rows(board, seen: seen) }
+
     var body: some View {
         LeadTeamView(root: root, board: board, seen: seen, open: open, answer: answer, notices: notices, decisions: decisions,
                      summary: { summaries.line($0) }, decisionSummary: { summaries.line($0) }, keepingAwake: keepAwake.held.contains(root),
-                     mac: MacLine.make(hosted, load: load, limits: limits))
+                     mac: MacLine.make(listed: hosted, load: load, limits: limits), rows: teamRows, recordsDir: recordsDir)
             .onAppear(perform: request)
             .onChange(of: tick) { request() }
             .onChange(of: summaries.enabled) { request() }
@@ -451,6 +464,6 @@ struct LeadTeamPane: View {
         load = MacLoad.oneMinute()
         limits = MacLimits.load()
         let recent = DecisionFeed.split(decisions, now: Date().timeIntervalSince1970, reduceMotion: reduceMotion).recent.map(\.decision)
-        summaries.request(rows: TeamRows.rows(board, seen: seen), decisions: recent)
+        summaries.request(rows: teamRows, decisions: recent)
     }
 }

@@ -181,7 +181,7 @@ enum BoardBench {
                     TeamStrip(board: board) { _ in }
                     LeadTeamPane(root: root, board: board, decisions: leads.decisions[root] ?? [], seen: [:], open: { _ in },
                                  answer: { question, text in leads.answer(question, root: root, with: text) }, notices: leads.answerNotices,
-                                 summaries: leads.summaries, keepAwake: leads.keepAwake, hosted: host.sessions)
+                                 summaries: leads.summaries, keepAwake: leads.keepAwake, hosted: host.sessions.map(MacLine.Session.init))
                 }
             } else {
                 Text("No lead")

@@ -48,6 +48,21 @@ struct TeamStrip: View {
     static let fade: CGFloat = 32
 
     var body: some View {
+        // Drawn again only when the board or its count of reports waiting changes, not each time the chat is.
+        TeamStripContent(board: board, waiting: board.leadTTY.flatMap { waiting.count[$0] }, open: open).equatable()
+    }
+}
+
+/// What `TeamStrip` draws: equal (its action aside), SwiftUI leaves it as it is.
+private struct TeamStripContent: View, Equatable {
+    let board: LeadBoard
+    /// Reports VibeSwitcher couldn't wake the lead for.
+    let waiting: Int?
+    let open: (LeadTask) -> Void
+
+    static func == (a: TeamStripContent, b: TeamStripContent) -> Bool { a.board == b.board && a.waiting == b.waiting }
+
+    var body: some View {
         let order = LeadTask.Status.attentionOrder
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
@@ -66,7 +81,7 @@ struct TeamStrip: View {
                 }
                 if board.tasks.isEmpty { Text("No tasks yet").font(.system(size: 11.5)).foregroundStyle(.secondary) }
                 Spacer()
-                if let count = board.leadTTY.flatMap({ waiting.count[$0] }), let text = reportsWaiting(count) {
+                if let count = waiting, let text = reportsWaiting(count) {
                     Label(text, systemImage: "tray.full.fill")
                         .font(.system(size: 11.5, weight: .medium)).foregroundStyle(.orange)
                         .help("VibeSwitcher couldn't wake the lead for them: a draft in its box or a dialog on its screen. They go along with its next prompt.")
@@ -716,23 +731,23 @@ struct LeadTeamView: View {
     var clock: Date?
     /// The Mac-wide line (every project's team and the load); nil: not shown.
     var mac: MacLine?
-
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// The board's rows (`TeamRows.rows`) when they're made already (the window's, kept in `TeamRowsCache`); nil: made
+    /// here, from `seen`.
+    var rows: [TeamRow]?
+    /// Where the lead's records are kept (`BoardStore.recordsDir`, read with the board, never as it draws; nil: in
+    /// .vibeswitcher).
+    var recordsDir: String? = LeadWorkflow.defaultRecordsDir
 
     var body: some View {
-        // The decisions still to fade: from the first one's fade to the last one's end (DecisionFeed's times).
-        let now = (clock ?? Date()).timeIntervalSince1970
-        let fades = decisions.map { $0.at + DecisionFeed.shown }.filter { $0 + DecisionFeed.fade > now }
-        let fadeStart = fades.min().map { Date(timeIntervalSince1970: $0) }
-        let fadeEnd = fades.max().map { Date(timeIntervalSince1970: $0 + DecisionFeed.fade) }
+        // Made once a draw, never as the clock ticks: a day's 200-odd tasks mapped and sorted.
+        let rows = self.rows ?? TeamRows.rows(board, seen: seen)
         ScrollView {
             VStack(alignment: .leading, spacing: 18) {
-                // Only what tells time is drawn again as the clock ticks: every 10 s, every second while a decision
-                // fades (never with Reduce Motion: it folds instead).
-                TimelineView(.fading(from: fadeStart, until: fadeEnd, every: 10, reduceMotion: reduceMotion)) { context in
-                    glance(now: clock ?? context.date)
-                }
-                rest
+                // Each drawn again only when what it shows changed, never for the window's other changes.
+                glancing(rows).equatable()
+                TeamRecords(root: root, board: board, recordsDir: recordsDir, clock: clock,
+                            minute: Int((clock ?? Date()).timeIntervalSince1970 / 60), showEarlierResults: showEarlierResults,
+                            showEarlierQuestions: showEarlierQuestions).equatable()
             }
             .padding(14)
         }
@@ -743,65 +758,144 @@ struct LeadTeamView: View {
     }
 
     /// What's glanced at, top to bottom: the questions, the recent decisions, the tasks (also drawn alone in pictures).
-    @ViewBuilder func glance(now: Date) -> some View {
+    func glance(now: Date) -> some View {
+        glancing(rows ?? TeamRows.rows(board, seen: seen)).content(now: now)
+    }
+
+    private func glancing(_ rows: [TeamRow]) -> TeamGlance {
+        var lines: [String: String] = [:]
+        for row in rows { if let line = summary(row) { lines[row.id] = line } }
+        var decisionLines: [String: String] = [:]
+        for decision in decisions { if let line = decisionSummary(decision) { decisionLines[decision.id] = line } }
+        return TeamGlance(board: board, rows: rows, openable: Set(seen.keys), notices: notices, decisions: decisions, lines: lines,
+                          decisionLines: decisionLines, openRows: openRows, showFinished: showFinished, openDecisions: openDecisions,
+                          showEarlier: showEarlier, clock: clock, open: open, answer: answer)
+    }
+}
+
+/// The Team tab's top: the lead's questions, its recent decisions, the tasks. Drawn again as its clock ticks (what tells
+/// time), and when what it shows changes: equal (its actions aside), SwiftUI leaves it as it is.
+struct TeamGlance: View, Equatable {
+    let board: LeadBoard
+    let rows: [TeamRow]
+    /// The team's sessions it can open, by host id.
+    let openable: Set<String>
+    let notices: [String: String]
+    let decisions: [LeadDecision]
+    /// The plain-language lines written so far, by task id and by decision id (see `TeamSummaryModel`).
+    let lines: [String: String]
+    let decisionLines: [String: String]
+    let openRows: Set<String>
+    let showFinished: Bool
+    let openDecisions: Set<String>
+    let showEarlier: Bool
+    let clock: Date?
+    let open: (String) -> Void
+    let answer: (LeadQuestion, String) -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    static func == (a: TeamGlance, b: TeamGlance) -> Bool {
+        a.board == b.board && a.rows == b.rows && a.openable == b.openable && a.notices == b.notices && a.decisions == b.decisions
+            && a.lines == b.lines && a.decisionLines == b.decisionLines && a.openRows == b.openRows && a.showFinished == b.showFinished
+            && a.openDecisions == b.openDecisions && a.showEarlier == b.showEarlier && a.clock == b.clock
+    }
+
+    var body: some View {
+        // The decisions still to fade: from the first one's fade to the last one's end (DecisionFeed's times).
+        let now = (clock ?? Date()).timeIntervalSince1970
+        let fades = decisions.map { $0.at + DecisionFeed.shown }.filter { $0 + DecisionFeed.fade > now }
+        let fadeStart = fades.min().map { Date(timeIntervalSince1970: $0) }
+        let fadeEnd = fades.max().map { Date(timeIntervalSince1970: $0 + DecisionFeed.fade) }
+        // Only what tells time is drawn again as the clock ticks: every 10 s, every second while a decision fades (never
+        // with Reduce Motion: it folds instead).
+        TimelineView(.fading(from: fadeStart, until: fadeEnd, every: 10, reduceMotion: reduceMotion)) { context in
+            content(now: clock ?? context.date)
+        }
+    }
+
+    @ViewBuilder func content(now: Date) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             let stack = board.questionStack(now: now.timeIntervalSince1970)
             if !stack.isEmpty {
                 // The withdrawn ones are in the history below.
                 LeadQuestionStack(questions: stack, notices: notices, answer: answer, showsWithdrawn: false)
             }
-            DecisionFeedView(decisions: decisions, now: now, summary: decisionSummary, openDecisions: openDecisions, showEarlier: showEarlier)
+            DecisionFeedView(decisions: decisions, now: now, summary: { decisionLines[$0.id] }, openDecisions: openDecisions, showEarlier: showEarlier)
                 .padding(.horizontal, -8)
-            section("Tasks") {
+            teamSection("Tasks") {
                 if board.tasks.isEmpty {
                     Text("Nothing on the board yet. Tell the lead what to build.").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
-                TeamTaskList(rows: TeamRows.rows(board, seen: seen), now: now, summary: summary, canOpen: { seen[$0] != nil }, open: open,
+                TeamTaskList(rows: rows, now: now, summary: { lines[$0.id] }, canOpen: { openable.contains($0) }, open: open,
                              openRows: openRows, showFinished: showFinished)
                     .padding(.horizontal, -8)
             }
         }
     }
+}
 
-    @ViewBuilder private var rest: some View {
-        if !board.tasks.isEmpty {
-            section("Scorecard") {
-                ScorecardView(scorecard: LeadScorecard(board, now: (clock ?? Date()).timeIntervalSince1970))
-            }
-        }
-        let closed = board.questions.filter { !$0.isOpen }
-        if !closed.isEmpty {
-            section("Answered and withdrawn") {
-                ClosedQuestionList(questions: closed, showEarlier: showEarlierQuestions).padding(.horizontal, -8)
-            }
-        }
-        if !board.updates.isEmpty {
-            section("Results") {
-                ResultsList(updates: board.updates, showEarlier: showEarlierResults)
-            }
-        }
-        section("Files") {
-            HStack(spacing: 8) {
-                ForEach(["workflow.md", "decisions.md", "progress.md", "incidents.md"], id: \.self) { name in
-                    Button(name) {
-                        let path = name == "workflow.md" ? (root as NSString).appendingPathComponent(".vibeswitcher/\(name)") : BoardStore(root: root).recordPath(name)
-                        if FileManager.default.fileExists(atPath: path) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) } else { NSSound.beep() }
-                    }
-                    .controlSize(.small)
+/// The Team tab below the tasks: the scorecard, your answers, the results, the files. Drawn again only when the board
+/// changes (or, for the scorecard's minutes waiting on you, a minute on), never as the window's sessions change.
+struct TeamRecords: View, Equatable {
+    let root: String
+    let board: LeadBoard
+    let recordsDir: String?
+    let clock: Date?
+    /// The minute it's drawn in.
+    let minute: Int
+    let showEarlierResults: Bool
+    let showEarlierQuestions: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            if !board.tasks.isEmpty {
+                teamSection("Scorecard") {
+                    ScorecardView(scorecard: LeadScorecard(board, now: (clock ?? Date()).timeIntervalSince1970))
                 }
             }
-            let shown = root.replacingOccurrences(of: NSHomeDirectory(), with: "~")
-            Text(BoardStore(root: root).recordsDir.map { "workflow.md is kept in \(shown)/.vibeswitcher (not committed); decisions.md, progress.md and incidents.md in \(shown)/\($0), committed to the lead's branch." }
-                 ?? "Kept in \(shown)/.vibeswitcher (not committed).")
-                .font(.system(size: 10.5)).foregroundStyle(.tertiary)
+            let closed = board.questions.filter { !$0.isOpen }
+            if !closed.isEmpty {
+                teamSection("Answered and withdrawn") {
+                    ClosedQuestionList(questions: closed, showEarlier: showEarlierQuestions).padding(.horizontal, -8)
+                }
+            }
+            if !board.updates.isEmpty {
+                teamSection("Results") {
+                    ResultsList(updates: board.updates, showEarlier: showEarlierResults)
+                }
+            }
+            teamSection("Files") {
+                HStack(spacing: 8) {
+                    ForEach(["workflow.md", "decisions.md", "progress.md", "incidents.md"], id: \.self) { name in
+                        Button(name) {
+                            let path = name == "workflow.md" ? (root as NSString).appendingPathComponent(".vibeswitcher/\(name)") : recordPath(name)
+                            if FileManager.default.fileExists(atPath: path) { NSWorkspace.shared.open(URL(fileURLWithPath: path)) } else { NSSound.beep() }
+                        }
+                        .controlSize(.small)
+                    }
+                }
+                let shown = root.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+                Text(recordsDir.map { "workflow.md is kept in \(shown)/.vibeswitcher (not committed); decisions.md, progress.md and incidents.md in \(shown)/\($0), committed to the lead's branch." }
+                     ?? "Kept in \(shown)/.vibeswitcher (not committed).")
+                    .font(.system(size: 10.5)).foregroundStyle(.tertiary)
+            }
         }
     }
 
-    private func section<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title.uppercased()).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.secondary)
-            content()
-        }
+    /// Where a record is (`BoardStore.recordPath`), from the records folder read with the board.
+    private func recordPath(_ name: String) -> String {
+        let store = BoardStore(root: root)
+        guard let recordsDir else { return (store.folder as NSString).appendingPathComponent(name) }
+        return ((root as NSString).appendingPathComponent(recordsDir) as NSString).appendingPathComponent(name)
+    }
+}
+
+/// A section of the Team tab: its title in small capitals over its content.
+private func teamSection<Content: View>(_ title: String, @ViewBuilder _ content: () -> Content) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+        Text(title.uppercased()).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(.secondary)
+        content()
     }
 }
 

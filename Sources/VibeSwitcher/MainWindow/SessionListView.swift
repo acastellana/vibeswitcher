@@ -108,13 +108,23 @@ struct SessionListView: View {
 
     private func rowView(_ row: WindowRow, arranged: LeadTeams.Arranged, showProject: Bool? = nil) -> some View {
         WindowRowView(row: row, showProject: showProject ?? (model.grouping == .attention), role: model.role(of: row),
-                      team: arranged.teams[row.id], board: arranged.teams[row.id] == nil ? nil : leads.lead(for: row)?.board,
+                      team: arranged.teams[row.id], teamSummary: teamSummary(row, team: arranged.teams[row.id]),
                       questions: model.role(of: row) == .lead ? leads.lead(for: row).map { ($0.board.openQuestions.count, $0.board.blockingQuestions) } : nil,
                       allDone: model.role(of: row) == .lead && leads.lead(for: row)?.board.hasUnseenAllDone == true,
                       label: model.label(of:), replaced: model.replaced(row), nested: arranged.nested.contains(row.id),
                       teamOpen: model.expandedTeams.contains(row.id)) { model.toggleTeam(row.id) }
             .tag(row.id as String?)
             .contextMenu { RowMenu(row: row, actions: actions) }
+    }
+
+    /// The lead row's "team: 2 working · 1 in review", from the board's tasks as their rows read them (a worker that
+    /// hasn't begun isn't idle); nil without a board. Made again only when the board or its team's sessions change
+    /// (`TeamRowsCache`), never as the row's clock ticks.
+    private func teamSummary(_ row: WindowRow, team: [WindowRow]?) -> String? {
+        guard let team, !team.isEmpty, let lead = leads.lead(for: row) else { return nil }
+        let key = "sidebar|" + lead.root
+        let seen = leads.teamRows.seen(key, board: lead.board, rows: team, now: Date())
+        return TeamRows.summary(leads.teamRows.rows(key, board: lead.board, seen: seen))
     }
 
     private var countText: String {
@@ -179,8 +189,8 @@ struct WindowRowView: View {
     var role: LeadLaunch.Role?
     /// A lead's team (folded under it).
     var team: [WindowRow]?
-    /// The lead's board: what its team's tasks are at.
-    var board: LeadBoard?
+    /// The lead's "team: 2 working · 1 in review", from its board (nil: from the team's rows alone).
+    var teamSummary: String?
     /// A lead's open questions for you, and how many of them block.
     var questions: (open: Int, blocking: Int)?
     /// A lead whose board cleared (every task finished) since you last opened it: a green check.
@@ -253,8 +263,7 @@ struct WindowRowView: View {
                             Button(action: toggleTeam) {
                                 HStack(spacing: 2) {
                                     // From the board's tasks where there's one (a worker that hasn't begun isn't idle).
-                                    Text(board.map { TeamRows.summary(TeamRows.rows($0, seen: TeamRows.seen(team, now: context.date))) }
-                                        ?? LeadTeams.summary(team, label: label, board: nil, now: context.date))
+                                    Text(teamSummary ?? LeadTeams.summary(team, label: label, board: nil, now: context.date))
                                     Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold)).rotationEffect(.degrees(teamOpen ? 90 : 0))
                                         .accessibilityHidden(true)
                                 }

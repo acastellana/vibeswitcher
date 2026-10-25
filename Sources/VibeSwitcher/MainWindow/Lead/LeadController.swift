@@ -45,6 +45,7 @@ struct LeadFiles {
 
     private var boards: [String: (stamp: Stamp, board: LeadBoard)] = [:]
     private var decisionLists: [String: (stamp: Stamp, decisions: [LeadDecision])] = [:]
+    private var workflows: [String: (stamp: Stamp, recordsDir: String?)] = [:]
     /// How many times a file was read (for tests).
     private(set) var fileReads = 0
 
@@ -68,10 +69,22 @@ struct LeadFiles {
         return decisions
     }
 
+    /// Where the lead's records are kept (`BoardStore.recordsDir`, from its workflow.md).
+    mutating func recordsDir(_ root: String) -> String? {
+        let store = BoardStore(root: root)
+        let stamp = Stamp((store.folder as NSString).appendingPathComponent("workflow.md"))
+        if let stamp, let kept = workflows[root], kept.stamp == stamp { return kept.recordsDir }
+        if stamp != nil { fileReads += 1 }
+        let dir = store.recordsDir
+        workflows[root] = stamp.map { ($0, dir) }
+        return dir
+    }
+
     /// Only these roots still have a lead.
     mutating func keep(_ roots: Set<String>) {
         boards = boards.filter { roots.contains($0.key) }
         decisionLists = decisionLists.filter { roots.contains($0.key) }
+        workflows = workflows.filter { roots.contains($0.key) }
     }
 }
 
@@ -159,6 +172,11 @@ final class LeadController: ObservableObject {
     @Published private(set) var boards: [String: LeadBoard] = [:]
     /// Each running lead's decisions (`BoardStore.decisions`), by repository root.
     @Published private(set) var decisions: [String: [LeadDecision]] = [:]
+    /// Where each running lead's records are kept (`BoardStore.recordsDir`, nil: in .vibeswitcher), by repository
+    /// root, read with its board: the Team tab says so without reading workflow.md as it draws.
+    @Published private(set) var recordsDirs: [String: String?] = [:]
+    /// The Team rows as last made, for the Team tab and the sidebar (see `TeamRowsCache`).
+    let teamRows = TeamRowsCache()
     /// The Team view's plain-language lines.
     let summaries = TeamSummaryModel()
     /// The all-done cards: each board clearing after merges, its summary, and the user opening the lead.
@@ -875,13 +893,15 @@ final class LeadController: ObservableObject {
             var loaded: [String: LeadBoard] = [:]
             for root in roots { loaded[root] = files.board(root) }
             let decisions = Dictionary(uniqueKeysWithValues: roots.map { ($0, files.decisions($0)) })
+            let records = Dictionary(uniqueKeysWithValues: roots.map { ($0, files.recordsDir($0)) })
             files.keep(roots)
             let teams = Dictionary(uniqueKeysWithValues: loaded.map { root, board in
                 (root, TeamReading.read(root: root, board: board, hosted: hosted, sessions: sessions, observer: observer))
             })
-            return (fired, loaded, decisions, teams)
-        }) { [weak self] fired, loaded, decisions, teams in
+            return (fired, loaded, decisions, teams, records)
+        }) { [weak self] fired, loaded, decisions, teams, records in
             guard let self else { return }
+            if records != self.recordsDirs { self.recordsDirs = records }
             self.refreshed(roots: roots, fired: fired, loaded: loaded, decisions: decisions, teams: teams)
             self.refreshing = false
             if self.refreshAgain {
@@ -898,6 +918,7 @@ final class LeadController: ObservableObject {
         tell(timers: fired)
         let previous = boards
         if loaded != boards { boards = loaded }
+        teamRows.keep { key in roots.contains { key == $0 || key.hasSuffix("|" + $0) } }
         if read != decisions { decisions = read }
         baseMoves.look(roots)
         for (root, board) in loaded {
