@@ -151,6 +151,38 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(!report.isError, "\(report.text)")
     }
 
+    // MARK: time budget
+
+    /// An over_budget report waits on the lead (see `LeadBudget`): the loop neither audits nor merges it, and never
+    /// extends its budget.
+    @Test func anOverBudgetReportIsntMovedOnAndAutoAdvanceNeverExtendsTheBudget() throws {
+        let (root, runtime, lead) = try team()
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        #expect(!lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"], "budget_min": 1]).isError)
+        #expect(advancing.until { task("add-b", root)?.status == .running })
+        // The witness counts its worker at work past the budget (looks a minute apart, on the test's clock).
+        for minute in 0...4 {
+            try BoardStore(root: root).update { board in
+                let worker = board.task("add-b")?.worker ?? ""
+                _ = board.noteWork(LeadBudget.working(board: board, seen: [worker: LeadBudgetTests.working]), defaultMinutes: 120,
+                                   now: 1_790_000_000 + Double(minute) * 60)
+            }
+        }
+        #expect(task("add-b", root)?.overBudget?.minutes == 1)
+        try commit("b.txt", "bee\n", in: Worktrees.path(root: root, slug: "add-b"))
+        let report = try seat("worker-add-b", runtime).call("report", ["status": "over_budget", "summary": "b.txt added; proposal: 5 more minutes"])
+        #expect(!report.isError, "\(report.text)")
+        advancing.settle()
+        advancing.settle()
+        let after = try #require(task("add-b", root))
+        #expect(after.status == .blocked)
+        #expect(after.budgetMin == 1)
+        #expect(after.overBudget?.report == "b.txt added; proposal: 5 more minutes")
+        #expect(after.verifier == nil && after.merged == nil)
+        #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
+    }
+
     // MARK: review none
 
     @Test func aReviewNoneTaskStartsMergesWithItsTestRunAndIsCleanedUpWithNoLeadCall() throws {
