@@ -89,24 +89,55 @@ private final class PipeText: @unchecked Sendable {
     }
 }
 
+/// A worker's branch's code, as merge, an audit's shared run and init_command run it from the lead's tool server (see
+/// `Worktrees.runChecks`): never the lead to the session host. It runs under a wrapper that's marked (`isRunner`) and
+/// never execs, in a POSIX session of its own with no controlling terminal: the host gives nothing below the wrapper
+/// the standing of the session above it (`HostServer.identify`), and a process that escapes the wrapper (kills it, so
+/// launchd adopts it) has left the session's process tree with no terminal of the session's either. It can't open its
+/// way back to the lead's terminal (`TIOCSCTTY` refuses a terminal another session holds), nor join that session.
+public enum BranchCode {
+    /// What the wrapper's argv starts with, the command after it: zsh without startup files, running the command and
+    /// then a builtin, so it waits for the command rather than becoming it.
+    static let wrapper = ["/bin/zsh", "-f", "-c", "\"$@\"; exit $?", "vibeswitcher-branch-code"]
+
+    /// Whether a process started with these arguments is the wrapper.
+    public static func isRunner(_ arguments: [String]) -> Bool { arguments.starts(with: wrapper) }
+
+    /// Whether `pid` is the wrapper (only the user's own processes' arguments can be read).
+    public static func isRunner(pid: Int32) -> Bool { isRunner(ProcessTable.commandLine(pid: pid)) }
+}
+
 /// Runs a program and captures its output.
 public enum Shell {
     /// With `interleaved`, stderr goes to the same pipe as stdout, so `output` holds both in the order they were
-    /// written (a build's warnings and the test results after them) and `error` is empty.
+    /// written (a build's warnings and the test results after them) and `error` is empty. With `branchCode`, it runs
+    /// as `BranchCode` says: under its wrapper, in a session of its own.
     public static func run(executable: String, args: [String], in directory: String, env: [String: String] = [:],
-                           timeout: TimeInterval = 120, grace: TimeInterval = 5, interleaved: Bool = false) -> Git.Result {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: executable)
-        process.arguments = args
-        process.currentDirectoryURL = URL(fileURLWithPath: directory)
-        process.environment = ProcessInfo.processInfo.environment.merging(env) { $1 }
+                           timeout: TimeInterval = 120, grace: TimeInterval = 5, interleaved: Bool = false,
+                           branchCode: Bool = false) -> Git.Result {
+        let environment = ProcessInfo.processInfo.environment.merging(env) { $1 }
         let out = Pipe(), err = Pipe()
-        process.standardOutput = out
-        process.standardError = interleaved ? out : err
-        process.standardInput = FileHandle.nullDevice
-        do { try process.run() } catch { return Git.Result(status: -1, output: "", error: "\(error)") }
+        let process: Running
+        if branchCode {
+            do {
+                process = try Spawned(BranchCode.wrapper + [executable] + args, in: directory, environment: environment,
+                                      output: out, errors: interleaved ? out : err)
+            } catch { return Git.Result(status: -1, output: "", error: "\(error)") }
+        } else {
+            let started = Process()
+            started.executableURL = URL(fileURLWithPath: executable)
+            started.arguments = args
+            started.currentDirectoryURL = URL(fileURLWithPath: directory)
+            started.environment = environment
+            started.standardOutput = out
+            started.standardError = interleaved ? out : err
+            started.standardInput = FileHandle.nullDevice
+            do { try started.run() } catch { return Git.Result(status: -1, output: "", error: "\(error)") }
+            process = started
+        }
         let pid = process.processIdentifier
-        // Process starts it as the leader of a process group of its own, whose id is its pid: what it starts is in it
+        // Process starts it as the leader of a process group of its own, whose id is its pid (as `Spawned` does, the
+        // leader of a session of its own): what it starts is in it
         // too, also what has left its family since (a background job whose shell exited). Taken from the pid, not
         // looked up: a command that ends at once is gone before getpgid could ask, and its group with it. A group
         // with that id can only be the one it made (its pid isn't given out again while the group has members).
@@ -153,7 +184,7 @@ public enum Shell {
 
     /// Stops a program and everything it started: its family and its process group, asked with TERM, then, once it's
     /// gone or `grace` is over (it ignores TERM), killed.
-    private static func stop(_ process: Process, group: Int32?, grace: TimeInterval) {
+    private static func stop(_ process: Running, group: Int32?, grace: TimeInterval) {
         let pid = process.processIdentifier
         let asked = signalFamily(of: pid, SIGTERM)
         if let group { kill(-group, SIGTERM) }
@@ -163,6 +194,96 @@ public enum Shell {
         if let group { kill(-group, SIGKILL) }
     }
 }
+
+extension Shell {
+    /// A program `run` started, as it waits on it.
+    protocol Running: AnyObject {
+        var processIdentifier: Int32 { get }
+        var isRunning: Bool { get }
+        var terminationStatus: Int32 { get }
+        func waitUntilExit()
+    }
+
+    /// A program started with posix_spawn as the leader of a POSIX session of its own (`POSIX_SPAWN_SETSID`: no
+    /// controlling terminal, and a process group whose id is its pid, as Process makes one), stdin /dev/null, its
+    /// output into the pipes given, nothing else of this process's open (`POSIX_SPAWN_CLOEXEC_DEFAULT`), every
+    /// signal at its default. Reaped here.
+    final class Spawned: Running {
+        let processIdentifier: Int32
+        private let lock = NSLock()
+        private var status: Int32?
+
+        struct Failure: Error, CustomStringConvertible {
+            var code: Int32
+            var description: String { "Couldn't start the command: \(String(cString: strerror(code)))." }
+        }
+
+        init(_ argv: [String], in directory: String, environment: [String: String], output: Pipe, errors: Pipe) throws {
+            var attributes: posix_spawnattr_t?
+            posix_spawnattr_init(&attributes)
+            defer { posix_spawnattr_destroy(&attributes) }
+            posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF))
+            var none = sigset_t(), all = sigset_t()
+            sigemptyset(&none)
+            sigfillset(&all)
+            posix_spawnattr_setsigmask(&attributes, &none)
+            posix_spawnattr_setsigdefault(&attributes, &all)
+            var actions: posix_spawn_file_actions_t?
+            posix_spawn_file_actions_init(&actions)
+            defer { posix_spawn_file_actions_destroy(&actions) }
+            posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
+            posix_spawn_file_actions_adddup2(&actions, output.fileHandleForWriting.fileDescriptor, 1)
+            posix_spawn_file_actions_adddup2(&actions, errors.fileHandleForWriting.fileDescriptor, 2)
+            posix_spawn_file_actions_addchdir_np(&actions, directory)
+            let arguments = argv.map { strdup($0) } + [nil]
+            let variables = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
+            defer { (arguments + variables).forEach { free($0) } }
+            var pid: pid_t = 0
+            let code = posix_spawn(&pid, argv[0], &actions, &attributes, arguments, variables)
+            // Only the child writes into them now: their ends close when it (and what it starts) is done.
+            try? output.fileHandleForWriting.close()
+            if errors !== output { try? errors.fileHandleForWriting.close() }
+            guard code == 0 else { throw Failure(code: code) }
+            processIdentifier = pid
+        }
+
+        var isRunning: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            if status != nil { return false }
+            var raw: Int32 = 0
+            let reaped = waitpid(processIdentifier, &raw, WNOHANG)
+            // Reaped by someone else: whatever it did isn't known, so it's no pass.
+            if reaped == processIdentifier { status = raw } else if reaped < 0, errno != EINTR { status = Self.unknown }
+            return status == nil
+        }
+
+        func waitUntilExit() {
+            lock.lock()
+            defer { lock.unlock() }
+            guard status == nil else { return }
+            var raw: Int32 = 0
+            while waitpid(processIdentifier, &raw, 0) < 0 {
+                guard errno == EINTR else { raw = Self.unknown; break }
+            }
+            status = raw
+        }
+
+        /// The wait status of an end that isn't known: exit 255.
+        private static let unknown: Int32 = 255 << 8
+
+        /// As Process says it: the exit status, or the signal that ended it.
+        var terminationStatus: Int32 {
+            lock.lock()
+            defer { lock.unlock() }
+            guard let status else { return -1 }
+            let signal = status & 0x7f
+            return signal == 0 ? (status >> 8) & 0xff : signal
+        }
+    }
+}
+
+extension Process: Shell.Running {}
 
 extension Shell {
     /// Signals a process and its descendants (plus `also`, an earlier walk: a descendant whose parent died since
@@ -723,7 +844,9 @@ public enum Worktrees {
             if let held { env[TestLock.heldVariable] = held.path }
             let started = Date()
             let stop = progress?.heartbeat { "Running the \(name) (\(duration(Date().timeIntervalSince(started))) so far)." }
-            let run = Shell.run(executable: "/bin/zsh", args: ["-lc", script], in: path, env: env, timeout: timeout, interleaved: true)
+            // The branch's code (its build, its tests): never the lead to the session host (see `BranchCode`).
+            let run = Shell.run(executable: "/bin/zsh", args: ["-lc", script], in: path, env: env, timeout: timeout, interleaved: true,
+                                branchCode: true)
             stop?()
             let said = (name == "rerun" ? rerunHeader : "") + header + run.output
             outputs.append((name, said))

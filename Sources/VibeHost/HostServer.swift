@@ -572,7 +572,9 @@ public final class HostServer {
     /// by parent processes, or with the session's terminal), else the app's code, outside every session (the app once
     /// it answers its connection's challenge, see `prove`), else
     /// unknown. Told once, when the connection is accepted: a process can leave its session's tree, never join
-    /// another's.
+    /// another's. A worker's branch's code that merge, an audit or init_command runs from a session (the lead's tool
+    /// server, see `BranchCode`) is no session's: anything below its wrapper, short of a session started under it
+    /// (a test suite's own host's), isn't the session above it, nor any by terminal.
     func identify(_ token: audit_token_t?) -> LeadVault.Caller {
         guard let token, token.pid > 1, ProcessTable.ancestry(of: token.pid) != nil else { return .unknown }
         if let session = session(of: token.pid) { return .session(session) }
@@ -581,13 +583,23 @@ public final class HostServer {
     }
 
     /// The live session `pid` runs in (its program or anything under it, by parent processes, or with the session's
-    /// terminal), by id; nil for none.
+    /// terminal), by id; nil for none. Branch code (see `identify`) runs in none.
     func session(of pid: pid_t) -> String? {
         guard pid > 1, let ancestry = ProcessTable.ancestry(of: pid) else { return nil }
         let live = sessions.values.filter { $0.info.isLive }
-        let chain = Set([pid] + ancestry.map(\.pid))
-        if let session = live.first(where: { chain.contains($0.info.childPID) }) { return session.id.uuidString }
-        if let tty = ProcessTable.info(pid: pid)?.tty, let session = live.first(where: { $0.info.tty == tty }) { return session.id.uuidString }
+        // Nearest first: the session found is the innermost one it runs in.
+        let chain = [pid] + ancestry.map(\.pid)
+        let programs = Dictionary(live.map { ($0.info.childPID, $0) }, uniquingKeysWith: { first, _ in first })
+        if let index = chain.firstIndex(where: { programs[$0] != nil }), let session = programs[chain[index]] {
+            guard let runner = chain[..<index].first(where: BranchCode.isRunner(pid:)) else { return session.id.uuidString }
+            log.note("pid \(pid) runs branch code (under pid \(runner), a merge's, audit's or init's command in session \(Self.short(session.id))): it's no session's")
+            return nil
+        }
+        if let tty = ProcessTable.info(pid: pid)?.tty, let session = live.first(where: { $0.info.tty == tty }) {
+            guard let runner = chain.first(where: BranchCode.isRunner(pid:)) else { return session.id.uuidString }
+            log.note("pid \(pid) runs branch code (under pid \(runner)) on session \(Self.short(session.id))'s terminal: it's no session's")
+            return nil
+        }
         return nil
     }
 
