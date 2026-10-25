@@ -166,25 +166,47 @@ struct LeadQuestionStack: View {
     let answer: (LeadQuestion, String) -> Void
     /// Earlier wordings shown open to begin with (by question id).
     var historyOpen: Set<String> = []
-    /// Drafts to begin with, by question id (pictures of a draft under a withdrawn question).
-    var drafts: [String: String] = [:]
+    /// The withdrawn ones as cards (false: the Team tab, whose history lists them; one still shows while it holds a
+    /// draft to send or what became of an answer to it).
+    var showsWithdrawn = true
+    /// The answers being written, by question id: kept here, so a card hidden once its question is withdrawn keeps
+    /// what you were writing (and shows it to send as a note).
+    @State private var drafts: [String: String]
+
+    init(questions: [LeadQuestion], notices: [String: String] = [:], answer: @escaping (LeadQuestion, String) -> Void,
+         historyOpen: Set<String> = [], drafts: [String: String] = [:], showsWithdrawn: Bool = true) {
+        self.questions = questions
+        self.notices = notices
+        self.answer = answer
+        self.historyOpen = historyOpen
+        self.showsWithdrawn = showsWithdrawn
+        _drafts = State(initialValue: drafts)
+    }
 
     var body: some View {
-        if !questions.isEmpty {
-            let open = questions.filter(\.isOpen)
+        let shown = questions.filter { question in
+            showsWithdrawn || question.state != .withdrawn || notices[question.id] != nil
+                || !(drafts[question.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        if !shown.isEmpty {
+            let open = shown.filter(\.isOpen)
             VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: "questionmark.bubble.fill").foregroundStyle(open.contains { $0.rank == .blocking } ? Color.red : Color.accentColor)
-                        .accessibilityHidden(true)
-                    Text(open.isEmpty ? "No questions waiting" : questionCount(open.count)).font(.system(size: 12, weight: .semibold))
-                    Spacer()
-                    if open.count > 1 {
-                        Text("Answer in any order").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                // A withdrawn card alone says what it is.
+                if showsWithdrawn || shown.contains(where: { $0.state != .withdrawn }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "questionmark.bubble.fill").foregroundStyle(open.contains { $0.rank == .blocking } ? Color.red : Color.accentColor)
+                            .accessibilityHidden(true)
+                        Text(open.isEmpty ? "No questions waiting" : questionCount(open.count)).font(.system(size: 12, weight: .semibold))
+                        Spacer()
+                        if open.count > 1 {
+                            Text("Answer in any order").font(.system(size: 10.5)).foregroundStyle(.tertiary)
+                        }
                     }
                 }
-                ForEach(questions) { question in
+                ForEach(shown) { question in
                     LeadQuestionCard(question: question, notice: notices[question.id], answer: answer,
-                                     showHistory: historyOpen.contains(question.id), text: drafts[question.id] ?? "")
+                                     showHistory: historyOpen.contains(question.id),
+                                     text: Binding(get: { drafts[question.id] ?? "" }, set: { drafts[question.id] = $0 }))
                 }
             }
         }
@@ -196,8 +218,9 @@ private struct LeadQuestionCard: View {
     let notice: String?
     let answer: (LeadQuestion, String) -> Void
     @State var showHistory: Bool
-    /// The answer being written: kept through a revision, and through a withdrawal (to send anyway or discard).
-    @State var text: String
+    /// The answer being written (the stack's): kept through a revision, and through a withdrawal (to send anyway or
+    /// discard).
+    @Binding var text: String
     @Environment(\.holdLeadQuestion) private var hold
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
@@ -433,47 +456,169 @@ private struct LeadQuestionCard: View {
     }
 }
 
-/// An answered question (with the wording that was answered) or a withdrawn one (with why), in the Team tab's history.
-private struct ClosedQuestionRow: View {
+/// The Team tab's answered and withdrawn questions, newest first, one line each (the question's first line and its
+/// answer); the newest few in view, the rest folded into "Earlier (n)". Clicking one shows it whole.
+struct ClosedQuestionList: View {
+    static let shown = 3
+    let questions: [LeadQuestion]
+    @State var showEarlier = false
+    /// Questions shown whole, to begin with (pictures).
+    @State var openQuestions: Set<String> = []
+
+    var body: some View {
+        let newest = Self.newestFirst(questions)
+        let earlier = newest.dropFirst(Self.shown)
+        VStack(alignment: .leading, spacing: 1) {
+            ForEach(newest.prefix(Self.shown)) { question in row(question) }
+            if !earlier.isEmpty {
+                Fold(title: "Earlier (\(earlier.count))", isOpen: $showEarlier, hint: "the earlier answered and withdrawn questions")
+                if showEarlier {
+                    ForEach(earlier) { question in row(question) }
+                }
+            }
+        }
+    }
+
+    /// Newest first, by when each closed: answered, withdrawn or decided by its timer.
+    static func newestFirst(_ questions: [LeadQuestion]) -> [LeadQuestion] {
+        questions.sorted { closedAt($0) > closedAt($1) }
+    }
+
+    static func closedAt(_ question: LeadQuestion) -> Double {
+        [question.answeredAt, question.withdrawnAt, question.autoDecidedAt].compactMap { $0 }.min() ?? question.askedAt
+    }
+
+    /// The text's first line: a question's gist.
+    static func firstLine(_ text: String) -> String {
+        String(text.split(whereSeparator: \.isNewline).first ?? "").trimmingCharacters(in: .whitespaces)
+    }
+
+    /// "→ 1 and 3": what it closed with, nil for a withdrawn one nobody answered.
+    static func outcome(_ question: LeadQuestion) -> String? {
+        switch question.state {
+        case .autoDecided: return question.proposal.map { "→ " + clipped($0) }
+        case .withdrawn, .answered, .open: return question.answer.map { "→ " + clipped($0) }
+        }
+    }
+
+    /// A long answer's start, so the question's gist keeps room on its line.
+    static func clipped(_ answer: String) -> String {
+        let line = firstLine(answer)
+        return line.count > 36 || line != answer.trimmingCharacters(in: .whitespacesAndNewlines) ? String(line.prefix(34)) + "…" : line
+    }
+
+    private func row(_ question: LeadQuestion) -> some View {
+        let isOpen = openQuestions.contains(question.id)
+        let withdrawn = question.state == .withdrawn
+        let toggle = { if isOpen { openQuestions.remove(question.id) } else { openQuestions.insert(question.id) } }
+        let gist = Self.firstLine(question.wording(question.answeredVersion ?? question.version).text)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "chevron.right").font(.system(size: 8, weight: .semibold)).foregroundStyle(.tertiary)
+                    .rotationEffect(.degrees(isOpen ? 90 : 0)).frame(width: 10).accessibilityHidden(true)
+                if withdrawn {
+                    Text("Withdrawn").font(.system(size: 10.5, weight: .medium)).foregroundStyle(.tertiary).fixedSize()
+                }
+                Text(gist).font(.system(size: 12)).foregroundStyle(withdrawn ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
+                    .lineLimit(1).truncationMode(.tail)
+                if let outcome = Self.outcome(question) {
+                    Text(outcome).font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(withdrawn ? AnyShapeStyle(.tertiary) : AnyShapeStyle(Color.accentColor))
+                        .lineLimit(1).layoutPriority(1)
+                }
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+            .onTapGesture(perform: toggle)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel((withdrawn ? "Withdrawn: " : "") + gist
+                                + ((question.state == .autoDecided ? question.proposal : question.answer).map { ", answer: \($0)" } ?? ""))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityHint(isOpen ? "Hides the question" : "Shows the whole question and its answer")
+            .accessibilityAction(.default, toggle)
+            if isOpen {
+                ClosedQuestionDetails(question: question).padding(.leading, 16).padding(.bottom, 4)
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 4)
+        .background(RoundedRectangle(cornerRadius: 7).fill(isOpen ? Color.secondary.opacity(0.07) : Color.clear))
+    }
+}
+
+/// An answered question opened (the wording that was answered, the answer), or a withdrawn one (why), in the Team
+/// tab's history.
+private struct ClosedQuestionDetails: View {
     let question: LeadQuestion
 
     var body: some View {
         let saw = question.answeredVersion ?? question.version
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 3) {
             if question.state == .withdrawn {
-                Text(question.text).font(.system(size: 12)).foregroundStyle(.tertiary).strikethrough(color: .secondary.opacity(0.5))
+                Text(question.text).font(.system(size: 11.5)).foregroundStyle(.secondary).textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text("Withdrawn: \(question.withdrawReason ?? "no reason given")").font(.system(size: 11)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
                 if let answer = question.answer {
                     Text("Answered anyway → \(answer)").font(.system(size: 11)).foregroundStyle(.secondary)
                 }
             } else if question.state == .autoDecided {
-                Text(question.text).font(.system(size: 12))
-                Text("→ \(question.proposal ?? "")").font(.system(size: 12, weight: .medium)).foregroundStyle(Color.accentColor)
+                Text(question.text).font(.system(size: 11.5)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                Text("→ \(question.proposal ?? "")").font(.system(size: 11.5, weight: .medium)).foregroundStyle(Color.accentColor)
                 Text("No answer in \(question.decideInText): the lead went ahead" + (question.answer.map { "; you answered later: \($0)" } ?? ""))
-                    .font(.system(size: 10.5)).foregroundStyle(.secondary)
+                    .font(.system(size: 10.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             } else {
-                Text(question.wording(saw).text).font(.system(size: 12))
-                Text("→ \(question.answer ?? "")").font(.system(size: 12, weight: .medium)).foregroundStyle(Color.accentColor)
+                Text(question.wording(saw).text).font(.system(size: 11.5)).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+                Text("→ \(question.answer ?? "")").font(.system(size: 11.5, weight: .medium)).foregroundStyle(Color.accentColor)
+                    .textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
                 if saw < question.version {
                     Text("Answered version \(saw); it was reworded to “\(question.text)”").font(.system(size: 10.5)).foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
                 } else if question.version > 1 {
                     Text("Reworded \(question.version - 1)×; last: \(question.lastRevision?.note ?? "")").font(.system(size: 10.5)).foregroundStyle(.tertiary)
                 }
             }
         }
-        .opacity(question.state == .withdrawn ? 0.75 : 1)
     }
 }
 
-/// The Team view's line while the Mac is kept awake for the team (see `KeepAwake`).
+/// The Team view's line while the Mac is kept awake for the team (see `KeepAwake`); short: "Kept awake".
 struct KeepingAwakeLine: View {
     static let text = "Keeping the Mac awake while the team works"
+    var short = false
 
     var body: some View {
-        Label(Self.text, systemImage: "cup.and.saucer.fill")
+        Label(short ? "Kept awake" : Self.text, systemImage: "cup.and.saucer.fill")
             .font(.system(size: 11)).foregroundStyle(.secondary)
+            .help(Self.text)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel("VibeSwitcher is keeping the Mac awake while the team works. Settings, Project lead, says when.")
+    }
+}
+
+/// The Team tab's foot: the Mac-wide line and whether the Mac is kept awake for the team. The Mac's state, apart from
+/// the tasks: on one line where it fits.
+struct TeamStatusFoot: View {
+    let mac: MacLine?
+    let keepingAwake: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Divider()
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) {
+                    if let mac { MacLineView(line: mac) }
+                    if keepingAwake { KeepingAwakeLine(short: mac != nil) }
+                }
+                .fixedSize()
+                VStack(alignment: .leading, spacing: 3) {
+                    if let mac { MacLineView(line: mac) }
+                    if keepingAwake { KeepingAwakeLine() }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 14).padding(.vertical, 6)
+        }
+        .background(.bar)
     }
 }
 
@@ -498,8 +643,9 @@ struct LeadTeamView: View {
     var decisions: [LeadDecision] = []
     var openDecisions: Set<String> = []
     var showEarlier = false
-    /// The earlier results unfolded, to begin with.
+    /// The earlier results, and the earlier answered and withdrawn questions, unfolded, to begin with.
     var showEarlierResults = false
+    var showEarlierQuestions = false
     /// The plain-language lines written so far (see `TeamSummaryModel`).
     var summary: (TeamRow) -> String? = { _ in nil }
     var decisionSummary: (LeadDecision) -> String? = { _ in nil }
@@ -529,6 +675,10 @@ struct LeadTeamView: View {
             }
             .padding(14)
         }
+        // The Mac's state, not a task: a line at the foot, in view however far the tasks scroll.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if mac != nil || keepingAwake { TeamStatusFoot(mac: mac, keepingAwake: keepingAwake) }
+        }
     }
 
     /// What's glanced at, top to bottom: the questions, the recent decisions, the tasks (also drawn alone in pictures).
@@ -536,13 +686,12 @@ struct LeadTeamView: View {
         VStack(alignment: .leading, spacing: 12) {
             let stack = board.questionStack(now: now.timeIntervalSince1970)
             if !stack.isEmpty {
-                LeadQuestionStack(questions: stack, notices: notices, answer: answer)
+                // The withdrawn ones are in the history below.
+                LeadQuestionStack(questions: stack, notices: notices, answer: answer, showsWithdrawn: false)
             }
             DecisionFeedView(decisions: decisions, now: now, summary: decisionSummary, openDecisions: openDecisions, showEarlier: showEarlier)
                 .padding(.horizontal, -8)
             section("Tasks") {
-                if let mac { MacLineView(line: mac) }
-                if keepingAwake { KeepingAwakeLine() }
                 if board.tasks.isEmpty {
                     Text("Nothing on the board yet. Tell the lead what to build.").font(.system(size: 12)).foregroundStyle(.secondary)
                 }
@@ -562,7 +711,7 @@ struct LeadTeamView: View {
         let closed = board.questions.filter { !$0.isOpen }
         if !closed.isEmpty {
             section("Answered and withdrawn") {
-                ForEach(closed.suffix(8).reversed()) { question in ClosedQuestionRow(question: question) }
+                ClosedQuestionList(questions: closed, showEarlier: showEarlierQuestions).padding(.horizontal, -8)
             }
         }
         if !board.updates.isEmpty {

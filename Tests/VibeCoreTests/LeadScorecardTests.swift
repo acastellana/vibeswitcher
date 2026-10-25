@@ -145,6 +145,28 @@ struct LeadScorecardTests: LeadTeamFixture {
         #expect(card.spoken.contains("67 percent passed the first audit") && card.spoken.contains("1 reverted later"))
         #expect(LeadScorecard(LeadBoard()).line == "Scorecard: nothing merged yet.")
         #expect(LeadScorecard(LeadBoard()).items.map(\.value) == ["–", "–", "–", "0"])
+        // The Team tab's tiles: the same numbers over 3 audited tasks, each with its meaning in its help tag.
+        #expect(card.tiles.map(\.value) == ["2.0", "67%", "10", "1"])
+        #expect(card.tiles.map(\.label) == ["audit rounds to pass", "pass the first audit", "min waiting on you per task", "revert"])
+        #expect(card.tiles.allSatisfy { $0.note == nil })
+        #expect(card.tiles[2].help.contains("40 min in all") && card.tiles[2].help.contains("divided by the 4 merged tasks"))
+    }
+
+    @Test func tooFewAuditedTasksShowNoAuditRates() {
+        // One audit that took 6 rounds, three merges with none: no average and no rate out of that one.
+        var board = LeadBoard()
+        board.tasks = [task("a", rounds: 6, passed: true, merged: LeadMergeRecord(commit: "a1", tested: true))]
+            + ["b", "c", "d"].map { task($0, rounds: 0, passed: false, merged: LeadMergeRecord(commit: "\($0)1", tested: true, audited: false)) }
+        let card = LeadScorecard(board, now: 99_999)
+        #expect(card.counted == 1 && card.meanRoundsToPass == 6)
+        #expect(card.tiles.map(\.value) == ["—", "—", "0.0", "0"])
+        #expect(card.tiles.map(\.note) == ["too few audited tasks (1)", "too few audited tasks (1)", nil, nil])
+        #expect(card.spoken.contains("too few audited tasks (1)") && !card.spoken.contains("percent"))
+        // The lead's own line keeps the figures (its board tool reads them with their counts).
+        #expect(card.line.contains("6.0 audit rounds to pass"))
+        // From 3 audited tasks on, the numbers show.
+        board.tasks += ["e", "f"].map { task($0, rounds: 1, passed: true, merged: LeadMergeRecord(commit: "\($0)1", tested: true)) }
+        #expect(LeadScorecard(board, now: 99_999).tiles.map(\.value).prefix(2) == ["2.7", "67%"])
     }
 
     // MARK: regression_command

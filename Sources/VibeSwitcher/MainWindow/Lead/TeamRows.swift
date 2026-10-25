@@ -191,7 +191,7 @@ enum TeamRows {
         var row = TeamRow(task: task, group: .queued, mark: .queued, state: "Queued", since: nil,
                           checkpoint: task.checkpoints?.last, activity: nil, problem: nil, agent: nil)
 
-        func red(_ mark: TeamRow.Mark, _ state: String, _ problem: String, since: Date?) {
+        func red(_ mark: TeamRow.Mark, _ state: String, _ problem: String?, since: Date?) {
             row.group = .needsYou
             row.mark = mark
             row.state = state
@@ -305,7 +305,7 @@ enum TeamRows {
                     since: task.since.map(Date.init(timeIntervalSince1970:)))
             }
         case .blocked:
-            red(.blocked, "Blocked", task.blocker ?? "Waiting on something.", since: task.since.map(Date.init(timeIntervalSince1970:)))
+            red(.blocked, "Blocked", waitsOn(task, board: board) ?? task.blocker, since: task.since.map(Date.init(timeIntervalSince1970:)))
         case .kept:
             // Held back on purpose: finished for now, not failed.
             row.group = .finished
@@ -314,6 +314,20 @@ enum TeamRows {
             row.problem = task.keptBecause
         }
         return row
+    }
+
+    /// "Waits on <title>, <title>": `task`'s after tasks not done yet, by title (a folded one by the task carrying it,
+    /// one not on the board by its slug); nil when none is left, or the board isn't known.
+    static func waitsOn(_ task: LeadTask, board: LeadBoard?) -> String? {
+        guard let board, let after = task.after, !after.isEmpty else { return nil }
+        let open = after.compactMap { slug -> String? in
+            var other = board.task(slug)
+            if other?.status == .folded, let carrier = other?.foldedInto { other = board.task(carrier) ?? other }
+            guard let other else { return slug }
+            if other.status == .done { return nil }
+            return other.title + (other.isAbandoned ? " (abandoned)" : "")
+        }
+        return open.isEmpty ? nil : "Waits on " + open.joined(separator: ", ")
     }
 
     /// An ended worker or verifier of a finished task (merged, folded, abandoned): the lead's history, not the list's. The host is

@@ -266,8 +266,9 @@ struct TeamTaskList: View {
     }
 }
 
-/// The lead's scorecard in a row of four small numbers: mean audit rounds to pass, the share passing the first audit,
-/// the user's minutes per merged task, and reverts (red when there's one); merges without tests under it.
+/// The lead's scorecard in a row of four small numbers: mean audit rounds to pass, the share passing the first audit
+/// ("—" over too few audited tasks), the user's minutes per merged task, and reverts (red when there's one), each
+/// saying what it means in its help tag; merges without tests under it.
 struct ScorecardView: View {
     let scorecard: LeadScorecard
 
@@ -276,14 +277,9 @@ struct ScorecardView: View {
             if scorecard.merged == 0 {
                 Text("Nothing merged yet: the numbers start with the first merge.").font(.system(size: 11.5)).foregroundStyle(.secondary)
             } else {
-                HStack(alignment: .firstTextBaseline, spacing: 16) {
-                    ForEach(Array(scorecard.items.enumerated()), id: \.offset) { index, item in
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(item.value).font(.system(size: 15, weight: .semibold).monospacedDigit())
-                                .foregroundStyle(index == 3 && scorecard.reverts > 0 ? Color.red : Color.primary)
-                            Text(item.label).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(2)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    ForEach(Array(scorecard.tiles.enumerated()), id: \.offset) { index, tile in
+                        self.tile(tile, red: index == 3 && scorecard.reverts > 0)
                     }
                 }
                 Text(Self.footnote(scorecard))
@@ -292,6 +288,22 @@ struct ScorecardView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(scorecard.spoken)
+    }
+
+    /// A number, what it is and, dim under it, why it's not shown ("too few audited tasks (1)"); its meaning on hover.
+    private func tile(_ tile: LeadScorecard.Tile, red: Bool) -> some View {
+        let style: AnyShapeStyle = red ? AnyShapeStyle(Color.red) : tile.note == nil ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary)
+        return VStack(alignment: .leading, spacing: 1) {
+            Text(tile.value).font(.system(size: 15, weight: .semibold).monospacedDigit()).foregroundStyle(style)
+            Text(tile.label).font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
+            if let note = tile.note {
+                Text(note).font(.system(size: 10)).foregroundStyle(.tertiary).lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .help(tile.help)
     }
 
     /// "Over 5 merged tasks (audit rounds known for 2); 2 with no audit (review none); 1 merged without tests."

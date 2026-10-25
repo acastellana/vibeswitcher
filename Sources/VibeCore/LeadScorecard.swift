@@ -153,6 +153,35 @@ public struct LeadScorecard: Equatable, Sendable {
          ("\(reverts)", reverts == 1 ? "revert" : "reverts")]
     }
 
+    /// Fewer audited merged tasks than this, and the audit numbers aren't shown as rates: one audit is no average.
+    public static let fewestAudited = 3
+
+    /// One of the Team tab's four numbers: its value, what it is, a note under it, and what it means (its help tag).
+    public struct Tile: Equatable, Sendable {
+        public var value: String
+        public var label: String
+        public var note: String?
+        public var help: String
+    }
+
+    /// The four numbers as the Team tab shows them: the audit ones only over enough audited tasks
+    /// (`fewestAudited`), "—" and why below that.
+    public var tiles: [Tile] {
+        let few = counted < Self.fewestAudited
+        let over = "over the \(counted) audited merged task\(counted == 1 ? "" : "s")"
+        let tooFew = few ? "too few audited tasks (\(counted))" : nil
+        let tooFewHelp = few ? " Shown from \(Self.fewestAudited) audited merged tasks on." : ""
+        return [Tile(value: few ? "—" : meanRoundsToPass.map { String(format: "%.1f", $0) } ?? "–", label: "audit rounds to pass", note: tooFew,
+                     help: "The audits a merged task took to pass, on average, \(over).\(tooFewHelp)"),
+                Tile(value: few ? "—" : firstAuditPassRate.map { "\(Int(($0 * 100).rounded()))%" } ?? "–", label: "pass the first audit", note: tooFew,
+                     help: "The share of the audited merged tasks that passed their first audit, \(over).\(tooFewHelp)"),
+                Tile(value: userMinutesPerMergedTask.map(Self.minutes) ?? "–", label: "min waiting on you per task", note: nil,
+                     help: "Your minutes per merged task: the time the lead's questions waited on your answer (\(Self.minutes(userMinutes)) min in all, "
+                         + "every question, about a task or not) divided by the \(merged) merged task\(merged == 1 ? "" : "s")."),
+                Tile(value: "\(reverts)", label: reverts == 1 ? "revert" : "reverts", note: nil,
+                     help: "Merges the base later reverted (a commit saying “This reverts commit …” for one of a merge's commits).")]
+    }
+
     /// "Scorecard (5 merged): 1.4 audit rounds to pass, 60% pass the first audit, 12 user min per merged task, 0 reverts; 1 merged without tests."
     public var line: String {
         guard merged > 0 else { return "Scorecard: nothing merged yet." }
@@ -166,9 +195,13 @@ public struct LeadScorecard: Equatable, Sendable {
     public var spoken: String {
         guard merged > 0 else { return "Scorecard: nothing merged yet." }
         var parts = ["\(merged) task\(merged == 1 ? "" : "s") merged"]
-        if let mean = meanRoundsToPass { parts.append(String(format: "%.1f", mean) + " audit rounds to pass on average") }
-        if let rate = firstAuditPassRate { parts.append("\(Int((rate * 100).rounded())) percent passed the first audit") }
-        if let minutes = userMinutesPerMergedTask { parts.append("\(Self.minutes(minutes)) minutes of the user's per merged task") }
+        if counted < Self.fewestAudited {
+            parts.append("too few audited tasks (\(counted)) for the audit numbers")
+        } else {
+            if let mean = meanRoundsToPass { parts.append(String(format: "%.1f", mean) + " audit rounds to pass on average") }
+            if let rate = firstAuditPassRate { parts.append("\(Int((rate * 100).rounded())) percent passed the first audit") }
+        }
+        if let minutes = userMinutesPerMergedTask { parts.append("\(Self.minutes(minutes)) minutes waiting on you per merged task") }
         parts.append("\(reverts) reverted later")
         if mergedWithoutTests > 0 { parts.append("\(mergedWithoutTests) merged without tests") }
         if mergedUnaudited > 0 { parts.append("\(mergedUnaudited) merged with no audit") }

@@ -170,6 +170,9 @@ struct TeamRowsTests {
         blocked.blocker = "Need the API key"
         #expect(row(blocked, ["w-b": Self.idle]).mark == .blocked)
         #expect(row(blocked, ["w-b": Self.idle]).line(summary: nil) == "Need the API key")
+        // Nothing said why: "Blocked", with no filler under it.
+        #expect(row(Self.task("u", .blocked)).line(summary: nil) == nil)
+        #expect(row(Self.task("u", .blocked)).stateText(now: Self.now) == "Blocked 12m")
         #expect(row(Self.task("s", .running), ["w-s": Self.ended]).mark == .ended)
         var passed = Self.task("p", .review, since: 60)
         passed.evidence = LeadEvidence(completion: .complete, integrity: .clean, summary: "ok")
@@ -182,6 +185,29 @@ struct TeamRowsTests {
         abandoned.worktree = nil
         #expect(row(abandoned).mark == .abandoned)
         #expect(TeamRows.finishedTitle([row(merged), row(abandoned)]) == "Merged (1) · Abandoned (1)")
+    }
+
+    @Test func aBlockedTaskSaysWhichOfItsAfterTasksItWaitsOn() {
+        var board = LeadBoard()
+        let first = Self.task("first", .running, title: "Ledger reconciles")
+        var folded = Self.task("folded", .folded, title: "Folded part")
+        folded.foldedInto = "carrier"
+        let carrier = Self.task("carrier", .review, title: "Payout report")
+        var done = Self.task("done", .done, title: "Already merged")
+        done.worktree = nil
+        var blocked = Self.task("b", .blocked)
+        blocked.after = ["first", "folded", "done", "gone"]
+        blocked.blocker = "Waiting for the ledger"
+        board.tasks = [first, folded, carrier, done, blocked]
+        // The after tasks still open, by title (a folded one by the task that carries it; one not on the board by its
+        // slug), before the reason given.
+        #expect(TeamRows.row(blocked, seen: [:], board: board).line(summary: nil) == "Waits on Ledger reconciles, Payout report, gone")
+        // Its after tasks all done: the reason given.
+        blocked.after = ["done"]
+        #expect(TeamRows.row(blocked, seen: [:], board: board).line(summary: nil) == "Waiting for the ledger")
+        // Neither: "Blocked" alone.
+        blocked.blocker = nil
+        #expect(TeamRows.row(blocked, seen: [:], board: board).line(summary: nil) == nil)
     }
 
     @Test func aReviewNoneTaskItsWorkerReportedIsReadyToMerge() {

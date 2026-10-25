@@ -160,6 +160,39 @@ struct TeamSnapshots {
         try write(view(opened, openRows: [opened.board.tasks[phone].id]), name: "expanded-row", folder: folder)
     }
 
+    /// The answered and withdrawn questions: one line each, newest first, one opened, the earlier ones unfolded;
+    /// and the scorecard over a single audited task.
+    @Test(.enabled(if: folder != nil)) func drawQuestionHistory() throws {
+        let folder = try #require(Self.folder)
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        let at = Self.now.timeIntervalSince1970
+        var questions: [LeadQuestion] = []
+        for (index, (text, answer)) in [("Which payout fixes go first: 1 the rounding, 2 the late cron, 3 the stale cache?\nEach is a task of its own.", "1 and 3"),
+                                        ("C now and plan B as its own task, or B only?", "C now + plan B as its own task"),
+                                        ("Keep the old CSV export?", "Yes, for a month"),
+                                        ("Run the reconciliation at 02:00 or 04:00 UTC?", "04:00")].enumerated() {
+            var question = LeadQuestion(text: text, options: [], at: at - Double(index + 1) * 2_400)
+            question.answer = answer
+            question.answeredAt = question.askedAt + 300
+            questions.append(question)
+        }
+        var withdrawn = LeadQuestion(text: "Re-plan the sidebar as one task, or fix each row on its own?", options: [], at: at - 900)
+        withdrawn.withdrawnAt = at - 600
+        withdrawn.withdrawReason = "User asked to re-ask it."
+        questions.append(withdrawn)
+        try write(ClosedQuestionList(questions: questions, showEarlier: true, openQuestions: [questions[0].id, withdrawn.id]).padding(14),
+                  name: "question-history", folder: folder)
+
+        var board = LeadBoard()
+        var audited = Self.task("Audited task", .done, since: 3_000, created: 9_000)
+        var audits = LeadAuditLedger()
+        (audits.rounds, audits.passed) = (6, true)
+        audited.audits = audits
+        audited.merged = LeadMergeRecord(commit: "abc", tested: true, at: at - 3_000)
+        board.tasks = [audited]
+        try write(ScorecardView(scorecard: LeadScorecard(board, now: at)).padding(14), name: "scorecard-one-audit", folder: folder)
+    }
+
     /// The scorecard over a few merged tasks (one reverted, one merged without tests), and a merged row opened with
     /// its score.
     @Test(.enabled(if: folder != nil)) func drawScorecard() throws {
