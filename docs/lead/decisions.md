@@ -440,3 +440,7 @@ Anthropic's approval rules tell comment-only changes apart from sensitive logic,
 
 The watcher is off by default and only vibeswitcher's lead should get its digests. Writing it down keeps the step from being lost across compaction or a new lead.
 
+## 2026-10-25 16:33:34 Lead habits from the 2026-10-25 retrospective: (a) Every hardening or security task's contract states up front to fail closed on unusual or unparseable input instead of handling each case, and to do no further hardening rounds unless a check fails. (b) The lead doesn't ask for changes on a branch whose audit is running; it waits for the verdict, then sends them, so no audit runs on a stale head.
+
+planted-git-hooks-or's blind checks kept finding deeper include and path corner cases. Its worker stopped mid-fix twice, costing about 1.5 h, until the lead cut it to fail-closed. A mid-audit request on the same task left a verifier auditing the old head.
+
