@@ -502,6 +502,10 @@ public final class MCPServer: @unchecked Sendable {
     /// Whether to switch to a new build now; asked once one is due (`vibeswitcher-mcp` waits for the session host to
     /// answer, as it restarts after an install too). Nil: always.
     public var switchWhen: (() -> Bool)?
+    /// A switch of builds is being tried: `background` waits for its outcome (the process is replaced, or it goes on).
+    private var switching = false
+    private let switchGate = NSCondition()
+    private var backgroundCount = 0
 
     /// The MCP revisions this server speaks, newest first: tools only, text results, no JSON-RPC batches (2025-03-26
     /// has them), which reads the same in each. Not 2026-07-28, which has no initialize (a `server/discover`, a `_meta`
@@ -554,6 +558,43 @@ public final class MCPServer: @unchecked Sendable {
             signalSources.append(source)
             lock.unlock()
         }
+    }
+
+    /// Runs `work` on a thread of its own as a tool call runs, though no client asked for it (the lead's automatic
+    /// steps, see `LeadAdvance`): a switch of builds waits for it as for a call, so it's never cut off halfway, and
+    /// `stop` cancels it as a call (`ShellCancel.current`). While a switch is being tried it starts once that's
+    /// settled (here, if the switch didn't happen; the new build looks again itself). False, and nothing run, once
+    /// the server is ending.
+    @discardableResult
+    public func background(_ work: @escaping () -> Void) -> Bool {
+        let token = ShellCancel()
+        switchGate.lock()
+        var key: String?
+        while key == nil {
+            lock.lock()
+            if stopping {
+                lock.unlock()
+                switchGate.unlock()
+                return false
+            }
+            if !switching {
+                backgroundCount += 1
+                key = "background-\(backgroundCount)"
+                running[key!] = token
+            }
+            lock.unlock()
+            if key == nil { switchGate.wait() }
+        }
+        switchGate.unlock()
+        Thread.detachNewThread { [self] in
+            ShellCancel.with(token) { work() }
+            lock.lock()
+            running[key!] = nil
+            let wake = self.wake
+            lock.unlock()
+            if wake >= 0 { _ = Darwin.write(wake, [UInt8(1)], 1) }
+        }
+        return true
     }
 
     /// Cancels every running call and waits, `stopGrace` at most, for them to end.
@@ -658,9 +699,26 @@ public final class MCPServer: @unchecked Sendable {
         guard let watch else { return }
         lock.lock()
         let idle = running.isEmpty
+        lock.unlock()
+        guard idle, let build = watch.update() else { return }
+        // No background work starts from here until the switch is settled (see `background`).
+        switchGate.lock()
+        lock.lock()
+        let still = running.isEmpty
+        if still { switching = true }
         let state = MCPHandover.State(session: session, input: pending, binary: nil)
         lock.unlock()
-        guard idle, let build = watch.update(), switchWhen?() ?? true else { return }
+        switchGate.unlock()
+        guard still else { return }
+        defer {
+            switchGate.lock()
+            lock.lock()
+            switching = false
+            lock.unlock()
+            switchGate.broadcast()
+            switchGate.unlock()
+        }
+        guard switchWhen?() ?? true else { return }
         var handover = state
         handover.binary = build
         let why = MCPHandover.replace(with: watch.path, arguments: Array(CommandLine.arguments.dropFirst()), state: handover)

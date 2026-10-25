@@ -35,22 +35,35 @@ final class FakeRuntime: LeadRuntime {
     /// The prompt each session waits on, as the host's reading of it says.
     var waiting: [String: PendingPrompt] = [:]
 
+    /// Calls from the lead's automatic passes (`LeadAdvance`, on a thread of their own) and the test's own, one at a time.
+    let calls = NSRecursiveLock()
+
     let server = "/App/vibeswitcher-mcp"
     /// The project's Claude command, flags included.
     var claude = "claude --dangerously-skip-permissions"
     func claudeCommand(root: String) -> String { claude }
     func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String, trust: Bool) throws -> String {
+        calls.lock()
+        defer { calls.unlock() }
         let id = "session-\(spawned.count + 1)"
         spawned.append((id, cwd, command, label, trust))
         environments[id] = env
         return id
     }
     func kill(_ session: String) throws {
+        calls.lock()
+        defer { calls.unlock() }
         if let refusal = refusals[session] { throw BoardError(text: refusal) }
         killed.append(session)
     }
-    func forget(_ session: String) { forgotten.append(session) }
+    func forget(_ session: String) {
+        calls.lock()
+        defer { calls.unlock() }
+        forgotten.append(session)
+    }
     func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String, clearDraft: Bool) throws -> LeadDelivery.Delivered {
+        calls.lock()
+        defer { calls.unlock() }
         if clearDraft { clearedDrafts += 1 }
         let name: String
         switch target {
@@ -60,15 +73,24 @@ final class FakeRuntime: LeadRuntime {
         steered.append((name, sender, text))
         return delivery
     }
+    /// Called at each read of the sessions, before the answer (a test's way into the moment a tool counts them).
+    var onSessions: (() -> Void)?
     func sessions() throws -> [LeadSessionInfo] {
+        calls.lock()
+        defer { calls.unlock() }
+        onSessions?()
         if let hostDown { throw BoardError(text: hostDown) }
         return spawned.filter { !forgotten.contains($0.id) }.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: statuses[$0.id] ?? "working", tty: nil, pid: pids[$0.id] ?? getpid(), waiting: waiting[$0.id]) } + others
     }
     func loadAverage() -> Double? {
+        calls.lock()
+        defer { calls.unlock() }
         loadReads += 1
         return loadReadings.isEmpty ? load : loadReadings.removeFirst()
     }
     func transcript(of session: String) throws -> String? {
+        calls.lock()
+        defer { calls.unlock() }
         if let hostDown { throw BoardError(text: hostDown) }
         return transcripts[session]
     }

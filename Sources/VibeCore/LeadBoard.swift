@@ -634,6 +634,14 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// Why its worker's last done report needs an audit before merge though its review is none (its branch touches
     /// sensitive_paths, say), as report found it; nil when it needs none (for showing: merge checks again).
     public var auditNeeded: String?
+    /// The tasks (their slugs) that must be done before it starts by itself (add_task's and update_task's `after`; see
+    /// `LeadAdvance`); nil or empty: none.
+    public var after: [String]?
+    /// False: VibeSwitcher moves nothing on it by itself (the contract opts it out of auto_advance); nil: it does.
+    public var autoAdvance: Bool?
+    /// The commit whose verdict's open Important findings VibeSwitcher last sent its worker by itself (`LeadAdvance`):
+    /// each verdict's are sent once.
+    public var autoSentBack: String?
 
     /// Its review level: none unless the lead set audit.
     public var reviewLevel: Review { review ?? .none }

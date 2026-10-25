@@ -260,6 +260,10 @@ func hostAnswers(_ vault: LeadVault) -> Bool {
     }
 }
 
+/// The server, once made: the lead's automatic steps run as its calls do (see `MCPServer.background`).
+final class ServerSlot: @unchecked Sendable { var server: MCPServer? }
+let slot = ServerSlot()
+
 // The role comes from the session host, at a fresh start as after a switch of builds (never from the build before).
 // The session can start before VibeSwitcher has bound its role to it: give that a moment. A host that can't be asked
 // yet is asked again, for up to two minutes; one that answers decides.
@@ -272,6 +276,9 @@ let toolset = MCPHostedToolset(attempt: {
     if toolset.tools.isEmpty && !hostAnswers(.standard) { return nil }
     // The lead's decision and progress logs go into the repository every few minutes (and after each merge).
     toolset.keepRecords()
+    // Finished work moves on by itself (auto_advance), each run of passes as the server's background work: an install's
+    // switch waits for it, and the new build's first pass takes what's still due.
+    toolset.startAdvancing { work in slot.server?.background(work) ?? false }
     return toolset
 }, giveUp: {
     let toolset = LeadToolset(arguments: arguments, runtime: runtime)
@@ -282,6 +289,7 @@ let toolset = MCPHostedToolset(attempt: {
 // once the session host answers (the new build asks it first thing).
 let watch = BinaryWatch(path: runtime.server, running: handover?.binary)
 let server = MCPServer(name: "vibeswitcher", version: "1", toolset: toolset, watch: watch, resuming: handover)
+slot.server = server
 let quickVault = LeadVault(folder: LeadVault.standard.folder) { try HostCall.vault($0, timeout: 1) }
 server.switchWhen = { hostAnswers(quickVault) }
 toolset.start { server.toolsSettled() }

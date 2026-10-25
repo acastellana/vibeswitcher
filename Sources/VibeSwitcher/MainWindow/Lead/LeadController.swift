@@ -1002,7 +1002,11 @@ final class LeadController: ObservableObject {
     /// A hold on battery, or the resume after one: to each running lead, as the witness.
     func lookAtPower() {
         guard let text = power?.look() else { return }
-        for root in leadSessions.keys { deliver(text, from: .system("witness"), root: root) }
+        for root in leadSessions.keys {
+            deliver(text, from: .system("witness"), root: root)
+            // The lead's tool server looks again at what it held (see `LeadAdvance`).
+            LeadAdvance.nudge(root: root)
+        }
     }
 
     /// The stranded role sessions, in every project: to each running lead, as the witness, and to the user.

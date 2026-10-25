@@ -157,7 +157,18 @@ and the merge's own test run, and the lead posts what changed, how it was checke
 afterwards), `ask_sensitive` (a commit touching `sensitive_paths:`, comma-separated globs as in
 `.gitignore`, by default Claude's settings and instructions, `.github`, `.env` files, entitlements and keys, waits for
 you) or `ask_all` (every merge waits). Until you've chosen, the lead asks you once, early, proposing one, records your
-answer with `configure` and as a decision, and doesn't ask again; meanwhile merges are handled as `ask_sensitive`. A
+answer with `configure` and as a decision, and doesn't ask again; meanwhile merges are handled as `ask_sensitive`. Finished
+work moves on without waiting for the lead's turn (`auto_advance: true`, the default; `configure(auto_advance: false)`
+turns it off, and a task's own `auto_advance: false` opts it out): when a worker reports done, the lead's tool server
+merges a review `none` task (its done report and the full test run) or starts an audit task's audit, merges a clean
+verdict, sends the worker a verdict's open Important findings (once per verdict; never past the round cap or on a
+verdict that isn't clean), sends it a failing merge's output, cleans up what merged, and starts a planned task once
+every task in its `after` list (add_task, update_task) is done, in board order, within `max_workers`, the Mac-wide
+limits and the battery hold. Each step goes through the lead's own tools and checks (merge's gate, the merge policy's
+approvals included), lands in the progress log, and reaches the lead in one report per run; nothing moves a task the
+lead holds (kept, blocked, failed, folded, abandoned). It watches the project's `.vibeswitcher` folder (a thread
+waiting in kevent, no polling), the app nudges it when the Mac has room again or AC power returns, and an install's
+switch of builds waits for a step under way; the new build's first look takes whatever is still due, once. A
 merge that waits refuses until you answer the lead's question with "Approve <commit>", which names the whole
 commit: it approves that commit only, so anything committed after it needs a new approval, and a timer running out
 never counts as one. The lead also checks in every few merges or couple of hours of work (what landed, what's stuck,
@@ -237,7 +248,7 @@ program of its choosing (only the app may ask for a handover; anyone else's is r
 anything), or end another session through the host (only the app, the session itself or one started from it, and
 its team's lead may). Nor can it get its own commands run as the lead, or loosen the rules its work is merged by:
 `workflow.md`'s guard rails (its test and setup commands, which `merge` runs as the lead; `merge_policy` and
-`sensitive_paths`; `records_dir`; `max_workers`, `heavy_slots`, `audit_finders` and `audit_nit_cap`, each as the team reads it,
+`sensitive_paths`; `records_dir`; `max_workers`, `heavy_slots`, `audit_finders`, `audit_nit_cap` and `auto_advance`, each as the team reads it,
 so a line left out is its default) count only as the lead last
 set them with `configure` (the host keeps a hash of each, and takes one only from the app or the lead). When the file
 says anything else, whether a worker's Bash wrote it or a branch's committed copy was merged over it, `merge` and

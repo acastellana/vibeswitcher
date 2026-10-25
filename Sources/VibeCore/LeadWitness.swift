@@ -470,6 +470,9 @@ extension LeadWitness {
             public var need: Int
             /// When it was refused (seconds since 1970).
             public var at: Double
+            /// Refused to VibeSwitcher's own automatic step (see `LeadAdvance`), not to the lead: once there's room,
+            /// the lead's tool server is nudged to try again, and the lead isn't told.
+            public var auto: Bool?
         }
 
         public let folder: URL
@@ -481,8 +484,9 @@ extension LeadWitness {
         public init(folder: URL = RoomWaits.folder) { self.folder = folder }
 
         /// Keeps a refusal for the lead of `root` until there's room for it.
-        public func record(root: String, what: String, need: Int, now: Date = Date()) {
-            let wait = Wait(root: (root as NSString).standardizingPath, what: what, need: max(0, need), at: now.timeIntervalSince1970)
+        public func record(root: String, what: String, need: Int, auto: Bool = false, now: Date = Date()) {
+            let wait = Wait(root: (root as NSString).standardizingPath, what: what, need: max(0, need), at: now.timeIntervalSince1970,
+                            auto: auto ? true : nil)
             guard let data = try? JSONEncoder().encode(wait) else { return }
             try? VibePaths.ensurePrivate(folder)
             try? VibePaths.writePrivate(data, to: folder.appendingPathComponent(UUID().uuidString + ".json"))
@@ -499,6 +503,8 @@ extension LeadWitness {
         /// What to tell each refused lead now that the Mac has room, one message per project: the waits `mac` has
         /// room for under `limits` (the 1-minute load not over load_threshold, and with a wait's sessions the team
         /// sessions within mac_max_sessions). Those told are removed; the rest stay until there's room for them too.
+        /// A project whose automatic steps were refused is nudged (`LeadAdvance.nudge`) instead: its lead's tool server
+        /// tries them again, and only the lead's own refusals are told.
         public func look(mac: MacLoad, limits: MacLimits, now: Date = Date()) -> [(root: String, text: String)] {
             var due: [String: [Wait]] = [:]
             for (file, wait) in waits() {
@@ -510,8 +516,10 @@ extension LeadWitness {
                 try? FileManager.default.removeItem(at: file)
                 due[wait.root, default: []].append(wait)
             }
-            return due.keys.sorted().map { root in
-                let waits = due[root]!.sorted { $0.at < $1.at }
+            for root in due.keys.sorted() where due[root]!.contains(where: { $0.auto == true }) { LeadAdvance.nudge(root: root) }
+            return due.keys.sorted().compactMap { root in
+                let waits = due[root]!.filter { $0.auto != true }.sorted { $0.at < $1.at }
+                guard !waits.isEmpty else { return nil }
                 var whats: [String] = []
                 for wait in waits where !whats.contains(wait.what) { whats.append(wait.what) }
                 return (root, LeadWitness.roomText(whats, mac: mac, limits: limits))
