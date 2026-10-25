@@ -85,6 +85,23 @@ struct MergeGateTests: LeadTeamFixture {
         let plan = try #require(MergeRerun.plan(after: Self.failure, workflow: workflow))
         #expect(MergeRerun.unshown(plan, rerun: "✔ Test run with 0 tests passed after 0.001 seconds.") == ["flaky()"])
         #expect(MergeRerun.unshown(plan, rerun: "✔ Test flaky() passed after 0.2 seconds.\n✔ Test run with 1 test passed").isEmpty)
+        // A pass with a known issue is a pass, ✘ as piped output marks it.
+        #expect(MergeRerun.unshown(plan, rerun: "✘ Test flaky() passed after 0.2 seconds with 1 known issue.").isEmpty)
+    }
+
+    /// Tests that pass with a known issue (`withKnownIssue`), ✘ in piped output, are neither failing nor unfinished:
+    /// the rerun is of the one that failed, filtered (lead-team-panel-clear's reran the whole suite for four of them).
+    @Test func aPassWithAKnownIssueIsntRerun() throws {
+        var workflow = LeadWorkflow()
+        workflow.testCommand = "bash scripts/test.sh"
+        let output = """
+            ◇ Test aFailingSceneIsEnded() started.
+            ✘ Test aFailingSceneIsEnded() recorded a known issue at TestHostsTests.swift:63:23: Caught error: Failure()
+            ✘ Test aFailingSceneIsEnded() passed after 1.365 seconds with 1 known issue.
+            """ + "\n" + Self.failure
+        let plan = try #require(MergeRerun.plan(after: output, workflow: workflow))
+        #expect(plan.tests == ["flaky()"])
+        #expect(plan.filtered)
     }
 
     // MARK: The ledger

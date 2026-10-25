@@ -83,6 +83,7 @@ public enum MergeRerun {
         return plan.tests.filter { test in
             !lines.contains { line in
                 ["✔", "􁁛"].contains { line.hasPrefix("\($0) Test \(test) passed after") }
+                    || TestFailures.passedWithKnownIssues(line) == test
                     || (line.hasPrefix("Test Case '") && line.contains(test.replacingOccurrences(of: ".", with: " ") + "]' passed"))
             }
         }

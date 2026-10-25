@@ -1515,7 +1515,8 @@ public struct TestFailures: Equatable, Sendable {
                 ended.insert(name)
             } else if let name = Self.swiftTesting(line, " started.", marks: ["◇"]) {
                 started.append(name)
-            } else if let name = Self.swiftTesting(line, " passed after", marks: ["✔", "􁁛", "➜", "􀟈"]) ?? Self.swiftTesting(line, " skipped") {
+            } else if let name = Self.swiftTesting(line, " passed after", marks: ["✔", "􁁛", "➜", "􀟈"]) ?? Self.swiftTesting(line, " skipped")
+                        ?? Self.passedWithKnownIssues(line) {
                 ended.insert(name)
             } else if line.range(of: #"^[✘􀢄] Test run with "#, options: .regularExpression) != nil {
                 run = line
@@ -1557,6 +1558,13 @@ public struct TestFailures: Equatable, Sendable {
             return String(rest[..<end.lowerBound])
         }
         return nil
+    }
+
+    /// The name in a line of a test that passed with known issues (`withKnownIssue`): piped, not on a terminal, Swift
+    /// Testing marks it ✘ ("✘ Test x() passed after 0.9 seconds with 1 known issue."). It ended, and passed.
+    static func passedWithKnownIssues(_ line: String) -> String? {
+        guard line.range(of: #" with \d+ known issues?\.$"#, options: .regularExpression) != nil else { return nil }
+        return swiftTesting(line, " passed after")
     }
 
     /// "-[Module.Suite testName]" or "Suite.testName" as "Suite.testName".

@@ -147,6 +147,29 @@ struct TestFailuresTests {
         #expect(summary.contains("signal code 5"))
     }
 
+    /// Real output (2026-10-25): piped, not on a terminal, Swift Testing marks a test that passes with a known issue
+    /// (`withKnownIssue`) ✘ too. Such a test ended, and passed: lead-team-panel-clear's merge run listed four of them as
+    /// started and never finished beside its one real failure, reran the whole suite and logged all five as flakes.
+    @Test func aTestThatPassesWithAKnownIssueEnded() throws {
+        let failures = TestFailures(output: """
+            ◇ Test noTestReadsTheMacsOwnFreeSpace() started.
+            ◇ Test aFailingTestsHostIsEnded() started.
+            ◇ Test aSendWhileAnotherProcessHoldsTheInboxReturnsAtOnceAndLandsWhenItsFree() started.
+            ✘ Test aFailingTestsHostIsEnded() recorded a known issue at TestHostsTests.swift:39:23: Caught error: Failure()
+            ↳ the body fails on purpose, its host still running
+            ✘ Test aFailingTestsHostIsEnded() passed after 0.773 seconds with 1 known issue.
+            ✘ Test noTestReadsTheMacsOwnFreeSpace() recorded a known issue at TestSupport.swift:26:21: Issue recorded
+            ✘ Test noTestReadsTheMacsOwnFreeSpace() passed after 0.917 seconds with 1 known issue.
+            ✘ Suite DiskSpaceTests passed after 0.918 seconds with 1 known issue.
+            ✘ Test aSendWhileAnotherProcessHoldsTheInboxReturnsAtOnceAndLandsWhenItsFree() recorded an issue at SteerOffMainTests.swift:67:9: Expectation failed: (returnedIn → 0.31) < 0.1
+            ✘ Test aSendWhileAnotherProcessHoldsTheInboxReturnsAtOnceAndLandsWhenItsFree() failed after 3.2 seconds with 1 issue.
+            ✘ Test run with 3 tests failed after 3.2 seconds with 1 issue (including 2 known issues).
+            """)
+        #expect(failures.tests == ["aSendWhileAnotherProcessHoldsTheInboxReturnsAtOnceAndLandsWhenItsFree()"])
+        #expect(failures.unfinished.isEmpty)
+        #expect(!(try #require(failures.summary())).contains("known issue at"))
+    }
+
     @Test func outputThatNamesNothingHasNoSummary() {
         #expect(TestFailures(output: "Build complete!\nsomething went wrong").summary() == nil)
     }
