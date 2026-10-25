@@ -137,6 +137,47 @@ struct LeadPolicyTextsTests {
                                                                   + "what a filtered run misses, which otherwise only the merge's full run finds.\nDone:"))
     }
 
+    /// A fix's regression test is shown to fail without the fix, by the worker and by a re-audit (2026-10-25: the two
+    /// tests for finished-work-lands' F1 fix would have passed on the old code too, and its verifier was refused the
+    /// scratch copy that would have shown it). The commands they name run under the rules: LeadGuardRailsTests.
+    @Test func aFixsTestIsShownToFailWithoutTheFixByTheWorkerAndByTheReaudit() {
+        let copy = LeadPrompts.Policy.preFixCopy
+        for needle in ["a scratch copy of the commit before the fix with the new test copied in", "written out in full and unquoted",
+                       "`mkdir -p <TMPDIR>pre-fix`", "`git archive <pre-fix> | tar -x -C <TMPDIR>pre-fix`",
+                       "`git archive HEAD <the new test's files> | tar -x -C <TMPDIR>pre-fix`", "Its build is cold (minutes), so run the test there under `vs-heavy`"] {
+            #expect(copy.contains(needle), "missing \(needle)")
+        }
+        // The worker: in its evidence, next to what the done report carries and the blind check.
+        let workflow = LeadWorkflow.parse("---\nbase_branch: project-lead\n---")
+        let worker = LeadPrompts.Policy.regressionTest(base: "project-lead")
+        #expect(LeadPrompts.worker(task: Self.task, root: "/r", workflow: workflow)
+            .contains(LeadPrompts.Policy.workerEvidence(base: "project-lead") + "\n" + worker + "\n" + LeadPrompts.Policy.workerFindings))
+        for needle in ["for a bug fix or a fixed audit finding, the evidence includes the new test's failing run on the commit before the fix",
+                       "the branch's merge-base with project-lead", "then its passing run after it",
+                       "a test that would pass either way doesn't cover the fix", "Prefer reverting the fix locally and restoring it",
+                       "`git diff <pre-fix> HEAD -- <the fix's files> | git apply -R`", "the same command without `-R`", "Or, when that won't do, " + copy] {
+            #expect(worker.contains(needle), "missing \(needle)")
+        }
+        // Not by a command the user's command guard refuses (it stops `git checkout <commit> -- <files>`).
+        #expect(!worker.contains("git checkout") && !worker.contains("git restore"))
+
+        // The re-audit, whatever its scope, and after a re-roll: the same copy, and a Nit when the test passes without the fix.
+        let reroll = LeadReroll(archive: "archive/split-layer-1", commit: "aaaaaaaa1111", round: 2)
+        for (scope, reroll) in [(LeadPrompts.Reaudit.Scope.since, nil), (.ownFiles(["a.swift"]), nil), (.wholeBranch(sameCommit: false), nil),
+                                (.wholeBranch(sameCommit: false), reroll)] {
+            let text = LeadPrompts.recheck(.init(round: 3, since: "aaaaaaaa1111", head: "bbbbbbbb2222", open: [], known: [], stat: "", diff: nil,
+                                                 base: "dev", scope: scope, reroll: reroll))
+            #expect(text.contains("A finding fixed with a new or changed test: confirm the test fails without the fix, on " + copy + ". "
+                                  + "The commit before the fix is usually aaaaaaaa, the one the earlier audit checked; then the test "
+                                  + "passes on the branch. When it passes without the fix too, the finding can still be fixed, but "
+                                  + "raise a Nit at the test's file and line, with that run: the test doesn't cover the fix."), "\(scope)")
+            // The one new Nit a re-audit raises.
+            #expect(reroll != nil || text.contains("never a new Nit but the one for a fix's test below."), "\(scope)")
+        }
+        let first = LeadPrompts.verifier(task: Self.task, root: "/r", workflow: workflow)
+        #expect(!first.contains("A finding fixed with a new or changed test"))
+    }
+
     @Test func privacyIsAReasonForAnAuditAlongsideSecurity() {
         let review = LeadPrompts.Policy.leadReview
         for needle in ["security (", "privacy (the owner's private data in a contract or a file", "a repository's or a share's visibility",

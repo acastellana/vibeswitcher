@@ -59,14 +59,37 @@ public enum LeadLaunch {
                             "Bash(vmmap:*)", "Bash(malloc_history:*)", "Bash(dtrace:*)", "Bash(dtruss:*)",
                             "Bash(sudo dtrace:*)", "Bash(sudo dtruss:*)"]
 
+    /// A scratch copy of a commit in the session's own TMPDIR (`scratch`, written out: rules don't expand `$TMPDIR`):
+    /// make its folder, unpack `git archive` of a commit, or of files, into it, and nowhere else. A fix's regression
+    /// test runs there on the code before the fix (`LeadPrompts.Policy.regressionTest`): the read-only verifier can't
+    /// revert a fix in its worktree, and on 2026-10-25 finished-work-lands' verifier was refused such an export. Not
+    /// `git worktree add --detach`: allowing it would mean dropping the `git worktree` rule (deny beats allow), which
+    /// keeps other worktrees from being removed or moved, and its entry would stay in the shared .git.
+    static func scratchCopy(_ scratch: String) -> [String] {
+        ["Bash(git archive:*)", "Bash(mkdir -p \(scratch)*)", "Bash(tar -x -C \(scratch)*)"]
+    }
+
+    /// What keeps `scratchCopy` in its folder: one folder made, nothing after tar's (another `-C`, `-f`, `-P`) and no
+    /// `..` out of it (each `..` rule twice, whether or not a `*` matches nothing).
+    static func scratchLimits(_ scratch: String) -> [String] {
+        ["Bash(mkdir -p \(scratch)* *)", "Bash(tar -x -C \(scratch)* *)"]
+            + ["mkdir -p", "tar -x -C"].flatMap { ["Bash(\($0) *..*)", "Bash(\($0) *..)"] }
+    }
+
+    /// `git archive` writes to its output, never to a file, for the roles that may run it (`scratchCopy`).
+    static let archiveWrites = ["Bash(git archive -o*)", "Bash(git archive * -o*)", "Bash(git archive --output*)",
+                                "Bash(git archive * --output*)"]
+
     /// What each role may not do. `records`: the workflow's `records_dir`, which only the lead's tool server writes
-    /// (and commits to the base branch): a worker editing it would conflict with those commits.
-    public static func deny(_ role: Role, base: String? = nil, records: String? = nil) -> [String] {
+    /// (and commits to the base branch): a worker editing it would conflict with those commits. `scratch`: the
+    /// session's TMPDIR, for a worker's or verifier's `scratchCopy`.
+    public static func deny(_ role: Role, base: String? = nil, records: String? = nil, scratch: String? = nil) -> [String] {
+        let limits = archiveWrites + (scratch.map(scratchLimits) ?? [])
         switch role {
         case .lead:
             return readOnly + gitWrites + gitAround + fileWrites + privateFiles + userSettings + killsByName
         case .verifier:
-            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + userSettings + killsByName + debuggers
+            return readOnly + gitWrites + gitAround + fileWrites + privateFiles + userSettings + killsByName + debuggers + limits
         case .worker:
             // Edits and commits on its own branch, and brings it up to date with the lead's (`git merge <base>`, what
             // the brief gives, or `git rebase <base>`); nothing that moves the lead's branch or another one. Rebase and merge only move
@@ -90,7 +113,7 @@ public enum LeadLaunch {
                 rules += ["Edit(\(records)/**)", "Write(\(records)/**)", "Bash(git add \(records)*)", "Bash(git rm \(records)*)",
                           "Bash(git rm * \(records)*)"]
             }
-            return rules + gitAround + privateFiles + userSettings + killsByName + debuggers
+            return rules + gitAround + privateFiles + userSettings + killsByName + debuggers + limits
         }
     }
 
@@ -115,12 +138,17 @@ public enum LeadLaunch {
     /// prompt, whether or not auto mode, the default since Claude Code 2.1.284, is on), reading git at any time
     /// (after a denied command too), and for a worker, committing, removing a file its change deletes (`git rm`: only
     /// files git tracks in this checkout, so nothing outside its worktree), and bringing its branch up to date with `base`.
-    public static func allow(_ role: Role, base: String? = nil) -> [String] {
+    /// A worker or verifier with a `scratch` folder (its TMPDIR) may also make a scratch copy of a commit there, and a
+    /// worker take a fix out of its worktree and put it back (`git diff <commit> HEAD -- <files> | git apply -R`, the
+    /// patch from git on its input: `LeadPrompts.Policy.regressionTest`).
+    public static func allow(_ role: Role, base: String? = nil, scratch: String? = nil) -> [String] {
         let reads = [ownTools, "Bash(git log:*)", "Bash(git diff:*)", "Bash(git status:*)", "Bash(git show:*)", "Bash(git rev-parse:*)",
                      "Bash(git merge-base:*)", "Bash(git ls-files:*)", "Bash(git blame:*)", "Bash(git branch --show-current)"]
-        guard role == .worker else { return reads }
-        var rules = reads + ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git rm:*)", "Bash(git rebase --continue)", "Bash(git rebase --abort)",
-                             "Bash(git rebase --skip)", "Bash(git merge --continue)", "Bash(git merge --abort)"]
+        guard role != .lead else { return reads }
+        let copy = scratch.map(scratchCopy) ?? []
+        guard role == .worker else { return reads + copy }
+        var rules = reads + copy + ["Bash(git add:*)", "Bash(git commit:*)", "Bash(git rm:*)", "Bash(git rebase --continue)", "Bash(git rebase --abort)",
+                             "Bash(git rebase --skip)", "Bash(git merge --continue)", "Bash(git merge --abort)", "Bash(git apply -R)", "Bash(git apply)"]
         if let base { rules += ["Bash(git rebase \(base))", "Bash(git merge \(base))", "Bash(git merge --no-edit \(base))"] }
         return rules
     }
@@ -157,7 +185,12 @@ public enum LeadLaunch {
         let mcp: [String: Any] = ["mcpServers": ["vibeswitcher": entry]]
         try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: mcp, options: [.prettyPrinted, .sortedKeys]),
                                    to: URL(fileURLWithPath: mcpFile))
-        var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch), "deny": deny(role, base: branch, records: records)]]
+        // Not made (another user's folder in its place): the session keeps the TMPDIR it would have had, and no scratch copy.
+        let cwd = cwd ?? task.map { Worktrees.path(root: root, slug: $0) } ?? root
+        let temporary = SessionTemp.make(cwd: cwd, name: name, in: temporary)
+        let scratch = role == .lead ? nil : temporary.map { $0.path + "/" }
+        var settings: [String: Any] = ["permissions": ["allow": allow(role, base: branch, scratch: scratch),
+                                                       "deny": deny(role, base: branch, records: records, scratch: scratch)]]
         if !environment(role).isEmpty { settings["env"] = environment(role) }
         try LeadVault.writePrivate(try JSONSerialization.data(withJSONObject: settings, options: [.prettyPrinted, .sortedKeys]),
                                    to: URL(fileURLWithPath: settingsFile))
@@ -175,9 +208,7 @@ public enum LeadLaunch {
         if let model { parts.append("--model \(quote(model))") }
         parts.append("-- \(quote(start))")
         var prepared = Prepared(command: parts.joined(separator: " "), promptFile: promptFile, mcpFile: mcpFile, settingsFile: settingsFile)
-        // Not made (another user's folder in its place): the session keeps the TMPDIR it would have had.
-        let cwd = cwd ?? task.map { Worktrees.path(root: root, slug: $0) } ?? root
-        if let temporary = SessionTemp.make(cwd: cwd, name: name, in: temporary) { prepared.environment["TMPDIR"] = temporary.path + "/" }
+        if let temporary { prepared.environment["TMPDIR"] = temporary.path + "/" }
         return prepared
     }
 

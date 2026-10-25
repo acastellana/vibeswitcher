@@ -636,6 +636,37 @@ public enum LeadPrompts {
                 + "did: fixed (in which commit) or why not (\"nothing blocking\" when it found nothing)."
         }
 
+        /// The scratch copy of the commit before a fix with its new test in, as `LeadLaunch.scratchCopy` allows it: in
+        /// the session's TMPDIR written out, since rules match the command's text. Its build is cold, so under vs-heavy.
+        public static let preFixCopy = "a scratch copy of the commit before the fix with the new test copied in, in your "
+            + "TMPDIR written out in full and unquoted (`echo $TMPDIR` prints it; your permission rules don't read "
+            + "`$TMPDIR`, and allow these three commands there only): `mkdir -p <TMPDIR>pre-fix`, then `git archive <pre-fix> "
+            + "| tar -x -C <TMPDIR>pre-fix`, then `git archive HEAD <the new test's files> | tar -x -C <TMPDIR>pre-fix` (a "
+            + "new folder for each copy: pre-fix-2…). Its build is cold (minutes), so run the test there under `vs-heavy`: "
+            + "the test command, filtered to the new test, from that folder (e.g. `vs-heavy bash <TMPDIR>pre-fix/scripts/test.sh "
+            + "--filter <test>`)"
+
+        /// A fix's regression test shown to fail without the fix (2026-10-25: finished-work-lands' two tests for its F1
+        /// fix never reached the race F1 described, so they'd have passed on the old code too). The fix comes out by a
+        /// reverse patch: a `git checkout <commit> -- <files>` is refused by the user's command guard.
+        public static func regressionTest(base: String) -> String {
+            "Regression tests: for a bug fix or a fixed audit finding, the evidence includes the new test's failing run on "
+                + "the commit before the fix (the branch's merge-base with \(base) for the task's own bug, or the commit before "
+                + "a finding's fix), then its passing run after it: a test that would pass either way doesn't cover the fix. "
+                + "Prefer reverting the fix locally and restoring it, in this worktree (its build is warm): with everything "
+                + "committed, take the fix out with `git diff <pre-fix> HEAD -- <the fix's files> | git apply -R` (not the "
+                + "test's files), run the test, and put the fix back with the same command without `-R`; `git status` is clean "
+                + "again. Or, when that won't do, " + preFixCopy + "."
+        }
+
+        /// How a re-audit checks a fixed finding's test, by the worker's scratch copy: the verifier can't revert one.
+        public static func fixedFindingTest(since: String) -> String {
+            "A finding fixed with a new or changed test: confirm the test fails without the fix, on " + preFixCopy + ". The "
+                + "commit before the fix is usually \(since), the one the earlier audit checked; then the test passes on the "
+                + "branch. When it passes without the fix too, the finding can still be fixed, but raise a Nit at the test's "
+                + "file and line, with that run: the test doesn't cover the fix."
+        }
+
         /// How a worker answers its audit's findings (answer_findings): each open one fixed or disagreed with, by id.
         public static let workerFindings = "Findings: when the lead sends you audit findings by id (F1, F2…), answer each "
             + "open one with answer_findings: fixed (commit the fix first) or disagree, with a reason the re-audit can check "
@@ -944,6 +975,7 @@ public enum LeadPrompts {
         report, not through rm). Then reply with a short report: what changed, how you checked it, the routine calls you made, anything left or doubtful. \
         \(Policy.workerCheck(task.reviewLevel))
         \(Policy.workerEvidence(base: workflow.base))
+        \(Policy.regressionTest(base: workflow.base))
         \(Policy.workerFindings)
         Stuck: say exactly what you need and stop. Don't fake a pass: never weaken or delete tests.
 
@@ -1294,13 +1326,14 @@ public enum LeadPrompts {
             """
             newFindings = "New findings come from \(from), as in a first audit."
         } else {
-            newFindings = "New findings come from \(from), and only for a problem the fix itself brought in, never a new Nit."
+            newFindings = "New findings come from \(from), and only for a problem the fix itself brought in, never a new Nit "
+                + "but the one for a fix's test below."
         }
         var text = """
         This is a re-audit (round \(reaudit.round)): \(check)
         In submit_audit's findings, give each open finding below by its id with status fixed (you checked it is), \
         open (it still is: say what you saw) or dismissed (with a reason). \(newFindings) A closed finding below is never \
-        raised again, under its id or another.
+        raised again, under its id or another. \(Policy.fixedFindingTest(since: String(since)))
         """
         if !reaudit.answers.isEmpty {
             text += """
