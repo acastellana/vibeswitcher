@@ -1203,3 +1203,11 @@
 - 2026-10-25 12:32 Automatically (auto_advance): Started a worker on lead-chat-less-clutter (Lead chat: less clutter around questions, tool rows and the team strip).
 - 2026-10-25 12:32 Started a worker on lead-team-panel-clear
 - 2026-10-25 12:32 Automatically (auto_advance): Started a worker on lead-team-panel-clear (Lead Team panel: clear task states, honest scorecard, shorter history).
+- 2026-10-25 12:41 Planned the-lead-s-chat: The lead's chat window stops freezing (SwiftUI churn in the Team panel) (review audit)
+- 2026-10-25 12:41 Planned hidden-lead-terminals: Hidden lead terminals aren't sized 392 rows
+- 2026-10-25 12:41 Planned app-memory-stops-growing: App memory stops growing ~150 MB an hour
+- 2026-10-25 12:41 Started a worker on hidden-lead-terminals
+- 2026-10-25 12:41 Automatically (auto_advance): Started a worker on hidden-lead-terminals (Hidden lead terminals aren't sized 392 rows).
+- 2026-10-25 12:41 Planned a-new-audit-ends: A new audit ends the task's earlier verifier
+- 2026-10-25 12:41 Started a worker on app-memory-stops-growing
+- 2026-10-25 12:41 Automatically (auto_advance): Started a worker on app-memory-stops-growing (App memory stops growing ~150 MB an hour).
