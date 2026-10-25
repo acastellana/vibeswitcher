@@ -1252,3 +1252,5 @@
 - 2026-10-25 15:22 Automatically (auto_advance): Merged the-lead-s-chat (The lead's chat window stops freezing (SwiftUI churn in the Team panel)) into project-lead at 1809b147, on its passing audit and the full test run.
 - 2026-10-25 15:22 Automatically (auto_advance): Cleaned up the-lead-s-chat (freed 2.4 GB of build output and temporary folders). It stays done.
 - 2026-10-25 15:28 Merged app-memory-stops-growing: App memory stops growing ~150 MB an hour (no audit: review none)
+- 2026-10-25 15:28 Automatically (auto_advance): Merged app-memory-stops-growing (App memory stops growing ~150 MB an hour) into project-lead at 9ca36a75, review none: on its worker's done report on e1a06370 and the full test run.
+- 2026-10-25 15:29 Automatically (auto_advance): Cleaned up app-memory-stops-growing (freed 1.8 GB of build output and temporary folders). It stays done.
