@@ -1155,3 +1155,4 @@
 - 2026-10-25 08:03 Started a worker on workers-run-a-sandboxed
 - 2026-10-25 08:03 Started a worker on done-reports-carry
 - 2026-10-25 08:03 Started a worker on audit-v3-blocking
+- 2026-10-25 08:31 Merged done-reports-carry: Done reports carry evidence and a blind self-check (no audit: review none)
