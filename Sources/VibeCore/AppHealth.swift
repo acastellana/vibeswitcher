@@ -275,8 +275,14 @@ public enum AppHealth {
     /// Words that make an app.log line an error.
     static let errorWords = ["error", "failed", "couldn't", "could not", "can't", "cannot", "crashed", "fatal", "exception", "timed out"]
 
-    /// An app.log line's kind, when it's an error ("lead: couldn't"): what part of the app wrote it (the word before
-    /// its first colon, when that's a plain name) and the error word. Nothing else of the line: that's what it says.
+    /// The parts of the app that start their app.log lines with their name ("lead: …"); a line starting with anything
+    /// else is the app's ("app: …"), so no word of what a line says becomes its kind.
+    static let logParts: Set<String> = ["app", "app health", "bench", "chat", "composer", "handover refused", "host", "keep awake", "lead",
+                                        "move", "privacy", "role sweep", "sandbox", "shutdown refused", "spawn failed", "vault", "watchdog",
+                                        "window", "witness"]
+
+    /// An app.log line's kind, when it's an error ("lead: couldn't"): what part of the app wrote it (one of `logParts`,
+    /// before the line's first colon) and the error word. Nothing else of the line: that's what it says.
     public static func errorKind(_ line: String) -> String? {
         var text = Substring(line)
         // Breadcrumbs start each line with its time: "14:02:10.123 lead: …".
@@ -287,8 +293,8 @@ public enum AppHealth {
         guard let word = errorWords.first(where: { contains(lower, word: $0) }) else { return nil }
         var part = "app"
         if let colon = lower.firstIndex(of: ":") {
-            let name = lower[..<colon]
-            if !name.isEmpty, name.count <= 24, name.allSatisfy({ $0.isASCII && ($0.isLetter || $0 == " " || $0 == "-") }) { part = String(name) }
+            let name = String(lower[..<colon])
+            if logParts.contains(name) { part = name }
         }
         return "\(part): \(word)"
     }
