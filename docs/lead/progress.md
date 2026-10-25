@@ -1289,3 +1289,4 @@
 - 2026-10-25 23:58 Automatically (auto_advance): Started the audit of notifications-only-when at 5d639947 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
 - 2026-10-25 23:58 Ended a-verifier-that-ends's worker (idle since its done report on 7230a866) to make room on the Mac for its audit
 - 2026-10-25 23:58 Automatically (auto_advance): Started the audit of a-verifier-that-ends at 7230a866 (Its review is audit).
+- 2026-10-26 00:05 Planned the-app-s-memory: The app's memory stops growing over a working day
