@@ -270,7 +270,7 @@ struct LeadFindingsToolTests: LeadTeamFixture {
         try text.write(toFile: worktree + "/" + file, atomically: true, encoding: .utf8)
         Git.run(["add", file], in: worktree)
         Git.run(["commit", "-q", "-m", "work on \(file)"], in: worktree)
-        let reported = call(try seat("worker-\(slug)", runtime), "report", ["status": "done", "summary": "did \(file)"])
+        let reported = call(try seat("worker-\(slug)", runtime), "report", doneReport("did \(file)"))
         #expect(!reported.isError, "\(reported.text)")
     }
 
@@ -361,7 +361,7 @@ struct LeadFindingsToolTests: LeadTeamFixture {
         #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
 
         // A report on the audited commit leaves it failed, the verdict and its open finding standing.
-        try #require(!call(try seat("worker-add-b", runtime), "report", ["status": "done", "summary": "nothing new"]).isError)
+        try #require(!call(try seat("worker-add-b", runtime), "report", doneReport("nothing new")).isError)
         #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)
         #expect(runtime.steered.last?.text.contains("with Important findings open (add-b:F1)") == true, "\(runtime.steered.last?.text ?? "")")
 

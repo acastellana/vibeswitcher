@@ -240,7 +240,7 @@ struct RoleSessionsEndTests: LeadTeamFixture {
         try "bee\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
         Git.run(["add", "b.txt"], in: worktree)
         Git.run(["commit", "-q", "-m", "add b"], in: worktree)
-        #expect(!(try seat("worker-add-b", runtime)).call("report", ["status": "done", "summary": "added b"]).isError)
+        #expect(!(try seat("worker-add-b", runtime)).call("report", doneReport("added b")).isError)
         #expect(!lead.call("audit", ["task": "add-b"]).isError)
         let verifier = try launched("verify-add-b", runtime).session
         let submitted = try seat("verify-add-b", runtime).call("submit_audit", ["completion": "incomplete", "integrity": "clean", "summary": "b is wrong"])

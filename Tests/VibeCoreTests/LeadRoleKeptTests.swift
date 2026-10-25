@@ -88,7 +88,7 @@ struct LeadRoleKeptTests: LeadTeamFixture {
         try vault.bind(grant, root: root, session: "lead-b-session")
         let progress = worker.call("progress", ["text": "tests pass"])
         #expect(!progress.isError, "\(progress.text)")
-        let report = worker.call("report", ["status": "done", "summary": "added b"])
+        let report = worker.call("report", doneReport("added b"))
         #expect(!report.isError, "\(report.text)")
         #expect(BoardStore(root: root).load().task("add-b")?.status == .review)
         // Lead B runs the task on (its verifier); lead A is sent to it.

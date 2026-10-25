@@ -106,7 +106,7 @@ extension LeadToolsetTests {
         let lead = try lead(root, runtime)
         _ = call(lead, "add_task", ["title": "Add b", "goal": "g", "acceptance": ["a"]])
         _ = call(lead, "start_worker", ["task": "add-b"])
-        _ = call(try seat("worker-add-b", runtime), "report", ["status": "done", "summary": "added"])
+        _ = call(try seat("worker-add-b", runtime), "report", doneReport("added"))
         #expect(!call(lead, "configure", ["audit_finders": "2", "test_command": "true", "test_timeout_min": "0.01"]).isError)
         let holders = try fillSlots(1, notes: ["scripts/test.sh in /Users/a/dev/genswap"])
         defer { end(holders) }

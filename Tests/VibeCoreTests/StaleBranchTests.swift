@@ -42,7 +42,7 @@ struct StaleBranchTests: LeadTeamFixture {
     }
 
     func reported(_ runtime: FakeRuntime) throws {
-        let report = try seat("worker-add-b", runtime).call("report", ["status": "done", "summary": "done"])
+        let report = try seat("worker-add-b", runtime).call("report", doneReport("done"))
         #expect(!report.isError, "\(report.text)")
     }
 

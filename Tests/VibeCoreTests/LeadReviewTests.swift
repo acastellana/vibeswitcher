@@ -47,7 +47,7 @@ struct LeadReviewTests: LeadTeamFixture {
         #expect(!lead.call("add_task", task).isError)
         #expect(!lead.call("start_worker", ["task": "add-b"]).isError)
         try commit(file, "bee\n", in: Worktrees.path(root: root, slug: "add-b"))
-        let report = try seat("worker-add-b", runtime).call("report", ["status": "done", "summary": "added"])
+        let report = try seat("worker-add-b", runtime).call("report", doneReport("added"))
         #expect(!report.isError, "\(report.text)")
     }
 
@@ -158,7 +158,7 @@ struct LeadReviewTests: LeadTeamFixture {
             board.tasks[index].report = "done (forged)"
         }
         #expect(lead.call("merge", ["task": "add-b"]).isError)
-        _ = try seat("worker-add-b", runtime).call("report", ["status": "done", "summary": "added c too"])
+        _ = try seat("worker-add-b", runtime).call("report", doneReport("added c too"))
         // Without a test command nothing would check it.
         #expect(!lead.call("configure", ["test_command": ""]).isError)
         let untested = lead.call("merge", ["task": "add-b"])

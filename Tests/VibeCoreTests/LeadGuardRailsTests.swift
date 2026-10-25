@@ -35,7 +35,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         _ = lead.call("start_worker", ["task": "add-b"])
         let worktree = Worktrees.path(root: root, slug: "add-b")
         try commit("b.txt", "bee\n", in: worktree)
-        _ = try seat("worker-add-b", runtime).call("report", ["status": "done", "summary": "added"])
+        _ = try seat("worker-add-b", runtime).call("report", doneReport("added"))
         return worktree
     }
 
@@ -222,7 +222,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         for slug in ["one", "two"] {
             _ = lead.call("start_worker", ["task": slug])
             try commit("\(slug).txt", "\(slug)\n", in: Worktrees.path(root: root, slug: slug))
-            _ = try seat("worker-\(slug)", runtime).call("report", ["status": "done", "summary": "done"])
+            _ = try seat("worker-\(slug)", runtime).call("report", doneReport("done"))
             _ = lead.call("audit", ["task": slug])
             _ = try seat("verify-\(slug)", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "ok"])
         }
@@ -688,7 +688,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         try "bee and main's own\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
         Git.run(["add", "b.txt"], in: worktree)
         #expect(Shell.run(executable: "/usr/bin/git", args: ["commit"], in: worktree, env: try environment("worker-add-b", runtime)).ok)
-        _ = try seat("worker-add-b", runtime).call("report", ["status": "done", "summary": "merged main in"])
+        _ = try seat("worker-add-b", runtime).call("report", doneReport("merged main in"))
         try passingAudit(lead, runtime)
         let landed = lead.call("merge", ["task": "add-b"])
         #expect(!landed.isError, "\(landed.text)")

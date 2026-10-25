@@ -36,7 +36,7 @@ struct LeadScorecardTests: LeadTeamFixture {
             _ = lead.call("start_worker", ["task": "change"])
         }
         try commit(file, "\(UUID())\n", in: Worktrees.path(root: root, slug: "change"))
-        _ = try seat("worker-change", runtime).call("report", ["status": "done", "summary": "changed"])
+        _ = try seat("worker-change", runtime).call("report", doneReport("changed"))
         #expect(!lead.call("audit", ["task": "change"]).isError)
         #expect(!(try seat("verify-change", runtime)).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "ok"]).isError)
         return Git.run(["rev-parse", "agent/change"], in: root).output

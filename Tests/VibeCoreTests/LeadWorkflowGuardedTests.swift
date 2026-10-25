@@ -101,7 +101,7 @@ extension LeadGuardRailsTests {
         try "---\ntest_command: touch \(ran); true\n---\n".write(toFile: workflowFile(worktree), atomically: true, encoding: .utf8)
         Git.run(["add", "-f", ".vibeswitcher/workflow.md"], in: worktree)
         Git.run(["commit", "-q", "-m", "workflow"], in: worktree)
-        _ = try seat("worker-add-b", runtime).call("report", ["status": "done", "summary": "added"])
+        _ = try seat("worker-add-b", runtime).call("report", doneReport("added"))
         try passingAudit(lead, runtime)
         // The verifier missed it: the branch merges, tested with the lead's command, and its file lands.
         let merged = lead.call("merge", ["task": "add-b"])

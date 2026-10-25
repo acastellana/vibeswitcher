@@ -191,7 +191,7 @@ struct LeadProgressTests: LeadTeamFixture {
         let lead = try lead(root, runtime)
         _ = lead.call("add_task", ["title": "Fix", "goal": "g", "acceptance": ["a"]])
         _ = lead.call("start_worker", ["task": "fix"])
-        _ = try seat("worker-fix", runtime).call("report", ["status": "done", "summary": "Fixed; swift test passes"])
+        _ = try seat("worker-fix", runtime).call("report", doneReport("Fixed; swift test passes"))
         #expect(task(root)?.report == "Fixed; swift test passes")
     }
 
@@ -203,7 +203,7 @@ struct LeadProgressTests: LeadTeamFixture {
         try "bee\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
         Git.run(["add", "b.txt"], in: worktree)
         Git.run(["commit", "-q", "-m", "add b"], in: worktree)
-        _ = try seat("worker-add-b", runtime).call("report", ["status": "done", "summary": "added"])
+        _ = try seat("worker-add-b", runtime).call("report", doneReport("added"))
         _ = lead.call("audit", ["task": "add-b"])
         _ = try seat("verify-add-b", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "checked"])
     }

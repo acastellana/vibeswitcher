@@ -35,7 +35,7 @@ struct LeadToolTripTests: LeadTeamFixture {
         _ = lead.call("start_worker", ["task": "add-b"])
         let worktree = Worktrees.path(root: root, slug: "add-b")
         try commit("b.txt", "bee\n", in: worktree)
-        _ = try seat("worker-add-b", runtime).call("report", ["status": "done", "summary": "added"])
+        _ = try seat("worker-add-b", runtime).call("report", doneReport("added"))
         return worktree
     }
 
@@ -151,7 +151,7 @@ struct LeadToolTripTests: LeadTeamFixture {
 
         let unsaid = worker.call("report", ["status": "done"])
         #expect(unsaid.isError && unsaid.text.contains("`summary`"))
-        #expect(!worker.call("report", ["status": "done", "message": "Added b.txt; tests pass"]).isError)
+        #expect(!worker.call("report", doneReport("Added b.txt; tests pass", key: "message")).isError)
         #expect(BoardStore(root: root).load().task("one")?.report == "Added b.txt; tests pass")
         #expect(!worker.call("ask_lead", ["text": "Which file?"]).isError)
         #expect(runtime.steered.last?.text.contains("Which file?") == true)

@@ -113,7 +113,7 @@ extension LeadToolsetTests {
         runtime.others = []
         runtime.load = 1
         _ = call(lead, "start_worker", ["task": "one"])
-        _ = call(try seat("worker-one", runtime), "report", ["status": "done", "summary": "done"])
+        _ = call(try seat("worker-one", runtime), "report", doneReport("done"))
         runtime.others = Self.neighbours
         texts.append(call(lead, "audit", ["task": "one"]).text)
         for text in texts {
@@ -177,7 +177,7 @@ extension LeadToolsetTests {
         let lead = try lead(root, runtime)
         _ = call(lead, "add_task", ["title": "Add b", "goal": "g", "acceptance": ["a"]])
         _ = call(lead, "start_worker", ["task": "add-b"])
-        _ = call(try seat("worker-add-b", runtime), "report", ["status": "done", "summary": "added"])
+        _ = call(try seat("worker-add-b", runtime), "report", doneReport("added"))
         runtime.load = 190
         let busy = call(lead, "audit", ["task": "add-b"])
         #expect(busy.isError)
@@ -206,7 +206,7 @@ extension LeadToolsetTests {
         let lead = try lead(root, runtime)
         _ = call(lead, "add_task", ["title": "Add b", "goal": "g", "acceptance": ["a"]])
         #expect(!call(lead, "start_worker", ["task": "add-b"]).isError)
-        _ = call(try seat("worker-add-b", runtime), "report", ["status": "done", "summary": "added"])
+        _ = call(try seat("worker-add-b", runtime), "report", doneReport("added"))
         runtime.others = Self.neighbours
         lead.macLimits = { MacLimits(maxSessions: 7) }
         return (root, lead, try #require(BoardStore(root: root).load().task("add-b")?.worker))

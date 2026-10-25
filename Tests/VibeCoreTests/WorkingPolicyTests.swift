@@ -251,7 +251,7 @@ struct WorkingPolicyTests: LeadTeamFixture {
         try "bee\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
         Git.run(["add", "b.txt"], in: worktree)
         Git.run(["commit", "-q", "-m", "add b"], in: worktree)
-        #expect(!(try seat("worker-add-b", runtime).call("report", ["status": "done", "summary": "added"])).isError)
+        #expect(!(try seat("worker-add-b", runtime).call("report", doneReport("added"))).isError)
 
         // Another project's worker runs its suite under vs-heavy, on the same lock.
         let holder = try TestLockTests.runVsHeavy(["--as", "tge's suite", "/bin/sh", "-c", "echo started >> \(q(order)); sleep 2; echo suite >> \(q(order))"],

@@ -231,7 +231,7 @@ struct LeadAuditFindersTests: LeadTeamFixture {
         try "bee\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
         Git.run(["add", "b.txt"], in: worktree)
         Git.run(["commit", "-q", "-m", "add b"], in: worktree)
-        #expect(!call(try seat("worker-add-b", runtime), "report", ["status": "done", "summary": "added b"]).isError)
+        #expect(!call(try seat("worker-add-b", runtime), "report", doneReport("added b")).isError)
         return (root, lead)
     }
 

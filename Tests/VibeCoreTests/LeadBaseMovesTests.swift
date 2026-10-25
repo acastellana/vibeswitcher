@@ -54,7 +54,7 @@ struct LeadBaseMovesTests: LeadTeamFixture {
         _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]])
         _ = lead.call("start_worker", ["task": "add-b"])
         try commit("b.txt", "bee\n", in: Worktrees.path(root: root, slug: "add-b"))
-        _ = try seat("worker-add-b", runtime).call("report", ["status": "done", "summary": "added"])
+        _ = try seat("worker-add-b", runtime).call("report", doneReport("added"))
         _ = lead.call("audit", ["task": "add-b"])
         let verdict = try seat("verify-add-b", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "ok"])
         #expect(!verdict.isError, "\(verdict.text)")

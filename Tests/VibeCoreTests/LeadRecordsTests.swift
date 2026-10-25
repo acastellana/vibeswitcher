@@ -271,7 +271,7 @@ struct LeadRecordsTests: LeadTeamFixture {
         try "\(slug)\n".write(toFile: worktree + "/" + file, atomically: true, encoding: .utf8)
         Git.run(["add", file], in: worktree)
         Git.run(["commit", "-q", "-m", "add \(file)"], in: worktree)
-        _ = try seat("worker-\(slug)", runtime).call("report", ["status": "done", "summary": "added"])
+        _ = try seat("worker-\(slug)", runtime).call("report", doneReport("added"))
         _ = lead.call("audit", ["task": slug])
         _ = try seat("verify-\(slug)", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "checked"])
     }

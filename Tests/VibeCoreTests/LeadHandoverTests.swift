@@ -33,7 +33,7 @@ struct LeadHandoverTests: LeadTeamFixture {
         _ = call(first, "add_task", ["title": "One", "goal": "g", "acceptance": ["a"]])
         _ = call(first, "start_worker", ["task": "one"])
         let worker = try seat("worker-one", runtime)
-        let report = { (summary: String) in self.call(worker, "report", ["status": "done", "summary": summary]) }
+        let report = { (summary: String) in self.call(worker, "report", doneReport(summary)) }
 
         #expect(!report("first try").text.contains("no lead"))
         #expect(runtime.steered.map(\.target) == ["agent:4242"])

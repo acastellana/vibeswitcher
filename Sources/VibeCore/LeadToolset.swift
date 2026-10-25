@@ -319,9 +319,11 @@ public final class LeadToolset: MCPToolset {
             return []
         case .worker?:
             return [
-                MCPToolInfo(name: "report", description: "Tell the lead you're done (everything committed, checks passing) or blocked (say what you need). A verifier then checks your branch.",
+                MCPToolInfo(name: "report", description: "Tell the lead you're done (everything committed, checks passing) or blocked (say what you need). A verifier then checks your branch. Done needs evidence for every acceptance check and your blind check's outcome: a done without them is refused, naming what's missing.",
                             properties: ["status": P(type: "string", description: "done or blocked", options: ["done", "blocked"]),
-                                         "summary": P(type: "string", description: "What changed and how you checked it, or what blocks you")],
+                                         "summary": P(type: "string", description: "What changed and how you checked it, or what blocks you"),
+                                         "evidence": P(type: "array", description: Self.evidenceShape, items: "object"),
+                                         "blind_check": P(type: "string", description: Self.blindCheckShape)],
                             required: ["status", "summary"]),
                 MCPToolInfo(name: "ask_lead", description: "Ask the project lead something without stopping your work; the answer arrives as a message.",
                             properties: ["question": P(type: "string", description: "The question")], required: ["question"]),
@@ -682,6 +684,13 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// submit_audit's findings, as its schema tells the verifier.
+    static let evidenceShape = "With done: one object per acceptance check of your contract, {check, how, result, screenshots}. check: "
+        + "the check's number (1 for the first) or its text; how: the command you ran and what it printed, the test's name, or "
+        + "what you looked at; result: what it showed (passed, the numbers, what you saw); screenshots: the paths of any "
+        + "screenshots, optional. A task with no acceptance checks needs one entry, for its goal. Not needed with blocked."
+    static let blindCheckShape = "With done: what your blind check (a fresh subagent given only the contract and the diff) found, "
+        + "and for each item what you did: fixed (in which commit) or why not. \"Nothing blocking\" when it found nothing."
+
     static let findingsShape = "Each problem you found, one object each: {id, severity, file, line, evidence, status, reason}. "
         + "severity: Important (must be fixed before merge: the contract isn't met, a bug, a weakened test), Nit (worth fixing, never blocks), "
         + "or Pre-existing (already wrong before this branch; never fails the task). file and line: where it is (path from the repository's root). "
@@ -1444,9 +1453,11 @@ public final class LeadToolset: MCPToolset {
 
     /// The worker's done report for its verifier: the board's copy, when the vault has the task's own worker
     /// reporting done on `head` (the board is anyone's to write; the vault takes "done" only from that worker).
+    /// Its evidence comes from the vault, kept with that done.
     func doneReport(_ task: LeadTask, head: String) -> String? {
-        guard let report = task.report, (try? vault.unaudited(root: root, task: task.slug))?.reported == head else { return nil }
-        return report
+        guard let report = task.report, let kept = try? vault.unaudited(root: root, task: task.slug), kept.reported == head else { return nil }
+        guard let evidence = kept.evidence else { return report }
+        return report + "\n\nIts evidence, check by check (what it says it ran and saw):\n" + evidence.lines.joined(separator: "\n")
     }
 
     /// Sends `text` to the task's worker when it runs; what the lead's result says about it.
@@ -1668,9 +1679,12 @@ public final class LeadToolset: MCPToolset {
             let ran = workflow.regressionCommand == nil ? "" : " (regression_command passed too.)"
             let patience = waited.map { " (The tests waited \(Worktrees.duration($0.after)) for the Mac's load to drop from \(MacLoad.number($0.from)) below load_threshold.)" } ?? ""
             let unaudited = audited ? "" : " (No audit: review none, on its worker's done report and the tests that just passed.)"
+            // Only the evidence of a done on the commit merged: an older one's claims aren't this commit's.
+            let kept = try? vault.unaudited(root: root, task: slug)
+            let evidence = kept?.reported == commit ? kept?.evidence.map { " Its worker's evidence: \($0.brief())" } ?? "" : ""
             let overruled = dismissed.isEmpty ? "" : " (Its audit was complete with its tests passing, and \(dismissed.count == 1 ? "the one Important finding that failed it" : "the \(dismissed.count) Important findings that failed it") you dismissed: "
                 + dismissed.map { "\($0.id) \($0.place) (\(Self.clip($0.reason ?? "", 120)))" }.joined(separator: "; ") + ".)"
-            return MCPToolResult(text: "Merged \(slug) into \(base)\(untested). Next: cleanup(\(slug)). \(LeadPrompts.Policy.updates)\(overruled)\(unaudited)\(ran)\(patience)")
+            return MCPToolResult(text: "Merged \(slug) into \(base)\(untested). Next: cleanup(\(slug)). \(LeadPrompts.Policy.updates)\(overruled)\(unaudited)\(ran)\(patience)\(evidence)")
         case .refused(let reason):
             throw Problem(text: "Not merged: \(reason)")
         }
@@ -2374,13 +2388,15 @@ public final class LeadToolset: MCPToolset {
         let slug = try taskSlug(arguments)
         let summary = try text(arguments, "summary", missing: "Say what changed and how you checked it, or what blocks you.")
         let done = (arguments["status"] as? String) != "blocked"
+        // Before anything is recorded: a done that doesn't show how each check was checked doesn't count as one.
+        let evidence = done ? try Self.doneEvidence(arguments, acceptance: store.load().task(slug)?.contract.acceptance ?? [], base: workflow.base) : nil
         // A report on the commit the last verdict covers (an answer, a note, a repeated "done") leaves that verdict
         // standing: only a new commit, or the lead's own audit, needs a new one.
         let head = branchHead(Worktrees.branch(slug))
         let standing = vault.verdict(root: root, task: slug).flatMap { $0.commit == head ? $0 : nil }
         if standing == nil { try vault.clearVerdict(root: root, task: slug) }
         // Where merge reads the worker's "done" for a task with no audit: the board's copy is anyone's to write.
-        let recorded = Result { try vault.reportDone(root: root, task: slug, commit: done ? head : nil) }
+        let recorded = Result { try vault.reportDone(root: root, task: slug, commit: done ? head : nil, evidence: evidence) }
         // A pass that left Important findings open still isn't mergeable.
         let blocking = standing == nil ? [] : vault.audits(root: root, task: slug)?.blocking ?? []
         // Why it's audited; with neither that nor a standing verdict, the merge's own test run is its check.
@@ -2588,6 +2604,61 @@ public final class LeadToolset: MCPToolset {
     private func changedFiles(from: String, to: String) -> Set<String>? {
         let diff = Git.run(["diff", "--name-only", from, to], in: root)
         return diff.ok ? Set(diff.output.split(whereSeparator: \.isNewline).map(String.init)) : nil
+    }
+
+    /// A done report's evidence and blind check, refused unless it covers every one of `acceptance` (see
+    /// `LeadDoneEvidence.uncovered`) and says what the blind check found.
+    static func doneEvidence(_ arguments: [String: Any], acceptance: [String], base: String) throws -> LeadDoneEvidence {
+        var value = arguments["evidence"]
+        if let text = value as? String {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            value = trimmed.isEmpty ? nil : (try? JSONSerialization.jsonObject(with: Data(trimmed.utf8))) ?? text
+        }
+        let missing = "Not reported: a done report needs `evidence`, one entry per acceptance check. " + evidenceShape
+        if let one = value as? [String: Any] { value = [one] }
+        guard let value else { throw Problem(text: missing) }
+        guard let list = value as? [Any] else { throw Problem(text: "Not reported: evidence is a list of objects. " + evidenceShape) }
+        let word = { (object: [String: Any], key: String) -> String in
+            if let number = object[key] as? NSNumber { return number.stringValue }
+            let said = (object[key] as? [String])?.joined(separator: "\n") ?? object[key] as? String ?? ""
+            return said.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        let checks = try list.enumerated().map { index, item -> LeadDoneEvidence.Check in
+            guard let object = item as? [String: Any] else { throw Problem(text: "Not reported: evidence entry \(index + 1) isn't an object. " + evidenceShape) }
+            let check = word(object, "check"), how = word(object, "how"), result = word(object, "result")
+            guard !check.isEmpty, !how.isEmpty, !result.isEmpty else {
+                let lacks = [("check", check), ("how", how), ("result", result)].filter { $0.1.isEmpty }.map(\.0).joined(separator: ", ")
+                throw Problem(text: "Not reported: evidence entry \(index + 1)\(check.isEmpty ? "" : " (\(check))") has no \(lacks). " + evidenceShape)
+            }
+            let shots = (object["screenshots"] as? [String]) ?? (object["screenshots"] as? String).map { [$0] } ?? []
+            let paths = shots.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+            return LeadDoneEvidence.Check(check: check, how: how, result: result, screenshots: paths.isEmpty ? nil : paths)
+        }
+        guard !checks.isEmpty else { throw Problem(text: missing) }
+        let blind = blindCheck(arguments["blind_check"])
+        guard !blind.isEmpty else {
+            throw Problem(text: "Not reported: say in `blind_check` what your blind check found and what you did about each item. "
+                + "Run it first if you haven't: " + LeadPrompts.Policy.blindCheck(base: base))
+        }
+        let evidence = LeadDoneEvidence(checks: checks, blindCheck: blind)
+        let uncovered = evidence.uncovered(acceptance)
+        guard uncovered.isEmpty else {
+            let named = uncovered.map { "\($0.number) (\(clip($0.text, 120)))" }.joined(separator: "; ")
+            throw Problem(text: "Not reported: the evidence has no entry for \(uncovered.count == 1 ? "acceptance check" : "these acceptance checks") \(named). "
+                + "Give one entry for each, naming the check by its number or its text, then report again.")
+        }
+        return evidence
+    }
+
+    /// blind_check as text: a string, or a list of strings or of objects (each item's fields on a line).
+    static func blindCheck(_ value: Any?) -> String {
+        let line = { (item: Any) -> String in
+            if let text = item as? String { return text }
+            guard let object = item as? [String: Any] else { return "" }
+            return object.keys.sorted().compactMap { key in (object[key] as? String).map { "\(key): \($0)" } }.joined(separator: "; ")
+        }
+        let lines = (value as? [Any])?.map(line) ?? value.map { [line($0)] } ?? []
+        return lines.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }.joined(separator: "\n")
     }
 
     /// "1 Important open, 2 Nit (1 open), 1 Pre-existing".
@@ -2999,6 +3070,11 @@ public final class LeadToolset: MCPToolset {
             var lines = [String(decoding: try encoder.encode(task), as: UTF8.self)]
             lines.append("\nReview: \(task.reviewLevel.rawValue)" + (task.merged.map { $0.unaudited ? " (merged with no audit)" : "" } ?? ""))
             if let sessions, let ended = Self.endedMember(task, sessions) { lines.append("\nNow: \(ended)") }
+            // From the vault, where only the task's own worker records it with its done (the board's copy is anyone's).
+            if let kept = try? vault.unaudited(root: root, task: task.slug), let commit = kept.reported, let evidence = kept.evidence {
+                lines.append("\nIts worker's evidence with its done on \(commit.prefix(8)):")
+                lines += evidence.lines
+            }
             if let audits = task.audits, !audits.findings.isEmpty || audits.reconsider {
                 lines.append("\n" + Self.findingsText(audits, of: task.slug))
                 if audits.reconsider, task.status != .done { lines.append(Self.reconsiderText(audits, of: task.slug)) }

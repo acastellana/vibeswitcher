@@ -199,8 +199,9 @@ public struct LeadVault: Sendable {
         case roster(root: String?)
         /// The repository's lead only: the task's review level (see `LeadTask.Review`).
         case setReview(root: String, task: String, review: LeadTask.Review)
-        /// The task's own worker only: it reported done on this commit (nil: its last report wasn't done).
-        case reportDone(root: String, task: String, commit: String?)
+        /// The task's own worker only: it reported done on this commit (nil: its last report wasn't done), with this
+        /// evidence (nil from an older tool server, or with a report that wasn't done).
+        case reportDone(root: String, task: String, commit: String?, evidence: LeadDoneEvidence? = nil)
         /// The task's review level and the commit its worker last reported done on (`Reply.unaudited`).
         case unaudited(root: String, task: String)
     }
@@ -223,7 +224,7 @@ public struct LeadVault: Sendable {
         case guarded([String: String]?)
         case approved(Bool)
         case roster([RosterEntry])
-        case unaudited(review: LeadTask.Review?, reported: String?)
+        case unaudited(review: LeadTask.Review?, reported: String?, evidence: LeadDoneEvidence? = nil)
     }
 
     /// The host said no, or couldn't be asked.
@@ -487,6 +488,9 @@ extension LeadVault {
             var reviews: [String: LeadTask.Review]?
             /// The commit each task's worker last reported done on, by task (optional: older vaults have none).
             var reported: [String: String]?
+            /// The evidence each task's worker gave with that done, by task (optional: older vaults, and dones from
+            /// before evidence was asked for, have none).
+            var evidence: [String: LeadDoneEvidence]?
 
             /// Takes the members `drop` picks out; the sessions the workers and verifiers among them were bound to
             /// become `former`, with the role and task each held.
@@ -734,6 +738,7 @@ extension LeadVault {
                     team.ballots?[task] = nil
                     team.reviews?[task] = nil
                     team.reported?[task] = nil
+                    team.evidence?[task] = nil
                 }
                 return .ok
             case .whoami(let root):
@@ -876,7 +881,7 @@ extension LeadVault {
                     team.reviews = reviews
                 }
                 return .ok
-            case .reportDone(let root, let task, let commit):
+            case .reportDone(let root, let task, let commit, let evidence):
                 guard case .session(let session) = caller,
                       team(root)?.members.contains(where: { $0.session == session && $0.role == .worker && $0.task == task }) == true else {
                     return .refused("Only the task's own worker reports it done.")
@@ -885,10 +890,14 @@ extension LeadVault {
                     var reported = team.reported ?? [:]
                     reported[task] = commit
                     team.reported = reported
+                    // Only with the done it came with: a later report that isn't done takes it away too.
+                    var kept = team.evidence ?? [:]
+                    kept[task] = commit == nil ? nil : evidence
+                    team.evidence = kept
                 }
                 return .ok
             case .unaudited(let root, let task):
-                return .unaudited(review: team(root)?.reviews?[task], reported: team(root)?.reported?[task])
+                return .unaudited(review: team(root)?.reviews?[task], reported: team(root)?.reported?[task], evidence: team(root)?.evidence?[task])
             case .roster(let root):
                 if let root {
                     guard caller == .app || isLead(caller, root) else { return .refused("Only VibeSwitcher or the repository's lead reads its roster.") }
