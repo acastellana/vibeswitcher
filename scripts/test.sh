@@ -13,7 +13,8 @@
 # CPU-minutes so far): a host runs in a process group of its own and outlives a runner killed with its group.
 #
 # Nor may the run add a preference file under a test's name to the real ~/Library/Preferences, which cfprefsd writes
-# whatever the scratch home says (`check_preferences` below): the run fails, naming them.
+# whatever the scratch home says, or change VibeSwitcher.plist there, the unbundled build's own defaults
+# (`check_preferences` below): the run fails, naming them.
 #
 # swift build and swift test, --perf's too, run under vs-heavy (Resources/bin/vs-heavy, the Mac-wide lock for heavy
 # work that every project's sessions have on PATH): while another run holds it (another worker's suite in any project,
@@ -35,6 +36,8 @@
 #   (LeftoverCheckTests); exit 1 when it ended any.
 # scripts/test.sh --web DIR: only the web tests, DIR/*.test.mjs (DIR from the repository's root, or absolute), on a
 #   scratch home as above (TestScriptWebTests).
+# scripts/test.sh --preferences DIR -- COMMAND…: only the preferences check, on DIR instead of the real
+#   ~/Library/Preferences, around COMMAND (PreferencesCheckTests).
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -121,6 +124,12 @@ if [[ ${1:-} == --leftovers ]]; then
 fi
 web_only=""
 [[ ${1:-} == --web ]] && web_only=${2:?scripts/test.sh --web DIR}
+preferences_only=""
+if [[ ${1:-} == --preferences ]]; then
+    preferences_only=${2:?scripts/test.sh --preferences DIR -- COMMAND}
+    shift 2
+    [[ ${1:-} == -- ]] && shift
+fi
 perf=""
 if [[ ${1:-} == --perf ]]; then
     shift
@@ -155,16 +164,41 @@ test_preferences() {
     ls "$real_preferences" 2> /dev/null \
         | grep -E '^(dev\.vibeswitcher\.(tests|snapshots)|VibeSwitcher-|[A-Za-z-]*([Tt]ests|snapshots)-[0-9A-Fa-f]{8}-)' | sort
 }
-# Names what the run added there (left as they are: they may be another run's) and returns 1; nothing, 0.
-check_preferences() {
-    local added
-    added=$(comm -13 <(echo "$1") <(test_preferences))
-    [[ -z $added ]] && return 0
-    echo "PREFERENCE FILES LEFT: the run added $(echo "$added" | wc -l | tr -d ' ') to $real_preferences, e.g.:"
-    echo "$added" | head -5 | sed 's/^/  /'
-    echo "  A test's UserDefaults go in scratch: Scratch.defaults (Tests/VibeSwitcherTests/TestSupport.swift)."
-    return 1
+# The unbundled build's own defaults there (.build/debug/VibeSwitcher's domain is its file name), as its sha, or "none".
+# The benches wrote theirs there until 2026-10-25 (window frames, split views, chat font): they keep them in scratch now
+# (BenchDefaults). The installed app's (dev.vibeswitcher.VibeSwitcher.plist) is never looked at.
+build_defaults() {
+    local file=$real_preferences/VibeSwitcher.plist
+    if [[ -f $file ]]; then shasum "$file" | awk '{print $1}'; else echo none; fi
 }
+# Names what the run added there (left as they are: they may be another run's), and says when VibeSwitcher.plist
+# changed ($2: its build_defaults before), and returns 1; nothing, 0.
+check_preferences() {
+    local added status=0
+    added=$(comm -13 <(echo "$1") <(test_preferences))
+    if [[ -n $added ]]; then
+        echo "PREFERENCE FILES LEFT: the run added $(echo "$added" | wc -l | tr -d ' ') to $real_preferences, e.g.:"
+        echo "$added" | head -5 | sed 's/^/  /'
+        echo "  A test's UserDefaults go in scratch: Scratch.defaults (Tests/VibeSwitcherTests/TestSupport.swift)."
+        status=1
+    fi
+    if [[ $(build_defaults) != "$2" ]]; then
+        echo "PREFERENCES CHANGED: the run changed $real_preferences/VibeSwitcher.plist, the unbundled build's defaults:"
+        echo "  something ran .build/debug/VibeSwitcher on its real domain. A bench's go in scratch: BenchDefaults"
+        echo "  (Sources/VibeSwitcher/BenchDefaults.swift), a sandbox's in its state folder."
+        status=1
+    fi
+    return $status
+}
+
+if [[ -n $preferences_only ]]; then
+    real_preferences=$preferences_only
+    preferences_before=$(test_preferences)
+    defaults_before=$(build_defaults)
+    "$@"
+    check_preferences "$preferences_before" "$defaults_before"
+    exit
+fi
 
 export HOME=$tool_scratch/home CFFIXED_USER_HOME=$tool_scratch/home VIBESWITCHER_HOME=$tool_scratch/home/.vibeswitcher
 # Only --perf runs the benches, whatever the caller's environment holds.
@@ -183,9 +217,10 @@ else
     # The default run and --perf alike, under the one lock call. The repository's own vs-heavy, not the installed app's:
     # the one these tests check.
     preferences_before=$(test_preferences)
+    defaults_before=$(build_defaults)
     Resources/bin/vs-heavy --as scripts/test.sh bash -c 'swift build && swift test "$@"' scripts/test.sh "$@"
     status=$?
-    check_preferences "$preferences_before" || status=1
+    check_preferences "$preferences_before" "$defaults_before" || status=1
     # Even when the build or a test failed: they don't need the build, and their result is worth having. Not in --perf.
     if [[ -z $perf ]]; then
         run_web_tests Tests/Web || status=1
