@@ -1296,3 +1296,6 @@
 - 2026-10-26 00:21 Merged notifications-only-when: Notifications only when everything is done or the user is needed
 - 2026-10-26 00:21 Automatically (auto_advance): Merged notifications-only-when (Notifications only when everything is done or the user is needed) into project-lead at ae0eea3b, on its passing audit and the full test run.
 - 2026-10-26 00:28 Merged a-verifier-that-ends: A verifier that ends without a verdict is retried by itself
+- 2026-10-26 00:28 Automatically (auto_advance): Merged a-verifier-that-ends (A verifier that ends without a verdict is retried by itself) into project-lead at 339018ac, on its passing audit and the full test run.
+- 2026-10-26 00:29 Automatically (auto_advance): Cleaned up notifications-only-when (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-10-26 00:29 Automatically (auto_advance): Cleaned up a-verifier-that-ends (freed 1.1 GB of build output and temporary folders). It stays done.
