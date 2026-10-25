@@ -1156,3 +1156,6 @@
 - 2026-10-25 08:03 Started a worker on done-reports-carry
 - 2026-10-25 08:03 Started a worker on audit-v3-blocking
 - 2026-10-25 08:31 Merged done-reports-carry: Done reports carry evidence and a blind self-check (no audit: review none)
+- 2026-10-25 08:45 Audit of steadier-merge-gate: incomplete, clean, round 1: 1 Important open, 1 Nit open
+- 2026-10-25 08:45 Audit of audit-v3-blocking: complete, clean, round 1: 4 Nit open
+- 2026-10-25 08:52 Merged audit-v3-blocking: Audit v3: blocking findings only, fix or answer, re-roll after 2 rounds
