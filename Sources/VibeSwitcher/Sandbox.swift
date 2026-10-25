@@ -517,7 +517,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     static func results(home: String) -> [LeadUpdate] {
         let project = home + "/projects/results", worktree = project + "/.vibeswitcher/worktrees/shots-a"
         let shot = worktree + "/.build/sandbox-shots/board.png"
-        let symbol = NSImage(systemSymbolName: "checkmark.seal.fill", accessibilityDescription: nil)?
+        let symbol = NSImage(systemSymbolName: "checkmark.seal.fill", accessibilityDescription: "Done")?
             .withSymbolConfiguration(.init(pointSize: 96, weight: .regular))
         if let tiff = symbol?.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
             try? VibePaths.ensurePrivate(URL(fileURLWithPath: (shot as NSString).deletingLastPathComponent))
