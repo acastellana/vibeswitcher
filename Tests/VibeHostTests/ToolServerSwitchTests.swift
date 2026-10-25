@@ -81,7 +81,10 @@ import Testing
         try #require(FileManager.default.isExecutableFile(atPath: built), "vibeswitcher-mcp isn't built beside the host: run swift build first")
         let files = FileManager.default
         let dir = temp.url("switch").path
-        let home = dir + "/home", vibe = home + "/.vibeswitcher", folder = dir + "/mcp", root = dir + "/repo"
+        let home = dir + "/home", folder = dir + "/mcp", root = dir + "/repo"
+        // VibeSwitcher's folder, where the host's socket is: short (a socket's path has a 104-byte limit, and a run's
+        // TMPDIR can be long).
+        let vibe = temp.adopt(URL(fileURLWithPath: "\(shortScratchRoot)/vssw-\(UUID().uuidString.prefix(8))")).path
         for path in [vibe, folder, root, dir + "/app"] { try files.createDirectory(atPath: path, withIntermediateDirectories: true) }
         let book = LeadVault.Book()
         let host = try TestHost(vault: book)
@@ -150,6 +153,14 @@ import Testing
             for pid in [leadPid, workerPid] { kill(pid, SIGTERM) }
             #expect(eventually { kill(leadPid, 0) != 0 && kill(workerPid, 0) != 0 })
         }
+        // The lead records where it runs as it starts, else at its next call: each asks the process table again (on a
+        // loaded Mac a shell's arguments, which make it the stand-in, may not be read in time).
+        #expect(eventually {
+            if store.load().leadTTY != nil { return true }
+            defer { leadID += 1 }
+            _ = try? lead.call(leadID, "status")
+            return store.load().leadTTY != nil
+        })
         let leadTTY = try #require(store.load().leadTTY, "the lead didn't record itself on the board")
 
         // The loop runs in the lead's server: it holds its lock, and its first pass's report reaches the lead sealed.
