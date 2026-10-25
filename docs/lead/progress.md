@@ -1148,3 +1148,10 @@
 - 2026-10-25 08:01 Planned finished-work-lands: Finished work lands without waiting for the lead (review audit)
 - 2026-10-25 08:01 Planned steadier-merge-gate: Steadier merge gate: flaky retry and early catch-up (review audit)
 - 2026-10-25 08:02 Planned workers-run-a-sandboxed: Workers run a sandboxed VibeSwitcher and screenshot it (review audit)
+- 2026-10-25 08:02 Planned done-reports-carry: Done reports carry evidence and a blind self-check
+- 2026-10-25 08:02 Planned audit-v3-blocking: Audit v3: blocking findings only, fix or answer, re-roll after 2 rounds (review audit)
+- 2026-10-25 08:02 Started a worker on finished-work-lands
+- 2026-10-25 08:03 Started a worker on steadier-merge-gate
+- 2026-10-25 08:03 Started a worker on workers-run-a-sandboxed
+- 2026-10-25 08:03 Started a worker on done-reports-carry
+- 2026-10-25 08:03 Started a worker on audit-v3-blocking
