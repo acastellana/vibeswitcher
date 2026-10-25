@@ -1294,3 +1294,5 @@
 - 2026-10-26 00:14 Planned sessionstoretests-team: SessionStoreTests' team-count test holds on a loaded Mac
 - 2026-10-26 00:14 Audit of a-verifier-that-ends: complete, clean, round 1: 5 Nit open
 - 2026-10-26 00:21 Merged notifications-only-when: Notifications only when everything is done or the user is needed
+- 2026-10-26 00:21 Automatically (auto_advance): Merged notifications-only-when (Notifications only when everything is done or the user is needed) into project-lead at ae0eea3b, on its passing audit and the full test run.
+- 2026-10-26 00:28 Merged a-verifier-that-ends: A verifier that ends without a verdict is retried by itself
