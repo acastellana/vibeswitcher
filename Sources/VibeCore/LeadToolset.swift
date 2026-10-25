@@ -1513,10 +1513,22 @@ public final class LeadToolset: MCPToolset {
                 || (Self.isTeamSession(session, in: folder) && LeadTeams.role(label: session.label) == .verifier))
         }
         guard !earlier.isEmpty else { return "" }
+        // Off the board first: a witness pass while they end (or while the new one starts) would take one for a
+        // verifier that ended without its verdict, and tell the lead to audit again.
+        let named = try store.update { board -> (verifier: String?, panel: LeadAuditPanel?) in
+            guard let index = board.taskIndex(task.slug) else { return (nil, nil) }
+            defer { (board.tasks[index].verifier, board.tasks[index].panel) = (nil, nil) }
+            return (board.tasks[index].verifier, board.tasks[index].panel)
+        }
         // One the host didn't end, ended as cleanup ends one (see endItself).
         let endings = try endItself(try end(earlier, refused: refused), refused: refused)
         let failed = endings.filter { $0.failure != nil }
         guard failed.isEmpty else {
+            // Still running: the board names it again, as before this audit.
+            try? store.update { board in
+                guard let index = board.taskIndex(task.slug), board.tasks[index].verifier == nil, board.tasks[index].panel == nil else { return }
+                (board.tasks[index].verifier, board.tasks[index].panel) = named
+            }
             throw Problem(text: "\(not): \(task.slug)'s earlier verifier is still running (\(failed.map(\.said).joined(separator: "; "))), and one more beside it "
                           + "would make two. If the host refuses, tell the user (they can end it in VibeSwitcher), then audit again.")
         }
