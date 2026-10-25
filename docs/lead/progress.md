@@ -1264,3 +1264,10 @@
 - 2026-10-25 16:33 Update: Freezes, memory and git hooks fixed; the board is clear — The loop merged these by itself. They reach your app at the next install.
 - 2026-10-25 16:33 Update: Retrospective: first day on auto_advance — **Went well:**
 - 2026-10-25 19:13 Workflow: watch_app_logs = `true`
+- 2026-10-25 22:41 Planned open-sessions-pick-up: Open sessions pick up an installed tool server by themselves (review audit)
+- 2026-10-25 22:41 Planned each-task-has-a: Each task has a time budget; at it the worker stops and reports
+- 2026-10-25 22:41 Planned today-s-flaky-tests: Today's flaky tests pass reliably on a loaded Mac
+- 2026-10-25 22:41 Planned a-fresh-worktree-starts: A fresh worktree starts from a copy of the last build
+- 2026-10-25 22:43 Started a worker on open-sessions-pick-up
+- 2026-10-25 22:43 Started a worker on each-task-has-a
+- 2026-10-25 22:43 Started a worker on today-s-flaky-tests
