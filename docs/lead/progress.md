@@ -1272,3 +1272,7 @@
 - 2026-10-25 22:43 Started a worker on each-task-has-a
 - 2026-10-25 22:43 Started a worker on today-s-flaky-tests
 - 2026-10-25 22:48 Planned notifications-only-when: Notifications only when everything is done or the user is needed
+- 2026-10-25 22:50 Review of today-s-flaky-tests: audit
+- 2026-10-25 22:53 Planned a-verifier-that-ends: A verifier that ends without a verdict is retried by itself (review audit)
+- 2026-10-25 22:53 Started a worker on notifications-only-when
+- 2026-10-25 22:53 Started a worker on a-verifier-that-ends
