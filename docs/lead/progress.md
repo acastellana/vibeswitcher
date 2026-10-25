@@ -1277,3 +1277,8 @@
 - 2026-10-25 22:53 Started a worker on notifications-only-when
 - 2026-10-25 22:53 Started a worker on a-verifier-that-ends
 - 2026-10-25 23:29 Merged each-task-has-a: Each task has a time budget; at it the worker stops and reports (no audit: review none)
+- 2026-10-25 23:29 Automatically (auto_advance): Merged each-task-has-a (Each task has a time budget; at it the worker stops and reports) into project-lead at 8ddafec9, review none: on its worker's done report on ce052bcf and the full test run.
+- 2026-10-25 23:29 Automatically (auto_advance): Cleaned up each-task-has-a (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-10-25 23:33 Planned a-short-project-map: A short project map every worker reads first (CLAUDE.md) (review audit)
+- 2026-10-25 23:33 Planned every-task-gets-a: Every task gets a receipt: time, tokens, cost, rounds, rollback
+- 2026-10-25 23:33 Planned the-lead-s-rules: The lead's rules that matter become checks, not just notes (review audit)
