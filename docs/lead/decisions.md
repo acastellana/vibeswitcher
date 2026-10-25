@@ -420,3 +420,7 @@ The user asked for a clear signal plus a simple-terms AI summary when all tasks 
 
 The user answered 'Start Phases 1 and 2 together' on 2026-10-25. Data from 2026-10-22..25: 59% of task time was finished work waiting for the lead, about 1.15 of 5 worker slots were used, 17 of 29 failing merges passed on retry, 21 conflicts cost 40.7 task-hours, about 30% of Important findings were dismissed, and the user found 35 bugs by hand. The design follows OpenAI's Symphony and harness write-ups, Anthropic's risk-tiered review, and the research on self-review and fix-loop decay. Overnight merges were taken as included: the merge policy is auto, and nothing reaches the app before the user installs.
 
+## 2026-10-25 09:46:35 From the retrospective of the Lead Process v3 batch: a fix's regression test must be shown to fail without the fix. The worker's evidence shows it, and the re-audit checks it; task a-fix-s-regression. No change for the load waits: the room messages handled them.
+
+finished-work-lands F1's two new tests would have passed on the old code too. The verifier couldn't prove it because a scratch-export command was denied. Without such proof a "fixed" finding has no guard against the bug coming back.
+

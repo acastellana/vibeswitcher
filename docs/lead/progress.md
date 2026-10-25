@@ -1169,3 +1169,7 @@
 - 2026-10-25 09:33 Audit of finished-work-lands: complete, clean, round 2: 1 Important closed, 2 Nit closed
 - 2026-10-25 09:39 Merged benches-stop-writing-the: Benches stop writing the real ~/Library/Preferences/VibeSwitcher.plist (no audit: review none)
 - 2026-10-25 09:45 Merged finished-work-lands: Finished work lands without waiting for the lead
+- 2026-10-25 09:46 Update: Lead Process v3 (phases 1 and 2) is merged — All five tasks from the process research are merged into project-lead. A small follow-up is merged too. They take effect for every project's lead at the next install.
+- 2026-10-25 09:46 Planned a-fix-s-regression: A fix's regression test is shown to fail without the fix
+- 2026-10-25 09:46 Started a worker on a-fix-s-regression
+- 2026-10-25 09:46 Update: Retrospective: Lead Process v3 batch — **Went well:** six tasks merged in about two hours, with no reverts and no merge conflicts that needed rework. Five workers ran at once, against the 1.15 average before. Catch-up messages after each m…
