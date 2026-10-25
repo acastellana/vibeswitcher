@@ -82,8 +82,9 @@ scripts/test-under-load.sh --load 24 -r 3 -f 'NewTests'   # new tests under load
 bash scripts/test.sh --perf                         # benches only, on a calm Mac
 ```
 
-Sandbox (UI changes): `bash scripts/sandbox-app.sh run`, then `chat`, `type TEXT`, `send`, `settings TAB`,
-`sheet NAME`, `shot NAME` (light and dark PNGs in .build/sandbox-shots/), `quit`; `help` lists the rest.
+Sandbox (UI changes), each step its own command: `bash scripts/sandbox-app.sh run`, then
+`bash scripts/sandbox-app.sh chat` (or `type TEXT`, `send`, `settings TAB`, `sheet NAME`; `help` lists them),
+`bash scripts/sandbox-app.sh shot NAME` (light and dark PNGs in .build/sandbox-shots/), `bash scripts/sandbox-app.sh quit`.
 
 Helpers: `Resources/bin/vs-heavy` (Mac-wide slots for heavy work), `scripts/lib/scratch.sh` (scripts' scratch TMPDIR).
 
