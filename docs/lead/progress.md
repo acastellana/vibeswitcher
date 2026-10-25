@@ -1241,3 +1241,4 @@
 - 2026-10-25 14:04 Started a worker on planted-git-hooks-or
 - 2026-10-25 14:04 Automatically (auto_advance): Started a worker on planted-git-hooks-or (Planted git hooks or executable config don't run as the lead), its after tasks done (merge-tests-don-t).
 - 2026-10-25 14:05 Update: Interface fixes and three bugs from the logs are merged — The loop merged these by itself. They reach your app at the next install.
+- 2026-10-25 14:42 Merged a-watcher-tells-the: A watcher tells the lead about VibeSwitcher's own freezes, crashes and memory growth (no audit: review none)
