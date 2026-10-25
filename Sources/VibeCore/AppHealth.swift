@@ -56,7 +56,15 @@ public enum AppHealth {
         public init(name: String) { self.name = name }
 
         /// What makes two freezes the same: their top 3 app frames.
-        public var signature: String { frames.isEmpty ? "no app frames" : frames.prefix(3).joined(separator: " < ") }
+        /// With none, the busiest path's top 3 frames whatever their image (see `AppHealth.systemFrames`).
+        public var systemFrames: [String] = []
+
+        /// What makes two freezes the same: their top 3 app frames, else their top 3 frames; nil without a sample
+        /// (nothing to tell it by: it's never taken for another).
+        public var signature: String? {
+            if !frames.isEmpty { return frames.prefix(3).joined(separator: " < ") }
+            return systemFrames.isEmpty ? nil : "no app frames: " + systemFrames.joined(separator: " < ")
+        }
     }
 
     /// A freeze from its .log (`log`, the header and state) and its sample (`sample`), either missing.
@@ -85,6 +93,7 @@ public enum AppHealth {
             hang.footprint = sampleMegabytes(sample, "Physical footprint:")
             hang.peak = sampleMegabytes(sample, "Physical footprint (peak):")
             hang.frames = appFrames(sample: sample, image: "VibeSwitcher")
+            if hang.frames.isEmpty { hang.systemFrames = systemFrames(sample: sample) }
         }
         return hang
     }
@@ -134,6 +143,27 @@ public enum AppHealth {
     /// The main thread's busiest path in a `sample` report's call graph, as its frames in `image` (by function name),
     /// the top of the stack first, at most 5.
     public static func appFrames(sample: String, image: String) -> [String] {
+        frames(busiestPath(sample: sample).filter { $0.image == image }.map(\.name))
+    }
+
+    /// With no app frame on that path (a SwiftUI or AttributeGraph stall): its top 3 frames whatever their image,
+    /// "name (image)", the top first.
+    public static func systemFrames(sample: String) -> [String] {
+        Array(frames(busiestPath(sample: sample).map { "\($0.name) (\($0.image))" }).prefix(3))
+    }
+
+    /// `names` (outermost first) without wrappers and repeats, the top of the stack first, at most 5.
+    static func frames(_ names: [String]) -> [String] {
+        var result: [String] = []
+        for name in names.reversed() where !entryPoints.contains(name) && !wrapperPrefixes.contains(where: name.hasPrefix) && result.last != name {
+            result.append(name)
+        }
+        return Array(result.prefix(5))
+    }
+
+    /// The main thread's busiest path (at each frame, the callee with the most samples), outermost first: each frame's
+    /// function name and image.
+    static func busiestPath(sample: String) -> [(name: String, image: String)] {
         let lines = sample.components(separatedBy: "\n")
         guard let graph = lines.firstIndex(where: { $0.hasPrefix("Call graph:") }) else { return [] }
         // The main thread's block: its line, then every line indented deeper.
@@ -158,7 +188,6 @@ public enum AppHealth {
                 threadDepth = depth
             }
         }
-        guard !nodes.isEmpty else { return [] }
         let roots = nodes.indices.filter { nodes[$0].parent == nil }
         guard var current = roots.max(by: { nodes[$0].count < nodes[$1].count }) else { return [] }
         var path = [current]
@@ -166,18 +195,15 @@ public enum AppHealth {
             path.append(next)
             current = next
         }
-        let marker = "  (in \(image))"
-        let names: [String] = path.compactMap { index in
+        return path.compactMap { index in
+            // "name  (in Image) + 12  [0x…]  File.swift:3"
             let text = nodes[index].text
-            guard let range = text.range(of: marker) else { return nil }
-            var name = String(text[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+            guard let open = text.range(of: "  (in "), let close = text[open.upperBound...].firstIndex(of: ")") else { return nil }
+            var name = String(text[..<open.lowerBound]).trimmingCharacters(in: .whitespaces)
             for prefix in ["specialized ", "merged "] where name.hasPrefix(prefix) { name = String(name.dropFirst(prefix.count)) }
-            guard !name.isEmpty, !entryPoints.contains(name), !wrapperPrefixes.contains(where: name.hasPrefix) else { return nil }
-            return String(name.prefix(120))
+            guard !name.isEmpty else { return nil }
+            return (String(name.prefix(120)), String(text[open.upperBound..<close].prefix(60)))
         }
-        var deduplicated: [String] = []
-        for name in names.reversed() where deduplicated.last != name { deduplicated.append(name) }
-        return Array(deduplicated.prefix(5))
     }
 
     /// A call graph line ("    + ! : | 2345 frame  (in Image) + 12  [0x…]"): its depth (the width of its tree
@@ -504,8 +530,13 @@ public enum AppHealth {
             }
             var freezes: [String] = []
             var repeated: [String] = []
-            let groups = Dictionary(grouping: read.filter { hang in !unsampled.contains { $0.name == hang.name } }, by: \.signature)
-            for (signature, group) in groups.sorted(by: { $0.value[0].name < $1.value[0].name }) {
+            // One without a signature is a group of its own.
+            let groups = Dictionary(grouping: read.filter { hang in !unsampled.contains { $0.name == hang.name } }, by: { $0.signature ?? $0.name })
+            for (_, group) in groups.sorted(by: { $0.value[0].name < $1.value[0].name }) {
+                guard let signature = group[0].signature else {
+                    freezes.append(Self.line(group))
+                    continue
+                }
                 let key = "hang " + signature
                 if let last = told[key], at - last.at < AppHealth.repeatWithin {
                     told[key]?.repeats += group.count
@@ -569,7 +600,9 @@ public enum AppHealth {
             if let footprint = hang.footprint {
                 words.append(String(format: "footprint %.0f MB", footprint) + (hang.peak.map { String(format: " (peak %.0f MB)", $0) } ?? "") + ";")
             }
-            words.append(hang.frames.isEmpty ? "no app frames on the main thread's busiest path" : "top app frames: " + hang.frames.joined(separator: " < "))
+            if !hang.frames.isEmpty { words.append("top app frames: " + hang.frames.joined(separator: " < ")) }
+            else if !hang.systemFrames.isEmpty { words.append("no app frames on the main thread's busiest path; its top frames: " + hang.systemFrames.joined(separator: " < ")) }
+            else { words.append("no sample of its stacks") }
             return words.joined(separator: " ")
         }
 

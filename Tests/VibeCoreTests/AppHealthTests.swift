@@ -130,7 +130,8 @@ struct AppHealthTests: LeadTeamFixture {
         #expect(hang.frames.isEmpty)
         let line = AppHealth.Watch.line([hang])
         #expect(line.contains("stuck, no recovery recorded"))
-        #expect(line.contains("no app frames"))
+        #expect(line.contains("no sample of its stacks"))
+        #expect(hang.signature == nil)
     }
 
     @Test func aNewHangIsOneDigestWithItsFieldsAndNoMessageText() throws {
@@ -232,7 +233,7 @@ struct AppHealthTests: LeadTeamFixture {
         watch.saw(hangs: folders.hangNames(), crashes: [], now: later)
         watch.look(now: later.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
         #expect(watch.pending.isEmpty)
-        let key = "hang " + folders.hang("hang-20261025-140210").signature
+        let key = "hang " + (folders.hang("hang-20261025-140210").signature ?? "")
         #expect(watch.told[key]?.repeats == 1)
         #expect(watch.told[key]?.first == "hang-20261025-140210")
         // A different freeze in the same window as a repeat is told, the repeat counted beside it.
@@ -254,6 +255,55 @@ struct AppHealthTests: LeadTeamFixture {
         watch.saw(hangs: folders.hangNames(), crashes: [], now: nextDay)
         watch.look(now: nextDay.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
         #expect(watch.pending.contains { $0.contains("hang-20261026-150210:") })
+    }
+
+    /// A sample whose main thread's busiest path has no app frame: a SwiftUI stall ending in `leaf`.
+    static func frameless(_ leaf: String) -> String {
+        """
+        Physical footprint:         512.0M
+        ----
+
+        Call graph:
+            100 Thread_1   DispatchQueue_1: com.apple.main-thread  (serial)
+            + 100 VibeSwitcher_main  (in VibeSwitcher) + 1  [0x1]
+            +   100 -[NSApplication run]  (in AppKit) + 1  [0x2]
+            +     100 GraphHost.runTransaction(_:do:id:)  (in SwiftUICore) + 1  [0x3]
+            +       100 \(leaf)  (in AttributeGraph) + 1  [0x4]
+
+        """
+    }
+
+    @Test func freezesWithoutAppFramesAreToldByTheirOwnTopFrames() throws {
+        let folders = try folders()
+        var watch = AppHealth.Watch()
+        try writeHang("hang-20261025-100000", in: folders, sample: Self.frameless("AG::Subgraph::update(unsigned int)"))
+        watch.saw(hangs: folders.hangNames(), crashes: [], now: start)
+        watch.look(now: start.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
+        let first = try #require(watch.pending.first)
+        #expect(first.contains("no app frames on the main thread's busiest path; its top frames: AG::Subgraph::update(unsigned int) (AttributeGraph) < "
+                               + "GraphHost.runTransaction(_:do:id:) (SwiftUICore) < -[NSApplication run] (AppKit)"), "\(first)")
+        watch.pending = []
+        // Another stall with no app frame, somewhere else: news, not a repeat of the first.
+        let later = start.addingTimeInterval(5 * 3600)
+        try writeHang("hang-20261025-150000", in: folders, sample: Self.frameless("AG::Graph::value_ref(AG::AttributeID)"))
+        // And the first one's again: a repeat.
+        try writeHang("hang-20261025-150500", in: folders, sample: Self.frameless("AG::Subgraph::update(unsigned int)"))
+        watch.saw(hangs: folders.hangNames(), crashes: [], now: later)
+        watch.look(now: later.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
+        let second = try #require(watch.pending.first)
+        #expect(second.contains("hang-20261025-150000:"), "\(second)")
+        #expect(!second.contains("hang-20261025-150500:"))
+        #expect(second.contains("a freeze like hang-20261025-100000"))
+        // Two with no sample at all: each told, neither taken for the other.
+        watch.pending = []
+        let third = later.addingTimeInterval(3600)
+        for name in ["hang-20261025-160000", "hang-20261025-160100"] {
+            try Self.log().write(to: folders.debug.appendingPathComponent(name + ".log"), atomically: true, encoding: .utf8)
+        }
+        watch.saw(hangs: folders.hangNames(), crashes: [], now: third)
+        watch.look(now: third.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
+        let fourth = try #require(watch.pending.first)
+        #expect(fourth.contains("hang-20261025-160000:") && fourth.contains("hang-20261025-160100:"), "\(fourth)")
     }
 
     // MARK: Crashes
