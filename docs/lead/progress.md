@@ -1211,3 +1211,8 @@
 - 2026-10-25 12:41 Planned a-new-audit-ends: A new audit ends the task's earlier verifier
 - 2026-10-25 12:41 Started a worker on app-memory-stops-growing
 - 2026-10-25 12:41 Automatically (auto_advance): Started a worker on app-memory-stops-growing (App memory stops growing ~150 MB an hour).
+- 2026-10-25 13:07 Planned planted-git-hooks-or: Planted git hooks or executable config don't run as the lead (review audit)
+- 2026-10-25 13:07 Started a worker on a-new-audit-ends
+- 2026-10-25 13:07 Automatically (auto_advance): Started a worker on a-new-audit-ends (A new audit ends the task's earlier verifier).
+- 2026-10-25 13:21 Merged lead-team-panel-clear: Lead Team panel: clear task states, honest scorecard, shorter history (no audit: review none)
+- 2026-10-25 13:21 Flaky in lead-team-panel-clear's merge: aSendWhileAnotherProcessHoldsTheInboxReturnsAtOnceAndLandsWhenItsFree(), aFailingTestsHostIsEnded(), aToolThatGivesNoAnswerIsEnded(), noTestReadsTheMacsOwnFreeSpace(), aFailingSceneIsEnded() failed the first test run and passed its rerun (the whole test command); merged on the rerun
