@@ -53,6 +53,19 @@ import Testing
             return (text, result["isError"] as? Bool ?? true)
         }
 
+        /// A tool call once the toolset is settled: a call while the server still asks the host for its role (a loaded
+        /// host may not answer its first whoami in time, see `MCPHostedToolset`) is answered `waiting`, and asked again
+        /// as the next id. `id`: the next free one.
+        func settledCall(_ id: inout Int, _ tool: String, _ arguments: [String: Any] = [:]) throws -> (text: String, isError: Bool)? {
+            var answer: (text: String, isError: Bool)?
+            _ = eventually {
+                defer { id += 1 }
+                answer = try? call(id, tool, arguments)
+                return answer.map { $0.text != MCPHostedToolset.waiting } ?? false
+            }
+            return answer
+        }
+
         var errors: String { (try? String(contentsOfFile: "\(folder)/\(name).err", encoding: .utf8)) ?? "" }
         var pid: pid_t? { (try? String(contentsOfFile: "\(folder)/\(name).pid", encoding: .utf8)).flatMap { pid_t($0.trimmingCharacters(in: .whitespacesAndNewlines)) } }
     }
@@ -128,9 +141,15 @@ import Testing
         let lead = Server(folder: folder, name: "lead"), worker = Server(folder: folder, name: "worker")
         #expect(try lead.initialize(), "lead's stderr: \(lead.errors)")
         #expect(try worker.initialize(), "worker's stderr: \(worker.errors)")
-        let before = try lead.call(2, "status")
+        var leadID = 2, workerID = 2
+        let before = try lead.settledCall(&leadID, "status")
         #expect(before?.isError == false, "status: \(before?.text ?? "no answer"); stderr: \(lead.errors)")
         let leadPid = try #require(lead.pid), workerPid = try #require(worker.pid)
+        // The servers end before the scratch folder goes: one still ending would write into it again.
+        defer {
+            for pid in [leadPid, workerPid] { kill(pid, SIGTERM) }
+            #expect(eventually { kill(leadPid, 0) != 0 && kill(workerPid, 0) != 0 })
+        }
         let leadTTY = try #require(store.load().leadTTY, "the lead didn't record itself on the board")
 
         // The loop runs in the lead's server: it holds its lock, and its first pass's report reaches the lead sealed.
@@ -152,7 +171,7 @@ import Testing
         #expect(lead.pid == leadPid && worker.pid == workerPid)
 
         // The lead's server is still the lead's: status answers, its role is the same grant in the same session.
-        let after = try lead.call(3, "status")
+        let after = try lead.settledCall(&leadID, "status")
         #expect(after?.isError == false, "status: \(after?.text ?? "no answer"); stderr: \(lead.errors)")
         guard case .member(let current?) = book.answer(.current(role: .lead, root: root, task: nil), from: .app) else {
             Issue.record("the lead's role is gone after the switch"); return
@@ -163,7 +182,7 @@ import Testing
         #expect(FileLock.attempt(advancing) == nil, "the new build's loop doesn't hold \(advancing)")
 
         // The worker's server reports as its session's worker.
-        let report = try worker.call(2, "report", ["status": "blocked", "summary": "Blocked on purpose (a test)."])
+        let report = try worker.settledCall(&workerID, "report", ["status": "blocked", "summary": "Blocked on purpose (a test)."])
         #expect(report?.isError == false, "report: \(report?.text ?? "no answer"); stderr: \(worker.errors)")
         let fromWorker = { inbox(vibe, tty: leadTTY).filter { $0.from == .system("worker t") } }
         #expect(eventually { fromWorker().count == 1 }, "the lead's inbox: \(inbox(vibe, tty: leadTTY))")
