@@ -606,8 +606,7 @@ final class HostClient: ObservableObject {
         var (cols, rows) = (cols, rows)
         if !Self.isRealSize(cols: cols, rows: rows) {
             // A view laid out at no real size still attaches (it needs the output), at the session's size.
-            let kept = size(of: id) ?? (min(max(cols, Self.realCols.lowerBound), Self.realCols.upperBound),
-                                        min(max(rows, Self.realRows.lowerBound), Self.realRows.upperBound))
+            let kept = keptSize(of: id, else: (cols, rows))
             note("host: \(id.uuidString.prefix(8)) not attached at \(cols)×\(rows), not a real size: at \(kept.cols)×\(kept.rows)")
             (cols, rows) = kept
         }
@@ -630,6 +629,14 @@ final class HostClient: ObservableObject {
     /// The session's PTY size, as the host last listed it.
     func size(of id: UUID) -> (cols: Int, rows: Int)? {
         sessions.first { $0.id == id }.map { ($0.cols, $0.rows) }
+    }
+
+    /// The size a view with no real size of its own keeps: the session's (`fallback` when the host doesn't list it),
+    /// brought into bounds, as a session sized wrongly before (by an earlier build) still lists that size.
+    func keptSize(of id: UUID, else fallback: (cols: Int, rows: Int)) -> (cols: Int, rows: Int) {
+        let listed = size(of: id) ?? fallback
+        return (min(max(listed.cols, Self.realCols.lowerBound), Self.realCols.upperBound),
+                min(max(listed.rows, Self.realRows.lowerBound), Self.realRows.upperBound))
     }
 
     private func sendAttach(_ id: UUID, cols: Int, rows: Int) {

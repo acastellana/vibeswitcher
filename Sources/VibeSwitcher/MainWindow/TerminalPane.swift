@@ -275,9 +275,9 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         // window a tall inspector had grown, attached at 116×392): the view keeps the session's size until it's shown,
         // and `unpark` sends the pane's. Before it's in `views`, so its own size change isn't sent.
         let laidOut = terminal.getTerminal()
-        if covered || !HostClient.isRealSize(cols: laidOut.cols, rows: laidOut.rows), let kept = host.size(of: id),
-           kept != (laidOut.cols, laidOut.rows) {
-            terminal.resize(cols: kept.cols, rows: kept.rows)
+        if covered || !HostClient.isRealSize(cols: laidOut.cols, rows: laidOut.rows) {
+            let kept = host.keptSize(of: id, else: (laidOut.cols, laidOut.rows))
+            if kept != (laidOut.cols, laidOut.rows) { terminal.resize(cols: kept.cols, rows: kept.rows) }
         }
         views[id] = terminal
         gates[id, default: ReplayGate()].attaching()

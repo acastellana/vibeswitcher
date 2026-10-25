@@ -112,6 +112,28 @@ struct HiddenTerminalSizeTests {
         #expect(await ptySize(p, b) == real)
     }
 
+    @Test func aSessionAlreadySizedWronglyIsBroughtIntoBoundsNotKeptThere() async throws {
+        let p = try Pane()
+        _ = try await p.spawn("first")
+        // As the leads were left by the build before (a host that outlived the app keeps them so): 116×392.
+        var result: Result<HostSession, HostClientError>?
+        p.host.spawn(SpawnRequest(cwd: scratchRoot.path, command: "echo 'lead ready'; exec /bin/cat", env: [:], cols: 116, rows: 392,
+                                  keepShell: false, label: "lead", agent: nil)) { result = $0 }
+        #expect(await until { result != nil })
+        let lead = try #require(result).get().id
+        #expect(p.host.size(of: lead).map { [$0.cols, $0.rows] } == [116, 392])
+        p.pane.covered = true
+        p.pane.view.frame = Self.grown
+        p.pane.show(hostID: lead, focus: false)
+        await drawn(p, lead, "lead")
+        #expect(viewSize(p, lead) == [116, HostClient.realRows.upperBound])
+        #expect(await ptySize(p, lead) == [116, HostClient.realRows.upperBound])
+        p.pane.view.frame = Self.real
+        p.pane.covered = false
+        let shown = viewSize(p, lead)
+        #expect(await ptySize(p, lead) == shown && HostClient.isRealSize(cols: shown[0], rows: shown[1]))
+    }
+
     @Test func realSizesAreTheOnesAScreenCanHave() {
         #expect(HostClient.isRealSize(cols: 116, rows: 56))
         #expect(HostClient.isRealSize(cols: 10, rows: 5) && HostClient.isRealSize(cols: 1_000, rows: 300))
