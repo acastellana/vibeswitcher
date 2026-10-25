@@ -699,9 +699,11 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         #expect(Git.run(["log", "-1", "--format=%s", work], in: root).output == "change b.txt")
     }
 
-    /// A fix's regression test is run on the code before the fix (`LeadPrompts.Policy.regressionTest`): a worker takes
-    /// the fix out of its worktree and puts it back; a worker or verifier unpacks the commit before it, with the new
-    /// test, in its own TMPDIR, and nowhere else. On 2026-10-25 finished-work-lands' verifier was refused that export.
+    /// A fix's regression test is run on the code before the fix (`LeadPrompts.Policy.regressionTest`): the worker takes
+    /// the fix out of its worktree by a reverse patch and puts it back. No role may export a commit to a scratch folder:
+    /// the rules that took (`git archive`, `tar -x -C`, `mkdir -p` in the TMPDIR) let commands and writes out (its audit,
+    /// 2026-10-25: `git archive --remote/--exec`, `--add-file`, a linked folder under the TMPDIR), and a re-audit reads
+    /// the worker's evidence instead.
     @Test func aFixsTestRunsOnTheCodeBeforeTheFixByTheCommandsTheBriefGives() throws {
         let root = try repo()
         let preFix = head("HEAD", root)
@@ -716,49 +718,26 @@ struct LeadGuardRailsTests: LeadTeamFixture {
             let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
             let permissions = try #require(settings?["permissions"] as? [String: [String]])
             let rules = (allow: permissions["allow"] ?? [], deny: permissions["deny"] ?? [])
-            let copy = scratch + "pre-fix-\(role.rawValue)"
-            // The brief's three commands, each piece of each pipe, with the TMPDIR written out.
-            for command in ["mkdir -p \(copy)", "git archive \(preFix)", "tar -x -C \(copy)", "git archive HEAD Tests/a.test"] {
-                #expect(Self.allowed(command, by: rules), "\(role): \(command)")
-            }
-            // Only there: not another folder, not out of it, not a second folder or another -C, nor an archive file.
-            for command in ["tar -x -C \(root)", "tar -x -C \(scratch)../x", "tar -x -C \(copy) -C \(root)", "tar -x -C \(copy) -P -f /x.tar",
-                            "mkdir -p \(copy) \(root)/x", "mkdir -p \(scratch)../x", "mkdir -p \(root)/x", "tar -x -C $TMPDIR/pre-fix",
-                            "git archive -o x.tar HEAD", "git archive HEAD -o x.tar", "git archive --output=x.tar HEAD",
-                            "git worktree add --detach \(copy) \(preFix)"] {
+            // No export: neither role has an allow for git archive, tar or mkdir, and none of the escapes runs unasked.
+            #expect(!rules.allow.contains { $0.contains("git archive") || $0.contains("tar ") || $0.contains("mkdir") }, "\(role): \(rules.allow)")
+            for command in ["git archive \(preFix)", "git archive --remote=x --exec=/bin/sh HEAD", "git archive --add-file=/x HEAD",
+                            "tar -x -C \(scratch)pre-fix", "mkdir -p \(scratch)pre-fix", "git worktree add --detach \(scratch)pre-fix \(preFix)"] {
                 #expect(!Self.allowed(command, by: rules), "\(role): \(command)")
             }
-            for command in ["tar -x -C \(scratch)../x", "tar -x -C \(copy) -C \(root)", "mkdir -p \(copy) \(root)/x", "git archive -o x.tar HEAD",
-                            "git archive HEAD -o x.tar", "git worktree add --detach \(copy) \(preFix)"] {
-                #expect(Self.denied(command, by: rules.deny), "\(role): \(command)")
+            // The worker's way, its reverse patch from git; the read-only verifier applies nothing.
+            for command in ["git diff \(preFix) HEAD -- a.txt", "git apply -R", "git apply"] {
+                #expect(Self.allowed(command, by: rules) == (role == .worker || command.hasPrefix("git diff")), "\(role): \(command)")
             }
-            // And they do what the brief says: the code before the fix, with the new test in.
-            let unpack = Shell.run(executable: "/bin/bash", args: ["-c", "mkdir -p \(copy) && git archive \(preFix) | tar -x -C \(copy) "
-                                                                    + "&& git archive HEAD Tests/a.test | tar -x -C \(copy)"], in: root)
-            #expect(unpack.ok, "\(unpack.error)")
-            #expect(try String(contentsOfFile: copy + "/a.txt", encoding: .utf8) == "one\n")
-            #expect(try String(contentsOfFile: copy + "/Tests/a.test", encoding: .utf8) == "expects fixed\n")
-            #expect(Git.run(["status", "--porcelain"], in: root).output.isEmpty)
         }
-        // The worker's other way, in its worktree: the fix out by a reverse patch from git, and back, its test kept.
-        let worker = (LeadLaunch.allow(.worker, base: "project-lead"), LeadLaunch.deny(.worker, base: "project-lead"))
-        for command in ["git diff \(preFix) HEAD -- a.txt", "git apply -R", "git apply"] {
-            #expect(Self.allowed(command, by: worker), "\(command)")
-        }
-        let verifier = (LeadLaunch.allow(.verifier), LeadLaunch.deny(.verifier))
-        for command in ["git apply -R", "git apply"] { #expect(!Self.allowed(command, by: verifier), "\(command)") }
+        // And it does what the brief says, in the worktree: the fix out, its test kept, and back with git status clean.
         let out = Shell.run(executable: "/bin/bash", args: ["-c", "git diff \(preFix) HEAD -- a.txt | git apply -R"], in: root)
         #expect(out.ok, "\(out.error)")
         #expect(try String(contentsOfFile: root + "/a.txt", encoding: .utf8) == "one\n")
         #expect(try String(contentsOfFile: root + "/Tests/a.test", encoding: .utf8) == "expects fixed\n")
         let back = Shell.run(executable: "/bin/bash", args: ["-c", "git diff \(preFix) HEAD -- a.txt | git apply"], in: root)
         #expect(back.ok, "\(back.error)")
+        #expect(try String(contentsOfFile: root + "/a.txt", encoding: .utf8) == "fixed\n")
         #expect(Git.run(["status", "--porcelain"], in: root).output.isEmpty)
-        // The lead makes no scratch copy, and only the session's own folder is open: another session's isn't.
-        let lead = (LeadLaunch.allow(.lead), LeadLaunch.deny(.lead))
-        #expect(!Self.allowed("git archive HEAD", by: lead))
-        let other = (LeadLaunch.allow(.verifier, scratch: tmp.path + "/a/"), LeadLaunch.deny(.verifier, scratch: tmp.path + "/a/"))
-        #expect(!Self.allowed("tar -x -C \(tmp.path)/b/pre-fix", by: other) && Self.allowed("tar -x -C \(tmp.path)/a/pre-fix", by: other))
     }
 }
 

@@ -137,16 +137,10 @@ struct LeadPolicyTextsTests {
                                                                   + "what a filtered run misses, which otherwise only the merge's full run finds.\nDone:"))
     }
 
-    /// A fix's regression test is shown to fail without the fix, by the worker and by a re-audit (2026-10-25: the two
-    /// tests for finished-work-lands' F1 fix would have passed on the old code too, and its verifier was refused the
-    /// scratch copy that would have shown it). The commands they name run under the rules: LeadGuardRailsTests.
+    /// A fix's regression test is shown to fail without the fix, by the worker's evidence, and a re-audit checks that
+    /// evidence (2026-10-25: the two tests for finished-work-lands' F1 fix would have passed on the old code too). The
+    /// commands the worker is given run under its rules: LeadGuardRailsTests.
     @Test func aFixsTestIsShownToFailWithoutTheFixByTheWorkerAndByTheReaudit() {
-        let copy = LeadPrompts.Policy.preFixCopy
-        for needle in ["a scratch copy of the commit before the fix with the new test copied in", "written out in full and unquoted",
-                       "`mkdir -p <TMPDIR>pre-fix`", "`git archive <pre-fix> | tar -x -C <TMPDIR>pre-fix`",
-                       "`git archive HEAD <the new test's files> | tar -x -C <TMPDIR>pre-fix`", "Its build is cold (minutes), so run the test there under `vs-heavy`"] {
-            #expect(copy.contains(needle), "missing \(needle)")
-        }
         // The worker: in its evidence, next to what the done report carries and the blind check.
         let workflow = LeadWorkflow.parse("---\nbase_branch: project-lead\n---")
         let worker = LeadPrompts.Policy.regressionTest(base: "project-lead")
@@ -154,23 +148,24 @@ struct LeadPolicyTextsTests {
             .contains(LeadPrompts.Policy.workerEvidence(base: "project-lead") + "\n" + worker + "\n" + LeadPrompts.Policy.workerFindings))
         for needle in ["for a bug fix or a fixed audit finding, the evidence includes the new test's failing run on the commit before the fix",
                        "the branch's merge-base with project-lead", "then its passing run after it",
-                       "a test that would pass either way doesn't cover the fix", "Prefer reverting the fix locally and restoring it",
-                       "`git diff <pre-fix> HEAD -- <the fix's files> | git apply -R`", "the same command without `-R`", "Or, when that won't do, " + copy] {
+                       "a test that would pass either way doesn't cover the fix", "by reverting the fix locally and restoring it, in this worktree",
+                       "`git diff <pre-fix> HEAD -- <the fix's files> | git apply -R`", "the same command without `-R`"] {
             #expect(worker.contains(needle), "missing \(needle)")
         }
-        // Not by a command the user's command guard refuses (it stops `git checkout <commit> -- <files>`).
-        #expect(!worker.contains("git checkout") && !worker.contains("git restore"))
+        // Not by a command the user's command guard refuses (it stops `git checkout <commit> -- <files>`), nor an export.
+        for refused in ["git checkout", "git restore", "git archive", "tar ", "TMPDIR"] { #expect(!worker.contains(refused), "\(refused)") }
 
-        // The re-audit, whatever its scope, and after a re-roll: the same copy, and a Nit when the test passes without the fix.
+        // The re-audit, whatever its scope, and after a re-roll: the worker's evidence, and a Nit when it falls short.
         let reroll = LeadReroll(archive: "archive/split-layer-1", commit: "aaaaaaaa1111", round: 2)
         for (scope, reroll) in [(LeadPrompts.Reaudit.Scope.since, nil), (.ownFiles(["a.swift"]), nil), (.wholeBranch(sameCommit: false), nil),
                                 (.wholeBranch(sameCommit: false), reroll)] {
             let text = LeadPrompts.recheck(.init(round: 3, since: "aaaaaaaa1111", head: "bbbbbbbb2222", open: [], known: [], stat: "", diff: nil,
                                                  base: "dev", scope: scope, reroll: reroll))
-            #expect(text.contains("A finding fixed with a new or changed test: confirm the test fails without the fix, on " + copy + ". "
-                                  + "The commit before the fix is usually aaaaaaaa, the one the earlier audit checked; then the test "
-                                  + "passes on the branch. When it passes without the fix too, the finding can still be fixed, but "
-                                  + "raise a Nit at the test's file and line, with that run: the test doesn't cover the fix."), "\(scope)")
+            #expect(text.contains("A finding fixed with a new or changed test: don't run the old code; check that the worker's "
+                                  + "evidence (its done report, or its answer below) shows the test failing on the commit before the "
+                                  + "fix and passing after it. When that evidence is missing, or the test plainly can't reach the bug "
+                                  + "the finding describes (it would pass on the old code too), the finding can still be fixed, but "
+                                  + "raise a Nit at the test's file and line saying which: the test doesn't cover the fix."), "\(scope)")
             // The one new Nit a re-audit raises.
             #expect(reroll != nil || text.contains("never a new Nit but the one for a fix's test below."), "\(scope)")
         }
