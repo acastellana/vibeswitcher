@@ -63,7 +63,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             let preset = presets.first { $0.agent == .claude && $0.place == .window } ?? presets.first { $0.agent == .claude }
             return preset.flatMap(LaunchPlan.command(for:)) ?? "claude"
         }
-        controller.notify = { [weak self] title, body in self?.notifier?.postInfo(title: title, body: body) }
+        controller.alert = { [weak self] event in self?.notifier?.post(event) }
         controller.select = { [weak self] id in self?.showMainWindow(select: id) }
         controller.keepAwake.mode = { [weak self] in self?.preferences.keepAwake ?? .never }
         controller.watchPower(limit: { [weak self] in self?.preferences.batteryHoldBelow ?? PowerWatch.defaultLimit }) { SystemPower.state() }
@@ -158,6 +158,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             self.open(session, source: "notification")
         }
         store.onAttention = { [weak self] session in self?.notifier?.post(for: session) }
+        // A lead's turn that ends on a question for you notifies (once per question, with the board's own alert).
+        notifier?.leadQuestion = { [weak self] session in
+            self?.leadController.boards.values.first { $0.leadTTY == session.tty }?.openQuestions.first
+        }
         store.onNudge = { [weak self] session, nudge in self?.notifier?.post(nudge, for: session) }
         notifier?.onAlert = { [weak self] title, body, tty in self?.phoneAccess.notify(title: title, body: body, tty: tty) }
         phoneAccess.onEvent = { [weak self] title, body in self?.notifier?.postInfo(title: title, body: body) }
@@ -501,7 +505,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         notifier?.refreshAuthorization()
         loadRecentProjects()
         let listed = store.split.listed
-        popoverState.selectedIndex = listed.firstIndex { $0.status == .needsInput && !$0.isPaused }
+        // A worker or verifier waiting waits on its lead, not you.
+        popoverState.selectedIndex = listed.firstIndex { $0.status == .needsInput && !$0.isPaused && !$0.waitsOnLead }
             ?? listed.firstIndex { $0.status == .done && !$0.isPaused } ?? 0
         hostingView.rootView = makePopoverContent()
         fitPopover()

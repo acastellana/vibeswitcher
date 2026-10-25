@@ -243,64 +243,46 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         AppStatus.extras["lastAlert"] = "test \(ISO8601DateFormatter().string(from: Date()))"
     }
 
+    /// What Settings › Notifications says, as `AlertRules` reads it.
+    private var settings: AlertRules.Settings {
+        AlertRules.Settings(needsInput: preferences.notifyNeedsInput, done: preferences.notifyDone,
+                            reminders: preferences.notifyReminders, sound: preferences.playSound)
+    }
+    /// The first open question a lead's board asks the user, by the lead's session (set by the app).
+    var leadQuestion: (Session) -> LeadQuestion? = { _ in nil }
+    private var gate = AlertRules.Gate()
+
+    /// A session went to needing input, or its turn ended.
     func post(for session: Session) {
-        let needsInput = session.status == .needsInput
-        guard needsInput ? preferences.notifyNeedsInput : preferences.notifyDone else { return }
-        AppStatus.extras["lastAlert"] = "\(session.status.rawValue) \(session.tty) \(ISO8601DateFormatter().string(from: Date()))"
-        // A lead's worker or verifier by its team: "acme · worker fix-login needs your input".
-        let name = SessionTeams.name(of: session) ?? session.displayName
-        let title = needsInput ? "\(name) needs your input" : "\(name) is done"
-        onAlert?(title, [session.task, session.detail].compactMap { $0 }.joined(separator: "\n"), session.tty)
-        // Without notification permission, at least make a sound when something is blocked on you.
-        guard allowed == true else {
-            if needsInput, preferences.playSound { NSSound(named: "Ping")?.play() }
-            return
-        }
-        let content = UNMutableNotificationContent()
-        content.title = title
-        content.subtitle = session.task ?? session.agent.displayName
-        if let detail = session.detail { content.body = detail }
-        content.sound = needsInput && preferences.playSound ? .default : nil
-        content.userInfo = ["tty": session.tty]
-        // One notification per terminal: a newer state replaces the older banner.
-        center.add(UNNotificationRequest(identifier: session.tty, content: content, trigger: nil))
+        post(AlertRules.attention(session, question: session.teamRole == .lead ? leadQuestion(session) : nil, settings: settings))
     }
 
     func post(_ nudge: Nudge, for session: Session) {
-        guard preferences.notifyReminders else { return }
-        AppStatus.extras["lastAlert"] = "reminder \(session.tty) \(ISO8601DateFormatter().string(from: Date()))"
-        defer { onAlert?(nudgeTitle(nudge, session), session.activity ?? session.detail ?? "", session.tty) }
-        guard allowed == true else { return }
-        let content = UNMutableNotificationContent()
-        let task = session.task.map { " · \($0)" } ?? ""
-        switch nudge {
-        case .stillWaiting(let minutes):
-            content.title = "\(session.displayName) is still waiting for you"
-            content.subtitle = "For \(minutes) min" + task
-            content.body = session.detail ?? ""
-            content.sound = preferences.playSound ? .default : nil
-        case .stalled(let minutes):
-            if let activity = session.activity {
-                // A long command may be legitimate (a build, a test suite): say what, and let you judge.
-                content.title = "\(session.displayName): one command running for \(minutes) min"
-                content.subtitle = activity
-                content.body = "No other progress since it started. Check it isn't stuck."
-            } else {
-                content.title = "\(session.displayName) may be stuck"
-                content.subtitle = "No progress for \(minutes) min" + task
-            }
-        }
-        content.userInfo = ["tty": session.tty]
-        center.add(UNNotificationRequest(identifier: session.tty, content: content, trigger: nil))
+        post(AlertRules.nudge(nudge, for: session, settings: settings))
     }
 
-    private func nudgeTitle(_ nudge: Nudge, _ session: Session) -> String {
-        switch nudge {
-        case .stillWaiting(let minutes): return "\(session.displayName) is still waiting for you (\(minutes) min)"
-        case .stalled(let minutes):
-            return session.activity != nil ? "\(session.displayName): one command running for \(minutes) min"
-                                           : "\(session.displayName) may be stuck (\(minutes) min)"
+    /// What a lead's board says to the user: a question, its all-done card, something broken.
+    func post(_ event: AlertRules.LeadEvent) {
+        post(AlertRules.lead(event, settings: settings))
+    }
+
+    private func post(_ alert: AlertRules.Alert?) {
+        guard let alert = gate.pass(alert) else { return }
+        AppStatus.extras["lastAlert"] = "\(alert.kind) \(alert.tty) \(ISO8601DateFormatter().string(from: Date()))"
+        onAlert?(alert.phoneTitle, alert.phoneBody, alert.tty)
+        // Without notification permission, at least make a sound when something is blocked on you.
+        guard allowed == true else {
+            if alert.kind == .needsYou, alert.sound { NSSound(named: "Ping")?.play() }
+            return
         }
+        let content = UNMutableNotificationContent()
+        content.title = alert.title
+        if let subtitle = alert.subtitle { content.subtitle = subtitle }
+        content.body = alert.body
+        content.sound = alert.sound ? .default : nil
+        content.userInfo = ["tty": alert.tty]
+        // One notification per terminal: a newer state replaces the older banner.
+        center.add(UNNotificationRequest(identifier: alert.tty.isEmpty ? UUID().uuidString : alert.tty, content: content, trigger: nil))
     }
 
     /// A plain informational banner (pairings, remote input).

@@ -392,8 +392,9 @@ struct SessionRow: View {
                     HStack(spacing: 4) {
                         // The status as a shape and a word, not just the badge's colour.
                         StatusMarkView(session: session, size: 9).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
-                        Text(session.status.label)
-                            .foregroundStyle(session.isPaused ? Color.secondaryInk : session.status.color)
+                        // A team member waiting waits on its lead: not in the red that says you're needed.
+                        Text(LeadTeams.label(of: session))
+                            .foregroundStyle(session.isPaused || session.waitsOnLead ? Color.secondaryInk : session.status.color)
                             .lineLimit(1).fixedSize()
                         if session.statusSince > Date.distantPast.addingTimeInterval(1) {
                             TimelineView(.elapsed(since: session.statusSince, reduceMotion: reduceMotion, voiceOver: voiceOver)) { context in
@@ -518,7 +519,7 @@ struct TeamHeader: View {
         }
         .font(.caption).foregroundStyle(.secondaryInk)
         .padding(.horizontal, 8).padding(.top, 8).padding(.bottom, 2)
-        .help("Workers and verifiers \(team.project)'s lead started: not counted as your sessions, and only their needing you notifies you")
+        .help("Workers and verifiers \(team.project)'s lead started: not counted as your sessions, and they don't notify you: their lead answers them")
         .accessibilityElement(children: .ignore)
         .accessibilityAddTraits(.isHeader)
         .accessibilityLabel("\(team.project) team, \(team.members.count)")

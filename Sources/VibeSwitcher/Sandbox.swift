@@ -452,6 +452,28 @@ private final class Driver: NSObject, NSApplicationDelegate {
         startFake(label: "Lead · \(slug)", slug: slug, transcript: lines, done)
     }
 
+    /// A fake worker on the fake lead's running task, in its worktree, named on the board as that task's worker.
+    func startWorker(_ done: @escaping (String?) -> Void) {
+        let lead = "sandbox-lead", slug = "sync-landing-base-with-2", label = "Worker: Sync landing-base with main"
+        guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
+        startFake(label: label, slug: "\(lead)/.vibeswitcher/worktrees/\(slug)") { [weak self] problem in
+            guard let self else { return }
+            if let problem { return done(problem) }
+            guard let fake = self.fakeList.first(where: { $0.label == label }) else { return done("the worker isn't listed") }
+            let root = ((self.home as NSString).appendingPathComponent("projects/\(lead)") as NSString).standardizingPath
+            do {
+                try BoardStore(root: root).update { board in
+                    guard let index = board.tasks.firstIndex(where: { $0.slug == slug }) else { return }
+                    board.tasks[index].worker = fake.id.uuidString
+                    board.tasks[index].worktree = fake.cwd
+                }
+            } catch {
+                return done("couldn't write the lead's board: \(error)")
+            }
+            done(nil)
+        }
+    }
+
     /// The fake lead's conversation, ending a minute ago: the transcript's lines, and when it withdrew its question.
     static func leadTurns(now: Date) -> (String, Double) {
         var lines: [String] = []
@@ -574,6 +596,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("tell JSON", "hands the selected fake Claude a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("new [LABEL]", "starts another fake session"),
         ("lead", "shows a fake project lead's chat, at its end (started the first time): a board of tasks, a withdrawn question, tool runs and workers' messages"),
+        ("team", "starts a fake worker on the fake lead's running task, in its worktree (start the lead first); select it and tell it a permission to see it wait on its lead"),
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
         ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
@@ -748,6 +771,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
             if fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) { return show() }
             startLead { problem in if let problem { reply(false, problem) } else { show() } }
+        case "team": startWorker { problem in reply(problem == nil, problem ?? "worker started") }
         case "select":
             guard let row = WindowGroups.filter(model.sections, query: rest).first?.rows.first else { return reply(false, "no row matches \(rest)") }
             model.selectedID = row.id

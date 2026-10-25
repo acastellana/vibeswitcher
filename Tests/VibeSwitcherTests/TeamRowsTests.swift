@@ -140,11 +140,11 @@ struct TeamRowsTests {
         #expect(TeamRowDetails.findingText(nits[1]) == "F2 b.swift:9 — naming (unconfirmed: 1 of 3 finders saw it: finder 2)")
     }
 
-    @Test func aSessionWaitingOnYouNeedsYouWithoutAClock() {
+    @Test func aSessionWaitingOnInputWaitsOnItsLeadWithoutAClock() {
         let asking = Self.member(needsYou: true, working: false, activity: nil, detail: "Which database?")
         let row = row(Self.task("fix", .running), ["w-fix": asking])
         #expect(row.mark == .needsYou && row.group == .needsYou)
-        #expect(row.stateText(now: Self.now) == "Needs you")
+        #expect(row.stateText(now: Self.now) == "Waits on lead")
         #expect(row.line(summary: "Making a database") == "Which database?")
     }
 
@@ -308,7 +308,7 @@ struct TeamRowsTests {
                     "w-asking": Self.member(needsYou: true, working: false, activity: nil, detail: "Which?")]
         let rows = TeamRows.rows(board, seen: seen)
         #expect(rows.map(\.task.slug) == ["asking", "failed", "running", "rework", "review", "queued-b", "queued-a", "merged"])
-        #expect(TeamRows.summary(rows) == "team: 2 need you · 2 working · 1 in review · 2 queued")
+        #expect(TeamRows.summary(rows) == "team: 2 wait on lead · 2 working · 1 in review · 2 queued")
         #expect(TeamRows.summary([]) == "team: none running")
     }
 

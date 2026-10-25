@@ -89,6 +89,8 @@ extension WindowRow {
             let since: Date? = session.statusSince
             let text = session.status.word.text
             switch session.status {
+            // A worker or verifier asks its lead, not you: its team's work goes on.
+            case .needsInput where session.waitsOnLead: return RowState(text: LeadTeams.waitsOnLead, since: since, group: .working)
             case .needsInput: return RowState(text: text, since: since, group: .needsYou)
             case .working, .background:
                 if let activity = session.activity {

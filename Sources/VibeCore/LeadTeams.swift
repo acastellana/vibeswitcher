@@ -159,13 +159,24 @@ public enum LeadTeams {
         return hosted.isLive && !row.agentQuit
     }
 
+    /// What a worker's or verifier's row says while it waits on input: its lead answers it. "Needs you" is only ever
+    /// you (a lead's question, a prompt in the lead's terminal).
+    public static let waitsOnLead = "waits on lead"
+    public static let waitsOnLeadLabel = "Waits on lead"
+
+    /// "Waits on lead" where a session's state is said on its own (a pill, the popover's row), else its status's label.
+    public static func label(of session: Session) -> String { session.waitsOnLead ? waitsOnLeadLabel : session.status.label }
+
+    /// "1 waits on lead", "2 wait on lead".
+    public static func waitsOnLead(_ count: Int) -> String { count == 1 ? "1 waits on lead" : "\(count) wait on lead" }
+
     /// What a team member's row says: as any row, so a normal end (exit 0, or the hangup or terminate that ending a
     /// session sends: 129, 143) reads "finished" or "ended", not as an exit code (see `SessionEnd`).
     public static func state(of row: WindowRow, now: Date) -> RowState {
         row.state(now: now)
     }
 
-    /// "team: 1 needs you · 2 working · 1 in review": the live members' tasks (a worker and its verifier are one
+    /// "team: 1 waits on lead · 2 working · 1 in review": the live members' tasks (a worker and its verifier are one
     /// task), with the board's word where it has one. Ended members aren't counted.
     public static func summary(_ team: [WindowRow], label: (WindowRow) -> String?, board: LeadBoard?, now: Date) -> String {
         var order: [String] = []
@@ -176,15 +187,18 @@ public enum LeadTeams {
             tasks[key, default: []].append(row)
         }
         guard !order.isEmpty else { return "team: none running" }
-        // The glossary's words (`StateWord`), and the board's "in review" (nil here).
+        // The glossary's words (`StateWord`), the board's "in review" (nil here), and a member asking its lead
+        // (`waits`: never "needs you", which is only ever you).
         var counts: [StateWord?: Int] = [:]
+        var waits = 0
         for key in order {
             let rows = tasks[key] ?? []
             let groups = rows.map { $0.state(now: now).group }
             let status = board?.task(key)?.status
             let word: StateWord?
-            if groups.contains(.needsYou) {
-                word = .needsYou
+            if groups.contains(.needsYou) || rows.contains(where: { $0.session?.status == .needsInput }) {
+                waits += 1
+                continue
             } else if status == .done {
                 word = .done
             } else if status == .review || rows.contains(where: { role(label: label($0)) == .verifier }) {
@@ -200,7 +214,7 @@ public enum LeadTeams {
             }
             counts[word, default: 0] += 1
         }
-        let parts = ([.needsYou, .working, nil, .done, .idle, .unknown] as [StateWord?]).compactMap { word -> String? in
+        let parts = (waits > 0 ? [waitsOnLead(waits)] : []) + ([.working, nil, .done, .idle, .unknown] as [StateWord?]).compactMap { word -> String? in
             guard let count = counts[word] else { return nil }
             return word?.counted(count) ?? "\(count) in review"
         }

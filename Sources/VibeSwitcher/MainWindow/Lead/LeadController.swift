@@ -190,11 +190,15 @@ final class LeadController: ObservableObject {
     private let store: SessionStore
     /// The project's Claude command (its launch preset), flags included.
     private let claudeCommand: (String) -> String
-    var notify: (String, String) -> Void = { _, _ in }
+    /// What a board says to the user (a question, its all-done card, something broken): the app's notifier decides
+    /// whether it notifies (`AlertRules`).
+    var alert: (AlertRules.LeadEvent) -> Void = { _ in }
     var select: (UUID) -> Void = { _ in }
     private var timer: Heartbeat.Subscription?
     /// Questions told about (by id and version: a revision is news too).
     private var seenQuestions: Set<String> = []
+    /// When the app started: a question older than that was told before it (see `AlertRules.look`).
+    private let launchedAt = Date().timeIntervalSince1970
     /// What became of an answer that didn't land as one (the question was withdrawn, or answered already), by
     /// question id: its card says so.
     @Published private(set) var answerNotices: [String: String] = [:]
@@ -323,7 +327,10 @@ final class LeadController: ObservableObject {
             self?.keepRunningLeads()
         }
         baseMoves.onAsk = { [weak self] root, move in
-            self?.notify("\(move.branch) moved outside the lead's merges", "\(move.count) in \((root as NSString).lastPathComponent): accept them in the lead's chat, or keep its merges refused.")
+            // Its merges are refused until you decide: it waits on you.
+            self?.alert(.broken(title: "\(move.branch) moved outside the lead's merges",
+                                body: "\(move.count) in \((root as NSString).lastPathComponent): accept them in the lead's chat, or keep its merges refused.",
+                                leadTTY: self?.boards[root]?.leadTTY))
         }
         baseMoves.onTaken = { [weak self] root, move, taker in
             guard let self else { return }
@@ -673,12 +680,9 @@ final class LeadController: ObservableObject {
     }
 
     private func tell(timers fired: [String: [(question: LeadQuestion, message: String)]]) {
+        // No alert: the lead went ahead, so it no longer waits on you (the question's card says so).
         for (root, expired) in fired {
-            let project = (root as NSString).lastPathComponent
-            for (question, message) in expired {
-                deliver(message, from: .system("timer"), root: root)
-                notify("The lead of \(project) went ahead with ‘\(question.proposal ?? "")’", question.text)
-            }
+            for (_, message) in expired { deliver(message, from: .system("timer"), root: root) }
         }
     }
 
@@ -922,10 +926,9 @@ final class LeadController: ObservableObject {
         if read != decisions { decisions = read }
         baseMoves.look(roots)
         for (root, board) in loaded {
-            for question in board.openQuestions where seenQuestions.insert("\(question.id)#\(question.version)").inserted {
-                let project = (root as NSString).lastPathComponent
-                let timer = question.isCounting ? "Going with ‘\(question.proposal ?? "")’ in \(question.decideInText) unless you answer: " : ""
-                notify(question.version > 1 ? "The lead of \(project) updated a question" : "The lead of \(project) asks", timer + question.text)
+            for event in AlertRules.look(previous: previous[root], board: board, project: (root as NSString).lastPathComponent,
+                                         seen: &seenQuestions, launchedAt: launchedAt) {
+                alert(event)
             }
             witness(root: root, board: board, team: teams[root] ?? TeamReading())
             allDone.look(root: root, previous: previous[root], board: board)
@@ -1046,11 +1049,9 @@ final class LeadController: ObservableObject {
         }
     }
 
-    /// The stranded role sessions, in every project: to each running lead, as the witness, and to the user.
+    /// The stranded role sessions, in every project: to each running lead, as the witness (its team's, so no alert).
     private func tellStranded(_ text: String) {
         for root in leadSessions.keys { deliver(text, from: .system("witness"), root: root) }
-        let first = text.split(separator: "\n").first.map(String.init) ?? text
-        notify("Role sessions of finished tasks still run", first)
     }
 
     /// A task merged or abandoned: its ended workers and verifiers leave the session list (everywhere it's shown:

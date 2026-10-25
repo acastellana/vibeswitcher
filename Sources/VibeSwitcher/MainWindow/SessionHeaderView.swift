@@ -159,7 +159,9 @@ extension WindowRow {
             if let program = info.liveProgramStatus { return StatusRules.status(for: program).label }
             return state.group == .working ? "Starting" : "Shell"
         case .agent(let session):
-            return session.isPaused ? StateWord.paused.label : session.status.label
+            if session.isPaused { return StateWord.paused.label }
+            // A worker or verifier asks its lead, not you.
+            return LeadTeams.label(of: session)
         }
     }
 }

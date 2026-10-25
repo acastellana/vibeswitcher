@@ -138,6 +138,8 @@ public struct Session: Identifiable, Equatable, Sendable {
     public var teamRole: LeadLaunch.Role?
     /// A lead's worker or verifier: the lead's team, not one of your own sessions (see `SessionTeams`).
     public var isTeamMember: Bool { teamRole == .worker || teamRole == .verifier }
+    /// A worker or verifier waiting on input: its lead answers it, not you (see `LeadTeams.waitsOnLead`).
+    public var waitsOnLead: Bool { isTeamMember && status == .needsInput }
     /// The agent's own session id (from its hooks): what `--resume` takes.
     public var agentSessionID: String?
     /// Claude only: shells still running under the agent (background commands, monitor loops) as of the last scan,

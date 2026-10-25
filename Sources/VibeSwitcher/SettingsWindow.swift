@@ -114,6 +114,9 @@ struct BatteryHoldRow: View {
 }
 
 struct GeneralSettings: View {
+    /// Under Notifications: what a lead's team notifies about (see `AlertRules`).
+    static let teamNote = "A project lead's team notifies you only when all its work is done or you're needed (a question for you, a prompt in the lead's terminal). These settings apply to those too."
+
     @ObservedObject var preferences: Preferences
     @ObservedObject var setup: SetupModel
     let showWelcome: () -> Void
@@ -181,7 +184,7 @@ struct GeneralSettings: View {
             MacLimitsSection()
             if let policy { WorkingPolicySection(editor: policy) }
             if let briefing { BriefingSettings(preferences: preferences, briefing: briefing) }
-            Section("Notifications") {
+            Section {
                 LabeledContent("Permission") {
                     HStack {
                         SetupStatusLabel(status: setup.notificationStatus)
@@ -194,6 +197,10 @@ struct GeneralSettings: View {
                 Toggle("Notify when a session finishes", isOn: $preferences.notifyDone)
                 Toggle("Play a sound when a session needs input", isOn: $preferences.playSound)
                 Toggle("Remind me about waiting or stuck sessions", isOn: $preferences.notifyReminders)
+            } header: {
+                Text("Notifications")
+            } footer: {
+                SettingsFooter(Self.teamNote)
             }
         }
         .formStyle(.grouped)

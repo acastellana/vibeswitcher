@@ -10,7 +10,7 @@ struct MemberSeen: Equatable {
     var working: Bool
     /// What it's doing now, while it works.
     var activity: String?
-    /// What it asks, while it needs you.
+    /// What it asks, while it waits on input (from its lead).
     var detail: String?
     /// Since when it's in its current state (working, waiting).
     var since: Date?
@@ -19,7 +19,7 @@ struct MemberSeen: Equatable {
 }
 
 /// A task as one line of the Team view: a status mark, its title, and its state in words with how long it's been in
-/// it ("Working 12m", "Rework 1 · 22m", "In review 3m", "Needs you", "Queued"), from the board and what its sessions
+/// it ("Working 12m", "Rework 1 · 22m", "In review 3m", "Waits on lead", "Queued"), from the board and what its sessions
 /// are doing now.
 struct TeamRow: Identifiable, Equatable {
     /// The order rows are shown in.
@@ -59,7 +59,7 @@ struct TeamRow: Identifiable, Equatable {
     var id: String { task.id }
     var group: Group
     var mark: Mark
-    /// In words: "Working", "Rework 1", "In review", "Needs audit", "Ready to merge", "Needs you", "Failed", "Blocked",
+    /// In words: "Working", "Rework 1", "In review", "Needs audit", "Ready to merge", "Waits on lead", "Failed", "Blocked",
     /// "Stalled", "Queued", "Merged", "Folded", "Abandoned".
     var state: String
     /// When the current stage began; nil when there's no clock to show (or nothing says when it began).
@@ -68,7 +68,7 @@ struct TeamRow: Identifiable, Equatable {
     var checkpoint: LeadCheckpoint?
     /// What the agent at work is doing now (its hooks' words).
     var activity: String?
-    /// What it asks (needs you), why it's red, or, while reworked, why it last failed.
+    /// What it asks (waits on lead), why it's red, or, while reworked, why it last failed.
     var problem: String?
     /// The session whose agent is at work on it now: the worker, or the verifier in review.
     var agent: String?
@@ -190,7 +190,9 @@ enum TeamRows {
             case .agent(let session): started = session.startedAt
             case .hosted(let info): started = info.startedAt
             }
-            seen[id] = MemberSeen(live: live, needsYou: live && state.group == .needsYou, working: live && state.group == .working,
+            // Asking: on a prompt, or waiting on input from its lead (its row reads "waits on lead", group working).
+            let asking = state.group == .needsYou || row.session?.status == .needsInput
+            seen[id] = MemberSeen(live: live, needsYou: live && asking, working: live && !asking && state.group == .working,
                                   activity: activity, detail: row.session?.detail, since: state.since, startedAt: started)
         }
         return seen
@@ -266,14 +268,14 @@ enum TeamRows {
             row.since = since
         }
 
-        // A session waiting on an answer needs you, whatever the board says (a finished task's is history).
+        // A session waiting on an answer waits on its lead, whatever the board says (a finished task's is history).
         if ![.done, .folded, .abandoned].contains(task.status), let worker, worker.needsYou {
-            red(.needsYou, StateWord.needsYou.label, worker.detail.flatMap { $0.isEmpty ? nil : $0 } ?? "The worker is waiting for an answer.", since: nil)
+            red(.needsYou, LeadTeams.waitsOnLeadLabel, worker.detail.flatMap { $0.isEmpty ? nil : $0 } ?? "The worker is waiting for an answer.", since: nil)
             row.agent = task.worker
             return row
         }
         if task.status == .review, let verifier, verifier.needsYou {
-            red(.needsYou, StateWord.needsYou.label, verifier.detail.flatMap { $0.isEmpty ? nil : $0 } ?? "The verifier is waiting for an answer.", since: nil)
+            red(.needsYou, LeadTeams.waitsOnLeadLabel, verifier.detail.flatMap { $0.isEmpty ? nil : $0 } ?? "The verifier is waiting for an answer.", since: nil)
             row.agent = task.verifier
             return row
         }
@@ -405,13 +407,14 @@ enum TeamRows {
         return LeadTeams.isFinished(task)
     }
 
-    /// The lead row's "team: 1 needs you · 2 working · 1 in review · 3 queued", from the board's tasks as their rows
-    /// read them (a worker that hasn't begun is queued or starting, never idle).
+    /// The lead row's "team: 1 waits on lead · 2 working · 1 in review · 3 queued", from the board's tasks as their rows
+    /// read them (a worker that hasn't begun is queued or starting, never idle). The red ones (asking, failed, ended…)
+    /// are the lead's to handle: "needs you" is only ever you.
     static func summary(_ rows: [TeamRow]) -> String {
         var counts: [TeamRow.Group: Int] = [:]
         for row in rows { counts[row.group, default: 0] += 1 }
         var parts: [String] = []
-        if let count = counts[.needsYou] { parts.append(StateWord.needsYou.counted(count)) }
+        if let count = counts[.needsYou] { parts.append(LeadTeams.waitsOnLead(count)) }
         if let count = counts[.working] { parts.append(StateWord.working.counted(count)) }
         if let count = counts[.review] { parts.append("\(count) in review") }
         if let count = counts[.queued] { parts.append("\(count) queued") }

@@ -52,10 +52,11 @@ struct LeadTeamsTests {
                             projectName: { _ in "p" })[0].rows[0]
     }
 
-    func agentRow(_ cwd: String, status: SessionStatus) -> WindowRow {
+    func agentRow(_ cwd: String, status: SessionStatus, role: LeadLaunch.Role? = nil) -> WindowRow {
         var session = Session(tty: "ttys\(UUID().uuidString.prefix(4))", agent: .claude, pid: 1, startedAt: Date(), cwd: cwd, project: "p",
                               task: nil, status: status, statusSince: Date(), detail: nil, hasHooks: true, inTerminalApp: false)
         session.hostID = UUID()
+        session.teamRole = role
         return WindowRow(content: .agent(session), project: "p")
     }
 
@@ -122,11 +123,11 @@ struct LeadTeamsTests {
         team.append(member("Worker: D", shellRow(session("Worker: D", cwd: wt + "d", started: now - 600), tableReadAt: now)))
         #expect(LeadTeams.summary(team, label: { labels[$0.id] }, board: board, now: now) == "team: 2 working · 1 in review")
 
-        // Waiting on you comes first; a merged task's live worker is done; a just-started one is working.
+        // Waiting on its lead comes first; a merged task's live worker is done; a just-started one is working.
         team.append(member("Worker: E", agentRow(wt + "e", status: .idle)))
         team.append(member("Worker: F", shellRow(session("Worker: F", cwd: wt + "f", started: now - 5), tableReadAt: now)))
         team[0] = member("Worker: A", agentRow(wt + "a", status: .needsInput))
-        #expect(LeadTeams.summary(team, label: { labels[$0.id] }, board: board, now: now) == "team: 1 needs you · 2 working · 1 in review · 1 done")
+        #expect(LeadTeams.summary(team, label: { labels[$0.id] }, board: board, now: now) == "team: 1 waits on lead · 2 working · 1 in review · 1 done")
         // Without the board, a live verifier still means the task is in review; an idle worker is idle.
         let plain = [member("Worker: G", agentRow(wt + "g", status: .idle)), member("Verifier: H", agentRow(wt + "h", status: .idle))]
         #expect(LeadTeams.summary(plain, label: { labels[$0.id] }, board: nil, now: now) == "team: 1 in review · 1 idle")
@@ -134,6 +135,29 @@ struct LeadTeamsTests {
         let unread = [member("Worker: I", agentRow(wt + "i", status: .working)), member("Worker: J", agentRow(wt + "j", status: .unknown))]
         #expect(LeadTeams.summary(unread, label: { labels[$0.id] }, board: nil, now: now) == "team: 1 working · 1 unknown")
         #expect(LeadTeams.summary(Array(team[4..<18]), label: { labels[$0.id] }, board: board, now: now) == "team: none running")
+    }
+
+    /// A worker or verifier waiting on input waits on its lead: "needs you" is only ever the user (2026-10-25: a lead's row
+    /// said "team: 1 needs you" for a verifier that had ended without a verdict).
+    @Test func aMemberWaitingOnInputWaitsOnItsLead() {
+        let now = Date()
+        let wt = "/r/acme/.vibeswitcher/worktrees/"
+        var board = LeadBoard()
+        board.tasks = [task("a", .review), task("b", .running), task("c", .running)]
+        let verifier = agentRow(wt + "a", status: .needsInput, role: .verifier)
+        let labels = [verifier.id: "Verifier: A"]
+        #expect(LeadTeams.summary([verifier], label: { labels[$0.id] }, board: board, now: now) == "team: 1 waits on lead")
+        let two = [verifier, agentRow(wt + "b", status: .needsInput, role: .worker), agentRow(wt + "c", status: .working, role: .worker)]
+        #expect(LeadTeams.summary(two, label: { labels[$0.id] }, board: board, now: now) == "team: 2 wait on lead · 1 working")
+        // Its own row says so too, and isn't counted with what needs you.
+        let state = verifier.state(now: now)
+        #expect(state.text == "waits on lead" && state.group != .needsYou)
+        #expect(WindowGroups.summary(two, now: now) == "3 working")
+        // The popover's row and the header's pill say it on its own.
+        #expect(verifier.session.map(LeadTeams.label(of:)) == "Waits on lead")
+        // A session of yours on a prompt still needs you.
+        let yours = agentRow("/r/other", status: .needsInput)
+        #expect(yours.state(now: now).group == .needsYou && yours.session.map(LeadTeams.label(of:)) == "Needs you")
     }
 
     /// Under load the process table can't be read for a while (the store keeps the sessions of the last one read): a
