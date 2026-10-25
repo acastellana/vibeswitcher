@@ -37,8 +37,12 @@ enum BenchDefaults {
         guard UserDefaults.standard === BenchSuite.suite else { refuse() }
     }
 
+    /// What it says when it can't. The bench scripts look for it in a build (scripts/lib/bench-defaults.sh): a build
+    /// without it writes the real defaults, and they don't run it.
+    static let refusal = "couldn't give the bench defaults of its own: it doesn't run on the build's real ones"
+
     private static func refuse() -> Never {
-        FileHandle.standardError.write(Data("couldn't give the bench defaults of its own: it doesn't run on the build's real ones\n".utf8))
+        FileHandle.standardError.write(Data("\(refusal)\n".utf8))
         exit(64)
     }
 }

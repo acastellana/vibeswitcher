@@ -32,6 +32,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
+source scripts/lib/bench-defaults.sh
 # Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
 unset VIBESWITCHER_HOME
 
@@ -48,6 +49,8 @@ while getopts "n:j:S:b:B:qe:L:o:w:s:v:" option; do
 done
 shift $((OPTIND - 1))
 [[ $# -eq 2 ]] || { echo "usage: $0 [options] A.jsonl B.jsonl" >&2; exit 64; }
+# It may not write the real ~/Library/Preferences/VibeSwitcher.plist (scripts/lib/bench-defaults.sh).
+bench_defaults_in_scratch "$binary" || exit 1
 
 # The scratch home goes when the bench ends (Ctrl-C too): copies of the transcripts filled the disk otherwise. What
 # the runs printed stays in $outputs (replaced by the next run).

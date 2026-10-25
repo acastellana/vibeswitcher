@@ -20,6 +20,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
+source scripts/lib/bench-defaults.sh
 # Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
 unset VIBESWITCHER_HOME
 
@@ -68,6 +69,9 @@ if [[ -n $base && ! ( -f $base && -x $base ) ]]; then
     fi
     base=$folder/.build/debug/VibeSwitcher
 fi
+# Neither may write the real ~/Library/Preferences/VibeSwitcher.plist (scripts/lib/bench-defaults.sh).
+bench_defaults_in_scratch "$binary" || exit 1
+[[ -z $base ]] || bench_defaults_in_scratch "$base" || exit 1
 
 logs=${UI_BENCH_LOGS:-.build/ui-bench}
 mkdir -p "$logs"

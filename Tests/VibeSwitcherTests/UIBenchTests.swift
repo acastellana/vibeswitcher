@@ -27,12 +27,14 @@ struct UIBenchScriptTests {
     let cores = ProcessInfo.processInfo.processorCount
     let scratch = Scratch()
 
-    /// A fake build: notes its name in `order`, prints a check and its idle rate, exits with `status`.
-    func fakeBuild(_ name: String, rate: Double?, status: Int32 = 0, order: URL) throws -> URL {
+    /// A fake build: notes its name in `order`, prints a check and its idle rate, exits with `status`. It holds
+    /// `BenchDefaults.refusal`, as a build that keeps a bench's defaults in scratch does, unless `old`.
+    func fakeBuild(_ name: String, rate: Double?, status: Int32 = 0, order: URL, old: Bool = false) throws -> URL {
         let url = scratch.url("fake-\(name)")
         let result = rate.map { "echo 'RESULT idle-instructions-per-second \(Int($0))'" } ?? ""
         try """
         #!/bin/bash
+        # \(old ? "an older build" : BenchDefaults.refusal)
         echo \(name) >> '\(order.path)'
         echo 'PASS  idle: cpu 0.20 % on average (under 2 %)'
         \(result)
@@ -100,6 +102,20 @@ struct UIBenchScriptTests {
         let run = try bench(["-b", branch.path, "-B", base.path, "-r", "1", "1"])
         #expect(run.status == 134, "\(run.output)")
         #expect(run.output.contains("FAIL  idle: no instructions/s from the branch's runs"), "\(run.output)")
+    }
+
+    /// A build from before `BenchDefaults` would write the real ~/Library/Preferences/VibeSwitcher.plist: not run,
+    /// branch or base.
+    @Test func aBuildThatWritesTheRealDefaultsIsNotRun() throws {
+        let order = scratch.url("order")
+        let old = try fakeBuild("old", rate: 30e6, order: order, old: true)
+        let new = try fakeBuild("new", rate: 30e6, order: order)
+        for arguments in [["-b", old.path, "1"], ["-b", new.path, "-B", old.path, "-r", "1", "1"]] {
+            let run = try bench(arguments)
+            #expect(run.status == 1, "\(run.output)")
+            #expect(run.output.contains("\(old.path) predates BenchDefaults"), "\(run.output)")
+        }
+        #expect(self.order(order).isEmpty)
     }
 
     @Test func aLoadedMacIsNotJudgedAndNothingRuns() throws {

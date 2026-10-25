@@ -358,7 +358,8 @@ struct ChatBenchSettleScriptTests {
 
     func script(_ body: String) throws -> URL {
         let url = scratch.url("fake-chat-bench")
-        try "#!/bin/bash\n\(body)\n".write(to: url, atomically: true, encoding: .utf8)
+        // As a build that keeps a bench's defaults in scratch (scripts/lib/bench-defaults.sh looks for it).
+        try "#!/bin/bash\n# \(BenchDefaults.refusal)\n\(body)\n".write(to: url, atomically: true, encoding: .utf8)
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
         return url
     }

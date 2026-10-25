@@ -10,6 +10,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
+source scripts/lib/bench-defaults.sh
 # Each run's home is the one given below; an exported VIBESWITCHER_HOME would come before it (`VibePaths.root`).
 unset VIBESWITCHER_HOME
 
@@ -25,6 +26,8 @@ builds=()
 while [[ $# -gt 0 && $1 != -- ]]; do builds+=("$1"); shift; done
 [[ $# -gt 1 && ${#builds[@]} -gt 0 ]] || { echo "usage: $0 [options] NAME=BINARY... -- T.jsonl..." >&2; exit 64; }
 shift
+# None may write the real ~/Library/Preferences/VibeSwitcher.plist (scripts/lib/bench-defaults.sh).
+for build in "${builds[@]}"; do bench_defaults_in_scratch "${build#*=}" || exit 1; done
 
 # The scratch home goes when the bench ends (Ctrl-C too): copies of the transcripts filled the disk otherwise. What
 # the runs printed stays in .build/chat-bench-perf (replaced by the next run).

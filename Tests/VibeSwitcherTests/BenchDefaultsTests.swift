@@ -46,13 +46,30 @@ struct BenchDefaultsTests {
         #expect(await until { font() == 17 }, "no chatFontSize 17 in \(plist.path)")
     }
 
+    /// The bench scripts run this build: it holds what scripts/lib/bench-defaults.sh looks for.
+    @Test func theBenchScriptsRunThisBuild() throws {
+        let app = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("VibeSwitcher")
+        try #require(FileManager.default.isExecutableFile(atPath: app.path))
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/bash")
+        process.arguments = ["-c", "source \"$0\" && bench_defaults_in_scratch \"$1\"",
+                             Self.repo.appendingPathComponent("scripts/lib/bench-defaults.sh").path, app.path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        let output = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+        process.waitUntilExit()
+        #expect(process.terminationStatus == 0, "\(output)")
+    }
+
     /// In a scratch home the suite is the home's; on the account's own home (a chat bench run by hand) a new folder in
     /// the temporary folder's, never ~/Library/Preferences.
     @Test func theSuiteIsInTheScratchHomeElseANewTemporaryFolder() throws {
         let temporary = scratch.url("bench-temporary")
         try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
-        #expect(BenchDefaults.path(home: "/tmp/vs-test.abc/home", accountHome: "/Users/me", temporary: temporary.path)
-                == "/tmp/vs-test.abc/home/bench-defaults")
+        #expect(BenchDefaults.path(home: "/scratch/vs-test.abc/home", accountHome: "/Users/me", temporary: temporary.path)
+                == "/scratch/vs-test.abc/home/bench-defaults")
         let own = BenchDefaults.path(home: "/Users/me/", accountHome: "/Users/me", temporary: temporary.path)
         let folder = (own as NSString).deletingLastPathComponent
         #expect((own as NSString).lastPathComponent == "bench-defaults")
