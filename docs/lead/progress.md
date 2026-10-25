@@ -1302,3 +1302,9 @@
 - 2026-10-26 00:34 Started a worker on every-task-gets-a
 - 2026-10-26 00:34 Automatically (auto_advance): Started a worker on every-task-gets-a (Every task gets a receipt: time, tokens, cost, rounds, rollback), its after tasks done (a-verifier-that-ends).
 - 2026-10-26 00:34 Automatically (auto_advance): Didn't audit open-sessions-pick-up: No verifier started: the Mac is shared by every project's team, and its 1-minute load is above load_threshold. Now: load 27.6 (load_threshold 24, twice the 12 cores), 9 team sessions across 3 projects (genswap 4, vibeswitcher 3, stakegen 2) (mac_max_sessions 10). VibeSwitcher sends you one message once there's room again. Don't sleep or poll: retry when you're next woken (a report, the user, or a VibeSwitcher message). Meanwhile merge and cleanup finished tasks (cleanup ends their sessions), pla…
+- 2026-10-26 00:54 Ended open-sessions-pick-up's worker (idle since its done report on 8641a7de) to make room on the Mac for its audit
+- 2026-10-26 00:54 Automatically (auto_advance): Started the audit of open-sessions-pick-up at 8641a7de (Its review is audit).
+- 2026-10-26 00:54 Ended today-s-flaky-tests's worker (idle since its done report on d9dc98e6) to make room on the Mac for its audit
+- 2026-10-26 00:54 Automatically (auto_advance): Started the audit of today-s-flaky-tests at d9dc98e6 (Its review is audit).
+- 2026-10-26 00:54 Ended a-short-project-map's worker (idle since its done report on 7b12b36d) to make room on the Mac for its audit
+- 2026-10-26 00:54 Automatically (auto_advance): Started the audit of a-short-project-map at 7b12b36d (Its review is audit).
