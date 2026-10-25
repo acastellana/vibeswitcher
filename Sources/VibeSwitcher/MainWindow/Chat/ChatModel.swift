@@ -59,6 +59,8 @@ final class ChatModel: ObservableObject {
     @Published private(set) var items: [ChatItem] = []
     /// How many of the newest items are laid out (see `ChatWindow`); Show Earlier adds a page.
     @Published private(set) var shownLimit = ChatWindow.page
+    /// How much of `shownLimit` is rows that arrived while you read further up (see `updateItems`).
+    private(set) var arrivalsShown = 0
     /// The window's rows not laid out yet: an open or an earlier page arrives a few rows a turn (`ChatStaging`).
     @Published private(set) var staging: ChatStaging?
     /// The staging is an open's: the view keeps the conversation out of sight until all its rows are laid out, then
@@ -186,8 +188,17 @@ final class ChatModel: ObservableObject {
         guard new != items else { return }
         // Its indices are the old items': whatever was still to come is shown now.
         stopStaging()
-        // Reading further up: what arrives grows the window, so nothing you're looking at moves out of it.
-        if !atBottom, new.count > items.count, !items.isEmpty { shownLimit += new.count - items.count }
+        if !atBottom, new.count > items.count, !items.isEmpty {
+            // Reading further up: what arrives grows the window, so nothing you're looking at moves out of it, by
+            // `ChatWindow.arrivalsKept` rows at most (every row shown stays laid out).
+            let grow = min(new.count - items.count, max(0, ChatWindow.arrivalsKept - arrivalsShown))
+            shownLimit += grow
+            arrivalsShown += grow
+        } else if atBottom, arrivalsShown > 0 {
+            // Back at the end: what arrived meanwhile is the newest page's now, and the window is what you asked for again.
+            shownLimit = max(ChatWindow.page, shownLimit - arrivalsShown)
+            arrivalsShown = 0
+        }
         items = new
     }
 
@@ -200,6 +211,8 @@ final class ChatModel: ObservableObject {
         var searchIndex: Int
         /// The item at the top of the view when you left; nil when you were at the end.
         var anchor: String?
+        /// The rows you had laid out (Show earlier's pages), without what arrived while you read up.
+        var asked: Int
     }
     private var kept: [String: Kept] = [:]
     /// Where each shown item starts and where the view's top is (kept current by the view), to know where you
@@ -209,6 +222,8 @@ final class ChatModel: ObservableObject {
     var atBottom = true
     /// Where to scroll when the conversation opens (set from what was kept).
     private(set) var restoreAnchor: String?
+    /// The rows you had laid out when you left the conversation now opening (see `Kept.asked`).
+    private var restoreAsked = ChatWindow.page
 
     /// Shows the conversation in `path` (nil: none), the one `key`'s composer sends to. Same path: nothing changes.
     func show(path: String?, key: String? = nil) {
@@ -220,7 +235,8 @@ final class ChatModel: ObservableObject {
         if let old = self.path {
             // Left before it was shown: where it was to open.
             let anchor = assembling ? restoreAnchor : atBottom ? nil : ChatWindow.anchor(tops: rowTops, visibleTop: visibleTop)
-            kept[old] = Kept(expanded: expanded, searchActive: searchActive, searchQuery: searchQuery, searchIndex: searchIndex, anchor: anchor)
+            kept[old] = Kept(expanded: expanded, searchActive: searchActive, searchQuery: searchQuery, searchIndex: searchIndex, anchor: anchor,
+                             asked: shownLimit - arrivalsShown)
         }
         generation += 1
         self.path = path
@@ -231,10 +247,12 @@ final class ChatModel: ObservableObject {
         searchQuery = restored?.searchQuery ?? ""
         searchIndex = restored?.searchIndex ?? 0
         restoreAnchor = restored?.anchor
+        restoreAsked = max(ChatWindow.page, restored?.asked ?? ChatWindow.page)
         rowTops = [:]
         visibleTop = 0
         atBottom = true
         shownLimit = ChatWindow.page
+        arrivalsShown = 0
         stopStaging()
         hasEarlier = false
         loadingEarlier = false
@@ -275,8 +293,11 @@ final class ChatModel: ObservableObject {
                 self.hasEarlier = read.start > 0
                 // Nothing new since you looked: no marker.
                 if self.markerAfter == log.entries.last?.id { self.markerAfter = nil }
-                // Lay out enough to reach where you were reading, or what's new if it isn't far back.
-                self.widen(toInclude: self.restoreAnchor)
+                // Lay out enough to reach where you were reading, or what's new if it isn't far back. Where you were
+                // reading as far back as what you had laid out, and what arrives may widen the window by (`updateItems`),
+                // at most: further back (a lead that worked for hours since), it opens at what's new or the end instead
+                // of laying out all of it.
+                if !self.widen(toInclude: self.restoreAnchor, atMost: self.restoreAsked + ChatWindow.arrivalsKept) { self.restoreAnchor = nil }
                 self.widen(toInclude: "new-marker", atMost: 3 * ChatWindow.page)
                 self.stageOpen()
                 self.state = .ready
@@ -410,10 +431,13 @@ final class ChatModel: ObservableObject {
         if staging != nil { staging = nil }
     }
 
-    private func widen(toInclude id: String?, atMost: Int = .max) {
-        guard let id, let index = items.firstIndex(where: { $0.id == id }) else { return }
+    /// Whether the window now reaches `id` (widened if it wasn't far back).
+    @discardableResult
+    private func widen(toInclude id: String?, atMost: Int = .max) -> Bool {
+        guard let id, let index = items.firstIndex(where: { $0.id == id }) else { return false }
         let needed = items.count - index + 5
         if needed <= atMost { shownLimit = max(shownLimit, needed) }
+        return needed <= shownLimit
     }
 
     /// Steps through search matches, wrapping around.

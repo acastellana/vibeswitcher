@@ -237,6 +237,10 @@ public enum ComposerText {
 /// shown is laid out.
 public enum ChatWindow {
     public static let page = 60
+    /// How many rows what arrives may add to the window while you read further up (`ChatModel.updateItems`): past it
+    /// the oldest rows shown give way. Without a bound a chat left scrolled up, or whose end the view lost track of,
+    /// laid out every row a working session wrote, for as long as the app ran (2026-10-25: ~150 MB an hour).
+    public static let arrivalsKept = 2 * page
 
     /// The newest `limit` items, widened to reach `including` (a search match, where you were reading) with a few
     /// items of context before it. `hidden`: how many earlier items aren't shown.

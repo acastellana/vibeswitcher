@@ -148,7 +148,7 @@ enum IdleBench {
 
     /// A made-up Claude transcript of `turns` exchanges (a prompt, a tool call and its result, an answer), for the chat
     /// when no `--transcript` is given.
-    private static func writeTranscript(to path: String, turns: Int = 150) {
+    static func writeTranscript(to path: String, turns: Int = 150) {
         let start = Date().addingTimeInterval(-Double(turns) * 60)
         let format = ISO8601DateFormatter()
         format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

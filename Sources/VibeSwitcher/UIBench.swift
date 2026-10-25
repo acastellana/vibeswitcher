@@ -20,6 +20,15 @@ import VibeCore
 /// `--ticking` has the busy screen redraw a line each second. For narrowing a cost down: VIBESWITCHER_BENCH_INSPECTOR
 /// (team, overview or activity: the inspector's tab, team by default) and VIBESWITCHER_BENCH_RESULTS (the results on
 /// each board, 32 by default).
+///
+/// `--soak MINUTES [--soak-workers N] [--soak-upserts PER_SECOND] [--soak-without hooks,boards,transcripts,switches]` (memory, 2026-10-25): instead of the three phases, a
+/// working day's traffic for MINUTES, to see whether the footprint levels off. Beside the two leads, N (6) made-up
+/// workers whose sessions retitle themselves (`sessionChanged` from the host, PER_SECOND (2) in all), their agents' hook events (one a second), the leads' boards written and a decision added every 10 s (by
+/// another process), every transcript growing a turn every 5 s, and the window switching to the next session, on its
+/// chat, every 30 s. Each minute: the footprint, malloc's bytes in use and the live views and chats; every 10 minutes
+/// (and at the end) what grew since the second minute, by vmmap's region categories and by class (`HeapCensus`). At the
+/// end, `RESULT soak-…` lines and a check: over the last 20 minutes each minute's least footprint (read every 5 s)
+/// within ±50 MB of their median (a run of 25 minutes or more).
 enum UIBench {
     static func run(arguments: [String]) -> Never {
         let realHome = getpwuid(getuid()).map { String(cString: $0.pointee.pw_dir) } ?? ""
@@ -35,8 +44,14 @@ enum UIBench {
         let app = NSApplication.shared
         app.setActivationPolicy(arguments.contains("--onscreen") ? .accessory : .prohibited)
         VibePaths.ensurePrivateDirectories()
+        let value = { (name: String) in arguments.firstIndex(of: name).flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil } }
+        let soak = value("--soak").flatMap(Double.init).map {
+            Soak(minutes: $0, workers: value("--soak-workers").flatMap(Int.init) ?? 6,
+                 upserts: value("--soak-upserts").flatMap(Double.init) ?? 2,
+                 without: Set((value("--soak-without") ?? "").split(separator: ",").map(String.init)))
+        }
         let bench = Bench(minutes: minutes, onscreen: arguments.contains("--onscreen"), ticking: arguments.contains("--ticking"),
-                          transcript: transcript)
+                          transcript: transcript, soak: soak)
         bench.start()
         app.run()
         exit(0)
@@ -55,6 +70,48 @@ enum UIBench {
             try? store.appendDecision("Decision at round \(round): keep going", why: "The bench's lead decided.")
         }
         exit(0)
+    }
+
+    /// `--soak`: how long, how many workers, and how many session changes a second they make in all.
+    struct Soak {
+        let minutes: Double
+        let workers: Int
+        let upserts: Double
+        /// Traffic left out, to narrow a growth down: hooks, boards, transcripts, switches (workers: `--soak-workers 0`).
+        let without: Set<String>
+        /// What a worker's session runs: it retitles itself every `$1` seconds (a change the host sends the app each
+        /// time), printing a line of agent-shaped output.
+        static let workerScript = """
+        i=0
+        while :; do
+          i=$((i + 1))
+          printf '\\033]0;✳ Worker step %d: run the tests\\007' $i
+          printf '\\033[1;38;5;%dm● Step %d\\033[0m \\033[38;5;245mread Sources/File%d.swift and ran the tests\\033[0m\\n' $((i % 7 + 31)) $i $i
+          sleep "$1"
+        done
+        """
+    }
+
+    /// One more exchange at the end of a made-up transcript (a prompt, a tool call and its result, an answer).
+    static func appendTurn(to path: String, turn: Int) {
+        let stamp = ISO8601DateFormatter()
+        stamp.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let now = stamp.string(from: Date())
+        let id = UUID().uuidString
+        func line(_ type: String, _ content: Any) -> String {
+            let entry: [String: Any] = ["type": type, "uuid": UUID().uuidString, "timestamp": now, "message": ["role": type, "content": content]]
+            return (try? JSONSerialization.data(withJSONObject: entry)).map { String(decoding: $0, as: UTF8.self) } ?? ""
+        }
+        let text = [line("user", "Turn \(turn): run the tests and tell me what failed."),
+                    line("assistant", [["type": "text", "text": "Running them."],
+                                       ["type": "tool_use", "id": id, "name": "Bash", "input": ["command": "swift test"]]]),
+                    line("user", [["type": "tool_result", "tool_use_id": id, "content": (0..<12).map { "Test Case \($0) passed (\(turn))" }.joined(separator: "\n")]]),
+                    line("assistant", [["type": "text", "text": "## Turn \(turn)\n\nAll the tests pass; the build is green.\n\n- one\n- `two`"]])]
+            .joined(separator: "\n") + "\n"
+        guard let handle = FileHandle(forWritingAtPath: path) else { return }
+        defer { try? handle.close() }
+        _ = try? handle.seekToEnd()
+        try? handle.write(contentsOf: Data(text.utf8))
     }
 
     /// What switching between the two leads may cost (the median, in instructions; a debug build). Measured: 5.8 G
@@ -192,6 +249,7 @@ enum UIBench {
         let onscreen: Bool
         let ticking: Bool
         let transcriptSource: String?
+        let soak: Soak?
         let started = Date()
         let store: SessionStore
         let host = HostClient()
@@ -208,8 +266,9 @@ enum UIBench {
         var roots: [String] { ["alpha", "beta"].map { (NSHomeDirectory() as NSString).appendingPathComponent("lead-\($0)") } }
         var transcripts: [String: String] = [:]
 
-        init(minutes: Double, onscreen: Bool, ticking: Bool, transcript: String?) {
+        init(minutes: Double, onscreen: Bool, ticking: Bool, transcript: String?, soak: Soak?) {
             self.minutes = minutes
+            self.soak = soak
             self.onscreen = onscreen
             self.ticking = ticking
             transcriptSource = transcript
@@ -255,6 +314,8 @@ enum UIBench {
                     try? FileManager.default.copyItem(atPath: source, toPath: copy)
                     transcripts[root] = copy
                 }
+            } else if soak != nil {
+                for root in roots { transcripts[root] = madeUpTranscript((root as NSString).lastPathComponent) }
             }
             try? UIBench.screenScript.write(toFile: (NSHomeDirectory() as NSString).appendingPathComponent("screen.sh"),
                                             atomically: true, encoding: .utf8)
@@ -340,12 +401,233 @@ enum UIBench {
             print(String(format: "ui bench: 2 lead sessions, boards of %.0f KB, window %@", Double(boardSize()) / 1024,
                          onscreen ? "on screen" : "off screen"))
             fflush(stdout)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in self?.clicks() }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                guard let self else { return }
+                if let soak = self.soak { self.soakPhase(soak) } else { self.clicks() }
+            }
         }
 
         private func boardSize() -> Int {
             let file = (BoardStore(root: roots[0]).folder as NSString).appendingPathComponent("board.json")
             return ((try? FileManager.default.attributesOfItem(atPath: file))?[.size] as? Int) ?? 0
+        }
+
+        // MARK: Soak
+
+        /// A made-up transcript for the chat, in the scratch home's Claude projects.
+        private func madeUpTranscript(_ name: String) -> String {
+            let folder = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/projects/-bench")
+            try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+            let path = (folder as NSString).appendingPathComponent(name + ".jsonl")
+            IdleBench.writeTranscript(to: path, turns: 60)
+            return path
+        }
+
+        /// The workers' sessions, by the host's id, with their transcripts and turns so far.
+        private var workers: [(id: UUID, tty: String, transcript: String)] = []
+        private var soakTimers: [Heartbeat.Subscription] = []
+
+        func soakPhase(_ soak: Soak) {
+            let script = (NSHomeDirectory() as NSString).appendingPathComponent("worker.sh")
+            try? Soak.workerScript.write(toFile: script, atomically: true, encoding: .utf8)
+            // Each worker retitles itself this often, so the host sends `upserts` changes a second in all.
+            let period = max(0.2, Double(soak.workers) / max(soak.upserts, 0.01))
+            var pending = soak.workers
+            print(String(format: "soak: %.0f minutes, 2 leads and %d workers (a session change every %.1f s each, %.1f a second in all)",
+                         soak.minutes, soak.workers, period, Double(soak.workers) / period))
+            fflush(stdout)
+            if soak.workers == 0 { return soakRun(soak) }
+            for index in 0..<soak.workers {
+                let root = roots[index % roots.count]
+                let cwd = (root as NSString).appendingPathComponent("worktree-\(index)")
+                try? FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
+                let transcript = madeUpTranscript("worker-\(index)")
+                host.spawn(SpawnRequest(cwd: cwd, command: "/bin/sh \(script) \(period)", env: [:], cols: 120, rows: 40, keepShell: false,
+                                        label: "Worker: task-\(index)", agent: "claude")) { [weak self] result in
+                    guard let self else { return }
+                    if case .success(let session) = result {
+                        self.agentsStarted += 1
+                        let pid = Int32(60_100 + self.agentsStarted)
+                        var state = HookState(agent: .claude, tty: session.tty, lastEvent: "PreToolUse", lastEventAt: Date().timeIntervalSince1970)
+                        state.agentPid = pid
+                        state.sessionId = UUID().uuidString
+                        state.cwd = cwd
+                        state.firstPrompt = "Work on task-\(index)"
+                        state.transcriptPath = transcript
+                        try? state.save(to: VibePaths.stateFile(tty: session.tty))
+                        self.lock.lock()
+                        self.agentTTYs[session.tty] = (pid, cwd)
+                        self.lock.unlock()
+                        self.workers.append((session.id, session.tty, transcript))
+                    }
+                    pending -= 1
+                    if pending == 0 { self.store.refresh(); DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.soakRun(soak) } }
+                }
+            }
+        }
+
+        private func soakRun(_ soak: Soak) {
+            model.showsChat = true
+            let off = soak.without
+            if !off.isEmpty { print("soak: without \(off.sorted().joined(separator: ", "))") }
+            var tick = 0, rounds = 0, switches = 0
+            let events = ["PreToolUse", "PostToolUse", "PreToolUse", "PostToolUse", "Stop", "UserPromptSubmit"]
+            // Hook events: one agent's state a second, round the workers and leads.
+            soakTimers.append(Heartbeat.shared.every(1) { [weak self] in
+                guard let self, !off.contains("hooks") else { return }
+                tick += 1
+                self.lock.lock()
+                let agents = self.agentTTYs.sorted { $0.key < $1.key }
+                self.lock.unlock()
+                guard !agents.isEmpty else { return }
+                let (tty, agent) = agents[tick % agents.count]
+                let path = VibePaths.stateFile(tty: tty)
+                guard var state = HookState.load(from: path) else { return }
+                state.lastEvent = events[tick % events.count]
+                state.lastEventAt = Date().timeIntervalSince1970
+                state.lastPrompt = "Step \(tick)"
+                state.toolName = state.lastEvent == "PreToolUse" ? "Bash" : nil
+                state.toolDetail = state.lastEvent == "PreToolUse" ? "swift test --filter Step\(tick)" : nil
+                state.agentPid = agent.pid
+                try? state.save(to: path)
+            })
+            // The chat follows its transcript each second, as the window does while it's in sight: the bench's window
+            // is off screen, and once the display has slept macOS may call it hidden for good (`chatInSight`).
+            soakTimers.append(Heartbeat.shared.every(1) { [weak self] in
+                guard let self, self.model.showsChat else { return }
+                self.window?.chat.poll()
+            })
+            // The leads' boards: a checkpoint and a decision every 10 s, from another process.
+            soakTimers.append(Heartbeat.shared.every(10) { [weak self] in
+                guard let self, !off.contains("boards") else { return }
+                rounds += 1
+                let write = Process()
+                write.executableURL = Bundle.main.executableURL
+                write.arguments = ["--ui-bench-write", "\(rounds)"] + self.roots
+                try? write.run()
+            })
+            // Every transcript a turn longer every 5 s.
+            soakTimers.append(Heartbeat.shared.every(5) { [weak self] in
+                guard let self, !off.contains("transcripts") else { return }
+                for path in Array(self.transcripts.values) + self.workers.map(\.transcript) { UIBench.appendTurn(to: path, turn: tick) }
+            })
+            // The window on the next session, on its chat, every 30 s.
+            soakTimers.append(Heartbeat.shared.every(30) { [weak self] in
+                guard let self, !off.contains("switches") else { return }
+                let live = self.host.sessions.filter(\.isLive)
+                guard !live.isEmpty else { return }
+                switches += 1
+                self.model.select(hostID: live[switches % live.count].id)
+                self.model.showsChat = true
+            })
+            soakMinutes(soak)
+        }
+
+        private struct Sample {
+            let minute: Int
+            let footprint: Double
+            let inUse: Double
+            /// The least footprint read in the minute (every 5 s): a terminal shown draws on the GPU, ~110 MB of
+            /// IOAccelerator memory that goes again within the minute, and a minute's reading can land on it. Growth
+            /// raises the floor; that doesn't.
+            let floor: Double
+        }
+
+        private func soakMinutes(_ soak: Soak) {
+            let count = max(1, Int(soak.minutes.rounded(.up)))
+            var samples: [Sample] = []
+            var least = UInt64.max
+            soakTimers.append(Heartbeat.shared.every(5) { least = min(least, IdleBench.Usage.now().footprint) })
+            var baseline: (census: HeapCensus.Result, regions: [String: Double])?
+            let mb = { (bytes: Double) in bytes / 1_048_576 }
+            func census(_ label: String, then done: @escaping (HeapCensus.Result, [String: Double]) -> Void) {
+                let pid = getpid()
+                DispatchQueue.global().async {
+                    let regions = IdleBench.VMMap.summary(pid: pid).regions
+                    let census = HeapCensus.take()
+                    DispatchQueue.main.async {
+                        print(String(format: "  census %@: %ld blocks, %.1f MB in malloc blocks", label as NSString, census.total.blocks,
+                                     mb(Double(census.total.bytes))))
+                        if let baseline {
+                            print("  grew since minute 2, by vmmap's region categories (dirty + swapped):")
+                            let names = Set(baseline.regions.keys).union(regions.keys)
+                            for (name, delta) in names.map({ ($0, (regions[$0] ?? 0) - (baseline.regions[$0] ?? 0)) }).sorted(by: { $0.1 > $1.1 }).prefix(6) {
+                                print(String(format: "    %-32@ %+7.1f MB  (%.1f → %.1f MB)", name as NSString, mb(delta),
+                                             mb(baseline.regions[name] ?? 0), mb(regions[name] ?? 0)))
+                            }
+                            print("  grew since minute 2, by class (malloc blocks), then blocks of no class by size:")
+                            var classed = baseline.census, unclassed = baseline.census, after = census, afterRaw = census
+                            classed.unclassed = [:]; after.unclassed = [:]; unclassed.classes = [:]; afterRaw.classes = [:]
+                            for row in HeapCensus.growth(from: classed, to: after, top: 16) + HeapCensus.growth(from: unclassed, to: afterRaw, top: 5) {
+                                print(String(format: "    %-60@ %+8.2f MB %+8ld blocks  (%ld → %ld)", row.name as NSString,
+                                             mb(Double(row.after.bytes - row.before.bytes)), row.after.blocks - row.before.blocks,
+                                             row.before.blocks, row.after.blocks))
+                            }
+                        }
+                        fflush(stdout)
+                        done(census, regions)
+                    }
+                }
+            }
+            func minute(_ index: Int) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + soak.minutes * 60 / Double(count)) { [weak self] in
+                    guard let self else { return }
+                    var stats = malloc_statistics_t()
+                    malloc_zone_statistics(nil, &stats)
+                    let usage = IdleBench.Usage.now()
+                    let sample = Sample(minute: index + 1, footprint: mb(Double(usage.footprint)), inUse: mb(Double(stats.size_in_use)),
+                                        floor: mb(Double(min(least, usage.footprint))))
+                    least = .max
+                    samples.append(sample)
+                    print(String(format: "  minute %3d  footprint %6.1f MB (least %6.1f)  malloc in use %6.1f MB  live views %@ chats %@  sessions %d  rows %d",
+                                 sample.minute, sample.footprint, sample.floor, sample.inUse, IdleBench.Live.views.map(String.init) ?? "n/a",
+                                 IdleBench.Live.chats.map(String.init) ?? "n/a", self.host.sessions.count, self.store.sessions.count))
+                    // The chat's own counts (entries, items, how many laid out).
+                    if let chat = self.window?.debugState().split(separator: "\n").first(where: { $0.hasPrefix("chat ") }) {
+                        print("              " + (chat.split(separator: " ").filter { !$0.hasPrefix("path=") && !$0.hasPrefix("draft=") && $0 != "chars" }
+                            .joined(separator: " ")))
+                    }
+                    fflush(stdout)
+                    let next = { if index + 1 < count { minute(index + 1) } else { self.soakFinish(soak, samples) } }
+                    if index + 1 == 2 {
+                        census("minute 2") { result, regions in baseline = (result, regions); next() }
+                    } else if (index + 1) % 10 == 0 || index + 1 == count {
+                        census("minute \(index + 1)") { _, _ in next() }
+                    } else {
+                        next()
+                    }
+                }
+            }
+            minute(0)
+        }
+
+        private func soakFinish(_ soak: Soak, _ samples: [Sample]) {
+            soakTimers.forEach { $0.cancel() }
+            soakTimers = []
+            guard let first = samples.first, let last = samples.last else { return finish() }
+            let window = samples.filter { $0.minute > last.minute - 20 }
+            let sorted = window.map(\.footprint).sorted()
+            let median = sorted[sorted.count / 2]
+            let spread = window.map { abs($0.footprint - median) }.max() ?? 0
+            let hours = Double(last.minute - first.minute) / 60
+            print(String(format: "RESULT soak-footprint-first-mb %.1f", first.footprint))
+            print(String(format: "RESULT soak-footprint-last-mb %.1f", last.footprint))
+            print(String(format: "RESULT soak-growth-mb-per-hour %.1f", hours > 0 ? (last.footprint - first.footprint) / hours : 0))
+            print(String(format: "RESULT soak-last-20-min %.1f-%.1f MB (median %.1f, at most %.1f MB from it)", sorted.first ?? 0,
+                         sorted.last ?? 0, median, spread))
+            let floors = window.map(\.floor).sorted()
+            let floorMedian = floors[floors.count / 2]
+            let floorSpread = window.map { abs($0.floor - floorMedian) }.max() ?? 0
+            print(String(format: "RESULT soak-last-20-min-least %.1f-%.1f MB (median %.1f, at most %.1f MB from it)", floors.first ?? 0,
+                         floors.last ?? 0, floorMedian, floorSpread))
+            if last.minute >= 25 {
+                // Judged on each minute's least footprint: a terminal's GPU memory comes and goes within a minute.
+                UIBench.check(floorSpread <= 50, String(format: "soak: the least footprint of each of the last 20 minutes within ±50 MB of their median (%.1f MB)",
+                                                         floorSpread))
+            } else {
+                print("soak: under 25 minutes, the last 20 minutes' spread is shown, not checked")
+            }
+            finish()
         }
 
         // MARK: Phase 1: clicks
