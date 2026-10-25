@@ -12,6 +12,9 @@ public enum ChatItem: Equatable, Sendable, Identifiable {
     case newMarker(summary: String)
     /// The lead's board cleared here: every task finished (see `BatchSummary.place`).
     case allDone(LeadAllDone)
+    /// One of the lead's questions closed here without your answer (withdrawn, or its timer ran out): its history,
+    /// where it happened, and what became of an answer that came too late (see `ChatTimeline.placeQuestions`).
+    case question(LeadQuestion, notice: String?)
 
     public static func toolsID(_ firstToolID: String) -> String { "tools:\(firstToolID)" }
 
@@ -21,6 +24,7 @@ public enum ChatItem: Equatable, Sendable, Identifiable {
         case .tools(let id, _): return id
         case .newMarker: return "new-marker"
         case .allDone(let mark): return "all-done:\(mark.id)"
+        case .question(let question, _): return "question:\(question.id)"
         }
     }
 }
@@ -37,6 +41,11 @@ public enum ChatTimeline {
         }
         for (index, entry) in entries.enumerated() {
             switch entry.kind {
+            // A message with nothing to show between two tool runs would split them in two rows: it's left out.
+            case .prompt(let text, let images) where text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && images.isEmpty && entry.team == nil:
+                break
+            case .reply(let text) where text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty:
+                break
             case .prompt, .steered:
                 flush()
                 items.append(entry.team.map { .team(entry, $0) } ?? .prompt(entry))
@@ -50,6 +59,58 @@ public enum ChatTimeline {
         }
         flush()
         return items
+    }
+
+    /// `items` with `extras` placed by time: each before the first item that came after it. One from before the first
+    /// item is left out (an earlier part of the conversation, or another session's), and nothing shows in a conversation
+    /// with no items yet.
+    public static func place(_ extras: [(at: Double, item: ChatItem)], in items: [ChatItem]) -> [ChatItem] {
+        guard !extras.isEmpty, let first = items.lazy.compactMap(time).first else { return items }
+        var pending = extras.filter { $0.at >= first }.sorted { $0.at < $1.at }[...]
+        guard !pending.isEmpty else { return items }
+        var placed: [ChatItem] = []
+        placed.reserveCapacity(items.count + pending.count)
+        for item in items {
+            if let at = time(item) {
+                while let extra = pending.first, extra.at < at {
+                    placed.append(extra.item)
+                    pending = pending.dropFirst()
+                }
+            }
+            placed.append(item)
+        }
+        placed += pending.map(\.item)
+        return placed
+    }
+
+    /// The lead's questions that closed without your answer (withdrawn, or decided when their timer ran out), each
+    /// where it closed: it leaves the stack under the chat, which holds only open ones, for the conversation's history.
+    /// An answered one needs none: your answer is in the conversation already, relayed with the question it answers.
+    /// `notices`: what became of a late answer, by question id.
+    public static func placeQuestions(_ questions: [LeadQuestion], notices: [String: String] = [:], in items: [ChatItem]) -> [ChatItem] {
+        place(questions.compactMap { question in closed(question).map { ($0, ChatItem.question(question, notice: notices[question.id])) } },
+              in: items)
+    }
+
+    /// When a question closed without an answer; nil for an open or answered one.
+    static func closed(_ question: LeadQuestion) -> Double? {
+        switch question.state {
+        case .withdrawn: return question.withdrawnAt
+        case .autoDecided: return question.autoDecidedAt
+        case .open, .answered: return nil
+        }
+    }
+
+    /// When an item happened (seconds since 1970), when it says.
+    static func time(_ item: ChatItem) -> Double? {
+        switch item {
+        case .prompt(let entry), .reply(let entry), .team(let entry, _): return entry.at?.timeIntervalSince1970
+        case .tools(_, let tools): return tools.first?.at?.timeIntervalSince1970
+        // Placed ones by their own time, so what's placed after them goes in order with them.
+        case .allDone(let mark): return mark.at
+        case .question(let question, _): return closed(question)
+        case .newMarker: return nil
+        }
     }
 
     /// "Ran 3 commands · edited 2 files · read 4 files · searched twice · used 1 tool · 1 failed".
@@ -122,6 +183,8 @@ public enum ChatSearch {
                 }
             case .newMarker:
                 return false
+            case .question(let question, let notice):
+                return ([question.text, question.withdrawReason ?? "", question.proposal ?? "", notice ?? ""]).contains { $0.localizedCaseInsensitiveContains(needle) }
             case .allDone(let mark):
                 let summary = mark.summary.map { [$0.headline] + $0.bullets } ?? []
                 return (["All tasks finished"] + summary + mark.tasks.map(\.title)).contains { $0.localizedCaseInsensitiveContains(needle) }

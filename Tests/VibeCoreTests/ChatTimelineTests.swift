@@ -19,6 +19,7 @@ struct ChatTimelineTests {
             case .tools(_, let tools): return "tools:" + tools.map(\.id).joined(separator: ",")
             case .newMarker(let summary): return "new:\(summary)"
             case .allDone(let mark): return "all-done:\(mark.id)"
+            case .question(let question, _): return "question:\(question.id)"
             }
         }
     }
@@ -26,6 +27,45 @@ struct ChatTimelineTests {
     @Test func consecutiveToolsFoldIntoOneItem() {
         let entries = [prompt("p", "go"), tool("t1", "Bash"), tool("t2", "Read"), reply("r", "ok"), tool("t3", "Bash")]
         #expect(shape(ChatTimeline.items(entries, newAfter: nil)) == ["prompt:p", "tools:t1,t2", "reply:r", "tools:t3"])
+    }
+
+    /// The lead's chat (seen 2026-10-25): tool calls with an empty message between them showed as two "Used 1 tool"
+    /// rows with nothing between; they're one row.
+    @Test func aBlankMessageDoesntSplitAToolRun() {
+        let entries = [reply("r", "ok"), tool("t1", "Bash"), reply("blank", "  \n "), tool("t2", "Read"),
+                       prompt("empty", " "), tool("t3", "Grep"), reply("r2", "done")]
+        #expect(shape(ChatTimeline.items(entries, newAfter: nil)) == ["reply:r", "tools:t1,t2,t3", "reply:r2"])
+    }
+
+    func at(_ entry: ChatEntry, _ seconds: Double) -> ChatEntry {
+        var entry = entry
+        entry.at = Date(timeIntervalSince1970: seconds)
+        return entry
+    }
+
+    /// The lead's chat pinned "No questions waiting" and a withdrawn question under the conversation (seen 2026-10-25):
+    /// a question that closed without an answer goes in the conversation where it closed, an open or answered one doesn't.
+    @Test func closedQuestionsGoWhereTheyClosed() {
+        let items = ChatTimeline.items([at(prompt("p", "go"), 100), at(reply("r1", "a"), 200), at(reply("r2", "b"), 300)], newAfter: nil)
+        var withdrawn = LeadQuestion(id: "W", text: "Keep the badges?", options: [], at: 50)
+        withdrawn.withdrawnAt = 250
+        withdrawn.withdrawReason = "User asked to re-ask it."
+        var decided = LeadQuestion(id: "D", text: "Which port?", options: ["80", "8080"], proposal: "80", at: 60)
+        decided.autoDecidedAt = 400
+        var answered = LeadQuestion(id: "A", text: "Ship it?", options: [], at: 70)
+        answered.answer = "Yes"
+        answered.answeredAt = 150
+        let open = LeadQuestion(id: "O", text: "Blue or red?", options: [], at: 120)
+        var earlier = LeadQuestion(id: "E", text: "Before this conversation", options: [], at: 1)
+        earlier.withdrawnAt = 2
+        let placed = ChatTimeline.placeQuestions([withdrawn, decided, answered, open, earlier], notices: ["W": "Withdrawn before your answer."], in: items)
+        #expect(shape(placed) == ["prompt:p", "reply:r1", "question:W", "reply:r2", "question:D"])
+        #expect(placed.contains(.question(withdrawn, notice: "Withdrawn before your answer.")))
+        #expect(ChatSearch.matches(placed, query: "re-ask") == ["question:W"])
+        // Placed with the all-done cards, each by its own time.
+        let mark = LeadAllDone(id: "m", at: 260, since: 0, tasks: [])
+        #expect(shape(ChatTimeline.placeQuestions([withdrawn], in: BatchSummary.place([mark], in: items)))
+                == ["prompt:p", "reply:r1", "question:W", "all-done:m", "reply:r2"])
     }
 
     @Test func summaryCountsKindsDistinctFilesAndFailures() {

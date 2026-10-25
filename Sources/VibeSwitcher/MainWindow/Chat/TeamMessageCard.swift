@@ -29,6 +29,10 @@ struct TeamMessageCard: View {
                         Text(message.title).font(.system(size: 12.5, weight: .semibold)).foregroundStyle(.primary)
                         if !open {
                             Text(message.gist).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(2)
+                            // The whole card opens it; this says there's more than the cut shows.
+                            if hasMore {
+                                Text("More").font(.system(size: 11, weight: .medium)).foregroundStyle(Self.tint)
+                            }
                         }
                     }
                     Spacer(minLength: 0)
@@ -79,6 +83,11 @@ struct TeamMessageCard: View {
         case .leadMessage: return "person.2"
         case .notice: return "bell"
         }
+    }
+
+    /// Whether the collapsed card leaves something out: more than its first line, or a first line too long for two.
+    private var hasMore: Bool {
+        message.body.trimmingCharacters(in: .whitespacesAndNewlines) != message.gist || message.gist.count > 140
     }
 
     private var failed: Bool { message.kind == .audit && message.title.contains("didn't pass") }

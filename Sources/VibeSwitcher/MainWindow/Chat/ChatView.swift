@@ -19,6 +19,8 @@ struct ChatContainer: View {
     var dismissMenu: () -> Void = {}
     /// The answer card's keys: the composer hands it ⌘1–⌘9, ↩ and ↑ / ↓ while it's empty. Held, not observed.
     @State private var cardKeys = AnswerCardKeys()
+    /// What you were writing under the lead's questions, kept when one closes (it moves into the conversation).
+    @State private var questionDrafts = LeadQuestionDrafts()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -36,7 +38,7 @@ struct ChatContainer: View {
             let terminal = model.selectedRow.flatMap { $0.hostID == nil ? $0.session : nil }.flatMap { $0.inTerminalApp ? $0 : nil }
             ChatView(chat: chat, row: model.selectedRow, live: model.selectedRow.map(actions.isLive) == true && model.selectedRow?.hostID != nil,
                      inTerminal: terminal.map { session in { actions.openInTerminal(session) } },
-                     leadQuestions: lead?.board.questionStack() ?? [], leadNotices: leads.answerNotices,
+                     leadQuestions: lead?.board.openQuestions ?? [], leadNotices: leads.answerNotices,
                      answerLead: { question, text in if let lead { leads.answer(question, root: lead.root, with: text) } },
                      showTerminal: showTerminal, choose: choose, moveTab: moveTab, resend: { _ = composer.send($0) }, dismissMenu: dismissMenu,
                      cardKeys: cardKeys)
@@ -44,8 +46,13 @@ struct ChatContainer: View {
                 .environment(\.chatFolder, model.selectedRow?.cwd)
                 .environment(\.chatRunner, chat.runner)
                 .environment(\.teamSummaries, leads.summaries)
+                .environment(\.leadQuestionDrafts, questionDrafts)
+                .environment(\.answerLeadQuestion) { question, text in if let lead { leads.answer(question, root: lead.root, with: text) } }
                 // The lead's all-done cards, in its own conversation only.
                 .onChange(of: lead?.board.allDone ?? [], initial: true) { _, marks in chat.showAllDone(marks) }
+                // Its questions that closed without your answer, where they closed (only open ones are pinned under it).
+                .onChange(of: lead?.board.questions ?? [], initial: true) { _, questions in chat.showQuestions(questions, notices: leads.answerNotices) }
+                .onChange(of: leads.answerNotices) { _, notices in chat.showQuestions(lead?.board.questions ?? [], notices: notices) }
             Divider()
             if let row = model.selectedRow {
                 if row.hostID != nil, actions.isLive(row), row.session == nil {
@@ -90,7 +97,8 @@ struct ChatView: View {
     let live: Bool
     /// A session in a Terminal tab: opens it there (⌘O). Its answer card asks before typing into the tab.
     var inTerminal: (() -> Void)?
-    /// The lead's questions stack (open ones, then lately withdrawn ones), when this is a project lead.
+    /// The lead's open questions, pinned under the conversation, when this is a project lead (closed ones are in the
+    /// conversation: `ChatItem.question`).
     var leadQuestions: [LeadQuestion] = []
     var leadNotices: [String: String] = [:]
     var answerLead: (LeadQuestion, String) -> Void = { _, _ in }
@@ -358,13 +366,13 @@ private struct ChatRows: View, Equatable {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            ForEach(items) { item in
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
                 ChatItemView(item: item, chat: chat, expanded: item.opens ? expanded : [], agent: agent, rowID: rowID,
                              canSend: canSend, resend: resend, openImage: openImage)
                     .equatable()
                     .id(item.id)
-                    .padding(6)
+                    .padding(.horizontal, 6).padding(.vertical, item.isTools ? 2 : 6)
                     .background {
                         // Only on a search match: a shape on every row is that much more to lay out.
                         if item.id == current || matches.contains(item.id) {
@@ -374,7 +382,18 @@ private struct ChatRows: View, Equatable {
                     .background(GeometryReader { geometry in
                         Color.clear.preference(key: RowTops.self, value: [item.id: geometry.frame(in: .named(RowTops.space)).minY])
                     })
+                    .padding(.top, index == 0 ? 0 : Self.gap(after: items[index - 1], before: item))
             }
+        }
+    }
+
+    /// The room between two rows: a tool row sits close to the reply it leads to, and closer to the reply before it
+    /// than other rows do (a turn of short replies and tool calls is one block, not a ladder).
+    static func gap(after previous: ChatItem, before item: ChatItem) -> CGFloat {
+        switch (previous, item) {
+        case (.tools, .reply): return 0
+        case (.reply, .tools): return 6
+        default: return 16
         }
     }
 }
@@ -557,6 +576,8 @@ struct ChatItemRow: View {
             TeamMessageCard(entry: entry, message: message, chat: chat, expanded: expanded).padding(.trailing, 40)
         case .allDone(let mark):
             AllDoneCard(mark: mark, chat: chat, expanded: expanded).padding(.trailing, 40)
+        case .question(let question, let notice):
+            LeadQuestionHistoryRow(question: question, notice: notice).padding(.trailing, 40)
         case .tools(let id, let tools):
             ToolGroupView(id: id, tools: tools, chat: chat, expanded: expanded, openImage: openImage).padding(.leading, 30)
         case .newMarker(let summary):
@@ -1271,5 +1292,10 @@ private extension ChatItem {
         case .tools, .team, .allDone: return true
         default: return false
         }
+    }
+
+    var isTools: Bool {
+        if case .tools = self { return true }
+        return false
     }
 }

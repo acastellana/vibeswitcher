@@ -35,6 +35,21 @@ struct TeamMessageTests {
         #expect(blocked.title == "The worker on x is blocked")
     }
 
+    /// A worker passed on news with ask_lead (seen 2026-10-25): the card said "Question from the worker" over an FYI.
+    @Test func aWorkersFYIIsANoteNotAQuestion() throws {
+        let fyi = try one(delivery("The worker on x asks: FYI: origin/main 5f19605 tops at #272; nothing for you to decide.\nAnswer with message(x, …).",
+                                   from: .system("worker x")))
+        #expect(fyi.title == "Note from the worker on x")
+        let news = try one(delivery("The worker on x asks: The base moved to #272, carrying on.\nAnswer with message(x, …).", from: .system("worker x")))
+        #expect(news.title == "Note from the worker on x")
+        let heads = try one(delivery("The worker on x asks: Heads up: is #272 on main? It is, so I carry on.", from: .system("worker x")))
+        #expect(heads.title == "Note from the worker on x")
+        let asks = try one(delivery("The worker on x asks: Keep the old API, or drop it?\nAnswer with message(x, …).", from: .system("worker x")))
+        #expect(asks.title == "Question from the worker on x")
+        let findings = try one(delivery("The worker on x answered findings: F1 fixed", from: .system("worker x")))
+        #expect(findings.title == "Note from the worker on x")
+    }
+
     @Test func aVerifiersAudit() throws {
         let passed = try one(delivery("The audit of x passed (complete, clean): fine\nmerge(x) when you're ready.", from: .system("verifier x")))
         #expect(passed.kind == .audit)

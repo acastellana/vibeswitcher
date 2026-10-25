@@ -79,9 +79,11 @@ public struct TeamMessage: Equatable, Sendable {
         case (.report, _):
             let slug = task ?? ""
             let opening = "The worker on \(slug) "
-            if firstLine.hasPrefix(opening + "asks") { base = "Question from the worker on \(slug)" }
+            if firstLine.hasPrefix(opening + "asks"), asksSomething(opening + "asks") { base = "Question from the worker on \(slug)" }
             else if firstLine.hasPrefix(opening + "is blocked") { base = "The worker on \(slug) is blocked" }
-            else { base = "Report from the worker on \(slug)" }
+            // A later part of a long one doesn't begin with what it is: a report's, as most long ones are.
+            else if firstLine.hasPrefix(opening + "says it's done") || (part?.index ?? 1) > 1 { base = "Report from the worker on \(slug)" }
+            else { base = "Note from the worker on \(slug)" }
         case (.audit, _):
             let slug = task ?? ""
             if firstLine.hasPrefix("The audit of \(slug) passed") { base = "Audit of \(slug) passed" }
@@ -95,6 +97,21 @@ public struct TeamMessage: Equatable, Sendable {
         }
         guard let part, part.count > 1 else { return base }
         return base + " · part \(part.index) of \(part.count)"
+    }
+
+    /// Openings that say a message is for the lead's information, not something to answer.
+    static let fyiOpenings = ["fyi", "heads up", "heads-up", "for your information", "note:", "just so you know"]
+
+    /// Whether what a worker asked the lead (`ask_lead`, its body after `opening`) needs an answer: it asks something
+    /// and doesn't open as an FYI. A worker passing on news with ask_lead isn't asking.
+    private func asksSomething(_ opening: String) -> Bool {
+        guard let start = body.range(of: opening) else { return true }
+        let asked = body[start.upperBound...].drop { $0 == ":" || $0.isWhitespace }
+        // The footer VibeSwitcher adds ("Answer with message(x, …).") isn't the worker's.
+        let words = asked.components(separatedBy: "\nAnswer with message(").first ?? String(asked)
+        let lowered = words.lowercased()
+        if Self.fyiOpenings.contains(where: { lowered.hasPrefix($0) }) { return false }
+        return words.contains("?")
     }
 
     /// The first line of what it says, for the collapsed card.

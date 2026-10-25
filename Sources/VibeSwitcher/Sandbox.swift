@@ -348,10 +348,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     /// A new fake session: FakeClaude (or, without its script, a shell's `cat`) on a scratch pty of the sandbox's host,
     /// with a short conversation already in its transcript and the hook state a Claude session leaves.
-    func startFake(label: String, _ done: @escaping (String?) -> Void) {
+    func startFake(label: String, slug named: String? = nil, transcript firstLines: String = Driver.firstTurn,
+                   _ done: @escaping (String?) -> Void) {
         fakeCount += 1
         let number = fakeCount
-        let slug = "sandbox-project" + (number == 1 ? "" : "-\(number)")
+        let slug = named ?? "sandbox-project" + (number == 1 ? "" : "-\(number)")
         let folder = (home as NSString).appendingPathComponent("projects/\(slug)")
         let files = state.appendingPathComponent("fake-\(number)", isDirectory: true)
         let projects = (home as NSString).appendingPathComponent(".claude/projects/-sandbox-\(slug)")
@@ -363,7 +364,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
         let command: String
         if let fakeClaude {
-            FileManager.default.createFile(atPath: transcript, contents: Data(Self.firstTurn.utf8))
+            FileManager.default.createFile(atPath: transcript, contents: Data(firstLines.utf8))
             FileManager.default.createFile(atPath: controlFile, contents: nil)
             command = "exec /usr/bin/python3 -I -u '\(fakeClaude)' '\(transcript)' '\(controlFile)' '\(agentState)'"
         } else {
@@ -417,6 +418,86 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
         """
     }()
+
+    /// A fake project lead: a session labelled as a lead, its board (tasks in every state, a question it withdrew)
+    /// in its folder, and a conversation of short replies between tool calls, with a worker's FYI and a worker's question.
+    func startLead(_ done: @escaping (String?) -> Void) {
+        let slug = "sandbox-lead"
+        let root = ((home as NSString).appendingPathComponent("projects/\(slug)") as NSString).standardizingPath
+        let (lines, withdrawnAt) = Self.leadTurns(now: Date())
+        let contract = LeadContract(goal: "A sandbox task.", acceptance: ["It shows."], boundaries: [], context: "")
+        let tasks: [(String, String, LeadTask.Status)] = [
+            ("sync-landing-base-with-2", "Sync landing-base with main", .running),
+            ("gen-attention-badge", "Your GEN attention badge counts the right things", .blocked),
+            ("ui-consistency-pass", "UI consistency pass over the sidebar", .blocked),
+            ("landing-copy", "Landing page copy for the launch", .done),
+            ("landing-hero", "Landing hero image and its dark variant", .done),
+            ("sidebar-review", "Sidebar review fixes", .done),
+            ("stats-cache", "Cache the stats endpoint", .done),
+            ("old-onboarding", "Old onboarding flow", .abandoned),
+        ]
+        do {
+            // Its board makes the folders it's in.
+            try BoardStore(root: root).update { board in
+                board.tasks = tasks.map { LeadTask(slug: $0.0, title: $0.1, contract: contract, status: $0.2) }
+                var question = LeadQuestion(text: "Should the sidebar keep its review badges?", options: ["Keep them", "Drop them"],
+                                            at: withdrawnAt - 300)
+                question.withdrawnAt = withdrawnAt
+                question.withdrawReason = "User asked to re-ask it. Sidebar review found: (1) the badges overlap the titles, (2) they don't clear when read."
+                board.questions = [question]
+            }
+        } catch {
+            return done("couldn't write the lead's board: \(error)")
+        }
+        startFake(label: "Lead · \(slug)", slug: slug, transcript: lines, done)
+    }
+
+    /// The fake lead's conversation, ending a minute ago: the transcript's lines, and when it withdrew its question.
+    static func leadTurns(now: Date) -> (String, Double) {
+        var lines: [String] = []
+        var clock = now.addingTimeInterval(-600)
+        var withdrawnAt = clock.timeIntervalSince1970
+        let formatter = ISO8601DateFormatter()
+        func add(_ type: String, _ content: Any, usage: Bool = false) {
+            clock = clock.addingTimeInterval(15)
+            var message: [String: Any] = ["role": type, "content": content]
+            if usage { message["model"] = "claude-opus-5-5"; message["usage"] = ["input_tokens": 224_000, "output_tokens": 21_600] }
+            let line: [String: Any] = ["type": type, "uuid": "lead-\(lines.count)", "timestamp": formatter.string(from: clock),
+                                       "isSidechain": false, "message": message]
+            if let data = try? JSONSerialization.data(withJSONObject: line), let text = String(data: data, encoding: .utf8) { lines.append(text) }
+        }
+        func say(_ text: String) { add("assistant", [["type": "text", "text": text]]) }
+        func tool(_ name: String, _ input: [String: Any], _ result: String) {
+            let id = "toolu_\(lines.count)"
+            add("assistant", [["type": "tool_use", "id": id, "name": name, "input": input]])
+            add("user", [["type": "tool_result", "tool_use_id": id, "content": result]])
+        }
+        add("user", "Sync the landing pages with main, and finish the sidebar review.")
+        say("On it. The board first.")
+        tool("mcp__vibeswitcher__board", [:], "8 tasks: 1 working, 2 blocked, 4 done, 1 abandoned.")
+        say("Two tasks wait on the base. Starting a worker on the sync.")
+        tool("mcp__vibeswitcher__start", ["task": "sync-landing-base-with-2"], "Started.")
+        say("Started sync-landing-base-with-2.")
+        tool("Bash", ["command": "git log --oneline -3 origin/main"], "5f19605 Merge #272\n1a2b3c4 Landing copy\n9f8e7d6 Stats cache")
+        // A blank message between two tool calls: nothing to show, so the calls are one row.
+        say("   ")
+        tool("Read", ["file_path": "/sandbox/docs/landing.md"], "# Landing")
+        tool("Grep", ["pattern": "badge"], "Sidebar.swift:42")
+        say("The base is at #272; the landing branch is two merges behind.")
+        add("user", "[VibeSwitcher · worker sync-landing-base-with-2, not the user] The worker on sync-landing-base-with-2 asks: "
+            + "FYI: origin/main 5f19605 tops at #272, so the sync needs no merge from main beyond it. I'll go on with the landing "
+            + "copy and report when it's done; nothing for you to decide.\nAnswer with message(sync-landing-base-with-2, …).")
+        tool("mcp__vibeswitcher__progress", ["text": "sync: base is #272"], "Noted.")
+        say("Noted: nothing to do for the sync.")
+        withdrawnAt = clock.addingTimeInterval(7).timeIntervalSince1970
+        tool("mcp__vibeswitcher__withdraw_question", ["reason": "User asked to re-ask it."], "Withdrawn.")
+        say("Withdrew the sidebar question: I'll ask it again once the review is in.")
+        add("user", "[VibeSwitcher · worker ui-consistency-pass, not the user] The worker on ui-consistency-pass asks: "
+            + "Should the GEN badge show 99+ past 99, or the exact count?\nAnswer with message(ui-consistency-pass, …).")
+        tool("mcp__vibeswitcher__message", ["task": "ui-consistency-pass", "text": "99+"], "Sent.")
+        add("assistant", [["type": "text", "text": "Told it 99+. Waiting on the two blocked tasks."]], usage: true)
+        return (lines.joined(separator: "\n") + "\n", withdrawnAt)
+    }
 
     var fakeList: [Fake] { lock.withLock { fakes.values.sorted { $0.label < $1.label } } }
 
@@ -492,6 +573,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("send", "presses Return in the composer: the message goes to the fake session"),
         ("tell JSON", "hands the selected fake Claude a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("new [LABEL]", "starts another fake session"),
+        ("lead", "shows a fake project lead's chat, at its end (started the first time): a board of tasks, a withdrawn question, tool runs and workers' messages"),
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
         ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
@@ -652,6 +734,20 @@ private final class Driver: NSObject, NSApplicationDelegate {
             startFake(label: rest.isEmpty ? "Fake Claude \(fakeCount + 1)" : rest) { problem in
                 reply(problem == nil, problem ?? "started")
             }
+        case "lead":
+            // Started once; then its chat, once its board is read, at the end (where its pinned questions are).
+            let show = { [weak self] in
+                guard let self else { return }
+                self.chat("lead") { ok, text in
+                    guard ok else { return reply(ok, text) }
+                    self.waitFor({ [weak self] in self?.model.selectedRow.flatMap { self?.leads.lead(for: $0) } != nil }) { [weak self] met in
+                        self?.window?.chat.scrollToBottom()
+                        self?.settle { reply(met, met ? text + ", its team read" : "the lead's board wasn't read") }
+                    }
+                }
+            }
+            if fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) { return show() }
+            startLead { problem in if let problem { reply(false, problem) } else { show() } }
         case "select":
             guard let row = WindowGroups.filter(model.sections, query: rest).first?.rows.first else { return reply(false, "no row matches \(rest)") }
             model.selectedID = row.id

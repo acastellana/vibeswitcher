@@ -263,35 +263,10 @@ public enum BatchSummary {
 
     // MARK: The chat
 
-    /// `items` with each mark placed where its board cleared: before the first item that came after it. A mark from
-    /// before the first item is left out (an earlier part of the conversation, or another lead's), and nothing shows
-    /// in a conversation with no items yet.
+    /// `items` with each mark placed where its board cleared: before the first item that came after it (see
+    /// `ChatTimeline.place`).
     public static func place(_ marks: [LeadAllDone], in items: [ChatItem]) -> [ChatItem] {
-        guard !marks.isEmpty, let first = items.lazy.compactMap(time).first else { return items }
-        var pending = marks.filter { $0.at >= first }.sorted { $0.at < $1.at }[...]
-        guard !pending.isEmpty else { return items }
-        var placed: [ChatItem] = []
-        placed.reserveCapacity(items.count + pending.count)
-        for item in items {
-            if let at = time(item) {
-                while let mark = pending.first, mark.at < at {
-                    placed.append(.allDone(mark))
-                    pending = pending.dropFirst()
-                }
-            }
-            placed.append(item)
-        }
-        placed += pending.map { .allDone($0) }
-        return placed
-    }
-
-    /// When an item happened (seconds since 1970), when it says.
-    static func time(_ item: ChatItem) -> Double? {
-        switch item {
-        case .prompt(let entry), .reply(let entry), .team(let entry, _): return entry.at?.timeIntervalSince1970
-        case .tools(_, let tools): return tools.first?.at?.timeIntervalSince1970
-        case .newMarker, .allDone: return nil
-        }
+        ChatTimeline.place(marks.map { ($0.at, .allDone($0)) }, in: items)
     }
 }
 

@@ -165,8 +165,24 @@ final class ChatModel: ObservableObject {
         updateItems()
     }
 
+    /// The lead's questions and what became of late answers, when this is a project lead's conversation: the closed
+    /// ones show where they closed (see `ChatTimeline.placeQuestions`).
+    private(set) var questions: [LeadQuestion] = []
+    private(set) var questionNotices: [String: String] = [:]
+
+    /// Shows the lead's closed questions in its conversation (none: this isn't a lead's).
+    func showQuestions(_ questions: [LeadQuestion], notices: [String: String]) {
+        let closed = questions.filter { $0.state == .withdrawn || $0.state == .autoDecided }
+        let notices = notices.filter { id, _ in closed.contains { $0.id == id } }
+        guard closed != self.questions || notices != questionNotices else { return }
+        self.questions = closed
+        questionNotices = notices
+        updateItems()
+    }
+
     private func updateItems() {
-        let new = BatchSummary.place(allDone, in: ChatTimeline.items(log.entries, newAfter: markerAfter))
+        let timeline = ChatTimeline.items(log.entries, newAfter: markerAfter)
+        let new = ChatTimeline.placeQuestions(questions, notices: questionNotices, in: BatchSummary.place(allDone, in: timeline))
         guard new != items else { return }
         // Its indices are the old items': whatever was still to come is shown now.
         stopStaging()

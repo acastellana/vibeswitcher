@@ -44,6 +44,9 @@ struct TeamStrip: View {
     /// Reports VibeSwitcher couldn't wake the lead for (see `LeadWake.shownAfter`), by the lead's terminal.
     @ObservedObject var waiting = ReportsWaiting.shared
 
+    /// How wide the fade at the chips' right edge is.
+    static let fade: CGFloat = 32
+
     var body: some View {
         let order = LeadTask.Status.attentionOrder
         VStack(alignment: .leading, spacing: 8) {
@@ -95,6 +98,17 @@ struct TeamStrip: View {
                             .help("\(task.shownStatus.label): \(task.contract.goal)")
                         }
                     }
+                    // From the strip's inset, and the last chip can scroll clear of the fade.
+                    .padding(.leading, 16).padding(.trailing, TeamStrip.fade + 8)
+                }
+                // Edge to edge: a chip past the right edge fades out there, never cut off mid-word at the inset.
+                .padding(.horizontal, -16)
+                .mask {
+                    HStack(spacing: 0) {
+                        LinearGradient(colors: [.clear, .black], startPoint: .leading, endPoint: .trailing).frame(width: 16)
+                        Color.black
+                        LinearGradient(colors: [.black, .clear], startPoint: .leading, endPoint: .trailing).frame(width: TeamStrip.fade)
+                    }
                 }
             }
         }
@@ -138,10 +152,35 @@ private struct HoldLeadQuestionKey: EnvironmentKey {
     static let defaultValue: (LeadQuestion) -> Void = { _ in }
 }
 
+/// Answering a lead's question from a row of the chat's history (a note after it closed). Set where the chat is made.
+private struct AnswerLeadQuestionKey: EnvironmentKey {
+    static let defaultValue: (LeadQuestion, String) -> Void = { _, _ in }
+}
+
+/// What you were writing under each of the lead's questions, by question id: a question that closes while you write
+/// leaves the stack under the chat for the chat's history, and the draft goes with it (to send as a note or discard).
+final class LeadQuestionDrafts {
+    var text: [String: String] = [:]
+}
+
+private struct LeadQuestionDraftsKey: EnvironmentKey {
+    static let defaultValue: LeadQuestionDrafts? = nil
+}
+
 extension EnvironmentValues {
     var holdLeadQuestion: (LeadQuestion) -> Void {
         get { self[HoldLeadQuestionKey.self] }
         set { self[HoldLeadQuestionKey.self] = newValue }
+    }
+
+    var answerLeadQuestion: (LeadQuestion, String) -> Void {
+        get { self[AnswerLeadQuestionKey.self] }
+        set { self[AnswerLeadQuestionKey.self] = newValue }
+    }
+
+    var leadQuestionDrafts: LeadQuestionDrafts? {
+        get { self[LeadQuestionDraftsKey.self] }
+        set { self[LeadQuestionDraftsKey.self] = newValue }
     }
 }
 
@@ -172,6 +211,8 @@ struct LeadQuestionStack: View {
     /// The answers being written, by question id: kept here, so a card hidden once its question is withdrawn keeps
     /// what you were writing (and shows it to send as a note).
     @State private var drafts: [String: String]
+    /// The chat's drafts (`LeadQuestionDrafts`): what you write here goes with a question that closes into the chat.
+    @Environment(\.leadQuestionDrafts) private var kept
 
     init(questions: [LeadQuestion], notices: [String: String] = [:], answer: @escaping (LeadQuestion, String) -> Void,
          historyOpen: Set<String> = [], drafts: [String: String] = [:], showsWithdrawn: Bool = true) {
@@ -206,10 +247,26 @@ struct LeadQuestionStack: View {
                 ForEach(shown) { question in
                     LeadQuestionCard(question: question, notice: notices[question.id], answer: answer,
                                      showHistory: historyOpen.contains(question.id),
-                                     text: Binding(get: { drafts[question.id] ?? "" }, set: { drafts[question.id] = $0 }))
+                                     text: Binding(get: { drafts[question.id] ?? kept?.text[question.id] ?? "" }, set: { drafts[question.id] = $0 }))
                 }
             }
         }
+    }
+}
+
+/// A question of the lead's that closed without your answer, in the chat's history where it closed: the line the stack
+/// showed for it, with a draft you were writing (`LeadQuestionDrafts`) still to send as a note.
+struct LeadQuestionHistoryRow: View {
+    let question: LeadQuestion
+    let notice: String?
+    @Environment(\.answerLeadQuestion) private var answer
+    @Environment(\.leadQuestionDrafts) private var drafts
+    /// The draft from the stack, once it's read (the card writes it back to `drafts` as it changes).
+    @State private var text: String?
+
+    var body: some View {
+        LeadQuestionCard(question: question, notice: notice, answer: answer, showHistory: false,
+                         text: Binding(get: { text ?? drafts?.text[question.id] ?? "" }, set: { text = $0 }))
     }
 }
 
@@ -222,15 +279,19 @@ private struct LeadQuestionCard: View {
     /// discard).
     @Binding var text: String
     @Environment(\.holdLeadQuestion) private var hold
+    @Environment(\.leadQuestionDrafts) private var drafts
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOver
 
     var body: some View {
-        switch question.state {
-        case .withdrawn: withdrawn
-        case .autoDecided: decided
-        case .open, .answered: card
+        Group {
+            switch question.state {
+            case .withdrawn: withdrawn
+            case .autoDecided: decided
+            case .open, .answered: card
+            }
         }
+        .onChange(of: text) { _, text in drafts?.text[question.id] = text.isEmpty ? nil : text }
     }
 
     private var card: some View {
