@@ -5,8 +5,8 @@ import Testing
 
 /// E-14: the steer inbox's lock is held by others for seconds (a hook's delivery checks seals through the host with a
 /// 5 s timeout), and the composer's send and the strip's withdraw took it on the main thread: the window froze for as
-/// long. Here another process holds the lock for 3 s, and the main-thread call still returns at once; the message
-/// lands (or comes back) once the lock is free, shown as sending meanwhile.
+/// long. Here another process holds the lock until the test lets it go, and the main-thread call returns while it
+/// still holds it; the message lands (or comes back) once the lock is free, shown as sending meanwhile.
 @MainActor
 @Suite(.serialized)
 struct SteerOffMainTests {
@@ -27,44 +27,62 @@ struct SteerOffMainTests {
         return (chat, sync, folder.appendingPathComponent("\(tty).jsonl"))
     }
 
-    /// Another process holding a file's lock, and when it took it (by its own clock, so a slow start or a late read of
-    /// its line under load doesn't count as time held).
+    /// Another process holding a file's lock.
     struct Holder {
         let process: Process
-        let lockedAt: Date
+        let input: Pipe
+
+        /// Lets the lock go now: the holder exits.
+        func release() { try? input.fileHandleForWriting.close() }
     }
 
-    /// Another process holding `file`'s lock for `seconds` from when it took it; returns once it has it.
+    /// Another process holding `file`'s lock until `release`, or for `seconds` from when it took it, whichever comes
+    /// first; returns once it has it.
     func holdLock(_ file: URL, for seconds: Double) throws -> Holder {
         let script = """
-        import fcntl, os, sys, time
+        import fcntl, os, select, sys
         fd = os.open(sys.argv[1], os.O_RDWR | os.O_CREAT, 0o600)
         fcntl.flock(fd, fcntl.LOCK_EX)
-        sys.stdout.write("locked %r\\n" % time.time()); sys.stdout.flush()
-        time.sleep(float(sys.argv[2]))
+        sys.stdout.write("locked\\n"); sys.stdout.flush()
+        select.select([sys.stdin], [], [], float(sys.argv[2]))
         """
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         process.arguments = ["-I", "-c", script, file.path, String(seconds)]
-        let out = Pipe()
+        let out = Pipe(), input = Pipe()
         process.standardOutput = out
+        process.standardInput = input
         try process.run()
         var line = Data()
         while let byte = try out.fileHandleForReading.read(upToCount: 1), !byte.isEmpty, byte != Data("\n".utf8) { line += byte }
-        let words = String(decoding: line, as: UTF8.self).split(separator: " ")
-        let lockedAt = try #require(words.count == 2 && words[0] == "locked" ? Double(words[1]) : nil, "the holder said \(words)")
-        return Holder(process: process, lockedAt: Date(timeIntervalSince1970: lockedAt))
+        let said = String(decoding: line, as: UTF8.self)
+        try #require(said == "locked", "the holder said \(said)")
+        return Holder(process: process, input: input)
+    }
+
+    /// Whether another process holds `file`'s lock now: one asked for here without waiting is refused. What a call
+    /// that must not wait for the lock is checked by, rather than how long it took (a loaded Mac can take 0.3 s to run
+    /// any call on the main thread).
+    func heldElsewhere(_ file: URL) -> Bool {
+        let fd = open(file.path, O_RDWR)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        guard flock(fd, LOCK_EX | LOCK_NB) != 0 else {
+            flock(fd, LOCK_UN)
+            return false
+        }
+        return errno == EWOULDBLOCK
     }
 
     @Test func aSendWhileAnotherProcessHoldsTheInboxReturnsAtOnceAndLandsWhenItsFree() async throws {
         let (chat, sync, file) = try chat()
-        let holder = try holdLock(file, for: 3)
+        // Held until the test lets it go (a minute at most, should the send wait for it).
+        let holder = try holdLock(file, for: 60)
         defer { holder.process.terminate() }
-        let started = Date()
         let accepted = sync.steer("use port 8080", key: key, tty: tty, agentPid: agentPid)
-        let returnedIn = Date().timeIntervalSince(started)
+        // It returned without waiting for the lock: the holder has it still.
+        #expect(heldElsewhere(file), "the main-thread send waited for the lock")
         #expect(accepted)
-        #expect(returnedIn < 0.1, "the main-thread send took \(returnedIn) s")
         // Meanwhile: in the chat as sending, not in the inbox yet; a heartbeat doesn't drop it.
         let id = try #require(chat.steering.first?.id)
         #expect(chat.steering.map(\.text) == ["use port 8080"])
@@ -73,12 +91,15 @@ struct SteerOffMainTests {
         chat.watchSteering(tty: tty, agentPid: agentPid, idle: false)
         chat.refreshSteering()
         #expect(chat.steering.map(\.text) == ["use port 8080"])
+        // Not in while the lock is held.
+        #expect(heldElsewhere(file))
+        #expect(chat.steerSending == [id])
+        #expect(SteerInbox.pending(tty: tty, root: chat.steerRoot).isEmpty)
         // Lands once the lock is free: steering (no longer sending), in the inbox, sealed as the user's. The wait ends
-        // when the post is in (the hang guard only bounds it); one that landed while the holder slept its 3 s, counted
-        // from when it took the lock, would come in under 2.5 s. The lock goes with the holder's exit, which Process
+        // when the post is in (the hang guard only bounds it). The lock goes with the holder's exit, which Process
         // learns of a moment later, so that's waited for too.
+        holder.release()
         #expect(await until { chat.steerSending.isEmpty })
-        #expect(Date().timeIntervalSince(holder.lockedAt) > 2.5, "it landed while the lock was held")
         #expect(await until { !holder.process.isRunning })
         let waiting = SteerInbox.pending(tty: tty, root: chat.steerRoot)
         #expect(waiting.map(\.id) == [id])
@@ -94,17 +115,16 @@ struct SteerOffMainTests {
         try SteerInbox.post(message, tty: tty, root: chat.steerRoot)
         chat.watchSteering(tty: tty, agentPid: agentPid, idle: true)
         #expect(chat.steering.map(\.id) == [message.id])
-        let holder = try holdLock(file, for: 3)
+        let holder = try holdLock(file, for: 60)
         defer { holder.process.terminate() }
         var taken: SteerMessage?
-        let started = Date()
         chat.withdrawSteered(message) { taken = $0 }
-        let returnedIn = Date().timeIntervalSince(started)
-        #expect(returnedIn < 0.1, "the main-thread withdraw took \(returnedIn) s")
+        #expect(heldElsewhere(file), "the main-thread withdraw waited for the lock")
         #expect(taken == nil)
         #expect(chat.steering.map(\.id) == [message.id])
+        #expect(SteerInbox.pending(tty: tty, root: chat.steerRoot).map(\.id) == [message.id])
+        holder.release()
         #expect(await until { taken != nil })
-        #expect(Date().timeIntervalSince(holder.lockedAt) > 2.5, "it was taken while the lock was held")
         #expect(await until { !holder.process.isRunning })
         #expect(taken?.id == message.id)
         #expect(chat.steering.isEmpty)
@@ -115,12 +135,14 @@ struct SteerOffMainTests {
     /// A withdraw sent while its post is still waiting on the lock comes after it (one queue, in order).
     @Test func aWithdrawRightAfterASendWaitsForItsPost() async throws {
         let (chat, sync, file) = try chat()
-        let holder = try holdLock(file, for: 1)
+        let holder = try holdLock(file, for: 60)
         defer { holder.process.terminate() }
         #expect(sync.steer("stop after this", key: key, tty: tty, agentPid: agentPid))
         let message = try #require(chat.steering.first)
         var taken: SteerMessage?
         chat.withdrawSteered(message) { taken = $0 }
+        #expect(heldElsewhere(file))
+        holder.release()
         #expect(await until { taken != nil })
         #expect(taken?.text == "stop after this")
         #expect(chat.steering.isEmpty)
@@ -144,12 +166,13 @@ struct SteerOffMainTests {
     /// lets it go then.
     @Test func theOutboxKeepsASteerUntilItsInTheInbox() async throws {
         let (chat, sync, file) = try chat()
-        let holder = try holdLock(file, for: 1)
+        let holder = try holdLock(file, for: 60)
         defer { holder.process.terminate() }
         let entry = send("use port 8080", chat: chat, sync: sync)
         #expect(chat.outbox.entry(entry.id)?.state == .sending)
         #expect(chat.pending.isEmpty)
         #expect(chat.steering.map(\.text) == ["use port 8080"])
+        holder.release()
         #expect(await until { chat.steerSending.isEmpty })
         #expect(chat.outbox.entry(entry.id) == nil)
         #expect(chat.pending.isEmpty)
@@ -164,7 +187,8 @@ struct SteerOffMainTests {
         let folder = root.appendingPathComponent("steer")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
         let outboxFile = home.appendingPathComponent("outbox.json")
-        let holder = try holdLock(folder.appendingPathComponent("\(tty).jsonl"), for: 3)
+        // Held through the test (ended with it): the next launch comes before the post got through.
+        let holder = try holdLock(folder.appendingPathComponent("\(tty).jsonl"), for: 60)
         defer { holder.process.terminate() }
         weak var gone: ChatModel?
         let entry: OutboxEntry
