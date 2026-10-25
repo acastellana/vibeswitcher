@@ -1177,3 +1177,10 @@
 - 2026-10-25 10:11 Audit of a-fix-s-regression: incomplete, clean, round 1: 3 Important open
 - 2026-10-25 10:19 Audit of a-fix-s-regression: complete, clean, round 2: 3 Important closed
 - 2026-10-25 10:24 Merged a-fix-s-regression: A fix's regression test is shown to fail without the fix
+- 2026-10-25 11:55 Automatically (auto_advance): Cleaned up all-done-card-a (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-10-25 11:56 Planned update-and-evidence: Update and evidence screenshots survive cleanup
+- 2026-10-25 11:56 Started a worker on update-and-evidence
+- 2026-10-25 11:56 Automatically (auto_advance): Started a worker on update-and-evidence (Update and evidence screenshots survive cleanup).
+- 2026-10-25 11:57 Planned auto-advance-s-reports: auto_advance's reports reach the lead as VibeSwitcher's, verified (review audit)
+- 2026-10-25 11:57 Started a worker on auto-advance-s-reports
+- 2026-10-25 11:57 Automatically (auto_advance): Started a worker on auto-advance-s-reports (auto_advance's reports reach the lead as VibeSwitcher's, verified).

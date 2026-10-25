@@ -424,3 +424,7 @@ The user answered 'Start Phases 1 and 2 together' on 2026-10-25. Data from 2026-
 
 finished-work-lands F1's two new tests would have passed on the old code too. The verifier couldn't prove it because a scratch-export command was denied. Without such proof a "fixed" finding has no guard against the bug coming back.
 
+## 2026-10-25 11:55:41 The lead installed the Lead Process v3 batch at 11:55 CEST on 2026-10-25, on the user's "Install now" plus "go" once the Mac was on AC power (the battery was at 5%). Verified: - the host pid 31589 is unchanged; - the leads' tool servers were swapped in place, with the same pids; - vibeswitcher's lead tool server (pid 10199) holds run/advancing.lock, so auto_advance is live; - status works. The build's own relaunch reported _LSOpenURLsWithCompletionHandler error -600. The app (pid 61407, started 11:55:18) was running when checked, after a precautionary `open`.
+
+Writing down the verified state saves the next lead re-checking it. The -600 relaunch error is worth noticing if it recurs.
+
