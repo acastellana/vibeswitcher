@@ -9,6 +9,8 @@ import Foundation
 /// - a verdict that left Important findings open sends its worker the open ids to answer with answer_findings (once
 ///   per verdict), or starts a worker to get them when its own has ended; a verdict the round cap says to reconsider
 ///   (the lead's call: re-plan, or update_task reroll), or one that isn't clean, is left to the lead;
+/// - an audit whose verifier ended without a verdict starts again once on the same commit, its leftover session closed;
+///   a second that ends so is left to the lead, with how each ended;
 /// - a merge whose tests fail (or that conflicts) sends its worker the output, and the task goes back to work;
 /// - a merged task is cleaned up;
 /// - a planned task whose `after` tasks are all done starts, in board order, within max_workers, the Mac-wide
@@ -120,7 +122,7 @@ public final class LeadAdvance: @unchecked Sendable {
     static func runningLock(_ store: BoardStore) -> String { (store.folder as NSString).appendingPathComponent("run/advancing.lock") }
 
     /// A lead's loop runs for this project now (in any process).
-    static func running(_ store: BoardStore) -> Bool {
+    public static func running(_ store: BoardStore) -> Bool {
         guard let lock = FileLock.attempt(runningLock(store)) else { return true }
         lock.release()
         return false
@@ -355,8 +357,8 @@ public final class LeadAdvance: @unchecked Sendable {
             merge(slug, head: head, busy: busy, audited: true)
             return
         }
-        // An audit under way on this commit: its verdict comes.
-        if vault.current(.verifier, root: root, task: slug)?.auditing == head { return }
+        // An audit under way on this commit: its verdict comes, unless its verifier ended without one.
+        if vault.current(.verifier, root: root, task: slug)?.auditing == head { return auditAgain(slug, head: head, busy: busy) }
         if let needed = lead.advanceReviewNeeded(slug, commit: head) {
             let finders = lead.workflow.auditFinders
             guard !busy, hasRoom(slug, need: finders) else { return roomWait("audit(\(slug))", need: finders) }
@@ -370,6 +372,66 @@ public final class LeadAdvance: @unchecked Sendable {
         // review none: on its worker's done report on this head (one on an older commit waits for its next report).
         guard (try? vault.unaudited(root: root, task: slug))?.reported == head else { return }
         merge(slug, head: head, busy: busy, audited: false)
+    }
+
+    /// The audit under way on `head` lost its verifier without a verdict (its session ended, or its agent quit and left
+    /// the shell open): it starts again once on the same commit, as any audit start waits for the Mac's room, and
+    /// audit closes the old verifier's session first. When the retry's verifier ends so too, nothing starts a third
+    /// (a verifier the lead started since is a first ending of its own):
+    /// its leftover session is closed and the lead gets one report, with how each ended. A verifier that submitted
+    /// nothing records no audit round (the vault counts one per verdict), so this never moves a task toward
+    /// reconsider by itself.
+    private func auditAgain(_ slug: String, head: String, busy: Bool) {
+        guard let task = due(slug, [.review]), task.evidence == nil, let ended = endedVerifier(task) else { return }
+        // The retry's own verifier ended too; any other (the lead audited again since, or an older commit's retry) is a
+        // first ending.
+        if let retry = task.verifierRetry, retry.commit == head, retry.verifiers.contains(ended.session) {
+            guard retry.second == nil else { return }
+            try? lead.store.update { board in
+                guard let index = board.taskIndex(slug) else { return }
+                board.tasks[index].verifierRetry?.second = ended.ending
+            }
+            if ended.live { try? lead.runtime.kill(ended.session) }
+            did("The verifier on \(slug) ended without a verdict twice at \(head.prefix(8)), so its audit doesn't start again by itself: "
+                + "the first: \(retry.first); the second: \(ended.ending)\(ended.live ? " (its shell is closed now)" : ""). "
+                + "read_session(\(slug), who: verifier) to see why, then audit(\(slug)) again or tell the user.")
+            return
+        }
+        let finders = lead.workflow.auditFinders
+        guard !busy, hasRoom(slug, need: finders) else { return roomWait("audit(\(slug))", need: finders) }
+        step("audit|\(slug)|\(head)|again") {
+            guard let task = due(slug, [.review]), task.evidence == nil, endedVerifier(task)?.session == ended.session else { throw NotDue() }
+            _ = try lead.advanceAudit(slug)
+            try? lead.store.update { board in
+                guard let index = board.taskIndex(slug) else { return }
+                let started = board.tasks[index]
+                board.tasks[index].verifierRetry = LeadVerifierRetry(commit: head, first: ended.ending,
+                                                                     verifiers: started.panel?.sessions ?? [started.verifier].compactMap { $0 })
+            }
+            return "The verifier on \(slug) ended without a verdict (\(ended.ending)): closed its session and started the audit again on the same commit, "
+                + "\(head.prefix(8)). If this one ends without a verdict too, it's left to you."
+        }
+    }
+
+    /// One of the verifiers `task` waits on that ended without its verdict, how (`LeadRuntime.agentEnding`), and whether
+    /// its session lives on as a shell; nil while each works (or the host can't be read).
+    private func endedVerifier(_ task: LeadTask) -> Ended? {
+        guard let sessions = try? lead.advanceSessions() else { return nil }
+        // Submitted: the host ends it shortly after, its job done.
+        let submitted = Set(((try? lead.vault.roster(root: lead.root)) ?? []).filter { $0.submittedAt != nil }.map(\.session))
+        for verifier in task.awaitedVerifiers where !submitted.contains(verifier) {
+            guard let info = sessions.first(where: { $0.id == verifier }) else {
+                return Ended(session: verifier, ending: "its session is gone (the session host was replaced, or it was removed)", live: false)
+            }
+            if let ending = lead.runtime.agentEnding(info) { return Ended(session: verifier, ending: ending, live: info.live) }
+        }
+        return nil
+    }
+
+    struct Ended {
+        var session: String
+        var ending: String
+        var live: Bool
     }
 
     private func merge(_ slug: String, head: String, busy: Bool, audited: Bool) {

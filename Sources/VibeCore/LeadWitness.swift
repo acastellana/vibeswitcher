@@ -160,7 +160,43 @@ public enum LeadWitness {
     /// How long a session may sit finished before it counts as stopped.
     public static let quiet: TimeInterval = 90
 
-    public static func events(board: LeadBoard, seen: [String: Seen], now: Date = Date()) -> [(key: String, text: String)] {
+    /// What a verifier whose agent quit, leaving its session's shell open, is said to have ended with.
+    public static let agentQuitEnding = "its agent quit; the session's shell is still open"
+
+    /// How a verifier that gave no verdict ended, in words (what the lead is told): its session's ending, or that its
+    /// agent quit with the shell left open.
+    static func verifierEnding(_ info: Seen) -> String { info.live ? agentQuitEnding : info.ending }
+
+    /// How long a verifier that ended without a verdict is left to auto_advance (see `leftToAdvance`) before the lead
+    /// is told as ever: its loop audits again within a pass of the app's nudge, unless the Mac has no room or the
+    /// ending couldn't be read there.
+    public static let advanceGrace: TimeInterval = 5 * 60
+
+    /// The verifiers that ended without a verdict on a task that moves by itself: auto_advance audits it again once,
+    /// or reports that its retry's verifier ended too (`LeadAdvance`). The app nudges the loop at the first sight of each.
+    public static func endedForAdvance(board: LeadBoard, seen: [String: Seen], now: Date = Date()) -> [String] {
+        board.tasks.filter { $0.status == .review && $0.evidence == nil && $0.autoAdvance != false }.flatMap { task in
+            let noTools = noToolsSessions(task, seen: seen, now: now)
+            return task.awaitedVerifiers.filter { verifier in
+                guard !noTools.contains(verifier), let info = seen[verifier] else { return false }
+                return (!info.live || info.agentQuit) && !gaveVerdict(info, on: task)
+            }
+        }
+    }
+
+    /// Of `endedForAdvance`, those `events` leaves to the loop while it runs (the app's `firstSeen`: when it first saw
+    /// each so): its report told of it already (the retry's verifier, which ended too), or it was seen less than
+    /// `advanceGrace` ago. Past that with no retry (the verifier still awaited), the lead is told as ever.
+    public static func leftToAdvance(board: LeadBoard, seen: [String: Seen], now: Date = Date(), firstSeen: [String: Date]) -> Set<String> {
+        Set(endedForAdvance(board: board, seen: seen, now: now).filter { verifier in
+            let task = board.tasks.first { $0.awaitedVerifiers.contains(verifier) }
+            if let retry = task?.verifierRetry, retry.second != nil, retry.verifiers.contains(verifier) { return true }
+            return firstSeen[verifier].map { now.timeIntervalSince($0) < advanceGrace } ?? true
+        })
+    }
+
+    /// `advanced`: the verifiers left to auto_advance (see `leftToAdvance`), not told here.
+    public static func events(board: LeadBoard, seen: [String: Seen], now: Date = Date(), advanced: Set<String> = []) -> [(key: String, text: String)] {
         var events: [(key: String, text: String)] = []
         for task in board.tasks where task.status != .done {
             // One whose tools never connected is told so, once, and nothing else of it is (its end is VibeSwitcher's).
@@ -191,11 +227,11 @@ public enum LeadWitness {
             }
             // With several finders, each that hasn't submitted yet.
             for verifier in task.status == .review && task.evidence == nil ? task.awaitedVerifiers : [] {
-                guard !noTools.contains(verifier), let info = seen[verifier], !gaveVerdict(info, on: task) else { continue }
+                guard !noTools.contains(verifier), !advanced.contains(verifier), let info = seen[verifier], !gaveVerdict(info, on: task) else { continue }
                 if info.live, !info.agentQuit, let error = info.apiError {
                     events.append(("\(verifier)|api-error-\(Int(info.apiErrorAt ?? 0))", "The verifier on \(task.slug) stopped mid-audit: its turn ended on an API error (\(error)). Tell the user, or audit again."))
                 } else if !info.live || info.agentQuit {
-                    events.append(("\(verifier)|ended", "The verifier on \(task.slug) ended without a verdict (\(info.live ? "its agent quit; the session's shell is still open" : info.ending)). read_session(\(task.slug), who: verifier) to see why, then audit again."))
+                    events.append(("\(verifier)|ended", "The verifier on \(task.slug) ended without a verdict (\(verifierEnding(info))). read_session(\(task.slug), who: verifier) to see why, then audit again."))
                 } else if let event = waiting(info, session: verifier, now: now,
                                               input: waitingText("The verifier on \(task.slug)", info, now: now, advice: "Tell the user if it's theirs, or audit again."),
                                               stopped: "The verifier on \(task.slug) stopped without calling submit_audit. read_session(\(task.slug), who: verifier) to see why, then audit again.") {
@@ -209,8 +245,9 @@ public enum LeadWitness {
     /// What to tell the lead: the `events` not `told` yet, as they are, except that sessions that ended without
     /// reporting are told together, in one message naming each task and how it ended (a stray kill ends many at
     /// once). Each message carries the keys of the events it tells.
-    public static func messages(board: LeadBoard, seen: [String: Seen], now: Date = Date(), told: (String) -> Bool) -> [(keys: [String], text: String)] {
-        let fresh = events(board: board, seen: seen, now: now).filter { !told($0.key) }
+    public static func messages(board: LeadBoard, seen: [String: Seen], now: Date = Date(), advanced: Set<String> = [],
+                                told: (String) -> Bool) -> [(keys: [String], text: String)] {
+        let fresh = events(board: board, seen: seen, now: now, advanced: advanced).filter { !told($0.key) }
         let ended = Set(fresh.map(\.key).filter { $0.hasSuffix("|ended") })
         guard ended.count > 1 else { return fresh.map { ([$0.key], $0.text) } }
         let lines = endings(board: board, seen: seen).filter { ended.contains($0.key) }

@@ -96,6 +96,13 @@ final class FakeRuntime: LeadRuntime {
     }
     func currentAgent() -> LeadAgent? { me }
     func isRunning(_ agent: LeadAgent) -> Bool { leadRunning }
+    /// How each session's agent ended, while its session lives on (its agent quit, say); one killed ended by SIGTERM.
+    var endings: [String: String] = [:]
+    func agentEnding(_ session: LeadSessionInfo) -> String? {
+        calls.lock()
+        defer { calls.unlock() }
+        return session.live ? endings[session.id] : endings[session.id] ?? "killed by SIGTERM"
+    }
 }
 
 /// The same world, seen from another session's tool server: its own agent, everything else shared.
@@ -121,6 +128,7 @@ final class FakeSeat: LeadRuntime {
     func currentAgent() -> LeadAgent? { agent }
     func isRunning(_ agent: LeadAgent) -> Bool { shared.isRunning(agent) }
     func loadAverage() -> Double? { shared.loadAverage() }
+    func agentEnding(_ session: LeadSessionInfo) -> String? { shared.agentEnding(session) }
 }
 
 /// The team as VibeSwitcher starts it, with a vault of its own: the book a session host would hold, asked in

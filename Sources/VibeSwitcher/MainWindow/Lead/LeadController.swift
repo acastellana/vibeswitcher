@@ -121,6 +121,9 @@ struct TeamReading {
     /// The live workers with a run in line for the Mac-wide test and build lock (see `LeadWitness.Seen.lockWait`).
     var lockWaits: [String: TestLock.Wait] = [:]
     var workflow = LeadWorkflow()
+    /// The lead's loop runs with workflow.md's auto_advance on: a verifier that ends without a verdict is its to
+    /// audit again (see `LeadWitness.leftToAdvance`). Looked at only while a task is in review.
+    var advancing = false
 
     /// A worker's transcript is read whatever it shows: a stall is one that reads as working too (see `LeadStall`). A
     /// verifier's while it doesn't show working: a turn that ended on an API error reads as finished or waiting, and
@@ -141,6 +144,7 @@ struct TeamReading {
             team.lockWaits = lock.waits(for: Dictionary(folders, uniquingKeysWith: { first, _ in first }))
         }
         team.workflow = LeadWorkflow.load(from: (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md"))
+        team.advancing = team.workflow.autoAdvance && board.tasks.contains { $0.status == .review } && LeadAdvance.running(BoardStore(root: root))
         return team
     }
 }
@@ -204,6 +208,9 @@ final class LeadController: ObservableObject {
     @Published private(set) var answerNotices: [String: String] = [:]
     /// Witness events already told, so each is told once.
     private var told: Set<String> = []
+    /// When the witness first saw each verifier that auto_advance audits again end without a verdict (by root and
+    /// session; see `LeadWitness.leftToAdvance`).
+    private var advanceSeen: [String: Date] = [:]
     /// Each project's free disk space, watched (see `LeadWitness.Disk`), by root.
     private var disks: [String: LeadWitness.Disk] = [:]
     /// The bytes free on the volume holding a path, as the disk watch reads them (see `DiskSpace.free`; a test run's
@@ -1114,7 +1121,23 @@ final class LeadController: ObservableObject {
             host.kill(uuid)
         }
         // Sessions that ended together (a stray kill, the app relaunched over them) are told in one message.
-        for message in LeadWitness.messages(board: board, seen: seen, now: now, told: { told.contains("\(root)|\($0)") }) {
+        // A verifier that ended without a verdict, which auto_advance audits again: its loop looks now (an agent that
+        // quit leaving its shell open writes nothing in the project's folder), and the lead hears of it in its report;
+        // past `LeadWitness.advanceGrace` with no retry, from here as ever.
+        var advanced: Set<String> = []
+        if team.advancing {
+            var firstSeen: [String: Date] = [:]
+            for verifier in LeadWitness.endedForAdvance(board: board, seen: seen, now: now) {
+                let key = "\(root)|\(verifier)"
+                if advanceSeen[key] == nil {
+                    advanceSeen[key] = now
+                    LeadAdvance.nudge(root: root)
+                }
+                firstSeen[verifier] = advanceSeen[key]
+            }
+            advanced = LeadWitness.leftToAdvance(board: board, seen: seen, now: now, firstSeen: firstSeen)
+        }
+        for message in LeadWitness.messages(board: board, seen: seen, now: now, advanced: advanced, told: { told.contains("\(root)|\($0)") }) {
             message.keys.forEach { told.insert("\(root)|\($0)") }
             deliver(message.text, from: .system("witness"), root: root)
         }

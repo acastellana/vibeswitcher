@@ -616,7 +616,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         // The lead's results as the Lead view lists them: an update whose screenshot post_update kept (its worktree
         // since removed), and an older one whose path into a cleaned-up worktree is gone.
         ("results", { driver in AnyView(ResultsList(updates: Driver.results(home: driver.home)).frame(width: 460).padding(12)) }),
-        // A lead's Team tab: a task at work, two blocked (one after it, one with no word why), merged ones of which
+        // A lead's Team tab: a task at work, two blocked (one after it, one with no word why), one whose verifier ended
+        // twice, merged ones of which
         // one was audited, a question withdrawn lately and several answered, the Mac line, the Mac kept awake.
         ("lead-team", { driver in
             let team = Driver.leadTeam()
@@ -657,7 +658,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
         merged[0].audits = audits
         var abandoned = task("Old staking widget", .abandoned, since: 9_000)
         abandoned.abandonedBecause = "Replaced by the payout report."
-        board.tasks = merged + [working, after, unsaid, abandoned]
+        // auto_advance audited it again once after its verifier's agent quit; the retry's verifier ended too.
+        var twice = task("Attention badge from stored scans", .review, since: 25 * 60)
+        twice.review = .audit
+        let verifier = UUID().uuidString
+        twice.verifier = verifier
+        twice.verifierRetry = LeadVerifierRetry(commit: "abc1234def0", first: LeadWitness.agentQuitEnding, verifiers: [verifier], second: "killed by SIGTERM")
+        board.tasks = merged + [working, after, unsaid, twice, abandoned]
 
         var withdrawn = LeadQuestion(text: "Sidebar review found three overlapping rows. Re-plan the sidebar as one task, or fix each row on its own?\nThe review's notes are in progress.md.",
                                      options: ["One task", "Each row"], at: now - 1_500)
@@ -680,6 +687,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         var seen: [String: MemberSeen] = [:]
         seen[working.worker!] = MemberSeen(live: true, needsYou: false, working: true, activity: "Running swift test", since: Date(timeIntervalSince1970: now - 60),
                                            startedAt: Date(timeIntervalSince1970: now - 240))
+        seen[verifier] = MemberSeen(live: false, needsYou: false, working: false, activity: nil, since: nil, startedAt: Date(timeIntervalSince1970: now - 900))
         let decisions = (1...16).map { LeadDecision(at: now - Double($0) * 900, text: "Earlier decision \($0)", why: "") }
         return (board, seen, decisions)
     }

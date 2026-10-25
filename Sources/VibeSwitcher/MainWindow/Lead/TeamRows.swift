@@ -349,6 +349,10 @@ enum TeamRows {
                 // Review none: its worker's done report is what merge takes, with the merge's own test run.
                 row.mark = .merge
                 row.state = "Ready to merge"
+            } else if let verifier, !verifier.live, task.evidence == nil, let retry = task.verifierRetry, let second = retry.second,
+                      awaited.map(retry.verifiers.contains) == true {
+                // auto_advance audited it again once, and that verifier ended too: the lead decides.
+                red(.ended, "Verifier ended twice", "Both verifiers ended without a verdict (\(retry.first); then \(second)); the lead decides what next.", since: nil)
             } else if let verifier, !verifier.live, task.evidence == nil {
                 red(.ended, "Verifier ended", "The verifier ended without a verdict.", since: nil)
             } else if verifierGone, task.evidence == nil {

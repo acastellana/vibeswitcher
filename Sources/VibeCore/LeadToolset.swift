@@ -81,11 +81,25 @@ public protocol LeadRuntime: AnyObject {
     func loadAverage() -> Double?
     /// The model the project's workers run on, as `claude --model` names it (nil: Claude's default, not known).
     func workerModel(root: String) -> String?
+    /// How a session's agent ended, in the witness's words (see `LeadWitness.verifierEnding`): its session's ending
+    /// ("killed by SIGTERM"), or that its agent quit and left the session's shell open; nil while its agent runs, or
+    /// when that can't be told.
+    func agentEnding(_ session: LeadSessionInfo) -> String?
 }
 
 public extension LeadRuntime {
     /// From the Claude command's own --model only; the app's runtime also reads Claude's settings (see `HostRuntime`).
     func workerModel(root: String) -> String? { LeadWorkflow.claudeModel(command: claudeCommand(root: root)) }
+
+    /// From the session host's record and the process table, as the app's witness tells it: quit when no agent runs
+    /// on its terminal a minute after it started (`HostSession.agentQuit`), by a table that could tell what runs there.
+    func agentEnding(_ session: LeadSessionInfo) -> String? {
+        let hosted = (try? HostCall.sessions())?.first { $0.id.uuidString == session.id }
+        guard session.live, hosted?.isLive ?? true else { return hosted?.exit?.cause ?? "its session ended" }
+        guard let hosted, hosted.agentQuit(now: Date()), let table = ProcessTable.trySnapshot() else { return nil }
+        let there = table.values.filter { $0.tty == hosted.tty }
+        return there.contains { $0.agent != nil || $0.identityUnknown } ? nil : LeadWitness.agentQuitEnding
+    }
 }
 
 /// The project lead's tools, and the few that workers and verifiers get, over the board and the runtime.
@@ -3478,6 +3492,9 @@ public final class LeadToolset: MCPToolset {
             return info.live ? nil : "worker ended without reporting. read_session to see where it stopped; start_worker continues in its worktree."
         case .review where task.evidence == nil:
             guard let verifier = task.awaitedVerifier(ended: { sessions[$0]?.live != true }) else { return nil }
+            if let retry = task.verifierRetry, let second = retry.second, retry.verifiers.contains(verifier) {
+                return "verifier ended twice without a verdict (\(retry.first); then \(second)), so auto_advance doesn't audit it again. read_session, then audit again or tell the user."
+            }
             guard let info = sessions[verifier] else { return "verifier ended: its session is gone, with no verdict. audit again." }
             return info.live ? nil : "verifier ended without a verdict. audit again."
         default:

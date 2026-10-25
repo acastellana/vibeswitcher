@@ -400,6 +400,182 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(!BoardStore(root: root).load().reports!.contains { $0.about == "verifier add-b" && $0.text.contains(LeadAdvance.sendsBackItself) && $0.text.contains("still says bee") })
     }
 
+    // MARK: a verifier that ends without a verdict
+
+    /// An audit task whose worker reported done, its audit started by the loop: the verifier's session and the head it checks.
+    func audited(_ root: String, _ runtime: FakeRuntime, _ advancing: Advancing, _ lead: LeadToolset) throws -> (verifier: String, head: String) {
+        _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"], "review": "audit"])
+        #expect(advancing.until { task("add-b", root)?.status == .running })
+        try work("add-b", file: "b.txt", root: root, runtime)
+        let head = head("agent/add-b", root)
+        #expect(advancing.until { vault.current(.verifier, root: root, task: "add-b")?.auditing == head && task("add-b", root)?.verifier != nil })
+        return (try #require(task("add-b", root)?.verifier), head)
+    }
+
+    /// `session`'s agent quits and leaves its shell open; the app's witness nudges the loop.
+    func quits(_ session: String, _ runtime: FakeRuntime, root: String) {
+        runtime.calls.lock()
+        runtime.endings[session] = LeadWitness.agentQuitEnding
+        runtime.calls.unlock()
+        LeadAdvance.nudge(root: root)
+    }
+
+    func verifiersSpawned(_ runtime: FakeRuntime) -> [String] {
+        runtime.calls.lock()
+        defer { runtime.calls.unlock() }
+        return runtime.spawned.filter { $0.label.hasPrefix("Verifier:") }.map(\.id)
+    }
+
+    func killed(_ session: String, _ runtime: FakeRuntime) -> Bool {
+        runtime.calls.lock()
+        defer { runtime.calls.unlock() }
+        return runtime.killed.contains(session)
+    }
+
+    @Test func aVerifierThatEndsWithoutAVerdictIsAuditedAgainOnceAndASecondIsLeftToTheLeadInOneReport() throws {
+        let (root, runtime, lead) = try team()
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        let (first, head) = try audited(root, runtime, advancing, lead)
+
+        // Its agent quits, its shell still open: the old session is closed and the audit starts again on the same commit.
+        quits(first, runtime, root: root)
+        #expect(advancing.until { task("add-b", root)?.verifierRetry != nil && reports(runtime).contains { $0.contains("started the audit again") } })
+        let second = try #require(task("add-b", root)?.verifier)
+        #expect(second != first && killed(first, runtime))
+        #expect(vault.current(.verifier, root: root, task: "add-b")?.auditing == head && head == self.head("agent/add-b", root))
+        #expect(task("add-b", root)?.verifierRetry == LeadVerifierRetry(commit: head, first: LeadWitness.agentQuitEnding, verifiers: [second]))
+        #expect(verifiersSpawned(runtime).count == 2)
+        let retried = reports(runtime).filter { $0.contains("started the audit again") }
+        #expect(retried.count == 1 && retried[0].contains("The verifier on add-b ended without a verdict (\(LeadWitness.agentQuitEnding))")
+            && retried[0].contains("same commit, \(head.prefix(8))"), "\(retried)")
+        #expect(progress(root).contains("Automatically (auto_advance): The verifier on add-b ended without a verdict"))
+        // No audit round for a verifier that submitted nothing.
+        #expect((vault.audits(root: root, task: "add-b")?.rounds ?? 0) == 0)
+
+        // The retry's verifier ends too (its session this time): one report, with how each ended, and no third audit.
+        try runtime.kill(second)
+        LeadAdvance.nudge(root: root)
+        #expect(advancing.until { reports(runtime).contains { $0.contains("ended without a verdict twice") } })
+        advancing.settle()
+        LeadAdvance.nudge(root: root)
+        advancing.settle()
+        #expect(verifiersSpawned(runtime).count == 2)
+        let twice = reports(runtime).filter { $0.contains("ended without a verdict twice") }
+        #expect(twice.count == 1, "\(twice)")
+        #expect(twice.first?.contains("the first: \(LeadWitness.agentQuitEnding); the second: killed by SIGTERM") == true, "\(twice)")
+        #expect(task("add-b", root)?.verifierRetry?.second == "killed by SIGTERM")
+        #expect(task("add-b", root)?.status == .review)
+        let ledger = vault.audits(root: root, task: "add-b")
+        #expect((ledger?.rounds ?? 0) == 0 && ledger?.reconsider != true)
+        // The lead's status says so.
+        #expect(lead.call("status", [:]).text.contains("verifier ended twice without a verdict"), "\(lead.call("status", [:]).text)")
+    }
+
+    @Test func theRetrysVerifierWhoseAgentQuitHasItsShellClosedToo() throws {
+        let (root, runtime, lead) = try team()
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        let (first, _) = try audited(root, runtime, advancing, lead)
+        quits(first, runtime, root: root)
+        #expect(advancing.until { task("add-b", root)?.verifierRetry != nil })
+        let second = try #require(task("add-b", root)?.verifier)
+        quits(second, runtime, root: root)
+        #expect(advancing.until { task("add-b", root)?.verifierRetry?.second != nil })
+        // Closed: it no longer counts as a live member of the team.
+        #expect(killed(second, runtime))
+        #expect(try runtime.sessions().first { $0.id == second }?.live == false)
+        #expect(reports(runtime).contains { $0.contains("ended without a verdict twice") && $0.contains("its shell is closed now") })
+        #expect(verifiersSpawned(runtime).count == 2)
+    }
+
+    @Test func aVerifierTheLeadStartedWhileARetryRanIsAuditedAgainToo() throws {
+        let (root, runtime, lead) = try team()
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        let (first, head) = try audited(root, runtime, advancing, lead)
+        quits(first, runtime, root: root)
+        #expect(advancing.until { task("add-b", root)?.verifierRetry != nil })
+        // The lead audits again itself on the same commit (the retry's verifier stopped on an API error, say).
+        let audit = lead.call("audit", ["task": "add-b"])
+        #expect(!audit.isError, "\(audit.text)")
+        let third = try #require(task("add-b", root)?.verifier)
+        #expect(!(task("add-b", root)?.verifierRetry?.verifiers.contains(third) ?? true))
+        // It ends too: a first ending of its own, audited again, not left unsaid.
+        quits(third, runtime, root: root)
+        #expect(advancing.until { task("add-b", root)?.verifierRetry?.verifiers.contains(task("add-b", root)?.verifier ?? "") == true
+            && task("add-b", root)?.verifier != third })
+        #expect(killed(third, runtime) && vault.current(.verifier, root: root, task: "add-b")?.auditing == head)
+        #expect(task("add-b", root)?.verifierRetry?.second == nil)
+        #expect(reports(runtime).filter { $0.contains("started the audit again") }.count >= 2)
+    }
+
+    @Test func noRetryOnceTheBranchMovedOn() throws {
+        let (root, runtime, lead) = try team()
+        let advancing = Advancing(lead)
+        let (first, head) = try audited(root, runtime, advancing, lead)
+        // With the loop stopped: the verifier quits, and the worker commits again and reports done on the new commit.
+        advancing.stop()
+        lead.advancing = nil
+        runtime.calls.lock()
+        runtime.endings[first] = LeadWitness.agentQuitEnding
+        runtime.calls.unlock()
+        try work("add-b", file: "c.txt", root: root, runtime)
+        let moved = self.head("agent/add-b", root)
+        #expect(moved != head)
+        let again = Advancing(restarted(root, runtime))
+        defer { again.stop() }
+        // The audit of the new commit, as any: not a retry on the old one.
+        #expect(again.until { vault.current(.verifier, root: root, task: "add-b")?.auditing == moved })
+        again.settle()
+        #expect(task("add-b", root)?.verifierRetry == nil)
+        #expect(reports(runtime).contains { $0.contains("Started the audit of add-b at \(moved.prefix(8))") }, "\(reports(runtime))")
+        #expect(!reports(runtime).contains { $0.contains("started the audit again") })
+        #expect(verifiersSpawned(runtime).count == 2 && killed(first, runtime))
+    }
+
+    @Test func aRetryWaitsForTheMacsRoomLikeAnyAuditStart() throws {
+        let (root, runtime, lead) = try team()
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        let (first, _) = try audited(root, runtime, advancing, lead)
+        // Another project's session takes the Mac's last place.
+        lead.macLimits = { MacLimits(maxSessions: 1) }
+        runtime.calls.lock()
+        runtime.others = [LeadSessionInfo(id: "other", cwd: "/elsewhere/.vibeswitcher/worktrees/x", label: "Worker: other", live: true, status: "working", tty: nil)]
+        runtime.calls.unlock()
+        quits(first, runtime, root: root)
+        advancing.settle()
+        #expect(task("add-b", root)?.verifierRetry == nil && verifiersSpawned(runtime).count == 1 && !killed(first, runtime))
+        #expect(roomWaits.waits().contains { $0.wait.auto == true && $0.wait.what == "audit(add-b)" }, "\(roomWaits.waits())")
+        // Room again: the app's nudge, and the retry starts.
+        runtime.calls.lock()
+        runtime.others = []
+        runtime.calls.unlock()
+        _ = roomWaits.look(mac: MacLoad.count([], load: 0.5), limits: MacLimits(maxSessions: 1))
+        #expect(advancing.until { task("add-b", root)?.verifierRetry != nil })
+        #expect(verifiersSpawned(runtime).count == 2 && killed(first, runtime))
+    }
+
+    @Test(arguments: ["auto_advance false", "kept", "blocked"])
+    func noRetryForATaskThatOptsOutOrIsHeld(_ hold: String) throws {
+        let (root, runtime, lead) = try team()
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        let (first, _) = try audited(root, runtime, advancing, lead)
+        let change: [String: Any] = hold == "kept" ? ["status": "kept", "reason": "the user looks first"]
+            : hold == "blocked" ? ["status": "blocked"] : ["auto_advance": false]
+        let held = lead.call("update_task", ["task": "add-b"].merging(change) { $1 })
+        #expect(!held.isError, "\(held.text)")
+        quits(first, runtime, root: root)
+        advancing.settle()
+        LeadAdvance.nudge(root: root)
+        advancing.settle()
+        #expect(task("add-b", root)?.verifierRetry == nil)
+        #expect(verifiersSpawned(runtime).count == 1 && !killed(first, runtime))
+        #expect(!reports(runtime).contains { $0.contains("started the audit again") || $0.contains("twice") }, "\(reports(runtime))")
+    }
+
     // MARK: holds and switches
 
     @Test func nothingMovesATaskTheLeadHoldsNorWithAutoAdvanceOff() throws {

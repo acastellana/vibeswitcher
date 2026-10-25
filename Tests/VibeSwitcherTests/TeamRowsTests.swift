@@ -291,6 +291,19 @@ struct TeamRowsTests {
         #expect(row(Self.task("s", .running), ["w-s": Self.ended]).state == "Worker ended")
     }
 
+    @Test func aVerifierThatEndedTwiceReadsSo() {
+        var rev = Self.task("rev", .review)
+        rev.verifier = "v2"
+        #expect(row(rev, ["v2": Self.ended]).state == "Verifier ended")
+        // auto_advance audited it again once (v2), and that verifier ended too.
+        rev.verifierRetry = LeadVerifierRetry(commit: "abc", first: "killed by SIGTERM", verifiers: ["v2"], second: "exited 1")
+        let twice = row(rev, ["v2": Self.ended])
+        #expect(twice.state == "Verifier ended twice" && twice.mark == .ended && twice.group == .needsYou)
+        #expect(twice.problem?.contains("killed by SIGTERM; then exited 1") == true, "\(String(describing: twice.problem))")
+        // Its retry under way: in review as any.
+        #expect(row(rev, ["v2": Self.working]).state == "In review")
+    }
+
     // MARK: Order
 
     @Test func rowsAreOrderedNeedsYouWorkingReviewQueuedFinished() {

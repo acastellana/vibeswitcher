@@ -523,6 +523,26 @@ public struct LeadAuditPanel: Codable, Equatable, Sendable {
     public var progress: String { "\(size) finders, \(reported.count) reported" }
 }
 
+/// An audit VibeSwitcher started again by itself because its verifier ended without a verdict (see `LeadAdvance`):
+/// once per commit. One that ends so too is left to the lead ("Verifier ended twice").
+public struct LeadVerifierRetry: Codable, Equatable, Sendable {
+    /// The branch's commit both audits check.
+    public var commit: String
+    /// How the first verifier ended, in the witness's words (see `LeadWitness.verifierEnding`).
+    public var first: String
+    /// The verifiers the retry started (its finders, with several).
+    public var verifiers: [String]
+    /// How the retry's verifier ended too, once it did: no third audit starts by itself.
+    public var second: String?
+
+    public init(commit: String, first: String, verifiers: [String], second: String? = nil) {
+        self.commit = commit
+        self.first = first
+        self.verifiers = verifiers
+        self.second = second
+    }
+}
+
 public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public enum Status: String, Codable, Sendable, CaseIterable {
         /// On the board, no worker yet.
@@ -642,6 +662,8 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// The commit whose verdict's open Important findings VibeSwitcher last sent its worker by itself (`LeadAdvance`):
     /// each verdict's are sent once.
     public var autoSentBack: String?
+    /// The audit VibeSwitcher last started again by itself after its verifier ended without a verdict (`LeadAdvance`).
+    public var verifierRetry: LeadVerifierRetry?
     /// Its time budget in minutes as the lead set it (add_task's and update_task's budget_min; 0: none); nil: the
     /// workflow's task_budget_min (see `LeadBudget`).
     public var budgetMin: Int?
