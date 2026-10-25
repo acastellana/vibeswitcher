@@ -158,6 +158,46 @@ import Testing
         #expect(kill(worker.childPID, 0) == 0, "the worker's session was ended")
     }
 
+    /// A git hook the lead accepted runs as branch code too (`GitGuard.shim`): a post-merge hook that asks the host for
+    /// what only the lead gets, as the merge's fast-forward runs it, is refused, and the merge lands.
+    @Test func anAcceptedHookIsntTheLeadAndTheMergeStillLands() throws {
+        let mcp = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
+        try #require(FileManager.default.isExecutableFile(atPath: mcp), "vibeswitcher-mcp isn't built beside the host: run swift build first")
+        let team = try Team(temp)
+        let hook = team.root + "/.git/hooks/post-merge"
+        try "#!/bin/sh\nsh '\(team.dir)/probe.sh'\n".write(toFile: hook, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: hook)
+        let folder = team.dir + "/mcp"
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: folder + "/a.in", contents: nil)
+        let (lead, worker) = try team.start(lead: "while [ ! -f '\(folder)/go' ]; do sleep 0.05; done; "
+            + "tail -n +1 -f '\(folder)/a.in' | '\(mcp)' --root '\(team.root)' --role lead > '\(folder)/a.out' 2> '\(folder)/a.err'")
+        let probe = try probe(team, leadRequests(team, agentPid: lead.childPID, worker: worker))
+        FileManager.default.createFile(atPath: folder + "/go", contents: nil)
+        let server = LeadToolServerHandoverTests.Server(folder: folder, name: "a")
+        #expect(try server.ask(1, "initialize", ["protocolVersion": "2025-06-18"]) != nil, "stderr: \(server.errors)")
+        let configured = try server.ask(2, "tools/call", ["name": "configure", "arguments": ["test_command": "true", "merge_policy": "auto", "auto_advance": false]])
+        #expect(configured?["isError"] as? Bool == false, "configure: \(configured ?? [:]) \(server.errors)")
+        let accepted = try server.ask(3, "tools/call", ["name": "accept_git_hooks", "arguments": ["hooks": ["post-merge"]]])
+        #expect(accepted?["isError"] as? Bool == false, "accept_git_hooks: \(accepted ?? [:])")
+        let added = try server.ask(4, "tools/call", ["name": "add_task", "arguments": ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]]])
+        #expect(added?["isError"] as? Bool == false, "add_task: \(added ?? [:])")
+        try server.send(5, "tools/call", ["name": "merge", "arguments": ["task": "add-b"]])
+        // The hook asks while the fast-forward waits on it; it ends once the host has answered everything.
+        #expect(eventually { wire.answered(probe.answers, 1...5) || result(server, 5) != nil }, "the hook got no answers: \(result(server, 5)?.text ?? "")")
+        FileManager.default.createFile(atPath: probe.stop.path, contents: nil)
+        let replies = try wire.replies(Data(contentsOf: probe.answers))
+        #expect(refused(replies[2]), "sealed as the lead's: \(String(describing: replies[2]))")
+        #expect(refused(replies[3]), "sealed as auto_advance's: \(String(describing: replies[3]))")
+        #expect(refused(replies[4]), "the lead's roster: \(String(describing: replies[4]))")
+        if case .error? = replies[5] {} else { Issue.record("ended the lead's worker: \(String(describing: replies[5]))") }
+        #expect(eventually { result(server, 5) != nil })
+        let merged = result(server, 5)
+        #expect(merged?.isError == false && merged?.text.contains("Merged add-b into main") == true, "merge: \(merged?.text ?? "no answer") \(server.errors)")
+        #expect(FileManager.default.fileExists(atPath: team.root + "/b.txt"))
+        #expect(kill(worker.childPID, 0) == 0, "the worker's session was ended")
+    }
+
     @Test func theLeadsOwnSessionStillGetsThem() throws {
         let team = try Team(temp)
         let base = team.dir + "/probe"

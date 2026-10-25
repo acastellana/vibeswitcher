@@ -398,6 +398,8 @@ public final class LeadToolset: MCPToolset {
                             properties: ["task": task], required: ["task"]),
                 MCPToolInfo(name: "cleanup", description: "End a task's sessions and remove its worktree and branch (after merging, or force to abandon it).",
                             properties: ["task": task, "force": P(type: "boolean", description: "Also discard unmerged work")], required: ["task"]),
+                MCPToolInfo(name: "accept_git_hooks", description: "Let the tool server's git (merges, cleanups, start_worker, auto_advance) run the repository's git hooks as they are now. It runs only hooks you accepted, from a copy, never the hooks folder a worker can write: status, merge and the rest tell you when that folder isn't as you accepted it. Read each hook first; accept only the user's own.",
+                            properties: ["hooks": P(type: "array", description: "The hooks to run, by name (e.g. commit-msg); empty or left out: all that are there now", items: "string")]),
                 MCPToolInfo(name: "ask_user", description: "Ask the user something. It doesn't block: keep working; the answer arrives as a message. Your open questions are a queue the user answers in any order: revise one when you learn something (revise_question), withdraw one that no longer applies (withdraw_question). For a reversible choice, prefer proposing your answer with a timer (proposal, decide_in): the user can pick another option or hold it, and if no answer comes in time you get a message to go ahead with your proposal, recorded as your decision. Never a timer on a blocking question, on merging a sensitive path, on deleting or discarding work, or on anything outward-facing (publishing, pushing, sending): those are refused.",
                             properties: ["question": P(type: "string", description: "One clear question"),
                                          "options": P(type: "array", description: "Suggested answers (the user can also write their own)", items: "string"),
@@ -461,12 +463,12 @@ public final class LeadToolset: MCPToolset {
             let member = try authenticate()
             if role == .lead { introduceLead() }
             switch name {
-            case "status": return MCPToolResult(text: status())
+            case "status": return withGitNotice(MCPToolResult(text: status()))
             case "board": return try MCPToolResult(text: boardText(task: arguments["task"] as? String))
             case "add_task": return try addTask(arguments)
             case "dismiss_finding": return try dismissFinding(arguments)
             case "update_task": return try updateTask(arguments)
-            case "start_worker": return try startWorker(try taskSlug(arguments), recover: arguments["recover"] as? Bool ?? false)
+            case "start_worker": return withGitNotice(try startWorker(try taskSlug(arguments), recover: arguments["recover"] as? Bool ?? false))
             case "stop_worker": return try stopWorker(try taskSlug(arguments))
             case "message": return try message(try taskSlug(arguments), arguments)
             case "read_session": return try readSession(try taskSlug(arguments), who: arguments["who"] as? String ?? "worker")
@@ -474,8 +476,9 @@ public final class LeadToolset: MCPToolset {
             case "merge":
                 let merged = try merge(try taskSlug(arguments))
                 records.flush(base: base)
-                return merged
-            case "cleanup": return try cleanup(try taskSlug(arguments), force: arguments["force"] as? Bool ?? false)
+                return withGitNotice(merged)
+            case "cleanup": return withGitNotice(try cleanup(try taskSlug(arguments), force: arguments["force"] as? Bool ?? false))
+            case "accept_git_hooks": return try acceptGitHooks(arguments)
             case "ask_user": return try askUser(arguments)
             case "revise_question": return try reviseQuestion(arguments)
             case "withdraw_question": return try withdrawQuestion(arguments)
@@ -500,6 +503,23 @@ public final class LeadToolset: MCPToolset {
     }
 
     struct Problem: Error { var text: String }
+
+    /// `result`, and what the tool server's git doesn't run in this repository (`GitGuard.notice`) when there's any.
+    private func withGitNotice(_ result: MCPToolResult) -> MCPToolResult {
+        guard let notice = GitGuard.notice(root: root) else { return result }
+        return MCPToolResult(text: result.text + "\n\n" + notice, isError: result.isError)
+    }
+
+    /// The repository's hooks, as they are now, for the tool server's git to run (`GitGuard.accept`); in the progress log.
+    private func acceptGitHooks(_ arguments: [String: Any]) throws -> MCPToolResult {
+        let named = (arguments["hooks"] as? [String])?.map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty } ?? []
+        let accepted: String
+        do { accepted = try GitGuard.accept(root: root, only: named.isEmpty ? nil : named) } catch let refused as GitGuard.Refused {
+            throw Problem(text: refused.description)
+        }
+        try? store.appendProgress("Git hooks accepted: \(accepted)")
+        return MCPToolResult(text: accepted)
+    }
 
     private func fail(_ text: String) -> MCPToolResult { MCPToolResult(text: text, isError: true) }
 

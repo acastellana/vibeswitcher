@@ -105,6 +105,8 @@ public final class LeadAdvance: @unchecked Sendable {
     /// A step's room wait recorded already (the Mac was full or loaded): not again until it's nudged.
     private var waitingRoom = false
     private var nudgedAt: Date?
+    /// What the tool server's git doesn't run here, as last told (`GitGuard.notice`): told again only when it changes.
+    private var gitNotice: String?
 
     init(lead: LeadToolset, run: @escaping (@escaping () -> Void) -> Bool) {
         owner = lead
@@ -305,6 +307,12 @@ public final class LeadAdvance: @unchecked Sendable {
             return
         }
         forget("settings|auto_advance")
+        // The steps below run git unattended: only the hooks the lead accepted, so a change there is the lead's to know.
+        let notice = GitGuard.notice(root: lead.root)
+        if notice != gitNotice {
+            gitNotice = notice
+            if let notice { did(notice) }
+        }
         guard let board = try? lead.store.read() else { return }
         let nudged = (try? FileManager.default.attributesOfItem(atPath: Self.nudgeFile(root: lead.root))[.modificationDate]) as? Date
         if nudged != nudgedAt {

@@ -1,40 +1,5 @@
 import Foundation
 
-/// Runs git (never through a shell, never prompting for credentials).
-public enum Git {
-    public struct Result: Equatable, Sendable {
-        public var status: Int32
-        public var output: String
-        public var error: String
-        /// It ran past its time limit and was stopped.
-        public var timedOut = false
-        /// The work it ran for was cancelled (see `ShellCancel`), and it was stopped.
-        public var cancelled = false
-        public var ok: Bool { status == 0 && !timedOut && !cancelled }
-    }
-
-    /// What git runs with here: never prompting for credentials, and without the optional locks: `git status` and the
-    /// like don't take index.lock to save what they refreshed. Killed while they held it (SIGKILL; they remove it on
-    /// TERM) they would leave it, and every git that changes that index refuses until someone removes it.
-    public static let environment = ["GIT_TERMINAL_PROMPT": "0", "GIT_OPTIONAL_LOCKS": "0"]
-
-    /// A run that was stopped (out of time, or cancelled) gives no output, only `error` saying so: its callers take
-    /// `output` as git's answer, and what it wrote until then isn't one (a shell it ran may even answer after its
-    /// time is up, and exit 0). `env` adds to `environment` (a commit's identity and dates, say).
-    @discardableResult
-    public static func run(_ args: [String], in directory: String, env: [String: String] = [:], timeout: TimeInterval = 120,
-                           grace: TimeInterval = 5) -> Result {
-        var result = Shell.run(executable: "/usr/bin/git", args: args, in: directory, env: environment.merging(env) { $1 },
-                               timeout: timeout, grace: grace)
-        if result.timedOut || result.cancelled {
-            result.output = ""
-            let stopped = result.cancelled ? "git was stopped: cancelled." : "git was stopped: it ran past \(Worktrees.duration(timeout))."
-            result.error = result.error.isEmpty ? stopped : stopped + "\n" + result.error
-        }
-        return result
-    }
-}
-
 /// Stops the commands a piece of work runs when it's cancelled (an MCP tool call the user interrupted). Set for
 /// the current thread with `with`; `Shell.run` picks it up.
 public final class ShellCancel: @unchecked Sendable {
@@ -996,8 +961,7 @@ public enum Worktrees {
 
     /// Git, as `Git.run`, with an editor that takes the message as it is: a rebase's `--continue` opens one.
     static func noEditor(_ args: [String], in path: String) -> Git.Result {
-        Shell.run(executable: "/usr/bin/git", args: ["-c", "core.editor=true"] + args, in: path,
-                  env: Git.environment.merging(["GIT_EDITOR": "true"]) { $1 }, timeout: 120)
+        Git.run(["-c", "core.editor=true"] + args, in: path, env: ["GIT_EDITOR": "true"])
     }
 
     /// What git said when a command failed.
@@ -1651,7 +1615,7 @@ extension Worktrees {
     public static func commitFiles(root: String, branch: String, paths: [String], contents: [String: Data] = [:], message: String,
                                    from expected: String? = nil, lockWait: TimeInterval = 5) -> FilesCommit {
         let git = { (args: [String], env: [String: String]) in
-            Shell.run(executable: "/usr/bin/git", args: args, in: root, env: Git.environment.merging(env) { $1 }, timeout: 60)
+            Git.run(args, in: root, env: env, timeout: 60)
         }
         let said = { (result: Git.Result) in result.error.isEmpty ? result.output : result.error }
         let head = Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(branch)"], in: root).output
