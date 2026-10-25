@@ -1271,3 +1271,4 @@
 - 2026-10-25 22:43 Started a worker on open-sessions-pick-up
 - 2026-10-25 22:43 Started a worker on each-task-has-a
 - 2026-10-25 22:43 Started a worker on today-s-flaky-tests
+- 2026-10-25 22:48 Planned notifications-only-when: Notifications only when everything is done or the user is needed

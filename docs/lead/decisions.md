@@ -448,3 +448,7 @@ planted-git-hooks-or's blind checks kept finding deeper include and path corner 
 
 The user answered 5405CE2E with "Install now (I'm here for the password)", and the battery was well above the 10 % limit. Checked after the install: the host is still pid 31589, the app relaunched as pid 98346, and advancing.lock is held. The lead tool servers that were already running keep the old code until their sessions restart.
 
+## 2026-10-25 22:48:39 Notifications and messages to the user: only when a batch is completely done, or when the user is needed (a question, a password or install, a breakage). The lead writes to the user only in those two cases. Routine events (merges, workers asking, starts) get one line at most in the terminal, or none, and are collected into the batch summary. Task notifications-only-when carries the app side.
+
+The user, 2026-10-25: "me molestan tantas notificaciones y no saber realmente cuando tengo que mirar" (all these notifications bother me, and I never really know when I have to look), then "quiero notificaciones cuando se ha completado del todo o cuando se me require por lo que sea" (notifications when it's fully done, or when I'm needed for whatever reason).
+
