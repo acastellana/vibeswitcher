@@ -1225,3 +1225,8 @@
 - 2026-10-25 13:34 Automatically (auto_advance): Started a worker on the-lead-s-chat (The lead's chat window stops freezing (SwiftUI churn in the Team panel)), its after tasks done (lead-chat-less-clutter, lead-team-panel-clear).
 - 2026-10-25 13:35 Automatically (auto_advance): Started the audit of merge-tests-don-t at 8d5bcc9a (Its review is audit).
 - 2026-10-25 13:42 Merged hidden-lead-terminals: Hidden lead terminals aren't sized 392 rows (no audit: review none)
+- 2026-10-25 13:42 Automatically (auto_advance): Merged hidden-lead-terminals (Hidden lead terminals aren't sized 392 rows) into project-lead at d614fb41, review none: on its worker's done report on c06e232f and the full test run.
+- 2026-10-25 13:44 Workflow: sensitive_paths = `.claude/, .mcp.json, CLAUDE.md, CLAUDE.local.md, AGENTS.md, .github/, .env, .env.*, *.entitlements, *.pem, Sources/VibeHost/, Sources/vibeswitcher-host/, Sources/VibeCore/LeadVault*.swift, Sources/VibeCore/LeadLaunch.swift, Sources/VibeCore/LeadAdvance.swift, Sources/VibeCore/Steer.swift, Sources/VibeCore/Worktrees.swift, Sources/VibeCore/MergeRerun.swift, Sources/VibeCore/TestLock.swift, Sources/VibeCore/Redaction.swift, Sources/VibeCore/HookInstaller.swift, Sources/VibeCore/RemoteAccess.swift, Sources/VibeSwitcher/RemoteServer.swift, Sources/VibeSwitcher/PhoneAccess.swift, Sources/VibeSwitcher/Sandbox.swift, scripts/build-app.sh, scripts/setup-signing.sh`
+- 2026-10-25 13:45 Planned a-watcher-tells-the: A watcher tells the lead about VibeSwitcher's own freezes, crashes and memory growth
+- 2026-10-25 13:53 Audit of merge-tests-don-t: complete, clean, round 1: 2 Nit open
+- 2026-10-25 13:56 Merged a-new-audit-ends: A new audit ends the task's earlier verifier (no audit: review none)
