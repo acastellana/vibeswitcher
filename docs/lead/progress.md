@@ -1175,3 +1175,5 @@
 - 2026-10-25 09:46 Update: Retrospective: Lead Process v3 batch — **Went well:** six tasks merged in about two hours, with no reverts and no merge conflicts that needed rework. Five workers ran at once, against the 1.15 average before. Catch-up messages after each m…
 - 2026-10-25 10:06 Review of a-fix-s-regression: audit
 - 2026-10-25 10:11 Audit of a-fix-s-regression: incomplete, clean, round 1: 3 Important open
+- 2026-10-25 10:19 Audit of a-fix-s-regression: complete, clean, round 2: 3 Important closed
+- 2026-10-25 10:24 Merged a-fix-s-regression: A fix's regression test is shown to fail without the fix
