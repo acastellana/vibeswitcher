@@ -50,6 +50,8 @@ public enum AppHealth {
         public var peak: Double?
         /// The app's main-thread frames on the busiest path of its sample, the top of the stack first.
         public var frames: [String] = []
+        /// Whether its sample (.txt) was there to read.
+        public var sampled = false
 
         public init(name: String) { self.name = name }
 
@@ -79,6 +81,7 @@ public enum AppHealth {
         }
         if hang.since == nil { hang.since = nameDate(name) }
         if let sample {
+            hang.sampled = true
             hang.footprint = sampleMegabytes(sample, "Physical footprint:")
             hang.peak = sampleMegabytes(sample, "Physical footprint (peak):")
             hang.frames = appFrames(sample: sample, image: "VibeSwitcher")
@@ -429,13 +432,14 @@ public enum AppHealth {
         }
 
         /// The reports in the folders now: new ones go into the digest under way (opened by the first). Returns whether
-        /// any was new. Names no longer there are forgotten (`HangWatchdog` keeps the ten newest).
+        /// any was new. Names no longer there are forgotten (`HangWatchdog` keeps the ten newest), but not on an empty
+        /// list: a folder that couldn't be read for a moment would make every report in it news again.
         @discardableResult
         public mutating func saw(hangs: [String], crashes: [String], now: Date) -> Bool {
             let newHangs = hangs.filter { !seenHangs.contains($0) }
             let newCrashes = crashes.filter { !seenCrashes.contains($0) }
-            seenHangs = Set(hangs)
-            seenCrashes = Set(crashes)
+            if !hangs.isEmpty { seenHangs = Set(hangs) }
+            if !crashes.isEmpty { seenCrashes = Set(crashes) }
             guard !newHangs.isEmpty || !newCrashes.isEmpty else { return false }
             open(now)
             self.hangs += newHangs
@@ -487,16 +491,20 @@ public enum AppHealth {
         /// The digest under way, read from its files; nil when nothing in it is news (every freeze and crash told within
         /// `repeatWithin`, and no new error kind), each repeat counted.
         mutating func digest(now: Date, folders: Folders) -> String? {
+            let at = now.timeIntervalSince1970
+            // A freeze that began moments ago may not have its sample yet (`sample` takes 3 s, after the .log): it
+            // goes in the next digest, read whole.
+            let read = hangs.sorted().map(folders.hang)
+            let unsampled = read.filter { $0.sampled == false && at - ($0.since?.timeIntervalSince1970 ?? 0) < Self.sampleWait }
             defer {
-                opened = nil
-                hangs = []
+                opened = unsampled.isEmpty ? nil : at
+                hangs = unsampled.map(\.name)
                 crashes = []
                 errors = [:]
             }
-            let at = now.timeIntervalSince1970
             var freezes: [String] = []
             var repeated: [String] = []
-            let groups = Dictionary(grouping: hangs.sorted().map(folders.hang), by: \.signature)
+            let groups = Dictionary(grouping: read.filter { hang in !unsampled.contains { $0.name == hang.name } }, by: \.signature)
             for (signature, group) in groups.sorted(by: { $0.value[0].name < $1.value[0].name }) {
                 let key = "hang " + signature
                 if let last = told[key], at - last.at < AppHealth.repeatWithin {
@@ -542,6 +550,9 @@ public enum AppHealth {
             parts.append("Turn what's a real bug into a task (one already on the board needs nothing); read the reports for the full stacks.")
             return Redaction.secrets(in: parts.joined(separator: "\n"))
         }
+
+        /// How long a freeze's sample is waited for before it's told without one.
+        static let sampleWait: TimeInterval = 120
 
         /// One line for freezes with the same top frames.
         static func line(_ group: [Hang]) -> String {

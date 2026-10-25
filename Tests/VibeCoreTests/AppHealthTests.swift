@@ -158,6 +158,35 @@ struct AppHealthTests: LeadTeamFixture {
         #expect(watch.pending.isEmpty)
     }
 
+    @Test func aFolderReadAsEmptyForAMomentDoesntMakeItsReportsNewAgain() throws {
+        let folders = try folders()
+        try writeHang("hang-20261025-140210", in: folders)
+        var watch = AppHealth.Watch()
+        watch.baseline(hangs: folders.hangNames(), crashes: folders.crashFiles())
+        watch.saw(hangs: [], crashes: [], now: start)
+        let again = watch.saw(hangs: folders.hangNames(), crashes: folders.crashFiles(), now: start.addingTimeInterval(1))
+        #expect(!again)
+        #expect(watch.opened == nil)
+    }
+
+    @Test func aHangNotSampledYetWaitsForTheNextDigest() throws {
+        let folders = try folders()
+        var watch = AppHealth.Watch()
+        // Its .log is written; `sample` is still running when the window closes, a minute after the freeze began.
+        let name = "hang-20261025-140210"
+        let began = start.addingTimeInterval(AppHealth.window - 60)
+        try (AppHealth.hangHeader(since: began, duration: nil) + "\n" + Self.log().components(separatedBy: "\n").dropFirst().joined(separator: "\n"))
+            .write(to: folders.debug.appendingPathComponent(name + ".log"), atomically: true, encoding: .utf8)
+        watch.saw(hangs: folders.hangNames(), crashes: [], now: start)
+        watch.look(now: start.addingTimeInterval(AppHealth.window), folders: folders, memory: nil)
+        #expect(watch.pending.isEmpty)
+        #expect(watch.hangs == [name])
+        try writeHang(name, in: folders)
+        watch.look(now: start.addingTimeInterval(2 * AppHealth.window), folders: folders, memory: nil)
+        #expect(watch.pending.count == 1)
+        #expect(watch.pending.first?.contains("top app frames: TranscriptReader.parse(_:)") == true, "\(watch.pending)")
+    }
+
     @Test func whatWasThereAtTheFirstRunIsHistory() throws {
         let folders = try folders()
         try writeHang("hang-20261024-090000", in: folders)
