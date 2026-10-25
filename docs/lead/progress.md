@@ -1282,3 +1282,5 @@
 - 2026-10-25 23:33 Planned a-short-project-map: A short project map every worker reads first (CLAUDE.md) (review audit)
 - 2026-10-25 23:33 Planned every-task-gets-a: Every task gets a receipt: time, tokens, cost, rounds, rollback
 - 2026-10-25 23:33 Planned the-lead-s-rules: The lead's rules that matter become checks, not just notes (review audit)
+- 2026-10-25 23:38 Started a worker on a-short-project-map
+- 2026-10-25 23:38 Automatically (auto_advance): Started a worker on a-short-project-map (A short project map every worker reads first (CLAUDE.md)).
