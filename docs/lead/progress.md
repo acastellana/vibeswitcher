@@ -1163,3 +1163,6 @@
 - 2026-10-25 09:00 Merged steadier-merge-gate: Steadier merge gate: flaky retry and early catch-up
 - 2026-10-25 09:08 Audit of workers-run-a-sandboxed: complete, clean, round 1: 1 Nit open
 - 2026-10-25 09:16 Merged workers-run-a-sandboxed: Workers run a sandboxed VibeSwitcher and screenshot it
+- 2026-10-25 09:16 Planned benches-stop-writing-the: Benches stop writing the real ~/Library/Preferences/VibeSwitcher.plist
+- 2026-10-25 09:16 Started a worker on benches-stop-writing-the
+- 2026-10-25 09:20 Audit of finished-work-lands: incomplete, clean, round 1: 1 Important open, 2 Nit open
