@@ -41,6 +41,10 @@ struct LeadDoneEvidenceTests: LeadTeamFixture {
         try "bee\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
         Git.run(["add", "b.txt"], in: worktree)
         Git.run(["commit", "-q", "-m", "add b"], in: worktree)
+        // The screenshot `full` names, relative to the worktree (as a sandbox shot is), left out of git.
+        try FileManager.default.createDirectory(atPath: worktree + "/shots", withIntermediateDirectories: true)
+        try testPNG().write(to: URL(fileURLWithPath: worktree + "/shots/board.png"))
+        try "shots/\n".write(toFile: root + "/.git/info/exclude", atomically: true, encoding: .utf8)
         return (lead, try seat("worker-add-b", runtime))
     }
 
@@ -90,7 +94,10 @@ struct LeadDoneEvidenceTests: LeadTeamFixture {
         let kept = try vault.unaudited(root: root, task: "add-b")
         #expect(kept.reported == Git.run(["rev-parse", "agent/add-b"], in: root).output)
         #expect(kept.evidence?.checks.map(\.check) == ["1", "B.txt says bee, one line, nothing else in it.", "LeadDoneEvidenceTests"])
-        #expect(kept.evidence?.checks.last?.screenshots == ["shots/board.png"])
+        // The screenshot as a copy kept in .vibeswitcher (KeptImages), not the worktree's.
+        let shot = try #require(kept.evidence?.checks.last?.screenshots?.first)
+        #expect(shot.hasPrefix(root + "/.vibeswitcher/evidence/add-b/") && shot.hasSuffix("/1-board.png"), "\(shot)")
+        #expect(kept.evidence?.checks.first?.screenshots == nil)
         #expect(kept.evidence?.blindCheck == "Found: b.txt lacked a newline. Fixed in the last commit.")
     }
 
@@ -135,7 +142,7 @@ struct LeadDoneEvidenceTests: LeadTeamFixture {
         let shown = lead.call("board", ["task": "add-b"]).text
         let head = Git.run(["rev-parse", "agent/add-b"], in: root).output
         #expect(shown.contains("Its worker's evidence with its done on \(head.prefix(8)):\n- 1: `test -f b.txt` in the worktree → exit 0\n"), "\(shown)")
-        #expect(shown.contains("- LeadDoneEvidenceTests: swift test --filter LeadDoneEvidenceTests → 9 tests passed (screenshots: shots/board.png)"))
+        #expect(shown.contains("- LeadDoneEvidenceTests: swift test --filter LeadDoneEvidenceTests → 9 tests passed (screenshots: \(root)/.vibeswitcher/evidence/add-b/"), "\(shown)")
         #expect(shown.contains("Blind check: Found: b.txt lacked a newline. Fixed in the last commit."))
 
         #expect(!lead.call("audit", ["task": "add-b"]).isError)
@@ -145,6 +152,41 @@ struct LeadDoneEvidenceTests: LeadTeamFixture {
         #expect(report.contains("its evidence is what it says it ran and saw: run the checks yourself, and a claimed result your run doesn't reproduce is a finding"))
         #expect(report.contains("added b.txt\n\nIts evidence, check by check (what it says it ran and saw):\n- 1: `test -f b.txt` in the worktree → exit 0"), "\(report)")
         #expect(report.contains("Blind check: Found: b.txt lacked a newline."))
+    }
+
+    /// The evidence's screenshots are kept in .vibeswitcher when the vault records the done: board(task), the verifier
+    /// and the lead still open them once the worktree is cleaned up. One that isn't there, or isn't an image, is refused.
+    @Test func evidenceScreenshotsStillLoadAfterTheWorktreeIsRemoved() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let (lead, worker) = try working(root, runtime)
+        let worktree = Worktrees.path(root: root, slug: "add-b")
+        try FileManager.default.createDirectory(atPath: worktree + "/.build/sandbox-shots", withIntermediateDirectories: true)
+        let absolute = worktree + "/.build/sandbox-shots/card-dark.png"
+        try testPNG(width: 20, height: 20).write(to: URL(fileURLWithPath: absolute))
+
+        var missing = Self.full
+        missing[1]["screenshots"] = "shots/nope.png"
+        let refused = worker.call("report", done(missing))
+        #expect(refused.isError && refused.text.contains("Not reported (evidence screenshots): shots/nope.png isn't there (looked in \(worktree))"), "\(refused.text)")
+        try "plain text".write(toFile: worktree + "/shots/notes.png", atomically: true, encoding: .utf8)
+        missing[1]["screenshots"] = ["shots/notes.png"]
+        let notImage = worker.call("report", done(missing))
+        #expect(notImage.isError && notImage.text.contains("shots/notes.png isn't an image"), "\(notImage.text)")
+        #expect(try vault.unaudited(root: root, task: "add-b").reported == nil)
+
+        var both = Self.full
+        both[0]["screenshots"] = [absolute]
+        #expect(!worker.call("report", done(both)).isError)
+        try FileManager.default.removeItem(atPath: worktree)
+
+        let checks = try #require(try vault.unaudited(root: root, task: "add-b").evidence?.checks)
+        let shots = checks.compactMap(\.screenshots).flatMap { $0 }
+        #expect(shots.count == 2 && shots[0].hasSuffix("/1-card-dark.png") && shots[1].hasSuffix("/2-board.png"), "\(shots)")
+        #expect(shots.allSatisfy { $0.hasPrefix(root + "/.vibeswitcher/evidence/add-b/") && loadsAsImage($0) })
+        #expect(checks[1].screenshots == nil)
+        let shown = lead.call("board", ["task": "add-b"]).text
+        #expect(shown.contains("(screenshots: \(shots[0]))") && shown.contains("(screenshots: \(shots[1]))"), "\(shown)")
     }
 
     @Test func mergesResultQuotesTheEvidence() throws {

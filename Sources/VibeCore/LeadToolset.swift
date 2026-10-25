@@ -421,7 +421,7 @@ public final class LeadToolset: MCPToolset {
                 MCPToolInfo(name: "questions", description: "Your questions to the user: open ones (most important first), answered and withdrawn ones, each with its earlier wordings."),
                 MCPToolInfo(name: "post_update", description: "Show the user a result: what changed, how it was checked, screenshots.",
                             properties: ["title": P(type: "string", description: "One line"), "body": P(type: "string", description: "Markdown"),
-                                         "images": P(type: "array", description: "Absolute paths of screenshots", items: "string")],
+                                         "images": P(type: "array", description: "Absolute paths of screenshots (image files; a copy is kept, so they stay viewable after cleanup)", items: "string")],
                             required: ["title", "body"]),
                 MCPToolInfo(name: "record_decision", description: "Write a decision and its reason to decisions.md.",
                             properties: ["decision": P(type: "string", description: "The decision"), "why": P(type: "string", description: "The reason")],
@@ -2453,11 +2453,22 @@ public final class LeadToolset: MCPToolset {
 
     private func postUpdate(_ arguments: [String: Any]) throws -> MCPToolResult {
         guard let title = arguments["title"] as? String, let body = arguments["body"] as? String else { throw Problem(text: "An update needs a title and a body.") }
-        try store.update { board in board.updates.append(LeadUpdate(title: title, body: body, images: strings(arguments["images"]))) }
+        // Copies, kept in .vibeswitcher: what's given is usually in a worktree's .build, gone once the task is cleaned up.
+        var update = LeadUpdate(title: title, body: body)
+        update.images = try keptImages(strings(arguments["images"]), as: "\(KeptImages.updates)/\(update.id)", relativeTo: root, not: "Not posted")
+        try store.update { board in board.updates.append(update) }
         // In the log too, so a later lead sees the updates, check-ins and retrospectives.
         let first = body.split(whereSeparator: \.isNewline).first.map { Self.clip(String($0), 200) }
         try? store.appendProgress("Update: \(Self.clip(title, 200))" + (first.map { " — \($0)" } ?? ""))
         return MCPToolResult(text: "Posted.")
+    }
+
+    /// `paths` kept as group `group` (`KeptImages`); a path that isn't there or isn't an image is refused, `not` saying
+    /// what didn't happen.
+    private func keptImages(_ paths: [String], as group: String, relativeTo base: String, not: String) throws -> [String] {
+        do { return try KeptImages(folder: store.folder).keep(paths, as: group, relativeTo: base) } catch let refusal as KeptImages.Refusal {
+            throw Problem(text: "\(not): \(refusal.text)")
+        }
     }
 
     private func recordDecision(_ arguments: [String: Any]) throws -> MCPToolResult {
@@ -2667,7 +2678,20 @@ public final class LeadToolset: MCPToolset {
         let summary = try text(arguments, "summary", missing: "Say what changed and how you checked it, or what blocks you.")
         let done = (arguments["status"] as? String) != "blocked"
         // Before anything is recorded: a done that doesn't show how each check was checked doesn't count as one.
-        let evidence = done ? try Self.doneEvidence(arguments, acceptance: store.load().task(slug)?.contract.acceptance ?? [], base: workflow.base) : nil
+        var evidence = done ? try Self.doneEvidence(arguments, acceptance: store.load().task(slug)?.contract.acceptance ?? [], base: workflow.base) : nil
+        // Its screenshots as copies kept in .vibeswitcher, so board(task), the verifier and the lead still open them
+        // once the worktree (where sandbox shots are) is cleaned up. Relative paths are the worktree's.
+        if let given = evidence {
+            let shots = given.checks.flatMap { $0.screenshots ?? [] }
+            let kept = try keptImages(shots, as: "\(KeptImages.evidence)/\(slug)/\(UUID().uuidString)",
+                                      relativeTo: Worktrees.path(root: root, slug: slug), not: "Not reported (evidence screenshots)")
+            var next = kept.makeIterator()
+            evidence?.checks = given.checks.map { check in
+                var check = check
+                check.screenshots = check.screenshots?.compactMap { _ in next.next() }
+                return check
+            }
+        }
         // A report on the commit the last verdict covers (an answer, a note, a repeated "done") leaves that verdict
         // standing: only a new commit, or the lead's own audit, needs a new one.
         let head = branchHead(Worktrees.branch(slug))

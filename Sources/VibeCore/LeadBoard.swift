@@ -914,7 +914,8 @@ public struct LeadUpdate: Codable, Equatable, Sendable, Identifiable {
     public var id: String
     public var title: String
     public var body: String
-    /// Image files (screenshots) and a branch or diff to look at.
+    /// Image files (screenshots): post_update keeps copies in `.vibeswitcher/updates/<id>/` (`KeptImages`), so they're
+    /// there after the worktree they were taken in is cleaned up, until the folder's cap drops the oldest.
     public var images: [String]
     public var at: Double
 
