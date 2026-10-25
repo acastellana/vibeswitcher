@@ -98,6 +98,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private var hiddenReadings = 0
     private var notificationTimer: Heartbeat.Subscription?
     private var terminationSignal: DispatchSourceSignal?
+    /// VibeSwitcher's own freezes, crashes and error lines, told to the lead of the project with watch_app_logs on.
+    private var appHealth: AppHealthWatcher?
     private static let statusItemName = "VibeSwitcher"
     /// Stored by macOS as the distance from the right screen edge; set once so we start next to the
     /// clock, where an overflowing menu bar never hides items. ⌘-dragging the icon overrides it.
@@ -127,6 +129,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         hostClient.connectIfRunning()
         // Leads' witness and questions work with the window closed too.
         _ = leadController
+        appHealth = AppHealthWatcher { [weak self] text in self?.leadController.tellAppHealth(text) ?? false }
+        appHealth?.start()
         if UserDefaults.standard.bool(forKey: "windowWasOpen") {
             // Cleared until the window has been up a while: if opening it crashes the app, the next launch
             // doesn't open it again (and crash again).

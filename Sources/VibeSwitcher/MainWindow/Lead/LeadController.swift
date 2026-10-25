@@ -1009,6 +1009,22 @@ final class LeadController: ObservableObject {
         }
     }
 
+    /// VibeSwitcher's own health (see `AppHealthWatcher`): to the leads of the projects whose workflow.md has
+    /// watch_app_logs: true, as VibeSwitcher's report ("app health"); no other lead gets it. False when no running
+    /// lead's project has it on (the watcher tries again later).
+    func tellAppHealth(_ text: String) -> Bool {
+        let roots = Self.appHealthRoots(Set(leadSessions.keys).union(boards.keys))
+        for root in roots { deliver(text, from: .system(AppHealth.sender), root: root) }
+        return !roots.isEmpty
+    }
+
+    /// The projects among `roots` whose workflow.md (the main checkout's, not a worktree's) has watch_app_logs on.
+    static func appHealthRoots(_ roots: Set<String>) -> [String] {
+        roots.sorted().filter { root in
+            LeadWorkflow.load(from: (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md")).watchAppLogs
+        }
+    }
+
     /// The stranded role sessions, in every project: to each running lead, as the witness, and to the user.
     private func tellStranded(_ text: String) {
         for root in leadSessions.keys { deliver(text, from: .system("witness"), root: root) }

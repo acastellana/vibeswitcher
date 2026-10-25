@@ -265,10 +265,20 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         let draft = row.map { chat.composer.drafts[$0.draftKey]?.count ?? 0 } ?? 0
         return """
         window visible=\(window?.isVisible == true) key=\(window?.isKeyWindow == true) frame=\(frame) mounted=\(mounted)
-        selected=\(row?.id ?? "none") project=\(row?.project ?? "") showsChat=\(model.showsChat) chatShown=\(!chatHost.isHidden) terminalHidden=\(pane.view.isHidden)
+        selected=\(row?.id ?? "none") kind=\(kind(of: row)) project=\(row?.project ?? "") showsChat=\(model.showsChat) chatShown=\(!chatHost.isHidden) terminalHidden=\(pane.view.isHidden)
         chat path=\(chat.path ?? "none") state=\(chat.state) entries=\(chat.log.entries.count) items=\(chat.items.count) shownLimit=\(chat.shownLimit) atBottom=\(chat.atBottom) pending=\(chat.pending.count) menu=\(chat.menu != nil) draft=\(draft) chars
         attached terminals=\(pane.attachedIDs.count) current=\(pane.current?.uuidString ?? "none")
         """
+    }
+
+    /// The selected session's kind, for the hang reports' state (see `AppHealth.Hang.session`): lead, worker, verifier,
+    /// agent (one the scan found), shell or ended.
+    private func kind(of row: WindowRow?) -> String {
+        guard let row else { return "none" }
+        let hosted = row.hostID.flatMap { id in host.sessions.first { $0.id == id } }
+        if let role = LeadTeams.role(label: hosted?.label) { return role.rawValue }
+        if case .agent = row.content { return "agent" }
+        return hosted?.isLive == true ? "shell" : "ended"
     }
 
     func present() {

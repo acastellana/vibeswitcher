@@ -47,6 +47,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// or audited, a clean audit merged, open Important findings sent back, a merged task cleaned up, and a planned task
     /// whose `after` tasks are done started. False: the lead does each.
     public var autoAdvance = true
+    /// This project's lead gets VibeSwitcher's own health digests (`watch_app_logs:`, see `AppHealth`): its freezes,
+    /// crashes and error lines, and a daily trend. Off for every project but the one that builds VibeSwitcher.
+    public var watchAppLogs = false
     public var notes = ""
     /// Each setting in the front matter as written (a key's last line), whatever the key: what the vault's hashes of
     /// the guard rails are of (`LeadVault.guardedKeys`).
@@ -105,6 +108,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "sensitive_paths": workflow.sensitivePaths = globs(value)
                 case "records_dir": workflow.recordsDir = recordsFolder(value)
                 case "auto_advance": workflow.autoAdvance = flag(value) ?? true
+                case "watch_app_logs": workflow.watchAppLogs = flag(value) ?? false
                 default: break
                 }
             }
@@ -338,7 +342,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     public static let configurable = ["test_command", "regression_command", "init_command", "base_branch", "verifier_model", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "records_dir",
-                                      "auto_advance"]
+                                      "auto_advance", "watch_app_logs"]
 
     /// Writes the workflow file (`.vibeswitcher/workflow.md`), private to you (0600), atomically: the template the first
     /// time (`BoardStore.prepare`), the lead's `configure` after.

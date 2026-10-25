@@ -448,7 +448,8 @@ public final class LeadToolset: MCPToolset {
                                          "merge_policy": P(type: "string", description: "How merges are handled, as the owner chose once: auto (work merges once its review passes: its audit, or for review none its worker's done report and the merge's test run; the user gets an update afterwards), ask_sensitive (a commit touching sensitive_paths waits for the user's approval of that exact commit), ask_all (every merge waits)",
                                                            options: LeadWorkflow.MergePolicy.allCases.map(\.rawValue)),
                                          "sensitive_paths": P(type: "string", description: "The globs ask_sensitive holds back, comma-separated, as in .gitignore (empty: Claude's settings and instructions, .github, .env files, entitlements, keys)"),
-                                         "auto_advance": P(type: "boolean", description: "Whether VibeSwitcher moves finished work on by itself (default true): a task reported done is merged (review none) or audited, a clean audit merged, open Important findings sent back to its worker, a merged task cleaned up, and a planned task started once its after tasks are done; you get one report of what it did. false: you do each")]),
+                                         "auto_advance": P(type: "boolean", description: "Whether VibeSwitcher moves finished work on by itself (default true): a task reported done is merged (review none) or audited, a clean audit merged, open Important findings sent back to its worker, a merged task cleaned up, and a planned task started once its after tasks are done; you get one report of what it did. false: you do each"),
+                                         "watch_app_logs": P(type: "boolean", description: "Whether you get VibeSwitcher's own health digests (default false; only for the project that builds VibeSwitcher): its freezes, crashes and error lines as it logs them, and a daily trend, each as a witness report to turn into tasks where it's a real bug")]),
             ]
         }
     }
@@ -2619,10 +2620,10 @@ public final class LeadToolset: MCPToolset {
                     throw Problem(text: "records_dir is a folder inside the repository (e.g. docs/lead), not in .git or .vibeswitcher; empty keeps the logs in .vibeswitcher.")
                 }
                 value = folder
-            case "auto_advance" where !value.isEmpty:
+            case "auto_advance" where !value.isEmpty, "watch_app_logs" where !value.isEmpty:
                 // A JSON true or false arrives as a number.
                 let flag = (given as? Bool) ?? LeadWorkflow.flag(value)
-                guard let flag else { throw Problem(text: "auto_advance is true or false.") }
+                guard let flag else { throw Problem(text: "\(key) is true or false.") }
                 value = String(flag)
             case "base_branch" where !value.isEmpty:
                 guard Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/\(value)"], in: root).ok else {
@@ -2652,12 +2653,13 @@ public final class LeadToolset: MCPToolset {
                                           "heavy_slots": after.heavySlots.map(String.init) ?? "",
                                           "audit_finders": String(after.auditFinders), "audit_nit_cap": String(after.auditNitCap),
                                           "merge_policy": after.mergePolicy?.rawValue ?? "", "sensitive_paths": after.sensitivePaths?.joined(separator: ", ") ?? "",
-                                          "records_dir": after.recordsDir ?? "", "auto_advance": String(after.autoAdvance)]
+                                          "records_dir": after.recordsDir ?? "", "auto_advance": String(after.autoAdvance),
+                                          "watch_app_logs": String(after.watchAppLogs)]
             // A limit cleared reads back as its default.
             let defaults = ["disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB),
                             "test_timeout_min": Self.gb(LeadWorkflow().testTimeoutMinutes),
                             "audit_finders": String(LeadWorkflow().auditFinders), "audit_nit_cap": String(LeadWorkflow().auditNitCap),
-                            "auto_advance": String(LeadWorkflow().autoAdvance)]
+                            "auto_advance": String(LeadWorkflow().autoAdvance), "watch_app_logs": String(LeadWorkflow().watchAppLogs)]
             for change in changes where read[change.key] != (change.value.isEmpty ? defaults[change.key] ?? "" : change.value) {
                 throw Problem(text: "Wrote workflow.md, but \(change.key) reads back as \"\(read[change.key] ?? "")\", not \"\(change.value)\". Check the file.")
             }
@@ -3494,6 +3496,9 @@ public final class LeadToolset: MCPToolset {
         lines.append("- sensitive_paths: \(workflow.sensitiveGlobs.joined(separator: ", "))\(workflow.sensitivePaths == nil ? " (the defaults)" : "")")
         lines.append("- auto_advance: " + (workflow.autoAdvance ? "true (finished work moves on by itself: merged, audited, sent back, cleaned up; planned tasks start once their after tasks are done)"
             : "false (you start, audit, merge and clean up each task yourself)"))
+        if workflow.watchAppLogs {
+            lines.append("- watch_app_logs: true (VibeSwitcher's own freezes, crashes, error lines and daily trend come to you as witness reports)")
+        }
         let limits = macLimits()
         lines += ["", "Mac-wide, set by the user in VibeSwitcher's Settings › Project lead (not here; configure doesn't set them):",
                   "- load_threshold: \(limits.loadLimitText) (above this 1-minute load start_worker and audit refuse and merge waits)",
