@@ -1263,3 +1263,4 @@
 - 2026-10-25 16:32 Automatically (auto_advance): Cleaned up planted-git-hooks-or (freed 3.9 GB of build output and temporary folders). It stays done.
 - 2026-10-25 16:33 Update: Freezes, memory and git hooks fixed; the board is clear — The loop merged these by itself. They reach your app at the next install.
 - 2026-10-25 16:33 Update: Retrospective: first day on auto_advance — **Went well:**
+- 2026-10-25 19:13 Workflow: watch_app_logs = `true`

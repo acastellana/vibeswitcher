@@ -444,3 +444,7 @@ The watcher is off by default and only vibeswitcher's lead should get its digest
 
 planted-git-hooks-or's blind checks kept finding deeper include and path corner cases. Its worker stopped mid-fix twice, costing about 1.5 h, until the lead cut it to fail-closed. A mid-audit request on the same task left a verifier auditing the old head.
 
+## 2026-10-25 19:13:10 Installed project-lead at eb5c4fb on 2026-10-25 19:12, on battery at 86 %. It brings everything merged today: freeze, memory and terminal fixes, the panel and chat clean-ups, the health watcher, branch-code isolation, sealed auto_advance reports, one verifier per audit, and the git-hooks guard. Afterwards I turned on watch_app_logs.
+
+The user answered 5405CE2E with "Install now (I'm here for the password)", and the battery was well above the 10 % limit. Checked after the install: the host is still pid 31589, the app relaunched as pid 98346, and advancing.lock is held. The lead tool servers that were already running keep the old code until their sessions restart.
+
