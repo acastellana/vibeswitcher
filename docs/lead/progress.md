@@ -1299,3 +1299,6 @@
 - 2026-10-26 00:28 Automatically (auto_advance): Merged a-verifier-that-ends (A verifier that ends without a verdict is retried by itself) into project-lead at 339018ac, on its passing audit and the full test run.
 - 2026-10-26 00:29 Automatically (auto_advance): Cleaned up notifications-only-when (freed 1.3 GB of build output and temporary folders). It stays done.
 - 2026-10-26 00:29 Automatically (auto_advance): Cleaned up a-verifier-that-ends (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-26 00:34 Started a worker on every-task-gets-a
+- 2026-10-26 00:34 Automatically (auto_advance): Started a worker on every-task-gets-a (Every task gets a receipt: time, tokens, cost, rounds, rollback), its after tasks done (a-verifier-that-ends).
+- 2026-10-26 00:34 Automatically (auto_advance): Didn't audit open-sessions-pick-up: No verifier started: the Mac is shared by every project's team, and its 1-minute load is above load_threshold. Now: load 27.6 (load_threshold 24, twice the 12 cores), 9 team sessions across 3 projects (genswap 4, vibeswitcher 3, stakegen 2) (mac_max_sessions 10). VibeSwitcher sends you one message once there's room again. Don't sleep or poll: retry when you're next woken (a report, the user, or a VibeSwitcher message). Meanwhile merge and cleanup finished tasks (cleanup ends their sessions), pla…
