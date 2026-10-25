@@ -51,14 +51,17 @@ extension LeadToolsetTests {
         let lead = try lead(root, runtime)
         _ = call(lead, "add_task", ["title": "One", "goal": "g", "acceptance": ["a"]])
         _ = call(lead, "start_worker", ["task": "one"])
-        // Audited twice: the board holds only the second verifier (session-3).
+        // A verifier still in its worktree that the board no longer names (one a later audit replaced before audit
+        // ended the earlier one first): cleanup finds it by the worktree.
         #expect(!call(lead, "audit", ["task": "one"]).isError)
-        #expect(!call(lead, "audit", ["task": "one"]).isError)
-        #expect(BoardStore(root: root).load().task("one")?.verifier == "session-3")
-        runtime.pids = ["session-1": getpid(), "session-2": getppid(), "session-3": getpid()]
+        try BoardStore(root: root).update { board in
+            guard let index = board.taskIndex("one") else { return }
+            board.tasks[index].verifier = nil
+        }
+        runtime.pids = ["session-1": getpid(), "session-2": getppid()]
         let cleaned = call(lead, "cleanup", ["task": "one", "force": true])
         #expect(!cleaned.isError, "\(cleaned.text)")
-        #expect(Set(runtime.killed) == ["session-1", "session-2", "session-3"])
+        #expect(Set(runtime.killed) == ["session-1", "session-2"])
         #expect(cleaned.text.contains("ended pid \(getppid()) (Verifier: One)"), "\(cleaned.text)")
         #expect(try runtime.sessions().isEmpty)
     }

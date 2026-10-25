@@ -1386,9 +1386,11 @@ public final class LeadToolset: MCPToolset {
         let session: String
         var panel: LeadAuditPanel?
         var merged = upToDate.merged
+        let earlier: String
         if finders > 1 {
-            panel = try startFinders(finders, task: task, head: head, merged: merged, workflow: workflow, recheck: recheck, trust: config.isEmpty)
-            session = panel!.sessions[0]
+            let started = try startFinders(finders, task: task, head: head, merged: merged, workflow: workflow, recheck: recheck, trust: config.isEmpty)
+            (panel, earlier) = (started.0, started.1)
+            session = started.0.sessions[0]
         } else {
             // Behind the base where it matters: its tests run once on the merged result, which the verifier reads.
             if let commit = merged?.commit {
@@ -1397,6 +1399,7 @@ public final class LeadToolset: MCPToolset {
                 merged?.run = run.outcome.text
                 try? store.appendProgress("Audit of \(slug) at \(head.prefix(8)) tested its merged result \(commit.prefix(8)) onto \(workflow.base): \(run.outcome.text)")
             }
+            earlier = try endEarlierVerifiers(task, not: "Not audited, no verifier started")
             session = try launch(.verifier, task: slug, name: "verify-\(slug)", in: Worktrees.path(root: root, slug: slug),
                                  label: "Verifier: \(task.title)", trust: config.isEmpty,
                                  prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, merged: merged,
@@ -1431,11 +1434,11 @@ public final class LeadToolset: MCPToolset {
         let cap = ledger?.reconsider == true ? " " + Self.reconsiderText(ledger!, of: slug) : ""
         let tested = merged.map { " One build and test run of its merged result \($0.commit.prefix(8)) came first, and the verifier reads its logs (\($0.run ?? "")): \($0.logs.joined(separator: ", "))." } ?? ""
         if let panel {
-            return MCPToolResult(text: noTools + putBack + behind + room + "\(panel.size) finders started on \(slug) (checking \(head.prefix(8))): " + Self.focusesText(panel.focuses) + ". "
+            return MCPToolResult(text: noTools + putBack + behind + room + earlier + "\(panel.size) finders started on \(slug) (checking \(head.prefix(8))): " + Self.focusesText(panel.focuses) + ". "
                                  + "One build and test run\(merged.map { " of its merged result \($0.commit.prefix(8))" } ?? "") came first, and every finder reads its logs (\(panel.run)): \(panel.logs.joined(separator: ", ")). "
                                  + "Their findings are voted into one verdict, which arrives as a message once all \(panel.size) have submitted.\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
         }
-        return MCPToolResult(text: noTools + putBack + behind + room + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(tested)\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
+        return MCPToolResult(text: noTools + putBack + behind + room + earlier + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(tested)\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
     }
 
     /// The model this project's audits run on: verifier_model, or another than the workers' (see `LeadWorkflow.auditModel`).
@@ -1459,10 +1462,11 @@ public final class LeadToolset: MCPToolset {
 
     /// An audit by `count` finders: one build and test run of `head` first (its logs kept per commit, so an audit
     /// of the same commit again reuses them), then each finder started with its focus and those logs, as one panel
-    /// in the vault. A finder that fails to start ends the ones started before it.
+    /// in the vault. A finder that fails to start ends the ones started before it. The task's earlier verifiers are
+    /// ended first (see `endEarlierVerifiers`), and the panel comes with what audit's reply says of them.
     /// A branch behind the base where it matters is tested as it would land: `merged`'s commit, not `head`.
     private func startFinders(_ count: Int, task: LeadTask, head: String, merged: LeadPrompts.Merged?, workflow: LeadWorkflow,
-                              recheck: LeadPrompts.Reaudit?, trust: Bool) throws -> LeadAuditPanel {
+                              recheck: LeadPrompts.Reaudit?, trust: Bool) throws -> (LeadAuditPanel, String) {
         let slug = task.slug
         let tested = merged?.commit ?? head
         let run = try auditRun(slug, commit: tested, workflow: workflow, not: "no finder started")
@@ -1470,6 +1474,7 @@ public final class LeadToolset: MCPToolset {
         let sensitive = changed.filter { path in workflow.sensitiveGlobs.contains { LeadWorkflow.matches(path, glob: $0) } }
         let focuses = LeadPrompts.Focus.panel(count, sensitive: !sensitive.isEmpty)
         let notes = leadNotes(task), report = doneReport(task, head: head)
+        let earlier = try endEarlierVerifiers(task, not: "Not audited, no finder started")
         let id = UUID().uuidString
         var sessions: [String] = []
         for (offset, focus) in focuses.enumerated() {
@@ -1490,7 +1495,34 @@ public final class LeadToolset: MCPToolset {
         }
         try? store.appendProgress("Audit of \(slug) at \(head.prefix(8)) by \(count) finders (\(focuses.map(\.rawValue).joined(separator: "; "))); the shared run"
                                   + (merged == nil ? "" : " of its merged result \(tested.prefix(8))") + ": \(run.outcome.text)")
-        return LeadAuditPanel(focuses: focuses.map(\.rawValue), sessions: sessions, commit: head, logs: run.logs, run: run.outcome.text)
+        return (LeadAuditPanel(focuses: focuses.map(\.rawValue), sessions: sessions, commit: head, logs: run.logs, run: run.outcome.text), earlier)
+    }
+
+    /// The task's verifiers still running (the board's, and any other in its worktree), ended before an audit starts
+    /// its own: a task has one live verifier, or audit_finders finders, at a time. The new grant replaces theirs, so no
+    /// verdict can come from them now (2026-10-24: genswap's app-security-rpc-trust had four verifiers alive at once, one
+    /// per audit call on the same commit, until all four were ended with its fold). One the host doesn't end refuses the
+    /// audit (`not`: what didn't happen): started beside it, the task would have one more. What audit's reply says of
+    /// them; "" for none.
+    private func endEarlierVerifiers(_ task: LeadTask, not: String) throws -> String {
+        let refused = "whether \(task.slug) has a verifier still running isn't known; \(not.prefix(1).lowercased() + not.dropFirst())"
+        let folder = (Worktrees.path(root: root, slug: task.slug) as NSString).standardizingPath
+        let ours = Set((task.panel?.sessions ?? []) + [task.verifier].compactMap { $0 })
+        let earlier = try hostSessions(refused).filter { session in
+            session.live && (ours.contains(session.id)
+                || (Self.isTeamSession(session, in: folder) && LeadTeams.role(label: session.label) == .verifier))
+        }
+        guard !earlier.isEmpty else { return "" }
+        // One the host didn't end, ended as cleanup ends one (see endItself).
+        let endings = try endItself(try end(earlier, refused: refused), refused: refused)
+        let failed = endings.filter { $0.failure != nil }
+        guard failed.isEmpty else {
+            throw Problem(text: "\(not): \(task.slug)'s earlier verifier is still running (\(failed.map(\.said).joined(separator: "; "))), and one more beside it "
+                          + "would make two. If the host refuses, tell the user (they can end it in VibeSwitcher), then audit again.")
+        }
+        let which = endings.count == 1 ? "earlier verifier" : "\(endings.count) earlier verifiers"
+        return "Ended \(task.slug)'s \(which) first (\(endings.map(\.said).joined(separator: ", "))): this audit's grant replaces "
+            + "\(endings.count == 1 ? "its" : "theirs"), so no verdict could come from \(endings.count == 1 ? "it" : "them"). "
     }
 
     /// The audit's one build and test run of `commit` (the branch's head, or its merged result), its logs kept per
