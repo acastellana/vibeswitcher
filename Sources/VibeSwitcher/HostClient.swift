@@ -46,6 +46,8 @@ final class HostClient: ObservableObject {
     private var sinks: [UUID: (sink: Sink, cols: Int, rows: Int)] = [:]
     /// When each session's last resize line went to app.log, and the newest one since, held (see `logResize`).
     private var resizeLogs: [UUID: (logged: Date, held: (line: String, count: Int)?)] = [:]
+    /// The last size each session's view asked for that wasn't sent (see `isRealSize`): one line for each.
+    private var refusedSizes: [UUID: (cols: Int, rows: Int)] = [:]
     /// The resize log's clock, and how it writes a held line later; a test's own instead.
     var resizeClock: () -> Date = Date.init
     var resizeLater: (TimeInterval, @escaping () -> Void) -> Void = { DispatchQueue.main.asyncAfter(deadline: .now() + $0, execute: $1) }
@@ -601,9 +603,33 @@ final class HostClient: ObservableObject {
     }
 
     func attach(_ id: UUID, cols: Int, rows: Int, sink: Sink) {
+        var (cols, rows) = (cols, rows)
+        if !Self.isRealSize(cols: cols, rows: rows) {
+            // A view laid out at no real size still attaches (it needs the output), at the session's size.
+            let kept = size(of: id) ?? (min(max(cols, Self.realCols.lowerBound), Self.realCols.upperBound),
+                                        min(max(rows, Self.realRows.lowerBound), Self.realRows.upperBound))
+            note("host: \(id.uuidString.prefix(8)) not attached at \(cols)×\(rows), not a real size: at \(kept.cols)×\(kept.rows)")
+            (cols, rows) = kept
+        }
         sinks[id] = (sink, cols, rows)
         sendAttach(id, cols: cols, rows: rows)
         logResize(id, cols: cols, rows: rows, reason: .initial)
+    }
+
+    /// The sizes a terminal can have on screen. Anything else is a view laid out at no real size (hidden, collapsed, in
+    /// a window grown far past the screen), and never reaches the session's PTY: 2026-10-25, the leads' views made behind
+    /// their chats, in a window a tall inspector had grown to some 6,000 points, attached their Claude sessions at
+    /// 116×392, which reflowed their screens.
+    static let realCols = 10...1000
+    static let realRows = 5...300
+
+    static func isRealSize(cols: Int, rows: Int) -> Bool {
+        realCols.contains(cols) && realRows.contains(rows)
+    }
+
+    /// The session's PTY size, as the host last listed it.
+    func size(of id: UUID) -> (cols: Int, rows: Int)? {
+        sessions.first { $0.id == id }.map { ($0.cols, $0.rows) }
     }
 
     private func sendAttach(_ id: UUID, cols: Int, rows: Int) {
@@ -614,6 +640,7 @@ final class HostClient: ObservableObject {
 
     func detach(_ id: UUID) {
         resizeLogs[id] = nil
+        refusedSizes[id] = nil
         guard sinks.removeValue(forKey: id) != nil else { return }
         request(.detach(id: id))
     }
@@ -902,7 +929,7 @@ final class HostClient: ObservableObject {
     enum ResizeReason: String {
         /// A view attached at its size.
         case initial
-        /// A view shown again, after the window changed size while it was hidden.
+        /// A view shown again (or uncovered by the chat), after the window changed size while it was hidden.
         case shown
         case windowResize = "window resize"
         /// The sidebar or the inspector shown, hidden or dragged.
@@ -912,6 +939,14 @@ final class HostClient: ObservableObject {
     }
 
     func resize(_ id: UUID, cols: Int, rows: Int, reason: ResizeReason) {
+        guard Self.isRealSize(cols: cols, rows: rows) else {
+            if refusedSizes[id].map({ $0 != (cols, rows) }) ?? true {
+                note("host: resize \(id.uuidString.prefix(8)) to \(cols)×\(rows) (\(reason.rawValue)) not sent: not a real size")
+            }
+            refusedSizes[id] = (cols, rows)
+            return
+        }
+        refusedSizes[id] = nil
         let changed = sinks[id].map { $0.cols != cols || $0.rows != rows } ?? true
         if sinks[id] != nil { sinks[id]?.cols = cols; sinks[id]?.rows = rows }
         request(.resize(id: id, cols: cols, rows: rows))

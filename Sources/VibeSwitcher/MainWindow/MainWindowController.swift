@@ -120,6 +120,11 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         super.init(window: window)
         window.delegate = self
 
+        // The side panes are sized by the split (their items' thicknesses) and the window, never by their content. Left
+        // to it, a hosting controller holds the window to its content's smallest size, and SwiftUI takes that at no
+        // width: 2026-10-25, a project briefing open in the Team tab (a wrapping text sized to fit) grew the window
+        // downwards past the screen to some 6,000 points, and the leads' terminals with it (116×392).
+        for host in [sidebarHost, inspectorHost] { host.sizingOptions = [] }
         let sidebar = NSSplitViewItem(sidebarWithViewController: sidebarHost)
         sidebarItem = sidebar
         sidebar.minimumThickness = 260

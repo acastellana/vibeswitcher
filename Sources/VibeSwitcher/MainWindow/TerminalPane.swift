@@ -120,9 +120,11 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         setMargin(terminal.nativeBackgroundColor)
         current = hostID
         // Hidden views don't resize their sessions (each would redraw on every step of a window drag): the one on
-        // screen catches up now.
-        let screen = terminal.getTerminal()
-        host.resize(hostID, cols: screen.cols, rows: screen.rows, reason: .shown)
+        // screen catches up now. Behind the chat it has no size of its own yet: it catches up when it's uncovered.
+        if !covered {
+            let screen = terminal.getTerminal()
+            host.resize(hostID, cols: screen.cols, rows: screen.rows, reason: .shown)
+        }
         recent.removeAll { $0 == hostID }
         recent.insert(hostID, at: 0)
         for evicted in recent.dropFirst(Self.keepAttached) { forget(evicted) }
@@ -161,9 +163,14 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         }
     }
 
+    /// Back on screen: the view takes the pane's size, and the session with it when it's the one shown (its size
+    /// was kept while it was hidden, and a frame it already had doesn't lay it out again).
     private func unpark(_ terminal: HostTerminalView) {
         guard terminal.superview == nil else { return }
+        unparking = true
+        defer { unparking = false }
         pin(terminal, inset: Self.inset)
+        terminal.setFrameSize(terminal.frame.size)
         terminal.needsDisplay = true
     }
 
@@ -264,6 +271,14 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         }
         configure(terminal)
         pin(terminal, inset: Self.inset)
+        // Behind the chat the pane's size isn't one the session is seen at (2026-10-25: a lead's view made there, in a
+        // window a tall inspector had grown, attached at 116×392): the view keeps the session's size until it's shown,
+        // and `unpark` sends the pane's. Before it's in `views`, so its own size change isn't sent.
+        let laidOut = terminal.getTerminal()
+        if covered || !HostClient.isRealSize(cols: laidOut.cols, rows: laidOut.rows), let kept = host.size(of: id),
+           kept != (laidOut.cols, laidOut.rows) {
+            terminal.resize(cols: kept.cols, rows: kept.rows)
+        }
         views[id] = terminal
         gates[id, default: ReplayGate()].attaching()
         let size = terminal.getTerminal()
@@ -300,12 +315,14 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         let windowSize = view.window?.frame.size
         let windowResized = view.window?.inLiveResize == true || windowSize != lastWindowSize
         lastWindowSize = windowSize
-        host.resize(id, cols: newCols, rows: newRows, reason: resizeCause ?? (windowResized ? .windowResize : .paneSplit))
+        host.resize(id, cols: newCols, rows: newRows, reason: resizeCause ?? (unparking ? .shown : windowResized ? .windowResize : .paneSplit))
     }
 
     /// What the terminal's size changes come from while the window changes something itself (focus mode, the font
     /// size); otherwise a window resize, or the split between the panes when the window kept its size.
     private var resizeCause: HostClient.ResizeReason?
+    /// While a view goes back on screen (`unpark`): its size change is it being shown.
+    private var unparking = false
     private var resizeCauses = 0
     private var lastWindowSize: NSSize?
 
