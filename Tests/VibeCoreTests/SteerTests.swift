@@ -268,6 +268,28 @@ struct SteerTests {
         }
     }
 
+    @Test func autoAdvancesReportsAreSealedOnlyByALeadsSessionForItsOwnAgent() {
+        let book = LeadVault.Book()
+        let team = team(book)
+        // `to`: the session the message's agent runs in, as the host tells from its pid.
+        func seals(_ caller: LeadVault.Caller, to agent: String?) -> Bool {
+            if case .seal = book.answer(.seal(message("x", from: .system(LeadAdvance.sender))), from: caller, agentSession: agent) { return true }
+            return false
+        }
+        // The lead's tool server (its loop), for the lead itself; the app, for anyone.
+        #expect(seals(.session(team.lead), to: team.lead))
+        #expect(seals(.app, to: team.lead) && seals(.app, to: nil))
+        // Not for another agent: its worker, one the host didn't start, none told.
+        #expect(!seals(.session(team.lead), to: team.worker) && !seals(.session(team.lead), to: "elsewhere") && !seals(.session(team.lead), to: nil))
+        // Nobody else, even for an agent in their own session or the lead's.
+        for caller in [team.worker, team.verifier, "someone-else"] {
+            #expect(!seals(.session(caller), to: caller) && !seals(.session(caller), to: team.lead), "\(caller)")
+        }
+        #expect(!seals(.unknown, to: team.lead))
+        // The sender line of a worker's report about itself stays its own: it doesn't take auto_advance's.
+        #expect(!seals(.session(team.worker), to: team.worker))
+    }
+
     @Test func aSealHoldsOnlyForTheSenderItWasMadeFor() throws {
         let root = try root()
         try SteerInbox.post(message("The worker on demo says it's done", from: .system("worker demo"), id: "report"), tty: "ttys001", root: root)

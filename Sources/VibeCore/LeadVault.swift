@@ -174,7 +174,8 @@ public struct LeadVault: Sendable {
         /// The app, or the repository's lead.
         case setHead(root: String, branch: String, commit: String)
         /// A message sealed for its sender (see `Book.maySeal`): the user's for the app only, the lead's for the app or
-        /// a lead, VibeSwitcher's for the app, or a worker's or verifier's tool server about itself.
+        /// a lead, VibeSwitcher's for the app, a worker's or verifier's tool server about itself, or (auto_advance's
+        /// reports) the lead's tool server for its own agent.
         case seal(SteerMessage)
         /// Which of these carry a valid seal.
         case verify([SteerMessage])
@@ -602,20 +603,27 @@ extension LeadVault {
             }
         }
 
-        /// A client asking this book directly, as `caller` (tests, and the host's own checks); `userOpened` as `answer`.
-        public func vault(folder: URL, as caller: @escaping @Sendable () -> Caller, userOpened: Bool = false) -> LeadVault {
-            LeadVault(folder: folder) { [self] request in answer(request, from: caller(), userOpened: userOpened) }
+        /// A client asking this book directly, as `caller` (tests, and the host's own checks); `userOpened` and
+        /// `agentSession` (here, of the message's agent pid) as `answer`.
+        public func vault(folder: URL, as caller: @escaping @Sendable () -> Caller, userOpened: Bool = false,
+                          agentSession: (@Sendable (Int32) -> String?)? = nil) -> LeadVault {
+            LeadVault(folder: folder) { [self] request in
+                var session: String?
+                if case .seal(let message) = request { session = agentSession?(message.agentPid) }
+                return answer(request, from: caller(), userOpened: userOpened, agentSession: session)
+            }
         }
 
         /// `userOpened`: the caller's session is one the app opened (the host knows; no session started it), so the
-        /// git commands it records are the user's while it holds no role in the team.
-        public func answer(_ request: Request, from caller: Caller, userOpened: Bool = false) -> Reply {
+        /// git commands it records are the user's while it holds no role in the team. `agentSession`: for `.seal`,
+        /// the session the message's agent runs in, as the host tells from its pid (nil: none it started).
+        public func answer(_ request: Request, from caller: Caller, userOpened: Bool = false, agentSession: String? = nil) -> Reply {
             // It reads git: outside the lock.
             if case .acceptMove(let root, let branch) = request { return acceptMove(root: root, branch: branch, from: caller) }
             lock.lock()
             defer { lock.unlock() }
             var changed = false
-            let reply = answer(request, from: caller, userOpened: userOpened, changed: &changed)
+            let reply = answer(request, from: caller, userOpened: userOpened, agentSession: agentSession, changed: &changed)
             if changed, let onChange, let data = try? JSONEncoder().encode(state) { onChange(data) }
             return reply
         }
@@ -680,7 +688,7 @@ extension LeadVault {
 
         // MARK: Rules
 
-        private func answer(_ request: Request, from caller: Caller, userOpened: Bool, changed: inout Bool) -> Reply {
+        private func answer(_ request: Request, from caller: Caller, userOpened: Bool, agentSession: String?, changed: inout Bool) -> Reply {
             switch request {
             case .issue(let role, let root, let task, let auditing, let finder):
                 if role == .lead {
@@ -813,7 +821,7 @@ extension LeadVault {
                 change(root, &changed) { $0.heads[branch] = commit }
                 return .ok
             case .seal(let message):
-                if let refusal = maySeal(message.from, caller: caller) { return .refused(refusal) }
+                if let refusal = maySeal(message.from, caller: caller, agentSession: agentSession) { return .refused(refusal) }
                 return .seal(SteerInbox.seal(message, key: SymmetricKey(data: state.senderKey)))
             case .verify(let messages):
                 let key = SymmetricKey(data: state.senderKey)
@@ -972,9 +980,12 @@ extension LeadVault {
         /// Why `caller` may not seal a message as `sender`'s (nil: it may). The user's words are the app's to seal;
         /// a lead's, a lead's (or the app's, passing them on); VibeSwitcher's, the app's, but for the reports a
         /// worker's or verifier's tool server sends its lead (`worker <task>`, `verifier <task>`), which the
-        /// session holding that role seals about itself. So a worker's Bash can't seal a line as its lead's, the
-        /// witness's or another worker's (it can only say, as itself, what its report tool says).
-        private func maySeal(_ sender: SteerMessage.Sender, caller: Caller) -> String? {
+        /// session holding that role seals about itself, and auto_advance's (`LeadAdvance.sender`), which the lead's
+        /// own tool server runs: a lead's session seals those only for an agent in that same session (`agentSession`),
+        /// itself. So a worker's Bash can't seal a line as its lead's, the witness's, auto_advance's or another
+        /// worker's (it can only say, as itself, what its report tool says), and a lead can't pass auto_advance's
+        /// word on to anyone else.
+        private func maySeal(_ sender: SteerMessage.Sender, caller: Caller, agentSession: String?) -> String? {
             if caller == .app { return nil }
             switch sender {
             case .user:
@@ -983,6 +994,11 @@ extension LeadVault {
                 guard case .session(let session) = caller,
                       state.teams.values.contains(where: { $0.members.contains { $0.role == .lead && $0.session == session } })
                 else { return "Only VibeSwitcher or a project lead seals a message as a lead's." }
+                return nil
+            case .system(let about) where about == LeadAdvance.sender:
+                guard case .session(let session) = caller, agentSession == session,
+                      state.teams.values.contains(where: { $0.members.contains { $0.role == .lead && $0.session == session } })
+                else { return "Only VibeSwitcher, or a project lead's own tool server about its loop's work and for that lead, seals a message as auto_advance's." }
                 return nil
             case .system(let about):
                 let words = about.split(separator: " ", maxSplits: 1).map(String.init)

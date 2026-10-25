@@ -457,7 +457,10 @@ public final class HostServer {
                 guard case .session(let id) = from, let id = UUID(uuidString: id) else { return false }
                 return isYours(id)
             }()
-            var answer = vault.answer(request, from: from, userOpened: opened)
+            // The session a message to seal is for (a lead's own loop seals its reports only for its own agent).
+            var agentSession: String?
+            if case .seal(let message) = request { agentSession = session(of: message.agentPid) }
+            var answer = vault.answer(request, from: from, userOpened: opened, agentSession: agentSession)
             // A verifier that gave its verdict has no job left: it ends once its grace is over (see `endSubmitted`).
             if case .submitVerdict = request, case .session(let id) = from {
                 switch answer {
@@ -571,15 +574,21 @@ public final class HostServer {
     /// unknown. Told once, when the connection is accepted: a process can leave its session's tree, never join
     /// another's.
     func identify(_ token: audit_token_t?) -> LeadVault.Caller {
-        guard let token, token.pid > 1, let ancestry = ProcessTable.ancestry(of: token.pid) else { return .unknown }
-        let live = sessions.values.filter { $0.info.isLive }
-        let chain = Set([token.pid] + ancestry.map(\.pid))
-        if let session = live.first(where: { chain.contains($0.info.childPID) }) { return .session(session.id.uuidString) }
-        if let tty = ProcessTable.info(pid: token.pid)?.tty, let session = live.first(where: { $0.info.tty == tty }) {
-            return .session(session.id.uuidString)
-        }
+        guard let token, token.pid > 1, ProcessTable.ancestry(of: token.pid) != nil else { return .unknown }
+        if let session = session(of: token.pid) { return .session(session) }
         if let app = config.appExecutable, AppCode.runs(token, executable: app) { return .app }
         return .unknown
+    }
+
+    /// The live session `pid` runs in (its program or anything under it, by parent processes, or with the session's
+    /// terminal), by id; nil for none.
+    func session(of pid: pid_t) -> String? {
+        guard pid > 1, let ancestry = ProcessTable.ancestry(of: pid) else { return nil }
+        let live = sessions.values.filter { $0.info.isLive }
+        let chain = Set([pid] + ancestry.map(\.pid))
+        if let session = live.first(where: { chain.contains($0.info.childPID) }) { return session.id.uuidString }
+        if let tty = ProcessTable.info(pid: pid)?.tty, let session = live.first(where: { $0.info.tty == tty }) { return session.id.uuidString }
+        return nil
     }
 
     static func executable(of pid: pid_t) -> String? {

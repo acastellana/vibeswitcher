@@ -32,8 +32,9 @@ import Foundation
 /// board is a rename into it; a worker's report, a verdict, a merge, a session ending all write it), and when the app
 /// nudges it (`nudge`: the Mac has room again for a step it refused, or AC power came back).
 public final class LeadAdvance: @unchecked Sendable {
-    /// Who the lead's reports from here are from (`LeadReport.about`).
-    static let sender = "VibeSwitcher (auto_advance)"
+    /// Who the lead's reports from here are from (`LeadReport.about`): sealed as VibeSwitcher's by the lead's own
+    /// session for its own agent only (see `LeadVault.Book.maySeal`), so they arrive as VibeSwitcher's word.
+    public static let sender = "auto_advance"
 
     /// What the lead is told with a report when VibeSwitcher takes the next step itself.
     static let mergesItself = "auto_advance is on: VibeSwitcher merges it by itself (the same merge, with its test run and every check), and you get one report of what happened; don't merge it yourself."
