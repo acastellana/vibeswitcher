@@ -1276,3 +1276,4 @@
 - 2026-10-25 22:53 Planned a-verifier-that-ends: A verifier that ends without a verdict is retried by itself (review audit)
 - 2026-10-25 22:53 Started a worker on notifications-only-when
 - 2026-10-25 22:53 Started a worker on a-verifier-that-ends
+- 2026-10-25 23:29 Merged each-task-has-a: Each task has a time budget; at it the worker stops and reports (no audit: review none)
