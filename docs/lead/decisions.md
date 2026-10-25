@@ -436,3 +436,7 @@ With auto_advance on, merges run unattended, so worker-written code runs with th
 
 Anthropic's approval rules tell comment-only changes apart from sensitive logic, and its 'superfan' agents watch components. Today the lead filed a permissions change at review none, and its audit (after a manual raise) found three escapes. The one-off log review found four real bugs that nothing had reported.
 
+## 2026-10-25 14:43:56 After the next install, the lead runs configure(watch_app_logs: true) on vibeswitcher. That turns on the app-health watcher (a-watcher-tells-the, merged at 6f9ec250). Today's installed tool server doesn't know the key.
+
+The watcher is off by default and only vibeswitcher's lead should get its digests. Writing it down keeps the step from being lost across compaction or a new lead.
+
