@@ -56,8 +56,9 @@ final class AppHealthWatcher: @unchecked Sendable {
         queue.sync { lookNow() }
     }
 
-    /// What it has taken in and told (tests).
+    /// What it has taken in and told, and whether digests are on their way to `send` (tests).
     var state: AppHealth.Watch { queue.sync { watch } }
+    var isSending: Bool { queue.sync { sending } }
 
     private func begin() {
         if let data = try? Data(contentsOf: stateFile), let saved = try? JSONDecoder().decode(AppHealth.Watch.self, from: data) {
