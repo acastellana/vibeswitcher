@@ -511,7 +511,73 @@ private final class Driver: NSObject, NSApplicationDelegate {
         // The lead's results as the Lead view lists them: an update whose screenshot post_update kept (its worktree
         // since removed), and an older one whose path into a cleaned-up worktree is gone.
         ("results", { driver in AnyView(ResultsList(updates: Driver.results(home: driver.home)).frame(width: 460).padding(12)) }),
+        // A lead's Team tab: a task at work, two blocked (one after it, one with no word why), merged ones of which
+        // one was audited, a question withdrawn lately and several answered, the Mac line, the Mac kept awake.
+        ("lead-team", { driver in
+            let team = Driver.leadTeam()
+            return AnyView(LeadTeamView(root: driver.home + "/projects/stakegen", board: team.board, seen: team.seen, open: { _ in },
+                                        decisions: team.decisions, keepingAwake: true,
+                                        mac: MacLine(text: "Mac: load 16.5, 5 team sessions across 3 projects", spoken: "", isOver: false))
+                .frame(width: 360, height: 980))
+        }),
     ]
+
+    /// The `lead-team` sheet's board, as of now.
+    static func leadTeam() -> (board: LeadBoard, seen: [String: MemberSeen], decisions: [LeadDecision]) {
+        let now = Date().timeIntervalSince1970
+        var board = LeadBoard()
+        func task(_ title: String, _ status: LeadTask.Status, since: Double) -> LeadTask {
+            var task = LeadTask(slug: Slug.make(title, taken: []), title: title,
+                                contract: LeadContract(goal: title, acceptance: [], boundaries: [], context: ""), status: status)
+            task.createdAt = now - 7_200
+            task.since = now - since
+            if status != .planned { task.worker = UUID().uuidString; task.worktree = "/tmp/\(task.slug)" }
+            return task
+        }
+        var working = task("Payout ledger reconciles nightly", .running, since: 4 * 60)
+        working.checkpoints = [LeadCheckpoint(text: "Ledger diff written; running the reconciliation tests", at: now - 120)]
+        var after = task("Payout report shows reconciled totals", .blocked, since: 18 * 60)
+        after.after = [working.slug]
+        let unsaid = task("Stake history pages load under a second", .blocked, since: 18 * 60)
+        var merged = (1...4).map { index -> LeadTask in
+            var done = task("Merged task \(index)", .done, since: Double(index) * 3_000)
+            done.worktree = nil
+            done.merged = LeadMergeRecord(commit: "abc\(index)def0", tested: true, audited: index == 1 ? nil : false, at: now - Double(index) * 3_000)
+            done.review = index == 1 ? .audit : LeadTask.Review.none
+            return done
+        }
+        var audits = LeadAuditLedger()
+        audits.rounds = 6
+        audits.passed = true
+        merged[0].audits = audits
+        var abandoned = task("Old staking widget", .abandoned, since: 9_000)
+        abandoned.abandonedBecause = "Replaced by the payout report."
+        board.tasks = merged + [working, after, unsaid, abandoned]
+
+        var withdrawn = LeadQuestion(text: "Sidebar review found three overlapping rows. Re-plan the sidebar as one task, or fix each row on its own?\nThe review's notes are in progress.md.",
+                                     options: ["One task", "Each row"], at: now - 1_500)
+        withdrawn.withdrawnAt = now - 600
+        withdrawn.withdrawReason = "User asked to re-ask it. Sidebar review found the rows were one bug."
+        var answered: [LeadQuestion] = []
+        for (index, (text, answer)) in [("Which payout fixes go first: 1 the rounding, 2 the late cron, 3 the stale cache?\nEach is a task of its own; 1 and 3 touch the same file.", "1 and 3"),
+                                        ("The ledger can be fixed now (C) or redesigned (B). C now and plan B as its own task, or B only?", "C now + plan B as its own task"),
+                                        ("Keep the old CSV export?", "Yes, for a month"),
+                                        ("Run the reconciliation at 02:00 or 04:00 UTC?", "04:00"),
+                                        ("Merge the stake history work with no audit (review none)?", "Yes")].enumerated() {
+            var question = LeadQuestion(text: text, options: [], at: now - Double(index + 1) * 2_400)
+            question.answer = answer
+            question.answeredAt = question.askedAt + 300
+            answered.append(question)
+        }
+        board.questions = answered.reversed() + [withdrawn]
+        board.refreshScores(now: now)
+
+        var seen: [String: MemberSeen] = [:]
+        seen[working.worker!] = MemberSeen(live: true, needsYou: false, working: true, activity: "Running swift test", since: Date(timeIntervalSince1970: now - 60),
+                                           startedAt: Date(timeIntervalSince1970: now - 240))
+        let decisions = (1...16).map { LeadDecision(at: now - Double($0) * 900, text: "Earlier decision \($0)", why: "") }
+        return (board, seen, decisions)
+    }
 
     /// Two updates for the `results` sheet, their images in a scratch project under the sandbox's home.
     static func results(home: String) -> [LeadUpdate] {
