@@ -202,16 +202,23 @@ struct StaleServerTests {
         let broken = BinaryWatch.Identity(modified: 200, size: 5_000, inode: 7)
         disk.binary = broken
         let now = Date()
-        watch.failed(broken, because: "its probe exited with status 3", at: now)
+        #expect(watch.failed(broken, because: "its probe exited with status 3", at: now))
         #expect(watch.update(now: now.addingTimeInterval(30)) == nil)
         #expect(watch.update(now: now.addingTimeInterval(61)) == broken)
         let notice = watch.notice() ?? ""
         #expect(notice.contains("couldn't switch to the new build (its probe exited with status 3)"))
         #expect(!notice.contains("/mcp"))
-        // Another build replacing it is tried at once.
+        // Said once: the next tool result, and a retry failing the same way, say nothing more; another reason is news.
+        #expect(watch.notice() == nil)
+        #expect(!watch.failed(broken, because: "its probe exited with status 3", at: now.addingTimeInterval(61)))
+        #expect(watch.notice() == nil)
+        #expect(watch.failed(broken, because: "its probe didn't answer", at: now.addingTimeInterval(122)))
+        // Another build replacing it is tried at once, and its own failure is said again.
         let fixed = BinaryWatch.Identity(modified: 300, size: 5_100, inode: 9)
         disk.binary = fixed
         #expect(watch.update(now: now.addingTimeInterval(1)) == fixed)
+        #expect(watch.failed(fixed, because: "its probe exited with status 3", at: now.addingTimeInterval(1)))
+        #expect(watch.notice() != nil)
         // The old build back in place: nothing to switch to, nothing to say.
         disk.binary = BinaryWatch.Identity(modified: 100, size: 5_000, inode: 7)
         #expect(watch.update() == nil)
@@ -221,11 +228,21 @@ struct StaleServerTests {
     @Test func aMissingBinaryIsNoCrashAndNoUpdate() {
         let disk = Disk()
         let watch = watch(disk)
-        // Mid-install, or the app moved: nothing to compare with yet.
+        // Mid-install, or the app moved: nothing to compare with yet, said once while it's gone.
         disk.binary = nil
         #expect(watch.update() == nil)
+        #expect(watch.goneNow())
+        #expect(watch.update() == nil)
+        #expect(!watch.goneNow())
         disk.binary = BinaryWatch.Identity(modified: 300, size: 6_000, inode: 9)
         #expect(watch.update() == disk.binary)
+        #expect(!watch.goneNow())
+        // Gone again later: said again.
+        let back = disk.binary
+        disk.binary = nil
+        #expect(watch.update() == nil)
+        #expect(watch.goneNow())
+        disk.binary = back
         // Never seen at start: never an update, it can't tell old from new.
         disk.binary = nil
         let blind = self.watch(disk)
@@ -272,6 +289,10 @@ struct StaleServerTests {
         disk.binary = BinaryWatch.Identity(modified: 200, size: 5_000, inode: 7)
         #expect(try call() == ["echo: hi"])
         watch.failed(try #require(disk.binary), because: "it couldn't start")
-        #expect(try call() == ["echo: hi", watch.notice()])
+        let noticed = try call()
+        #expect(noticed.count == 2 && noticed[0] == "echo: hi")
+        #expect(noticed.last??.contains("couldn't switch to the new build (it couldn't start)") == true)
+        // Once: the agent has it.
+        #expect(try call() == ["echo: hi"])
     }
 }

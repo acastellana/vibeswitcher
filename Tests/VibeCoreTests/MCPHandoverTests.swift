@@ -20,6 +20,8 @@ final class ScratchToolServer {
     private let lock = NSLock()
     private var buffer = Data()
     private var replies: [Int: [String: Any]] = [:]
+    /// The id of every reply, in the order they came (a reply sent twice is here twice).
+    private var answered: [Int] = []
     private var notified: [String] = []
 
     /// `extra`: more of the server's environment.
@@ -100,6 +102,16 @@ final class ScratchToolServer {
         try #require((try reply(id)["result"] as? [String: Any])?["tools"] as? [[String: Any]]).compactMap { $0["name"] as? String }
     }
 
+    /// The ids of the replies so far, in the order they came.
+    var replyOrder: [Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return answered
+    }
+
+    /// Writes `data` as it is: part of a line, say.
+    func write(_ data: Data) { input.fileHandleForWriting.write(data) }
+
     /// The notifications the server sent, in order.
     var notifications: [String] {
         lock.lock()
@@ -115,7 +127,12 @@ final class ScratchToolServer {
             let line = Data(buffer[buffer.startIndex..<end])
             buffer = Data(buffer[buffer.index(after: end)...])
             guard let message = (try? JSONSerialization.jsonObject(with: line)) as? [String: Any] else { continue }
-            if let id = message["id"] as? Int { replies[id] = message } else if let method = message["method"] as? String { notified.append(method) }
+            if let id = message["id"] as? Int {
+                replies[id] = message
+                answered.append(id)
+            } else if let method = message["method"] as? String {
+                notified.append(method)
+            }
         }
     }
 
@@ -212,6 +229,130 @@ struct MCPHandoverTests {
         try server.install(build: "B")
         try server.send([server.call(6, "build")])
         #expect(try server.texts(6) == ["B \(pid)"])
+    }
+
+    /// Requests written back to back across the switch, the last one split over two writes: each is answered once, by
+    /// the new build, in the order sent; none is lost in the old build's read buffer, none answered by both.
+    @Test func pipelinedRequestsAcrossASwitchAreEachAnsweredOnceInOrder() throws {
+        let server = try ScratchToolServer(scratch)
+        defer { server.stop() }
+        try server.send(ScratchToolServer.initialize)
+        _ = try server.reply(1)
+        let pid = server.process.processIdentifier
+
+        try server.install(build: "B")
+        // Pings and tools/list are answered as they're read, so their replies come in the order sent.
+        var burst = Data()
+        for id in 2...41 {
+            let message: [String: Any] = id % 10 == 0 ? ["jsonrpc": "2.0", "id": id, "method": "tools/list"]
+                : ["jsonrpc": "2.0", "id": id, "method": "ping"]
+            burst += try JSONSerialization.data(withJSONObject: message) + Data([0x0A])
+        }
+        let last = try JSONSerialization.data(withJSONObject: server.call(42, "build")) + Data([0x0A])
+        server.write(burst + last.prefix(10))
+        #expect(eventually { server.replyOrder.contains(41) })
+        server.write(last.dropFirst(10))
+        #expect(try server.texts(42) == ["B \(pid)"])
+        #expect(server.replyOrder == [0, 1] + Array(2...42))
+        #expect(try server.tools(40) == ["build", "slow", "only-B"])
+        #expect(server.notifications == ["notifications/tools/list_changed"])
+        #expect(server.log.components(separatedBy: "switched in place to the new build").count == 2)
+    }
+
+    /// An install that replaces the file again while the build before it is being probed: the server never executes a
+    /// build that didn't answer its probe, and settles on the last one with a switch to it, not a switch per change.
+    @Test func aBuildReplacedDuringItsProbeIsNeverExecutedUnprobed() throws {
+        let server = try ScratchToolServer(scratch)
+        defer { server.stop() }
+        try server.send(ScratchToolServer.initialize)
+        _ = try server.reply(1)
+        let pid = server.process.processIdentifier
+        let record = server.dir.appendingPathComponent("c-ran").path
+        let next = server.dir.appendingPathComponent("next").path
+        // Build C says each time it runs whether as a probe or as the server.
+        let c = "#!/bin/sh\nif [ \"$1\" = \(MCPHandover.probeFlag) ]; then echo probe >> '\(record)'; else echo run >> '\(record)'; fi\n"
+            + "VIBESWITCHER_MCP_TEST_BUILD=C exec '\(toolServer)' \"$@\"\n"
+        let cScript = server.dir.appendingPathComponent("c").path
+        FileManager.default.createFile(atPath: cScript, contents: Data(c.utf8), attributes: [.posixPermissions: 0o755])
+        // Build B, as it's probed, is replaced by C (an install landing just then), and still answers its probe.
+        try server.install("#!/bin/sh\nif [ \"$1\" = \(MCPHandover.probeFlag) ]; then cp '\(cScript)' '\(next)' && mv '\(next)' '\(server.installed)'; fi\n"
+                           + "VIBESWITCHER_MCP_TEST_BUILD=B exec '\(toolServer)' \"$@\"\n")
+        try server.send([server.call(2, "build")])
+        let first = try server.texts(2)
+        #expect(first == ["A \(pid)"] || first == ["C \(pid)"], "\(first)")
+        try server.send([server.call(3, "build")])
+        #expect(try server.texts(3) == ["C \(pid)"])
+        // C answered a probe before it ran, and runs once: one switch, to it.
+        #expect((try? String(contentsOfFile: record, encoding: .utf8)) == "probe\nrun\n")
+        try server.send([server.call(4, "build")])
+        #expect(try server.texts(4) == ["C \(pid)"])
+        #expect(server.log.components(separatedBy: "switched in place to the new build").count == 2)
+        #expect(!server.log.contains("couldn't switch"))
+    }
+
+    /// The installed binary gone (mid-install, or the app moved): the old build serves on and says so once.
+    @Test func aMissingBinaryLeavesTheOldBuildServingAndIsSaidOnce() throws {
+        let server = try ScratchToolServer(scratch)
+        defer { server.stop() }
+        try server.send(ScratchToolServer.initialize)
+        _ = try server.reply(1)
+        let pid = server.process.processIdentifier
+        #expect(unlink(server.installed) == 0)
+        for id in 2...4 {
+            try server.send([server.call(id, "build")])
+            #expect(try server.texts(id) == ["A \(pid)"])
+        }
+        #expect(eventually { server.log.contains("is gone") })
+        #expect(server.log.components(separatedBy: "\(server.installed) is gone (an install under way, or the app moved); this build serves on").count == 2)
+        // Back, as a new build: it takes over.
+        try server.install(build: "B")
+        try server.send([server.call(5, "build")])
+        #expect(try server.texts(5) == ["B \(pid)"])
+    }
+
+    /// A build the kernel won't run (no code signature) never replaces the running one; the first result after says
+    /// why, once.
+    @Test func anUnsignedBuildLeavesTheOldOneServing() throws {
+        let server = try ScratchToolServer(scratch)
+        defer { server.stop() }
+        try server.send(ScratchToolServer.initialize)
+        _ = try server.reply(1)
+        let pid = server.process.processIdentifier
+        let unsigned = server.dir.appendingPathComponent("unsigned").path
+        try FileManager.default.copyItem(atPath: toolServer, toPath: unsigned)
+        let strip = Process()
+        strip.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+        strip.arguments = ["--remove-signature", unsigned]
+        try strip.run()
+        strip.waitUntilExit()
+        #expect(strip.terminationStatus == 0)
+        #expect(rename(unsigned, server.installed) == 0)
+        try server.send([server.call(2, "build")])
+        let texts = try server.texts(2)
+        #expect(texts.first == "A \(pid)")
+        #expect(texts.count == 2 && texts[1].contains("couldn't switch to the new build (its probe was killed by signal 9)"), "\(texts)")
+        try server.send([server.call(3, "build")])
+        #expect(try server.texts(3) == ["A \(pid)"])
+        #expect(server.log.contains("couldn't switch to the new build at \(server.installed): its probe was killed by signal 9; this build serves on"))
+    }
+
+    /// A build that fails its probe each time it's tried again is said once, not at each retry.
+    @Test func aBuildRefusedAtEachRetryIsSaidOnce() throws {
+        // Tried again every 0.2 s rather than every minute.
+        let server = try ScratchToolServer(scratch, environment: ["VIBESWITCHER_MCP_TEST_RETRY": "0.2"])
+        defer { server.stop() }
+        try server.send(ScratchToolServer.initialize)
+        _ = try server.reply(1)
+        let pid = server.process.processIdentifier
+        let probes = server.dir.appendingPathComponent("probes").path
+        try server.install("#!/bin/sh\necho probed >> '\(probes)'\necho 'this build is broken' >&2\nexit 3\n")
+        // An idle server looks every second: three probes, each refused.
+        #expect(eventually { ((try? String(contentsOfFile: probes, encoding: .utf8)) ?? "").split(separator: "\n").count >= 3 })
+        try server.send([server.call(2, "build")])
+        let texts = try server.texts(2)
+        #expect(texts.first == "A \(pid)")
+        #expect(texts.count == 2 && texts[1].contains("its probe exited with status 3"))
+        #expect(server.log.components(separatedBy: "couldn't switch to the new build at").count == 2, "\(server.log)")
     }
 }
 

@@ -77,8 +77,13 @@ public final class BinaryWatch: @unchecked Sendable {
     let running: Identity?
     private let lock = NSLock()
     private var failure: (build: Identity, at: Date, why: String)?
+    /// The failure's notice went out in a tool result already: once per build that couldn't take over.
+    private var noticed = false
+    /// The file was gone when last looked at, and that was said (`goneNow`).
+    private var missing = false
+    private var saidMissing = false
     /// How long a build that couldn't take over waits before it's tried again (a busy Mac can make its probe time out).
-    var retry: TimeInterval = 60
+    public var retry: TimeInterval = 60
 
     /// `running`: the build this process was executed from, when the one before it says (it checked the file just
     /// before); else the file as it is now: create it as the server starts.
@@ -94,7 +99,13 @@ public final class BinaryWatch: @unchecked Sendable {
     public func update(now: Date = Date()) -> Identity? {
         lock.lock()
         defer { lock.unlock() }
-        guard let running, let disk = identify(path) else { return nil }
+        guard let running else { return nil }
+        guard let disk = identify(path) else {
+            missing = true
+            return nil
+        }
+        missing = false
+        saidMissing = false
         guard disk != running else {
             failure = nil
             return nil
@@ -103,19 +114,38 @@ public final class BinaryWatch: @unchecked Sendable {
         return disk
     }
 
-    /// Switching to `build` failed: it's tried again after `retry`, or as soon as another build replaces it.
-    public func failed(_ build: Identity, because why: String, at now: Date = Date()) {
+    /// The last `update` found no file, and this is the first time it's asked since the file was there: an absence
+    /// is said once.
+    public func goneNow() -> Bool {
         lock.lock()
-        failure = (build, now, why)
-        lock.unlock()
+        defer { lock.unlock() }
+        guard missing, !saidMissing else { return false }
+        saidMissing = true
+        return true
     }
 
-    /// The notice for a tool result: nil unless switching to a newer build failed.
+    /// The build on disk is still `build` (it wasn't replaced again while it was being checked).
+    public func still(_ build: Identity) -> Bool { identify(path) == build }
+
+    /// Switching to `build` failed: it's tried again after `retry`, or as soon as another build replaces it. True when
+    /// that's news (another build, or another reason), to be said; a retry failing as before isn't.
+    @discardableResult
+    public func failed(_ build: Identity, because why: String, at now: Date = Date()) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        let news = failure.map { $0.build != build || $0.why != why } ?? true
+        if failure?.build != build { noticed = false }
+        failure = (build, now, why)
+        return news
+    }
+
+    /// The notice for a tool result: nil unless switching to a newer build failed, and once per build that did.
     public func notice() -> String? {
         lock.lock()
         defer { lock.unlock() }
-        guard let failure else { return nil }
-        return "VibeSwitcher was updated, but this tool server couldn't switch to the new build (\(failure.why)); it runs the old one and tries again in a minute."
+        guard let failure, !noticed else { return nil }
+        noticed = true
+        return "VibeSwitcher was updated, but this tool server couldn't switch to the new build (\(failure.why)); it runs the old one and tries again every minute."
     }
 
     public static func identity(of path: String) -> Identity? {
@@ -193,9 +223,16 @@ public enum MCPHandover {
         exit(0)
     }
 
+    /// Why `replace` didn't, when the file was replaced again after its probe: not the build's fault, so the one that's
+    /// there now is tried at once (no wait as for a build that failed).
+    public static let replacedAgain = "it was replaced again while it was being checked"
+
     /// Replaces this process's image with `executable` (run with `arguments`), handing it `state`. Returns only when
-    /// that didn't happen, saying why; nothing changed then. Call it between requests, with none running.
-    public static func replace(with executable: String, arguments: [String], state: State, probeTimeout: TimeInterval = 20) -> String {
+    /// that didn't happen, saying why; nothing changed then. Call it between requests, with none running. `unchanged`:
+    /// whether the file is still the build probed, asked just before the exec, so a build that never answered the probe
+    /// (an install replacing it meanwhile) is never executed.
+    public static func replace(with executable: String, arguments: [String], state: State, probeTimeout: TimeInterval = 20,
+                               unchanged: () -> Bool = { true }) -> String {
         guard let data = try? JSONEncoder().encode(state) else { return "the session couldn't be written" }
         var template = Array((NSTemporaryDirectory() as NSString).appendingPathComponent("vibeswitcher-mcp-handover.XXXXXX").utf8CString)
         let fd = mkstemp(&template)
@@ -207,7 +244,9 @@ public enum MCPHandover {
         guard writeAll(fd, data) else { return "the state file couldn't be written: \(String(cString: strerror(errno)))" }
         // The probe reads it from the start (it shares the offset), and so does the new build.
         guard lseek(fd, 0, SEEK_SET) == 0 else { return "the state file couldn't be rewound" }
-        if let failure = probe(executable, stateFD: fd, timeout: probeTimeout) { return failure }
+        // A probe of a file still being written fails as the build it isn't yet: not said, the finished one comes next.
+        if let failure = probe(executable, stateFD: fd, timeout: probeTimeout) { return unchanged() ? failure : replacedAgain }
+        guard unchanged() else { return replacedAgain }
         guard lseek(fd, 0, SEEK_SET) == 0 else { return "the state file couldn't be rewound" }
         fflush(stdout)
         return exec(executable, arguments: arguments, stateFD: fd)
@@ -700,7 +739,12 @@ public final class MCPServer: @unchecked Sendable {
         lock.lock()
         let idle = running.isEmpty
         lock.unlock()
-        guard idle, let build = watch.update() else { return }
+        guard idle, let build = watch.update() else {
+            if watch.goneNow() {
+                FileHandle.standardError.write(Data("vibeswitcher-mcp: \(watch.path) is gone (an install under way, or the app moved); this build serves on\n".utf8))
+            }
+            return
+        }
         // No background work starts from here until the switch is settled (see `background`).
         switchGate.lock()
         lock.lock()
@@ -721,8 +765,12 @@ public final class MCPServer: @unchecked Sendable {
         guard switchWhen?() ?? true else { return }
         var handover = state
         handover.binary = build
-        let why = MCPHandover.replace(with: watch.path, arguments: Array(CommandLine.arguments.dropFirst()), state: handover)
-        watch.failed(build, because: why)
+        let why = MCPHandover.replace(with: watch.path, arguments: Array(CommandLine.arguments.dropFirst()), state: handover,
+                                      unchanged: { watch.still(build) })
+        // Replaced again: the build there now is looked at on the next turn, as any new one.
+        guard why != MCPHandover.replacedAgain else { return }
+        // Said once per build and reason: a retry every minute that fails the same way adds nothing.
+        guard watch.failed(build, because: why) else { return }
         FileHandle.standardError.write(Data("vibeswitcher-mcp: couldn't switch to the new build at \(watch.path): \(why); this build serves on\n".utf8))
     }
 

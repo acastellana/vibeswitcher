@@ -61,8 +61,10 @@ if let build = environment["VIBESWITCHER_MCP_TEST_BUILD"], let installed = envir
         guard let host else { return TestBuild(build, role: nil) }
         return (try? String(contentsOfFile: host, encoding: .utf8)).map { TestBuild(build, role: $0) }
     }, giveUp: { TestBuild(build, role: "") })
-    let server = MCPServer(name: "vibeswitcher", version: "1", toolset: toolset,
-                           watch: BinaryWatch(path: installed, running: handover?.binary), resuming: handover)
+    let watch = BinaryWatch(path: installed, running: handover?.binary)
+    // `VIBESWITCHER_MCP_TEST_RETRY`: how soon a build that couldn't take over is tried again (a minute otherwise).
+    if let retry = environment["VIBESWITCHER_MCP_TEST_RETRY"].flatMap(Double.init) { watch.retry = retry }
+    let server = MCPServer(name: "vibeswitcher", version: "1", toolset: toolset, watch: watch, resuming: handover)
     if let host, environment["VIBESWITCHER_MCP_TEST_HOLD"] == "1" { server.switchWhen = { FileManager.default.fileExists(atPath: host) } }
     toolset.start { server.toolsSettled() }
     server.stop(on: [SIGTERM, SIGHUP])
