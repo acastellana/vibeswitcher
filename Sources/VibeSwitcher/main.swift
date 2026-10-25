@@ -12,6 +12,10 @@ if let index = arguments.firstIndex(of: "--sandbox") {
     // see `Sandbox`). First, before anything else reads a default or makes the application.
     Sandbox.run(arguments: Array(arguments[(index + 1)...]))
 }
+if BenchDefaults.flags.contains(where: arguments.contains) {
+    // The benches' defaults go in scratch, never the build's real domain (see `BenchDefaults`). Before any reads one.
+    BenchDefaults.redirect()
+}
 if let index = arguments.firstIndex(of: "--chat-bench"), arguments.indices.contains(index + 1) {
     // Debug aid: the chat view offscreen in this process on a transcript, timing its layouts (see `ChatBench`).
     ChatBench.run(path: arguments[index + 1])
