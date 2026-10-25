@@ -1161,3 +1161,5 @@
 - 2026-10-25 08:52 Merged audit-v3-blocking: Audit v3: blocking findings only, fix or answer, re-roll after 2 rounds
 - 2026-10-25 08:53 Audit of steadier-merge-gate: complete, clean, round 2: 1 Important closed, 1 Nit closed
 - 2026-10-25 09:00 Merged steadier-merge-gate: Steadier merge gate: flaky retry and early catch-up
+- 2026-10-25 09:08 Audit of workers-run-a-sandboxed: complete, clean, round 1: 1 Nit open
+- 2026-10-25 09:16 Merged workers-run-a-sandboxed: Workers run a sandboxed VibeSwitcher and screenshot it
