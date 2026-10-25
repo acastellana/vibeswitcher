@@ -96,8 +96,10 @@ struct PhoneRepliesTests {
         return parsed
     }
 
-    /// Phone Access served for `store`, replies on, one phone paired: its token. `done` undoes it.
-    private func serve(_ store: SessionStore) throws -> (access: PhoneAccess, token: String, done: () -> Void) {
+    /// Phone Access served for `store`, replies on, one phone paired: its token. `done` undoes it. `before` runs before
+    /// that phone pairs.
+    private func serve(_ store: SessionStore, before: (PhoneAccess) throws -> Void = { _ in }) throws
+        -> (access: PhoneAccess, token: String, done: () -> Void) {
         let access = PhoneAccess(store: store)
         access.serveForTests(.init(dnsName: Self.host, login: Self.login, httpsAvailable: true))
         access.screenLocked = { false }
@@ -107,19 +109,25 @@ struct PhoneRepliesTests {
         access.readTerminalScreen = { _ in nil }
         access.typeInTerminal = { _, _, _, _, _, _ in .notInTerminal }
         access.sendToWindow = { _, _, _, confirmed in confirmed(false) }
-        access.startPairing()
-        let code = try #require(access.pairing?.code)
-        var answer: Answer?
-        access.handleForTests(try request("POST", "/api/pair", body: #"{"code":"\#(code)","name":"Test phone"}"#)) {
-            answer = Answer(status: $0.status, body: $0.body)
-        }
-        let token = try #require(answer?.json["token"] as? String)
+        try before(access)
+        let token = try pair(access, name: "Test phone")
         let wasAllowed = access.inputAllowed
         access.inputAllowed = true
         return (access, token, {
             access.inputAllowed = wasAllowed
             for device in access.devices { access.remove(device) }
         })
+    }
+
+    /// Pairs a phone named `name` with `access`, as a phone does: its token.
+    private func pair(_ access: PhoneAccess, name: String) throws -> String {
+        access.startPairing()
+        let code = try #require(access.pairing?.code)
+        var answer: Answer?
+        access.handleForTests(try request("POST", "/api/pair", body: #"{"code":"\#(code)","name":"\#(name)"}"#)) {
+            answer = Answer(status: $0.status, body: $0.body)
+        }
+        return try #require(answer?.json["token"] as? String)
     }
 
     private func sid(_ store: SessionStore) throws -> String {
@@ -436,7 +444,10 @@ struct PhoneRepliesTests {
 
     @Test func aRestartMidRequestAnswers503AndKeepsThePairing() async throws {
         let store = try await store()
-        let (access, token, done) = try serve(store)
+        // Another phone paired first, as one in the devices file the access loads may be (~/.vibeswitcher/remote, the
+        // same for every suite in the run: another one pairs its own beside this one).
+        var other = ""
+        let (access, token, done) = try serve(store) { other = try pair($0, name: "Another phone") }
         defer { done() }
         // The read goes on until the test lets it end (off the main thread, on the reads queue).
         let reading = Box(false)
@@ -462,11 +473,12 @@ struct PhoneRepliesTests {
         let state = send(access, try request("GET", "/api/state", token: token))
         #expect(await until { state.value != nil })
         #expect(state.value?.status == 200)
-        // A removed phone, though, hears 401 (and forgets its token).
-        access.remove(access.devices[0])
+        // A removed phone, though, hears 401 (and forgets its token); the other one is still paired.
+        access.remove(try #require(access.devices.first { $0.tokenHash == RemoteAuth.hash(token) }))
         let removed = send(access, try request("GET", "/api/state", token: token))
         #expect(removed.value?.status == 401)
         #expect(removed.value?.error == PhoneAccess.unpaired)
+        #expect(send(access, try request("GET", "/api/state", token: other)).value?.status == 200)
     }
 
     // MARK: - The server's cut
