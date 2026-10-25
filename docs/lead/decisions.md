@@ -428,3 +428,7 @@ finished-work-lands F1's two new tests would have passed on the old code too. Th
 
 Writing down the verified state saves the next lead re-checking it. The -600 relaunch error is worth noticing if it recurs.
 
+## 2026-10-25 12:25:44 auto-advance-s-reports:F1 is accepted, not fixed in that branch. A merge's test-command children can seal an auto_advance report to the lead, but they already count as the lead at the vault, a far larger power. The underlying boundary, that branch code run by merge, audit or init is identified as the lead's session, is now its own task, merge-tests-don-t, at review audit. (The dismissal's reason calls it merge-tests-run-as; the task is merge-tests-don-t.)
+
+With auto_advance on, merges run unattended, so worker-written code runs with the lead's standing and no one watching. Narrowing one seal while the whole grant stays exposed would be the wrong fix.
+

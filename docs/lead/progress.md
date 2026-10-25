@@ -1188,3 +1188,12 @@
 - 2026-10-25 12:19 Merged update-and-evidence: Update and evidence screenshots survive cleanup (no audit: review none)
 - 2026-10-25 12:19 Automatically (auto_advance): Merged update-and-evidence (Update and evidence screenshots survive cleanup) into project-lead at 64df1a44, review none: on its worker's done report on e5250da3 and the full test run.
 - 2026-10-25 12:19 Automatically (auto_advance): Cleaned up update-and-evidence (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-10-25 12:25 Audit of auto-advance-s-reports: complete, clean, round 1: 1 Important open, 2 Nit open
+- 2026-10-25 12:25 Dismissed auto-advance-s-reports:F1: The lead accepts this. Code in the lead's session (a merge's test_command children included) already counts as the lead at the vault, which is a far larger power than sealing a report. A fake auto_advance report can't merge, audit or approve anything, because those all go through the vault. The real issue is the pre-existing boundary, now its own task (merge-tests-run-as).
+- 2026-10-25 12:25 auto-advance-s-reports back in review: no Important finding open, and its audit passed
+- 2026-10-25 12:25 Planned merge-tests-don-t: Merge tests don't run as the lead (review audit)
+- 2026-10-25 12:26 Started a worker on merge-tests-don-t
+- 2026-10-25 12:26 Automatically (auto_advance): Started a worker on merge-tests-don-t (Merge tests don't run as the lead).
+- 2026-10-25 12:30 Planned lead-chat-less-clutter: Lead chat: less clutter around questions, tool rows and the team strip
+- 2026-10-25 12:30 Planned lead-team-panel-clear: Lead Team panel: clear task states, honest scorecard, shorter history
+- 2026-10-25 12:32 Merged auto-advance-s-reports: auto_advance's reports reach the lead as VibeSwitcher's, verified
