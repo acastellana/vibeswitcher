@@ -1284,3 +1284,4 @@
 - 2026-10-25 23:33 Planned the-lead-s-rules: The lead's rules that matter become checks, not just notes (review audit)
 - 2026-10-25 23:38 Started a worker on a-short-project-map
 - 2026-10-25 23:38 Automatically (auto_advance): Started a worker on a-short-project-map (A short project map every worker reads first (CLAUDE.md)).
+- 2026-10-25 23:40 Planned needs-you-follow-ups: "Needs you" follow-ups: open question, red dot, base-branch alert
