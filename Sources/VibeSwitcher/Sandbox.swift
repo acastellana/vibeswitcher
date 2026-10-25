@@ -508,7 +508,29 @@ private final class Driver: NSObject, NSApplicationDelegate {
                                     created: { [weak driver] folder, _ in driver?.refuse("starting a lead in \(folder)") },
                                     close: { [weak driver] in driver?.closeSheet() }))
         }),
+        // The lead's results as the Lead view lists them: an update whose screenshot post_update kept (its worktree
+        // since removed), and an older one whose path into a cleaned-up worktree is gone.
+        ("results", { driver in AnyView(ResultsList(updates: Driver.results(home: driver.home)).frame(width: 460).padding(12)) }),
     ]
+
+    /// Two updates for the `results` sheet, their images in a scratch project under the sandbox's home.
+    static func results(home: String) -> [LeadUpdate] {
+        let project = home + "/projects/results", worktree = project + "/.vibeswitcher/worktrees/shots-a"
+        let shot = worktree + "/.build/sandbox-shots/board.png"
+        let symbol = NSImage(systemSymbolName: "checkmark.seal.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(.init(pointSize: 96, weight: .regular))
+        if let tiff = symbol?.tiffRepresentation, let png = NSBitmapImageRep(data: tiff)?.representation(using: .png, properties: [:]) {
+            try? VibePaths.ensurePrivate(URL(fileURLWithPath: (shot as NSString).deletingLastPathComponent))
+            try? VibePaths.writePrivate(png, to: URL(fileURLWithPath: shot))
+        }
+        var kept = LeadUpdate(title: "Board shows the done card", body: "Checked in the sandbox; the screenshot is a kept copy.")
+        kept.images = (try? KeptImages(folder: project + "/.vibeswitcher").keep([shot], as: "updates/\(kept.id)", relativeTo: project)) ?? []
+        try? FileManager.default.removeItem(atPath: worktree)
+        var gone = LeadUpdate(title: "Older result", body: "Posted before images were kept: its screenshot was in a worktree since cleaned up.",
+                              images: [worktree + "/.build/all-done-snapshots/card.png"])
+        gone.at = kept.at - 600
+        return [gone, kept]
+    }
 
     private func listen() {
         let timer = DispatchSource.makeTimerSource(queue: .main)

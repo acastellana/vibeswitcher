@@ -648,6 +648,11 @@ struct ResultsList: View {
                     Image(nsImage: image).resizable().aspectRatio(contentMode: .fit).frame(maxHeight: 160)
                         .clipShape(RoundedRectangle(cornerRadius: 6))
                         .onTapGesture { NSWorkspace.shared.open(URL(fileURLWithPath: path)) }
+                } else {
+                    // Gone: dropped by the kept images' cap, or an older update's path into a cleaned-up worktree.
+                    Label("Image no longer available", systemImage: "photo")
+                        .font(.system(size: 11)).foregroundStyle(.tertiary)
+                        .help(path)
                 }
             }
         }
