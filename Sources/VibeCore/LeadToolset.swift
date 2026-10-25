@@ -1758,12 +1758,31 @@ public final class LeadToolset: MCPToolset {
         // Timing-sensitive tests fail on a Mac every project's team is loading: the tests wait (a bounded time) for
         // the load to drop.
         let waited = try waitForLoad(workflow, slug: slug)
-        // Exactly the audited commit, rebased and tested where no agent works.
+        // Exactly the audited commit, rebased and tested where no agent works. A failing test command runs once more
+        // (`MergeRerun`): what failed, then the rerun that passed, when that's how it passed.
         let tested: String
+        var rerun: MergeRerun.Plan?
+        var flaked: (plan: MergeRerun.Plan, log: String?)?
         switch Worktrees.rebaseAndTest(root: root, commit: commit, onto: current, setup: workflow.initCommand, test: workflow.mergeChecks,
                                        scratch: vault.scratch(root: root, "merge-\(slug)"), home: vault.scratch(root: root, "merge-\(slug)-home"),
-                                       timeout: workflow.testTimeout, lock: heavyLock(workflow), records: workflow.recordsDir) {
+                                       timeout: workflow.testTimeout, lock: heavyLock(workflow), records: workflow.recordsDir,
+                                       rerun: { output in
+                                           rerun = MergeRerun.plan(after: output, workflow: workflow)
+                                           return rerun?.command
+                                       }) {
         case .passed(let commit): tested = commit
+        case .passedOnRerun(let commit, let failed, let again):
+            guard let plan = rerun else { throw Problem(text: "Not merged: \(slug)'s tests passed on a rerun nobody planned.") }
+            // A filter that matched nothing ran nothing: that's no pass.
+            let unshown = MergeRerun.unshown(plan, rerun: again)
+            guard unshown.isEmpty else {
+                let names = unshown.prefix(8).joined(separator: ", ")
+                try setStatus(slug, .failed, setback: LeadSetback(stage: .merge, reason: "Tests fail rebased onto \(base): \(Self.clip(plan.tests.joined(separator: ", "), 200))"))
+                throw Problem(text: testFailure(failed, slug: slug, base: base, commit: commit, onto: current)
+                              + "\nIts rerun of the failing tests exited 0 but didn't show \(names) passing (a filter that matched nothing), so it doesn't count.")
+            }
+            tested = commit
+            flaked = (plan, saveMergeLog(failed + "\n" + again, slug: slug))
         case .cancelled:
             // Stopped by the caller: nothing is known about the work, and the task stays as it was.
             throw Problem(text: "The merge of \(slug) was cancelled; nothing was merged, and \(slug) stays as it was.")
@@ -1794,11 +1813,22 @@ public final class LeadToolset: MCPToolset {
         switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: tested, from: current) }) {
         case .merged:
             try vault.setHead(tested, root: root, branch: base)
-            try store.update { board in
-                guard let index = board.taskIndex(slug) else { return }
+            let flakes = flaked.map { $0.plan.tests.isEmpty ? [MergeRerun.unnamed] : $0.plan.tests } ?? []
+            let planned = try store.update { board -> [(test: String, slug: String)] in
+                guard let index = board.taskIndex(slug) else { return [] }
                 board.tasks[index].status = .done
                 board.tasks[index].merged = LeadMergeRecord(commit: tested, tested: workflow.testCommand != nil, onto: current,
                                                              regression: workflow.regressionCommand.map { _ in true }, audited: audited ? nil : false)
+                guard !flakes.isEmpty else { return [] }
+                // The flake ledger, and a task for each test that flaked once too often (once: `recordFlakes`).
+                return board.recordFlakes(flakes, task: slug, commit: tested, now: Date().timeIntervalSince1970).map { test, merges in
+                    let title = "Fix the flaky test " + Self.clip(test, 60)
+                    let fix = LeadTask(slug: Slug.make(title, taken: Set(board.tasks.map(\.slug))), title: title,
+                                       contract: MergeRerun.fixContract(test: test, merges: merges, workflow: workflow))
+                    board.tasks.append(fix)
+                    board.notePlanned(fix.slug, for: test)
+                    return (test, fix.slug)
+                }
             }
             // Nothing ran: say so, it isn't a pass.
             let untested = workflow.testCommand == nil
@@ -1813,10 +1843,46 @@ public final class LeadToolset: MCPToolset {
             let evidence = kept?.reported == commit ? kept?.evidence.map { " Its worker's evidence: \($0.brief())" } ?? "" : ""
             let overruled = dismissed.isEmpty ? "" : " (Its audit was complete with its tests passing, and \(dismissed.count == 1 ? "the one Important finding that failed it" : "the \(dismissed.count) Important findings that failed it") you dismissed: "
                 + dismissed.map { "\($0.id) \($0.place) (\(Self.clip($0.reason ?? "", 120)))" }.joined(separator: "; ") + ".)"
-            return MCPToolResult(text: "Merged \(slug) into \(base)\(untested). Next: cleanup(\(slug)). \(LeadPrompts.Policy.updates)\(overruled)\(unaudited)\(ran)\(patience)\(evidence)")
+            var flakeNote = ""
+            if let flaked {
+                let names = flakes.joined(separator: ", ")
+                try? store.appendProgress("Flaky in \(slug)'s merge: \(Self.clip(names, 300)) failed the first test run and passed its rerun (\(flaked.plan.filtered ? "the failing tests only" : "the whole test command")); merged on the rerun")
+                for (test, fix) in planned {
+                    try? store.appendProgress("Planned \(fix): \(test) flaked \(LeadBoard.flakeLimit) times within \(Int(LeadBoard.flakeWindow / 86_400)) days")
+                }
+                flakeNote = " (Its first test run failed on \(Self.clip(names, 300)) and the rerun of \(flaked.plan.filtered ? "those tests" : "the whole test command") passed, so it merged on the rerun: recorded in the flake ledger, which status lists."
+                    + (flaked.log.map { " Both runs' output: \($0)." } ?? "")
+                    + (planned.isEmpty ? "" : " " + planned.map { "\($0.test) flaked \(LeadBoard.flakeLimit) times within \(Int(LeadBoard.flakeWindow / 86_400)) days: planned \($0.slug) to fix it." }.joined(separator: " "))
+                    + ")"
+            }
+            let caughtUp = tellToCatchUp(merged: slug, from: current, to: tested, base: base)
+            return MCPToolResult(text: "Merged \(slug) into \(base)\(untested). Next: cleanup(\(slug)). \(LeadPrompts.Policy.updates)\(overruled)\(unaudited)\(ran)\(patience)\(evidence)\(flakeNote)\(caughtUp)")
         case .refused(let reason):
             throw Problem(text: "Not merged: \(reason)")
         }
+    }
+
+    /// After `merged`'s merge moved `base` from `old` to `new`: each running task whose branch changes a file the merge
+    /// changed too gets one message to its worker to merge `base` now, naming the files, while the conflict is still
+    /// small (2026-10-25: 21 merge conflicts cost 40.7 task-hours, most found only at merge). Branches that overlap no
+    /// file get nothing; the lead's records count in neither. What the lead's result says about it ("" for nothing).
+    private func tellToCatchUp(merged: String, from old: String, to new: String, base: String) -> String {
+        let records = Set(workflow.recordsDir.map(LeadRecords.paths) ?? [])
+        let lines = { (output: String) in output.split(whereSeparator: \.isNewline).map(String.init) }
+        let moved = Git.run(["diff", "--name-only", old, new], in: root)
+        let changed = Set(moved.ok ? lines(moved.output) : []).subtracting(records)
+        guard !changed.isEmpty else { return "" }
+        var told: [String] = []
+        for task in store.load().tasks where task.status == .running && task.slug != merged {
+            // What the branch changes since it last took the base in.
+            let diff = Git.run(["diff", "--name-only", "\(new)...\(Worktrees.branch(task.slug))"], in: root)
+            guard diff.ok else { continue }
+            let files = lines(diff.output).filter(changed.contains).sorted()
+            guard !files.isEmpty else { continue }
+            let said = tellWorker(task, LeadDelivery.catchUp(base: base, merged: merged, files: files))
+            told.append("\(task.slug) (\(files.prefix(4).joined(separator: ", "))\(files.count > 4 ? ", …" : "")): \(said)")
+        }
+        return told.isEmpty ? "" : " \(merged) changed files that running branches change too, so their workers were told to merge \(base) now: " + told.joined(separator: " ")
     }
 
     /// Why `slug`'s merge needs a passing audit, in a sentence; nil when it doesn't: review none on the board and in
@@ -1908,7 +1974,9 @@ public final class LeadToolset: MCPToolset {
         // The test command passed and the incidents' checks ran after it.
         let regression = !setup && output.components(separatedBy: "\n").contains(LeadWorkflow.regressionMarker)
         let which = setup ? "init_command" : regression ? "regression_command (the checks incidents became; test_command passed)" : "test command"
-        return "The \(which) fails on \(slug) rebased onto \(base).\n\(found)\n\(touched)"
+        // A rerun (`MergeRerun`) failed too: its output is what's told.
+        let again = output.hasPrefix(Worktrees.rerunHeader) ? ", and again on its rerun (run once, after the first run failed)" : ""
+        return "The \(which) fails on \(slug) rebased onto \(base)\(again).\n\(found)\n\(touched)"
             + (saved.map { "Full output: \($0)" } ?? "(The full output couldn't be saved.)")
     }
 
@@ -3012,6 +3080,7 @@ public final class LeadToolset: MCPToolset {
                 return "- \(wording) → \(question.answer ?? "")" + (saw < question.version ? " (to version \(saw) of \(question.version))" : "")
             }
         }
+        if let flakes = board.flakeLine(now: Date().timeIntervalSince1970) { lines.append("\n" + flakes) }
         let reverted = recordReverts(base: workflow.base)
         if !reverted.isEmpty {
             lines.append("\nReverted on \(workflow.base) since they merged (\(reverted.count)): " + reverted.map { "\($0.slug) (by \($0.commit.prefix(8)))" }.joined(separator: ", ")

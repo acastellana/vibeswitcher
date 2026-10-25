@@ -1104,7 +1104,8 @@ struct LeadToolsetTests: LeadTeamFixture {
         let merged = call(lead, "merge", ["task": "add-b"])
         #expect(merged.isError)
         let lines = merged.text.components(separatedBy: "\n")
-        #expect(lines.first == "The test command fails on add-b rebased onto main.")
+        // Not a command `--filter` can be added to: it ran whole once more, and failed again.
+        #expect(lines.first == "The test command fails on add-b rebased onto main, and again on its rerun (run once, after the first run failed).")
         #expect(lines.dropFirst().first == "Failing tests (3): recordsIssue(), param(n:), answerIsRight()")
         #expect(merged.text.contains("↳ the answer drifted"))
         #expect(!merged.text.contains("resumed"))
@@ -1112,9 +1113,9 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(lines.last == "Full output: \(log.path)")
         let saved = try String(contentsOf: log, encoding: .utf8)
         #expect(saved.contains("Test run with 5 tests failed") && saved.contains("captured var 'resumed'"))
-        // The log's first line names the scratch home the tests ran with, gone by now.
+        // The log is the rerun's: its first line says so, the next names the scratch home the tests ran with, gone by now.
         let home = vault.scratch(root: root, "merge-add-b-home").path
-        #expect(saved.hasPrefix("HOME, CFFIXED_USER_HOME and TMPDIR: \(home) (a scratch folder, removed afterwards)\n"), "\(saved.prefix(300))")
+        #expect(saved.hasPrefix(Worktrees.rerunHeader + "HOME, CFFIXED_USER_HOME and TMPDIR: \(home) (a scratch folder, removed afterwards)\n"), "\(saved.prefix(300))")
         #expect(!FileManager.default.fileExists(atPath: home))
         #expect(BoardStore(root: root).load().task("add-b")?.status == .failed)
     }

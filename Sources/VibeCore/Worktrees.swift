@@ -192,7 +192,10 @@ public enum Worktrees {
     public enum Check: Equatable, Sendable {
         /// The checks passed on this commit (the branch rebased onto main).
         case passed(String)
-        /// A command failed; all of its output.
+        /// The test command failed, and its rerun (`Rerun`) passed on this commit: the first run's output, then the
+        /// rerun's. Whether that's a pass is the caller's to judge (`MergeRerun.unshown`).
+        case passedOnRerun(commit: String, failed: String, rerun: String)
+        /// A command failed; all of its output (a rerun's starts with `Worktrees.rerunHeader`).
         case failed(String)
         /// Rebasing onto main conflicted; the rebase was undone.
         case conflict
@@ -601,9 +604,10 @@ public enum Worktrees {
     /// one (`TestLock.standard()`), tests a scratch one.
     /// The lead's records under `records` (`records_dir`) land as the base has them, conflicted or merged cleanly
     /// (`baseRecords`), and conflicts only in them don't stop it (`takeBaseRecords`).
+    /// With `rerun`, a failing test command may run once more (see `runChecks`): `passedOnRerun` when that passes.
     public static func rebaseAndTest(root: String, commit: String, onto base: String, setup: String? = nil, test: String?,
                                      scratch: URL, home: URL? = nil, timeout: TimeInterval = testTimeout,
-                                     lock: TestLock?, records: String? = nil) -> Check {
+                                     lock: TestLock?, records: String? = nil, rerun: ((String) -> String?)? = nil) -> Check {
         let path = scratch.path
         let home = (home ?? scratch.deletingLastPathComponent().appendingPathComponent(scratch.lastPathComponent + "-home")).path
         let cancel = ShellCancel.current
@@ -649,9 +653,17 @@ public enum Worktrees {
         }
         guard cancel?.isCancelled != true else { return .cancelled }
         let tested = Git.run(["rev-parse", "HEAD"], in: path).output
-        return runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
-                         as: "VibeSwitcher's merge test of \(commit.prefix(8))", place: root).stopped ?? .passed(tested)
+        let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
+                                           as: "VibeSwitcher's merge test of \(commit.prefix(8))", place: root, rerun: rerun)
+        if let stopped { return stopped }
+        if let again = outputs.last, again.name == "rerun", let first = outputs.dropLast().last {
+            return .passedOnRerun(commit: tested, failed: first.output, rerun: again.output)
+        }
+        return .passed(tested)
     }
+
+    /// The first line of a rerun's output (`runChecks`' `rerun`).
+    public static let rerunHeader = "Rerun once, after the first run failed (its failing tests when they can be picked out, else all of it):\n"
 
     /// Runs `setup` then `test` (each when given) in `path` with HOME, CFFIXED_USER_HOME and TMPDIR in `home` (made
     /// here, removed by the caller), as merge and an audit's shared run do. `stopped`: nil when every command passed,
@@ -660,8 +672,12 @@ public enum Worktrees {
     /// for `place`), after waiting for one up to `timeout`; the commands get its path in `TestLock.heldVariable`, so a
     /// script among them doesn't wait for it. The call's `ToolProgress` hears the wait (who holds the slots) and the
     /// run, every its `every`: a merge's tool call never goes silent.
+    /// When the test command fails, `rerun` is given its output and may return a command to run once more in its place
+    /// (`MergeRerun`: the failing tests again), in the same worktree and home, holding the same slot: its output,
+    /// named "rerun", decides. It's never asked again, whatever the rerun does.
     static func runChecks(setup: String?, test: String?, in path: String, home: String, timeout: TimeInterval,
-                          lock: TestLock? = nil, as holder: String = "VibeSwitcher's test run", place: String? = nil)
+                          lock: TestLock? = nil, as holder: String = "VibeSwitcher's test run", place: String? = nil,
+                          rerun: ((String) -> String?)? = nil)
         -> (stopped: Check?, outputs: [(name: String, output: String)]) {
         let cancel = ShellCancel.current
         let tmp = home + "/tmp"
@@ -696,7 +712,8 @@ public enum Worktrees {
             }
         }
         var outputs: [(name: String, output: String)] = []
-        for (name, command) in [("init_command", setup), ("test command", test)] {
+        var steps = [("init_command", setup), ("test command", test)][...]
+        while let (name, command) = steps.popFirst() {
             guard let command, !command.trimmingCharacters(in: .whitespaces).isEmpty else { continue }
             // HOME only once the login shell has read the user's own startup files (their PATH, from their home); the
             // command and all it starts have the scratch one.
@@ -708,11 +725,18 @@ public enum Worktrees {
             let stop = progress?.heartbeat { "Running the \(name) (\(duration(Date().timeIntervalSince(started))) so far)." }
             let run = Shell.run(executable: "/bin/zsh", args: ["-lc", script], in: path, env: env, timeout: timeout, interleaved: true)
             stop?()
-            outputs.append((name, header + run.output))
+            let said = (name == "rerun" ? rerunHeader : "") + header + run.output
+            outputs.append((name, said))
             if run.cancelled || cancel?.isCancelled == true { return (.cancelled, outputs) }
-            if run.timedOut { return (.hung(command: name, after: timeout, output: header + run.output), outputs) }
+            if run.timedOut { return (.hung(command: name, after: timeout, output: said), outputs) }
             guard run.ok else {
-                return (.failed((name == "init_command" ? "init_command failed:\n" : "") + header + run.output), outputs)
+                let failed = (name == "init_command" ? "init_command failed:\n" : "") + said
+                // Once, and only after the test command: a rerun that fails is the failure.
+                if name == "test command", let again = rerun?(failed) {
+                    steps.append(("rerun", again))
+                    continue
+                }
+                return (.failed(failed), outputs)
             }
         }
         return (nil, outputs)
@@ -760,7 +784,7 @@ public enum Worktrees {
         case .hung(let command, let after, _): outcome = .hung(command, after: after)
         case .cancelled: outcome = .cancelled
         case .error(let text): outcome = .error(text)
-        case .passed, .conflict: outcome = .error("unexpected")
+        case .passed, .passedOnRerun, .conflict: outcome = .error("unexpected")
         }
         if case .cancelled = outcome { return AuditRun(outcome: outcome, logs: files) }
         try? Data((outcome.text + "\n").utf8).write(to: logs.appendingPathComponent("run.txt"), options: .atomic)

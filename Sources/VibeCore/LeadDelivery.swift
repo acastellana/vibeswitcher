@@ -24,6 +24,15 @@ public enum LeadDelivery {
 }
 
 extension LeadDelivery {
+    /// What a running worker is told when `merged`'s merge into `base` changed `files`, which its branch changes too:
+    /// merge `base` in now, while a conflict is still small, rather than find it at its own merge.
+    public static func catchUp(base: String, merged: String, files: [String]) -> String {
+        let named = files.prefix(12).joined(separator: ", ") + (files.count > 12 ? ", …" : "")
+        return "\(base) just moved: \(merged) merged, and it changed files your branch changes too: \(named). Merge \(base) in now, while any conflict is still small: "
+            + "in your worktree run `git merge \(base)`, resolve the conflicts in those files if there are any, `git add` them, then `git commit`, each command on its own (no pipes, && or 2>&1). "
+            + "Then run the tests those files affect, commit, and carry on with your task."
+    }
+
     /// What happened to a message: steered into a working agent (it gets it at its next step), typed in as an idle
     /// agent's prompt, or queued (idle, but its box held a draft or couldn't be read): it then rides along with the
     /// next prompt, or `flush` types it once the box is empty.

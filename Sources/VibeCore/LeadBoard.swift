@@ -941,6 +941,26 @@ public struct LeadReport: Codable, Equatable, Sendable {
     }
 }
 
+/// A test that failed a merge's test run and passed its rerun (`MergeRerun`): one entry in the board's flake ledger.
+public struct LeadFlake: Codable, Equatable, Sendable {
+    /// As `TestFailures` names it (`MergeRerun.unnamed` when the run named none).
+    public var test: String
+    /// The task whose merge it held up, and the commit that merge tested.
+    public var task: String
+    public var commit: String
+    public var at: Double
+    /// The task planned to fix it, on the flake that made it due (`LeadBoard.recordFlakes`).
+    public var planned: String?
+
+    public init(test: String, task: String, commit: String, at: Double, planned: String? = nil) {
+        self.test = test
+        self.task = task
+        self.commit = commit
+        self.at = at
+        self.planned = planned
+    }
+}
+
 public struct LeadBoard: Codable, Equatable, Sendable {
     /// The lead's session (host id) and agent pid, so answers and events can be steered into it.
     public var leadSession: String?
@@ -961,8 +981,15 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     /// Each moment the board cleared after merges (see `BatchSummary`), oldest first, with its summary once written.
     /// Optional: older boards have none.
     public var allDone: [LeadAllDone]?
+    /// The flake ledger: each test that failed a merge's test run and passed its rerun (`MergeRerun`), oldest first,
+    /// at most `keptFlakes`. Optional: older boards have none.
+    public var flakes: [LeadFlake]?
 
     public static let keptReports = 50
+    public static let keptFlakes = 200
+    /// A test that flakes `flakeLimit` times within `flakeWindow` becomes a task to fix it, once.
+    public static let flakeLimit = 3
+    public static let flakeWindow: Double = 7 * 86_400
 
     public init() {}
 
@@ -993,6 +1020,50 @@ public struct LeadBoard: Codable, Equatable, Sendable {
         tasks.filter { $0.stall != nil && $0.status == .running }.sorted { $0.stall!.lastActivity < $1.stall!.lastActivity }
     }
     public func taskIndex(_ id: String) -> Int? { tasks.firstIndex { $0.id == id || $0.slug == id } }
+
+    // MARK: Flakes
+
+    /// Records each of `tests` as having flaked in `task`'s merge (tested at `commit`). Returns those that flaked
+    /// `flakeLimit` times within `flakeWindow` since a task was last planned for them, each with the merges it held up
+    /// (oldest first): the caller plans one task each and marks it (`planned`), so a test makes one task, not one per
+    /// flake. A flake recorded under `MergeRerun.unnamed` names no test, and plans nothing.
+    public mutating func recordFlakes(_ tests: [String], task: String, commit: String, now: Double) -> [(test: String, merges: [String])] {
+        var ledger = flakes ?? []
+        var due: [(test: String, merges: [String])] = []
+        for test in tests {
+            ledger.append(LeadFlake(test: test, task: task, commit: commit, at: now))
+            guard test != MergeRerun.unnamed else { continue }
+            let since = ledger.last { $0.test == test && $0.planned != nil }?.at ?? -.infinity
+            let counted = ledger.filter { $0.test == test && $0.at > since && now - $0.at <= Self.flakeWindow }
+            if counted.count >= Self.flakeLimit { due.append((test, counted.map(\.task))) }
+        }
+        flakes = Array(ledger.suffix(Self.keptFlakes))
+        return due
+    }
+
+    /// Marks `test`'s latest flake as the one `slug` was planned for.
+    public mutating func notePlanned(_ slug: String, for test: String) {
+        guard let index = flakes?.lastIndex(where: { $0.test == test }) else { return }
+        flakes?[index].planned = slug
+    }
+
+    /// For status: the tests that flaked within `flakeWindow` of `now`, the most flakes first, each with the merges
+    /// it held up and the task planned for it; nil when none did.
+    public func flakeLine(now: Double) -> String? {
+        let recent = (flakes ?? []).filter { now - $0.at <= Self.flakeWindow }
+        guard !recent.isEmpty else { return nil }
+        var order: [String] = []
+        for flake in recent.reversed() where !order.contains(flake.test) { order.append(flake.test) }
+        let counts = Dictionary(grouping: recent, by: \.test)
+        order.sort { counts[$0]!.count > counts[$1]!.count }
+        let shown = order.prefix(8).map { test -> String in
+            let flakes = counts[test]!
+            let planned = (self.flakes ?? []).last { $0.test == test && $0.planned != nil }?.planned
+            return "\(test) ×\(flakes.count) (\(flakes.map(\.task).joined(separator: ", ")))" + (planned.map { " → task \($0)" } ?? "")
+        }
+        return "Flaky tests in the last \(Int(Self.flakeWindow / 86_400)) days (\(recent.count) flake\(recent.count == 1 ? "" : "s"): each failed a merge's test run, passed its rerun, and the merge went ahead; "
+            + "\(Self.flakeLimit) of one test become a task to fix it): " + shown.joined(separator: "; ") + (order.count > 8 ? "; …" : "") + "."
+    }
 
     // MARK: Questions
 
