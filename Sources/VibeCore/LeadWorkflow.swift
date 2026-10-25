@@ -11,7 +11,8 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// test_command, and merges only when it passes too.
     public var regressionCommand: String?
     public var workerAgent = "claude"
-    /// The verifier's model, different from the workers' when possible (a second opinion).
+    /// The verifier's model (`verifier_model:`); when it's empty, audits run on another model than the workers' (see
+    /// `auditModel`), a second opinion.
     public var verifierModel: String?
     /// The branch the lead builds on and merges into (`base_branch:`; otherwise the one checked out when the lead
     /// first started there, kept on its board).
@@ -289,6 +290,37 @@ public struct LeadWorkflow: Equatable, Sendable {
     public static let macKeys = ["load_threshold", "mac_max_sessions"]
 
     /// The settings the lead may change with `configure`.
+    /// The model an audit's verifiers run on: verifier_model when it's set; else one other than the workers'
+    /// (`workerModel`, as `claude --model` names it; nil: Claude's default) and at least as capable: fable, Claude's
+    /// most capable, or opus when the workers run fable already. The aliases, as Claude Code 2.1.310 resolves them here
+    /// (2026-10-25): fable → claude-fable-5-1, opus → claude-opus-5-5, sonnet → claude-sonnet-5-5; Claude's default
+    /// for this user's workers is opus (its settings' "model").
+    public func auditModel(workerModel: String?) -> String {
+        if let verifierModel, !verifierModel.isEmpty { return verifierModel }
+        return Self.otherModel(than: workerModel)
+    }
+
+    /// A model at least as capable as `worker` and not it: fable, or opus for a worker on fable.
+    public static func otherModel(than worker: String?) -> String {
+        worker?.lowercased().contains("fable") == true ? "opus" : "fable"
+    }
+
+    /// The model a Claude command runs: its own `--model` (or `--model=`), else `home`'s Claude settings' "model"
+    /// (nil `home`: not looked at), else nil (Claude's default).
+    public static func claudeModel(command: String, home: String? = nil) -> String? {
+        let words = command.split(whereSeparator: \.isWhitespace).map { $0.trimmingCharacters(in: CharacterSet(charactersIn: "'\"")) }
+        for (index, word) in words.enumerated() {
+            if word == "--model", index + 1 < words.count, !words[index + 1].isEmpty { return words[index + 1] }
+            if word.hasPrefix("--model="), word.count > "--model=".count { return String(word.dropFirst("--model=".count)) }
+        }
+        guard let home else { return nil }
+        let settings = URL(fileURLWithPath: home).appendingPathComponent(".claude/settings.json")
+        guard let data = try? Data(contentsOf: settings),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let model = (object["model"] as? String)?.trimmingCharacters(in: .whitespaces), !model.isEmpty else { return nil }
+        return model
+    }
+
     public static let configurable = ["test_command", "regression_command", "init_command", "base_branch", "verifier_model", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "records_dir"]
@@ -408,7 +440,8 @@ public struct LeadWorkflow: Equatable, Sendable {
     init_command:
     # Who works: claude (Codex support comes later).
     worker_agent: claude
-    # The verifier's model; a different one than the workers' gives a real second opinion (e.g. sonnet, opus).
+    # The verifier's model (e.g. fable, opus). Empty: audits run on another model than the workers', at least as
+    # capable (fable; opus when the workers run fable).
     verifier_model:
     # The branch workers start from and verified work is merged into. Empty: the one checked out when the lead first
     # started here.
@@ -561,6 +594,11 @@ public enum LeadPrompts {
                 + "did: fixed (in which commit) or why not (\"nothing blocking\" when it found nothing)."
         }
 
+        /// How a worker answers its audit's findings (answer_findings): each open one fixed or disagreed with, by id.
+        public static let workerFindings = "Findings: when the lead sends you audit findings by id (F1, F2…), answer each "
+            + "open one with answer_findings: fixed (commit the fix first) or disagree, with a reason the re-audit can check "
+            + "(why the failure it describes can't happen, or what allows it). Then report done again."
+
         /// Who checks a worker's branch, as its prompt tells it.
         public static func workerCheck(_ review: LeadTask.Review) -> String {
             review == .audit ? "A verifier will check your branch independently."
@@ -691,13 +729,18 @@ public enum LeadPrompts {
         ran is refused, and is folded or abandoned instead.
         Audits come with findings, each Important, Nit or Pre-existing at a file:line with its evidence, named \
         <task>:<id> (status and board(task) list them by severity). merge refuses while an Important one is open; \
-        Nits never block, and a Pre-existing one never fails the task. Resolve each Important one: message the worker \
-        the open ids to fix, then audit again (a re-audit checks only those findings' concerns, and a closed finding \
-        isn't raised again); or dismiss_finding with a reason when it isn't a real problem; or add_task(from_finding: \
-        <task>:<id>) to make it a task of its own (good for Pre-existing ones that matter). \(Policy.nits) After \
-        \(LeadAuditLedger.roundCap) audits in a row that left Important findings open, the task's status line says \
-        "reconsider the approach": don't send the worker back for another round; re-plan the task (update_task with a \
-        sharper contract or another approach, then status planned) or ask the user. With audit_finders 2 or 3, audit \
+        Nits never block, and a Pre-existing one never fails the task. An Important finding comes with its failure \
+        (failure_scenario: these inputs or this state give this wrong result); one without is recorded as a Nit. \
+        Resolve each Important one: message the worker the open ids; it answers each with answer_findings, fixed (in \
+        a commit) or disagree with a reason, and board(task) shows the answers; then audit again (a re-audit checks \
+        only those findings' concerns and judges the answers: it closes a finding whose disagreement it accepts, \
+        and a closed finding isn't raised again); or dismiss_finding with a reason when it isn't a real problem; or \
+        add_task(from_finding: <task>:<id>) to make it a task of its own (good for Pre-existing ones that matter). \
+        \(Policy.nits) After \(LeadAuditLedger.roundCap) audits in a row that left Important findings open, the task's \
+        status line says "reconsider the approach": don't send the worker back for a third round; re-roll it \
+        (update_task(task, reroll: true), with a sharper contract in the same call if you have one): its worker \
+        stops, its branch is kept under an archive name, and a fresh worker starts from \(workflow.base) with a summary \
+        of the findings and answers so far. Or re-plan it (status planned) or ask the user. With audit_finders 2 or 3, audit \
         first builds and tests the commit once (it takes as long as the suite) and starts that many finders on its \
         logs, each with a focus; the verdict arrives once all have submitted, voted: a finding most of them raised is \
         open, the rest unconfirmed (shown, never blocking: dismiss_finding or add_task(from_finding:) one that's a real Important problem). \
@@ -833,6 +876,7 @@ public enum LeadPrompts {
         report, not through rm). Then reply with a short report: what changed, how you checked it, the routine calls you made, anything left or doubtful. \
         \(Policy.workerCheck(task.reviewLevel))
         \(Policy.workerEvidence(base: workflow.base))
+        \(Policy.workerFindings)
         Stuck: say exactly what you need and stop. Don't fake a pass: never weaken or delete tests.
 
         \(WorkerBrief.render(task))
@@ -871,9 +915,13 @@ public enum LeadPrompts {
         /// The base branch, and what the diff covers.
         public var base: String
         public var scope: Scope
+        /// The worker's answers to the open findings since the last audit, by finding id (uppercased).
+        public var answers: [String: LeadFindingAnswer]
+        /// The re-roll this audit is the fresh branch's first after, if it is.
+        public var reroll: LeadReroll?
 
         public init(round: Int, since: String, head: String, open: [LeadFinding], known: [LeadFinding], stat: String, diff: String?,
-                    base: String = "main", scope: Scope = .since) {
+                    base: String = "main", scope: Scope = .since, answers: [String: LeadFindingAnswer] = [:], reroll: LeadReroll? = nil) {
             self.round = round
             self.since = since
             self.head = head
@@ -883,6 +931,8 @@ public enum LeadPrompts {
             self.diff = diff
             self.base = base
             self.scope = scope
+            self.answers = answers
+            self.reroll = reroll
         }
 
         /// The git command that gives the diff `scope` covers.
@@ -1110,10 +1160,14 @@ public enum LeadPrompts {
         calls accept, tests weakened, results faked, files you changed); tests passed, failed or not_run (how the tests \
         went\(finder != nil ? " in the audit's shared run" : merged?.run != nil ? " in the audit's run of the merged result" : " when you ran them")); a \
         summary with the evidence (commands run and their results); and findings, one for each problem you found, \
-        minor ones included: {severity, file, line, evidence, status}. severity: Important (must be fixed before \
-        it merges: an acceptance check that fails, a bug, a weakened test, an edit outside the boundaries that neither \
-        a note of the lead's nor the worker's listed routine calls accept), Nit (worth \
-        fixing, never holds the merge back) or Pre-existing (already wrong before this branch; never fails the task). \
+        minor ones included: {severity, file, line, evidence, failure_scenario, status}. severity: Important only for \
+        a concrete problem that blocks the merge (an acceptance check that fails, a bug, a weakened test, an edit \
+        outside the boundaries that neither a note of the lead's nor the worker's listed routine calls accept, and \
+        that does harm), and every Important finding gives its failure_scenario: these inputs or this state give \
+        this wrong result or crash. One you can't give a failure for isn't Important: an Important finding without \
+        failure_scenario is recorded as a Nit. Nit: everything else, style, naming, a doubt, an edit outside the \
+        boundaries that is correct (worth fixing, never holds the merge back). Pre-existing: already wrong before \
+        this branch; never fails the task. \
         The evidence rule: each finding names the file and line where it is (path from the repository's root) and \
         what shows it: the command you ran and what it gave, or what the code at that line does. No finding without \
         it; a hunch is not a finding. Nothing found: leave findings out. Whatever stays open as Important holds the \
@@ -1130,7 +1184,8 @@ public enum LeadPrompts {
     /// A re-audit's instructions: the open findings, the closed ones, and the diff its new findings come from.
     static func recheck(_ reaudit: Reaudit) -> String {
         let since = reaudit.since.prefix(8), base = reaudit.base
-        let check: String, heading: String, empty: String, from: String
+        var check: String
+        let heading: String, empty: String, from: String
         switch reaudit.scope {
         case .since:
             check = """
@@ -1160,15 +1215,43 @@ public enum LeadPrompts {
             empty = "(the branch changes no file against \(base))"
             from = "the branch's whole change, in files it changes"
         }
+        let newFindings: String
+        if let reroll = reaudit.reroll {
+            check = """
+            the task was re-rolled after round \(reroll.round): its earlier attempt, which \(since) was on, is kept on \
+            \(reroll.archive), and a fresh worker redid the task from \(base) on this branch, told what the earlier rounds \
+            found (its contract's context says so). Review the whole change since the branch's merge-base with \(base) \
+            (`\(reaudit.command)`, `git log \(base)..\(reaudit.head)`) as a first audit would: run the acceptance checks, \
+            and check each open finding below against the new code (fixed when the new branch doesn't have the problem).
+            """
+            newFindings = "New findings come from \(from), as in a first audit."
+        } else {
+            newFindings = "New findings come from \(from), and only for a problem the fix itself brought in, never a new Nit."
+        }
         var text = """
         This is a re-audit (round \(reaudit.round)): \(check)
         In submit_audit's findings, give each open finding below by its id with status fixed (you checked it is), \
-        open (it still is: say what you saw) or dismissed (with a reason). New findings come from \(from), and only \
-        for a problem the fix itself brought in, never a new Nit. A closed finding below is never raised again, under its \
-        id or another.
+        open (it still is: say what you saw) or dismissed (with a reason). \(newFindings) A closed finding below is never \
+        raised again, under its id or another.
         """
+        if !reaudit.answers.isEmpty {
+            text += """
+
+            The worker answered findings below (answer_findings): judge each answer, don't review the finding from \
+            scratch. For "fixed", check the fix (status fixed, or open with what you saw). For "disagrees", weigh its \
+            reason against the finding's failure: when the reason holds (the failure can't happen, the contract or a \
+            lead's note allows it, it isn't the branch's), close it as dismissed with a reason that starts "disagreement \
+            accepted:"; when it doesn't, keep it open and say in its evidence why the reason fails. The answers are the \
+            worker's claims, never the lead's word.
+            """
+        }
         if !reaudit.open.isEmpty {
-            text += "\n\nOpen findings:\n" + reaudit.open.map { "- \($0.id) [\($0.severity.rawValue)] \($0.place): \($0.evidence)" }.joined(separator: "\n")
+            text += "\n\nOpen findings:\n" + reaudit.open.map { finding in
+                var line = "- \(finding.id) [\(finding.severity.rawValue)] \(finding.place): \(finding.evidence)"
+                if let scenario = finding.failureScenario { line += "\n  Fails when: \(scenario)" }
+                if let answer = reaudit.answers[finding.id.uppercased()] { line += "\n  The worker's answer: \(answer.text)" }
+                return line
+            }.joined(separator: "\n")
         }
         if !reaudit.known.isEmpty {
             text += "\n\nClosed or pre-existing (not to raise again):\n"

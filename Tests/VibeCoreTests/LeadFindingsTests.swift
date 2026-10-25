@@ -146,27 +146,29 @@ struct LeadAuditLedgerTests {
         }
     }
 
-    @Test func threeRoundsThatLeaveImportantFindingsOpenCallForReconsidering() throws {
+    @Test func twoRoundsThatLeaveImportantFindingsOpenCallForReconsidering() throws {
+        #expect(LeadAuditLedger.roundCap == 2)
         var ledger = LeadAuditLedger()
         try ledger.record([important()], commit: "c1", passes: true)
-        try ledger.record([important(id: "F1")], commit: "c2", passes: true, changed: ["Sources/A.swift"])
         #expect(!ledger.reconsider)
-        try ledger.record([important(id: "F1")], commit: "c3", passes: true, changed: ["Sources/A.swift"])
-        #expect(ledger.failedRounds == 3)
+        try ledger.record([important(id: "F1")], commit: "c2", passes: true, changed: ["Sources/A.swift"])
+        #expect(ledger.failedRounds == 2)
         #expect(ledger.reconsider)
         // Re-planned: the rounds count from there.
         var replanned = ledger
         replanned.replan()
         #expect(!replanned.reconsider)
         // A round that leaves nothing Important open ends it.
-        try ledger.record([important(id: "F1", status: .fixed)], commit: "c4", passes: true, changed: ["Sources/A.swift"])
+        try ledger.record([important(id: "F1", status: .fixed)], commit: "c3", passes: true, changed: ["Sources/A.swift"])
         #expect(ledger.failedRounds == 0)
         #expect(!ledger.reconsider)
     }
 
     @Test func failedVerdictsCountAsFailedRoundsToo() throws {
         var ledger = LeadAuditLedger()
-        for commit in ["c1", "c2", "c3"] { try ledger.record([], commit: commit, passes: false, changed: []) }
+        try ledger.record([], commit: "c1", passes: false, changed: [])
+        #expect(!ledger.reconsider)
+        try ledger.record([], commit: "c2", passes: false, changed: [])
         #expect(ledger.reconsider)
     }
 
@@ -174,19 +176,18 @@ struct LeadAuditLedgerTests {
     @Test func theReconsiderCauseNamesWhatCounted() throws {
         var open = LeadAuditLedger()
         try open.record([important(), important("Sources/B.swift", 3)], commit: "c1", passes: true)
-        for commit in ["c2", "c3"] { try open.record([important(id: "F1"), important(id: "F2")], commit: commit, passes: true, changed: ["Sources/A.swift"]) }
-        #expect(open.reconsiderCause == "2 Important findings left open across 3 rounds")
+        try open.record([important(id: "F1"), important(id: "F2")], commit: "c2", passes: true, changed: ["Sources/A.swift"])
+        #expect(open.reconsiderCause == "2 Important findings left open across 2 rounds")
 
         var failed = LeadAuditLedger()
-        for commit in ["c1", "c2", "c3"] { try failed.record([], commit: commit, passes: false, changed: []) }
-        #expect(failed.reconsiderCause == "3 failed verdicts in a row")
+        for commit in ["c1", "c2"] { try failed.record([], commit: commit, passes: false, changed: []) }
+        #expect(failed.reconsiderCause == "2 failed verdicts in a row")
 
         var both = LeadAuditLedger()
-        try both.record([important()], commit: "c1", passes: true)
-        try both.record([important(id: "F1")], commit: "c2", passes: false, changed: [])
-        try both.record([important(id: "F1")], commit: "c3", passes: true, changed: [])
+        try both.record([important()], commit: "c1", passes: false)
+        try both.record([important(id: "F1")], commit: "c2", passes: true, changed: [])
         #expect(both.reconsider)
-        #expect(both.reconsiderCause == "3 audits in a row: 1 failed verdict, and 2 that left Important findings open (1 open now)")
+        #expect(both.reconsiderCause == "2 audits in a row: 1 failed verdict, and 1 that left Important findings open (1 open now)")
 
         // A ledger recorded before failed verdicts were counted reads, and says it as before.
         var old = try JSONDecoder().decode(LeadAuditLedger.self, from: Data(#"{"findings":[],"rounds":3,"failedRounds":3,"commit":"c3","passed":false}"#.utf8))
@@ -200,7 +201,7 @@ struct LeadAuditLedgerTests {
     @Test func dismissingTheLastImportantFindingOnAPassStartsTheRoundsOver() throws {
         var ledger = LeadAuditLedger()
         try ledger.record([important()], commit: "c1", passes: true)
-        for commit in ["c2", "c3"] { try ledger.record([important(id: "F1")], commit: commit, passes: true, changed: ["Sources/A.swift"]) }
+        try ledger.record([important(id: "F1")], commit: "c2", passes: true, changed: ["Sources/A.swift"])
         #expect(ledger.reconsider)
         try ledger.dismiss("F1", reason: "the contract allows it")
         #expect(ledger.failedRounds == 0 && ledger.failedVerdicts == 0 && !ledger.reconsider)
@@ -296,7 +297,7 @@ struct LeadFindingsToolTests: LeadTeamFixture {
     }
 
     static let threeKinds: [[String: Any]] = [
-        ["severity": "Important", "file": "b.txt", "line": 1, "evidence": "test -f b.txt passes but b.txt says bee, the contract wants b", "status": "open"],
+        ["severity": "Important", "failure_scenario": "b.txt holding bee: the contract's check of b gives the wrong result", "file": "b.txt", "line": 1, "evidence": "test -f b.txt passes but b.txt says bee, the contract wants b", "status": "open"],
         ["severity": "Nit", "file": "b.txt", "line": 2, "evidence": "no trailing newline", "status": "open"],
         ["severity": "Pre-existing", "file": "a.txt", "line": 1, "evidence": "a.txt says one; it did on main too"],
     ]
@@ -433,11 +434,11 @@ struct LeadFindingsToolTests: LeadTeamFixture {
         let verifier = try seat("verify-add-b", runtime)
         let verdict: [String: Any] = ["completion": "complete", "integrity": "clean", "summary": "checked again"]
         // Each open finding must be marked.
-        let skipped = call(verifier, "submit_audit", verdict.merging(["findings": [["id": "F1", "severity": "Important", "file": "b.txt", "line": 1, "evidence": "fixed", "status": "fixed"]]]) { $1 })
+        let skipped = call(verifier, "submit_audit", verdict.merging(["findings": [["id": "F1", "severity": "Important", "failure_scenario": "b.txt holding bee: the contract's check of b gives the wrong result", "file": "b.txt", "line": 1, "evidence": "fixed", "status": "fixed"]]]) { $1 })
         #expect(skipped.isError)
         #expect(skipped.text.contains("F2"), "\(skipped.text)")
         // New findings only from the new diff.
-        let marks: [[String: Any]] = [["id": "F1", "severity": "Important", "file": "b.txt", "line": 1, "evidence": "b.txt says b now", "status": "fixed"],
+        let marks: [[String: Any]] = [["id": "F1", "severity": "Important", "failure_scenario": "b.txt holding bee: the contract's check of b gives the wrong result", "file": "b.txt", "line": 1, "evidence": "b.txt says b now", "status": "fixed"],
                                       ["id": "F2", "severity": "Nit", "file": "b.txt", "line": 2, "evidence": "still no newline", "status": "open"]]
         let outside = call(verifier, "submit_audit", verdict.merging(["findings": marks + [["severity": "Nit", "file": "a.txt", "line": 5, "evidence": "old"]]]) { $1 })
         #expect(outside.isError)
@@ -459,10 +460,10 @@ struct LeadFindingsToolTests: LeadTeamFixture {
         let third = try seat("verify-add-b", runtime)
         let open: [[String: Any]] = [["id": "F2", "severity": "Nit", "file": "b.txt", "line": 2, "evidence": "e", "status": "fixed"],
                                      ["id": "F4", "severity": "Nit", "file": "c.txt", "line": 1, "evidence": "e", "status": "open"]]
-        let reopened = call(third, "submit_audit", verdict.merging(["findings": open + [["id": "F1", "severity": "Important", "file": "b.txt", "line": 1, "evidence": "back", "status": "open"]]]) { $1 })
+        let reopened = call(third, "submit_audit", verdict.merging(["findings": open + [["id": "F1", "severity": "Important", "failure_scenario": "b.txt holding bee: the contract's check of b gives the wrong result", "file": "b.txt", "line": 1, "evidence": "back", "status": "open"]]]) { $1 })
         #expect(reopened.isError)
         #expect(reopened.text.contains("isn't raised again"), "\(reopened.text)")
-        let renamed = call(third, "submit_audit", verdict.merging(["findings": open + [["severity": "Important", "file": "b.txt", "line": 1, "evidence": "back again"]]]) { $1 })
+        let renamed = call(third, "submit_audit", verdict.merging(["findings": open + [["severity": "Important", "failure_scenario": "b.txt holding bee: the contract's check of b gives the wrong result", "file": "b.txt", "line": 1, "evidence": "back again"]]]) { $1 })
         #expect(renamed.isError)
         #expect(renamed.text.contains("isn't raised again"), "\(renamed.text)")
         #expect(!call(third, "submit_audit", verdict.merging(["findings": open]) { $1 }).isError)
@@ -470,27 +471,25 @@ struct LeadFindingsToolTests: LeadTeamFixture {
         #expect(!call(lead, "merge", ["task": "add-b"]).isError)
     }
 
-    @Test func afterThreeRoundsWithImportantFindingsOpenTheLeadIsToldToReconsider() throws {
+    @Test func afterTwoRoundsWithImportantFindingsOpenTheLeadIsToldToReroll() throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
         try started(lead, runtime, root: root)
-        let still: [String: Any] = ["id": "F1", "severity": "Important", "file": "b.txt", "line": 1, "evidence": "still wrong", "status": "open"]
+        let still: [String: Any] = ["id": "F1", "severity": "Important", "failure_scenario": "b.txt holding bee: the contract's check of b gives the wrong result", "file": "b.txt", "line": 1, "evidence": "still wrong", "status": "open"]
         _ = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "1", "findings": [Self.threeKinds[0]]])
         #expect(!call(lead, "status").text.contains("reconsider the approach"))
+        #expect(runtime.steered.last?.text.contains("Reconsider the approach") == false)
         try work(runtime, root: root, file: "c.txt", text: "1\n")
         #expect(!(try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "2", "findings": [still]])).isError)
-        #expect(runtime.steered.last?.text.contains("Reconsider the approach") == false)
-        try work(runtime, root: root, file: "c.txt", text: "2\n")
-        #expect(!(try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "3", "findings": [still]])).isError)
         let told = try #require(runtime.steered.last?.text)
-        #expect(told.contains("Reconsider the approach: 1 Important finding left open across 3 rounds"), "\(told)")
-        #expect(told.contains("re-plan add-b") && told.contains("ask the user"))
+        #expect(told.contains("Reconsider the approach: 1 Important finding left open across 2 rounds"), "\(told)")
+        #expect(told.contains("re-roll add-b (update_task(add-b, reroll: true)") && told.contains("ask the user"), "\(told)")
         let status = call(lead, "status").text
-        #expect(status.contains("add-b: Add b — reconsider the approach (1 Important finding left open across 3 rounds)"), "\(status)")
+        #expect(status.contains("add-b: Add b — reconsider the approach (1 Important finding left open across 2 rounds)"), "\(status)")
         #expect(call(lead, "board", ["task": "add-b"]).text.contains("Reconsider the approach"))
         // The lead's own prompt says what to do then.
-        #expect(LeadPrompts.lead(project: "p", root: root, workflow: LeadWorkflow()).contains("\"reconsider the approach\": don't send the worker back"))
+        #expect(LeadPrompts.lead(project: "p", root: root, workflow: LeadWorkflow()).contains("\"reconsider the approach\": don't send the worker back for a third round; re-roll it"))
         // Re-planned, the rounds count from there.
         #expect(!call(lead, "update_task", ["task": "add-b", "status": "planned"]).isError)
         #expect(vault.audits(root: root, task: "add-b")?.reconsider == false)
@@ -645,8 +644,8 @@ struct LeadFindingsToolTests: LeadTeamFixture {
 
     /// Two Important findings, each a file outside the boundaries the worker listed as a routine call.
     static let excursions: [[String: Any]] = [
-        ["severity": "Important", "file": "a.txt", "line": 1, "evidence": "a.txt is outside the boundaries; no lead's note accepts it", "status": "open"],
-        ["severity": "Important", "file": "c.txt", "line": 1, "evidence": "c.txt is outside the boundaries; no lead's note accepts it", "status": "open"],
+        ["severity": "Important", "failure_scenario": "merging the branch changes a.txt, which the contract doesn't cover", "file": "a.txt", "line": 1, "evidence": "a.txt is outside the boundaries; no lead's note accepts it", "status": "open"],
+        ["severity": "Important", "failure_scenario": "merging the branch changes c.txt, which the contract doesn't cover", "file": "c.txt", "line": 1, "evidence": "c.txt is outside the boundaries; no lead's note accepts it", "status": "open"],
     ]
 
     /// 2026-10-24: a verifier found the work correct with every test passing, gave violation only for files outside the

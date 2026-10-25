@@ -297,8 +297,8 @@ enum TeamRows {
             }
         case .failed:
             if let audits = task.audits, audits.reconsider {
-                // Rounds of fixes aren't landing: the lead re-plans it or asks you, rather than another round.
-                red(.failed, "Reconsider", "Reconsider the approach: \(audits.reconsiderCause); the lead re-plans it or asks you.",
+                // Rounds of fixes aren't landing: the lead re-rolls it, re-plans it or asks you, rather than another round.
+                red(.failed, "Reconsider", "Reconsider the approach: \(audits.reconsiderCause); the lead re-rolls it, re-plans it or asks you.",
                     since: task.since.map(Date.init(timeIntervalSince1970:)))
             } else {
                 red(.failed, "Failed", task.setback?.reason ?? task.evidence?.summary ?? "It failed; the lead decides what next.",

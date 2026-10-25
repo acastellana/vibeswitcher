@@ -165,8 +165,11 @@ public struct LeadFinding: Codable, Equatable, Sendable, Identifiable {
         public var evidence: String
         public var status: Status
         public var reason: String?
+        /// An Important finding's failure: these inputs or this state give this wrong result or crash.
+        public var failureScenario: String?
 
-        public init(id: String? = nil, severity: Severity, file: String, line: Int, evidence: String, status: Status = .open, reason: String? = nil) {
+        public init(id: String? = nil, severity: Severity, file: String, line: Int, evidence: String, status: Status = .open, reason: String? = nil,
+                    failureScenario: String? = nil) {
             self.id = id
             self.severity = severity
             self.file = file
@@ -174,6 +177,7 @@ public struct LeadFinding: Codable, Equatable, Sendable, Identifiable {
             self.evidence = evidence
             self.status = status
             self.reason = reason
+            self.failureScenario = failureScenario
         }
     }
 
@@ -193,6 +197,9 @@ public struct LeadFinding: Codable, Equatable, Sendable, Identifiable {
     public var closedBy: String?
     /// The task the lead made of it (add_task from_finding).
     public var followUp: String?
+    /// What goes wrong because of it (an Important finding's: one without it is recorded as a Nit; optional: findings
+    /// from before it was asked have none).
+    public var failureScenario: String?
 
     public var isOpen: Bool { status == .open }
     /// Open, or unconfirmed: a later round may still say something about it.
@@ -202,9 +209,10 @@ public struct LeadFinding: Codable, Equatable, Sendable, Identifiable {
     public var place: String { "\(file):\(line)" }
     /// "F2 (Important, Sources/A.swift:12)".
     public var label: String { "\(id) (\(severity.rawValue), \(place))" }
-    /// "F2 Sources/A.swift:12 — evidence [fixed: reason]", for the lead's text.
+    /// "F2 Sources/A.swift:12 — evidence (fails: scenario) [fixed: reason]", for the lead's text.
     public var line1: String {
         var text = "\(id) \(place) — \(evidence)"
+        if let failureScenario { text += " (fails: \(failureScenario))" }
         if status != .open { text += " [\(status.rawValue)\(closedBy == "lead" ? " by the lead" : "")\(reason.map { ": \($0)" } ?? "")]" }
         if let followUp { text += " → task \(followUp)" }
         return text
@@ -212,6 +220,58 @@ public struct LeadFinding: Codable, Equatable, Sendable, Identifiable {
 
     /// The same finding, however its id is written ("f2", " F2 ").
     func named(_ name: String) -> Bool { id.lowercased() == name.trimmingCharacters(in: .whitespaces).lowercased() }
+}
+
+/// A worker's answer to one of its task's open findings (answer_findings): fixed (in a commit) or a disagreement with
+/// its reason. The re-audit is told the answers given since the last audit and judges them: it checks a fix, and
+/// closes a finding whose disagreement it accepts (dismissed).
+public struct LeadFindingAnswer: Codable, Equatable, Sendable {
+    public enum Kind: String, Codable, Sendable, CaseIterable { case fixed, disagree }
+
+    public var id: String
+    public var kind: Kind
+    /// How it was fixed, or why the worker disagrees.
+    public var reason: String
+    /// The branch's head when it answered.
+    public var commit: String?
+    /// The audit rounds recorded when it answered: an answer counts for the next audit only.
+    public var round: Int
+    public var at: Double
+
+    public init(id: String, kind: Kind, reason: String, commit: String?, round: Int, at: Double = Date().timeIntervalSince1970) {
+        self.id = id
+        self.kind = kind
+        self.reason = reason
+        self.commit = commit
+        self.round = round
+        self.at = at
+    }
+
+    /// "fixed at 1234abcd: how", "disagrees: why".
+    public var text: String {
+        switch kind {
+        case .fixed: return "fixed" + (commit.map { " at \($0.prefix(8))" } ?? "") + (reason.isEmpty ? "" : ": \(reason)")
+        case .disagree: return "disagrees: \(reason)"
+        }
+    }
+}
+
+/// A task re-rolled after its audit rounds (update_task reroll): its worker stopped, its branch kept under `archive`,
+/// and a fresh worker started from the base with what the rounds learned.
+public struct LeadReroll: Codable, Equatable, Sendable {
+    /// The branch the earlier attempt is kept under, and its head.
+    public var archive: String
+    public var commit: String?
+    /// The audit rounds recorded when it was re-rolled: the next audit is the fresh branch's first.
+    public var round: Int
+    public var at: Double
+
+    public init(archive: String, commit: String?, round: Int, at: Double = Date().timeIntervalSince1970) {
+        self.archive = archive
+        self.commit = commit
+        self.round = round
+        self.at = at
+    }
 }
 
 /// A task's audits: the findings raised across its rounds, each with its state, and how the rounds went. The vault
@@ -233,8 +293,9 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
     /// How the last audit's finders voted, when it ran more than one (optional: one verifier gives none).
     public var vote: LeadAuditVote.Outcome?
 
-    /// Failed rounds after which the task should be re-planned, not sent back for another.
-    public static let roundCap = 3
+    /// Failed rounds after which the task is re-rolled (or re-planned), not sent back for a third: fixes past the
+    /// second attempt rarely land, and a fresh start from what the rounds learned does better.
+    public static let roundCap = 2
 
     public init() {}
 
@@ -248,7 +309,7 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
     /// `roundCap` audits in a row left Important findings open (or failed) and the last one still does.
     public var reconsider: Bool { failedRounds >= Self.roundCap && (!blocking.isEmpty || passed == false) }
 
-    /// What the failed rounds were: "2 Important findings left open across 3 rounds", "3 failed verdicts in a row",
+    /// What the failed rounds were: "2 Important findings left open across 2 rounds", "2 failed verdicts in a row",
     /// or both kinds counted.
     public var reconsiderCause: String {
         let rounds = failedRounds, open = blocking.count
@@ -345,14 +406,14 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
                 }
                 seen.insert(id)
                 next.findings.append(LeadFinding(id: id, severity: report.severity, file: report.file, line: report.line, evidence: report.evidence,
-                                                 status: .open, reason: nil, raised: round))
+                                                 status: .open, reason: nil, raised: round, failureScenario: report.failureScenario))
             }
         }
         for report in unconfirmed where !next.findings.contains(where: { $0.file == report.file && $0.line == report.line && $0.severity == report.severity }) {
             var number = next.findings.count + 1
             while next.finding("F\(number)") != nil { number += 1 }
             next.findings.append(LeadFinding(id: "F\(number)", severity: report.severity, file: report.file, line: report.line, evidence: report.evidence,
-                                             status: .unconfirmed, reason: report.reason, raised: round))
+                                             status: .unconfirmed, reason: report.reason, raised: round, failureScenario: report.failureScenario))
         }
         if isReaudit {
             let skipped = toRecheck.filter { !seen.contains($0.id) }
@@ -392,6 +453,37 @@ public struct LeadAuditLedger: Codable, Equatable, Sendable {
     public mutating func replan() {
         failedRounds = 0
         failedVerdicts = 0
+    }
+
+    /// What the rounds learned, for a re-rolled task's fresh worker (and its verifier): where the earlier attempt is
+    /// kept, why it was re-rolled, and each Important finding (and open Nit) with its evidence, its failure, how it
+    /// ended and the worker's last answer. `answers`: the worker's, the latest per finding; `number`: which re-roll.
+    public func rerollSummary(answers: [LeadFindingAnswer], archive: String, base: String, number: Int) -> String {
+        func clip(_ text: String, _ limit: Int = 400) -> String {
+            let line = text.split(whereSeparator: \.isNewline).joined(separator: " ")
+            return line.count > limit ? String(line.prefix(limit)) + "…" : line
+        }
+        let latest = Dictionary(answers.map { ($0.id.uppercased(), $0) }) { $1 }
+        var lines = ["## Re-roll \(number): what the earlier attempt's audits learned",
+                     "The task was re-rolled after \(rounds) audit round\(rounds == 1 ? "" : "s")\(failedRounds >= Self.roundCap ? " (\(reconsiderCause))" : ""): a fresh worker starts from \(base). "
+                        + "The earlier attempt is kept on the branch \(archive) (`git log \(base)..\(archive)`, `git diff \(base)...\(archive)`): read it for what "
+                        + "worked, but don't merge it in or copy it whole; avoid what its findings below say went wrong. The new branch's first audit checks each open finding again."]
+        let shown = findings.filter { $0.severity == .important || ($0.severity == .nit && $0.isLive) }
+        if shown.isEmpty { lines.append("No Important finding was raised; the rounds failed on their verdicts.") }
+        for finding in shown {
+            let state: String
+            switch finding.status {
+            case .open: state = "open"
+            case .unconfirmed: state = "unconfirmed"
+            case .fixed: state = "fixed in round \(finding.closed ?? rounds)"
+            case .dismissed: state = "dismissed by the \(finding.closedBy ?? "verifier")" + (finding.reason.map { ": \(clip($0, 200))" } ?? "")
+            }
+            var line = "- \(finding.id) [\(finding.severity.rawValue), \(state)] \(finding.place): \(clip(finding.evidence))"
+            if let scenario = finding.failureScenario { line += " Fails when: \(clip(scenario, 300))" }
+            if let answer = latest[finding.id.uppercased()] { line += " The worker's answer: \(clip(answer.text, 300))" }
+            lines.append(line)
+        }
+        return lines.joined(separator: "\n")
     }
 
     /// The findings by severity (Important, Nit, Pre-existing), each group's open ones first, then unconfirmed ones;
@@ -528,6 +620,10 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var audits: LeadAuditLedger?
     /// The finders its audit runs, while it runs more than one (for showing; the vault holds their reports).
     public var panel: LeadAuditPanel?
+    /// Its worker's answers to its open findings (answer_findings), the latest for each finding.
+    public var answers: [LeadFindingAnswer]?
+    /// Its re-rolls, oldest first (update_task reroll): the branches its earlier attempts are kept under.
+    public var rerolls: [LeadReroll]?
     /// The lead's notes on it since its contract (appended context, messages to its worker), oldest first.
     public var notes: [LeadNote]?
     /// How it went, in the scorecard's numbers, as of the board's last change (see `LeadTaskScore`).
@@ -541,6 +637,17 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
 
     /// Its review level: none unless the lead set audit.
     public var reviewLevel: Review { review ?? .none }
+
+    /// Its worker's answers given since the last audit `ledger` records, by finding id: the ones the next audit judges.
+    public func currentAnswers(_ ledger: LeadAuditLedger?) -> [String: LeadFindingAnswer] {
+        let rounds = ledger?.rounds ?? 0
+        return Dictionary((answers ?? []).filter { $0.round == rounds }.map { ($0.id.uppercased(), $0) }) { $1 }
+    }
+
+    /// The re-roll the next audit is the first after (no audit recorded since), if any.
+    public func pendingReroll(_ ledger: LeadAuditLedger?) -> LeadReroll? {
+        rerolls?.last.flatMap { $0.round == (ledger?.rounds ?? 0) ? $0 : nil }
+    }
 
     public static let keptCheckpoints = 40
     /// Notes kept per task, the newest: an approval is rarely more than a few dozen messages back.

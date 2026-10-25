@@ -79,6 +79,13 @@ public protocol LeadRuntime: AnyObject {
     func isRunning(_ agent: LeadAgent) -> Bool
     /// The Mac's 1-minute load average (see `MacLoad.oneMinute`); nil when it can't be read.
     func loadAverage() -> Double?
+    /// The model the project's workers run on, as `claude --model` names it (nil: Claude's default, not known).
+    func workerModel(root: String) -> String?
+}
+
+public extension LeadRuntime {
+    /// From the Claude command's own --model only; the app's runtime also reads Claude's settings (see `HostRuntime`).
+    func workerModel(root: String) -> String? { LeadWorkflow.claudeModel(command: claudeCommand(root: root)) }
 }
 
 /// The project lead's tools, and the few that workers and verifiers get, over the board and the runtime.
@@ -329,6 +336,8 @@ public final class LeadToolset: MCPToolset {
                             properties: ["question": P(type: "string", description: "The question")], required: ["question"]),
                 MCPToolInfo(name: "progress", description: "Note a milestone in one line (a part working, checks passing, what's next). It shows on your task's lane in the lead's Team view; it doesn't message the lead. Call it at each milestone.",
                             properties: ["text": P(type: "string", description: "One line: what's done or under way")], required: ["text"]),
+                MCPToolInfo(name: "answer_findings", description: "Answer your task's open audit findings by id: fixed (commit the fix first) or disagree, with a reason. The lead sees the answers, and the re-audit judges them: it checks each fix, and closes a finding whose disagreement it accepts.",
+                            properties: ["answers": P(type: "array", description: Self.answersShape, items: "object")], required: ["answers"]),
             ]
         case .verifier?:
             return [MCPToolInfo(name: "submit_audit", description: "Your verdict on the worker's branch, with evidence and your findings. Only this moves a task to done; an open Important finding holds its merge back.",
@@ -366,7 +375,8 @@ public final class LeadToolset: MCPToolset {
                                          "status": P(type: "string", description: "New state", options: Self.settableStates.map(\.rawValue) + [Self.removedState]),
                                          "reason": P(type: "string", description: "With status kept: what holds it back (a decision, the user's word); merge names it when it refuses. With abandoned: why nothing will carry it. With removed: why it was a mistake (optional)"),
                                          "into": P(type: "string", description: "With status folded: the task (its slug) that carries this one's work"),
-                                         "review": Self.reviewProperty],
+                                         "review": Self.reviewProperty,
+                                         "reroll": P(type: "boolean", description: "Re-roll it after audit rounds that didn't land: its worker and verifier stop, its branch is kept as archive/<slug>-<n>, its worktree goes, and a fresh worker starts from the base on a new agent/<slug>, its context given a summary of the findings and the worker's answers so far. Contract changes in the same call apply first; not with status")],
                             required: ["task"]),
                 MCPToolInfo(name: "start_worker", description: "Start a worker on a task: a fresh Claude session in its own worktree on branch agent/<slug>, given the contract. A worktree stopped partway through a rebase or merge is described, not started; recover aborts it first. One left on another branch or a detached HEAD is put back on agent/<slug>, its uncommitted files carried along.",
                             properties: ["task": task,
@@ -425,7 +435,7 @@ public final class LeadToolset: MCPToolset {
                                          "regression_command": P(type: "string", description: "The checks incidents became (e.g. a bench corpus run); merge runs it after test_command and merges only when it passes too"),
                                          "init_command": P(type: "string", description: "What a fresh worktree needs before work starts (install, build)"),
                                          "base_branch": P(type: "string", description: "The branch workers start from and verified work is merged into (an existing local branch)"),
-                                         "verifier_model": P(type: "string", description: "The verifier's model (e.g. sonnet, opus); a different one than the workers' gives a second opinion"),
+                                         "verifier_model": P(type: "string", description: "The verifier's model (e.g. fable, opus). Empty: audits run on another model than the workers', at least as capable (fable; opus when the workers run fable)"),
                                          "max_workers": P(type: "integer", description: "How many workers may run at once (at least 1)"),
                                          "disk_warning_gb": P(type: "number", description: "Free space (GB) on the worktrees' volume below which you're told, once, what takes the space (default 10)"),
                                          "disk_floor_gb": P(type: "number", description: "Free space (GB) below which start_worker refuses (default 3)"),
@@ -474,6 +484,7 @@ public final class LeadToolset: MCPToolset {
             case "report": return try report(arguments)
             case "ask_lead": return try askLead(arguments)
             case "progress": return try progress(arguments)
+            case "answer_findings": return try answerFindings(arguments)
             case "submit_audit": return try submitAudit(arguments, by: member)
             default: return fail("No tool \(name).")
             }
@@ -691,13 +702,15 @@ public final class LeadToolset: MCPToolset {
     static let blindCheckShape = "With done: what your blind check (a fresh subagent given only the contract and the diff) found, "
         + "and for each item what you did: fixed (in which commit) or why not. \"Nothing blocking\" when it found nothing."
 
-    static let findingsShape = "Each problem you found, one object each: {id, severity, file, line, evidence, status, reason}. "
-        + "severity: Important (must be fixed before merge: the contract isn't met, a bug, a weakened test), Nit (worth fixing, never blocks), "
-        + "or Pre-existing (already wrong before this branch; never fails the task). file and line: where it is (path from the repository's root). "
+    static let findingsShape = "Each problem you found, one object each: {id, severity, file, line, evidence, failure_scenario, status, reason}. "
+        + "severity: Important only for a concrete problem that blocks the merge (an acceptance check that fails, a bug, a weakened test), "
+        + "and it needs failure_scenario: these inputs or this state give this wrong result or crash; an Important finding without one is "
+        + "recorded as a Nit. Nit: everything else (worth fixing, never blocks). Pre-existing: already wrong before this branch; never fails "
+        + "the task. file and line: where it is (path from the repository's root). "
         + "evidence: what you ran and what it gave, or what the code at file:line does. status: open; in a re-audit, each open finding you were given "
         + "by its id: fixed, open (still), or dismissed with a reason. id: leave it out for a new finding. Empty or left out: you found nothing."
 
-    static let updateKeys: Set<String> = ["task", "title", "goal", "acceptance", "boundaries", "context", "append_context", "status", "reason", "into", "review"]
+    static let updateKeys: Set<String> = ["task", "title", "goal", "acceptance", "boundaries", "context", "append_context", "status", "reason", "into", "review", "reroll"]
 
     private func updateTask(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
@@ -708,6 +721,14 @@ public final class LeadToolset: MCPToolset {
         }
         var status: LeadTask.Status?
         let reason = (arguments["reason"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let reroll = arguments["reroll"] as? Bool ?? false
+        if reroll {
+            let others = ["status", "reason", "into"].filter { arguments[$0] != nil }
+            guard others.isEmpty else {
+                throw Problem(text: "reroll doesn't go with \(others.joined(separator: ", ")): it puts the task back to work itself. Nothing was changed.")
+            }
+            try checkRerollable(slug)
+        }
         if let given = arguments["status"] as? String, !given.isEmpty {
             if given.lowercased() == Self.removedState { return try removeTask(slug, arguments, reason: reason) }
             guard let wanted = LeadTask.Status(rawValue: given.lowercased()), Self.settableStates.contains(wanted) else {
@@ -803,7 +824,111 @@ public final class LeadToolset: MCPToolset {
                 recorded += " An audit was started on \(slug) already: its verdict decides its merge."
             }
         }
+        if reroll {
+            return MCPToolResult(text: (changed.isEmpty ? "" : "Updated \(slug): \(changed.joined(separator: ", ")).\(recorded) ") + (try rerollTask(slug)))
+        }
         return MCPToolResult(text: changed.isEmpty ? "Nothing to change on \(slug)." : "Updated \(slug): \(changed.joined(separator: ", ")).\(recorded)")
+    }
+
+    /// A task may be re-rolled while it's still to land: not merged, kept, folded or abandoned, and no merge of it under way.
+    private func checkRerollable(_ slug: String) throws {
+        guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
+        if [.done, .kept, .folded, .abandoned].contains(task.status) {
+            throw Problem(text: "\(slug) is \(Self.shownState(task)): there's nothing to re-roll\(task.status == .kept ? " (update_task(\(slug), status: planned) first, if it's wanted after all)" : ""). Nothing was changed.")
+        }
+        guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/merge-\(slug).lock")) else {
+            throw Problem(text: "A merge of \(slug) is under way: re-roll it once its result is back. Nothing was changed.")
+        }
+        lock.release()
+    }
+
+    /// update_task(reroll: true): the task starts over from the base with what its audit rounds learned, instead of a
+    /// third round of patching. Its sessions end; its branch is kept as archive/<slug>-<n> (and uncommitted changes
+    /// to tracked files as a commit on archive/<slug>-<n>-uncommitted); its worktree and agent/<slug> go; its context
+    /// gets the summary of the findings and the worker's answers (`LeadAuditLedger.rerollSummary`); its rounds count
+    /// from zero, its findings stay for the fresh branch's first audit to check again; and a fresh worker starts.
+    private func rerollTask(_ slug: String) throws -> String {
+        guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
+        let refused = "\(slug) wasn't re-rolled"
+        let folder = (Worktrees.path(root: root, slug: slug) as NSString).standardizingPath
+        let ours = Set([task.worker, task.verifier].compactMap { $0 } + (task.panel?.sessions ?? []))
+        let sessions = try hostSessions(refused + "; nothing was changed").filter { $0.live && (ours.contains($0.id) || Self.isTeamSession($0, in: folder)) }
+        let endings = try endItself(try end(sessions, refused: refused), refused: refused)
+        let failed = endings.filter { $0.failure != nil }
+        guard failed.isEmpty else {
+            throw Problem(text: "\(refused): \(failed.map(\.said).joined(separator: "; ")). Its branch and worktree stay while a session may still write there. If the host refuses, tell the user (they can end it in VibeSwitcher), then re-roll again.")
+        }
+        let number = (task.rerolls?.count ?? 0) + 1
+        let head = branchHead(Worktrees.branch(slug))
+        var archive: String?
+        var kept: [String] = []
+        if let head {
+            var suffix = number
+            while branchHead("archive/\(slug)-\(suffix)") != nil { suffix += 1 }
+            let name = "archive/\(slug)-\(suffix)"
+            let made = Git.run(["branch", name, head], in: root)
+            guard made.ok else {
+                throw Problem(text: "\(refused): its branch couldn't be kept as \(name) (\(made.error)), so nothing of it was removed. \(endings.isEmpty ? "" : "Its sessions were ended: \(endings.map(\.said).joined(separator: ", ")).")")
+            }
+            archive = name
+            kept.append("its branch is kept as \(name) (at \(head.prefix(8)))")
+            // `git stash create` makes a commit of the uncommitted changes to tracked files, touching no file and no ref.
+            if Worktrees.isWorktree(root: root, slug: slug) {
+                let stash = Git.run(["stash", "create", "uncommitted when \(slug) was re-rolled"], in: Worktrees.path(root: root, slug: slug))
+                if stash.ok, !stash.output.isEmpty, Git.run(["branch", name + "-uncommitted", stash.output], in: root).ok {
+                    kept.append("its uncommitted changes as \(name)-uncommitted")
+                }
+            }
+        }
+        let untracked = Worktrees.isWorktree(root: root, slug: slug) ? Worktrees.leftovers(root: root, slug: slug) : []
+        _ = removeFolder((Worktrees.path(root: root, slug: slug) as NSString).appendingPathComponent(".build"))
+        _ = removeFolder((store.folder as NSString).appendingPathComponent("audit/\(slug)"))
+        if FileManager.default.fileExists(atPath: Worktrees.path(root: root, slug: slug)) || head != nil {
+            do { try Worktrees.remove(root: root, slug: slug, force: true) } catch {
+                throw Problem(text: "\(refused) all the way: \(kept.joined(separator: ", ")), but its worktree or \(Worktrees.branch(slug)) couldn't be removed (\(error)). Tell the user; start_worker would continue on the old branch.")
+            }
+        }
+        let ledger = vault.audits(root: root, task: slug)
+        let replanned = ledger == nil ? nil : (try? vault.replan(root: root, task: slug)) ?? nil
+        try? vault.clearVerdict(root: root, task: slug)
+        let summary = (ledger ?? LeadAuditLedger()).rerollSummary(answers: task.answers ?? [], archive: archive ?? "(none: nothing was committed)",
+                                                                  base: workflow.base, number: number)
+        let note = leadNote(.context, summary, on: slug)
+        let record = LeadReroll(archive: archive ?? "", commit: head, round: ledger?.rounds ?? 0)
+        try store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            let context = board.tasks[index].contract.context.trimmingCharacters(in: .whitespacesAndNewlines)
+            board.tasks[index].contract.context = context.isEmpty ? summary : context + "\n\n" + summary
+            board.tasks[index].keep(note)
+            board.tasks[index].rerolls = (board.tasks[index].rerolls ?? []) + [record]
+            board.tasks[index].answers = nil
+            board.tasks[index].attempts = (board.tasks[index].attempts ?? 1) + 1
+            board.tasks[index].status = .planned
+            board.tasks[index].stopped = task.worker
+            board.tasks[index].verifier = nil
+            board.tasks[index].panel = nil
+            board.tasks[index].worktree = nil
+            board.tasks[index].branch = nil
+            board.tasks[index].evidence = nil
+            board.tasks[index].outdatedEvidence = nil
+            board.tasks[index].report = nil
+            board.tasks[index].auditNeeded = nil
+            board.tasks[index].blocker = nil
+            if let replanned { board.tasks[index].audits = replanned }
+        }
+        try? store.appendProgress("Re-rolled \(slug) after \(ledger?.rounds ?? 0) audit round\((ledger?.rounds ?? 0) == 1 ? "" : "s")" + (archive.map { ": its branch is kept as \($0)" } ?? ""))
+        let ended = endings.isEmpty ? "" : " Ended " + endings.map(\.said).joined(separator: ", ") + "."
+        let dropped = untracked.isEmpty ? "" : " Untracked files left in its worktree went with it: " + untracked.prefix(10).map(\.path).joined(separator: ", ") + (untracked.count > 10 ? ", …" : "") + "."
+        let important = ledger?.findings.filter { $0.severity == .important }.count ?? 0
+        var text = "Re-rolled \(slug):\(ended) " + (kept.isEmpty ? "it had no branch to keep" : kept.joined(separator: ", ")) + ".\(dropped) "
+            + "Its context now ends with a summary of what the rounds learned (\(important) Important finding\(important == 1 ? "" : "s") with the worker's answers); "
+            + "its audit rounds count from zero, and the fresh branch's first audit checks each open finding again. "
+        do {
+            text += try startWorker(slug).text
+        } catch let problem as Problem {
+            text += "The fresh worker wasn't started: \(problem.text) It's planned; start_worker(\(slug)) then."
+        }
+        return text
     }
 
     /// A task may be folded or abandoned (`verb`) once nothing works on it: refused while its worker runs or a merge
@@ -1205,7 +1330,7 @@ public final class LeadToolset: MCPToolset {
                                  label: "Verifier: \(task.title)", trust: config.isEmpty,
                                  prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, merged: merged,
                                                               notes: leadNotes(task), report: doneReport(task, head: head)),
-                                 start: "Verify the task now, then call submit_audit.", model: workflow.verifierModel, auditing: head)
+                                 start: "Verify the task now, then call submit_audit.", model: auditModel(workflow), auditing: head)
         }
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
@@ -1241,6 +1366,9 @@ public final class LeadToolset: MCPToolset {
         }
         return MCPToolResult(text: noTools + putBack + behind + room + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(tested)\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
     }
+
+    /// The model this project's audits run on: verifier_model, or another than the workers' (see `LeadWorkflow.auditModel`).
+    func auditModel(_ workflow: LeadWorkflow) -> String { workflow.auditModel(workerModel: runtime.workerModel(root: root)) }
 
     /// " The worktree has 3 untracked files (12.0 KB), leftovers …: path (size), …", or "" for none.
     static func leftoversText(_ leftovers: [Worktrees.Leftover]) -> String {
@@ -1282,7 +1410,7 @@ public final class LeadToolset: MCPToolset {
                                            in: Worktrees.path(root: root, slug: slug), label: "Verifier: \(task.title) (finder \(index)/\(count): \(focus.rawValue))",
                                            trust: trust, prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, finder: finder,
                                                                                       merged: merged, notes: notes, report: report),
-                                           start: "Look for findings in your focus now, then call submit_audit.", model: workflow.verifierModel, auditing: head,
+                                           start: "Look for findings in your focus now, then call submit_audit.", model: auditModel(workflow), auditing: head,
                                            finder: LeadVault.Finder(panel: id, index: index, size: count, focus: focus.rawValue, nitCap: workflow.auditNitCap)))
             } catch {
                 for started in sessions { try? runtime.kill(started) }
@@ -1340,11 +1468,12 @@ public final class LeadToolset: MCPToolset {
         // No file of its own to show: no diff to run (`git diff a...b --` alone would show everything).
         let stat = range.map { Git.run(["diff", "--stat"] + $0, in: root) }
         let diff = range.map { Git.run(["diff"] + $0, in: root) }
+        let task = store.load().task(slug)
         return LeadPrompts.Reaudit(round: ledger.rounds + 1, since: since, head: head, open: ledger.toRecheck,
                                    known: ledger.findings.filter { !$0.isOpen || $0.severity == .preExisting },
                                    stat: stat.map { $0.ok ? $0.output : "(git diff --stat failed: \($0.error))" } ?? "",
                                    diff: diff.flatMap { $0.ok && $0.output.count <= LeadPrompts.Reaudit.diffLimit ? $0.output : nil },
-                                   base: base, scope: scope)
+                                   base: base, scope: scope, answers: task?.currentAnswers(ledger) ?? [:], reroll: task?.pendingReroll(ledger))
     }
 
     /// What a re-audit of `head` covers, the last audit having covered `since`: the same commit again (a 'blocked'
@@ -2479,6 +2608,62 @@ public final class LeadToolset: MCPToolset {
         return MCPToolResult(text: "Noted on your task's lane. Keep going.")
     }
 
+    /// answer_findings' answers, as its schema tells the worker.
+    static let answersShape = "One object per finding: {id, answer, reason}. id: the finding's id as the lead sent it (F2). "
+        + "answer: fixed (the fix is committed on your branch) or disagree. reason: for disagree, why it isn't a problem that "
+        + "blocks the merge (why the failure it describes can't happen, or what allows it), which the re-audit weighs; for "
+        + "fixed, what the fix was (optional)."
+
+    /// A worker's answers to its task's open findings: each one fixed (committed since the audit that left it open) or
+    /// disagreed with, with a reason. Kept on the task for the lead (board) and the next audit; refused whole when an id
+    /// isn't an open finding, a disagreement has no reason, or nothing is committed since the audit for a fix.
+    private func answerFindings(_ arguments: [String: Any]) throws -> MCPToolResult {
+        let slug = try taskSlug(arguments)
+        var value = arguments["answers"]
+        if let text = value as? String { value = try? JSONSerialization.jsonObject(with: Data(text.utf8)) }
+        guard let list = value as? [Any], !list.isEmpty else { throw Problem(text: "answers is a list of objects: \(Self.answersShape)") }
+        let ledger = vault.audits(root: root, task: slug) ?? store.load().task(slug)?.audits
+        guard let ledger, !ledger.findings.isEmpty else { throw Problem(text: "Your task has no audit findings to answer. Nothing was recorded.") }
+        let head = branchHead(Worktrees.branch(slug))
+        var answers: [LeadFindingAnswer] = []
+        for (index, item) in list.enumerated() {
+            guard let object = item as? [String: Any] else { throw Problem(text: "Answer \(index + 1) isn't an object: \(Self.answersShape)") }
+            let word = { (key: String) in (object[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+            guard let finding = ledger.finding(word("id")) else {
+                throw Problem(text: "Answer \(index + 1): \(word("id").isEmpty ? "give the finding's id" : "no finding \(word("id"))") (your task's are \(ledger.findings.map(\.id).joined(separator: ", "))). Nothing was recorded.")
+            }
+            guard finding.isLive else {
+                throw Problem(text: "\(finding.label) is \(finding.status.rawValue) already; answer the open ones (\(ledger.findings.filter(\.isLive).map(\.id).joined(separator: ", "))). Nothing was recorded.")
+            }
+            guard answers.allSatisfy({ !finding.named($0.id) }) else { throw Problem(text: "\(finding.id) is answered twice; answer it once. Nothing was recorded.") }
+            guard let kind = LeadFindingAnswer.Kind(rawValue: word("answer").lowercased()) else {
+                throw Problem(text: "\(finding.id): answer is fixed or disagree, not \(word("answer").isEmpty ? "missing" : word("answer")). Nothing was recorded.")
+            }
+            let reason = word("reason")
+            if kind == .disagree, reason.isEmpty {
+                throw Problem(text: "\(finding.id): say why you disagree (reason), so the re-audit can weigh it. Nothing was recorded.")
+            }
+            if kind == .fixed, head == nil || head == ledger.commit {
+                throw Problem(text: "\(finding.id): nothing is committed on your branch since the audit at \(ledger.commit?.prefix(8) ?? "its commit"); commit the fix first, then answer. Nothing was recorded.")
+            }
+            answers.append(LeadFindingAnswer(id: finding.id, kind: kind, reason: reason, commit: head, round: ledger.rounds))
+        }
+        try store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            let answered = Set(answers.map(\.id))
+            board.tasks[index].answers = (board.tasks[index].answers ?? []).filter { !answered.contains($0.id) } + answers
+        }
+        let said = answers.map { "\(slug):\($0.id) \($0.text)" }.joined(separator: "; ")
+        try? store.appendProgress("The worker on \(slug) answered findings: \(Self.clip(said, 500))")
+        let told = try tellLead("The worker on \(slug) answered findings: \(said)\nThe re-audit judges these answers (audit(\(slug)) once it reports done); dismiss_finding one you accept yourself.",
+                                about: "worker \(slug)")
+        let current = store.load().task(slug)?.currentAnswers(ledger) ?? [:]
+        let open = ledger.blocking.filter { current[$0.id.uppercased()] == nil }
+        return MCPToolResult(text: "Answered \(answers.map(\.id).joined(separator: ", ")); the lead sees them in board(\(slug)) and the re-audit judges them."
+                             + (open.isEmpty ? "" : " Still unanswered Important findings: \(open.map(\.id).joined(separator: ", ")).")
+                             + " When everything is committed, report done." + (told ? "" : Self.noLead))
+    }
+
     private func submitAudit(_ arguments: [String: Any], by member: LeadVault.Member) throws -> MCPToolResult {
         // Only from the verifier VibeSwitcher's lead started last for its task, about the commit it was started on:
         // the session host records it from this server's session, whatever it says.
@@ -2497,7 +2682,8 @@ public final class LeadToolset: MCPToolset {
             }
             return tests
         }
-        let reports = try Self.findingReports(arguments["findings"])
+        let (reports, demoted) = try Self.parsedFindings(arguments["findings"])
+        let demotedText = demoted.isEmpty ? "" : " Recorded as Nit\(demoted.count == 1 ? "" : "s"), having no failure_scenario: \(demoted.joined(separator: ", ")) (Important needs one)."
         // Checked here first against what a re-audit covers (the vault has no git; see reauditScope), then by the vault.
         let earlier = vault.audits(root: root, task: slug) ?? LeadAuditLedger()
         if let audited = member.auditing {
@@ -2519,7 +2705,7 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].panel?.reported = (panel.reported + [finder]).sorted()
             }
             try? store.appendProgress("Audit of \(slug): finder \(finder ?? 0) of \(submission.of) submitted (\(completion.rawValue), \(integrity.rawValue), \(reports.count) finding\(reports.count == 1 ? "" : "s"))")
-            return MCPToolResult(text: "Your findings are in: \(submission.cast) of \(submission.of) finders have submitted, and the vote runs when the last one does. You're done; the lead takes it from here.")
+            return MCPToolResult(text: "Your findings are in: \(submission.cast) of \(submission.of) finders have submitted, and the vote runs when the last one does.\(demotedText) You're done; the lead takes it from here.")
         }
         // The verdict: one verifier's, or the finders' vote.
         let ledger = vault.audits(root: root, task: slug)
@@ -2558,7 +2744,7 @@ public final class LeadToolset: MCPToolset {
         if let ledger, ledger.reconsider {
             text += Self.reconsiderText(ledger, of: slug)
         } else if !blocking.isEmpty {
-            text += "merge refuses while an Important finding is open: send the worker the open ones (message, with their ids), or dismiss_finding one with a reason, or add_task(from_finding: …) to move it to a task of its own."
+            text += "merge refuses while an Important finding is open: send the worker the open ones (message, with their ids; it answers each with answer_findings, fixed or disagree with a reason, and the re-audit judges the answers), or dismiss_finding one with a reason, or add_task(from_finding: …) to move it to a task of its own."
         } else if !evidence.passes {
             text += "Send the worker the findings with message, or re-plan the task."
         } else if ledger?.open.isEmpty == false {
@@ -2566,11 +2752,27 @@ public final class LeadToolset: MCPToolset {
         }
         let told = try tellLead(text.trimmingCharacters(in: .whitespacesAndNewlines), about: "verifier \(slug)")
         let recorded = submission.of > 1 ? "Your findings are in, the last of \(submission.of): the vote is done and its verdict recorded." : "Verdict recorded."
-        return MCPToolResult(text: recorded + " You're done; the lead takes it from here." + (told ? "" : Self.noLead))
+        return MCPToolResult(text: recorded + demotedText + " You're done; the lead takes it from here." + (told ? "" : Self.noLead))
     }
 
     /// submit_audit's findings as the verifier passed them (a list of objects, or that list as JSON text).
-    static func findingReports(_ value: Any?) throws -> [LeadFinding.Report] {
+    static func findingReports(_ value: Any?) throws -> [LeadFinding.Report] { try parsedFindings(value).reports }
+
+    /// The same, and the open Important findings recorded as Nits for having no failure_scenario ("file:line" each):
+    /// Important is only for a concrete problem that blocks the merge, shown by what goes wrong.
+    static func parsedFindings(_ value: Any?) throws -> (reports: [LeadFinding.Report], demoted: [String]) {
+        var demoted: [String] = []
+        let reports = try findingList(value).map { report in
+            guard report.severity == .important, report.status == .open, (report.failureScenario ?? "").isEmpty else { return report }
+            var nit = report
+            nit.severity = .nit
+            demoted.append("\(report.file):\(report.line)")
+            return nit
+        }
+        return (reports, demoted)
+    }
+
+    private static func findingList(_ value: Any?) throws -> [LeadFinding.Report] {
         var value = value
         if let text = value as? String {
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2595,8 +2797,10 @@ public final class LeadToolset: MCPToolset {
             guard !word("evidence").isEmpty else { throw Problem(text: "\(which) (\(word("file")):\(line)): give the evidence: what you ran and what it gave, or what the code there does.") }
             let reason = word("reason")
             guard status != .dismissed || !reason.isEmpty else { throw Problem(text: "\(which) (\(word("file")):\(line)): a dismissed finding needs its reason.") }
+            let scenario = word("failure_scenario")
             return LeadFinding.Report(id: word("id").isEmpty ? nil : word("id"), severity: severity, file: word("file"), line: line,
-                                      evidence: word("evidence"), status: status, reason: reason.isEmpty ? nil : reason)
+                                      evidence: word("evidence"), status: status, reason: reason.isEmpty ? nil : reason,
+                                      failureScenario: scenario.isEmpty ? nil : scenario)
         }
     }
 
@@ -2674,20 +2878,26 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// The findings grouped by severity, open ones first, each named <task>:<id> for dismiss_finding and add_task.
-    static func findingsText(_ ledger: LeadAuditLedger, of slug: String) -> String {
+    /// `answers`: the worker's answers since the last audit (by id, uppercased), each under its finding.
+    static func findingsText(_ ledger: LeadAuditLedger, of slug: String, answers: [String: LeadFindingAnswer] = [:]) -> String {
         var lines = ["Findings (round \(ledger.rounds); \(findingsTally(ledger))):"]
         if let vote = ledger.vote { lines.append("Round \(ledger.rounds): \(vote.text) (\(focusesText(vote.focuses))).") }
         for group in ledger.bySeverity {
             lines.append("\(group.severity.rawValue):")
-            lines += group.findings.map { "- \(slug):" + clip($0.line1, 300) }
+            for finding in group.findings {
+                lines.append("- \(slug):" + clip(finding.line1, 300))
+                if let answer = answers[finding.id.uppercased()] { lines.append("  The worker's answer: " + clip(answer.text, 300)) }
+            }
         }
         return lines.joined(separator: "\n")
     }
 
     /// What the lead is told once the rounds reached the cap.
     static func reconsiderText(_ ledger: LeadAuditLedger, of slug: String) -> String {
-        "Reconsider the approach: \(ledger.reconsiderCause), and another round of the same rarely lands. "
-            + "Don't send the worker back as it is: re-plan \(slug) (update_task with a sharper contract or a different approach, then status planned, which starts its rounds over) or ask the user (ask_user). "
+        "Reconsider the approach: \(ledger.reconsiderCause), and a third round of patching rarely lands. "
+            + "Don't send the worker back as it is: re-roll \(slug) (update_task(\(slug), reroll: true), with a sharper contract in the same call if you have one): "
+            + "its worker stops, its branch is kept under an archive name, and a fresh worker starts from the base with a summary of the findings and answers so far. "
+            + "Or re-plan it (update_task, then status planned, which starts its rounds over) or ask the user (ask_user). "
             + "Dismiss a finding that isn't a real problem (dismiss_finding, with a reason), or make one a task of its own (add_task from_finding)."
     }
 
@@ -3034,7 +3244,7 @@ public final class LeadToolset: MCPToolset {
                      "- regression_command: " + (workflow.regressionCommand.map { "`\($0)` (merge runs it after test_command)" } ?? "not set: the incidents' checks (record_incident) run only as part of test_command"),
                      "- init_command: " + (workflow.initCommand.map { "`\($0)`" } ?? "not set" + (detectedInit.map { " (suggested from the repository: `\($0)`)" } ?? "")),
                      "- base_branch: " + (raw.baseBranch ?? "not set: \(fallback) (the branch the lead first started on)"),
-                     "- verifier_model: " + (workflow.verifierModel ?? "not set: the workers' model"),
+                     "- verifier_model: " + (workflow.verifierModel ?? "not set: audits run on \(auditModel(workflow)), another model than the workers' (\(runtime.workerModel(root: root) ?? "Claude's default"))"),
                      "- max_workers: \(workflow.maxWorkers)",
                      "- disk_warning_gb: \(Self.gb(workflow.diskWarningGB)) (the lead is told below this much free space)",
                      "- disk_floor_gb: \(Self.gb(workflow.diskFloorGB)) (start_worker refuses below it)",
@@ -3076,7 +3286,7 @@ public final class LeadToolset: MCPToolset {
                 lines += evidence.lines
             }
             if let audits = task.audits, !audits.findings.isEmpty || audits.reconsider {
-                lines.append("\n" + Self.findingsText(audits, of: task.slug))
+                lines.append("\n" + Self.findingsText(audits, of: task.slug, answers: task.currentAnswers(audits)))
                 if audits.reconsider, task.status != .done { lines.append(Self.reconsiderText(audits, of: task.slug)) }
             }
             let reports = (board.reports ?? []).filter { $0.task == task.slug }

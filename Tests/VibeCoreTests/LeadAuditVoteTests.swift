@@ -253,7 +253,7 @@ struct LeadAuditFindersTests: LeadTeamFixture {
     }
 
     static let verdict: [String: Any] = ["completion": "complete", "integrity": "clean", "summary": "checked"]
-    static let crash: [String: Any] = ["severity": "Important", "file": "b.txt", "line": 1, "evidence": "b.txt says bee, the contract wants b"]
+    static let crash: [String: Any] = ["severity": "Important", "failure_scenario": "b.txt holding bee: the contract's check of b gives the wrong result", "file": "b.txt", "line": 1, "evidence": "b.txt says bee, the contract wants b"]
 
     @Test func auditFindersIsSetWithConfigureWithinItsRange() throws {
         let root = try repo()
@@ -322,7 +322,7 @@ struct LeadAuditFindersTests: LeadTeamFixture {
         let (root, lead) = try ready(runtime)
         #expect(!call(lead, "audit", ["task": "add-b"]).isError)
         let seats = try (1...3).map { try finder($0, runtime) }
-        let lone: [String: Any] = ["severity": "Important", "file": "b.txt", "line": 1, "evidence": "only finder 2 sees it"]
+        let lone: [String: Any] = ["severity": "Important", "failure_scenario": "b.txt holding bee: the contract's check of b gives the wrong result", "file": "b.txt", "line": 1, "evidence": "only finder 2 sees it"]
         let nit: [String: Any] = ["severity": "Nit", "file": "b.txt", "line": 1, "evidence": "no capital"]
         // Finder 2 alone sees an Important finding; finders 1 and 3 a Nit.
         let one = call(seats[0], "submit_audit", Self.verdict.merging(["findings": [nit]]) { $1 })
@@ -370,7 +370,7 @@ struct LeadAuditFindersTests: LeadTeamFixture {
         let (root, lead) = try ready(runtime)
         #expect(!call(lead, "audit", ["task": "add-b"]).isError)
         let seats = try (1...3).map { try finder($0, runtime) }
-        let other: [String: Any] = ["severity": "Important", "file": "b.txt", "line": 40, "evidence": "only finder 3 sees this"]
+        let other: [String: Any] = ["severity": "Important", "failure_scenario": "line 40 of b.txt read on startup crashes it", "file": "b.txt", "line": 40, "evidence": "only finder 3 sees this"]
         #expect(!call(seats[0], "submit_audit", Self.verdict.merging(["findings": [Self.crash]]) { $1 }).isError)
         #expect(!call(seats[1], "submit_audit", Self.verdict.merging(["findings": [Self.crash.merging(["line": 2]) { $1 }]]) { $1 }).isError)
         #expect(!call(seats[2], "submit_audit", Self.verdict.merging(["findings": [other]]) { $1 }).isError)

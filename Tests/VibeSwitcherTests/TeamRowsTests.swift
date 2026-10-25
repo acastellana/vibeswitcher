@@ -84,20 +84,20 @@ struct TeamRowsTests {
         task.setback = LeadSetback(stage: .review, reason: "Important findings open: F1 a.swift:1")
         var audits = LeadAuditLedger()
         let still = LeadFinding.Report(id: "F1", severity: .important, file: "a.swift", line: 1, evidence: "still fails")
-        for (index, commit) in ["c1", "c2"].enumerated() { try audits.record([still], commit: commit, passes: true, changed: index == 0 ? nil : ["a.swift"]) }
+        try audits.record([still], commit: "c1", passes: true)
         task.audits = audits
         #expect(row(task, ["w-fix": Self.idle]).state == "Failed")
-        try audits.record([still], commit: "c3", passes: true, changed: ["a.swift"])
+        try audits.record([still], commit: "c2", passes: true, changed: ["a.swift"])
         task.audits = audits
         let reconsider = row(task, ["w-fix": Self.idle])
         #expect(reconsider.state == "Reconsider" && reconsider.mark == .failed && reconsider.group == .needsYou)
-        #expect(reconsider.line(summary: "ignored") == "Reconsider the approach: 1 Important finding left open across 3 rounds; the lead re-plans it or asks you.")
+        #expect(reconsider.line(summary: "ignored") == "Reconsider the approach: 1 Important finding left open across 2 rounds; the lead re-rolls it, re-plans it or asks you.")
 
         // Rounds whose verdict failed are counted as such.
         var failed = LeadAuditLedger()
         for commit in ["c1", "c2", "c3"] { try failed.record([], commit: commit, passes: false, changed: []) }
         task.audits = failed
-        #expect(row(task, ["w-fix": Self.idle]).line(summary: "ignored") == "Reconsider the approach: 3 failed verdicts in a row; the lead re-plans it or asks you.")
+        #expect(row(task, ["w-fix": Self.idle]).line(summary: "ignored") == "Reconsider the approach: 3 failed verdicts in a row; the lead re-rolls it, re-plans it or asks you.")
     }
 
     @Test func theTaskViewShowsFindingsBySeverity() throws {

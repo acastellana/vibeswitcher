@@ -36,7 +36,9 @@ final class FakeRuntime: LeadRuntime {
     var waiting: [String: PendingPrompt] = [:]
 
     let server = "/App/vibeswitcher-mcp"
-    func claudeCommand(root: String) -> String { "claude --dangerously-skip-permissions" }
+    /// The project's Claude command, flags included.
+    var claude = "claude --dangerously-skip-permissions"
+    func claudeCommand(root: String) -> String { claude }
     func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String, trust: Bool) throws -> String {
         let id = "session-\(spawned.count + 1)"
         spawned.append((id, cwd, command, label, trust))
@@ -216,7 +218,7 @@ struct LeadToolsetTests: LeadTeamFixture {
         let names = { (role: LeadLaunch.Role) in Set(((try? self.issued(role, task: role == .lead ? nil : "t", root: root, runtime))?.tools ?? []).map(\.name)) }
         #expect(names(.lead).isSuperset(of: ["status", "add_task", "start_worker", "audit", "merge", "cleanup", "ask_user", "post_update", "message"]))
         #expect(!names(.lead).contains("submit_audit"))
-        #expect(names(.worker) == ["report", "ask_lead", "progress"])
+        #expect(names(.worker) == ["report", "ask_lead", "progress", "answer_findings"])
         #expect(names(.verifier) == ["submit_audit"])
     }
 

@@ -82,6 +82,11 @@ final class HostRuntime: LeadRuntime {
         Bundle.main.executablePath ?? URL(fileURLWithPath: CommandLine.arguments[0]).standardizedFileURL.path
     }
 
+    /// The command's own --model, else Claude's settings in this process's home: what the workers start with.
+    func workerModel(root: String) -> String? {
+        LeadWorkflow.claudeModel(command: claudeCommand(root: root), home: VibePaths.home)
+    }
+
     func claudeCommand(root: String) -> String {
         // The same command the app starts Claude with (its preferences), so workers run like your own sessions.
         let preferences = UserDefaults(suiteName: "dev.vibeswitcher.VibeSwitcher")
