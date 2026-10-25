@@ -1219,3 +1219,9 @@
 - 2026-10-25 13:21 Automatically (auto_advance): Merged lead-team-panel-clear (Lead Team panel: clear task states, honest scorecard, shorter history) into project-lead at 923dacd9, review none: on its worker's done report on c0e62853 and the full test run. (Its first test run failed on aSendWhileAnotherProcessHoldsTheInboxReturnsAtOnceAndLandsWhenItsFree(), aFailingTestsHostIsEnded(), aToolThatGivesNoAnswerIsEnded(), noTestReadsTheMacsOwnFreeSpace(), aFailingSceneIsEnded() and the rerun of the whole test command passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/sc….)
 - 2026-10-25 13:21 Automatically (auto_advance): Cleaned up lead-team-panel-clear (freed 1.3 GB of build output and temporary folders). It stays done.
 - 2026-10-25 13:34 Merged lead-chat-less-clutter: Lead chat: less clutter around questions, tool rows and the team strip (no audit: review none)
+- 2026-10-25 13:34 Automatically (auto_advance): Merged lead-chat-less-clutter (Lead chat: less clutter around questions, tool rows and the team strip) into project-lead at ef11acd8, review none: on its worker's done report on e41cc47d and the full test run.
+- 2026-10-25 13:34 Automatically (auto_advance): Cleaned up lead-chat-less-clutter (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-10-25 13:34 Started a worker on the-lead-s-chat
+- 2026-10-25 13:34 Automatically (auto_advance): Started a worker on the-lead-s-chat (The lead's chat window stops freezing (SwiftUI churn in the Team panel)), its after tasks done (lead-chat-less-clutter, lead-team-panel-clear).
+- 2026-10-25 13:35 Automatically (auto_advance): Started the audit of merge-tests-don-t at 8d5bcc9a (Its review is audit).
+- 2026-10-25 13:42 Merged hidden-lead-terminals: Hidden lead terminals aren't sized 392 rows (no audit: review none)
