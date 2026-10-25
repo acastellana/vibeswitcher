@@ -1249,3 +1249,6 @@
 - 2026-10-25 15:14 Automatically (auto_advance): Started the audit of planted-git-hooks-or at 7113450d (Its review is audit).
 - 2026-10-25 15:15 Audit of the-lead-s-chat: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
 - 2026-10-25 15:22 Merged the-lead-s-chat: The lead's chat window stops freezing (SwiftUI churn in the Team panel)
+- 2026-10-25 15:22 Automatically (auto_advance): Merged the-lead-s-chat (The lead's chat window stops freezing (SwiftUI churn in the Team panel)) into project-lead at 1809b147, on its passing audit and the full test run.
+- 2026-10-25 15:22 Automatically (auto_advance): Cleaned up the-lead-s-chat (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-10-25 15:28 Merged app-memory-stops-growing: App memory stops growing ~150 MB an hour (no audit: review none)
