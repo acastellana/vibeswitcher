@@ -13,6 +13,18 @@ func liveVerifiers(_ runtime: FakeRuntime, root: String, slug: String) -> [Strin
     }.map(\.id)
 }
 
+/// At each read of the host's sessions, the task's awaited verifiers that read as ended: what the witness would tell
+/// the lead as "ended without a verdict" (`LeadWitness.endings`). Watched from the moment it's set.
+final class AwaitedEnded {
+    private(set) var seen: [String] = []
+    init(_ runtime: FakeRuntime, root: String, slug: String) {
+        runtime.onSessions = { [unowned runtime] in
+            guard let task = BoardStore(root: root).load().task(slug), task.status == .review, task.evidence == nil else { return }
+            self.seen += task.awaitedVerifiers.filter { runtime.killed.contains($0) && !runtime.stubborn.contains($0) }
+        }
+    }
+}
+
 extension LeadToolsetTests {
     @Test func auditAgainEndsTheEarlierVerifierFirst() throws {
         let root = try repo()
@@ -23,8 +35,11 @@ extension LeadToolsetTests {
         let first = call(lead, "audit", ["task": "one"])
         #expect(!first.isError, "\(first.text)")
         #expect(liveVerifiers(runtime, root: root, slug: "one") == ["session-2"])
-        // session-2 is still at work (or never got its tools): the next audit ends it before it starts session-3.
+        // session-2 is still at work (or never got its tools): the next audit ends it before it starts session-3,
+        // off the board first, so no witness pass meanwhile takes it for a verifier that ended without its verdict.
+        let awaited = AwaitedEnded(runtime, root: root, slug: "one")
         let again = call(lead, "audit", ["task": "one"])
+        #expect(awaited.seen.isEmpty, "\(awaited.seen)")
         #expect(!again.isError, "\(again.text)")
         #expect(runtime.killed.contains("session-2"))
         #expect(again.text.contains("Ended one's earlier verifier first"), "\(again.text)")
@@ -67,7 +82,9 @@ extension LeadAuditFindersTests {
         let panel = try #require(BoardStore(root: root).load().task("add-b")?.panel?.sessions)
         #expect(panel.count == 2)
         #expect(Set(liveVerifiers(runtime, root: root, slug: "add-b")) == Set(panel))
+        let awaited = AwaitedEnded(runtime, root: root, slug: "add-b")
         let again = call(lead, "audit", ["task": "add-b"])
+        #expect(awaited.seen.isEmpty, "\(awaited.seen)")
         #expect(!again.isError, "\(again.text)")
         #expect(again.text.contains("Ended add-b's 2 earlier verifiers first"), "\(again.text)")
         #expect(Set(runtime.killed).isSuperset(of: panel))
