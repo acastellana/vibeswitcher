@@ -642,6 +642,16 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     /// The commit whose verdict's open Important findings VibeSwitcher last sent its worker by itself (`LeadAdvance`):
     /// each verdict's are sent once.
     public var autoSentBack: String?
+    /// Its time budget in minutes as the lead set it (add_task's and update_task's budget_min; 0: none); nil: the
+    /// workflow's task_budget_min (see `LeadBudget`).
+    public var budgetMin: Int?
+    /// How long its workers have worked on it, in seconds, as the witness counted (see `LeadBudget.counts`): waiting
+    /// on a prompt, the lead or the user, and its audits, don't count.
+    public var worked: Double?
+    /// When the witness last counted its worker at work; nil while it isn't.
+    public var workedAt: Double?
+    /// Its working time reached its budget (see `LeadBudget`): until the lead changes budget_min.
+    public var overBudget: LeadOverBudget?
 
     /// Its review level: none unless the lead set audit.
     public var reviewLevel: Review { review ?? .none }

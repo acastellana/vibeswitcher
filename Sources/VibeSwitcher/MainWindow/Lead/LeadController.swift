@@ -1129,6 +1129,23 @@ final class LeadController: ObservableObject {
             }
         }
         disks[root] = disk
+        // Working time, and the stop at a task's time budget (see `LeadBudget`): counted on the board as it is when
+        // written, so each budget is told once, to its worker and to the lead.
+        let working = LeadBudget.working(board: board, seen: seen)
+        let budget = workflow.taskBudgetMinutes, at = now.timeIntervalSince1970
+        var counted = board
+        if counted.noteWork(working, defaultMinutes: budget, now: at).changed {
+            var agents: [String: LeadAgent] = [:]
+            for task in board.tasks {
+                guard let worker = task.worker, let session = team.sessions[worker] else { continue }
+                agents[task.id] = LeadAgent(pid: session.pid, tty: session.tty, session: worker)
+            }
+            reads.async({ _ in
+                (try? BoardStore(root: root).update { $0.noteWork(working, defaultMinutes: budget, now: at).reached }) ?? []
+            }) { [weak self] reached in
+                for task in reached { self?.stopForBudget(task, root: root, worker: agents[task.id], defaultMinutes: budget) }
+            }
+        }
         // On the board too, for status and the Team view, until the worker moves again.
         let stalls = LeadWitness.stalls(board: board, seen: seen, now: now)
         var noted = board
@@ -1138,6 +1155,20 @@ final class LeadController: ObservableObject {
             for message in waiting { deliver(message.text, from: message.sender, root: root) }
         }
         wake(root: root)
+    }
+
+    /// A task's worker reached its time budget: it's told to stop and report over_budget (in its inbox, typed in if
+    /// it's between turns), and the lead is told. Nothing is ended.
+    private func stopForBudget(_ task: LeadTask, root: String, worker: LeadAgent?, defaultMinutes: Int) {
+        let minutes = task.overBudget?.minutes ?? LeadBudget.minutes(task, default: defaultMinutes) ?? 0
+        Breadcrumbs.shared.note("witness: \(task.slug) in \((root as NSString).lastPathComponent) reached its \(minutes) min budget")
+        if let worker {
+            let state = HookState.load(from: VibePaths.stateFile(tty: worker.tty))
+            _ = try? LeadDelivery.deliver(LeadBudget.stopText(task, minutes: minutes), from: .system("time budget"), to: worker,
+                                          state: state, inputIsEmpty: nil, typeInto: nil, root: inbox)
+            flush(worker)
+        }
+        deliver(LeadBudget.leadText(task, minutes: minutes), from: .system("witness"), root: root)
     }
 
     /// Who a waiting message is from, in words.

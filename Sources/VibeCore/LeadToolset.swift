@@ -328,9 +328,9 @@ public final class LeadToolset: MCPToolset {
             return []
         case .worker?:
             return [
-                MCPToolInfo(name: "report", description: "Tell the lead you're done (everything committed, checks passing) or blocked (say what you need). A verifier then checks your branch. Done needs evidence for every acceptance check and your blind check's outcome: a done without them is refused, naming what's missing.",
-                            properties: ["status": P(type: "string", description: "done or blocked", options: ["done", "blocked"]),
-                                         "summary": P(type: "string", description: "What changed and how you checked it, or what blocks you"),
+                MCPToolInfo(name: "report", description: "Tell the lead you're done (everything committed, checks passing), blocked (say what you need), or over_budget (once VibeSwitcher says your task's time budget is reached: commit what works first). A verifier then checks a done branch. Done needs evidence for every acceptance check and your blind check's outcome: a done without them is refused, naming what's missing.",
+                            properties: ["status": P(type: "string", description: "done, blocked, or over_budget", options: ["done", "blocked", Self.overBudgetStatus]),
+                                         "summary": P(type: "string", description: "What changed and how you checked it, or what blocks you; for over_budget: what works (with evidence), what's missing, and your proposal (finish in N more minutes, cut scope, or another approach)"),
                                          "evidence": P(type: "array", description: Self.evidenceShape, items: "object"),
                                          "blind_check": P(type: "string", description: Self.blindCheckShape)],
                             required: ["status", "summary"]),
@@ -363,7 +363,8 @@ public final class LeadToolset: MCPToolset {
                                          "boundaries": P(type: "array", description: "Files or areas it may touch; what it must not do", items: "string"),
                                          "context": P(type: "string", description: "What a fresh worker needs to know"),
                                          "from_finding": P(type: "string", description: "A finding as status and board name it, <task>:<id> (e.g. add-b:F2)"),
-                                         "review": Self.reviewProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty]),
+                                         "review": Self.reviewProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
+                                         "budget_min": Self.budgetProperty]),
                 MCPToolInfo(name: "dismiss_finding", description: "Close one of a task's open audit findings with a reason (it isn't a problem, it's out of scope, the user accepted it): it no longer holds the merge back, and no verifier raises it again.",
                             properties: ["task": task, "id": P(type: "string", description: "The finding's id (F2), or <task>:<id>"),
                                          "reason": P(type: "string", description: "Why, in one line (it's kept with the finding)")],
@@ -378,6 +379,7 @@ public final class LeadToolset: MCPToolset {
                                          "reason": P(type: "string", description: "With status kept: what holds it back (a decision, the user's word); merge names it when it refuses. With abandoned: why nothing will carry it. With removed: why it was a mistake (optional)"),
                                          "into": P(type: "string", description: "With status folded: the task (its slug) that carries this one's work"),
                                          "review": Self.reviewProperty, "after": Self.afterProperty, "auto_advance": Self.autoAdvanceProperty,
+                                         "budget_min": Self.budgetProperty,
                                          "reroll": P(type: "boolean", description: "Re-roll it after audit rounds that didn't land: its worker and verifier stop, its branch is kept as archive/<slug>-<n>, its worktree goes, and a fresh worker starts from the base on a new agent/<slug>, its context given a summary of the findings and the worker's answers so far. Contract changes in the same call apply first; not with status")],
                             required: ["task"]),
                 MCPToolInfo(name: "start_worker", description: "Start a worker on a task: a fresh Claude session in its own worktree on branch agent/<slug>, given the contract. A worktree stopped partway through a rebase or merge is described, not started; recover aborts it first. One left on another branch or a detached HEAD is put back on agent/<slug>, its uncommitted files carried along.",
@@ -444,6 +446,7 @@ public final class LeadToolset: MCPToolset {
                                          "disk_warning_gb": P(type: "number", description: "Free space (GB) on the worktrees' volume below which you're told, once, what takes the space (default 10)"),
                                          "disk_floor_gb": P(type: "number", description: "Free space (GB) below which start_worker refuses (default 3)"),
                                          "test_timeout_min": P(type: "number", description: "Minutes merge lets init_command and test_command run before it takes them as hung and stops them (default 45)"),
+                                         "task_budget_min": P(type: "integer", description: "A task's time budget when it sets none (add_task budget_min), in minutes of its worker's working time: at it the worker is told to stop and report over_budget, and you decide (default 120; 0: no budget)"),
                                          "heavy_slots": P(type: "integer", description: "How many builds and full test runs (vs-heavy's, merges', audits') may run at once across all projects on this Mac (empty: the cores ÷ 4)"),
                                          "audit_finders": P(type: "integer", description: "How many finders an audit runs: 1 (one verifier, the default), 2 or 3 (different focuses on one shared build and test run, and a vote keeps what most of them found; each counts against mac_max_sessions)"),
                                          "audit_nit_cap": P(type: "integer", description: "How many new Nit findings one audit's vote keeps (default 5)"),
@@ -572,6 +575,20 @@ public final class LeadToolset: MCPToolset {
                              items: "string")
     }
     /// add_task's and update_task's per-task opt-out of auto_advance.
+    static var budgetProperty: MCPToolInfo.Property {
+        MCPToolInfo.Property(type: "integer", description: "Its time budget, in minutes of its worker's working time (waiting on you or the user, and audits, don't count): at it the worker is told to stop and report over_budget. 0: none. Not given: workflow.md's task_budget_min. Changing it clears an over-budget state, and the next stop comes at the new budget")
+    }
+
+    /// The `budget_min` passed to add_task or update_task; nil when none was.
+    private func budgetArgument(_ arguments: [String: Any]) throws -> Int? {
+        guard let given = arguments["budget_min"], !(given is NSNull), !((given as? String)?.isEmpty ?? false) else { return nil }
+        let number = (given as? NSNumber)?.doubleValue ?? (given as? String).flatMap { Double($0.trimmingCharacters(in: .whitespaces)) }
+        guard let number, number >= 0, number == number.rounded() else {
+            throw Problem(text: "budget_min is a whole number of minutes, 0 (no budget) or more, not \(given). Nothing was changed.")
+        }
+        return Int(number)
+    }
+
     static var autoAdvanceProperty: MCPToolInfo.Property {
         MCPToolInfo.Property(type: "boolean", description: "false: VibeSwitcher moves nothing on this task by itself (no automatic start, audit, merge, send-back or cleanup), whatever workflow.md's auto_advance says; true (the default) clears that")
     }
@@ -598,11 +615,13 @@ public final class LeadToolset: MCPToolset {
         guard !contract.acceptance.isEmpty else { throw Problem(text: "Give at least one acceptance check: something that can be run or seen.") }
         let review = try reviewArgument(arguments)
         let auto = try autoArgument(arguments)
+        let budget = try budgetArgument(arguments)
         let task = try store.update { board -> LeadTask in
             var task = LeadTask(slug: Slug.make(title, taken: Set(board.tasks.map(\.slug))), title: title, contract: contract)
             task.review = review
             if arguments["after"] != nil { task.after = try Self.afterList(strings(arguments["after"]), on: board, for: task.slug) }
             task.autoAdvance = auto == false ? false : nil
+            task.budgetMin = budget
             board.tasks.append(task)
             return task
         }
@@ -790,7 +809,7 @@ public final class LeadToolset: MCPToolset {
         + "by its id: fixed, open (still), or dismissed with a reason. id: leave it out for a new finding. Empty or left out: you found nothing."
 
     static let updateKeys: Set<String> = ["task", "title", "goal", "acceptance", "boundaries", "context", "append_context", "status", "reason", "into", "review", "reroll",
-                                          "after", "auto_advance"]
+                                          "after", "auto_advance", "budget_min"]
 
     private func updateTask(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
@@ -834,6 +853,9 @@ public final class LeadToolset: MCPToolset {
         }
         let review = try reviewArgument(arguments)
         let auto = try autoArgument(arguments)
+        let budget = try budgetArgument(arguments)
+        let defaultBudget = workflow.taskBudgetMinutes
+        var budgetCleared = false
         let appended = (arguments["append_context"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let note = appended.isEmpty ? nil : leadNote(.context, appended, on: slug)
         var changed: [String] = []
@@ -876,6 +898,19 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].autoAdvance = auto ? nil : false
                 changed.append(auto ? "auto_advance on for it" : "auto_advance off for it (nothing moves on it by itself)")
             }
+            if let budget {
+                let before = board.tasks[index].budgetMin ?? defaultBudget
+                board.tasks[index].budgetMin = budget
+                // A new budget is a new stop: the over-budget state goes, and the worker is told again at the new one.
+                if budget != before, let over = board.tasks[index].overBudget {
+                    board.tasks[index].overBudget = nil
+                    budgetCleared = true
+                    changed.append("budget_min \(budget) (it was over its \(over.minutes) min budget, \(LeadBudget.text(board.tasks[index].worked ?? 0)) worked: "
+                                   + (budget == 0 ? "no budget now" : "the next stop comes at \(budget) min") + ")")
+                } else {
+                    changed.append(budget == 0 ? "budget_min 0 (no budget)" : "budget_min \(budget)")
+                }
+            }
             if !appended.isEmpty {
                 let context = board.tasks[index].contract.context.trimmingCharacters(in: .whitespacesAndNewlines)
                 board.tasks[index].contract.context = context.isEmpty ? appended : context + "\n\n" + appended
@@ -883,6 +918,12 @@ public final class LeadToolset: MCPToolset {
                 changed.append("context (added to)")
             }
             if let status {
+                // Re-planned: its next worker's time counts from zero.
+                if status == .planned, board.tasks[index].status != .planned {
+                    board.tasks[index].worked = nil
+                    board.tasks[index].workedAt = nil
+                    board.tasks[index].overBudget = nil
+                }
                 board.tasks[index].status = status
                 board.tasks[index].keptBecause = status == .kept ? reason : nil
                 board.tasks[index].abandonedBecause = status == .abandoned ? reason : nil
@@ -916,7 +957,8 @@ public final class LeadToolset: MCPToolset {
         if reroll {
             return MCPToolResult(text: (changed.isEmpty ? "" : "Updated \(slug): \(changed.joined(separator: ", ")).\(recorded) ") + (try rerollTask(slug)))
         }
-        return MCPToolResult(text: changed.isEmpty ? "Nothing to change on \(slug)." : "Updated \(slug): \(changed.joined(separator: ", ")).\(recorded)")
+        let goOn = budgetCleared && status == nil ? " If its worker stopped for the budget, message(\(slug), …) to tell it to go on." : ""
+        return MCPToolResult(text: changed.isEmpty ? "Nothing to change on \(slug)." : "Updated \(slug): \(changed.joined(separator: ", ")).\(recorded)\(goOn)")
     }
 
     /// A task may be re-rolled while it's still to land: not merged, kept, folded or abandoned, and no merge of it under way.
@@ -1003,6 +1045,9 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].report = nil
             board.tasks[index].auditNeeded = nil
             board.tasks[index].blocker = nil
+            board.tasks[index].worked = nil
+            board.tasks[index].workedAt = nil
+            board.tasks[index].overBudget = nil
             if let replanned { board.tasks[index].audits = replanned }
         }
         try? store.appendProgress("Re-rolled \(slug) after \(ledger?.rounds ?? 0) audit round\((ledger?.rounds ?? 0) == 1 ? "" : "s")" + (archive.map { ": its branch is kept as \($0)" } ?? ""))
@@ -2624,6 +2669,10 @@ public final class LeadToolset: MCPToolset {
                 guard !value.isEmpty else { break }
                 guard let count = Int(value), count >= 0 else { throw Problem(text: "audit_nit_cap must be a whole number, 0 or more.") }
                 value = String(count)
+            case "task_budget_min":
+                guard !value.isEmpty else { break }
+                guard let count = Int(value), count >= 0 else { throw Problem(text: "task_budget_min must be a whole number of minutes, 0 (no budget) or more.") }
+                value = String(count)
             case "test_timeout_min":
                 guard !value.isEmpty else { break }
                 guard let minutes = LeadWorkflow.minutes(value) else { throw Problem(text: "test_timeout_min must be a number of minutes, more than 0.") }
@@ -2669,7 +2718,7 @@ public final class LeadToolset: MCPToolset {
                                           "base_branch": after.baseBranch ?? "", "verifier_model": after.verifierModel ?? "",
                                           "max_workers": String(after.maxWorkers),
                                           "disk_warning_gb": Self.gb(after.diskWarningGB), "disk_floor_gb": Self.gb(after.diskFloorGB),
-                                          "test_timeout_min": Self.gb(after.testTimeoutMinutes),
+                                          "test_timeout_min": Self.gb(after.testTimeoutMinutes), "task_budget_min": String(after.taskBudgetMinutes),
                                           "heavy_slots": after.heavySlots.map(String.init) ?? "",
                                           "audit_finders": String(after.auditFinders), "audit_nit_cap": String(after.auditNitCap),
                                           "merge_policy": after.mergePolicy?.rawValue ?? "", "sensitive_paths": after.sensitivePaths?.joined(separator: ", ") ?? "",
@@ -2677,7 +2726,7 @@ public final class LeadToolset: MCPToolset {
                                           "watch_app_logs": String(after.watchAppLogs)]
             // A limit cleared reads back as its default.
             let defaults = ["disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB),
-                            "test_timeout_min": Self.gb(LeadWorkflow().testTimeoutMinutes),
+                            "test_timeout_min": Self.gb(LeadWorkflow().testTimeoutMinutes), "task_budget_min": String(LeadWorkflow().taskBudgetMinutes),
                             "audit_finders": String(LeadWorkflow().auditFinders), "audit_nit_cap": String(LeadWorkflow().auditNitCap),
                             "auto_advance": String(LeadWorkflow().autoAdvance), "watch_app_logs": String(LeadWorkflow().watchAppLogs)]
             for change in changes where read[change.key] != (change.value.isEmpty ? defaults[change.key] ?? "" : change.value) {
@@ -2739,10 +2788,16 @@ public final class LeadToolset: MCPToolset {
 
     private static let noLead = " (There's no lead running right now; it's on the board, and the next lead picks it up.)"
 
+    /// The report a worker gives at its task's time budget (see `LeadBudget`): not done, for the lead to decide on.
+    static let overBudgetStatus = "over_budget"
+
     private func report(_ arguments: [String: Any]) throws -> MCPToolResult {
         let slug = try taskSlug(arguments)
         let summary = try text(arguments, "summary", missing: "Say what changed and how you checked it, or what blocks you.")
-        let done = (arguments["status"] as? String) != "blocked"
+        let kind = (arguments["status"] as? String)?.trimmingCharacters(in: .whitespaces).lowercased()
+        let overBudget = kind == Self.overBudgetStatus
+        if overBudget { return try reportOverBudget(slug, summary) }
+        let done = kind != "blocked"
         // Before anything is recorded: a done that doesn't show how each check was checked doesn't count as one.
         var evidence = done ? try Self.doneEvidence(arguments, acceptance: store.load().task(slug)?.contract.acceptance ?? [], base: workflow.base) : nil
         // Its screenshots as copies kept in .vibeswitcher, so board(task), the verifier and the lead still open them
@@ -2829,6 +2884,40 @@ public final class LeadToolset: MCPToolset {
                                                           : "Reported. A verifier will check your branch; stay available for fixes.") : "Reported." + kept)
             : "Reported. The lead will get back to you." + kept
         return MCPToolResult(text: reply + (told ? "" : Self.noLead))
+    }
+
+    /// report(status: over_budget): like blocked, it's no done (merge and audit don't take it), and it waits on the
+    /// lead's decision: extend the budget, re-plan or abandon. Kept on the task as its over-budget state.
+    private func reportOverBudget(_ slug: String, _ summary: String) throws -> MCPToolResult {
+        // A done recorded earlier for this task goes: what merge reads for a review none task is the latest word.
+        let head = branchHead(Worktrees.branch(slug))
+        let standing = vault.verdict(root: root, task: slug).flatMap { $0.commit == head ? $0 : nil }
+        if standing == nil { try vault.clearVerdict(root: root, task: slug) }
+        _ = try? vault.reportDone(root: root, task: slug, commit: nil, evidence: nil)
+        let workflow = self.workflow
+        let task = try store.update { board -> LeadTask? in
+            guard let index = board.taskIndex(slug) else { return nil }
+            if ![.kept, .folded, .abandoned, .done].contains(board.tasks[index].status) { board.tasks[index].status = .blocked }
+            // One that reports it before it's told (it judged the time itself) is over its budget all the same.
+            var over = board.tasks[index].overBudget
+                ?? LeadOverBudget(minutes: LeadBudget.minutes(board.tasks[index], default: workflow.taskBudgetMinutes) ?? 0)
+            over.report = summary
+            board.tasks[index].overBudget = over
+            if standing == nil, let earlier = board.tasks[index].evidence {
+                if earlier.commit != nil, earlier.commit != head { board.tasks[index].outdatedEvidence = earlier }
+                board.tasks[index].evidence = nil
+            }
+            board.tasks[index].auditNeeded = nil
+            board.tasks[index].blocker = "Over its time budget: " + summary
+            return board.tasks[index]
+        }
+        let over = task?.overBudget
+        let budget = over.map { $0.minutes > 0 ? "its \($0.minutes) min time budget" : "its time budget" } ?? "its time budget"
+        let text = "The worker on \(slug) is over \(budget) (\(LeadBudget.text(task?.worked ?? 0)) worked): \(summary)\n"
+            + "Decide: extend it (update_task(\(slug), budget_min: more), then message it to go on), re-plan (update_task, then message it), "
+            + "or abandon it. It's not a done report: merge and audit don't take it."
+        let told = try tellLead(text, about: "worker \(slug)")
+        return MCPToolResult(text: "Reported over budget. Wait for the lead's decision: it extends the budget, re-plans or abandons the task." + (told ? "" : Self.noLead))
     }
 
     private func askLead(_ arguments: [String: Any]) throws -> MCPToolResult {
@@ -3195,6 +3284,12 @@ public final class LeadToolset: MCPToolset {
                 Self.clip("- \(task.slug): \(task.stall!.text(now: now)). \(task.stall!.advice(slug: task.slug))", 300)
             }
         }
+        // Over their time budget: each waits on the lead's decision (see `LeadBudget`).
+        let over = board.overBudget
+        if !over.isEmpty {
+            lines.append("\nOver budget (\(over.count)): extend (update_task budget_min, then message it to go on), re-plan or abandon:")
+            lines += over.prefix(Self.statusTasks).map { task in Self.clip("- \(task.slug): \(task.overBudget!.text(worked: task.worked))", 300) }
+        }
         // A task whose worker or verifier ended without a word, or whose session went with a replaced host, isn't
         // running: it's said apart, with what to do.
         let ended = sessions.map { sessions in board.tasks.compactMap { task in Self.endedMember(task, sessions).map { (task, $0) } } } ?? []
@@ -3351,6 +3446,9 @@ public final class LeadToolset: MCPToolset {
         if let panel = task.panel, task.evidence == nil, task.status == .review, panel.reported.count < panel.size { line += " — audit by \(panel.progress)" }
         else if let vote = task.audits?.vote, task.evidence != nil, task.status != .done { line += " — \(vote.text)" }
         if task.rework > 0 { line += " — rework \(task.rework)" }
+        if let over = task.overBudget, !LeadTeams.isFinished(task) {
+            line += " — over budget: \(LeadBudget.text(task.worked ?? 0)) of \(over.minutes) min" + (over.report == nil ? ", no report yet" : "")
+        }
         if let checkpoint = task.checkpoints?.last { line += " — last progress: \(Self.clip(checkpoint.text, 70))" }
         return Self.clip(line, 200)
     }
@@ -3508,6 +3606,7 @@ public final class LeadToolset: MCPToolset {
                      "- disk_warning_gb: \(Self.gb(workflow.diskWarningGB)) (the lead is told below this much free space)",
                      "- disk_floor_gb: \(Self.gb(workflow.diskFloorGB)) (start_worker refuses below it)",
                      "- test_timeout_min: \(Self.gb(workflow.testTimeoutMinutes)) (merge stops init_command and test_command past it, as hung)",
+                     "- task_budget_min: " + (workflow.taskBudgetMinutes > 0 ? "\(workflow.taskBudgetMinutes) (a task's time budget, in minutes of its worker's working time, unless it sets its own)" : "0 (no time budget unless a task sets its own)"),
                      "- heavy_slots: \(heavySlotsText(workflow)) (builds and full test runs at once, Mac-wide: vs-heavy's, merges', audits'; one more waits)",
                      "- audit_finders: \(workflow.auditFinders) (" + (workflow.auditFinders == 1 ? "one verifier per audit" : "finders per audit, on one shared build and test run, with a vote; each counts against mac_max_sessions") + ")",
                      "- audit_nit_cap: \(workflow.auditNitCap) (new Nit findings one audit's vote keeps)"]

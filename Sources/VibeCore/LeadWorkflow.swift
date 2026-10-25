@@ -25,6 +25,9 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// How many minutes merge lets init_command and test_command run before they're taken as hung and stopped
     /// (`test_timeout_min:`).
     public var testTimeoutMinutes: Double = Worktrees.testTimeout / 60
+    /// A task's time budget in minutes when it sets none of its own (`task_budget_min:`; 0: no budget): once its
+    /// worker's working time reaches it, the worker is told to stop and report over_budget (see `LeadBudget`).
+    public var taskBudgetMinutes = LeadBudget.defaultMinutes
     /// The Mac-wide keys (`macKeys`) set in this file: ignored, the Mac's are set once in Settings (see `MacLimits`).
     public var ignoredKeys: [String] = []
     /// How many test and build slots merge and an audit's shared run share with every project's `vs-heavy`
@@ -98,6 +101,7 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "disk_warning_gb": workflow.diskWarningGB = gigabytes(value) ?? 10
                 case "disk_floor_gb": workflow.diskFloorGB = gigabytes(value) ?? 3
                 case "test_timeout_min": workflow.testTimeoutMinutes = minutes(value) ?? Worktrees.testTimeout / 60
+                case "task_budget_min": workflow.taskBudgetMinutes = Int(value).map { max(0, $0) } ?? LeadBudget.defaultMinutes
                 case _ where macKeys.contains(key):
                     if !value.isEmpty, !workflow.ignoredKeys.contains(key) { workflow.ignoredKeys.append(key) }
                 case "heavy_slots": workflow.heavySlots = Int(value).flatMap { $0 >= 1 ? $0 : nil }
@@ -340,7 +344,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     }
 
     public static let configurable = ["test_command", "regression_command", "init_command", "base_branch", "verifier_model", "max_workers",
-                                      "disk_warning_gb", "disk_floor_gb", "test_timeout_min",
+                                      "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "task_budget_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "records_dir",
                                       "auto_advance", "watch_app_logs"]
 
@@ -469,6 +473,10 @@ public struct LeadWorkflow: Equatable, Sendable {
     # biggest task folders); below disk_floor_gb start_worker refuses.
     disk_warning_gb: 10
     disk_floor_gb: 3
+    # A task's time budget, in minutes of its worker's working time (waiting on you or the lead, and audits, don't
+    # count): at it the worker is told to stop, commit what works and report over_budget, and the lead decides whether
+    # to extend it (update_task budget_min), re-plan or abandon. Nothing is stopped. 0: no budget. Empty: 120.
+    task_budget_min: 120
     # How many builds and full test runs (vs-heavy's, merge's, audits') may run at once across all projects on this
     # Mac; one more waits, saying who holds each slot. Empty: the Mac's cores ÷ 4 (VIBESWITCHER_HEAVY_SLOTS when set).
     heavy_slots:
@@ -667,6 +675,25 @@ public enum LeadPrompts {
             + "open one with answer_findings: fixed (commit the fix first) or disagree, with a reason the re-audit can check "
             + "(why the failure it describes can't happen, or what allows it). Then report done again."
 
+        /// What happens at a task's time budget (see `LeadBudget`), as the worker's brief says it in one line.
+        public static func workerBudget(_ minutes: Int?) -> String {
+            guard let minutes else { return "Time budget: none for this task." }
+            return "Time budget: \(minutes) min of your working time (waiting on the user or the lead doesn't count). When "
+                + "it's reached, VibeSwitcher tells you to stop: commit what works, then report with status over_budget "
+                + "saying what works (with evidence), what's missing and your proposal (finish in N more minutes, cut scope, "
+                + "or another approach), and wait for the lead's decision."
+        }
+
+        /// What happens at a task's time budget, as the lead's brief says it in one line.
+        public static func leadBudget(_ workflow: LeadWorkflow) -> String {
+            let budget = workflow.taskBudgetMinutes > 0 ? "\(workflow.taskBudgetMinutes) min (task_budget_min)" : "none by default (task_budget_min 0)"
+            return "Time budget: each task has one, \(budget), or its own (add_task or update_task budget_min; 0: none). "
+                + "When its worker's working time reaches it (waiting on you, the user or an audit doesn't count), VibeSwitcher "
+                + "tells the worker to stop and report over_budget (what works, what's missing, its proposal) and tells you; "
+                + "nothing is stopped. Status lists it under Over budget: decide, extend (update_task budget_min, then message "
+                + "it to go on; auto_advance never extends one), re-plan or abandon."
+        }
+
         /// Who checks a worker's branch, as its prompt tells it.
         public static func workerCheck(_ review: LeadTask.Review) -> String {
             review == .audit ? "A verifier will check your branch independently."
@@ -836,6 +863,8 @@ public enum LeadPrompts {
 
         \(autoAdvance(workflow))
 
+        \(Policy.leadBudget(workflow))
+
         Talking to the user: short. What you decided, what's done (with evidence), what you need from them, what's \
         next. Hide the grunt work; the user can open any worker to look.
         Messages arriving while you work: from the user (act on them), from VibeSwitcher (worker events) or from \
@@ -972,6 +1001,7 @@ public enum LeadPrompts {
         \(Policy.workerEvidence(base: workflow.base))
         \(Policy.regressionTest(base: workflow.base))
         \(Policy.workerFindings)
+        \(Policy.workerBudget(LeadBudget.minutes(task, default: workflow.taskBudgetMinutes)))
         Stuck: say exactly what you need and stop. Don't fake a pass: never weaken or delete tests.
 
         \(WorkerBrief.render(task))
