@@ -1379,3 +1379,5 @@
 - 2026-10-26 10:41 Planned review-level-from-the: Review level from the change itself, and a REVIEW.md per project (review audit)
 - 2026-10-26 10:41 Planned one-step-revert-of: One-step revert of a merged task (review audit)
 - 2026-10-26 10:41 Workflow: sensitive_paths = `.claude/, .mcp.json, CLAUDE.md, CLAUDE.local.md, AGENTS.md, REVIEW.md, .github/, .env, .env.*, *.entitlements, *.pem, Sources/VibeHost/, Sources/vibeswitcher-host/, Sources/VibeCore/LeadVault*.swift, Sources/VibeCore/LeadLaunch.swift, Sources/VibeCore/LeadAdvance.swift, Sources/VibeCore/LeadRisk.swift, Sources/VibeCore/Steer.swift, Sources/VibeCore/Worktrees.swift, Sources/VibeCore/MergeRerun.swift, Sources/VibeCore/TestLock.swift, Sources/VibeCore/Redaction.swift, Sources/VibeCore/HookInstaller.swift, Sources/VibeCore/RemoteAccess.swift, Sources/VibeSwitcher/RemoteServer.swift, Sources/VibeSwitcher/PhoneAccess.swift, Sources/VibeSwitcher/Sandbox.swift, scripts/build-app.sh, scripts/setup-signing.sh`
+- 2026-10-26 10:41 Started a worker on review-level-from-the
+- 2026-10-26 10:41 Started a worker on one-step-revert-of
