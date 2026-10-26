@@ -1373,3 +1373,5 @@
 - 2026-10-26 03:35 Automatically (auto_advance): Merged the-phone-shows-needs (The phone shows "needs you" only for the user, like the Mac) into project-lead at 72de9685, on its passing audit and the full test run.
 - 2026-10-26 03:35 Automatically (auto_advance): Cleaned up the-phone-shows-needs (freed 2.3 GB of build output and temporary folders). It stays done.
 - 2026-10-26 08:01 Kept the-app-s-memory unmerged: Lead hold before merge: FootprintRelief's malloc-lock stall (183–572 ms measured) can freeze the UI. Change requested; set back once the worker has re-reported.
+- 2026-10-26 08:26 Automatically (auto_advance): Didn't start the-app-s-memory: the-app-s-memory's worker is still running. Send it what to do with message, or stop_worker first.
+- 2026-10-26 08:32 Merged the-app-s-memory: The app's memory stops growing over a working day (no audit: review none)

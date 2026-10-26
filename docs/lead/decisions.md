@@ -456,3 +456,7 @@ The user, 2026-10-25: "me molestan tantas notificaciones y no saber realmente cu
 
 The worker measured it on 2026-10-26. A fresh worktree's first swift build takes 91 s for 208 steps at load 28. A `cp -c` clone of an up-to-date .build still rebuilds all 208, because swift-driver disables incremental compilation when arguments change: absolute paths and -package-name are in master.priors and llbuild's build.db. Only .build/checkouts survives, saving about 5 s, and its alternates point into the source worktree. The earlier a-new-worktree-builds (727f29d) already shares the SDK module cache, the one part that does carry over.
 
+## 2026-10-26 08:25:23 Lifted the hold on the-app-s-memory and merged it: FootprintRelief runs only while the app isn't frontmost.
+
+The hold was for the malloc-lock stall (183–572 ms with 8 MB slack, on a loaded Mac). Now that the relief only runs in the background, at 24 MB slack its longest run measured 42 ms. The leak fix (d6ecc41, HostConnection.finish clears its handlers) stays as it was.
+
