@@ -2175,6 +2175,9 @@ public final class LeadToolset: MCPToolset {
             return "It touches sensitive_paths (" + sensitive.prefix(8).joined(separator: ", ") + (sensitive.count > 8 ? ", …" : "")
                 + "), so it's treated as audit whatever its review says."
         }
+        // Only the commit its worker reported done on: one committed since isn't finished work yet (merge refuses it
+        // for that), and a raise or a model's answer on it would be on work nobody said is done.
+        guard kept.reported == commit else { return nil }
         return riskRaise(task, commit: commit, workflow: workflow, model: model)
     }
 

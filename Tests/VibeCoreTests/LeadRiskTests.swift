@@ -288,6 +288,23 @@ struct LeadRiskMergeTests: LeadTeamFixture {
         #expect(task(root)?.riskRaised == nil)
     }
 
+    @Test func aCommitAfterTheDoneReportIsntCheckedUntilItIsReported() throws {
+        let (root, runtime, lead) = try team()
+        let model = FakeModel("raise: anything")
+        lead.riskModel = model.ask
+        try reported(lead, runtime, root: root, file: "b.txt", text: "bee\n")
+        try commit("Sources/Runner.swift", "let process = Process()\n", in: Worktrees.path(root: root, slug: "change"))
+        // Nobody said this commit is done: no raise and no model's answer on it, and merge refuses it for that.
+        #expect(lead.advanceReviewNeeded("change", commit: head("agent/change", root)) == nil)
+        let refused = lead.call("merge", ["task": "change"])
+        #expect(refused.isError && refused.text.contains("merges without one only on its worker's done report"), "\(refused.text)")
+        #expect(model.prompts.isEmpty && task(root)?.riskRaised == nil)
+        #expect(try vault.unaudited(root: root, task: "change").review == LeadTask.Review.none)
+        // Reported, it's checked.
+        #expect(!(try seat("worker-change", runtime)).call("report", doneReport("added the runner")).isError)
+        #expect(lead.advanceReviewNeeded("change", commit: head("agent/change", root))?.contains("it has code that spawns processes") == true)
+    }
+
     @Test func noModelIsAskedWhenATriggerRaisedItOrRiskModelIsOff() throws {
         let (root, runtime, lead) = try team(["risk_model": false])
         let model = FakeModel("raise: anything")
