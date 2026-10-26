@@ -37,4 +37,19 @@ import Testing
         #expect(fake.reliefs == 2, "the floor followed the footprint down")
         #expect(fake.readings.isEmpty)
     }
+
+    /// A relief holds malloc's locks, and the main thread's allocations wait: never while you're using the app.
+    @Test func waitsWhileTheAppIsInUse() {
+        let slack = FootprintRelief.slack
+        let fake = Fake([100, 100 + slack, 100 + slack + 5, 101])
+        var active = true
+        let relief = FootprintRelief(footprint: fake.read, relieve: { fake.reliefs += 1 }, inUse: { active })
+        look(relief)
+        look(relief)
+        #expect(fake.reliefs == 0, "frontmost: over the slack, but no relief")
+        active = false
+        look(relief)
+        #expect(fake.reliefs == 1, "in the background, the next look gives the pages back")
+        #expect(fake.readings.isEmpty)
+    }
 }

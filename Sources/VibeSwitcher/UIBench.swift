@@ -726,9 +726,11 @@ enum UIBench {
                     var relief = ""
                     if soak.relief {
                         let before = IdleBench.Usage.now().footprint
+                        let started = DispatchTime.now()
                         malloc_zone_pressure_relief(nil, 0)
-                        relief = String(format: "; footprint %.1f → %.1f MB after malloc's pressure relief", mb(Double(before)),
-                                        mb(Double(IdleBench.Usage.now().footprint)))
+                        let took = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1e6
+                        relief = String(format: "; footprint %.1f → %.1f MB after malloc's pressure relief (%.1f ms)", mb(Double(before)),
+                                        mb(Double(IdleBench.Usage.now().footprint)), took)
                     }
                     DispatchQueue.main.async {
                         print(String(format: "  census %@: %ld blocks, %.1f MB in malloc blocks%@", label as NSString, census.total.blocks,
