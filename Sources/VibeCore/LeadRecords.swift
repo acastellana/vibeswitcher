@@ -2,7 +2,8 @@ import Foundation
 
 /// The lead's decision log, progress log and incident log in the repository: `<records_dir>/decisions.md`,
 /// `progress.md` and `incidents.md` (`records_dir:` in workflow.md, `docs/lead` by default), committed to the base branch by the lead's tool server, so
-/// the plan's reasoning survives a deleted `.vibeswitcher`, another Mac or a new lead. The board stays local.
+/// the plan's reasoning survives a deleted `.vibeswitcher`, another Mac or a new lead, and `decisions-archive.md`, where
+/// `archive_decisions` moves the decisions every lead start no longer needs to read. The board stays local.
 ///
 /// The lead itself may not edit files or run git that writes; its tool server commits for it, batched (after each
 /// merge, and at most every `interval` otherwise), as small commits of their own that touch only those two files
@@ -12,13 +13,14 @@ import Foundation
 /// so the next merge's check that nothing else moved the branch takes it.
 public final class LeadRecords: @unchecked Sendable {
     public enum Kind: CaseIterable, Sendable {
-        case decisions, progress, incidents
+        case decisions, progress, incidents, archive
 
         public var name: String {
             switch self {
             case .decisions: return "decisions.md"
             case .progress: return "progress.md"
             case .incidents: return "incidents.md"
+            case .archive: return "decisions-archive.md"
             }
         }
         var header: String {
@@ -26,6 +28,7 @@ public final class LeadRecords: @unchecked Sendable {
             case .decisions: return "# Decisions\n\n"
             case .progress: return "# Progress\n\n"
             case .incidents: return "# Incidents\n\n"
+            case .archive: return "# Archived decisions\n\nMoved here from decisions.md by archive_decisions, unchanged: superseded, obsolete or now enforced by a check.\n\n"
             }
         }
         /// How each entry's first line starts.
@@ -49,7 +52,7 @@ public final class LeadRecords: @unchecked Sendable {
     /// No trailer (Co-Authored-By or any other): a project's workflow may refuse them (genswap's regression_command
     /// does), and these commits land on its base among its own.
     static func message(_ dir: String) -> String {
-        "\(subject)\n\nThe project lead's \(dir)/decisions.md, \(dir)/progress.md and \(dir)/incidents.md, committed by VibeSwitcher for the lead "
+        "\(subject)\n\nThe project lead's \(dir)/decisions.md, \(dir)/progress.md, \(dir)/incidents.md and \(dir)/decisions-archive.md, committed by VibeSwitcher for the lead "
             + "(its tool server); nothing else is in this commit."
     }
 
@@ -207,7 +210,11 @@ public final class LeadRecords: @unchecked Sendable {
             guard let old = try? String(contentsOfFile: local, encoding: .utf8) else { continue }
             let path = store.recordPath(kind.name)
             let current = try? String(contentsOfFile: path, encoding: .utf8)
-            try write(merged(old: Redaction.secrets(in: old), into: current, kind: kind), to: path, in: store)
+            // The archive's batches (each under its own `# Archived` line) go after the ones already there, as they are.
+            let text = kind == .archive
+                ? (current.map { $0 + (old.hasPrefix(kind.header) ? String(old.dropFirst(kind.header.count)) : old) } ?? old)
+                : merged(old: Redaction.secrets(in: old), into: current, kind: kind)
+            try write(text, to: path, in: store)
             let moved = local + ".moved"
             try? FileManager.default.removeItem(atPath: moved)
             try FileManager.default.moveItem(atPath: local, toPath: moved)
@@ -259,5 +266,133 @@ public final class LeadRecords: @unchecked Sendable {
         let entries = found.map { $0.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines) + ending }
         let head = preamble.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
         return (head.isEmpty ? "" : head + "\n\n", entries)
+    }
+
+    // MARK: Archiving decisions
+
+    /// A refused archive: nothing was moved.
+    public struct Refusal: Error, Equatable {
+        public let text: String
+    }
+
+    /// What `archive` moved: the moved entries' headings, and how many entries decisions.md and the archive hold now.
+    public struct Archived: Equatable, Sendable {
+        public var moved: [String]
+        public var kept: Int
+        public var archived: Int
+    }
+
+    /// decisions.md's size past which status asks the lead to archive (`archive_decisions`): every lead start reads it.
+    public static let archiveEntries = 60
+    public static let archiveBytes = 40 * 1024
+
+    /// How decisions.md's one line pointing to the archive starts (it's replaced, never added again).
+    static let pointerPrefix = "Archived decisions: "
+
+    /// Moves the decisions `names` names from decisions.md to decisions-archive.md (`archive_decisions`), under the
+    /// records' lock, as the commit reads them. Each moves byte for byte, its date with it, appended to the archive under
+    /// one `# Archived <time>: <reason>` line for the call (the archive is only ever appended to); decisions.md keeps
+    /// the rest as they were, in their order, and one pointer line to the archive under its title. A name is an entry's
+    /// heading (without `## `) or its start up to a word, e.g. its stamp `2026-10-17 12:15`; one that names no entry,
+    /// or several, refuses the whole call with nothing changed.
+    static func archive(_ names: [String], reason: String, in store: BoardStore, now: Date = Date()) throws -> Archived {
+        let reason = Redaction.secrets(in: reason.split(whereSeparator: \.isNewline).joined(separator: " ")).trimmingCharacters(in: .whitespaces)
+        guard !reason.isEmpty else { throw Refusal(text: "Nothing was archived: say why (reason): superseded, obsolete, or now enforced by a check.") }
+        let wanted = names.map { name in
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            return (trimmed.hasPrefix("## ") ? String(trimmed.dropFirst(3)) : trimmed).trimmingCharacters(in: .whitespaces)
+        }.filter { !$0.isEmpty }
+        guard !wanted.isEmpty else { throw Refusal(text: "Nothing was archived: name the entries (entries), each by its heading or its stamp.") }
+        return try store.withRecordsLock {
+            try migrate(store)
+            let path = store.recordPath(Kind.decisions.name)
+            guard let text = try? String(contentsOfFile: path, encoding: .utf8) else {
+                throw Refusal(text: "Nothing was archived: there's no decisions.md yet.")
+            }
+            let (preamble, entries) = rawEntries(text)
+            let headings = entries.map(heading)
+            var chosen = Set<Int>()
+            var problems: [String] = []
+            for name in wanted {
+                let matches = headings.indices.filter { headings[$0] == name || headings[$0].hasPrefix(name + " ") }
+                switch matches.count {
+                case 0: problems.append("“\(name)” names no entry in decisions.md")
+                case 1: chosen.insert(matches[0])
+                default:
+                    let which = matches.prefix(4).map { "“\(clipped(headings[$0], 70))”" }.joined(separator: ", ")
+                    problems.append("“\(name)” names \(matches.count) entries (\(which)): name each by more of its heading")
+                }
+            }
+            guard problems.isEmpty else { throw Refusal(text: "Nothing was archived: " + problems.joined(separator: "; ") + ".") }
+            let moved = entries.indices.filter(chosen.contains).map { entries[$0] }
+            let kept = entries.indices.filter { !chosen.contains($0) }.map { entries[$0] }
+
+            // The archive first, appended to: should decisions.md's write fail after it, an entry is in both, never in neither.
+            let archivePath = store.recordPath(Kind.archive.name)
+            let before = try? String(contentsOfFile: archivePath, encoding: .utf8)
+            if before == nil { try write(Kind.archive.header, to: archivePath, in: store) }
+            let gap = (before ?? Kind.archive.header).hasSuffix("\n\n") ? "" : (before ?? "").hasSuffix("\n") ? "\n" : "\n\n"
+            // An entry that ended the file without a newline gets one after it here, so the next starts on its own line.
+            let batch = gap + "# Archived \(LeadDecision.stamp(now)): \(reason)\n\n" + moved.map { $0.hasSuffix("\n") ? $0 : $0 + "\n" }.joined()
+            let handle = try FileHandle(forWritingTo: URL(fileURLWithPath: archivePath))
+            defer { try? handle.close() }
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Data(batch.utf8))
+
+            let archived = rawEntries((before ?? "") + batch).entries.count
+            let day = String(LeadDecision.stamp(now).prefix(10))
+            let pointer = pointerPrefix + "\(archived) \(archived == 1 ? "entry" : "entries") (superseded, obsolete or now enforced by a check) "
+                + "\(archived == 1 ? "is" : "are") in \(Kind.archive.name), moved there unchanged (last on \(day))."
+            try write(pointed(preamble, pointer) + kept.joined(), to: path, in: store)
+            return Archived(moved: moved.map(heading), kept: kept.count, archived: archived)
+        }
+    }
+
+    /// A decisions log's text before its first entry, and its entries (each from its `## <stamp>` heading to the next
+    /// one), exactly as they are: joined, they give back the text byte for byte.
+    static func rawEntries(_ text: String) -> (preamble: String, entries: [String]) {
+        let lines = text.components(separatedBy: "\n")
+        var preamble = ""
+        var found: [String] = []
+        for (index, line) in lines.enumerated() {
+            let piece = line + (index < lines.count - 1 ? "\n" : "")
+            if line.range(of: #"^## \d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?(\s|$)"#, options: .regularExpression) != nil { found.append(piece) }
+            else if found.isEmpty { preamble += piece }
+            else { found[found.count - 1] += piece }
+        }
+        return (preamble, found)
+    }
+
+    /// An entry's heading, without `## `.
+    static func heading(_ entry: String) -> String {
+        String(entry.prefix { $0 != "\n" }.dropFirst(3)).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// `preamble` with `pointer` in place of its pointer line, or under its title when it has none yet.
+    static func pointed(_ preamble: String, _ pointer: String) -> String {
+        var lines = preamble.components(separatedBy: "\n")
+        if let at = lines.firstIndex(where: { $0.hasPrefix(pointerPrefix) }) {
+            lines[at] = pointer
+        } else if let title = lines.firstIndex(where: { $0.hasPrefix("# ") }) {
+            lines.insert(contentsOf: ["", pointer], at: title + 1)
+            // "# Decisions" with nothing under it: the entries still start after a blank line.
+            if lines.count == title + 3 { lines += ["", ""] }
+        } else {
+            lines.insert(contentsOf: [pointer, ""], at: 0)
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func clipped(_ text: String, _ limit: Int) -> String {
+        text.count > limit ? String(text.prefix(limit - 1)) + "…" : text
+    }
+
+    /// For status, once decisions.md passes `archiveEntries` entries or `archiveBytes`: a line asking the lead to
+    /// archive what no longer holds; nil below. `rules`: the repository's inventory of them, when it has one.
+    static func archiveNudge(entries: Int, bytes: Int, rules: String?) -> String? {
+        guard entries > archiveEntries || bytes > archiveBytes else { return nil }
+        let listed = rules.map { " (\($0) lists them)" } ?? ""
+        return "decisions.md has \(entries) entries (\(bytes / 1024) KB), and every lead start reads it: archive_decisions the superseded "
+            + "and obsolete ones, and those a check now enforces\(listed). They move to \(Kind.archive.name) unchanged."
     }
 }

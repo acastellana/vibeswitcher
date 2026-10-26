@@ -248,6 +248,26 @@ struct WorktreesTests {
         #expect(heads(root, "r").tip == tip && listed(root).count == 2)
     }
 
+    /// decisions-archive.md is one of the lead's records too (`archive_decisions`): a branch's edit of it, or of
+    /// decisions.md, lands as the base has them.
+    @Test func aBranchsEditOfTheDecisionsArchiveLandsAsTheBaseHasIt() throws {
+        let root = try repo()
+        try records(["decisions.md": "# Decisions\n\n## one\n", "decisions-archive.md": "# Archived decisions\n\n## old\n"], in: root)
+        let worktree = try Worktrees.create(root: root, slug: "r")
+        try "w\n".write(toFile: worktree + "/w.txt", atomically: true, encoding: .utf8)
+        try "# Archived decisions\n\n## old\n## the worker's\n".write(toFile: worktree + "/docs/lead/decisions-archive.md", atomically: true, encoding: .utf8)
+        try "# Decisions\n\n".write(toFile: worktree + "/docs/lead/decisions.md", atomically: true, encoding: .utf8)
+        _ = Git.run(["add", "w.txt", "docs/lead"], in: worktree)
+        _ = Git.run(["commit", "-q", "-m", "add w"], in: worktree)
+        let main = Git.run(["rev-parse", "main"], in: root).output
+        let tip = Git.run(["rev-parse", "HEAD"], in: worktree).output
+        let checked = Worktrees.rebaseAndTest(root: root, commit: tip, onto: main, test: "test -f w.txt", scratch: scratch(), lock: lock,
+                                              records: "docs/lead")
+        guard case .passed(let tested) = checked else { Issue.record("\(checked)"); return }
+        #expect(recordsTree(tested, root) == recordsTree(main, root))
+        #expect(Git.run(["diff", "--name-only", main, tested], in: root).output == "w.txt")
+    }
+
     /// As above, for a branch that merged an older base in (squashed onto the base): its records conflict, the base's
     /// stay as they are.
     @Test func aSquashThatConflictsOnlyInTheLeadsRecordsLandsWithTheBasesRecords() throws {

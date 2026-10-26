@@ -150,6 +150,8 @@ public final class LeadToolset: MCPToolset {
     /// Status said once that workflow.md's Mac-wide keys are ignored.
     private var toldIgnoredKeys = false
     private let tellingIgnoredKeys = NSLock()
+    /// Status said once that decisions.md is past the size to archive (`LeadRecords.archiveNudge`).
+    private var toldArchive = false
     /// The slots merge's and an audit's test runs take one of (see `TestLock`; the workflow's heavy_slots sets how
     /// many): the tool server sets the Mac-wide ones, every project's merges sharing them with `vs-heavy`; nil (tests
     /// that don't give scratch ones): none.
@@ -447,6 +449,10 @@ public final class LeadToolset: MCPToolset {
                 MCPToolInfo(name: "record_decision", description: "Write a decision and its reason to decisions.md.",
                             properties: ["decision": P(type: "string", description: "The decision"), "why": P(type: "string", description: "The reason")],
                             required: ["decision", "why"]),
+                MCPToolInfo(name: "archive_decisions", description: "Move decisions that no longer hold from decisions.md to decisions-archive.md, unchanged and with their dates (superseded, obsolete, or now enforced by a check): every lead start reads decisions.md, not the archive. decisions.md keeps the rest in order and one line pointing to the archive; nothing is deleted. An entry that's unknown, or a name that fits several, refuses the call with nothing moved.",
+                            properties: ["entries": P(type: "array", description: "The entries to move, each by its heading (without ##) or its start, e.g. its stamp \"2026-10-17 12:15\"", items: "string"),
+                                         "reason": P(type: "string", description: "Why they go, in one line (it heads this batch in the archive)")],
+                            required: ["entries", "reason"]),
                 MCPToolInfo(name: "record_incident", description: "Record an incident (something broke the user's work: a hang, a lost message, a reverted merge) in incidents.md, and plan a task that turns it into a check that runs before merge (a test, or a case in regression_command's corpus), so a merge that brings it back is refused.",
                             properties: ["what": P(type: "string", description: "What happened, in one line"),
                                          "evidence": P(type: "string", description: "How it showed: the transcript, log, commit or steps that reproduce it"),
@@ -505,6 +511,7 @@ public final class LeadToolset: MCPToolset {
             case "questions": return MCPToolResult(text: questionsText())
             case "post_update": return try postUpdate(arguments)
             case "record_decision": return try recordDecision(arguments)
+            case "archive_decisions": return try archiveDecisions(arguments)
             case "record_incident": return try recordIncident(arguments)
             case "sessions": return MCPToolResult(text: sessionsText())
             case "configure": return try configure(arguments)
@@ -2666,6 +2673,19 @@ public final class LeadToolset: MCPToolset {
         return MCPToolResult(text: store.recordsDir.map { "Recorded in \($0)/decisions.md (committed to \(base) with the next batch)." } ?? "Recorded.")
     }
 
+    /// Moves the named decisions to decisions-archive.md (`LeadRecords.archive`); committed with the next batch, as
+    /// record_decision's are.
+    private func archiveDecisions(_ arguments: [String: Any]) throws -> MCPToolResult {
+        let archived: LeadRecords.Archived
+        do {
+            archived = try LeadRecords.archive(strings(arguments["entries"]), reason: arguments["reason"] as? String ?? "", in: store)
+        } catch let refusal as LeadRecords.Refusal { throw Problem(text: refusal.text) }
+        let file = store.recordsDir.map { "\($0)/decisions-archive.md (committed to \(base) with the next batch)" } ?? "decisions-archive.md"
+        return MCPToolResult(text: "Archived \(archived.moved.count) \(archived.moved.count == 1 ? "entry" : "entries") in \(file): "
+                             + archived.moved.map { "“\(Self.clip($0, 80))”" }.joined(separator: ", ")
+                             + ". decisions.md keeps \(archived.kept); the archive holds \(archived.archived).")
+    }
+
     /// An incident in incidents.md, and the planned task that turns it into a check run before merge.
     private func recordIncident(_ arguments: [String: Any]) throws -> MCPToolResult {
         let given = { (key: String) in (arguments[key] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
@@ -3385,6 +3405,7 @@ public final class LeadToolset: MCPToolset {
         if let ignored = ignoredKeysOnce(workflow) { lines.append(ignored) }
         lines += diskWarning(workflow, board: board, sessions: listing)
         if let line = records.statusLine { lines.append(line) }
+        if let line = archiveNudgeOnce() { lines.append(line) }
         if let listing {
             let mac = MacLoad.count(listing.map { ($0.label, $0.cwd, $0.live) }, load: runtime.loadAverage())
             let full = macRefusal(mac, not: "") != nil
@@ -3702,6 +3723,21 @@ public final class LeadToolset: MCPToolset {
         guard !toldIgnoredKeys else { return nil }
         toldIgnoredKeys = true
         return Self.ignoredText(workflow)
+    }
+
+    /// `LeadRecords.archiveNudge` for decisions.md as it is, the first time status finds it past the size in this tool
+    /// server (once a lead start); nil after, or below it.
+    private func archiveNudgeOnce() -> String? {
+        tellingIgnoredKeys.lock()
+        defer { tellingIgnoredKeys.unlock() }
+        guard !toldArchive else { return nil }
+        let path = store.recordPath(LeadRecords.Kind.decisions.name)
+        let bytes = (try? FileManager.default.attributesOfItem(atPath: path)[.size] as? Int) ?? 0
+        let rules = "docs/process/lead-rules.md"
+        let nudge = LeadRecords.archiveNudge(entries: store.decisions().count, bytes: bytes,
+                                             rules: FileManager.default.fileExists(atPath: (root as NSString).appendingPathComponent(rules)) ? rules : nil)
+        if nudge != nil { toldArchive = true }
+        return nudge
     }
 
     private func workflowWarnings(_ workflow: LeadWorkflow) -> [String] {

@@ -510,7 +510,7 @@ public struct LeadWorkflow: Equatable, Sendable {
 
 /// What each role is told (appended to Claude Code's own system prompt).
 public enum LeadPrompts {
-    public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, dismiss_finding, record_decision, record_incident, merge, cleanup, configure"
+    public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, dismiss_finding, record_decision, archive_decisions, record_incident, merge, cleanup, configure"
 
     /// What workers and verifiers are told about putting load on the Mac: a verifier once ran four times its
     /// contract's load on a Mac other sessions and the user were using, and a turn that ended left its burners running.
@@ -842,7 +842,8 @@ public enum LeadPrompts {
         Each finder counts against mac_max_sessions; when audit says there's no room, lower audit_finders or retry \
         it when you're next woken.
         7. Keep the board, the progress log and decisions (record_decision) current. They are your memory: when your \
-        context fills up, a new lead continues from them.
+        context fills up, a new lead continues from them. When status says decisions.md is long, archive_decisions the \
+        entries that are superseded, obsolete or now enforced by a check (docs/process/lead-rules.md lists them, where the project has it).
         8. Every incident becomes a check that runs before merge. When something broke the user's work (a hang, a \
         lost message, a merge that had to be reverted, the same mistake twice), record_incident(what, evidence, task) \
         right away: it goes into incidents.md and plans a task that turns it into a check (a test, or a case in \
