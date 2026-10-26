@@ -452,3 +452,7 @@ The user answered 5405CE2E with "Install now (I'm here for the password)", and t
 
 The user, 2026-10-25: "me molestan tantas notificaciones y no saber realmente cuando tengo que mirar" (all these notifications bother me, and I never really know when I have to look), then "quiero notificaciones cuando se ha completado del todo o cuando se me require por lo que sea" (notifications when it's fully done, or when I'm needed for whatever reason).
 
+## 2026-10-26 02:06:07 No copy-of-the-build start for worktrees (a-fresh-worktree-starts abandoned). The only cheaper path left is SwiftTerm as a prebuilt binary target. That's not planned: it saves about 72 of 208 compile steps but adds an xcframework to maintain.
+
+The worker measured it on 2026-10-26. A fresh worktree's first swift build takes 91 s for 208 steps at load 28. A `cp -c` clone of an up-to-date .build still rebuilds all 208, because swift-driver disables incremental compilation when arguments change: absolute paths and -package-name are in master.priors and llbuild's build.db. Only .build/checkouts survives, saving about 5 s, and its alternates point into the source worktree. The earlier a-new-worktree-builds (727f29d) already shares the SDK module cache, the one part that does carry over.
+
