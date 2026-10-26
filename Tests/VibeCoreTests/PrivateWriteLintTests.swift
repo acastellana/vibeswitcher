@@ -39,7 +39,7 @@ struct PrivateWriteLintTests {
         "Sources/VibeSwitcher/MainWindow/MainWindowController.swift": (1, "a chat export to where the user saves it"),
         "Sources/VibeSwitcher/MainWindow/Chat/ToolViews.swift": (1, "an image to where the user saves it"),
         "Sources/VibeSwitcher/IdleBench.swift": (2, "a bench's scratch home"),
-        "Sources/VibeSwitcher/UIBench.swift": (5, "a bench's scratch home (the soak's worker script, worktrees and transcripts too)"),
+        "Sources/VibeSwitcher/UIBench.swift": (6, "a bench's scratch home (the soak's worker script, worktrees, transcripts and workers' stop files too)"),
         "Sources/VibeSwitcher/MainWindow/Lead/BoardBench.swift": (2, "a bench's scratch home"),
         "Sources/VibeSwitcher/MainWindow/Lead/TeamChurnBench.swift": (6, "a bench's scratch home"),
         "Sources/VibeSwitcher/PowerBench.swift": (4, "a bench's scratch home"),
