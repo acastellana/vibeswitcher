@@ -9,10 +9,11 @@ import VibeCore
 /// live flat, and came back down to its first minute's when the pages were given back (`scripts/soak-bench.sh
 /// --soak-relief`). It looks once a minute; the reading and the relief run on its own queue, off the main thread.
 final class FootprintRelief {
-    /// Growth over the last relief's footprint (MB) that's given back: what's kept between reliefs (at 24 MB the
-    /// footprint sawed enough to read 20-40 MB an hour over the soak's 40 minutes). A terminal's GPU memory for a
-    /// moment is more, but a relief then finds nothing and the next look starts from there.
-    static let slack = 8.0
+    /// Growth over the last relief's footprint (MB) that's given back. 8 MB was tried: it read no flatter over the
+    /// soak's last 40 minutes (33 MB an hour against 20) and ran 27 reliefs in 65 minutes, the longest 0.2-0.6 s
+    /// holding malloc's locks. A terminal's GPU memory for a moment is more, but a relief then finds nothing and the
+    /// next look starts from there.
+    static let slack = 24.0
 
     private let footprint: () -> Double?
     private let relieve: () -> Void
