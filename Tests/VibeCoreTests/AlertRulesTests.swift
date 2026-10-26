@@ -187,8 +187,43 @@ struct AlertRulesTests {
     }
 
     @Test func somethingBrokenThatWaitsOnYouNotifies() {
-        let alert = AlertRules.lead(.broken(title: "main moved outside the lead's merges", body: "2 in acme", leadTTY: "ttys001"), settings: .init())
+        let alert = AlertRules.lead(.broken(title: "main moved outside the lead's merges", body: "2 in acme", leadTTY: "ttys001", key: nil), settings: .init())
         #expect(alert?.kind == .needsYou && alert?.sound == true && alert?.tty == "ttys001")
+    }
+
+    static func move(to: String = "bbbbbbbb") -> LeadVault.BaseMove {
+        LeadVault.BaseMove(branch: "project-lead", from: "aaaaaaaa", to: to, accepted: false, commits: [.init(sha: to, subject: "Your own fix")],
+                           sessions: [], reason: "No session of yours made it.")
+    }
+
+    /// The base branch moved by a commit outside the lead (the user's own, say): silent for the user, as the window's card
+    /// asks about it in the lead's chat and the lead's merge tells the lead. Only a merge it refused waits on the user:
+    /// told once per move.
+    @Test func aBaseMoveOutsideTheLeadIsSilentUntilItRefusesAMerge() {
+        var gate = AlertRules.Gate()
+        let move = Self.move()
+        #expect(AlertRules.baseMoved(move, refused: nil, root: "/r/acme", leadTTY: "ttys001") == nil)
+        #expect(AlertRules.baseMoved(nil, refused: nil, root: "/r/acme", leadTTY: "ttys001") == nil)
+        // A refusal for another move (an older one), or of another branch: not this one's.
+        #expect(AlertRules.baseMoved(move, refused: .init(branch: "project-lead", to: "cccccccc", at: 1), root: "/r/acme", leadTTY: nil) == nil)
+        #expect(AlertRules.baseMoved(move, refused: .init(branch: "main", to: "bbbbbbbb", at: 1), root: "/r/acme", leadTTY: nil) == nil)
+        // Accepted or kept refused in the window: nothing asks any more.
+        #expect(AlertRules.baseMoved(nil, refused: .init(branch: "project-lead", to: "bbbbbbbb", at: 1), root: "/r/acme", leadTTY: nil) == nil)
+
+        let refused = LeadVault.BaseMoveRefusal(branch: "project-lead", to: "bbbbbbbb", at: 1)
+        let event = AlertRules.baseMoved(move, refused: refused, root: "/r/acme", leadTTY: "ttys001")
+        let alert = gate.pass(event.flatMap { AlertRules.lead($0, settings: .init()) })
+        #expect(Self.said(alert) == "banner 'project-lead moved outside the lead's merges' / '1 commit in acme: the lead's merges wait on you. "
+            + "Accept them in the lead's chat, or keep its merges refused.' · sound · phone 'project-lead moved outside the lead's merges' / "
+            + "'1 commit in acme: the lead's merges wait on you. Accept them in the lead's chat, or keep its merges refused.' @ttys001")
+        // The next refresh, or the next refused merge: told already.
+        #expect(gate.pass(AlertRules.baseMoved(move, refused: refused, root: "/r/acme", leadTTY: "ttys001").flatMap { AlertRules.lead($0, settings: .init()) }) == nil)
+        // A further move that refuses a merge again is news.
+        let further = Self.move(to: "dddddddd")
+        #expect(gate.pass(AlertRules.baseMoved(further, refused: .init(branch: "project-lead", to: "dddddddd", at: 2), root: "/r/acme", leadTTY: "ttys001")
+            .flatMap { AlertRules.lead($0, settings: .init()) }) != nil)
+        // With needing-input notifications off, not even then.
+        #expect(event.flatMap { AlertRules.lead($0, settings: .init(needsInput: false)) } == nil)
     }
 
     /// A lead's batch from start to finish, as the user gets it: only the question and the all-done card notify.

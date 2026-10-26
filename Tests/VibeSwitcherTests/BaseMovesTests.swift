@@ -210,11 +210,18 @@ final class BaseMovesTests {
         #expect(refusal.contains("VibeSwitcher is asking the user: a card in your chat"), "\(refusal)")
         #expect(refusal.contains("Don't ask them to restart you"), "\(refusal)")
         #expect(!refusal.contains("starting the lead again"))
+        // Asked about in the lead's chat, but no merge of the lead's refused yet: no alert (the user commits on the base).
+        #expect(AlertRules.baseMoved(move, refused: LeadVault.BaseMoveRefusal.load(root: root), root: root, leadTTY: nil) == nil)
+        // The lead's merge refused for it: its merges wait on the user, who's told.
+        try LeadVault.BaseMoveRefusal(branch: "fair-launch", to: now, at: 1).save(root: root)
+        #expect(AlertRules.baseMoved(moves.asking[root], refused: LeadVault.BaseMoveRefusal.load(root: root), root: root, leadTTY: nil) != nil)
 
         moves.accept(root)
         #expect(app.headMoved(root: root, branch: "fair-launch") == nil)
         _ = board()
         #expect(LeadVault.BaseMoveNote.load(root: root) == nil)
+        // Taken: no merge waits on the user any more.
+        #expect(LeadVault.BaseMoveRefusal.load(root: root) == nil)
     }
 
     @Test func aBangGitCommandYouSentFromTheWindowIsTakenWithoutAsking() throws {

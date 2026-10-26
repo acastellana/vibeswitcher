@@ -672,6 +672,32 @@ struct ActivityLedgerTests {
         #expect(rows.first?.background == 600)
     }
 
+    /// A lead's worker or verifier waiting on input waits on its lead: its seconds aren't waiting on you, and go under the
+    /// lead's project (F4 of notifications-only-when). A lead with a question for you open does wait on you.
+    @Test func aTeamMemberWaitingOnItsLeadIsntWaitingOnYou() {
+        func session(_ status: SessionStatus, cwd: String, role: LeadLaunch.Role?) -> Session {
+            var session = Session(tty: "ttys001", agent: .claude, pid: 1, startedAt: now, cwd: cwd, project: (cwd as NSString).lastPathComponent,
+                                  task: nil, status: status, statusSince: now.addingTimeInterval(-60), detail: nil, hasHooks: true, inTerminalApp: false)
+            session.teamRole = role
+            return session
+        }
+        let worker = session(.needsInput, cwd: "/r/acme/.vibeswitcher/worktrees/fix-login", role: .worker)
+        let verifier = session(.needsInput, cwd: "/r/acme/.vibeswitcher/worktrees/fix-login", role: .verifier)
+        #expect(ActivityLedger.entry(for: worker).project == "acme" && ActivityLedger.entry(for: worker).status == .idle)
+        var ledger = ActivityLedger(day: "2026-09-26")
+        ledger.record([worker, verifier].map(ActivityLedger.entry(for:)), seconds: 60, now: now)
+        #expect(ledger.waitingOnYou == 0)
+        #expect(ledger.seconds([.needsInput, .unseenDone]) == 0)
+        // One of yours on a prompt still waits on you.
+        ledger.record([session(.needsInput, cwd: "/r/site", role: nil)].map(ActivityLedger.entry(for:)), seconds: 30, now: now)
+        #expect(ledger.waitingOnYou == 30)
+        // And a lead whose terminal is idle with a question for you open.
+        var lead = session(.idle, cwd: "/r/acme", role: .lead)
+        lead.leadAsks = true
+        ledger.record([ActivityLedger.entry(for: lead)], seconds: 10, now: now)
+        #expect(ledger.waitingOnYou == 40)
+    }
+
     @Test func aFinishedSessionLeftAloneStopsCounting() {
         var ledger = ActivityLedger(day: "2026-09-26")
         ledger.record([entry("shop", .done, minutesAgo: 10)], seconds: 60, now: now)

@@ -213,6 +213,9 @@ struct LeadBaseMovesTests: LeadTeamFixture {
         #expect(merged.text.contains("isn't one of yours"), "\(merged.text)")
         #expect(vault.head(root: root, branch: "main") == known)
         #expect(try vault.acceptMove(root: root, branch: "main").accepted == false)
+        // The refusal is marked: the lead's merges wait on the user now, so the window tells them (`AlertRules.baseMoved`).
+        let refusal = try #require(LeadVault.BaseMoveRefusal.load(root: root))
+        #expect(refusal.branch == "main" && refusal.to == head("main", root))
     }
 
     @Test func aForgedHookClaimFromATeamProcessIsRefused() throws {

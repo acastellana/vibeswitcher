@@ -143,9 +143,36 @@ struct TeamRowsTests {
     @Test func aSessionWaitingOnInputWaitsOnItsLeadWithoutAClock() {
         let asking = Self.member(needsYou: true, working: false, activity: nil, detail: "Which database?")
         let row = row(Self.task("fix", .running), ["w-fix": asking])
-        #expect(row.mark == .needsYou && row.group == .needsYou)
+        #expect(row.mark == .waits && row.group == .needsYou)
         #expect(row.stateText(now: Self.now) == "Waits on lead")
         #expect(row.line(summary: "Making a database") == "Which database?")
+    }
+
+    /// Red and "!" mean you're needed (a lead's question, a prompt, something broken). A team member waiting on its lead
+    /// shows as working: its Team row's mark, its own dot, and the lead's dot, which goes red only for a question of its
+    /// own for you.
+    @Test func aMemberWaitingOnItsLeadIsntRedNorIsItsLeadsDot() {
+        let asking = row(Self.task("fix", .running), ["w-fix": Self.member(needsYou: true, working: false, activity: nil, detail: "Which database?")])
+        #expect(!asking.mark.isRed && asking.mark.color != .red && asking.mark.symbol != "exclamationmark.triangle.fill")
+        #expect(TeamRows.summary([asking, row(Self.task("docs", .running), ["w-docs": Self.working])]) == "team: 1 waits on lead · 1 working")
+
+        func session(_ status: SessionStatus, role: LeadLaunch.Role, cwd: String) -> Session {
+            var session = Session(tty: "ttys00\(role == .lead ? 1 : 2)", agent: .claude, pid: 1, startedAt: Self.now, cwd: cwd, project: "acme",
+                                  task: nil, status: status, statusSince: Self.now, detail: nil, hasHooks: true, inTerminalApp: false)
+            session.teamRole = role
+            return session
+        }
+        var lead = session(.idle, role: .lead, cwd: "/r/acme")
+        let worker = session(.needsInput, role: .worker, cwd: "/r/acme/.vibeswitcher/worktrees/fix")
+        #expect(lead.dotNSColor == SessionStatus.idle.nsColor && lead.mark == .smallDot)
+        #expect(worker.dotNSColor == SessionStatus.working.nsColor && worker.mark == .spinner)
+        // The header's pill for the worker: "Waits on lead" in the working colour, not the red that says you're needed.
+        let workerRow = WindowRow(content: .agent(worker), project: "acme")
+        #expect(workerRow.pillLabel(workerRow.state(now: Self.now)) == "Waits on lead")
+        #expect(workerRow.session?.dotNSColor == SessionStatus.working.nsColor)
+        // The lead asks you something: now its dot is red, with the "!".
+        lead.leadAsks = true
+        #expect(lead.dotNSColor == SessionStatus.needsInput.nsColor && lead.mark == .alert)
     }
 
     @Test func aStalledWorkerIsRedWhateverItsScreenSays() {

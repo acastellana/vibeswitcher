@@ -80,6 +80,23 @@ struct BriefingTests {
         #expect(text.count <= Briefing.inputLimit)
     }
 
+    /// A lead's worker or verifier waiting on input waits on its lead: not one of the sessions that need you (F3 of
+    /// notifications-only-when: the briefing said "2 sessions need you" for one of yours and a worker).
+    @Test func aTeamMemberWaitingOnItsLeadIsntASessionThatNeedsYou() {
+        var worker = session("acme", .needsInput)
+        worker.cwd = "/r/acme/.vibeswitcher/worktrees/fix-login"
+        worker.teamRole = .worker
+        var verifier = session("acme-v", .needsInput)
+        verifier.teamRole = .verifier
+        var lead = session("acme", .needsInput)
+        lead.teamRole = .lead
+        let input = Briefing.compose([], sessions: [worker, session("api", .needsInput), verifier], lastBriefed: nil, now: now)
+        #expect(input.waitingCount == 1 && input.waiting.map(\.name) == ["api"])
+        #expect(Briefing.template(input).contains("1 session needs you: api."))
+        // A lead on a prompt in its terminal does need you.
+        #expect(Briefing.compose([], sessions: [worker, lead], lastBriefed: nil, now: now).waitingCount == 1)
+    }
+
     @Test func theLogsLinesAreSaidInPlainWordsWithoutSlugsOrHashes() {
         let titles = ["phone-menu": "The phone's menu"]
         #expect(Briefing.plain("Merged phone-menu: The phone's menu", titles: titles) == "Landed: The phone's menu")
