@@ -1,0 +1,20 @@
+A slash command that opens a picker shows it in the chat at once
+
+When the user sends a slash command from the chat view that opens an interactive picker or dialog in Claude Code's terminal UI (/mcp, /model, /resume, /config, /permissions, /agents and the like), the chat shows that picker right away, within the same second the terminal draws it, as a card the user can answer from the chat (arrow and Enter keys, or clicking an option). Escape cancels it. It must not wait for the next transcript message, which is what happens today: the user typed /mcp in the chat, saw nothing, and the selector only appeared after they sent another message.
+
+Acceptance checks:
+- Reproduced first: describe exactly why the chat stays blank. Likely the chat only redraws from transcript lines, and a local command's picker is screen-only. Name the code path and the line that waits.
+- The chat watches the session's screen (the host's styledScreen and the session parser) while the last thing sent was a slash command or a picker is open. It shows the picker as a card with its title and options and the highlighted one marked, within 1 s of the terminal drawing it. It updates as the highlight moves and disappears when the picker closes.
+- Answering from the card sends the same keys a terminal user would (arrows, Enter, Esc, or the option's number where Claude offers one) through the existing input-delivery path. Typing in the composer while a picker is open goes to the picker the same way the answer cards for permission prompts do.
+- Tests on captured screens, recorded from a SCRATCH Claude session on a scratch HOME with no real session touched, the way WT-2 captured status rows. The /mcp server list, /model, and one yes/no dialog are each parsed into a card with the right options and highlight. A replay test shows the card appearing with no transcript line written. A key test checks the bytes sent for down, down, Enter and for Esc.
+- Screenshots of the card for /mcp and /model, light and dark. Full suite twice via scripts/test.sh, output to files and grepped.
+
+Boundaries:
+- Sources/VibeSwitcher/MainWindow/Chat (the card, composer routing), Sources/VibeCore (screen-to-picker parsing, ChatSync only where it decides when to redraw), Tests/ (+ captured fixtures)
+- Never type into or resize a real user session: captures come from a scratch Claude session on a scratch HOME, as in WT-2; no protocol change to the session host; don't touch HangWatchdog.swift; never install
+- Git: `git merge project-lead` to update, never rebase; report(summary:) once with the commit and the screenshots
+
+Context:
+2026-10-21 09:1x (lead). Reported by the user. In VibeSwitcher's chat view they typed /mcp. The selector Claude Code opens didn't appear in the chat; it only showed after they sent another message. Today the chat is built from the transcript (JSONL) plus answer cards for permission prompts, which come from hooks or the screen. A local slash command's picker writes nothing to the transcript, so nothing triggers a redraw. Related merged work: answer-card keys (permission prompts answered from the chat), WT-2 (screen readout fixed for grapheme clusters; scratch-only capture tools in Tests/Tools/capture-claude-status-rows.py, which shows how to drive a scratch Claude 2.1.304 on a fake Messages API), a-role-session-s (PendingPrompt text), and chat-paging (staging). Claude Code version on this Mac: check with `claude --version` in a scratch shell.
+
+2026-10-21 10:4x (lead). Approved: the new capture tool Tests/Tools/capture-claude-pickers.py and its fixture; ChatSync's hostScreen closure. Accepted limits: /config's search focus, /permissions before the first arrow, the first 0.25 s after a slash command, Terminal.app tab sessions. Verifier: check that a message held while a picker is open is never lost (picker closed by the user in the terminal, the session ending, the window closing), that Esc from an empty composer only reaches the picker when a picker card is showing, that the 0.25 s watch really stops (no screen reads after it ends), and that the capture fixture has no user paths or real keys.
