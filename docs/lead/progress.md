@@ -1325,3 +1325,5 @@
 - 2026-10-26 01:36 Merged today-s-flaky-tests: Today's flaky tests pass reliably on a loaded Mac
 - 2026-10-26 01:36 Automatically (auto_advance): Merged today-s-flaky-tests (Today's flaky tests pass reliably on a loaded Mac) into project-lead at 410ce58a, on its passing audit and the full test run.
 - 2026-10-26 01:46 Merged a-short-project-map: A short project map every worker reads first (CLAUDE.md)
+- 2026-10-26 01:46 Automatically (auto_advance): Merged a-short-project-map (A short project map every worker reads first (CLAUDE.md)) into project-lead at ede10c4a, on its passing audit and the full test run.
+- 2026-10-26 01:55 Merged every-task-gets-a: Every task gets a receipt: time, tokens, cost, rounds, rollback
