@@ -62,10 +62,10 @@ struct BatchSummaryTests {
         #expect(BatchSummary.detect(previous: before, current: after, now: now) == nil)
     }
 
-    /// Planned, running, review, blocked, kept and failed are open work; done, folded and abandoned aren't.
+    /// Planned, running, review, blocked, kept and failed are open work; done, folded, abandoned and reverted aren't.
     @Test func theOpenStatesAreTheBoardsUnfinishedOnes() {
         for status in LeadTask.Status.allCases {
-            let closed = [LeadTask.Status.done, .folded, .abandoned].contains(status)
+            let closed = [LeadTask.Status.done, .folded, .abandoned, .reverted].contains(status)
             #expect(BatchSummary.isClosed(task("x", status)) == closed, "\(status)")
         }
         let open = board([task("a", .done), task("k", .kept)])

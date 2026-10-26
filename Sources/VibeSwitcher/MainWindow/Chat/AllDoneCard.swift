@@ -112,6 +112,7 @@ struct AllDoneCard: View {
         case .merged: return "checkmark.circle.fill"
         case .folded: return "arrow.triangle.merge"
         case .abandoned: return "minus.circle"
+        case .reverted: return "arrow.uturn.backward.circle"
         }
     }
 
@@ -120,6 +121,7 @@ struct AllDoneCard: View {
         case .merged: return "merged"
         case .folded: return "folded into another task"
         case .abandoned: return "set aside"
+        case .reverted: return "reverted"
         }
     }
 

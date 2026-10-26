@@ -31,7 +31,7 @@ struct TeamRow: Identifiable, Equatable {
 
     /// The status mark: each has its own color and its own shape, so it reads without color too.
     enum Mark: CaseIterable {
-        case waits, failed, blocked, stalled, ended, working, rework, review, merge, queued, merged, folded, kept, abandoned
+        case waits, failed, blocked, stalled, ended, working, rework, review, merge, queued, merged, folded, kept, abandoned, reverted
 
         var symbol: String {
             switch self {
@@ -50,6 +50,7 @@ struct TeamRow: Identifiable, Equatable {
             case .folded: return "arrow.turn.down.right"
             case .kept: return "archivebox.fill"
             case .abandoned: return "minus.circle"
+            case .reverted: return "arrow.uturn.backward.circle"
             }
         }
 
@@ -95,7 +96,7 @@ struct TeamRow: Identifiable, Equatable {
     /// The dim line under the title: for a task at work, what its agent is doing (the plain-language summary, else
     /// the latest checkpoint, else the live activity); for a red one, what it asks or why.
     func line(summary: String?) -> String? {
-        if mark.isRed || [.waits, .blocked, .kept, .abandoned].contains(mark) { return problem }
+        if mark.isRed || [.waits, .blocked, .kept, .abandoned, .reverted].contains(mark) { return problem }
         if let foldedText { return foldedText }
         guard isLive else { return nil }
         return summary ?? checkpoint?.text ?? activity
@@ -270,7 +271,7 @@ enum TeamRows {
         }
 
         // A session waiting on an answer waits on its lead, whatever the board says (a finished task's is history).
-        if ![.done, .folded, .abandoned].contains(task.status), let worker, worker.needsYou {
+        if ![.done, .folded, .abandoned, .reverted].contains(task.status), let worker, worker.needsYou {
             red(.waits, LeadTeams.waitsOnLeadLabel, worker.detail.flatMap { $0.isEmpty ? nil : $0 } ?? "The worker is waiting for an answer.", since: nil)
             row.agent = task.worker
             return row
@@ -305,6 +306,12 @@ enum TeamRows {
             row.mark = .abandoned
             row.state = "Abandoned"
             row.problem = task.abandonedBecause
+        case .reverted:
+            // Merged, then undone by the lead's revert: finished, with why.
+            row.group = .finished
+            row.mark = .reverted
+            row.state = "Reverted"
+            row.problem = task.merged?.revertReason
         case .failed where task.worktree == nil && task.worker != nil:
             // Cleaned up without merging.
             row.group = .finished
@@ -442,9 +449,10 @@ enum TeamRows {
         let merged = finished.filter { $0.mark == .merged }.count
         let folded = finished.filter { $0.mark == .folded }.count
         let kept = finished.filter { $0.mark == .kept }.count
-        let abandoned = finished.count - merged - folded - kept
+        let reverted = finished.filter { $0.mark == .reverted }.count
+        let abandoned = finished.count - merged - folded - kept - reverted
         return "Merged (\(merged + folded)\(folded > 0 ? ", \(folded) folded" : ""))" + (kept > 0 ? " · Kept (\(kept))" : "")
-            + (abandoned > 0 ? " · Abandoned (\(abandoned))" : "")
+            + (reverted > 0 ? " · Reverted (\(reverted))" : "") + (abandoned > 0 ? " · Abandoned (\(abandoned))" : "")
     }
 }
 

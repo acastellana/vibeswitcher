@@ -122,6 +122,8 @@ public struct LeadMergeRecord: Codable, Equatable, Sendable {
     /// The base's commit that reverted it (all or part of it), and when that was found (see `LeadReverts`).
     public var revertedBy: String?
     public var revertedAt: Double?
+    /// Why the lead reverted it (the revert tool); nil when the base's own commit did (found by `LeadReverts`).
+    public var revertReason: String?
     /// false: it merged with no verdict, a `review: none` task on its worker's report and the merge's own test run;
     /// nil (older records, and every audited merge): a passing audit let it in.
     public var audited: Bool?
@@ -566,9 +568,12 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
         /// Given up by the lead (`abandonedBecause`): nothing will carry its work. Finished, counted apart from the
         /// merged ones and never as failed or blocked; nothing more starts, audits or merges on it.
         case abandoned
+        /// Merged, then undone by the lead's revert (`merged.revertedBy`, `merged.revertReason`): one commit on the base
+        /// took its changes out again. Finished; nothing more starts, audits or merges on it (new work is a new task).
+        case reverted
 
         /// The order the board lists the states in: what needs the lead first. Holds every case (a test checks).
-        public static let attentionOrder: [Status] = [.running, .review, .blocked, .failed, .kept, .planned, .done, .folded, .abandoned]
+        public static let attentionOrder: [Status] = [.running, .review, .blocked, .failed, .kept, .planned, .done, .reverted, .folded, .abandoned]
         /// Where the state sits in `attentionOrder`.
         public var attentionRank: Int { Self.attentionOrder.firstIndex(of: self) ?? Self.attentionOrder.count }
     }

@@ -216,6 +216,15 @@ struct TeamRowsTests {
         abandoned.worktree = nil
         #expect(row(abandoned).mark == .abandoned)
         #expect(TeamRows.finishedTitle([row(merged), row(abandoned)]) == "Merged (1) · Abandoned (1)")
+        // Merged, then undone by the lead's revert: finished, saying why.
+        var reverted = Self.task("r", .reverted)
+        reverted.worktree = nil
+        reverted.merged = LeadMergeRecord(commit: "abc", tested: true, onto: "def")
+        reverted.merged?.revertedBy = "1234"
+        reverted.merged?.revertReason = "The chat froze on paste"
+        #expect(row(reverted).group == .finished && row(reverted).mark == .reverted && row(reverted).state == "Reverted")
+        #expect(row(reverted).line(summary: nil) == "The chat froze on paste")
+        #expect(TeamRows.finishedTitle([row(merged), row(reverted), row(abandoned)]) == "Merged (1) · Reverted (1) · Abandoned (1)")
     }
 
     @Test func aBlockedTaskSaysWhichOfItsAfterTasksItWaitsOn() {

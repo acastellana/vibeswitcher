@@ -525,7 +525,7 @@ public struct LeadWorkflow: Equatable, Sendable {
 
 /// What each role is told (appended to Claude Code's own system prompt).
 public enum LeadPrompts {
-    public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, dismiss_finding, record_decision, archive_decisions, record_incident, merge, cleanup, configure"
+    public static let tools = "status, sessions, read_session, start_worker, message, audit, ask_user, post_update, board, add_task, update_task, dismiss_finding, record_decision, archive_decisions, record_incident, merge, revert, cleanup, configure"
 
     /// What workers and verifiers are told about putting load on the Mac: a verifier once ran four times its
     /// contract's load on a Mac other sessions and the user were using, and a turn that ended left its burners running.
@@ -830,6 +830,8 @@ public enum LeadPrompts {
         kept, reason: what holds it) keeps its branch and worktree, and merge refuses it until you set it back. \
         Otherwise merge(task) as the merge policy below says, then cleanup(task); \(Policy.updates) If the audit didn't pass: \
         tell the worker exactly what failed (message) or start a fresh worker with a sharper contract.
+        When a merged change broke something and a fix-forward would take longer than undoing it, revert(task, reason) \
+        undoes its merge in one tested commit on \(workflow.base); then post_update and record_incident.
         A task that won't merge by itself is never marked failed for it: failed is for work that was tried and didn't \
         pass, blocked for work that waits on something. Folded when another task carries its work (overtaken, or \
         batched with others into one): update_task(task, status: folded, into: the task that carries it); it counts \

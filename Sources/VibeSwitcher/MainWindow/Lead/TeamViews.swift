@@ -11,6 +11,7 @@ extension TeamRow.Mark {
         case .merge, .merged, .folded: return .green
         case .kept: return .teal
         case .queued, .abandoned: return .secondary
+        case .reverted: return .red
         }
     }
 }

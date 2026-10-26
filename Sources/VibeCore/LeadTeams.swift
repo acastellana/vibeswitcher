@@ -37,9 +37,9 @@ public enum LeadTeams {
         return path[range.upperBound...].split(separator: "/").first.map(String.init)
     }
 
-    /// Merged, folded into another task, abandoned, or cleaned up without merging: nothing more happens on the task.
+    /// Merged, folded into another task, abandoned, reverted, or cleaned up without merging: nothing more happens on the task.
     public static func isFinished(_ task: LeadTask) -> Bool {
-        [.done, .folded, .abandoned].contains(task.status) || (task.status == .failed && task.worktree == nil)
+        [.done, .folded, .abandoned, .reverted].contains(task.status) || (task.status == .failed && task.worktree == nil)
     }
 
     /// When a finished task finished: when it took its status (stamped on every change), else when it merged.

@@ -14,6 +14,7 @@ extension LeadTask.Status {
         case .kept: return .teal
         case .folded: return .green
         case .abandoned: return .secondary
+        case .reverted: return .red
         }
     }
 
@@ -28,6 +29,7 @@ extension LeadTask.Status {
         case .kept: return "Kept"
         case .folded: return "Folded"
         case .abandoned: return "Abandoned"
+        case .reverted: return "Reverted"
         }
     }
 }

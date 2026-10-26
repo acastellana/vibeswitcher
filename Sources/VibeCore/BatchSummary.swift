@@ -6,7 +6,7 @@ import Foundation
 public struct LeadAllDone: Codable, Equatable, Sendable, Identifiable {
     /// A task of the batch: its title, and how it ended.
     public struct Task: Codable, Equatable, Sendable {
-        public enum Outcome: String, Codable, Sendable { case merged, folded, abandoned }
+        public enum Outcome: String, Codable, Sendable { case merged, folded, abandoned, reverted }
         public var slug: String
         public var title: String
         public var outcome: Outcome
@@ -85,11 +85,11 @@ public enum BatchSummary {
 
     // MARK: Detection
 
-    /// Finished: done, folded or abandoned (a failed task cleaned up counts as abandoned, as the board reads it). The
+    /// Finished: done, folded, abandoned or reverted (a failed task cleaned up counts as abandoned, as the board reads it). The
     /// rest (planned, running, review, blocked, kept, failed) is open work.
     public static func isClosed(_ task: LeadTask) -> Bool {
         switch task.status {
-        case .done, .folded, .abandoned: return true
+        case .done, .folded, .abandoned, .reverted: return true
         case .failed: return task.isAbandoned
         case .planned, .running, .review, .blocked, .kept: return false
         }
@@ -104,6 +104,7 @@ public enum BatchSummary {
         switch task.status {
         case .done: return .merged
         case .folded: return .folded
+        case .reverted: return .reverted
         default: return .abandoned
         }
     }
@@ -257,6 +258,7 @@ public enum BatchSummary {
             case .merged: return "Done: \(title)."
             case .folded: return "Done as part of another task: \(title)."
             case .abandoned: return "Set aside: \(title)."
+            case .reverted: return "Merged, then reverted: \(title)."
             }
         }
         let shown = tasks.count > bulletLimit ? bulletLimit - 1 : bulletLimit

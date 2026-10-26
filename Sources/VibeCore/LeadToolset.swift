@@ -425,6 +425,9 @@ public final class LeadToolset: MCPToolset {
                             properties: ["task": task], required: ["task"]),
                 MCPToolInfo(name: "merge", description: "Merge a task: rebase onto the lead's branch (squashed when the worker merged it in), run the test command, fast-forward that branch. An audit task (or one whose branch touches sensitive_paths) needs its passing audit; a review none task needs only its worker's done report on the branch's head and the test command passing.",
                             properties: ["task": task], required: ["task"]),
+                MCPToolInfo(name: "revert", description: "Undo a merged task in one step: one commit on top of the lead's branch reverts the commits its merge put there, the test command runs on it, and the branch fast-forwards to it; the task reads reverted. It only adds a commit (nothing is reset or rewritten). Refused, with the branch untouched, when the tests fail or when later commits conflict with the revert (it names the files and the tasks that touched them: plan a fix-forward task instead).",
+                            properties: ["task": task, "reason": P(type: "string", description: "What the merge broke, in one line: it goes into the revert commit's message and the task's record")],
+                            required: ["task", "reason"]),
                 MCPToolInfo(name: "cleanup", description: "End a task's sessions and remove its worktree and branch (after merging, or force to abandon it).",
                             properties: ["task": task, "force": P(type: "boolean", description: "Also discard unmerged work")], required: ["task"]),
                 MCPToolInfo(name: "accept_git_hooks", description: "Let the tool server's git (merges, cleanups, start_worker, auto_advance) run the repository's git hooks as they are now. It runs only hooks you accepted, from a copy, never the hooks folder a worker can write: status, merge and the rest tell you when that folder isn't as you accepted it. Read each hook first; accept only the user's own.",
@@ -513,6 +516,10 @@ public final class LeadToolset: MCPToolset {
                 let merged = try merge(try taskSlug(arguments))
                 records.flush(base: base)
                 return withGitNotice(merged)
+            case "revert":
+                let reverted = try revert(try taskSlug(arguments), reason: arguments["reason"] as? String ?? "")
+                records.flush(base: base)
+                return withGitNotice(reverted)
             case "cleanup": return withGitNotice(try cleanup(try taskSlug(arguments), force: arguments["force"] as? Bool ?? false))
             case "accept_git_hooks": return try acceptGitHooks(arguments)
             case "ask_user": return try askUser(arguments)
@@ -628,7 +635,7 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// The states the lead settles a task in: finished, never counted as failed; nothing starts, audits or merges on it.
-    static let settledStates: [LeadTask.Status] = [.folded, .abandoned]
+    static let settledStates: [LeadTask.Status] = [.folded, .abandoned, .reverted]
 
     // MARK: Lead
 
@@ -904,6 +911,9 @@ public final class LeadToolset: MCPToolset {
         var changed: [String] = []
         try boardChange { board in
             guard let index = board.taskIndex(slug) else { return }
+            if let status, board.tasks[index].status == .reverted {
+                throw BoardError(text: "\(slug) was merged and reverted\(board.tasks[index].merged?.revertedBy.map { " (by \($0.prefix(8)))" } ?? ""); it stays reverted, not \(status.rawValue). To do its work again, add_task a new task. Nothing was changed.")
+            }
             if let status, board.tasks[index].status == .done {
                 throw BoardError(text: "\(slug) is merged already\(board.tasks[index].merged.map { " (at \($0.commit.prefix(8)))" } ?? ""); it stays done, not \(status.rawValue). Nothing was changed.")
             }
@@ -1015,7 +1025,7 @@ public final class LeadToolset: MCPToolset {
     /// A task may be re-rolled while it's still to land: not merged, kept, folded or abandoned, and no merge of it under way.
     private func checkRerollable(_ slug: String) throws {
         guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
-        if [.done, .kept, .folded, .abandoned].contains(task.status) {
+        if [.done, .kept, .folded, .abandoned, .reverted].contains(task.status) {
             throw Problem(text: "\(slug) is \(Self.shownState(task)): there's nothing to re-roll\(task.status == .kept ? " (update_task(\(slug), status: planned) first, if it's wanted after all)" : ""). Nothing was changed.")
         }
         guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/merge-\(slug).lock")) else {
@@ -1133,6 +1143,10 @@ public final class LeadToolset: MCPToolset {
     /// The refusal for a folded or abandoned task: nothing more happens on it (`what`: what was refused).
     private static func settledRefusal(_ task: LeadTask, _ what: String) -> Problem {
         let back = "update_task(\(task.slug), status: planned) first"
+        if task.status == .reverted {
+            return Problem(text: "\(what): \(task.slug) was merged and then reverted" + (task.merged?.revertReason.map { " (\($0))" } ?? "")
+                           + ". Its work stays undone; to do it again, plan a new task (add_task) that does it without what broke.")
+        }
         if task.status == .abandoned {
             return Problem(text: "\(what): \(task.slug) is abandoned (\(task.abandonedBecause ?? "no reason recorded")). If it's wanted after all, \(back).")
         }
@@ -1547,7 +1561,7 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].verifier = session
             board.tasks[index].panel = panel
             // A kept task stays kept through a new audit: what holds it back hasn't changed.
-            if ![.kept, .folded, .abandoned].contains(board.tasks[index].status) { board.tasks[index].status = .review }
+            if ![.kept, .folded, .abandoned, .reverted].contains(board.tasks[index].status) { board.tasks[index].status = .review }
             board.tasks[index].evidence = nil
         }
         let flagged: String
@@ -1990,21 +2004,7 @@ public final class LeadToolset: MCPToolset {
         }
         defer { held.release() }
         guard let current = branchHead(base) else { throw Problem(text: "There's no branch \(base) to merge into.") }
-        // The branch moves only through these merges: anything else that moved it (a worker's git, a hand-made
-        // commit) is something nobody audited.
-        // Except the user's own commits, which the vault takes when their sessions' hooks account for every one.
-        if let known = vault.head(root: root, branch: base), known != current {
-            let move = Result { try vault.acceptMove(root: root, branch: base) }
-            guard case .success(let taken) = move, taken.accepted, taken.to == current else {
-                // Its merges wait on the user now: the window tells them (`AlertRules.baseMoved`).
-                LeadVault.BaseMoveRefusal.mark(base: base, current: current, move: move, root: root)
-                throw Problem(text: LeadVault.moveRefusal(base: base, known: known, current: current, move: move, root: root))
-            }
-            try? store.update { $0.updates.append(LeadUpdate(title: "Took \(taken.count) on \(base)", body: taken.acceptedLine)) }
-            try? store.appendProgress(taken.acceptedLine)
-        } else if vault.head(root: root, branch: base) == nil {
-            try vault.setHead(current, root: root, branch: base)
-        }
+        try checkBaseMoves(base: base, current: current)
         // A lock in the main checkout stops the fast-forward at the end: said now, before the tests run.
         if let lock = Worktrees.indexLock(blocking: base, root: root) {
             throw Problem(text: "Not merged (nothing was tested): \(Worktrees.refusal(lock))")
@@ -2121,6 +2121,165 @@ public final class LeadToolset: MCPToolset {
             return MCPToolResult(text: "Merged \(slug) into \(base)\(untested). Next: cleanup(\(slug)). \(LeadPrompts.Policy.updates)\(overruled)\(unaudited)\(ran)\(patience)\(evidence)\(flakeNote)\(caughtUp)")
         case .refused(let reason):
             throw Problem(text: "Not merged: \(reason)")
+        }
+    }
+
+    /// The base moves only through merges and reverts: anything else that moved it from where the vault last saw it
+    /// (a worker's git, a hand-made commit) is something nobody audited, and is refused (`BaseMoveRefusal`). Except
+    /// the user's own commits, which the vault takes when their sessions' hooks account for every one.
+    private func checkBaseMoves(base: String, current: String) throws {
+        if let known = vault.head(root: root, branch: base), known != current {
+            let move = Result { try vault.acceptMove(root: root, branch: base) }
+            guard case .success(let taken) = move, taken.accepted, taken.to == current else {
+                // Its merges wait on the user now: the window tells them (`AlertRules.baseMoved`).
+                LeadVault.BaseMoveRefusal.mark(base: base, current: current, move: move, root: root)
+                throw Problem(text: LeadVault.moveRefusal(base: base, known: known, current: current, move: move, root: root))
+            }
+            try? store.update { $0.updates.append(LeadUpdate(title: "Took \(taken.count) on \(base)", body: taken.acceptedLine)) }
+            try? store.appendProgress(taken.acceptedLine)
+        } else if vault.head(root: root, branch: base) == nil {
+            try vault.setHead(current, root: root, branch: base)
+        }
+    }
+
+    /// Undoes a merged task in one step: one commit on top of the base reverts the commits its merge put there (the
+    /// board's `merged.onto..merged.commit`), made and tested where no agent works (`Worktrees.revertAndTest`), and the
+    /// base fast-forwards to it. It keeps what merge keeps: the battery hold, the Mac-wide test lock, the load wait,
+    /// the guarded settings, one move of the base at a time, and the base-move check. It only adds a commit: a failed
+    /// test run or a conflict with what came later leaves the base as it was, the task merged.
+    private func revert(_ slug: String, reason given: String) throws -> MCPToolResult {
+        let reason = given.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !reason.isEmpty else {
+            throw Problem(text: "Not reverted: say what the merge broke (reason), in one line; it goes into the revert commit and the task's record.")
+        }
+        guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
+        if task.status == .reverted {
+            throw Problem(text: "\(slug) is reverted already" + (task.merged?.revertedBy.map { " (by \($0.prefix(8)))" } ?? "") + ". Nothing to do.")
+        }
+        guard task.status == .done, let merged = task.merged else {
+            throw Problem(text: "Not reverted: \(slug) isn't merged (it's \(Self.shownState(task))), so nothing of it is on the base to undo.")
+        }
+        guard let onto = merged.onto else {
+            throw Problem(text: "Not reverted: \(slug) merged (at \(merged.commit.prefix(8))) before the board recorded the commit it went onto, so which commits it brought can't be told for sure. "
+                          + "Revert it by hand, or plan a fix-forward task (add_task).")
+        }
+        if let by = merged.revertedBy {
+            throw Problem(text: "Not reverted: \(by.prefix(8)) on the base already reverts \(slug)'s merge (all or part of it). `git show \(by.prefix(8))` shows what it undid; a fix-forward task (add_task) handles anything left.")
+        }
+        try checkBattery(not: "Not reverted")
+        guard let lock = FileLock.attempt((store.folder as NSString).appendingPathComponent("run/merge-\(slug).lock")) else {
+            throw Problem(text: "A merge or revert of \(slug) is already running; its result comes back to the call that started it.")
+        }
+        defer { lock.release() }
+        let workflow = self.workflow
+        try checkSettings(workflow, not: "Not reverted (nothing was tested)")
+        let base = workflow.base
+        // One move of the branch at a time, merges and reverts alike: each checks the head the other one moves.
+        let baseLock = vault.scratch(root: root, "merge-into-\(LeadVault.hash(base).prefix(16)).lock")
+        try vault.ensurePrivate(baseLock.deletingLastPathComponent())
+        guard let held = FileLock.attempt(baseLock.path) else {
+            throw Problem(text: "A merge or revert into \(base) is running; revert \(slug) when it's done.")
+        }
+        defer { held.release() }
+        guard let current = branchHead(base) else { throw Problem(text: "There's no branch \(base) to revert on.") }
+        try checkBaseMoves(base: base, current: current)
+        if let lock = Worktrees.indexLock(blocking: base, root: root) {
+            throw Problem(text: "Not reverted (nothing was tested): \(Worktrees.refusal(lock))")
+        }
+        let range = "\(onto)..\(merged.commit)"
+        let listed = Git.run(["rev-list", range], in: root)
+        let commits = listed.output.split(whereSeparator: \.isNewline).map(String.init)
+        guard listed.ok, !commits.isEmpty else {
+            throw Problem(text: "Not reverted: the commits \(slug)'s merge brought (\(onto.prefix(8))..\(merged.commit.prefix(8))) can't be listed: \(Worktrees.said(listed))")
+        }
+        let waited = try waitForLoad(workflow, slug: slug, doing: "revert", done: "reverted")
+        // `LeadReverts` reads the hashes from the message, as git's own revert writes them.
+        let message = "Revert \(slug): \(Self.clip(task.title, 60))\n\n\(reason)\n\n"
+            + commits.map { "This reverts commit \($0)." }.joined(separator: "\n")
+        let made: String
+        switch Worktrees.revertAndTest(root: root, onto: onto, commit: merged.commit, base: current, message: message,
+                                       setup: workflow.initCommand, test: workflow.mergeChecks,
+                                       scratch: vault.scratch(root: root, "revert-\(slug)"), home: vault.scratch(root: root, "revert-\(slug)-home"),
+                                       timeout: workflow.testTimeout, lock: heavyLock(workflow)) {
+        case .passed(let commit): made = commit
+        case .conflict(let files):
+            let shown = laterTouches(files.prefix(12).map { $0 }, slug: slug, after: merged.commit, current: current)
+            throw Problem(text: "Not reverted: reverting \(slug) conflicts with what \(base) did since it merged, in \(files.count) file\(files.count == 1 ? "" : "s"): "
+                          + shown.joined(separator: "; ") + (files.count > 12 ? "; …" : "") + ". \(base) is as it was, and \(slug) stays merged. "
+                          + "Undoing it would mean undoing those too: plan a fix-forward task instead (add_task), saying what \(slug) broke (\(Self.clip(reason, 120))).")
+        case .failed(let output):
+            let saved = saveMergeLog(output, slug: slug, name: "revert-test.log")
+            let found = TestFailures(output: output).summary()
+                ?? "Nothing in the output names a failing test or an error; it ends:\n" + String(output.suffix(1500))
+            let which = output.hasPrefix("init_command failed:\n") ? "init_command" : "test command"
+            throw Problem(text: "Not reverted: the \(which) fails with \(slug) reverted on \(base). \(base) is as it was, and \(slug) stays merged.\n\(found)\n"
+                          + (saved.map { "Full output: \($0)" } ?? "(The full output couldn't be saved.)")
+                          + "\nIf the tests fail without the change too, fix forward (add_task); if they only fail reverted, its later work depends on it.")
+        case .hung(let command, let after, let output):
+            let saved = saveMergeLog(output, slug: slug, name: "revert-test.log")
+            throw Problem(text: "Not reverted: the \(command) hung after \(Worktrees.duration(after)) with \(slug) reverted on \(base), and was stopped with everything started under it. \(base) is as it was. "
+                          + (saved.map { "The output so far: \($0)." } ?? "(The output couldn't be saved.)"))
+        case .cancelled:
+            throw Problem(text: "The revert of \(slug) was cancelled; \(base) is as it was, and \(slug) stays merged.")
+        case .error(let text):
+            throw Problem(text: "Not reverted: \(text) \(base) is as it was.")
+        }
+        if ShellCancel.current?.isCancelled == true {
+            throw Problem(text: "The revert of \(slug) was cancelled after its checks passed; \(base) is as it was, and \(slug) stays merged.")
+        }
+        switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: made, from: current) }) {
+        case .merged:
+            try vault.setHead(made, root: root, branch: base)
+            let now = Date().timeIntervalSince1970
+            try store.update { board in
+                guard let index = board.taskIndex(slug) else { return }
+                board.tasks[index].status = .reverted
+                board.tasks[index].merged?.revertedBy = made
+                board.tasks[index].merged?.revertedAt = now
+                board.tasks[index].merged?.revertReason = reason
+            }
+            try? store.appendProgress("Reverted \(slug): \(task.title), by \(made.prefix(8)) (\(Self.clip(reason, 200)))")
+            let untested = workflow.testCommand == nil
+                ? " (reverted without tests: no test_command\(workflow.problem.map { "; \($0)" } ?? ""). Set one with configure.)" : " The test command passed on it."
+            let patience = waited.map { " (The tests waited \(Worktrees.duration($0.after)) for the Mac's load to drop from \(MacLoad.number($0.from)) below load_threshold.)" } ?? ""
+            let caughtUp = tellToCatchUp(merged: "the revert of \(slug)", from: current, to: made, base: base)
+            return MCPToolResult(text: "Reverted \(slug) on \(base): one commit, \(made.prefix(8)) “Revert \(slug)”, undoes the \(commits.count) commit\(commits.count == 1 ? "" : "s") its merge brought (\(onto.prefix(8))..\(merged.commit.prefix(8))).\(untested) \(slug) reads reverted. "
+                                 + "Next: post_update what was undone and why (the user installs as usual), and record_incident(what, evidence, task: \(slug)) so what broke becomes a check before merge. "
+                                 + "If its work is still wanted, plan a new task (add_task) that does it again without what broke.\(patience)\(caughtUp)")
+        case .refused(let why):
+            throw Problem(text: "Not reverted: \(why) The revert commit wasn't put on \(base); \(slug) stays merged.")
+        }
+    }
+
+    /// For each of `files` (a revert's conflicts), who changed it on the base after `slug`'s merge (`after`) up to
+    /// `current`: the later tasks whose merged ranges (`merged.onto..merged.commit`) hold such a commit, and the
+    /// commits no task's range holds (the user's own), by hash and subject.
+    private func laterTouches(_ files: [String], slug: String, after: String, current: String) -> [String] {
+        let lines = { (output: String) in output.split(whereSeparator: \.isNewline).map(String.init) }
+        var owner: [String: String] = [:]
+        for task in store.load().tasks where task.slug != slug {
+            guard let merged = task.merged, let onto = merged.onto else { continue }
+            let listed = Git.run(["rev-list", "\(onto)..\(merged.commit)"], in: root)
+            guard listed.ok else { continue }
+            for commit in lines(listed.output) { owner[commit] = task.slug }
+        }
+        return files.map { file in
+            let log = Git.run(["log", "--format=%H%x1f%s", "\(after)..\(current)", "--", file], in: root)
+            var tasks: [String] = [], others: [String] = []
+            for entry in lines(log.output) {
+                let parts = entry.split(separator: "\u{1f}", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+                if let task = owner[parts[0]] {
+                    if !tasks.contains(task) { tasks.append(task) }
+                } else {
+                    others.append("\(parts[0].prefix(8)) “\(Self.clip(parts.count > 1 ? parts[1] : "", 60))”")
+                }
+            }
+            var who: [String] = []
+            if !tasks.isEmpty { who.append((tasks.count == 1 ? "task " : "tasks ") + tasks.joined(separator: ", ")) }
+            if !others.isEmpty {
+                who.append((others.count == 1 ? "commit " : "commits ") + others.prefix(3).joined(separator: ", ") + (others.count > 3 ? ", …" : ""))
+            }
+            return file + (who.isEmpty ? " (no later commit changed it)" : " (changed since by " + who.joined(separator: " and ") + ")")
         }
     }
 
@@ -2330,8 +2489,8 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// Saves a merge's test output where the lead can read it; its path, or nil when it couldn't be saved.
-    private func saveMergeLog(_ output: String, slug: String) -> String? {
-        let log = vault.scratch(root: root, "\(slug)/merge-test.log")
+    private func saveMergeLog(_ output: String, slug: String, name: String = "merge-test.log") -> String? {
+        let log = vault.scratch(root: root, "\(slug)/\(name)")
         return (try? vault.ensurePrivate(log.deletingLastPathComponent())).flatMap {
             (try? Data(output.utf8).write(to: log, options: .atomic)).map { log.path }
         }
@@ -2341,7 +2500,7 @@ public final class LeadToolset: MCPToolset {
         let board = store.load()
         guard let task = board.task(slug) else { throw Problem(text: "No task \(slug).") }
         // Folded (another task carries its work) or abandoned by the lead: it goes without force.
-        guard [.done, .folded, .abandoned].contains(task.status) || force else {
+        guard [.done, .folded, .abandoned, .reverted].contains(task.status) || force else {
             throw Problem(text: "\(slug) isn't merged. Use force: true to abandon its work.")
         }
         // Only the ones still running are ended: a session that's gone (lost with a replaced host) has nothing to kill.
@@ -2374,11 +2533,11 @@ public final class LeadToolset: MCPToolset {
         freed += sweepFinished(board, except: slug)
         try? vault.retire(root: root, task: slug)
         // Cleaned up unmerged after a worker ran: abandoned, as the board reads it, so it gets its receipt.
-        let usage = [.done, .folded, .abandoned].contains(task.status) || task.isAbandoned ? nil : receiptUsage(task)
+        let usage = [.done, .folded, .abandoned, .reverted].contains(task.status) || task.isAbandoned ? nil : receiptUsage(task)
         let after = try store.update { board -> LeadTask? in
             guard let index = board.taskIndex(slug) else { return nil }
             board.tasks[index].worktree = nil
-            if ![.done, .folded, .abandoned].contains(board.tasks[index].status) { board.tasks[index].status = .failed }
+            if ![.done, .folded, .abandoned, .reverted].contains(board.tasks[index].status) { board.tasks[index].status = .failed }
             if let usage, board.tasks[index].isAbandoned {
                 board.tasks[index].receipt = LeadReceipt(board.tasks[index], ending: .abandoned, questions: board.questions, usage: usage)
             }
@@ -2522,7 +2681,8 @@ public final class LeadToolset: MCPToolset {
     /// Waits while the Mac's 1-minute load is above load_threshold, reading it every `loadPoll`, for at most
     /// test_timeout_min; nil when it didn't wait, else how long and from what load. Throws, with the numbers, when the
     /// load didn't drop in time (nothing was tested).
-    private func waitForLoad(_ workflow: LeadWorkflow, slug: String) throws -> (after: TimeInterval, from: Double)? {
+    /// `doing` and `done`: what waits ("merge", "merged"; a revert's say so).
+    private func waitForLoad(_ workflow: LeadWorkflow, slug: String, doing: String = "merge", done: String = "merged") throws -> (after: TimeInterval, from: Double)? {
         let start = Date()
         let deadline = start.addingTimeInterval(workflow.testTimeout)
         let limits = macLimits()
@@ -2536,12 +2696,12 @@ public final class LeadToolset: MCPToolset {
                 progress.send("Waiting \(Worktrees.duration(Date().timeIntervalSince(start))) for the Mac's 1-minute load (\(MacLoad.number(current))) to drop below load_threshold (\(MacLoad.number(limits.loadLimit))) before testing \(slug).")
             }
             if ShellCancel.current?.isCancelled == true {
-                throw Problem(text: "The merge of \(slug) was cancelled while it waited for the Mac's load to drop; nothing was merged, and \(slug) stays as it was.")
+                throw Problem(text: "The \(doing) of \(slug) was cancelled while it waited for the Mac's load to drop; nothing was \(done), and \(slug) stays as it was.")
             }
             guard Date() < deadline else {
                 let mac = MacLoad.count(((try? listed()) ?? []).map { ($0.label, $0.cwd, $0.live) }, load: current)
-                roomWaits.record(root: root, what: "merge(\(slug))", need: 0, auto: LeadAdvance.isAutomatic)
-                throw Problem(text: "Not merged (nothing was tested): the Mac's 1-minute load stayed above load_threshold for the \(Worktrees.duration(workflow.testTimeout)) merge waits (test_timeout_min). Now: \(Self.macText(mac, limits)). "
+                roomWaits.record(root: root, what: "\(doing)(\(slug))", need: 0, auto: LeadAdvance.isAutomatic)
+                throw Problem(text: "Not \(done) (nothing was tested): the Mac's 1-minute load stayed above load_threshold for the \(Worktrees.duration(workflow.testTimeout)) \(doing) waits (test_timeout_min). Now: \(Self.macText(mac, limits)). "
                               + "Timing-sensitive tests fail on a Mac this busy, so \(slug) wasn't tested and stays as it was. \(LeadPrompts.retryWhenWoken) Meanwhile start no workers or audits (they'd add to the load), and tell the user if it stays this busy.")
             }
             Thread.sleep(forTimeInterval: min(loadPoll, progress?.every ?? loadPoll, max(0, deadline.timeIntervalSinceNow)))
@@ -2598,7 +2758,7 @@ public final class LeadToolset: MCPToolset {
         guard let sessions = try? listed() else { return 0 }
         let live = Set(sessions.filter(\.live).map { ($0.cwd as NSString).standardizingPath })
         var freed: Int64 = 0
-        for task in board.tasks where task.slug != slug && task.worktree == nil && [.done, .failed, .folded, .abandoned].contains(task.status) {
+        for task in board.tasks where task.slug != slug && task.worktree == nil && [.done, .failed, .folded, .abandoned, .reverted].contains(task.status) {
             let worktree = Worktrees.path(root: root, slug: task.slug)
             guard !FileManager.default.fileExists(atPath: worktree), !live.contains((worktree as NSString).standardizingPath) else { continue }
             freed += (ClaudeScratch.folders(for: worktree, in: scratchRoot) + SessionTemp.folders(for: worktree, in: sessionTempRoot))
@@ -3008,8 +3168,8 @@ public final class LeadToolset: MCPToolset {
         let needed = standing == nil && done ? reviewNeeded(slug, commit: head) : nil
         try store.update { board in
             guard let index = board.taskIndex(slug) else { return }
-            // Kept, folded or abandoned by the lead: a late report doesn't change that.
-            if ![.kept, .folded, .abandoned].contains(board.tasks[index].status) {
+            // Kept, folded, abandoned or reverted by the lead: a late report doesn't change that.
+            if ![.kept, .folded, .abandoned, .reverted].contains(board.tasks[index].status) {
                 board.tasks[index].status = !done ? .blocked : standing.map { $0.passes && blocking.isEmpty ? .review : .failed } ?? .review
             }
             if let standing {
@@ -3079,7 +3239,7 @@ public final class LeadToolset: MCPToolset {
         let workflow = self.workflow
         let task = try store.update { board -> LeadTask? in
             guard let index = board.taskIndex(slug) else { return nil }
-            if ![.kept, .folded, .abandoned, .done].contains(board.tasks[index].status) { board.tasks[index].status = .blocked }
+            if ![.kept, .folded, .abandoned, .done, .reverted].contains(board.tasks[index].status) { board.tasks[index].status = .blocked }
             // One that reports it before it's told (it judged the time itself) is over its budget all the same.
             var over = board.tasks[index].overBudget
                 ?? LeadOverBudget(minutes: LeadBudget.minutes(board.tasks[index], default: workflow.taskBudgetMinutes) ?? 0)
@@ -3240,7 +3400,7 @@ public final class LeadToolset: MCPToolset {
             board.tasks[index].audits = ledger
             if let size = board.tasks[index].panel?.size { board.tasks[index].panel?.reported = Array(1...size) }
             // A pass that leaves an Important finding open isn't mergeable yet: the lead decides, as on a failure.
-            if ![.kept, .folded, .abandoned].contains(board.tasks[index].status) { board.tasks[index].status = evidence.passes && blocking.isEmpty ? .review : .failed }
+            if ![.kept, .folded, .abandoned, .reverted].contains(board.tasks[index].status) { board.tasks[index].status = evidence.passes && blocking.isEmpty ? .review : .failed }
             if !evidence.passes {
                 board.tasks[index].setback = LeadSetback(stage: .review, reason: evidence.summary.isEmpty ? "The audit didn't pass (\(evidence.completion.rawValue), \(evidence.integrity.rawValue))." : evidence.summary,
                                                          evidence: evidence)
@@ -3523,9 +3683,9 @@ public final class LeadToolset: MCPToolset {
             var tasks = board.tasks.filter { $0.status == state && !endedIDs.contains($0.id) }
             guard !tasks.isEmpty else { continue }
             switch state {
-            case .done, .folded, .abandoned:
+            case .done, .folded, .abandoned, .reverted:
                 // Said below, each in a line: merged and folded together (a folded task's work merges with another
-                // task), then abandoned.
+                // task), then reverted, then abandoned.
                 continue
             case .failed:
                 // Cleaned up after failing (older boards, cleanup with force): abandoned, said below.
@@ -3543,6 +3703,7 @@ public final class LeadToolset: MCPToolset {
         }
         let settled = board.tasks.filter { !endedIDs.contains($0.id) }
         if let merged = Self.mergedLine(settled) { lines.append("\n" + merged) }
+        if let reverted = Self.revertedLine(settled) { lines.append("\n" + reverted) }
         if let abandoned = Self.abandonedLine(settled) { lines.append("\n" + abandoned) }
         // The scorecard's cost line: the batch's receipts summed, and its most expensive task.
         if let receipts = LeadReceiptTotals.line(board) { lines.append("\n" + receipts) }
@@ -3637,6 +3798,17 @@ public final class LeadToolset: MCPToolset {
         return "done (\(count)): " + clip(names, 600)
     }
 
+    /// "reverted (1): add-a (by 1a2b3c4d: the chat froze on paste)": the merged tasks the lead's revert undid (bounded);
+    /// nil when there are none.
+    static func revertedLine(_ tasks: [LeadTask]) -> String? {
+        let reverted = tasks.filter { $0.status == .reverted }
+        guard !reverted.isEmpty else { return nil }
+        return "reverted (\(reverted.count)): " + clip(reverted.map { task in
+            task.slug + " (" + (task.merged?.revertedBy.map { "by \($0.prefix(8))" } ?? "by ?")
+                + (task.merged?.revertReason.map { ": \(clip($0, 60))" } ?? "") + ")"
+        }.joined(separator: ", "), 600)
+    }
+
     /// "abandoned (2): old-a (no longer wanted), old-b": the tasks the lead gave up, and those cleaned up after
     /// failing (bounded); nil when there are none.
     static func abandonedLine(_ tasks: [LeadTask]) -> String? {
@@ -3651,15 +3823,18 @@ public final class LeadToolset: MCPToolset {
     /// progress. `sessions` nil: the host can't be read.
     private func taskLine(_ task: LeadTask, _ sessions: [String: LeadSessionInfo]?) -> String {
         var line = "- \(task.slug): \(Self.clip(task.title, 60))"
-        if task.reviewLevel == .audit, task.status != .done { line += " — review audit" }
-        if let raised = task.riskRaised, task.status != .done { line += " — audited: \(Self.clip(raised.reason, 90))" }
+        if task.reviewLevel == .audit, ![.done, .reverted].contains(task.status) { line += " — review audit" }
+        if let raised = task.riskRaised, ![.done, .reverted].contains(task.status) { line += " — audited: \(Self.clip(raised.reason, 90))" }
         if task.status == .kept { line += " — kept: \(Self.clip(task.keptBecause ?? "no reason recorded", 80))" }
         if task.status == .folded { line += " — folded into \(task.foldedInto ?? "another task")" }
         if task.status == .abandoned { line += " — abandoned: \(Self.clip(task.abandonedBecause ?? "no reason recorded", 80))" }
-        if let audits = task.audits, audits.reconsider, task.status != .done {
+        if task.status == .reverted {
+            line += " — reverted by \(task.merged?.revertedBy.map { String($0.prefix(8)) } ?? "?"): \(Self.clip(task.merged?.revertReason ?? "no reason recorded", 80))"
+        }
+        if let audits = task.audits, audits.reconsider, ![.done, .reverted].contains(task.status) {
             line += " — reconsider the approach (\(audits.reconsiderCause))"
         }
-        if let audits = task.audits, !audits.open.isEmpty, task.status != .done {
+        if let audits = task.audits, !audits.open.isEmpty, ![.done, .reverted].contains(task.status) {
             let blocking = audits.blocking
             line += " — findings: " + (blocking.isEmpty ? "" : "Important open \(blocking.prefix(3).map { "\($0.id) \($0.place)" }.joined(separator: ", "))\(blocking.count > 3 ? ", …" : ""); ")
                 + Self.findingsTally(audits)
@@ -3897,7 +4072,7 @@ public final class LeadToolset: MCPToolset {
             }
             if let audits = task.audits, !audits.findings.isEmpty || audits.reconsider {
                 lines.append("\n" + Self.findingsText(audits, of: task.slug, answers: task.currentAnswers(audits)))
-                if audits.reconsider, task.status != .done { lines.append(Self.reconsiderText(audits, of: task.slug)) }
+                if audits.reconsider, ![.done, .reverted].contains(task.status) { lines.append(Self.reconsiderText(audits, of: task.slug)) }
             }
             let reports = (board.reports ?? []).filter { $0.task == task.slug }
             lines.append(reports.isEmpty ? "\nNo reports about it on the board." : "\nReports about it (oldest first):")
@@ -3967,7 +4142,7 @@ extension LeadToolset {
     /// auto_advance is on, the task doesn't opt out, and the lead doesn't hold it (kept, blocked, folded, abandoned).
     func advances(_ slug: String) -> Bool {
         guard LeadAdvance.running(store), workflow.autoAdvance, let task = store.load().task(slug), task.autoAdvance != false else { return false }
-        return ![.kept, .blocked, .folded, .abandoned].contains(task.status)
+        return ![.kept, .blocked, .folded, .abandoned, .reverted].contains(task.status)
     }
 
     func advanceStart(_ slug: String, when: @escaping (LeadTask) -> Bool) throws -> MCPToolResult { try startWorker(slug, when: when) }

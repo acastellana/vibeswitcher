@@ -751,6 +751,98 @@ public enum Worktrees {
         return .passed(tested)
     }
 
+    /// How a revert's run went (`revertAndTest`).
+    public enum Revert: Equatable, Sendable {
+        /// The revert commit, on top of the base, with the checks passing on it.
+        case passed(String)
+        /// Reverting conflicted with what the base did since: the files git couldn't revert. Nothing was made.
+        case conflict([String])
+        /// A command failed; all of its output.
+        case failed(String)
+        case hung(command: String, after: TimeInterval, output: String)
+        case cancelled
+        case error(String)
+    }
+
+    /// Reverts the commits `onto..commit` (what a merge put on the base) in one commit with `message` on top of `base`,
+    /// and runs the setup and test commands on it, as `rebaseAndTest` does: in a detached worktree of its own at
+    /// `scratch` under a scratch home, both removed afterwards, holding `lock`, the commands as the branch's code. Only
+    /// adds a commit: nothing is reset or rewritten, and the base itself isn't touched (the caller fast-forwards it to
+    /// the commit that passed). Refused (`error`) when the range holds a merge commit, isn't on the base, or reverts
+    /// to nothing (the base already undid it).
+    public static func revertAndTest(root: String, onto: String, commit: String, base: String, message: String,
+                                     setup: String? = nil, test: String?, scratch: URL, home: URL? = nil,
+                                     timeout: TimeInterval = testTimeout, lock: TestLock?) -> Revert {
+        let path = scratch.path
+        let home = (home ?? scratch.deletingLastPathComponent().appendingPathComponent(scratch.lastPathComponent + "-home")).path
+        let cancel = ShellCancel.current
+        let range = "\(onto)..\(commit)"
+        guard Git.run(["merge-base", "--is-ancestor", onto, commit], in: root).ok else {
+            return .error("\(onto.prefix(8)) isn't under \(commit.prefix(8)), so \(range) isn't a range of commits to revert.")
+        }
+        guard Git.run(["merge-base", "--is-ancestor", commit, base], in: root).ok else {
+            return .error("\(commit.prefix(8)) isn't on \(base.prefix(8)): there's nothing of it there to revert.")
+        }
+        let commits = Git.run(["rev-list", range], in: root)
+        guard commits.ok, !commits.output.isEmpty else { return .error("\(range) holds no commits: \(said(commits))") }
+        let merges = Git.run(["rev-list", "--merges", "--max-count=1", range], in: root).output
+        if let merge = merges.isEmpty ? nil : merges {
+            return .error("\(range) holds a merge commit (\(merge.prefix(8))), which a revert can't take whole; revert it by hand.")
+        }
+        let remove = {
+            ShellCancel.with(nil) {
+                SessionStrays.endInside(folder: path)
+                Git.run(["worktree", "remove", "--force", path], in: root)
+                try? FileManager.default.removeItem(atPath: path)
+                Git.run(["worktree", "prune"], in: root)
+                try? FileManager.default.removeItem(atPath: home)
+            }
+        }
+        if FileManager.default.fileExists(atPath: path) || FileManager.default.fileExists(atPath: home) { remove() }
+        guard cancel?.isCancelled != true else { return .cancelled }
+        try? FileManager.default.createDirectory(at: scratch.deletingLastPathComponent(), withIntermediateDirectories: true,
+                                                 attributes: [.posixPermissions: 0o700])
+        defer { remove() }
+        let added = Git.run(["worktree", "add", "--detach", "-q", path, base], in: root)
+        guard added.ok else {
+            if cancel?.isCancelled == true { return .cancelled }
+            return .error(added.error.isEmpty ? "Couldn't set up a worktree to revert in on \(base.prefix(8))." : added.error)
+        }
+        // The range as one commit (`commit`'s tree on `onto`, written to the object store only: no ref points at it),
+        // whose revert undoes it all at once: a conflict names every file, not only the newest commit's.
+        let identity = ["GIT_AUTHOR_NAME": "VibeSwitcher", "GIT_AUTHOR_EMAIL": "revert@vibeswitcher.invalid",
+                        "GIT_COMMITTER_NAME": "VibeSwitcher", "GIT_COMMITTER_EMAIL": "revert@vibeswitcher.invalid"]
+        let whole = Git.run(["commit-tree", "\(commit)^{tree}", "-p", onto, "-m", "\(range) as one commit"], in: root, env: identity)
+        guard whole.ok, whole.output.count >= 40, whole.output.allSatisfy(\.isHexDigit) else {
+            return .error("Couldn't take \(range) as one commit to revert: \(said(whole))")
+        }
+        let reverted = Git.run(["revert", "--no-commit", whole.output], in: path)
+        guard reverted.ok else {
+            let files = Git.run(["diff", "--name-only", "-z", "--diff-filter=U"], in: path).output
+                .split(separator: "\0").map(String.init).sorted()
+            Git.run(["revert", "--abort"], in: path)
+            if cancel?.isCancelled == true { return .cancelled }
+            return files.isEmpty ? .error("Reverting \(range) on \(base.prefix(8)) failed, and not on a conflict: \(said(reverted))") : .conflict(files)
+        }
+        if Git.run(["diff", "--cached", "--quiet"], in: path).ok {
+            return .error("Reverting \(range) on \(base.prefix(8)) changes nothing: the base no longer has any of it.")
+        }
+        let committed = Git.run(["commit", "-q", "-m", message], in: path)
+        guard committed.ok else { return .error("Committing the revert on \(base.prefix(8)) failed: \(said(committed))") }
+        guard cancel?.isCancelled != true else { return .cancelled }
+        let made = Git.run(["rev-parse", "HEAD"], in: path).output
+        let (stopped, _) = runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
+                                     as: "VibeSwitcher's revert test of \(commit.prefix(8))", place: root)
+        switch stopped {
+        case nil: return .passed(made)
+        case .failed(let output): return .failed(output)
+        case .hung(let command, let after, let output): return .hung(command: command, after: after, output: output)
+        case .cancelled: return .cancelled
+        case .error(let text): return .error(text)
+        case .passed, .passedOnRerun, .conflict: return .error("unexpected")
+        }
+    }
+
     /// The first line of a rerun's output (`runChecks`' `rerun`).
     public static let rerunHeader = "Rerun once, after the first run failed (its failing tests when they can be picked out, else all of it):\n"
 

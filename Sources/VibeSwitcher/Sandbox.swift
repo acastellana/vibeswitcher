@@ -646,7 +646,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("results", { driver in AnyView(ResultsList(updates: Driver.results(home: driver.home)).frame(width: 460).padding(12)) }),
         // A lead's Team tab: a task at work, two blocked (one after it, one with no word why), one whose verifier ended
         // twice, merged ones of which
-        // one was audited, a question withdrawn lately and several answered, the Mac line, the Mac kept awake.
+        // one was audited, one merged and then reverted, a question withdrawn lately and several answered, the Mac line, the Mac kept awake.
         // An all-done card with its batch's receipts summed (`LeadReceiptTotals`), its task list open.
         ("all-done", { driver in
             let mark = Driver.allDoneMark()
@@ -698,12 +698,17 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let verifier = UUID().uuidString
         twice.verifier = verifier
         twice.verifierRetry = LeadVerifierRetry(commit: "abc1234def0", first: LeadWitness.agentQuitEnding, verifiers: [verifier], second: "killed by SIGTERM")
+        var reverted = task("Paste images into the chat", .reverted, since: 4_000)
+        reverted.worktree = nil
+        reverted.merged = LeadMergeRecord(commit: "abc9def0", tested: true, onto: "abc8def0", audited: false, at: now - 6_000)
+        reverted.merged?.revertedBy = "fed9cba0"
+        reverted.merged?.revertReason = "The chat froze on a large paste; reverted, a fix-forward is planned."
         // Review none, raised to audit by the risk check (see `LeadRisk`) when its worker reported done.
         var raised = task("Clean up ended sessions' folders", .review, since: 2 * 60)
         raised.review = .audit
         raised.riskRaised = LeadRiskRaise(reason: "it has code that deletes or rewrites files or data (Sources/Cleanup.swift: try fm.removeItem(at: folder))",
                                           commit: "abc1234def0", byModel: false)
-        board.tasks = merged + [working, after, unsaid, twice, raised, abandoned]
+        board.tasks = merged + [working, after, unsaid, twice, raised, reverted, abandoned]
 
         var withdrawn = LeadQuestion(text: "Sidebar review found three overlapping rows. Re-plan the sidebar as one task, or fix each row on its own?\nThe review's notes are in progress.md.",
                                      options: ["One task", "Each row"], at: now - 1_500)

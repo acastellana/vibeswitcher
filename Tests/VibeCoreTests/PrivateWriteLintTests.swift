@@ -17,7 +17,7 @@ struct PrivateWriteLintTests {
         "Sources/VibeCore/Steer.swift": (1, "the steer folder, 0700 attributes"),
         "Sources/VibeCore/TeamSummaries.swift": (1, "its folder, 0700 attributes"),
         "Sources/VibeCore/TranscriptReader.swift": (2, "converted transcripts in a 0700 folder"),
-        "Sources/VibeCore/Worktrees.swift": (8, "merge scratch and check logs in the vault's 0700 folders; worktrees and hash copies are git checkouts"),
+        "Sources/VibeCore/Worktrees.swift": (9, "merge and revert scratch and check logs in the vault's 0700 folders; worktrees and hash copies are git checkouts"),
         "Sources/VibeHost/VaultStorage.swift": (1, "the host's vault: its own 0600 rules"),
         "Sources/VibeHost/HostLog.swift": (1, "the host's log: its own 0600 rules"),
         "Sources/vibeswitcher-host/main.swift": (1, "the host's launchers folder, 0700 attributes"),
