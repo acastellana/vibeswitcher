@@ -205,4 +205,14 @@ struct LeadPolicyTextsTests {
             #expect(worker.contains("Git commands refused here, by your permission rules: " + LeadPrompts.deniedGit(workflow) + ".\nOut of date:"))
         }
     }
+
+    /// The brief sends a change to the verifier through its eval set where the project has one, and says nothing of it
+    /// elsewhere.
+    @Test func theLeadsBriefRunsTheVerifierEvalOnlyWhereTheProjectHasIt() {
+        let repository = Self.sources.deletingLastPathComponent().deletingLastPathComponent().path
+        let line = "`scripts/verifier-eval.sh --all` before it merges"
+        #expect(LeadPrompts.lead(project: "vibeswitcher", root: repository, workflow: LeadWorkflow()).contains(line))
+        #expect(LeadPrompts.lead(project: "vibeswitcher", root: repository, workflow: LeadWorkflow()).contains("docs/process/verifier-eval.md"))
+        #expect(!LeadPrompts.lead(project: "tge", root: "/r/tge", workflow: LeadWorkflow()).contains("verifier-eval"))
+    }
 }

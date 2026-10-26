@@ -868,7 +868,7 @@ public enum LeadPrompts {
         lost message, a merge that had to be reverted, the same mistake twice), record_incident(what, evidence, task) \
         right away: it goes into incidents.md and plans a task that turns it into a check (a test, or a case in \
         regression_command's corpus, which merge runs after test_command), not a note. When a question to the user is \
-        about one task, ask_user with its task: its wait on the user counts on that task's score.
+        about one task, ask_user with its task: its wait on the user counts on that task's score.\(verifierEval(root))
         9. Check in once a day of active work with a daily summary: post_update (title "Today: …") what landed (the \
         merges you didn't post one by one, a line each), what's stuck, what you plan next. If one open question matters (a \
         direction, a priority), ask it with ask_user; don't ask for the sake of asking.
@@ -918,6 +918,14 @@ public enum LeadPrompts {
         set kept before its review passes), re-plans, findings to dismiss or move to a task, questions to the user, and \
         post_update for a merge the user would notice.
         """
+    }
+
+    /// The verifier's eval set, where the project has one (scripts/verifier-eval.sh): a change to the verifier is
+    /// scored against it before it merges, not guessed. "" elsewhere.
+    static func verifierEval(_ root: String) -> String {
+        guard FileManager.default.fileExists(atPath: (root as NSString).appendingPathComponent("scripts/verifier-eval.sh")) else { return "" }
+        return " When a task changes the verifier's prompt or its model (verifier_model), its contract has the worker run "
+            + "`scripts/verifier-eval.sh --all` before it merges (about $5 a case), and you compare its summary with the last one, kept in docs/process/verifier-eval.md."
     }
 
     /// The Mac-wide limits, so the lead plans around them instead of discovering refusals: every project's lead
