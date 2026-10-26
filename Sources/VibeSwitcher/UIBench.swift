@@ -21,12 +21,15 @@ import VibeCore
 /// (team, overview or activity: the inspector's tab, team by default) and VIBESWITCHER_BENCH_RESULTS (the results on
 /// each board, 32 by default).
 ///
-/// `--soak MINUTES [--soak-workers N] [--soak-upserts PER_SECOND] [--soak-without hooks,boards,transcripts,switches]` (memory, 2026-10-25): instead of the three phases, a
-/// working day's traffic for MINUTES, to see whether the footprint levels off. Beside the two leads, N (6) made-up
+/// `--soak MINUTES [--soak-workers N] [--soak-upserts PER_SECOND] [--soak-without hooks,boards,transcripts,switches]
+/// [--soak-leads L] [--soak-churn SECONDS]` (memory, 2026-10-25): instead of the three phases, a
+/// working day's traffic for MINUTES, to see whether the footprint levels off. Beside the L (2) leads, N (6) made-up
 /// workers whose sessions retitle themselves (`sessionChanged` from the host, PER_SECOND (2) in all), their agents' hook events (one a second), the leads' boards written and a decision added every 10 s (by
 /// another process), every transcript growing a turn every 5 s, and the window switching to the next session, on its
-/// chat, every 30 s. Each minute: the footprint, malloc's bytes in use and the live views and chats; every 10 minutes
-/// (and at the end) what grew since the second minute, by vmmap's region categories and by class (`HeapCensus`). At the
+/// chat, every 30 s. With `--soak-churn`, every SECONDS the oldest worker's task merges and its session ends, and a new
+/// worker starts on a new task (teams whose sessions come and go, 2026-10-26). Each minute: the footprint, malloc's bytes
+/// in use and the live views and chats; every 10 minutes (and at the end) what grew since the second minute, by kind of
+/// memory (`memoryKinds`, the process's own task_info) and by class (`HeapCensus`). At the
 /// end, `RESULT soak-…` lines and a check: over the last 20 minutes each minute's least footprint (read every 5 s)
 /// within ±50 MB of their median (a run of 25 minutes or more).
 enum UIBench {
@@ -48,7 +51,9 @@ enum UIBench {
         let soak = value("--soak").flatMap(Double.init).map {
             Soak(minutes: $0, workers: value("--soak-workers").flatMap(Int.init) ?? 6,
                  upserts: value("--soak-upserts").flatMap(Double.init) ?? 2,
-                 without: Set((value("--soak-without") ?? "").split(separator: ",").map(String.init)))
+                 without: Set((value("--soak-without") ?? "").split(separator: ",").map(String.init)),
+                 leads: min(max(value("--soak-leads").flatMap(Int.init) ?? 2, 1), Soak.leadNames.count),
+                 churn: value("--soak-churn").flatMap(Double.init).flatMap { $0 > 0 ? $0 : nil })
         }
         let bench = Bench(minutes: minutes, onscreen: arguments.contains("--onscreen"), ticking: arguments.contains("--ticking"),
                           transcript: transcript, soak: soak)
@@ -79,17 +84,55 @@ enum UIBench {
         let upserts: Double
         /// Traffic left out, to narrow a growth down: hooks, boards, transcripts, switches (workers: `--soak-workers 0`).
         let without: Set<String>
+        /// The leads, each in a project of its own with its board; the workers are shared out among them.
+        var leads = 2
+        /// Every this many seconds the oldest worker's task merges and its session ends (the app has the host forget
+        /// it, as it does a merged task's), and a new worker starts on a new task of the next lead's (nil: the same
+        /// workers all day).
+        var churn: Double?
+        static let leadNames = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]
         /// What a worker's session runs: it retitles itself every `$1` seconds (a change the host sends the app each
-        /// time), printing a line of agent-shaped output.
+        /// time), printing a line of agent-shaped output, and ends once the file `$2` is there (its task merged).
         static let workerScript = """
         i=0
-        while :; do
+        while [ ! -e "$2" ]; do
           i=$((i + 1))
           printf '\\033]0;✳ Worker step %d: run the tests\\007' $i
           printf '\\033[1;38;5;%dm● Step %d\\033[0m \\033[38;5;245mread Sources/File%d.swift and ran the tests\\033[0m\\n' $((i % 7 + 31)) $i $i
           sleep "$1"
         done
         """
+    }
+
+    /// The process's memory by kind, in bytes, read from inside it (task_info and malloc's zones: no tool takes its
+    /// task port, as vmmap's would): what its footprint is made of, to tell which grows.
+    static func memoryKinds() -> [String: Double] {
+        var kinds: [String: Double] = [:]
+        var vm = task_vm_info_data_t()
+        var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<integer_t>.size)
+        let ok = withUnsafeMutablePointer(to: &vm) { pointer in
+            pointer.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { task_info(mach_task_self_, task_flavor_t(TASK_VM_INFO), $0, &count) }
+        } == KERN_SUCCESS
+        if ok {
+            kinds["footprint"] = Double(vm.phys_footprint)
+            kinds["internal (dirty, resident)"] = Double(vm.internal)
+            kinds["compressed"] = Double(vm.compressed)
+            kinds["graphics"] = Double(vm.ledger_tag_graphics_footprint) + Double(vm.ledger_tag_graphics_footprint_compressed)
+            kinds["purgeable, non-volatile"] = Double(vm.ledger_purgeable_nonvolatile) + Double(vm.ledger_purgeable_novolatile_compressed)
+        }
+        var zones: UnsafeMutablePointer<vm_address_t>?
+        var zoneCount: UInt32 = 0
+        if malloc_get_all_zones(mach_task_self_, nil, &zones, &zoneCount) == KERN_SUCCESS, let zones {
+            for index in 0..<Int(zoneCount) {
+                guard let zone = UnsafeMutablePointer<malloc_zone_t>(bitPattern: UInt(zones[index])) else { continue }
+                var stats = malloc_statistics_t()
+                malloc_zone_statistics(zone, &stats)
+                let name = zone.pointee.zone_name.map { String(cString: $0) } ?? "zone \(index)"
+                kinds["malloc \(name) in use"] = Double(stats.size_in_use)
+                kinds["malloc \(name) allocated"] = Double(stats.size_allocated)
+            }
+        }
+        return kinds
     }
 
     /// One more exchange at the end of a made-up transcript (a prompt, a tool call and its result, an answer).
@@ -263,7 +306,9 @@ enum UIBench {
         private var agentTTYs: [String: (pid: Int32, root: String)] = [:]
         /// The made-up agents started so far (on the main thread).
         private var agentsStarted = 0
-        var roots: [String] { ["alpha", "beta"].map { (NSHomeDirectory() as NSString).appendingPathComponent("lead-\($0)") } }
+        var roots: [String] {
+            Soak.leadNames.prefix(soak?.leads ?? 2).map { (NSHomeDirectory() as NSString).appendingPathComponent("lead-\($0)") }
+        }
         var transcripts: [String: String] = [:]
 
         init(minutes: Double, onscreen: Bool, ticking: Bool, transcript: String?, soak: Soak?) {
@@ -423,9 +468,11 @@ enum UIBench {
             return path
         }
 
-        /// The workers' sessions, by the host's id, with their transcripts and turns so far.
-        private var workers: [(id: UUID, tty: String, transcript: String)] = []
+        /// The workers' sessions, by the host's id, with their transcripts, oldest first.
+        private var workers: [(id: UUID, tty: String, transcript: String, root: String, slug: String)] = []
         private var soakTimers: [Heartbeat.Subscription] = []
+        /// Workers started so far (each on a task of its own, `soak-N`).
+        private var workersStarted = 0
 
         func soakPhase(_ soak: Soak) {
             let script = (NSHomeDirectory() as NSString).appendingPathComponent("worker.sh")
@@ -433,37 +480,85 @@ enum UIBench {
             // Each worker retitles itself this often, so the host sends `upserts` changes a second in all.
             let period = max(0.2, Double(soak.workers) / max(soak.upserts, 0.01))
             var pending = soak.workers
-            print(String(format: "soak: %.0f minutes, 2 leads and %d workers (a session change every %.1f s each, %.1f a second in all)",
-                         soak.minutes, soak.workers, period, Double(soak.workers) / period))
+            print(String(format: "soak: %.0f minutes, %d leads and %d workers (a session change every %.1f s each, %.1f a second in all)%@",
+                         soak.minutes, roots.count, soak.workers, period, Double(soak.workers) / period,
+                         soak.churn.map { String(format: "; a worker merged and replaced every %.0f s", $0) } ?? ""))
             fflush(stdout)
             if soak.workers == 0 { return soakRun(soak) }
-            for index in 0..<soak.workers {
-                let root = roots[index % roots.count]
-                let cwd = (root as NSString).appendingPathComponent("worktree-\(index)")
-                try? FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
-                let transcript = madeUpTranscript("worker-\(index)")
-                host.spawn(SpawnRequest(cwd: cwd, command: "/bin/sh \(script) \(period)", env: [:], cols: 120, rows: 40, keepShell: false,
-                                        label: "Worker: task-\(index)", agent: "claude")) { [weak self] result in
+            for _ in 0..<soak.workers {
+                spawnWorker(period: period) { [weak self] in
                     guard let self else { return }
-                    if case .success(let session) = result {
-                        self.agentsStarted += 1
-                        let pid = Int32(60_100 + self.agentsStarted)
-                        var state = HookState(agent: .claude, tty: session.tty, lastEvent: "PreToolUse", lastEventAt: Date().timeIntervalSince1970)
-                        state.agentPid = pid
-                        state.sessionId = UUID().uuidString
-                        state.cwd = cwd
-                        state.firstPrompt = "Work on task-\(index)"
-                        state.transcriptPath = transcript
-                        try? state.save(to: VibePaths.stateFile(tty: session.tty))
-                        self.lock.lock()
-                        self.agentTTYs[session.tty] = (pid, cwd)
-                        self.lock.unlock()
-                        self.workers.append((session.id, session.tty, transcript))
-                    }
                     pending -= 1
                     if pending == 0 { self.store.refresh(); DispatchQueue.main.asyncAfter(deadline: .now() + 3) { self.soakRun(soak) } }
                 }
             }
+        }
+
+        /// A worker on a new task of the next lead's, in its worktree, as `start_worker` makes one: the task on the
+        /// board names its session, so the lead's Team tab shows it.
+        private func spawnWorker(period: Double, done: @escaping () -> Void = {}) {
+            let index = workersStarted
+            workersStarted += 1
+            let root = roots[index % roots.count]
+            let slug = "soak-\(index)"
+            let cwd = Self.worktree(root, slug)
+            try? FileManager.default.createDirectory(atPath: cwd, withIntermediateDirectories: true)
+            let transcript = madeUpTranscript("worker-\(index)")
+            let script = (NSHomeDirectory() as NSString).appendingPathComponent("worker.sh")
+            host.spawn(SpawnRequest(cwd: cwd, command: "/bin/sh \(script) \(period) \(cwd)/.done", env: [:], cols: 120, rows: 40, keepShell: false,
+                                    label: "Worker: \(slug)", agent: "claude")) { [weak self] result in
+                guard let self else { return done() }
+                if case .success(let session) = result {
+                    self.agentsStarted += 1
+                    let pid = Int32(60_100 + self.agentsStarted)
+                    var state = HookState(agent: .claude, tty: session.tty, lastEvent: "PreToolUse", lastEventAt: Date().timeIntervalSince1970)
+                    state.agentPid = pid
+                    state.sessionId = UUID().uuidString
+                    state.cwd = cwd
+                    state.firstPrompt = "Work on \(slug)"
+                    state.transcriptPath = transcript
+                    try? state.save(to: VibePaths.stateFile(tty: session.tty))
+                    self.lock.lock()
+                    self.agentTTYs[session.tty] = (pid, cwd)
+                    self.lock.unlock()
+                    self.workers.append((session.id, session.tty, transcript, root, slug))
+                    try? BoardStore(root: root).update { board in
+                        var task = LeadTask(slug: slug, title: "Soak task \(index): keep the footprint flat",
+                                            contract: LeadContract(goal: "Task \(index) of the soak.", acceptance: ["It works."], boundaries: [], context: ""),
+                                            status: .running)
+                        task.startedAt = Date().timeIntervalSince1970
+                        task.since = task.startedAt
+                        task.worker = session.id.uuidString
+                        task.worktree = cwd
+                        task.branch = "agent/\(slug)"
+                        board.tasks.append(task)
+                    }
+                }
+                done()
+            }
+        }
+
+        private static func worktree(_ root: String, _ slug: String) -> String {
+            (root as NSString).appendingPathComponent(".vibeswitcher/worktrees/\(slug)")
+        }
+
+        /// The oldest worker's task merges and its session ends; a new worker takes its place.
+        private func churnWorker(period: Double) {
+            guard !workers.isEmpty else { return spawnWorker(period: period) }
+            let worker = workers.removeFirst()
+            try? BoardStore(root: worker.root).update { board in
+                guard let index = board.tasks.firstIndex(where: { $0.slug == worker.slug }) else { return }
+                let now = Date().timeIntervalSince1970
+                board.tasks[index].status = .done
+                board.tasks[index].since = now
+                board.tasks[index].report = "Done: the footprint stays flat over the soak; every check passed on a scratch home."
+                board.tasks[index].evidence = LeadEvidence(completion: .complete, integrity: .clean, summary: "All checks passed.", commit: "abc\(worker.slug)")
+                board.tasks[index].merged = LeadMergeRecord(commit: "def\(worker.slug)", tested: true, at: now)
+                board.tasks[index].worktree = nil
+            }
+            // Its agent quits (the bench's own kill isn't the app's, which the host may refuse).
+            FileManager.default.createFile(atPath: (Self.worktree(worker.root, worker.slug) as NSString).appendingPathComponent(".done"), contents: nil)
+            spawnWorker(period: period)
         }
 
         private func soakRun(_ soak: Soak) {
@@ -520,6 +615,10 @@ enum UIBench {
                 self.model.select(hostID: live[switches % live.count].id)
                 self.model.showsChat = true
             })
+            if let churn = soak.churn, soak.workers > 0 {
+                let period = max(0.2, Double(soak.workers) / max(soak.upserts, 0.01))
+                soakTimers.append(Heartbeat.shared.every(max(1, Int(churn.rounded()))) { [weak self] in self?.churnWorker(period: period) })
+            }
             soakMinutes(soak)
         }
 
@@ -541,15 +640,14 @@ enum UIBench {
             var baseline: (census: HeapCensus.Result, regions: [String: Double])?
             let mb = { (bytes: Double) in bytes / 1_048_576 }
             func census(_ label: String, then done: @escaping (HeapCensus.Result, [String: Double]) -> Void) {
-                let pid = getpid()
                 DispatchQueue.global().async {
-                    let regions = IdleBench.VMMap.summary(pid: pid).regions
+                    let regions = UIBench.memoryKinds()
                     let census = HeapCensus.take()
                     DispatchQueue.main.async {
                         print(String(format: "  census %@: %ld blocks, %.1f MB in malloc blocks", label as NSString, census.total.blocks,
                                      mb(Double(census.total.bytes))))
                         if let baseline {
-                            print("  grew since minute 2, by vmmap's region categories (dirty + swapped):")
+                            print("  grew since minute 2, by kind of memory (the process's own task_info and malloc's zones):")
                             let names = Set(baseline.regions.keys).union(regions.keys)
                             for (name, delta) in names.map({ ($0, (regions[$0] ?? 0) - (baseline.regions[$0] ?? 0)) }).sorted(by: { $0.1 > $1.1 }).prefix(6) {
                                 print(String(format: "    %-32@ %+7.1f MB  (%.1f → %.1f MB)", name as NSString, mb(delta),

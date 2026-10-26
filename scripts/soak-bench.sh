@@ -1,13 +1,14 @@
 #!/bin/bash
 # Runs `VibeSwitcher --ui-bench --soak MINUTES` in a fresh scratch home: two made-up leads and their workers on a private
-# session host, a working day's traffic (session changes, hook events, board writes, growing transcripts, the window
-# switching chats) for MINUTES, printing the footprint each minute and what grew by region and by class (see
+# session host, a working day's traffic (session changes, hook events, board writes, growing transcripts, workers coming and going, the window
+# switching chats) for MINUTES, printing the footprint each minute and what grew by kind of memory and by class (see
 # UIBench.swift). Nothing touches the real ~/.vibeswitcher, the real host or real sessions. It exits 1 when the footprint
 # (each minute's least) over the last 20 minutes strays more than 50 MB from its median (runs of 25 minutes or more).
 #
 # Unlike scripts/ui-bench.sh it runs on a loaded Mac: memory doesn't depend on the load (CPU figures aren't judged here).
 #
 # scripts/soak-bench.sh [-b BINARY] [-n NAME] MINUTES [--soak-workers N] [--soak-upserts PER_SECOND] [--soak-without LIST]
+#   [--soak-leads L] [--soak-churn SECONDS]
 #   -b BINARY: the build (.build/debug/VibeSwitcher).  -n NAME: the log's name (soak): .build/soak/NAME.log
 #   (SOAK_BENCH_LOGS: another folder).
 set -euo pipefail
