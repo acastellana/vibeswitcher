@@ -1434,3 +1434,5 @@
 - 2026-10-26 12:52 Automatically (auto_advance): Merged security-checklist-for (Security checklist for audits of guard-rail changes, measured on a real past miss) into project-lead at c3adc58c, on its passing audit and the full test run.
 - 2026-10-26 12:53 Automatically (auto_advance): Cleaned up security-checklist-for (freed 1.1 GB of build output and temporary folders). It stays done.
 - 2026-10-26 12:54 Update: Batch done: reviews follow the risk, one-step revert, leaner AGENTS.md — 8 tasks merged into project-lead since the last install (b91fa2e). Lessons from Anthropic's code-review post and the AGENTS.md research. It reaches your app only through an install.
+- 2026-10-26 13:58 Planned launch-video: Launch video: VibeSwitcher's lead and its team under the hood (brag)
+- 2026-10-26 13:58 Started a worker on launch-video
