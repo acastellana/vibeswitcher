@@ -346,6 +346,11 @@ enum TeamRows {
                 row.mark = .review
                 row.state = "Needs audit"
                 row.activity = why
+            } else if let raised = task.riskRaised, task.verifier == nil, task.evidence == nil {
+                // The risk check raised it from review none to audit (see `LeadRisk`): it says why until its audit starts.
+                row.mark = .review
+                row.state = "Needs audit"
+                row.activity = "Audited: \(raised.reason)"
             } else if task.reviewLevel == .none, task.verifier == nil, task.evidence == nil {
                 // Review none: its worker's done report is what merge takes, with the merge's own test run.
                 row.mark = .merge

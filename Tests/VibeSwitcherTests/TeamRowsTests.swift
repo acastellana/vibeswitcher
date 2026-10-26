@@ -257,6 +257,14 @@ struct TeamRowsTests {
         sensitive.auditNeeded = "It touches sensitive_paths (.github/ci.yml), so it's treated as audit whatever its review says."
         #expect(row(sensitive).state == "Needs audit" && row(sensitive).mark == .review)
         #expect(row(sensitive).activity?.contains(".github/ci.yml") == true)
+        // Raised to audit by the risk check: it says why until its audit starts.
+        var raised = Self.task("r", .review, since: 60)
+        raised.review = .audit
+        raised.riskRaised = LeadRiskRaise(reason: "it changes 612 lines, over risk_lines (400)", commit: "abc", byModel: false)
+        #expect(row(raised).state == "Needs audit" && row(raised).mark == .review)
+        #expect(row(raised).activity == "Audited: it changes 612 lines, over risk_lines (400)")
+        raised.verifier = "v-r"
+        #expect(row(raised, ["v-r": Self.working]).state == "In review")
     }
 
     @Test func theScorecardSaysHowManyMergedWithNoAudit() {

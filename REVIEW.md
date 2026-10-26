@@ -1,35 +1,24 @@
-# Reviewing VibeSwitcher
+# Review rules for VibeSwitcher
 
-The owner's word for verifiers and the risk check. It is read from the base branch only: a branch's own edits to it
-count from the merge on.
+## Important
+- A host call, git, disk read, lock or wait on the main thread: give the call path from the UI event to it.
+- An AppKit object (NSFont, attributed string, view) two threads can reach: a shared NSFont leaked and raced once.
+- One session's state kept in a value all sessions share: switch to another session and back, and check it resets.
+- A queue or buffer fed by a session's output or the user's input with no bound.
+- A test that passes alone but fails in the full suite or under scripts/test-under-load.sh, or that waits on a pipe,
+  process or file with no time limit.
+- A test that reaches the real home: ~/.vibeswitcher, the host socket, the Mac-wide test lock (a default argument
+  counts), real sessions or real windows.
+- A secret, token, pairing code or session screen in a log line, an error text or a headless Claude prompt.
+- A change to a role's allow or deny rules: try each allowed command with options that read or write elsewhere
+  (--remote, --exec, --add-file, -o, a symlinked folder). One escape is Important.
+- Branch code that merge runs (test scripts, the harness) able to reach host.sock, the vault or the lead's files.
+- A setting or hold read once, then acted on after a step that takes minutes (a merge, a test run).
 
-## What fails here (Important)
+## Nit, never more
+- Copy, naming, comments, blank lines, a doc comment that slid off its function, line length.
 
-- Main-thread stalls: blocking work (disk, git, a process, a lock, a host call) on the main thread or in a SwiftUI
-  body. A frozen menu bar is the worst bug this app has.
-- Anything that touches real sessions, windows or the user's home: typed or steered input reaching a real session,
-  real windows hidden or moved across Spaces, writes outside a scratch home in tests, the installed app or Keychain.
-- Secrets in logs: tokens, keys, phone pairing codes or a session's screen in a log line, a crash report, a prompt to
-  headless Claude or anything leaving the Mac. Redact before it is written.
-- Tests that pass alone but not under load: a fixed sleep or wall-clock window, a wait on anything but the event
-  itself. Run new tests under scripts/test-under-load.sh.
-- The lead's guard rails: a review level, a verdict, a guarded setting or sensitive_paths that a worker can loosen
-  from its own branch or through board.json.
-- Processes, locks and threads left behind, or held across a call that can wait on the user.
-
-## What to ignore
-
-- The lead's records in docs/lead (decisions, progress, incidents): the lead writes them, not the branch.
-- Snapshot images' pixel noise, and formatting a tool would fix.
-
-## What is a Nit
-
-Copy, naming and comments, unless the copy is wrong about what the code does or the user is told something false.
-Never hold a merge for one.
-
-## How to report
-
-- Each finding: file:line (from the repository root) and what shows it (the command and its output, or what that
-  line does).
-- An Important finding gives a failure scenario: this input or state gives this wrong result, stall or crash.
-- End with a summary line: the count by severity ("2 Important, 3 Nit"), or "no issues".
+## Report
+- Each finding: file:line from the repository root, and the command or the code that shows it.
+- An Important finding gives its failure scenario: this input or state gives this wrong result, stall or crash.
+- Last line: the count by severity ("2 Important, 1 Nit"), or "no issues".

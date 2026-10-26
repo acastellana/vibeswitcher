@@ -430,6 +430,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             ("sync-landing-base-with-2", "Sync landing-base with main", .running),
             ("gen-attention-badge", "Your GEN attention badge counts the right things", .blocked),
             ("ui-consistency-pass", "UI consistency pass over the sidebar", .blocked),
+            ("session-cleanup", "Clean up ended sessions' folders", .review),
             ("landing-copy", "Landing page copy for the launch", .done),
             ("landing-hero", "Landing hero image and its dark variant", .done),
             ("sidebar-review", "Sidebar review fixes", .done),
@@ -440,6 +441,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
             // Its board makes the folders it's in.
             try BoardStore(root: root).update { board in
                 board.tasks = tasks.map { LeadTask(slug: $0.0, title: $0.1, contract: contract, status: $0.2) }
+                // One the risk check raised from review none to audit (see `LeadRisk`): its row says why.
+                if let index = board.taskIndex("session-cleanup") {
+                    board.tasks[index].review = .audit
+                    board.tasks[index].riskRaised = LeadRiskRaise(reason: "it has code that deletes or rewrites files or data (Sources/Cleanup.swift: try fm.removeItem(at: folder))",
+                                                                  commit: "0123456789abcdef", byModel: false)
+                }
                 var question = LeadQuestion(text: "Should the sidebar keep its review badges?", options: ["Keep them", "Drop them"],
                                             at: withdrawnAt - 300)
                 question.withdrawnAt = withdrawnAt
