@@ -505,8 +505,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         notifier?.refreshAuthorization()
         loadRecentProjects()
         let listed = store.split.listed
-        // A worker or verifier waiting waits on its lead, not you.
-        popoverState.selectedIndex = listed.firstIndex { $0.status == .needsInput && !$0.isPaused && !$0.waitsOnLead }
+        // What needs you as its row says it: a lead with a question for you open, not a worker waiting on its lead.
+        popoverState.selectedIndex = listed.firstIndex { $0.shownStatus == .needsInput && !$0.isPaused }
             ?? listed.firstIndex { $0.status == .done && !$0.isPaused } ?? 0
         hostingView.rootView = makePopoverContent()
         fitPopover()
