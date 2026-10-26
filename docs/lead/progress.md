@@ -1323,3 +1323,5 @@
 - 2026-10-26 01:21 Merged open-sessions-pick-up: Open sessions pick up an installed tool server by themselves
 - 2026-10-26 01:21 Automatically (auto_advance): Merged open-sessions-pick-up (Open sessions pick up an installed tool server by themselves) into project-lead at a591117c, on its passing audit and the full test run.
 - 2026-10-26 01:36 Merged today-s-flaky-tests: Today's flaky tests pass reliably on a loaded Mac
+- 2026-10-26 01:36 Automatically (auto_advance): Merged today-s-flaky-tests (Today's flaky tests pass reliably on a loaded Mac) into project-lead at 410ce58a, on its passing audit and the full test run.
+- 2026-10-26 01:46 Merged a-short-project-map: A short project map every worker reads first (CLAUDE.md)
