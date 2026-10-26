@@ -115,11 +115,12 @@ extension ReplacedLead {
 extension Session {
     /// Paused sessions are drawn grey, whatever they're doing (with the paused mark: two bars).
     static let pausedNSColor = SessionStatus.idle.nsColor
-    var dotNSColor: NSColor { isPaused ? Self.pausedNSColor : status.nsColor }
+    /// As its row reads it (`shownStatus`): a lead asking you is red, a team member waiting on its lead isn't.
+    var dotNSColor: NSColor { isPaused ? Self.pausedNSColor : shownStatus.nsColor }
     var dotColor: Color { Color(nsColor: dotNSColor) }
     /// Drawn as an outline (unknown status) rather than a filled dot.
-    var dotIsHollow: Bool { !isPaused && status == .unknown }
-    var mark: StatusMark { StatusMark(status: status, paused: isPaused) }
+    var dotIsHollow: Bool { !isPaused && shownStatus == .unknown }
+    var mark: StatusMark { StatusMark(status: shownStatus, paused: isPaused) }
 }
 
 extension StatusMark {

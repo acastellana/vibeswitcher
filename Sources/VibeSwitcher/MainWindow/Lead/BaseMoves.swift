@@ -40,7 +40,8 @@ final class BaseMoves: ObservableObject {
     private let reads: LeadReads
     private let background: (@escaping () -> Void) -> Void
     private let main: (@escaping () -> Void) -> Void
-    /// A move to ask about appeared (to tell you once, outside the window too).
+    /// A move to ask about appeared (a card in the lead's chat; you're told outside the window only once it refuses a
+    /// merge: `AlertRules.baseMoved`).
     var onAsk: (String, LeadVault.BaseMove) -> Void = { _, _ in }
     /// A move was taken: the lead hears it when the window or you took it (its merges go ahead now).
     var onTaken: (String, LeadVault.BaseMove, Taker) -> Void = { _, _, _ in }
@@ -198,7 +199,13 @@ final class BaseMoves: ObservableObject {
     /// What the lead's merge says about the move (nil: nothing to say), written on the lead controller's queue.
     private func note(_ note: LeadVault.BaseMoveNote?, _ root: String) {
         reads.async { _ in
-            if let note { try? note.save(root: root) } else { LeadVault.BaseMoveNote.clear(root: root) }
+            if let note {
+                try? note.save(root: root)
+            } else {
+                LeadVault.BaseMoveNote.clear(root: root)
+                // Taken, or back where the lead left it: no merge waits on you.
+                LeadVault.BaseMoveRefusal.clear(root: root)
+            }
         }
     }
 

@@ -97,7 +97,7 @@ struct PopoverView: View {
         .buttonStyle(.plain)
         // "1, acme-web, needs input", then what it's doing; a team member by its team ("acme · worker fix-login").
         .accessibilityLabel(StatusSummary.spoken(number: index + 1, name: SessionTeams.name(of: session) ?? session.displayName,
-                                                 status: session.status, paused: session.isPaused))
+                                                 session: session))
         .accessibilityValue(session.detail ?? session.task ?? "")
         .onHover { if $0 { state.selectedIndex = index } }
         .contextMenu {
@@ -355,7 +355,7 @@ struct SessionRow: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            NumberBadge(number: index + 1, status: session.status, isCurrent: session.isCurrent, isPaused: session.isPaused)
+            NumberBadge(number: index + 1, status: session.shownStatus, isCurrent: session.isCurrent, isPaused: session.isPaused)
                 .padding(.top, 1)
 
             VStack(alignment: .leading, spacing: 2) {
@@ -394,7 +394,7 @@ struct SessionRow: View {
                         StatusMarkView(session: session, size: 9).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
                         // A team member waiting waits on its lead: not in the red that says you're needed.
                         Text(LeadTeams.label(of: session))
-                            .foregroundStyle(session.isPaused || session.waitsOnLead ? Color.secondaryInk : session.status.color)
+                            .foregroundStyle(session.isPaused || session.waitsOnLead ? Color.secondaryInk : session.shownStatus.color)
                             .lineLimit(1).fixedSize()
                         if session.statusSince > Date.distantPast.addingTimeInterval(1) {
                             TimelineView(.elapsed(since: session.statusSince, reduceMotion: reduceMotion, voiceOver: voiceOver)) { context in

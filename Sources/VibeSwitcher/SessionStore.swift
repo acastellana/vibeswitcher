@@ -119,6 +119,20 @@ final class SessionStore: ObservableObject {
         hooksInstalled = Dictionary(uniqueKeysWithValues: Agent.allCases.map { ($0, HookInstaller.isInstalled(agent: $0)) })
     }
 
+    /// The roots of the leads' boards with a question for you open (`LeadTeams.asking`, set by the lead controller as
+    /// it reads them): those leads' sessions need you (`Session.leadAsks`), told at once, not at the next scan.
+    var leadsAsking: Set<String> = [] {
+        didSet {
+            guard leadsAsking != oldValue else { return }
+            let marked = sessions.map { session in
+                var session = session
+                session.leadAsks = LeadTeams.asks(session, asking: leadsAsking)
+                return session
+            }
+            if marked != sessions { sessions = marked }
+        }
+    }
+
     /// Gives a session your own name (nil or empty resets it to the project name).
     /// Minimize the session's window when pausing it (only if it's alone in that window).
     var minimizeOnPause = true
@@ -323,6 +337,7 @@ final class SessionStore: ObservableObject {
             session.transcriptPath = transcripts[item.tty]
             session.hostID = window?.id
             session.teamRole = LeadTeams.role(label: window?.label)
+            session.leadAsks = LeadTeams.asks(session, asking: leadsAsking)
             session.agentSessionID = item.hook?.sessionId
             session.backgroundJobs = item.backgroundJobs
             // Only the visible tab counts: a window full of session tabs sits on one desktop, but
@@ -418,15 +433,8 @@ final class SessionStore: ObservableObject {
         }
         // Longer gaps are sleep or a stuck scan: nobody was working or waiting in any meaningful sense.
         if let last = lastLedgerAt, now.timeIntervalSince(last) <= 30 {
-            // A paused session's waiting is your choice, not a bottleneck; its agent work still counts. A lead's worker or
-            // verifier that's done waits on its lead, not on you: its time goes under the lead's project.
-            ledger.record(sessions.map { session in
-                let parkedWait = session.isPaused && [.needsInput, .done].contains(session.status)
-                let leadsTurn = session.isTeamMember && session.status == .done
-                return .init(project: session.isTeamMember ? SessionTeams.project(of: session) : session.project,
-                             status: parkedWait || leadsTurn ? .idle : session.status, since: session.statusSince)
-            },
-                          seconds: now.timeIntervalSince(last), now: now, userPresent: userPresent)
+            // Waiting on you only when you're needed (`ActivityLedger.entry`): not a paused session's, nor a team member's.
+            ledger.record(sessions.map(ActivityLedger.entry(for:)), seconds: now.timeIntervalSince(last), now: now, userPresent: userPresent)
         }
         lastLedgerAt = now
         if now.timeIntervalSince(lastLedgerSave) >= 60 {

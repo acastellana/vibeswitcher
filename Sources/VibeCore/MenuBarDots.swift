@@ -308,7 +308,8 @@ public enum StatusSummary {
         guard !sessions.isEmpty else { return "VibeSwitcher: no sessions" }
         var parts: [String] = []
         for status in [SessionStatus.needsInput, .working, .background, .done, .idle, .unknown] {
-            let count = sessions.filter { $0.status == status && !$0.isPaused }.count
+            // As each row shows it: a team member waiting on its lead isn't one that needs you (`Session.shownStatus`).
+            let count = sessions.filter { $0.shownStatus == status && !$0.isPaused }.count
             guard count > 0 else { continue }
             parts.append(status.word.counted(count))
         }
@@ -320,5 +321,10 @@ public enum StatusSummary {
     /// One session: "3, docs-site, done".
     public static func spoken(number: Int, name: String, status: SessionStatus, paused: Bool) -> String {
         "\(number), \(name), \((paused ? StateWord.paused : status.word).text)"
+    }
+
+    /// One session, as its row shows it: "3, docs-site, done", "2, acme · worker fix-login, waits on lead".
+    public static func spoken(number: Int, name: String, session: Session) -> String {
+        "\(number), \(name), " + (session.isPaused ? StateWord.paused.text : LeadTeams.word(of: session))
     }
 }

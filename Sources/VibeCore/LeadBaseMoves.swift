@@ -364,6 +364,47 @@ extension LeadVault {
         }
     }
 
+    /// A merge of the lead's that a base move refused: its merges wait on the user now, so the window tells them (once
+    /// per move: `AlertRules.baseMoved`). Until a merge is refused the move waits on no one, and stays silent: the user
+    /// commits on the base themselves. Written by the lead's merge, read by the window.
+    public struct BaseMoveRefusal: Codable, Equatable, Sendable {
+        public var branch: String
+        /// The commit the base had moved to.
+        public var to: String
+        public var at: Double
+
+        public init(branch: String, to: String, at: Double) {
+            self.branch = branch
+            self.to = to
+            self.at = at
+        }
+
+        static func path(root: String) -> String {
+            (BoardStore(root: root).folder as NSString).appendingPathComponent("run/base-move-refused.json")
+        }
+
+        public static func load(root: String) -> BaseMoveRefusal? {
+            (try? Data(contentsOf: URL(fileURLWithPath: path(root: root)))).flatMap { try? JSONDecoder().decode(BaseMoveRefusal.self, from: $0) }
+        }
+
+        public func save(root: String) throws {
+            let url = URL(fileURLWithPath: Self.path(root: root))
+            try VibePaths.ensurePrivate(url.deletingLastPathComponent(), within: URL(fileURLWithPath: BoardStore(root: root).folder))
+            try VibePaths.writePrivate(try JSONEncoder().encode(self), to: url)
+        }
+
+        public static func clear(root: String) {
+            try? FileManager.default.removeItem(atPath: path(root: root))
+        }
+
+        /// A merge refused for `move` (the vault's answer about `base` at `current`): marked, unless the move waits on a
+        /// command of the user's still running (it isn't the user's to answer then).
+        public static func mark(base: String, current: String, move: Result<BaseMove, Error>, root: String, now: Double = Date().timeIntervalSince1970) {
+            if case .success(let move) = move, move.waiting == true { return }
+            try? BaseMoveRefusal(branch: base, to: current, at: now).save(root: root)
+        }
+    }
+
     /// The merge's refusal when `base` moved from `known` to `current` and the vault didn't take it (`move`, or the
     /// error asking for it): why, and what the window does about it, from its note.
     public static func moveRefusal(base: String, known: String, current: String, move: Result<BaseMove, Error>, root: String) -> String {
@@ -382,7 +423,7 @@ extension LeadVault {
         let count = "\(note.commits) commit\(note.commits == 1 ? "" : "s")"
         switch note.state {
         case .asking:
-            return head + " \(why) So VibeSwitcher is asking the user: a card in your chat in its window lists the \(count) (\(commits)) with Accept, and it sent them a notification. You get a message when they accept; merge then. Don't ask them to restart you or to run anything: Accept is all it takes. Tell them if the commits aren't theirs."
+            return head + " \(why) So VibeSwitcher is asking the user: a card in your chat in its window lists the \(count) (\(commits)) with Accept, and as this merge waits on it, it notifies them now. You get a message when they accept; merge then. Don't ask them to restart you or to run anything: Accept is all it takes. Tell them if the commits aren't theirs."
         case .kept:
             return head + " \(why) The user answered Keep Refused in VibeSwitcher's window, so nothing merges onto these \(count) (\(commits)). Ask them what to do with them; a restart doesn't change it."
         }

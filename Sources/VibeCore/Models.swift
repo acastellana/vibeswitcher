@@ -140,6 +140,16 @@ public struct Session: Identifiable, Equatable, Sendable {
     public var isTeamMember: Bool { teamRole == .worker || teamRole == .verifier }
     /// A worker or verifier waiting on input: its lead answers it, not you (see `LeadTeams.waitsOnLead`).
     public var waitsOnLead: Bool { isTeamMember && status == .needsInput }
+    /// A lead whose board has an open question for you (set by the app from the boards: `LeadTeams.asking`).
+    public var leadAsks = false
+    /// Its status as you read it (a row, its dot, the popover): "needs you" is only ever you. A lead whose turn is over
+    /// with a question for you open needs you, its terminal idle or not; a team member waiting on its lead shows as
+    /// working (its team's work goes on). Alerts and its hooks' state go by `status`.
+    public var shownStatus: SessionStatus {
+        if waitsOnLead { return .working }
+        if teamRole == .lead, leadAsks, status != .working { return .needsInput }
+        return status
+    }
     /// The agent's own session id (from its hooks): what `--resume` takes.
     public var agentSessionID: String?
     /// Claude only: shells still running under the agent (background commands, monitor loops) as of the last scan,

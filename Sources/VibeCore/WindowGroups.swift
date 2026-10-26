@@ -87,10 +87,12 @@ extension WindowRow {
         case .agent(let session):
             if session.isPaused { return RowState(text: StateWord.paused.text, since: nil, group: .idle) }
             let since: Date? = session.statusSince
-            let text = session.status.word.text
-            switch session.status {
             // A worker or verifier asks its lead, not you: its team's work goes on.
-            case .needsInput where session.waitsOnLead: return RowState(text: LeadTeams.waitsOnLead, since: since, group: .working)
+            if session.waitsOnLead { return RowState(text: LeadTeams.waitsOnLead, since: since, group: .working) }
+            // A lead with a question for you open needs you, its terminal on a prompt or not (`Session.shownStatus`).
+            let status = session.shownStatus
+            let text = status.word.text
+            switch status {
             case .needsInput: return RowState(text: text, since: since, group: .needsYou)
             case .working, .background:
                 if let activity = session.activity {

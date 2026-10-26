@@ -124,9 +124,8 @@ struct FloatingDots: View {
                     }
                 }
                 .buttonStyle(.plain)
-                .help("\(index + 1). \(session.title) · \(session.status.label)" + (session.isPaused ? " · paused" : ""))
-                .accessibilityLabel(StatusSummary.spoken(number: index + 1, name: session.title, status: session.status,
-                                                         paused: session.isPaused))
+                .help("\(index + 1). \(session.title) · \(LeadTeams.label(of: session))" + (session.isPaused ? " · paused" : ""))
+                .accessibilityLabel(StatusSummary.spoken(number: index + 1, name: session.title, session: session))
             }
             if sessions.count > MenuBarDots.maxDots {
                 let more = sessions.count - MenuBarDots.maxDots

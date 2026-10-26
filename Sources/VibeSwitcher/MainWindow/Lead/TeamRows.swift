@@ -31,11 +31,12 @@ struct TeamRow: Identifiable, Equatable {
 
     /// The status mark: each has its own color and its own shape, so it reads without color too.
     enum Mark: CaseIterable {
-        case needsYou, failed, blocked, stalled, ended, working, rework, review, merge, queued, merged, folded, kept, abandoned
+        case waits, failed, blocked, stalled, ended, working, rework, review, merge, queued, merged, folded, kept, abandoned
 
         var symbol: String {
             switch self {
-            case .needsYou: return "exclamationmark.triangle.fill"
+            // A worker or verifier waiting on its lead: not the red "!" that says you're needed.
+            case .waits: return "ellipsis.bubble.fill"
             case .failed: return "xmark.octagon.fill"
             case .blocked: return "nosign"
             case .stalled: return "pause.circle.fill"
@@ -52,7 +53,7 @@ struct TeamRow: Identifiable, Equatable {
             }
         }
 
-        var isRed: Bool { [.needsYou, .failed, .stalled, .ended].contains(self) }
+        var isRed: Bool { [.failed, .stalled, .ended].contains(self) }
     }
 
     var task: LeadTask
@@ -94,7 +95,7 @@ struct TeamRow: Identifiable, Equatable {
     /// The dim line under the title: for a task at work, what its agent is doing (the plain-language summary, else
     /// the latest checkpoint, else the live activity); for a red one, what it asks or why.
     func line(summary: String?) -> String? {
-        if mark.isRed || [.blocked, .kept, .abandoned].contains(mark) { return problem }
+        if mark.isRed || [.waits, .blocked, .kept, .abandoned].contains(mark) { return problem }
         if let foldedText { return foldedText }
         guard isLive else { return nil }
         return summary ?? checkpoint?.text ?? activity
@@ -212,7 +213,7 @@ enum TeamRows {
             if a.group != b.group { return a.group < b.group }
             switch a.group {
             case .needsYou:
-                if (a.mark == .needsYou) != (b.mark == .needsYou) { return a.mark == .needsYou }
+                if (a.mark == .waits) != (b.mark == .waits) { return a.mark == .waits }
                 return position[a.id, default: 0] < position[b.id, default: 0]
             case .working: return (a.task.startedAt ?? a.task.createdAt, position[a.id, default: 0]) < (b.task.startedAt ?? b.task.createdAt, position[b.id, default: 0])
             case .review: return (a.since ?? .distantFuture, position[a.id, default: 0]) < (b.since ?? .distantFuture, position[b.id, default: 0])
@@ -270,12 +271,12 @@ enum TeamRows {
 
         // A session waiting on an answer waits on its lead, whatever the board says (a finished task's is history).
         if ![.done, .folded, .abandoned].contains(task.status), let worker, worker.needsYou {
-            red(.needsYou, LeadTeams.waitsOnLeadLabel, worker.detail.flatMap { $0.isEmpty ? nil : $0 } ?? "The worker is waiting for an answer.", since: nil)
+            red(.waits, LeadTeams.waitsOnLeadLabel, worker.detail.flatMap { $0.isEmpty ? nil : $0 } ?? "The worker is waiting for an answer.", since: nil)
             row.agent = task.worker
             return row
         }
         if task.status == .review, let verifier, verifier.needsYou {
-            red(.needsYou, LeadTeams.waitsOnLeadLabel, verifier.detail.flatMap { $0.isEmpty ? nil : $0 } ?? "The verifier is waiting for an answer.", since: nil)
+            red(.waits, LeadTeams.waitsOnLeadLabel, verifier.detail.flatMap { $0.isEmpty ? nil : $0 } ?? "The verifier is waiting for an answer.", since: nil)
             row.agent = task.verifier
             return row
         }

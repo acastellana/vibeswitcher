@@ -333,12 +333,8 @@ final class LeadController: ObservableObject {
             self?.startPending()
             self?.keepRunningLeads()
         }
-        baseMoves.onAsk = { [weak self] root, move in
-            // Its merges are refused until you decide: it waits on you.
-            self?.alert(.broken(title: "\(move.branch) moved outside the lead's merges",
-                                body: "\(move.count) in \((root as NSString).lastPathComponent): accept them in the lead's chat, or keep its merges refused.",
-                                leadTTY: self?.boards[root]?.leadTTY))
-        }
+        // A move it asks about is a card in the lead's chat, no alert: you commit on the base yourself. Only a merge it
+        // refused waits on you (`AlertRules.baseMoved`, at each refresh).
         baseMoves.onTaken = { [weak self] root, move, taker in
             guard let self else { return }
             let span = "\(move.count) on \(move.branch) (\(move.from.prefix(8)) → \(move.to.prefix(8)))"
@@ -905,15 +901,16 @@ final class LeadController: ObservableObject {
             for root in roots { loaded[root] = files.board(root) }
             let decisions = Dictionary(uniqueKeysWithValues: roots.map { ($0, files.decisions($0)) })
             let records = Dictionary(uniqueKeysWithValues: roots.map { ($0, files.recordsDir($0)) })
+            let refusals = Dictionary(uniqueKeysWithValues: roots.compactMap { root in LeadVault.BaseMoveRefusal.load(root: root).map { (root, $0) } })
             files.keep(roots)
             let teams = Dictionary(uniqueKeysWithValues: loaded.map { root, board in
                 (root, TeamReading.read(root: root, board: board, hosted: hosted, sessions: sessions, observer: observer))
             })
-            return (fired, loaded, decisions, teams, records)
-        }) { [weak self] fired, loaded, decisions, teams, records in
+            return (fired, loaded, decisions, teams, records, refusals)
+        }) { [weak self] fired, loaded, decisions, teams, records, refusals in
             guard let self else { return }
             if records != self.recordsDirs { self.recordsDirs = records }
-            self.refreshed(roots: roots, fired: fired, loaded: loaded, decisions: decisions, teams: teams)
+            self.refreshed(roots: roots, fired: fired, loaded: loaded, decisions: decisions, teams: teams, refusals: refusals)
             self.refreshing = false
             if self.refreshAgain {
                 self.refreshAgain = false
@@ -924,17 +921,24 @@ final class LeadController: ObservableObject {
 
     /// What a refresh read, on the main thread.
     private func refreshed(roots: Set<String>, fired: [String: [(question: LeadQuestion, message: String)]], loaded: [String: LeadBoard],
-                           decisions read: [String: [LeadDecision]], teams: [String: TeamReading]) {
+                           decisions read: [String: [LeadDecision]], teams: [String: TeamReading],
+                           refusals: [String: LeadVault.BaseMoveRefusal]) {
         dispatchPrecondition(condition: .onQueue(.main))
         tell(timers: fired)
         let previous = boards
         if loaded != boards { boards = loaded }
+        // A lead with a question for you open needs you, its terminal idle or not.
+        store.leadsAsking = LeadTeams.asking(loaded)
         teamRows.keep { key in roots.contains { key == $0 || key.hasSuffix("|" + $0) } }
         if read != decisions { decisions = read }
         baseMoves.look(roots)
         for (root, board) in loaded {
             for event in AlertRules.look(previous: previous[root], board: board, project: (root as NSString).lastPathComponent,
                                          seen: &seenQuestions, launchedAt: launchedAt) {
+                alert(event)
+            }
+            // A base move that refused one of its merges waits on you (told once per move).
+            if let event = AlertRules.baseMoved(baseMoves.asking[root], refused: refusals[root], root: root, leadTTY: board.leadTTY) {
                 alert(event)
             }
             witness(root: root, board: board, team: teams[root] ?? TeamReading())

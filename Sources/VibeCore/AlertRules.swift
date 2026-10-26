@@ -46,8 +46,9 @@ public enum AlertRules {
         case asked(LeadQuestion, project: String, leadTTY: String?)
         /// The board cleared: the all-done card appeared.
         case allDone(LeadAllDone, project: String, leadTTY: String?)
-        /// Something broke that waits on the user (a base branch moved outside the lead's merges).
-        case broken(title: String, body: String, leadTTY: String?)
+        /// Something broke that waits on the user (a base branch moved outside the lead's merges refused one of its
+        /// merges: `baseMoved`). `key`: told once (nil: each time).
+        case broken(title: String, body: String, leadTTY: String?, key: String?)
     }
 
     /// Lets each told-once alert through once (by its `key`).
@@ -129,11 +130,24 @@ public enum AlertRules {
             let body = (mark.summary ?? BatchSummary.fallback(mark.tasks)).headline
             return Alert(kind: .done, title: title, subtitle: nil, body: body, sound: false, tty: tty ?? "",
                          phoneTitle: title, phoneBody: body, key: "all-done|\(mark.id)")
-        case .broken(let title, let body, let tty):
+        case .broken(let title, let body, let tty, let key):
             guard settings.needsInput else { return nil }
             return Alert(kind: .needsYou, title: title, subtitle: nil, body: body, sound: settings.sound, tty: tty ?? "",
-                         phoneTitle: title, phoneBody: body, key: nil)
+                         phoneTitle: title, phoneBody: body, key: key)
         }
+    }
+
+    /// A base branch that moved outside the lead's merges (`asking`: the move the window asks you about, in the lead's
+    /// chat): silent while it waits on no one, since you commit on the base yourself and the lead's merge tells the lead.
+    /// Once a merge of the lead's was refused for it (`refused`, the merge's mark), its merges wait on you: told once per
+    /// move.
+    public static func baseMoved(_ asking: LeadVault.BaseMove?, refused: LeadVault.BaseMoveRefusal?, root: String,
+                                 leadTTY: String?) -> LeadEvent? {
+        guard let asking, let refused, refused.branch == asking.branch, refused.to == asking.to else { return nil }
+        let project = (root as NSString).lastPathComponent
+        return .broken(title: "\(asking.branch) moved outside the lead's merges",
+                       body: "\(asking.count) in \(project): the lead's merges wait on you. Accept them in the lead's chat, or keep its merges refused.",
+                       leadTTY: leadTTY, key: "base-move|\(root)|\(asking.to)")
     }
 
     /// How long before the launch a question still counts as asked while the app relaunched (seconds).

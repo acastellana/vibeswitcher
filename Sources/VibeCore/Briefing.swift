@@ -170,7 +170,8 @@ public enum Briefing {
                 running: count(.running), review: count(.review), blocked: count(.blocked),
                 questions: questions.prefix(questionsPerProject).map { clean($0.text) }, questionCount: questions.count)
         }
-        let waiting = sessions.filter { $0.status == .needsInput && !$0.isPaused }.sorted { $0.statusSince < $1.statusSince }
+        // A team member waiting on input waits on its lead, not on the user (a lead's questions are counted above).
+        let waiting = sessions.filter { $0.status == .needsInput && !$0.isPaused && !$0.waitsOnLead }.sorted { $0.statusSince < $1.statusSince }
         return BriefingInput(since: since, now: now, projects: projects,
                              waiting: waiting.prefix(waitingShown).map { .init(name: clean($0.displayName), project: clean($0.project)) },
                              waitingCount: waiting.count)

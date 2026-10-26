@@ -165,7 +165,22 @@ public enum LeadTeams {
     public static let waitsOnLeadLabel = "Waits on lead"
 
     /// "Waits on lead" where a session's state is said on its own (a pill, the popover's row), else its status's label.
-    public static func label(of session: Session) -> String { session.waitsOnLead ? waitsOnLeadLabel : session.status.label }
+    public static func label(of session: Session) -> String { session.waitsOnLead ? waitsOnLeadLabel : session.shownStatus.label }
+
+    /// "waits on lead" where a session's state is read out on its own (VoiceOver), else its shown status's word.
+    public static func word(of session: Session) -> String { session.waitsOnLead ? waitsOnLead : session.shownStatus.word.text }
+
+    /// The roots (standardized) of the boards in `boards` with a question for the user open: their leads need you
+    /// (`Session.leadAsks`).
+    public static func asking(_ boards: [String: LeadBoard]) -> Set<String> {
+        Set(boards.filter { !$0.value.openQuestions.isEmpty }.map { ($0.key as NSString).standardizingPath })
+    }
+
+    /// Whether `session` is the lead of one of the `asking` roots: a lead whose folder is that root.
+    public static func asks(_ session: Session, asking: Set<String>) -> Bool {
+        guard session.teamRole == .lead, let cwd = session.cwd, !asking.isEmpty else { return false }
+        return asking.contains((cwd as NSString).standardizingPath)
+    }
 
     /// "1 waits on lead", "2 wait on lead".
     public static func waitsOnLead(_ count: Int) -> String { count == 1 ? "1 waits on lead" : "\(count) wait on lead" }

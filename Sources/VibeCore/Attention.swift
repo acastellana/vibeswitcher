@@ -62,6 +62,16 @@ public struct ActivityLedger: Codable, Equatable, Sendable {
         }
     }
 
+    /// What `session`'s time is booked as: its status as its row shows it (a lead with a question for you open waits on
+    /// you). A paused session's waiting is your choice, not a bottleneck; its agent work still counts. A lead's worker or
+    /// verifier that's done or waits on input waits on its lead, not on you: its time goes under the lead's project.
+    public static func entry(for session: Session) -> Entry {
+        let parkedWait = session.isPaused && [.needsInput, .done].contains(session.status)
+        let leadsTurn = session.isTeamMember && [.needsInput, .done].contains(session.status)
+        return Entry(project: session.isTeamMember ? SessionTeams.project(of: session) : session.project,
+                     status: parkedWait || leadsTurn ? .idle : session.shownStatus, since: session.statusSince)
+    }
+
     /// A finished session you haven't opened for this long was set aside, not waiting on you.
     public static let unseenDoneLimit: TimeInterval = 30 * 60
 

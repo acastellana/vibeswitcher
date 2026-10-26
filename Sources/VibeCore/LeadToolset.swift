@@ -1960,6 +1960,8 @@ public final class LeadToolset: MCPToolset {
         if let known = vault.head(root: root, branch: base), known != current {
             let move = Result { try vault.acceptMove(root: root, branch: base) }
             guard case .success(let taken) = move, taken.accepted, taken.to == current else {
+                // Its merges wait on the user now: the window tells them (`AlertRules.baseMoved`).
+                LeadVault.BaseMoveRefusal.mark(base: base, current: current, move: move, root: root)
                 throw Problem(text: LeadVault.moveRefusal(base: base, known: known, current: current, move: move, root: root))
             }
             try? store.update { $0.updates.append(LeadUpdate(title: "Took \(taken.count) on \(base)", body: taken.acceptedLine)) }
