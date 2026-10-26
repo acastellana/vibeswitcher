@@ -181,5 +181,11 @@ public final class HostConnection {
         readSource?.cancel()
         readSource = nil
         if notify { onClose?() }
+        // Handlers that hold the connection (`HostCall`'s send on it) would keep it, and all they captured, for good:
+        // each of the app's one-shot calls did, several a second with a few leads (10-26). Nothing is delivered now.
+        onEvent = nil
+        onOutput = nil
+        onClose = nil
+        onProofRefused = nil
     }
 }
