@@ -620,6 +620,12 @@ public final class LeadToolset: MCPToolset {
         var origin: (slug: String, finding: LeadFinding)?
         if let reference = (arguments["from_finding"] as? String)?.trimmingCharacters(in: .whitespaces), !reference.isEmpty {
             origin = try finding(reference)
+            // A Nit never becomes a task (the working policy, 2026-10-21: four picker-card tasks chained from Nits).
+            if let origin, origin.finding.severity == .nit {
+                throw Problem(text: "Not added: \(origin.slug):\(origin.finding.id) is a Nit, and a Nit never becomes a task: it stays recorded on "
+                              + "\(origin.slug), and a worker fixes it only while it's in that code anyway. If it really breaks something, "
+                              + "it isn't a Nit: plan that problem as a task of its own with add_task, saying what goes wrong.")
+            }
         }
         let given = { (key: String) in (arguments[key] as? String).flatMap { $0.isEmpty ? nil : $0 } }
         guard let title = given("title") ?? origin.map({ Self.findingTitle($0.finding) }), let goal = given("goal") ?? origin.map({ Self.findingGoal($0.finding) }) else {
@@ -1186,6 +1192,7 @@ public final class LeadToolset: MCPToolset {
         }
         let workflow = self.workflow
         try checkSettings(workflow, not: "Not started")
+        try checkBattery(not: "Not started")
         let running = board.tasks.filter { $0.status == .running && $0.id != task.id }.count
         let limit = workflow.maxWorkers
         guard running < limit else {
@@ -1436,12 +1443,22 @@ public final class LeadToolset: MCPToolset {
 
     private func audit(_ slug: String) throws -> MCPToolResult {
         if let task = store.load().task(slug), Self.settledStates.contains(task.status) { throw Self.settledRefusal(task, "Not audited") }
+        try checkBattery(not: "Not audited, no verifier started")
         // A worktree that left its branch goes back on it first (see putBackForAudit).
         let putBack = try store.load().task(slug).map { try putBackForAudit(slug, $0) } ?? ""
         // The task's own worktree (not whatever folder the board names) on the commit the branch is at now: that
         // commit is what this verifier's verdict covers.
         guard let task = store.load().task(slug), Worktrees.isWorktree(root: root, slug: slug), let head = branchHead(Worktrees.branch(slug)) else {
             throw Problem(text: "\(slug) has no worktree to check.")
+        }
+        // A passing verdict on this very commit with nothing Important open: another round would check the same code
+        // again, for Nits at most (the working policy: no audit rounds without a concrete open concern; 2026-10-21, text
+        // selection took four rounds and the picker card four tasks).
+        if let verdict = vault.verdict(root: root, task: slug), verdict.passes, verdict.commit == head,
+           vault.audits(root: root, task: slug)?.blocking.isEmpty ?? true {
+            throw Problem(text: "Not audited: \(slug)'s audit at \(head.prefix(8)) passed (complete, clean) with no Important finding open, and its branch "
+                          + "hasn't moved since, so another audit would check the same commit again. merge(\(slug)) when nothing holds it back; "
+                          + "Nits don't need a round. A concrete problem it missed: have the worker fix it and commit, then audit the new commit.")
         }
         let workflow = self.workflow
         let upToDate = try checkUpToDate(slug, head: head, base: workflow.base)
@@ -1891,6 +1908,7 @@ public final class LeadToolset: MCPToolset {
                           + ". Nothing to do but cleanup, if it isn't done yet.")
         }
         if Self.settledStates.contains(task.status) { throw Self.settledRefusal(task, "Not merged") }
+        try checkBattery(not: "Not merged")
         // Held back on purpose (a decision, the user's word): only the lead setting it back lets it merge.
         if task.status == .kept {
             throw Problem(text: "Not merged: \(slug) is kept unmerged (\(task.keptBecause ?? "no reason recorded")). If that no longer holds (the user said so, a newer decision), update_task(\(slug), status: planned) first, and say why with record_decision.")
@@ -2407,6 +2425,17 @@ public final class LeadToolset: MCPToolset {
             + "Meanwhile merge and cleanup finished tasks (cleanup ends their sessions), plan, or answer the user."
     }
 
+    /// The battery hold, as start_worker, audit and merge keep it (auto_advance's loop keeps it too, see `LeadAdvance`):
+    /// nothing starts, audits or merges while the witness's hold under the user's limit lasts (see `PowerWatch`). The
+    /// lead used to keep it by hand from the witness's messages (decisions 2026-10-19 15:50, 2026-10-20 22:12): two
+    /// verifiers and a merge's test run died in the Mac's sleeps on 2026-10-19 at 2 %. `not`: what didn't happen.
+    private func checkBattery(not: String) throws {
+        guard let power = power(), power.onBattery, let limit = power.heldUnder else { return }
+        throw Problem(text: "\(not): the Mac is on battery at \(power.percent) %, under the user's \(limit) % limit (Settings › Project lead), "
+            + "so nothing starts, audits or merges until AC power returns or the limit is lowered; work in flight finishes. "
+            + "The witness tells you when to resume. " + LeadPrompts.retryWhenWoken)
+    }
+
     /// Waits while the Mac's 1-minute load is above load_threshold, reading it every `loadPoll`, for at most
     /// test_timeout_min; nil when it didn't wait, else how long and from what load. Throws, with the numbers, when the
     /// load didn't drop in time (nothing was tested).
@@ -2850,6 +2879,7 @@ public final class LeadToolset: MCPToolset {
         let done = kind != "blocked"
         // Before anything is recorded: a done that doesn't show how each check was checked doesn't count as one.
         var evidence = done ? try Self.doneEvidence(arguments, acceptance: store.load().task(slug)?.contract.acceptance ?? [], base: workflow.base) : nil
+        if done { try checkLoadProof(slug, arguments) }
         // Its screenshots as copies kept in .vibeswitcher, so board(task), the verifier and the lead still open them
         // once the worktree (where sandbox shots are) is cleaned up. Relative paths are the worktree's.
         if let given = evidence {
@@ -3249,6 +3279,45 @@ public final class LeadToolset: MCPToolset {
                 + "Give one entry for each, naming the check by its number or its text, then report again.")
         }
         return evidence
+    }
+
+    /// The load harness a done report's new tests are proven under (see `LeadPrompts.newTests`), in the worktree.
+    static let loadScript = "scripts/test-under-load.sh"
+
+    /// A done report on a branch that adds or changes tests, in a project with `loadScript`, gives their run under load
+    /// (the script named in its summary, evidence or blind check): on 2026-10-23 three new tests passed in their workers
+    /// and failed in loaded merge runs, each a ~30 min merge and a rework (decision 2026-10-23 14:16).
+    private func checkLoadProof(_ slug: String, _ arguments: [String: Any]) throws {
+        let worktree = Worktrees.path(root: root, slug: slug)
+        guard FileManager.default.fileExists(atPath: (worktree as NSString).appendingPathComponent(Self.loadScript)),
+              let head = branchHead(Worktrees.branch(slug)) else { return }
+        // A done again on the same commit (answering findings, a note): its first one gave it.
+        if (try? vault.unaudited(root: root, task: slug))?.reported == head { return }
+        let changed = Git.run(["diff", "--name-only", "--diff-filter=d", "\(workflow.base)...\(head)"], in: root)
+        let tests = Self.testFiles(changed.output.split(whereSeparator: \.isNewline).map(String.init))
+        guard changed.ok, !tests.isEmpty else { return }
+        let said = [arguments["summary"], arguments["evidence"], arguments["blind_check"]].map { value -> String in
+            guard let value else { return "" }
+            if let text = value as? String { return text }
+            return (try? JSONSerialization.data(withJSONObject: value)).flatMap { String(data: $0, encoding: .utf8) } ?? "\(value)"
+        }.joined(separator: "\n")
+        guard !said.contains("test-under-load") else { return }
+        throw Problem(text: "Not reported: your branch adds or changes tests (\(tests.prefix(5).joined(separator: ", "))\(tests.count > 5 ? ", …" : "")), "
+            + "and the report doesn't give their run under load. Run them once through `\(LeadPrompts.proofCommand)` and put its "
+            + "result line in your report (summary or evidence), then report again.")
+    }
+
+    /// The test files among repository paths: under a Tests, tests, test, spec or __tests__ folder, or named as tests
+    /// are (FooTests.swift, foo_test.go, foo.test.js, foo.spec.ts, test_foo.py).
+    static func testFiles(_ paths: [String]) -> [String] {
+        paths.filter { path in
+            let parts = path.split(separator: "/").map(String.init)
+            guard let name = parts.last else { return false }
+            if parts.dropLast().contains(where: { ["Tests", "tests", "test", "spec", "__tests__"].contains($0) }) { return true }
+            let stem = (name as NSString).deletingPathExtension
+            return stem.hasSuffix("Tests") || stem.hasSuffix("Test") || stem.hasSuffix("_test") || stem.hasPrefix("test_")
+                || stem.hasSuffix(".test") || stem.hasSuffix(".spec")
+        }
     }
 
     /// blind_check as text: a string, or a list of strings or of objects (each item's fields on a line).

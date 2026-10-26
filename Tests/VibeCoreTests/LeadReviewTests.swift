@@ -287,6 +287,6 @@ struct LeadPolicyPromptTests {
         }
         #expect(!prompt.contains("worthwhile Nits"))
         // No prompt or tool reply suggests making a Nit a task.
-        #expect(!LeadPrompts.Policy.nits.isEmpty && LeadPrompts.Policy.nits.contains("never become tasks by themselves"))
+        #expect(!LeadPrompts.Policy.nits.isEmpty && LeadPrompts.Policy.nits.contains("add_task refuses one"))
     }
 }

@@ -679,13 +679,29 @@ struct LeadToolsetTests: LeadTeamFixture {
         #expect(FileManager.default.fileExists(atPath: root + "/b.txt"))
     }
 
-    /// The lead's own audit is a re-audit: it needs a new verdict whatever the commit.
+    /// The lead's own audit is a re-audit: it needs a new verdict whatever the commit. (A clean pass on the commit isn't
+    /// audited again at all: `LeadRuleChecksTests`.) Here the verdict lets merge in only through the lead's dismissal of
+    /// the Important finding it failed on; once audited again, it no longer counts.
     @Test func anAuditAgainOnTheSameCommitNeedsItsNewVerdict() throws {
         let root = try repo()
         let runtime = FakeRuntime()
         let lead = try lead(root, runtime)
-        _ = try audited(lead, runtime, root: root)
+        _ = call(lead, "add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]])
+        _ = call(lead, "start_worker", ["task": "add-b"])
+        let worktree = Worktrees.path(root: root, slug: "add-b")
+        try "bee\n".write(toFile: worktree + "/b.txt", atomically: true, encoding: .utf8)
+        Git.run(["add", "b.txt"], in: worktree)
+        Git.run(["commit", "-q", "-m", "add b"], in: worktree)
+        _ = call(try seat("worker-add-b", runtime), "report", doneReport("added"))
         _ = call(lead, "audit", ["task": "add-b"])
+        let important: [String: Any] = ["severity": "Important", "file": "b.txt", "line": 1, "evidence": "says bee",
+                                        "failure_scenario": "cat b.txt gives bee where the contract wants b", "status": "open"]
+        _ = call(try seat("verify-add-b", runtime), "submit_audit", ["completion": "complete", "integrity": "suspect", "summary": "checked",
+                                                                     "tests": "passed", "findings": [important]])
+        #expect(!call(lead, "dismiss_finding", ["task": "add-b", "id": "F1", "reason": "the contract asks only that b.txt exists"]).isError)
+        #expect(vault.verdict(root: root, task: "add-b")?.dismissed(in: vault.audits(root: root, task: "add-b")) != nil)
+        let again = call(lead, "audit", ["task": "add-b"])
+        #expect(!again.isError, "\(again.text)")
         _ = call(try seat("worker-add-b", runtime), "report", doneReport("still done"))
         #expect(BoardStore(root: root).load().task("add-b")?.evidence == nil)
         #expect(call(lead, "merge", ["task": "add-b"]).isError)

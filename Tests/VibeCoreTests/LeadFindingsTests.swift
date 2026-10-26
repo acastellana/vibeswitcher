@@ -407,8 +407,10 @@ struct LeadFindingsToolTests: LeadTeamFixture {
         #expect(finding.status == .dismissed)
         #expect(finding.followUp == made.slug)
         // What the lead passes replaces that part.
-        #expect(!call(lead, "add_task", ["from_finding": "add-b:F2", "title": "Tidy b"]).isError)
-        #expect(BoardStore(root: root).load().tasks.last?.title == "Tidy b")
+        #expect(!call(lead, "add_task", ["from_finding": "add-b:F1", "title": "Fix b"]).isError)
+        #expect(BoardStore(root: root).load().tasks.last?.title == "Fix b")
+        // A Nit never becomes one (see LeadRuleChecksTests).
+        #expect(call(lead, "add_task", ["from_finding": "add-b:F2", "title": "Tidy b"]).isError)
         #expect(call(lead, "add_task", ["from_finding": "add-b:F9"]).isError)
         #expect(call(lead, "add_task", ["title": "No goal"]).isError)
     }

@@ -531,7 +531,7 @@ public enum LeadPrompts {
         + "injected clock), never on a fixed sleep or a wall-clock window: on a loaded Mac those race. Before you report done, "
         + "run every test your branch adds or changes under load once, through scripts/test-under-load.sh (e.g. "
         + "`\(proofCommand)`), and put its result line in your report (`all 3 runs passed and left nothing behind`, or the "
-        + "run that failed). A test that fails there isn't done: fix its wait, not the load. A project without the script: "
+        + "run that failed): report refuses a done without it. A test that fails there isn't done: fix its wait, not the load. A project without the script: "
         + "say so in your report."
 
     /// The verifier's part of `newTests`: one run under load of the branch's new tests (a finder panel's first finder
@@ -726,8 +726,8 @@ public enum LeadPrompts {
             + "revert it. Every other merge goes into your daily summary."
 
         /// Findings that are cosmetic.
-        public static let nits = "Nits never block a merge and never become tasks by themselves; fix one only while the "
-            + "worker is in that code anyway. Stop when it works and the relevant checks pass: no audit rounds for polish."
+        public static let nits = "Nits never block a merge, and add_task refuses one: a worker fixes it only while in that "
+            + "code anyway. audit refuses a passing commit again: no rounds for polish."
 
         /// What a re-audit checks (the verifier's prompt).
         public static let reaudit = "A re-audit checks only the concerns the open findings below raise: whether each is fixed, "
@@ -916,14 +916,11 @@ public enum LeadPrompts {
         """
     }
 
-    /// What the lead does on battery (the witness tells a hold under the user's limit and the resume after it, status
-    /// says it while it lasts), in one sentence.
+    /// The battery hold, in one sentence: start_worker, audit and merge keep it themselves (see `checkBattery` in
+    /// LeadToolset), so the lead no longer applies it by hand.
     static let onBattery = """
-        On battery, hold new starts, audits and merges only while the witness says the battery is under the user's \
-        limit; otherwise work as on power: the limit is the user's "On battery, pause lead work below N %" in \
-        VibeSwitcher's Settings (0 never pauses), the witness tells you once when the charge is under it and once when \
-        to resume (AC power back, or the limit lowered), status says "under your N % limit" while the hold lasts, and \
-        work in flight finishes either way.
+        On battery under the user's "On battery, pause lead work below N %" limit, start_worker, audit and merge refuse \
+        until the witness tells you to resume.
         """
 
     /// The lead's merge policy section: the one-time question while the owner hasn't chosen, then the policy to

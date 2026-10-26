@@ -209,7 +209,7 @@ struct PowerWitnessTests: LeadTeamFixture {
     @Test func theLeadsPromptSaysWhatToDoOnBatteryInOneSentence() {
         let prompt = LeadPrompts.lead(project: "p", root: "/p", workflow: LeadWorkflow())
         #expect(prompt.contains(LeadPrompts.onBattery))
-        #expect(LeadPrompts.onBattery.contains("hold new starts, audits and merges only while the witness says the battery is under the user's limit; otherwise work as on power"))
+        #expect(LeadPrompts.onBattery.contains("start_worker, audit and merge refuse until the witness tells you to resume"))
         #expect(LeadPrompts.onBattery.contains("On battery, pause lead work below N %"))
         // Not at every unplug.
         #expect(!LeadPrompts.onBattery.contains("start no new workers or audits and merge nothing"))
