@@ -1462,3 +1462,5 @@
 - 2026-10-26 17:46 Automatically (auto_advance): Cleaned up the-verifier-s-eval (freed 1.2 GB of build output and temporary folders). It stays done.
 - 2026-10-26 17:47 Update: Batch done: revert follow-ups, the verifier's eval set, README fix — 3 tasks merged into project-lead since the last install (e6278af).
 - 2026-10-27 00:41 Planned the-phone-shows-leads: The phone shows leads and their teams the way the Mac now does (review audit)
+- 2026-10-27 00:52 Started a worker on the-phone-shows-leads
+- 2026-10-27 00:52 Automatically (auto_advance): Started a worker on the-phone-shows-leads (The phone shows leads and their teams the way the Mac now does).
