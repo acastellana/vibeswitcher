@@ -1402,3 +1402,11 @@
 - 2026-10-26 11:36 Automatically (auto_advance): Merge of one-step-revert-of failed: Conflicts with project-lead: the branch needs bringing up to date. Sent its worker the output; it's back at work.
 - 2026-10-26 11:36 Automatically (auto_advance): Started the audit of agents-md-holds-the at c224df53 (Its review is audit).
 - 2026-10-26 11:37 Automatically (auto_advance): Cleaned up review-level-from-the (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-10-26 11:42 Started a worker on security-checklist-for
+- 2026-10-26 11:42 Automatically (auto_advance): Started a worker on security-checklist-for (Security checklist for audits of guard-rail changes, measured on a real past miss), its after tasks done (review-level-from-the).
+- 2026-10-26 11:42 Started a worker on the-risk-check-s
+- 2026-10-26 11:42 Automatically (auto_advance): Started a worker on the-risk-check-s (The risk check's size trigger counts source lines, not tests), its after tasks done (review-level-from-the).
+- 2026-10-26 11:42 Started a worker on catch-and-fix-the
+- 2026-10-26 11:42 Automatically (auto_advance): Started a worker on catch-and-fix-the (Catch and fix the 3 s main-thread stalls with a lead's chat shown).
+- 2026-10-26 11:43 Automatically (auto_advance): Started the audit of one-step-revert-of at 606d1f77 (Its review is audit).
+- 2026-10-26 11:46 Audit of agents-md-holds-the: complete, clean, round 1: 3 Nit open
