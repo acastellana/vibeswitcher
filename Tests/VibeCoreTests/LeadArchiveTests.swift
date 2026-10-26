@@ -111,9 +111,16 @@ struct LeadArchiveTests: LeadTeamFixture {
             #expect(read(path) == both)
             #expect(!FileManager.default.fileExists(atPath: archivePath))
         }
+        // A minute stamp (as docs/process/lead-rules.md names them) fits an entry stamped to the second, and both of a minute's.
+        let minute = lead.call("archive_decisions", ["entries": ["2026-10-18 09:45"], "reason": "obsolete"])
+        #expect(minute.isError && minute.text.contains("names 2 entries"), "\(minute.text)")
+        #expect(read(path) == both)
         // Named by more of its heading, either one goes alone.
         #expect(!lead.call("archive_decisions", ["entries": ["2026-10-20 10:00 Keep it local, again"], "reason": "duplicate"]).isError)
         #expect(BoardStore(root: root).decisions().map(\.text).last == "Keep it local")
+        let seconds = lead.call("archive_decisions", ["entries": ["2026-10-18 09:45 Keep the board"], "reason": "obsolete"])
+        #expect(!seconds.isError && seconds.text.contains("“2026-10-18 09:45:41 Keep the board current”"), "\(seconds.text)")
+        #expect(!(read(path) ?? "").contains("Keep the board current"))
     }
 
     @Test func onlyTheLeadArchives() throws {
