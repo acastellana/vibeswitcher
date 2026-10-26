@@ -48,7 +48,8 @@ struct LeadRiskTests {
         let big = Self.raise([Self.change("Sources/VibeCore/Thing.swift", 400, 50), Self.change("Tests/VibeCoreTests/ThingTests.swift", 500, 0)])
         #expect(big == "it changes 450 lines outside tests, over risk_lines (400)", "\(big ?? "nil")")
         // A bench in the product's sources is source.
-        #expect(LeadRisk.countsForSize("Sources/VibeSwitcher/UIBench.swift") && !LeadRisk.countsForSize("scripts/ui-bench.sh"))
+        #expect(Self.raise([Self.change("Sources/VibeSwitcher/UIBench.swift", 401, 0)])?.contains("401 lines") == true)
+        #expect(Self.raise([Self.change("scripts/ui-bench.sh", 401, 0)]) == nil)
     }
 
     @Test func aDeletedFilesRemovedLinesAreRead() {
