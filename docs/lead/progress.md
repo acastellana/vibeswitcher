@@ -1412,3 +1412,5 @@
 - 2026-10-26 11:46 Audit of agents-md-holds-the: complete, clean, round 1: 3 Nit open
 - 2026-10-26 11:47 Audit of one-step-revert-of: complete, clean, round 2: 3 Nit open
 - 2026-10-26 11:55 Merged one-step-revert-of: One-step revert of a merged task
+- 2026-10-26 11:55 Automatically (auto_advance): Merged one-step-revert-of (One-step revert of a merged task) into project-lead at ac79dff1, on its passing audit and the full test run.
+- 2026-10-26 12:02 Merged agents-md-holds-the: AGENTS.md holds the few rules agents can't discover; CLAUDE.md just imports it
