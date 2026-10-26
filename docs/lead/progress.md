@@ -1321,3 +1321,5 @@
 - 2026-10-26 01:17 Dismissed today-s-flaky-tests:F1: Moved into task sessionstoretests-team (same shared-devices cleanup fix).
 - 2026-10-26 01:17 Dismissed today-s-flaky-tests:F2: Moved into task sessionstoretests-team (same shared-devices cleanup fix).
 - 2026-10-26 01:21 Merged open-sessions-pick-up: Open sessions pick up an installed tool server by themselves
+- 2026-10-26 01:21 Automatically (auto_advance): Merged open-sessions-pick-up (Open sessions pick up an installed tool server by themselves) into project-lead at a591117c, on its passing audit and the full test run.
+- 2026-10-26 01:36 Merged today-s-flaky-tests: Today's flaky tests pass reliably on a loaded Mac
