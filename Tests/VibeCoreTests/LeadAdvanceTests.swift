@@ -144,9 +144,9 @@ struct LeadAdvanceTests: LeadTeamFixture {
         (try? String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)) ?? ""
     }
 
-    /// `slug`'s worker (started by the loop) commits `file` and reports done.
+    /// `slug`'s worker (started by the loop) commits `file` and reports done (a .swift file: code that spawns a process).
     func work(_ slug: String, file: String, root: String, _ runtime: FakeRuntime) throws {
-        try commit(file, "bee\n", in: Worktrees.path(root: root, slug: slug))
+        try commit(file, file.hasSuffix(".swift") ? "let process = Process()\n" : "bee\n", in: Worktrees.path(root: root, slug: slug))
         let report = try seat("worker-\(slug)", runtime).call("report", doneReport("added \(file)"))
         #expect(!report.isError, "\(report.text)")
     }
@@ -212,6 +212,26 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(merged.count == 1 && merged[0].contains("Cleaned up add-b"), "\(reports(runtime))")
         #expect(progress(root).contains("Automatically (auto_advance): Merged add-b"))
         #expect(progress(root).contains("Automatically (auto_advance): Started a worker on add-b"))
+    }
+
+    /// The risk check (see `LeadRisk`) runs on auto_advance's step too: a review none task whose change it flags is
+    /// audited instead of merged, and the lead's report says why.
+    @Test func aReviewNoneTaskTheRiskCheckRaisesIsAuditedNotMerged() throws {
+        let (root, runtime, lead) = try team()
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]])
+        #expect(advancing.until { task("add-b", root)?.status == .running })
+        try work("add-b", file: "run.swift", root: root, runtime)
+        #expect(advancing.until { vault.current(.verifier, root: root, task: "add-b")?.auditing == head("agent/add-b", root)
+            && reports(runtime).contains { $0.contains("Started the audit of add-b") } })
+        let started = try #require(reports(runtime).first { $0.contains("Started the audit of add-b") })
+        #expect(started.contains("The risk check raised it to audit: it has code that"), "\(started)")
+        #expect(task("add-b", root)?.riskRaised != nil && task("add-b", root)?.merged == nil)
+        #expect(try vault.unaudited(root: root, task: "add-b").review == .audit)
+        #expect(lead.call("status", [:]).text.contains("audited: it has code that"))
+        // Nothing merged or tested before its verdict.
+        #expect((try? String(contentsOfFile: log, encoding: .utf8)) == nil)
     }
 
     // MARK: Its reports reach the lead as VibeSwitcher's
