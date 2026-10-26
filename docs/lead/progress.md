@@ -1440,3 +1440,6 @@
 - 2026-10-26 16:27 Planned readme-says-the-right: README says the right audit-round cap
 - 2026-10-26 16:28 Started a worker on readme-says-the-right
 - 2026-10-26 16:28 Automatically (auto_advance): Started a worker on readme-says-the-right (README says the right audit-round cap).
+- 2026-10-26 16:38 Planned after-a-revert-dependent: After a revert: dependent tasks are told, cleanup happens, the Mac stays awake (review audit)
+- 2026-10-26 16:38 Planned the-verifier-s-eval: The verifier's eval set: real past bugs and clean commits, run when its prompt or model changes
+- 2026-10-26 16:39 Merged readme-says-the-right: README says the right audit-round cap (no audit: review none)
