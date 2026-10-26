@@ -1461,3 +1461,4 @@
 - 2026-10-26 17:46 Automatically (auto_advance): Merged the-verifier-s-eval (The verifier's eval set: real past bugs and clean commits, run when its prompt or model changes) into project-lead at ee2d0ae6, on its passing audit and the full test run.
 - 2026-10-26 17:46 Automatically (auto_advance): Cleaned up the-verifier-s-eval (freed 1.2 GB of build output and temporary folders). It stays done.
 - 2026-10-26 17:47 Update: Batch done: revert follow-ups, the verifier's eval set, README fix — 3 tasks merged into project-lead since the last install (e6278af).
+- 2026-10-27 00:41 Planned the-phone-shows-leads: The phone shows leads and their teams the way the Mac now does (review audit)
