@@ -1452,3 +1452,5 @@
 - 2026-10-26 16:49 Automatically (auto_advance): Started the audit of after-a-revert-dependent at 89de4aed (Its review is audit).
 - 2026-10-26 17:04 Audit of after-a-revert-dependent: complete, clean, round 1: 1 Pre-existing open
 - 2026-10-26 17:11 Merged after-a-revert-dependent: After a revert: dependent tasks are told, cleanup happens, the Mac stays awake
+- 2026-10-26 17:11 Automatically (auto_advance): Merged after-a-revert-dependent (After a revert: dependent tasks are told, cleanup happens, the Mac stays awake) into project-lead at 9dc85d71, on its passing audit and the full test run.
+- 2026-10-26 17:12 Automatically (auto_advance): Cleaned up after-a-revert-dependent (freed 2.2 GB of build output and temporary folders). It stays done.
