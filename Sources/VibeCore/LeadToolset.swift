@@ -1553,7 +1553,8 @@ public final class LeadToolset: MCPToolset {
                                  label: "Verifier: \(task.title)", trust: config.isEmpty,
                                  prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, merged: merged,
                                                               notes: leadNotes(task), report: doneReport(task, head: head),
-                                                              guide: LeadRisk.reviewGuide(root: root, base: workflow.base)),
+                                                              guide: LeadRisk.reviewGuide(root: root, base: workflow.base),
+                                                              security: Self.securityReason(root: root, head: head, workflow: workflow, raised: task.riskRaised)),
                                  start: "Verify the task now, then call submit_audit.", model: auditModel(workflow), auditing: head)
         }
         try store.update { board in
@@ -1591,6 +1592,38 @@ public final class LeadToolset: MCPToolset {
         return MCPToolResult(text: noTools + putBack + behind + room + earlier + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(tested)\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
     }
 
+    /// Why an audit's verifiers get the security checklist (`LeadPrompts.securitySection`); nil when they don't. The
+    /// branch touches sensitive_paths, the risk check raised it (a model raises only for security, secrets, stored data
+    /// or other sessions; its triggers count for `securityKinds`), or its code changes permissions, spawns processes or
+    /// deletes or rewrites files by the risk check's own patterns, on any audit: the lead's review audit too, which the
+    /// risk check never reads (a-fix-s-regression was filed so, and its escapes were in a permissions list). Locks
+    /// and threads alone are concurrency, not security. `patch`: the branch's `git diff -U0`, read only when needed.
+    static func securityReason(sensitive: [String], raised: LeadRiskRaise?, patch: () -> String?) -> String? {
+        if !sensitive.isEmpty { return "it touches sensitive_paths: " + LeadRisk.list(sensitive) }
+        if let raised, raised.byModel || securityKinds.contains(where: raised.reason.contains) {
+            return "the risk check raised it: \(raised.reason)"
+        }
+        guard let patch = patch(), let flagged = LeadRisk.flagged(patch, kinds: securityKinds) else { return nil }
+        return "it has code that \(flagged.what) (\(flagged.path): \(flagged.line))"
+    }
+
+    static let securityKinds = Set(LeadRisk.patterns.map(\.what).filter { $0 != "adds locks or threads" })
+
+    /// `securityReason` for the branch at `head` in `root` (`sensitive`: the sensitive paths it touches, when known),
+    /// as an audit gives it; scripts/verifier-eval.sh's replay too (vibeswitcher-mcp --verifier-prompt).
+    public static func securityReason(root: String, head: String, workflow: LeadWorkflow, raised: LeadRiskRaise?, sensitive: [String]? = nil) -> String? {
+        securityReason(sensitive: sensitive ?? sensitiveChanges(root: root, head: head, workflow: workflow), raised: raised, patch: {
+            let patch = Git.run(["diff", "-U0", "--no-color", "\(workflow.base)...\(head)"], in: root)
+            return patch.ok ? patch.output : nil
+        })
+    }
+
+    /// The sensitive paths the branch changes from `base` to `head`.
+    static func sensitiveChanges(root: String, head: String, workflow: LeadWorkflow) -> [String] {
+        let changed = Git.run(["diff", "--name-only", "\(workflow.base)...\(head)"], in: root).output.split(whereSeparator: \.isNewline).map(String.init)
+        return changed.filter { path in workflow.sensitiveGlobs.contains { LeadWorkflow.matches(path, glob: $0) } }
+    }
+
     /// The model this project's audits run on: verifier_model, or another than the workers' (see `LeadWorkflow.auditModel`).
     func auditModel(_ workflow: LeadWorkflow) -> String { workflow.auditModel(workerModel: runtime.workerModel(root: root)) }
 
@@ -1620,10 +1653,10 @@ public final class LeadToolset: MCPToolset {
         let slug = task.slug
         let tested = merged?.commit ?? head
         let run = try auditRun(slug, commit: tested, workflow: workflow, not: "no finder started")
-        let changed = Git.run(["diff", "--name-only", "\(workflow.base)...\(head)"], in: root).output.split(whereSeparator: \.isNewline).map(String.init)
-        let sensitive = changed.filter { path in workflow.sensitiveGlobs.contains { LeadWorkflow.matches(path, glob: $0) } }
+        let sensitive = Self.sensitiveChanges(root: root, head: head, workflow: workflow)
         let focuses = LeadPrompts.Focus.panel(count, sensitive: !sensitive.isEmpty)
         let notes = leadNotes(task), report = doneReport(task, head: head), guide = LeadRisk.reviewGuide(root: root, base: workflow.base)
+        let security = Self.securityReason(root: root, head: head, workflow: workflow, raised: task.riskRaised, sensitive: sensitive)
         let earlier = try endEarlierVerifiers(task, not: "Not audited, no finder started")
         let id = UUID().uuidString
         var sessions: [String] = []
@@ -1635,7 +1668,8 @@ public final class LeadToolset: MCPToolset {
                 sessions.append(try launch(.verifier, task: slug, name: index == 1 ? "verify-\(slug)" : "finder\(index)-\(slug)",
                                            in: Worktrees.path(root: root, slug: slug), label: "Verifier: \(task.title) (finder \(index)/\(count): \(focus.rawValue))",
                                            trust: trust, prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, finder: finder,
-                                                                                      merged: merged, notes: notes, report: report, guide: guide),
+                                                                                      merged: merged, notes: notes, report: report, guide: guide,
+                                                                                      security: security),
                                            start: "Look for findings in your focus now, then call submit_audit.", model: auditModel(workflow), auditing: head,
                                            finder: LeadVault.Finder(panel: id, index: index, size: count, focus: focus.rawValue, nitCap: workflow.auditNitCap)))
             } catch {

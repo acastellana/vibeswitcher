@@ -388,4 +388,88 @@ struct LeadRiskMergeTests: LeadTeamFixture {
         let prompt = try #require(model.prompts.first)
         #expect(prompt.contains("BASE-GUIDE") && !prompt.contains("WORKTREE-GUIDE") && !prompt.contains("CHECKOUT-GUIDE"), "\(prompt)")
     }
+
+    // MARK: The verifier's security checklist
+
+    /// Task "change" filed as `review`, `file` committed with `text` and its done reported, then audited: its first
+    /// verifier's prompt (finder 1's, under audit_finders 2), and finder 2's when there is one.
+    func auditedPrompts(file: String, text: String, review: String = "audit", settings: [String: Any] = [:],
+                        model: FakeModel? = nil) throws -> [String] {
+        let (root, runtime, lead) = try team(settings)
+        if let model { lead.riskModel = model.ask }
+        #expect(!lead.call("add_task", ["title": "Change", "goal": "the change", "acceptance": ["it's there"], "review": review]).isError)
+        #expect(!lead.call("start_worker", ["task": "change"]).isError)
+        try commit(file, text, in: Worktrees.path(root: root, slug: "change"))
+        #expect(!(try seat("worker-change", runtime)).call("report", doneReport("changed")).isError)
+        // A review none task meets the risk check at merge, which raises it or merges it.
+        if review == "none" { #expect(lead.call("merge", ["task": "change"]).isError) }
+        let audit = lead.call("audit", ["task": "change"])
+        #expect(!audit.isError, "\(audit.text)")
+        return try ["verify-change", "finder2-change"].compactMap { name in
+            guard let spawn = runtime.spawned.last(where: { $0.command.contains("--name '\(name)'") }) else { return nil }
+            let range = try #require(spawn.command.range(of: #"--append-system-prompt-file '([^']+)'"#, options: .regularExpression))
+            return try String(contentsOfFile: String(spawn.command[range].dropFirst("--append-system-prompt-file '".count).dropLast()), encoding: .utf8)
+        }
+    }
+
+    /// The checklist's section in `prompt`, from its heading to the next blank line; nil without one.
+    func checklist(_ prompt: String) -> Substring? {
+        guard let start = prompt.range(of: LeadPrompts.securityHeading) else { return nil }
+        let rest = prompt[start.lowerBound...]
+        return rest.range(of: "\n\n").map { rest[..<$0.lowerBound] } ?? rest
+    }
+
+    /// At most 8 lines, instructions only, each from a case on the board; nothing without a reason.
+    @Test func theChecklistIsShortAndEachLineComesFromACase() {
+        #expect(LeadPrompts.securitySection(nil).isEmpty)
+        let section = LeadPrompts.securitySection("it touches sensitive_paths: x")
+        let lines = section.trimmingCharacters(in: .newlines).split(separator: "\n")
+        #expect(lines.count <= 8 && LeadPrompts.securityChecklist.count == lines.count - 2, "\(section)")
+        for line in LeadPrompts.securityChecklist {
+            // A slug of the board's (words joined by hyphens), and no case name in the instruction itself.
+            #expect(line.from.contains(try! Regex(#"^[a-z]+(-[a-z]+)+\b"#)), "\(line.from)")
+            #expect(!line.text.contains("a-fix-s-regression") && !line.text.contains("F1"), "\(line.text)")
+        }
+        // The four areas: commands' options, path escape and symlinks, secrets, checks that fail open.
+        let text = LeadPrompts.securityChecklist.map(\.text).joined(separator: " ")
+        for words in ["options that run", "symlink", "secret", "It must refuse"] { #expect(text.contains(words), "\(words)") }
+    }
+
+    @Test func aBranchTouchingSensitivePathsGetsTheChecklist() throws {
+        let prompts = try auditedPrompts(file: "Sources/Guard.swift", text: "let rule = \"Bash(git log:*)\"\n",
+                                         settings: ["sensitive_paths": "Sources/Guard.swift"])
+        let section = try #require(prompts.first.flatMap(checklist))
+        #expect(section.contains("(it touches sensitive_paths: Sources/Guard.swift)"), "\(section)")
+        for line in LeadPrompts.securityChecklist { #expect(section.contains("- " + line.text)) }
+    }
+
+    @Test func aBranchTheRiskCheckRaisedGetsTheChecklist() throws {
+        let prompts = try auditedPrompts(file: "Sources/Runner.swift", text: "let process = Process()\n", review: "none")
+        let section = try #require(prompts.first.flatMap(checklist))
+        #expect(section.contains("(the risk check raised it: it has code that spawns processes (Sources/Runner.swift: let process = Process()))"), "\(section)")
+        // The model's raise too: it raises only for security, secrets, stored data or other sessions.
+        let raised = try auditedPrompts(file: "b.txt", text: "bee\n", review: "none", model: FakeModel("raise: it rewrites how sessions are kept"))
+        #expect(raised.first.flatMap(checklist)?.contains("(the risk check raised it: headless Claude said raise: it rewrites how sessions are kept)") == true,
+                "\(raised.first ?? "")")
+    }
+
+    /// The lead's review audit, outside sensitive_paths: the risk check never read it, its patterns do at the audit
+    /// (a-fix-s-regression was filed so, its escapes in a permissions list). Every finder gets it.
+    @Test func anAuditTaskWithPermissionsCodeOutsideSensitivePathsGetsItInEveryFinder() throws {
+        let prompts = try auditedPrompts(file: "Sources/Launch.swift", text: "let settings = [\"permissions\": [\"allow\": rules]]\n",
+                                         settings: ["audit_finders": 2])
+        #expect(prompts.count == 2)
+        for prompt in prompts {
+            #expect(checklist(prompt)?.contains("(it has code that changes permissions (Sources/Launch.swift: ") == true, "\(prompt)")
+        }
+    }
+
+    @Test func aPlainBranchOrOneWithOnlyLocksGetsNoChecklist() throws {
+        for (file, text) in [("Sources/View.swift", "Text(\"Ready to merge\")\n"), ("Sources/Cache.swift", "private let lock = NSLock()\n")] {
+            let prompts = try auditedPrompts(file: file, text: text)
+            let prompt = try #require(prompts.first)
+            #expect(prompt.contains("Check: run every acceptance check") && !prompt.contains(LeadPrompts.securityHeading), "\(file): \(prompt)")
+            #expect(!LeadPrompts.securityChecklist.contains { prompt.contains($0.text) })
+        }
+    }
 }

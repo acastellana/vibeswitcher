@@ -1279,7 +1279,7 @@ public enum LeadPrompts {
 
     public static func verifier(task: LeadTask, root: String, workflow: LeadWorkflow, reaudit: Reaudit? = nil, finder: Finder? = nil,
                                 merged: Merged? = nil, notes: Notes = Notes(), report: String? = nil, policy: String = WorkingPolicy.load(),
-                                guide: String? = nil) -> String {
+                                guide: String? = nil, security: String? = nil) -> String {
         """
         You are the verifier for a task of the project lead of \(root). You are read-only: don't edit, fix, commit or \
         stage anything. Check the branch agent/\(task.slug) in this worktree against its contract, independently of \
@@ -1319,7 +1319,7 @@ public enum LeadPrompts {
 
         \(WorkerBrief.render(task))
 
-        \(guideSection(guide, base: workflow.base))\(reportSection(report))
+        \(guideSection(guide, base: workflow.base))\(securitySection(security))\(reportSection(report))
 
         \(notesSection(notes))
         """
@@ -1335,6 +1335,39 @@ public enum LeadPrompts {
             + "The project owner's word on what matters in this code, what to ignore and what counts as a Nit, from \(base) "
             + "(the branch's own copy doesn't count). Weigh findings and the report format by it; the rules above still hold:\n"
             + guide + "\n\n"
+    }
+
+    static let securityHeading = "## Security checklist"
+
+    /// What the verifier tries on a branch that touches sensitive_paths or has code that changes permissions, spawns
+    /// processes or deletes or rewrites files (`LeadToolset.securityReason`), each line with the cases on the board it
+    /// comes from. Instructions only, and few: specific ones are followed, general text only adds cost.
+    public static let securityChecklist: [(text: String, from: String)] = [
+        ("Each command the change runs or lets a role run without a prompt: find in its manual the options that run "
+            + "another program, open a connection, or read or write a path it wasn't given, and try each one.",
+         "a-fix-s-regression F1 (git archive --remote/--exec ran a command), F2 (--add-file read any file)"),
+        ("Each folder it writes, unpacks into or reads: try `..`, an absolute path, and a folder inside it that is a "
+            + "symlink to outside. A rule that matches a path's text doesn't follow the link.",
+         "a-fix-s-regression F3 (a symlinked folder took tar -x -C and mkdir -p out of the TMPDIR)"),
+        ("Each secret, token, private file (~/.vibeswitcher/lead, steer, the vault) or session screen it handles: follow "
+            + "it into log lines, error texts, headless prompts, the board and other sessions. It must reach none.",
+         "a-fix-s-regression F2 (the lead's private files copied where a worker reads), review-level-from-the (no diff "
+            + "line in the headless prompt), redaction-a-slack"),
+        ("Each check it adds (who is calling, a guard, a parse, a walk): make it fail with an error, a missing or "
+            + "unreadable file, a timeout, a gap or a loop. It must refuse, not let the action through.",
+         "auto-advance-s-reports F1 (identity by process tree let branch code seal as auto_advance), lead-secrets-out-of "
+            + "(the ancestry walk fails closed on a gap or loop), planted-git-hooks-or (git config includes fail closed)"),
+        ("Try these in a scratch repository or folder under your TMPDIR, never the real home or sessions. The command "
+            + "and what it did go in the finding's evidence; one that gets out is Important.",
+         "a-fix-s-regression F1-F3 (each shown by a probe in a scratch repository)"),
+    ]
+
+    /// The verifier's security checklist and why this audit gets it; "" without (`why` nil).
+    static func securitySection(_ why: String?) -> String {
+        guard let why else { return "" }
+        return securityHeading + "\n"
+            + "This branch can let things in or out (\(why)). Besides the checks above:\n"
+            + securityChecklist.map { "- " + $0.text }.joined(separator: "\n") + "\n\n"
     }
 
     /// A re-audit's instructions: the open findings, the closed ones, and the diff its new findings come from.

@@ -15,6 +15,32 @@ if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--test-failure
     exit(0)
 }
 
+// `vibeswitcher-mcp --verifier-prompt ROOT SLUG BASE MESSAGE_FILE auto|off`, for scripts/verifier-eval.sh: what an
+// audit's single verifier starts with for the branch agent/SLUG against BASE in ROOT (a scratch clone, its own
+// .vibeswitcher/workflow.md), as JSON: the prompt (LeadPrompts.verifier; the task's goal is the commit's message), the
+// verifier's permission settings, the model audits run on (verifier_model, else another than ~/.claude's), and why
+// the security checklist is in it (null when it isn't; off: never). No board, vault, host or session is read.
+if CommandLine.arguments.count == 7, CommandLine.arguments[1] == "--verifier-prompt" {
+    let (root, slug, base, file, mode) = (CommandLine.arguments[2], CommandLine.arguments[3], CommandLine.arguments[4],
+                                          CommandLine.arguments[5], CommandLine.arguments[6])
+    var workflow = LeadWorkflow.load(from: (root as NSString).appendingPathComponent(".vibeswitcher/workflow.md"))
+    workflow.baseBranch = base
+    let message = (try? String(contentsOfFile: file, encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    let title = message.split(separator: "\n").first.map { String($0.prefix(80)) } ?? slug
+    let task = LeadTask(slug: slug, title: title, contract: LeadContract(goal: message, acceptance: [], boundaries: [], context: ""), status: .review)
+    let head = Worktrees.branch(slug)
+    let security = mode == "off" ? nil : LeadToolset.securityReason(root: root, head: head, workflow: workflow, raised: nil)
+    let prompt = LeadPrompts.verifier(task: task, root: root, workflow: workflow, guide: LeadRisk.reviewGuide(root: root, base: base), security: security)
+    let settings: [String: Any] = ["permissions": ["allow": LeadLaunch.allow(.verifier, base: base),
+                                                   "deny": LeadLaunch.deny(.verifier, base: base, records: workflow.recordsDir)],
+                                   "env": LeadLaunch.environment(.verifier)]
+    let model = workflow.auditModel(workerModel: LeadWorkflow.claudeModel(command: "claude", home: NSHomeDirectory()))
+    let out: [String: Any] = ["prompt": prompt, "settings": settings, "model": model, "security": security ?? NSNull()]
+    let data = (try? JSONSerialization.data(withJSONObject: out, options: [.prettyPrinted, .sortedKeys])) ?? Data()
+    FileHandle.standardOutput.write(data)
+    exit(data.isEmpty ? 1 : 0)
+}
+
 // A build switching to this one asks first whether it takes the session (see `MCPHandover`).
 if CommandLine.arguments.count == 2, CommandLine.arguments[1] == MCPHandover.probeFlag { MCPHandover.answerProbe() }
 

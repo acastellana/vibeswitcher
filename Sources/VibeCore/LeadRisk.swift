@@ -128,8 +128,8 @@ public enum LeadRisk {
     }
 
     /// The first changed line in `patch` (a `git diff -U0`) that does what a pattern says, in a file that isn't a test
-    /// or a document, and isn't a comment: what it does, the file, and the line.
-    public static func flagged(_ patch: String) -> (what: String, path: String, line: String)? {
+    /// or a document, and isn't a comment: what it does, the file, and the line. `kinds`: only those patterns (by what).
+    public static func flagged(_ patch: String, kinds: Set<String>? = nil) -> (what: String, path: String, line: String)? {
         var path: String?
         // Between `diff --git` and its first `@@`: a removed `-- x` or an added `++ x` in a hunk isn't a file's name.
         var header = true
@@ -159,7 +159,7 @@ public enum LeadRisk {
             let code = raw.dropFirst().trimmingCharacters(in: .whitespaces)
             guard !code.isEmpty, !["//", "/*", "*", "#"].contains(where: { code.hasPrefix($0) }) else { continue }
             let range = NSRange(code.startIndex..., in: code)
-            for pattern in compiled where pattern.regex.firstMatch(in: code, range: range) != nil {
+            for pattern in compiled where kinds?.contains(pattern.what) ?? true && pattern.regex.firstMatch(in: code, range: range) != nil {
                 return (pattern.what, file, String(code.prefix(80)))
             }
         }
