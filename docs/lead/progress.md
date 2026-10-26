@@ -1313,3 +1313,11 @@
 - 2026-10-26 01:05 Automatically (auto_advance): Started the audit of every-task-gets-a at d99581e2 (It touches sensitive_paths (Sources/VibeCore/Worktrees.swift, Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
 - 2026-10-26 01:08 Audit of open-sessions-pick-up: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
 - 2026-10-26 01:08 Planned the-records-commit-can: The records commit can't be cut by a tool-server switch
+- 2026-10-26 01:13 Started a worker on needs-you-follow-ups
+- 2026-10-26 01:13 Automatically (auto_advance): Started a worker on needs-you-follow-ups ("Needs you" follow-ups: open question, red dot, base-branch alert), its after tasks done (notifications-only-when).
+- 2026-10-26 01:16 Audit of every-task-gets-a: complete, clean, round 1: 3 Nit open, 1 Pre-existing open
+- 2026-10-26 01:16 Dismissed every-task-gets-a:F4: Already fixed by today-s-flaky-tests (d9dc98e: the test removes its own phone, not devices[0]); that branch is in audit and will merge.
+- 2026-10-26 01:16 Audit of today-s-flaky-tests: complete, clean, round 1: 2 Pre-existing open
+- 2026-10-26 01:17 Dismissed today-s-flaky-tests:F1: Moved into task sessionstoretests-team (same shared-devices cleanup fix).
+- 2026-10-26 01:17 Dismissed today-s-flaky-tests:F2: Moved into task sessionstoretests-team (same shared-devices cleanup fix).
+- 2026-10-26 01:21 Merged open-sessions-pick-up: Open sessions pick up an installed tool server by themselves
