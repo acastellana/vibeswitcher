@@ -1436,3 +1436,4 @@
 - 2026-10-26 12:54 Update: Batch done: reviews follow the risk, one-step revert, leaner AGENTS.md — 8 tasks merged into project-lead since the last install (b91fa2e). Lessons from Anthropic's code-review post and the AGENTS.md research. It reaches your app only through an install.
 - 2026-10-26 13:58 Planned launch-video: Launch video: VibeSwitcher's lead and its team under the hood (brag)
 - 2026-10-26 13:58 Started a worker on launch-video
+- 2026-10-26 14:14 Kept launch-video unmerged: Deliverable only: the video lives in its worktree's brag-output/. Never merge it; keep the worktree until the user has the files or asks for a re-roll.
