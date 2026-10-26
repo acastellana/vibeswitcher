@@ -155,6 +155,10 @@ struct TeamRowsTests {
         let asking = row(Self.task("fix", .running), ["w-fix": Self.member(needsYou: true, working: false, activity: nil, detail: "Which database?")])
         #expect(!asking.mark.isRed && asking.mark.color != .red && asking.mark.symbol != "exclamationmark.triangle.fill")
         #expect(TeamRows.summary([asking, row(Self.task("docs", .running), ["w-docs": Self.working])]) == "team: 1 waits on lead · 1 working")
+        // A blocked task waits on other tasks, not on the lead (the sandbox's lead read "team: 3 wait on lead" for one).
+        var blocked = Self.task("badge", .blocked)
+        blocked.after = ["docs"]
+        #expect(TeamRows.summary([asking, row(blocked), row(blocked)]) == "team: 1 waits on lead · 2 blocked")
 
         func session(_ status: SessionStatus, role: LeadLaunch.Role, cwd: String) -> Session {
             var session = Session(tty: "ttys00\(role == .lead ? 1 : 2)", agent: .claude, pid: 1, startedAt: Self.now, cwd: cwd, project: "acme",

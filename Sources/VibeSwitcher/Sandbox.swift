@@ -474,6 +474,31 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// An open question for you on the fake lead's board (`text`, or a made-up one), or (`answer`) its open questions
+    /// answered; done once the lead's session reads it (`Session.leadAsks`).
+    func ask(_ text: String, answer: Bool, _ done: @escaping (String?) -> Void) {
+        guard let lead = fakeList.first(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
+        let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
+        do {
+            try BoardStore(root: root).update { board in
+                if answer {
+                    for index in board.questions.indices where board.questions[index].isOpen {
+                        board.questions[index].answer = board.questions[index].options.first ?? "Yes"
+                        board.questions[index].answeredAt = Date().timeIntervalSince1970
+                    }
+                } else {
+                    board.questions.append(LeadQuestion(text: text.isEmpty ? "Ship the landing page to everyone, or only to the testers first?" : text,
+                                                        options: ["Everyone", "Testers first"]))
+                }
+            }
+        } catch {
+            return done("couldn't write the lead's board: \(error)")
+        }
+        waitFor({ [weak self] in self?.store.sessions.first { $0.tty == lead.tty }?.leadAsks == !answer }) { met in
+            done(met ? nil : "the lead's session didn't read its board's question")
+        }
+    }
+
     /// The fake lead's conversation, ending a minute ago: the transcript's lines, and when it withdrew its question.
     static func leadTurns(now: Date) -> (String, Double) {
         var lines: [String] = []
@@ -597,6 +622,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("new [LABEL]", "starts another fake session"),
         ("lead", "shows a fake project lead's chat, at its end (started the first time): a board of tasks, a withdrawn question, tool runs and workers' messages"),
         ("team", "starts a fake worker on the fake lead's running task, in its worktree (start the lead first); select it and tell it a permission to see it wait on its lead"),
+        ("ask [TEXT]", "puts an open question for you (TEXT, or a made-up one) on the fake lead's board (start the lead first): its row reads needs you"),
+        ("unfold", "shows the selected lead's team under its row in the sidebar"),
+        ("answer", "answers the fake lead's open questions: its row reads as its terminal does again"),
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
         ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
@@ -826,6 +854,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
             if fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) { return show() }
             startLead { problem in if let problem { reply(false, problem) } else { show() } }
         case "team": startWorker { problem in reply(problem == nil, problem ?? "worker started") }
+        case "unfold":
+            guard let row = model.selectedRow else { return reply(false, "nothing selected") }
+            if !model.expandedTeams.contains(row.id) { model.toggleTeam(row.id) }
+            settle { reply(true, "\(row.title)'s team shown") }
+        case "ask": ask(rest, answer: false) { problem in reply(problem == nil, problem ?? "the lead asks you") }
+        case "answer": ask("", answer: true) { problem in reply(problem == nil, problem ?? "its questions answered") }
         case "select":
             guard let row = WindowGroups.filter(model.sections, query: rest).first?.rows.first else { return reply(false, "no row matches \(rest)") }
             model.selectedID = row.id
@@ -888,13 +922,22 @@ private final class Driver: NSObject, NSApplicationDelegate {
     }
 
     private func tell(_ json: String, _ reply: @escaping (Bool, String) -> Void) {
-        guard (try? JSONSerialization.jsonObject(with: Data(json.utf8))) is [String: Any] else { return reply(false, "not a JSON object: \(json)") }
+        guard let op = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] else { return reply(false, "not a JSON object: \(json)") }
         let selected = model.selectedRow?.hostID
         guard let fake = fakeList.first(where: { $0.id == selected }) ?? fakeList.first, let file = fake.control,
               let handle = FileHandle(forWritingAtPath: file) else { return reply(false, "no fake Claude to tell") }
         handle.seekToEndOfFile()
         handle.write(Data((json + "\n").utf8))
         try? handle.close()
+        // A permission prompt: the hook state a real Claude leaves on one, so the session waits on input as one does.
+        let stateFile = VibePaths.stateFile(tty: fake.tty)
+        if op["op"] as? String == "permission", var hook = HookState.load(from: stateFile) {
+            hook.lastEvent = "PermissionRequest"
+            hook.lastEventAt = Date().timeIntervalSince1970
+            hook.toolName = "Bash"
+            hook.request = "Bash: " + (op["command"] as? String ?? "")
+            try? hook.save(to: stateFile)
+        }
         reply(true, "told \(fake.label) \(json)")
     }
 

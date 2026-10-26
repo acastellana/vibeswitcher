@@ -412,16 +412,21 @@ enum TeamRows {
         return LeadTeams.isFinished(task)
     }
 
-    /// The lead row's "team: 1 waits on lead · 2 working · 1 in review · 3 queued", from the board's tasks as their rows
-    /// read them (a worker that hasn't begun is queued or starting, never idle). The red ones (asking, failed, ended…)
-    /// are the lead's to handle: "needs you" is only ever you.
+    /// The lead row's "team: 1 waits on lead · 2 working · 1 in review · 1 blocked · 3 queued", from the board's tasks as
+    /// their rows read them (a worker that hasn't begun is queued or starting, never idle). The ones asking, failed or
+    /// ended are the lead's to handle: "needs you" is only ever you. A blocked one waits on other tasks (as the Team
+    /// view's header says), not on the lead.
     static func summary(_ rows: [TeamRow]) -> String {
         var counts: [TeamRow.Group: Int] = [:]
-        for row in rows { counts[row.group, default: 0] += 1 }
+        var blocked = 0
+        for row in rows {
+            if row.mark == .blocked { blocked += 1 } else { counts[row.group, default: 0] += 1 }
+        }
         var parts: [String] = []
         if let count = counts[.needsYou] { parts.append(LeadTeams.waitsOnLead(count)) }
         if let count = counts[.working] { parts.append(StateWord.working.counted(count)) }
         if let count = counts[.review] { parts.append("\(count) in review") }
+        if blocked > 0 { parts.append("\(blocked) blocked") }
         if let count = counts[.queued] { parts.append("\(count) queued") }
         return parts.isEmpty ? "team: none running" : "team: " + parts.joined(separator: " · ")
     }
