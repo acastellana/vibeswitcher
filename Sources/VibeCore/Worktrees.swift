@@ -1095,7 +1095,7 @@ public enum Worktrees {
     }
 
     /// Files Claude Code reads as settings or instructions (project settings and hooks under `.claude/`, `.mcp.json`,
-    /// `CLAUDE.md`) that the task's branch changes from `base` (`committedAgentConfig`), or that sit changed or new at
+    /// `CLAUDE.md`, the `AGENTS.md` it imports or reads in its place) that the task's branch changes from `base` (`committedAgentConfig`), or that sit changed or new at
     /// its worktree's root, ignored ones included (`localAgentConfig`): a session started there runs what the worker
     /// put in them.
     public static func agentConfigChanges(root: String, slug: String, base: String) -> [String] {
@@ -1109,14 +1109,14 @@ public enum Worktrees {
     }
 
     /// Settings or instructions files changed or new in the worktree, not committed, that Claude reads in a session
-    /// started there: under the root's `.claude/`, `.mcp.json` at the root, and `CLAUDE*.md` in any folder (read when
-    /// it works on files there). Ignored ones ("!! path") count only when Claude reads them, not its own lock and state
+    /// started there: under the root's `.claude/`, `.mcp.json` at the root, and `CLAUDE*.md` and `AGENTS.md` in any folder
+    /// (read when it works on files there). Ignored ones ("!! path") count only when Claude reads them, not its own lock and state
     /// files. A `.claude/` deeper down (a scratch home a bench left) is no setting of this worktree's: it's a leftover
     /// (`leftovers`).
     public static func localAgentConfig(root: String, slug: String) -> [String] {
         status(in: path(root: root, slug: slug), ignored: true).filter { entry in
             let parts = entry.path.split(separator: "/")
-            let read = parts.first == ".claude" || entry.path == ".mcp.json" || ["CLAUDE.md", "CLAUDE.local.md"].contains(parts.last ?? "")
+            let read = parts.first == ".claude" || entry.path == ".mcp.json" || ["CLAUDE.md", "CLAUDE.local.md", "AGENTS.md"].contains(parts.last ?? "")
             return read && isAgentConfig(entry.path, ignored: entry.code == "!!")
         }.map(\.path).sorted()
     }
@@ -1277,12 +1277,12 @@ public enum Worktrees {
     static let agentConfigFolders: Set<String> = ["commands", "agents", "skills", "hooks", "output-styles", "rules"]
 
     /// A file Claude Code reads as settings or instructions. A git-ignored one counts only when it's one Claude
-    /// reads (`settings*.json`, `.mcp.json`, `CLAUDE*.md`, what's under `agentConfigFolders`), not one it writes
+    /// reads (`settings*.json`, `.mcp.json`, `CLAUDE*.md`, `AGENTS.md`, what's under `agentConfigFolders`), not one it writes
     /// for itself (`.claude/scheduled_tasks.lock`).
     static func isAgentConfig(_ path: String, ignored: Bool = false) -> Bool {
         let parts = path.split(separator: "/").map(String.init)
         let name = parts.last ?? ""
-        if [".mcp.json", "CLAUDE.md", "CLAUDE.local.md"].contains(name) { return true }
+        if [".mcp.json", "CLAUDE.md", "CLAUDE.local.md", "AGENTS.md"].contains(name) { return true }
         guard let claude = parts.firstIndex(of: ".claude") else { return false }
         guard ignored else { return true }
         let inside = parts[(claude + 1)...]
