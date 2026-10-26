@@ -205,9 +205,11 @@ public enum LeadRisk {
 
     public static let system = """
         You decide whether a finished code change needs an independent reviewer before it merges. Its author's lead \
-        filed it as needing none. Answer raise when the change, as its file list and its task describe it, carries \
-        risk the task didn't flag: security, permissions, secrets, deleting or rewriting data, processes, concurrency, \
-        the build or the tests themselves, or many parts at once. Answer keep for a plain, contained change.
+        filed it as needing none: its worker owns it, and the merge runs the full test suite on it. Most changes are \
+        keep. Answer raise only when the task's own goal or boundaries say it does one of these, and its review level \
+        didn't account for it: security, authentication or permissions; secrets or the owner's private data; deleting \
+        or rewriting stored data; a change other agents or the user's real sessions would feel at once. Touching a \
+        file that matters, a bug fix, new tests or a UI change are keep. When unsure, keep.
         """
 
     /// What the model reads: the diff's stat (file names and counts, no code), the task's contract and the base
