@@ -1437,3 +1437,6 @@
 - 2026-10-26 13:58 Planned launch-video: Launch video: VibeSwitcher's lead and its team under the hood (brag)
 - 2026-10-26 13:58 Started a worker on launch-video
 - 2026-10-26 14:14 Kept launch-video unmerged: Deliverable only: the video lives in its worktree's brag-output/. Never merge it; keep the worktree until the user has the files or asks for a re-roll.
+- 2026-10-26 16:27 Planned readme-says-the-right: README says the right audit-round cap
+- 2026-10-26 16:28 Started a worker on readme-says-the-right
+- 2026-10-26 16:28 Automatically (auto_advance): Started a worker on readme-says-the-right (README says the right audit-round cap).
