@@ -29,13 +29,37 @@ struct LeadRiskTests {
         // 400 lines is the default's edge: at it, review none stays; one more raises.
         #expect(Self.raise([Self.change("Sources/A.swift", 300, 100)]) == nil)
         let over = Self.raise([Self.change("Sources/A.swift", 300, 60), Self.change("Sources/B.swift", 41, 0)])
-        #expect(over == "it changes 401 lines, over risk_lines (400)", "\(over ?? "nil")")
+        #expect(over == "it changes 401 lines outside tests, over risk_lines (400)", "\(over ?? "nil")")
         // workflow.md's risk_lines sets it; 0 is no size trigger.
         let tight = LeadWorkflow.parse("---\nrisk_lines: 50\n---\n")
         #expect(tight.riskLines == 50 && Self.raise([Self.change("Sources/A.swift", 51, 0)], workflow: tight)?.contains("over risk_lines (50)") == true)
         let off = LeadWorkflow.parse("---\nrisk_lines: 0\n---\n")
         #expect(Self.raise([Self.change("Sources/A.swift", 5_000, 0)], workflow: off) == nil)
         #expect(LeadWorkflow.parse("---\n---\n").riskLines == LeadRisk.defaultLines && LeadRisk.defaultLines == 400)
+    }
+
+    @Test func onlySourceLinesCountTowardRiskLines() {
+        // 300 lines of source with 500 of tests, benches, fixtures and evidence: the tests aren't what's risky.
+        let tested = [Self.change("Sources/VibeCore/Thing.swift", 250, 50), Self.change("Tests/VibeCoreTests/ThingTests.swift", 300, 0),
+                      Self.change("web/fixtures/screen.json", 80, 0), Self.change("scripts/thing-bench.sh", 60, 0),
+                      Self.change("docs/eval/evidence/run.log", 40, 20)]
+        #expect(Self.raise(tested) == nil)
+        // 450 of source is over, and the reason says it counted only those.
+        let big = Self.raise([Self.change("Sources/VibeCore/Thing.swift", 400, 50), Self.change("Tests/VibeCoreTests/ThingTests.swift", 500, 0)])
+        #expect(big == "it changes 450 lines outside tests, over risk_lines (400)", "\(big ?? "nil")")
+        // A bench in the product's sources is source.
+        #expect(LeadRisk.countsForSize("Sources/VibeSwitcher/UIBench.swift") && !LeadRisk.countsForSize("scripts/ui-bench.sh"))
+    }
+
+    @Test func aDeletedFilesRemovedLinesAreRead() {
+        // git prints a deleted file as `--- a/path` then `+++ /dev/null`: its lines are the old path's.
+        let deleted = "diff --git a/Sources/VibeCore/Locker.swift b/Sources/VibeCore/Locker.swift\ndeleted file mode 100644\nindex 1234567..0000000\n"
+            + "--- a/Sources/VibeCore/Locker.swift\n+++ /dev/null\n@@ -1,2 +0,0 @@\n-import Foundation\n-private let lock = NSLock()\n"
+        let raised = Self.raise([Self.change("Sources/VibeCore/Locker.swift", 0, 2)], patch: deleted)
+        #expect(raised == "it has code that adds locks or threads (Sources/VibeCore/Locker.swift: private let lock = NSLock())", "\(raised ?? "nil")")
+        // A removed SQL comment `-- notes.md` in a hunk isn't a file header: the lines after it are still the code's.
+        let sql = Self.patch("db/migrate.sql", ["DELETE FROM sessions"], removed: ["-- notes.md"])
+        #expect(Self.raise([Self.change("db/migrate.sql")], patch: sql)?.contains("deletes or rewrites files or data (db/migrate.sql: ") == true)
     }
 
     @Test(arguments: [
@@ -66,7 +90,7 @@ struct LeadRiskTests {
     }
 
     @Test(arguments: ["Package.swift", "scripts/test.sh", "scripts/test-under-load.sh", "scripts/lib/scratch.sh", "Tests/VibeCoreTests/TestSupport.swift",
-                      "Tests/VibeSwitcherTests/FakeClaude.swift", ".github/workflows/ci.yml", "web/package.json"])
+                      "Tests/VibeSwitcherTests/FakeClaude.swift", ".github/workflows/ci.yml", "web/package.json", "Resources/bin/vs-heavy"])
     func aChangeToTheSuitesOwnInfrastructureRaises(path: String) {
         let raised = Self.raise([Self.change("Sources/A.swift"), Self.change(path)])
         #expect(raised == "it changes test or build infrastructure the suite relies on (\(path))", "\(raised ?? "nil")")

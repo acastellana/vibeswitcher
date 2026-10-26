@@ -2,7 +2,7 @@ import Foundation
 
 /// The risk check: a review none task's level from what its branch actually changes, not only from the lead's label
 /// and sensitive_paths. Before a review none task merges (merge, and auto_advance's step to it), its branch's diff is
-/// read: a change over `risk_lines`, code that deletes or rewrites files or data, changes permissions, spawns processes
+/// read: a change over `risk_lines` (outside tests, benches and fixtures), code that deletes or rewrites files or data, changes permissions, spawns processes
 /// or adds locks or threads (`patterns`), a change to the test or build infrastructure the suite relies on, or to
 /// REVIEW.md, is audited instead (the deterministic triggers, `deterministic`). Then, when the lead's tool server has
 /// one, headless Claude gets the diff's stat (no code), the contract and the base branch's REVIEW.md, and answers raise
@@ -18,7 +18,8 @@ import Foundation
 /// counts as a Nit. The verifier and the risk check read it from the base branch (`reviewGuide`), never from the branch
 /// under review, so a worker can't weaken its own audit by editing it.
 public enum LeadRisk {
-    /// workflow.md's `risk_lines` when it says none: a branch changing more lines than this (added and removed) is audited.
+    /// workflow.md's `risk_lines` when it says none: a branch changing more lines than this (added and removed, outside
+    /// tests, benches and fixtures: `countsForSize`) is audited.
     public static let defaultLines = 400
 
     /// What a branch's code adds or removes that raises it to audit, by what it does: each a regular expression on a
@@ -49,7 +50,7 @@ public enum LeadRisk {
         "package.json", "package-lock.json", "yarn.lock", "pnpm-lock.yaml", "pyproject.toml", "setup.py", "setup.cfg", "tox.ini",
         "pytest.ini", "conftest.py", "jest.config.*", "vitest.config.*", "playwright.config.*", "Cargo.toml", "Cargo.lock",
         "go.mod", "go.sum", "build.gradle*", "settings.gradle*", ".github/workflows/", ".gitlab-ci.yml",
-        "/scripts/test*", "/scripts/lib/", "/scripts/build*", "/scripts/worktree-init*",
+        "/scripts/test*", "/scripts/lib/", "/scripts/build*", "/scripts/worktree-init*", "/Resources/bin/vs-heavy",
         "**/TestSupport*", "**/TestHelpers*", "**/TestUtils*", "**/Fixtures/", "Tests/**/Fake*",
     ]
 
@@ -75,6 +76,17 @@ public enum LeadRisk {
         if parts.dropLast().contains(where: { ["Tests", "tests", "test", "__tests__", "spec", "testdata"].contains($0) || $0.hasSuffix("Tests") }) { return true }
         return name.hasSuffix("Tests.swift") || name.hasSuffix("Test.swift") || name.hasPrefix("test_") || name.contains(".test.")
             || name.contains(".spec.") || name.hasSuffix("_test.go") || name.hasSuffix("_test.py")
+    }
+
+    /// A file whose lines count toward `risk_lines`: not a test, a bench script, or a file in a fixtures or evidence
+    /// folder. A branch's tests and their data are often most of its lines, and they don't run in the product; the
+    /// suite's own infrastructure among them is still its own trigger.
+    public static func countsForSize(_ path: String) -> Bool {
+        guard !isTest(path) else { return false }
+        let parts = path.split(separator: "/").map { $0.lowercased() }
+        let folders = parts.dropLast()
+        if folders.contains(where: { ["fixtures", "fixture", "__fixtures__", "evidence"].contains($0) }) { return false }
+        return !(folders.contains("scripts") && (parts.last ?? "").contains("bench"))
     }
 
     /// A document or an image: what it says doesn't run.
@@ -119,19 +131,31 @@ public enum LeadRisk {
     /// or a document, and isn't a comment: what it does, the file, and the line.
     public static func flagged(_ patch: String) -> (what: String, path: String, line: String)? {
         var path: String?
+        // Between `diff --git` and its first `@@`: a removed `-- x` or an added `++ x` in a hunk isn't a file's name.
+        var header = true
         for raw in patch.split(separator: "\n", omittingEmptySubsequences: false) {
-            if raw.hasPrefix("+++ ") {
-                let target = raw.dropFirst(4)
-                path = target == "/dev/null" ? nil : String(target.hasPrefix("b/") ? target.dropFirst(2) : target)
+            if raw.hasPrefix("diff --git ") {
+                header = true
+                path = nil
                 continue
             }
-            if raw.hasPrefix("--- ") {
-                // A deleted file's lines are read under its old path.
+            if raw.hasPrefix("@@") {
+                header = false
+                continue
+            }
+            // git prints `--- a/old` then `+++ b/new`: a new file's `---` is /dev/null and a deleted file's `+++` is, so
+            // a deleted file's removed lines are read under its `---` path.
+            if header, raw.hasPrefix("--- ") {
                 let source = raw.dropFirst(4)
                 path = source == "/dev/null" ? nil : String(source.hasPrefix("a/") ? source.dropFirst(2) : source)
                 continue
             }
-            guard let file = path, raw.hasPrefix("+") || raw.hasPrefix("-"), !isTest(file), !isDocument(file) else { continue }
+            if header, raw.hasPrefix("+++ ") {
+                let target = raw.dropFirst(4)
+                if target != "/dev/null" { path = String(target.hasPrefix("b/") ? target.dropFirst(2) : target) }
+                continue
+            }
+            guard !header, let file = path, raw.hasPrefix("+") || raw.hasPrefix("-"), !isTest(file), !isDocument(file) else { continue }
             let code = raw.dropFirst().trimmingCharacters(in: .whitespaces)
             guard !code.isEmpty, !["//", "/*", "*", "#"].contains(where: { code.hasPrefix($0) }) else { continue }
             let range = NSRange(code.startIndex..., in: code)
@@ -145,9 +169,9 @@ public enum LeadRisk {
     /// Why the change raises a review none task to audit, without a model; nil when nothing does. `patch` is read
     /// only when the change is under the size threshold (`git diff -U0`, here on the Mac; never sent anywhere).
     public static func deterministic(changes: [Change], patch: () -> String?, workflow: LeadWorkflow) -> String? {
-        let lines = changes.reduce(0) { $0 + $1.added + $1.removed }
+        let lines = changes.filter { countsForSize($0.path) }.reduce(0) { $0 + $1.added + $1.removed }
         if workflow.riskLines > 0, lines > workflow.riskLines {
-            return "it changes \(lines) lines, over risk_lines (\(workflow.riskLines))"
+            return "it changes \(lines) lines outside tests, over risk_lines (\(workflow.riskLines))"
         }
         let infrastructure = changes.map(\.path).filter { isInfrastructure($0, workflow: workflow) }
         if !infrastructure.isEmpty {
