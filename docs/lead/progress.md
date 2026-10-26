@@ -1369,3 +1369,4 @@
 - 2026-10-26 03:18 Automatically (auto_advance): Cleaned up the-lead-s-rules (freed 2.3 GB of build output and temporary folders). It stays done.
 - 2026-10-26 03:19 Automatically (auto_advance): Started the audit of the-phone-shows-needs at f1db2bdd (Its review is audit).
 - 2026-10-26 03:28 Audit of the-phone-shows-needs: complete, clean, round 1: 1 Nit open
+- 2026-10-26 03:35 Merged the-phone-shows-needs: The phone shows "needs you" only for the user, like the Mac
