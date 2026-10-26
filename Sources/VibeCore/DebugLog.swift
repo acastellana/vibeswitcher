@@ -10,12 +10,20 @@ public struct StallDetector: Sendable {
     }
 
     public let threshold: TimeInterval
+    /// How late a beat is before the main thread counts as late (`lateSince`): its stack is worth catching then, in
+    /// case it turns into a stall.
+    public let early: TimeInterval
     private var lastBeat: Date?
     private var stalledSince: Date?
     private var recovered: TimeInterval?
     private var lastCheck: Date?
+    /// The last beat, while the next one is more than `early` late (as of the last `check`); nil once it beats.
+    public private(set) var lateSince: Date?
 
-    public init(threshold: TimeInterval) { self.threshold = threshold }
+    public init(threshold: TimeInterval, early: TimeInterval = 0.5) {
+        self.threshold = threshold
+        self.early = min(early, threshold)
+    }
 
     public mutating func beat(at now: Date = Date()) {
         if let since = stalledSince {
@@ -23,6 +31,7 @@ public struct StallDetector: Sendable {
             stalledSince = nil
         }
         lastBeat = now
+        lateSince = nil
     }
 
     public mutating func check(at now: Date = Date()) -> Event? {
@@ -35,8 +44,10 @@ public struct StallDetector: Sendable {
         // which isn't the main thread being stuck. Start over from now.
         if stalledSince == nil, let previous = lastCheck, now.timeIntervalSince(previous) > threshold {
             lastBeat = now
+            lateSince = nil
             return nil
         }
+        if lateSince == nil, let last = lastBeat, now.timeIntervalSince(last) > early { lateSince = last }
         guard stalledSince == nil, let last = lastBeat, now.timeIntervalSince(last) > threshold else { return nil }
         stalledSince = last
         return .stalled(since: last)

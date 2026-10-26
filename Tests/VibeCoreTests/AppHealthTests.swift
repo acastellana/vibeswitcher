@@ -121,6 +121,47 @@ struct AppHealthTests: LeadTeamFixture {
         #expect(hang.signature == "TranscriptReader.parse(_:) < ChatModel.reload(from:) < SessionStore.rescan()")
     }
 
+    /// The main thread's stacks caught while it was stuck go before the sample's (begun after it answered, it shows
+    /// the idle run loop), and the digest says how much of the sample was inside the stall.
+    @Test func stacksCaughtWhileStuckAreTheFreezesFrames() {
+        func frame(_ name: String, _ image: String, _ address: UInt) -> AppHealth.StackFrame {
+            AppHealth.StackFrame(name: name, image: image, offset: 12, address: address)
+        }
+        let base = [frame("start", "dyld", 1), frame("VibeSwitcher_main", "VibeSwitcher", 2), frame("-[NSApplication run]", "AppKit", 3),
+                    frame("closure #1 in Heartbeat.every(_:_:)", "VibeSwitcher", 4), frame("MainWindowController.followChat()", "VibeSwitcher", 5)]
+        let blocked = base + [frame("TerminalPaneController.screenText(_:)", "VibeSwitcher", 6), frame("mach_msg2_trap", "libsystem_kernel.dylib", 7)]
+        let other = base + [frame("ChatModel.poll()", "VibeSwitcher", 8)]
+        let graph = AppHealth.caughtGraph([(0.6, blocked), (0.7, blocked), (0.8, other), (0.9, blocked)])
+        #expect(graph.hasPrefix("\(AppHealth.caughtTitle): 4 stacks, from 0.6 s to 0.9 s into the stall"))
+        #expect(graph.contains("+ 4 start  (in dyld) + 12  [0x1]"))
+        var log = Self.log().components(separatedBy: "\n")
+        log[0] = AppHealth.hangHeader(since: start, duration: 3.2, sampleInside: 0)
+        log.insert(contentsOf: ["", graph, ""], at: log.firstIndex { $0.hasPrefix("Latest events") } ?? log.count)
+        let hang = AppHealth.hang(name: "hang-20261025-140210", log: log.joined(separator: "\n"), sample: Self.sample())
+        #expect(hang.caught)
+        #expect(hang.sampleInside == 0)
+        #expect(hang.footprint == 812.4)
+        #expect(hang.frames == ["TerminalPaneController.screenText(_:)", "MainWindowController.followChat()", "closure #1 in Heartbeat.every(_:_:)"])
+        let line = AppHealth.Watch.line([hang])
+        #expect(line.contains("top app frames (caught while stuck): TerminalPaneController.screenText(_:) < "))
+        #expect(line.hasSuffix("(0% of its sample inside the stall)"))
+        // Without caught stacks, the sample's as before.
+        #expect(AppHealth.hang(name: "hang-20261025-140210", log: Self.log(), sample: Self.sample()).caught == false)
+    }
+
+    /// `sample`'s Date/Time is when its sampling began: 2026-10-26's first report began 5.8 s into a 3.2 s stall.
+    @Test func howMuchOfTheSampleWasInsideTheStall() throws {
+        let sample = "Analysis of sampling VibeSwitcher (pid 12647) every 1 millisecond\nProcess:         VibeSwitcher [12647]\n"
+            + "Date/Time:       2026-10-26 11:19:20.374 +0100\nLaunch Time:     2026-10-26 08:42:09.253 +0100\n"
+        let began = try #require(AppHealth.sampleStart(sample))
+        let since = Date(timeIntervalSince1970: 1793009954.545)
+        #expect(abs(began.timeIntervalSince(since) - 5.829) < 0.001)
+        #expect(AppHealth.sampleInside(start: began, end: since.addingTimeInterval(3.2)) == 0)
+        #expect(AppHealth.sampleInside(start: since.addingTimeInterval(2), end: since.addingTimeInterval(3.5)) == 0.5)
+        #expect(AppHealth.sampleInside(start: since.addingTimeInterval(2), end: nil) == 1)
+        #expect(AppHealth.sampleStart("no header") == nil)
+    }
+
     @Test func aReportFromBeforeTheHeaderStillReads() {
         let old = Self.log().components(separatedBy: "\n").dropFirst().joined(separator: "\n")
         let hang = AppHealth.hang(name: "hang-20261025-140210", log: old, sample: nil)

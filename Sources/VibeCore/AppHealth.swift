@@ -28,9 +28,90 @@ public enum AppHealth {
 
     /// The line `HangWatchdog` starts a hang's .log with: when the main thread got stuck, and once it answered again,
     /// how long that took ("vibeswitcher-hang: since=1761400000.123 duration=12.3").
-    public static func hangHeader(since: Date, duration: TimeInterval?) -> String {
+    /// `sampleInside`: how much of the sample (.txt) was taken while it was still stuck, 0 to 1 ("sample-inside=0.00":
+    /// none of it, the sample began after it answered).
+    public static func hangHeader(since: Date, duration: TimeInterval?, sampleInside: Double? = nil) -> String {
         "vibeswitcher-hang: since=\(String(format: "%.3f", since.timeIntervalSince1970))"
             + (duration.map { " duration=\(String(format: "%.1f", $0))" } ?? "")
+            + (sampleInside.map { " sample-inside=\(String(format: "%.2f", $0))" } ?? "")
+    }
+
+    /// How long `sample` samples a hang for (its `HangWatchdog` call).
+    public static let sampleSeconds: TimeInterval = 3
+
+    /// When a `sample` report's sampling began, its "Date/Time:" line ("2026-10-26 11:19:20.374 +0100").
+    public static func sampleStart(_ sample: String) -> Date? {
+        guard let line = sample.components(separatedBy: "\n").prefix(40).first(where: { $0.hasPrefix("Date/Time:") }) else { return nil }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss.SSS Z"
+        return formatter.date(from: line.dropFirst("Date/Time:".count).trimmingCharacters(in: .whitespaces))
+    }
+
+    /// The part of a sample begun at `start` (lasting `sampleSeconds`) taken before the main thread answered at `end`
+    /// (nil: it never did), 0 to 1. 2026-10-26: `sample` took 3 to 6 s to begin, so both reports that day sampled only
+    /// the idle main thread after its stall.
+    public static func sampleInside(start: Date, end: Date?) -> Double {
+        guard let end else { return 1 }
+        return min(max(end.timeIntervalSince(start) / sampleSeconds, 0), 1)
+    }
+
+    /// One frame of a stack caught on the stuck main thread.
+    public struct StackFrame: Equatable, Hashable, Sendable {
+        /// The function (demangled), or "???" when it can't be named.
+        public var name: String
+        /// Its image's file name ("VibeSwitcher", "AppKit").
+        public var image: String
+        /// The return address's offset in the function, and the address.
+        public var offset: UInt
+        public var address: UInt
+
+        public init(name: String, image: String, offset: UInt, address: UInt) {
+            self.name = name
+            self.image = image
+            self.offset = offset
+            self.address = address
+        }
+    }
+
+    /// The line that opens the caught stacks' section of a hang's .log.
+    public static let caughtTitle = "Main thread while stuck"
+
+    /// The main thread's stacks caught while it was stuck (each outermost frame first; `at`, how far into the stall
+    /// each was taken), as a call graph in `sample`'s shape under a title line: what `busiestPath` reads, and a
+    /// person can, as in a sample.
+    public static func caughtGraph(_ stacks: [(at: TimeInterval, frames: [StackFrame])]) -> String {
+        guard let first = stacks.first, let last = stacks.last else { return "" }
+        final class Node {
+            var count = 0
+            var children: [StackFrame: Node] = [:]
+            var order: [StackFrame] = []
+        }
+        let root = Node()
+        for stack in stacks {
+            root.count += 1
+            var node = root
+            for frame in stack.frames {
+                if node.children[frame] == nil {
+                    node.children[frame] = Node()
+                    node.order.append(frame)
+                }
+                node = node.children[frame]!
+                node.count += 1
+            }
+        }
+        var lines = [String(format: "\(caughtTitle): %d stacks, from %.1f s to %.1f s into the stall", stacks.count, first.at, last.at),
+                     "Call graph:", "    \(stacks.count) Thread_main   DispatchQueue_1: com.apple.main-thread  (caught while stuck)"]
+        func emit(_ node: Node, level: Int) {
+            for frame in node.order.sorted(by: { node.children[$0]!.count > node.children[$1]!.count }) {
+                let child = node.children[frame]!
+                lines.append("    + " + String(repeating: "  ", count: level) + "\(child.count) \(frame.name)  (in \(frame.image)) + \(frame.offset)  ["
+                             + "0x" + String(frame.address, radix: 16) + "]")
+                emit(child, level: level + 1)
+            }
+        }
+        emit(root, level: 0)
+        return lines.joined(separator: "\n")
     }
 
     /// One freeze, from its report's two files.
@@ -52,6 +133,10 @@ public enum AppHealth {
         public var frames: [String] = []
         /// Whether its sample (.txt) was there to read.
         public var sampled = false
+        /// Whether `frames` (or `systemFrames`) are from stacks caught while it was stuck (the .log's), not the sample.
+        public var caught = false
+        /// How much of the sample was taken while it was still stuck, 0 to 1 (nil: not known).
+        public var sampleInside: Double?
 
         public init(name: String) { self.name = name }
 
@@ -76,6 +161,7 @@ public enum AppHealth {
                 let fields = values(header)
                 hang.since = fields["since"].flatMap(Double.init).map { Date(timeIntervalSince1970: $0) }
                 hang.duration = fields["duration"].flatMap(Double.init)
+                hang.sampleInside = fields["sample-inside"].flatMap(Double.init)
             }
             for line in lines {
                 if line.hasPrefix("window never opened") { hang.shown = "window never opened" }
@@ -94,6 +180,15 @@ public enum AppHealth {
             hang.peak = sampleMegabytes(sample, "Physical footprint (peak):")
             hang.frames = appFrames(sample: sample, image: "VibeSwitcher")
             if hang.frames.isEmpty { hang.systemFrames = systemFrames(sample: sample) }
+        }
+        // The stacks caught while it was stuck say what blocked it; the sample may have begun after it answered.
+        if let log, log.contains("\n" + caughtTitle) {
+            let frames = appFrames(sample: log, image: "VibeSwitcher"), system = frames.isEmpty ? systemFrames(sample: log) : []
+            if !frames.isEmpty || !system.isEmpty {
+                hang.caught = true
+                hang.frames = frames
+                hang.systemFrames = system
+            }
         }
         return hang
     }
@@ -600,9 +695,11 @@ public enum AppHealth {
             if let footprint = hang.footprint {
                 words.append(String(format: "footprint %.0f MB", footprint) + (hang.peak.map { String(format: " (peak %.0f MB)", $0) } ?? "") + ";")
             }
-            if !hang.frames.isEmpty { words.append("top app frames: " + hang.frames.joined(separator: " < ")) }
-            else if !hang.systemFrames.isEmpty { words.append("no app frames on the main thread's busiest path; its top frames: " + hang.systemFrames.joined(separator: " < ")) }
+            let source = hang.caught ? " (caught while stuck)" : ""
+            if !hang.frames.isEmpty { words.append("top app frames\(source): " + hang.frames.joined(separator: " < ")) }
+            else if !hang.systemFrames.isEmpty { words.append("no app frames on the main thread's busiest path\(source); its top frames: " + hang.systemFrames.joined(separator: " < ")) }
             else { words.append("no sample of its stacks") }
+            if let inside = hang.sampleInside { words.append(String(format: "(%.0f%% of its sample inside the stall)", inside * 100)) }
             return words.joined(separator: " ")
         }
 

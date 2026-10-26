@@ -17,6 +17,32 @@ struct StallDetectorTests {
     }
 }
 
+/// Late from `early` on, so the stack can be caught while it lasts; cleared by the next beat whether or not it became a
+/// stall.
+struct StallDetectorLateTests {
+    @Test func aLateBeatIsSeenBeforeItIsAStall() {
+        var detector = StallDetector(threshold: 2, early: 0.5)
+        let start = Date(timeIntervalSince1970: 1000)
+        detector.beat(at: start)
+        #expect(detector.check(at: start + 0.4) == nil)
+        #expect(detector.lateSince == nil)
+        #expect(detector.check(at: start + 0.6) == nil)
+        #expect(detector.lateSince == start)
+        // It answered before 2 s: late no more, and no stall.
+        detector.beat(at: start + 1)
+        #expect(detector.lateSince == nil)
+        #expect(detector.check(at: start + 1.1) == nil)
+        // Late again, and this time a stall.
+        #expect(detector.check(at: start + 1.6) == nil)
+        #expect(detector.lateSince == start + 1)
+        #expect(detector.check(at: start + 3.1) == .stalled(since: start + 1))
+        #expect(detector.lateSince == start + 1)
+        detector.beat(at: start + 4)
+        #expect(detector.lateSince == nil)
+        #expect(detector.check(at: start + 4.1) == .recovered(after: 3))
+    }
+}
+
 struct StallDetectorSleepTests {
     @Test func aSuspendedProcessIsNotAHang() {
         // The Mac slept (or App Nap held the app): the checker didn't run either. Waking up isn't a stall.
