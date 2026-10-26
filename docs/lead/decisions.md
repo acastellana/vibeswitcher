@@ -464,3 +464,7 @@ The hold was for the malloc-lock stall (183–572 ms with 8 MB slack, on a loade
 
 The user answered 133FA6B0 with "Install now". Checked: the host is still pid 31589, the app relaunched as pid 12647, and the lead's tool server (pid 10199) switched in place to the new binary (inode 304239769) and holds advancing.lock again.
 
+## 2026-10-26 11:01:23 Context files and roles. (a) AGENTS.md holds only rules and commands agents can't discover; CLAUDE.md is `@AGENTS.md`; no repository overview. (b) A security focus goes into the verifier prompt for sensitive or raised branches, not a second finder, measured with scripts/verifier-eval.sh on real past misses. (c) No scheduled gardener agent; size-triggered housekeeping only (archive_decisions). No idle-time bug sweeps.
+
+The user's convention is that CLAUDE.md points to AGENTS.md, and they note that AGENTS.md content has been hurting performance. ETH Zurich (arXiv 2602.11988): overviews don't help; instructions are followed; context files add about 20% cost. With 2 finders, a finding raised only by the security finder would be unconfirmed and never block. The working policy also rules out audit loops without a concrete concern, which a scheduled bug sweep would be.
+

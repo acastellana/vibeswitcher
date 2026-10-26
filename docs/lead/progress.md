@@ -1381,3 +1381,10 @@
 - 2026-10-26 10:41 Workflow: sensitive_paths = `.claude/, .mcp.json, CLAUDE.md, CLAUDE.local.md, AGENTS.md, REVIEW.md, .github/, .env, .env.*, *.entitlements, *.pem, Sources/VibeHost/, Sources/vibeswitcher-host/, Sources/VibeCore/LeadVault*.swift, Sources/VibeCore/LeadLaunch.swift, Sources/VibeCore/LeadAdvance.swift, Sources/VibeCore/LeadRisk.swift, Sources/VibeCore/Steer.swift, Sources/VibeCore/Worktrees.swift, Sources/VibeCore/MergeRerun.swift, Sources/VibeCore/TestLock.swift, Sources/VibeCore/Redaction.swift, Sources/VibeCore/HookInstaller.swift, Sources/VibeCore/RemoteAccess.swift, Sources/VibeSwitcher/RemoteServer.swift, Sources/VibeSwitcher/PhoneAccess.swift, Sources/VibeSwitcher/Sandbox.swift, scripts/build-app.sh, scripts/setup-signing.sh`
 - 2026-10-26 10:41 Started a worker on review-level-from-the
 - 2026-10-26 10:41 Started a worker on one-step-revert-of
+- 2026-10-26 11:00 Planned agents-md-holds-the: AGENTS.md holds the few rules agents can't discover; CLAUDE.md just imports it (review audit)
+- 2026-10-26 11:01 Planned security-checklist-for: Security checklist for audits of guard-rail changes, measured on a real past miss (review audit)
+- 2026-10-26 11:01 Planned the-lead-can-archive: The lead can archive superseded decisions, so every lead start reads less
+- 2026-10-26 11:01 Started a worker on agents-md-holds-the
+- 2026-10-26 11:01 Automatically (auto_advance): Started a worker on agents-md-holds-the (AGENTS.md holds the few rules agents can't discover; CLAUDE.md just imports it).
+- 2026-10-26 11:01 Started a worker on the-lead-can-archive
+- 2026-10-26 11:01 Automatically (auto_advance): Started a worker on the-lead-can-archive (The lead can archive superseded decisions, so every lead start reads less).
