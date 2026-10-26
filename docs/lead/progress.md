@@ -1450,3 +1450,5 @@
 - 2026-10-26 16:40 Started a worker on the-verifier-s-eval
 - 2026-10-26 16:40 Automatically (auto_advance): Started a worker on the-verifier-s-eval (The verifier's eval set: real past bugs and clean commits, run when its prompt or model changes).
 - 2026-10-26 16:49 Automatically (auto_advance): Started the audit of after-a-revert-dependent at 89de4aed (Its review is audit).
+- 2026-10-26 17:04 Audit of after-a-revert-dependent: complete, clean, round 1: 1 Pre-existing open
+- 2026-10-26 17:11 Merged after-a-revert-dependent: After a revert: dependent tasks are told, cleanup happens, the Mac stays awake
