@@ -115,8 +115,10 @@ blocks (nor becomes a task by itself) and a Pre-existing one never fails the tas
 worker fixes it and a re-audit, handed the open findings and the diff since the audited commit, marks it fixed (it
 checks only those findings' concerns, with focused tests rather than the whole suite, raises no new Nit, and never a
 closed finding again); or `dismiss_finding` closes it with a reason; or `add_task(from_finding: task:F2)` makes it a
-task of its own. After three audits in a row that left Important findings open, the task's status says
-"reconsider the approach" and the lead re-plans it or asks you, instead of another round. With `audit_finders: 2`
+task of its own. After two audits in a row that left Important findings open or failed (the round cap), the task's
+status says "reconsider the approach" and, instead of a third round, the lead re-rolls it (`update_task(reroll:
+true)`: its worker stops, its branch is kept as `archive/<slug>-<n>`, and a fresh worker starts from the lead's branch
+with a summary of the findings and answers so far), re-plans it or asks you. With `audit_finders: 2`
 or `3` in `workflow.md` (1, one verifier, is the default), an audit runs that many **finders** instead, each with its
 own focus (contract and acceptance; bugs and regressions; security when the branch touches `sensitive_paths`, else
 the tests). `audit` first builds and tests the audited commit once, in a scratch worktree under a scratch home as
