@@ -9,9 +9,10 @@ import VibeCore
 /// live flat, and came back down to its first minute's when the pages were given back (`scripts/soak-bench.sh
 /// --soak-relief`). It looks once a minute; the reading and the relief run on its own queue, off the main thread.
 final class FootprintRelief {
-    /// Growth over the last relief's footprint (MB) that's given back: a terminal's GPU memory for a moment is more,
-    /// but a relief then finds nothing and the next look starts from there.
-    static let slack = 24.0
+    /// Growth over the last relief's footprint (MB) that's given back: what's kept between reliefs (at 24 MB the
+    /// footprint sawed enough to read 20-40 MB an hour over the soak's 40 minutes). A terminal's GPU memory for a
+    /// moment is more, but a relief then finds nothing and the next look starts from there.
+    static let slack = 8.0
 
     private let footprint: () -> Double?
     private let relieve: () -> Void
@@ -19,6 +20,11 @@ final class FootprintRelief {
     /// The footprint after the last relief, or the least since (it follows the footprint down); nil before the first look.
     private var floor: Double?
     private var timer: Heartbeat.Subscription?
+    private var reliefs = 0
+    private var longest = 0.0
+
+    /// The reliefs so far and the longest, in ms (the soak bench's).
+    var made: (reliefs: Int, longest: Double) { queue.sync { (reliefs, longest) } }
 
     init(footprint: @escaping () -> Double? = { AppHealthWatcher.ownFootprint()?.now },
          relieve: @escaping () -> Void = { malloc_zone_pressure_relief(nil, 0) }) {
@@ -42,9 +48,11 @@ final class FootprintRelief {
             // It holds malloc's locks while it runs: how long, in the log, to see what it costs a big heap.
             let started = DispatchTime.now()
             relieve()
+            let took = Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1e6
             let after = footprint() ?? now
-            Breadcrumbs.shared.note(String(format: "footprint relief: %.0f → %.0f MB in %.0f ms", now, after,
-                                           Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1e6))
+            Breadcrumbs.shared.note(String(format: "footprint relief: %.0f → %.0f MB in %.0f ms", now, after, took))
+            reliefs += 1
+            longest = max(longest, took)
             self.floor = after
         }
     }

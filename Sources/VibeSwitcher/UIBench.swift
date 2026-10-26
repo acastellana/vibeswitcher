@@ -822,6 +822,8 @@ enum UIBench {
             // How fast each minute's least footprint grew over the last 40 minutes, a least-squares line through them: the
             // footprint saws up and down between malloc's reliefs (`FootprintRelief`), so the two ends alone say little.
             let recent = samples.filter { $0.minute > last.minute - 40 }
+            let reliefs = footprintRelief.made
+            print(String(format: "RESULT soak-reliefs %d (the longest %.1f ms)", reliefs.reliefs, reliefs.longest))
             if recent.count >= 3 {
                 let meanX = Double(recent.map(\.minute).reduce(0, +)) / Double(recent.count)
                 let meanY = recent.map(\.floor).reduce(0, +) / Double(recent.count)
