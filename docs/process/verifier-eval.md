@@ -11,13 +11,14 @@ one below and add the new one. The lead's brief says so where a project has the 
 
 ```sh
 scripts/verifier-eval.sh --all --dry-run        # free: every case builds its clone and prompt, no model call
-scripts/verifier-eval.sh --all                  # every case, one summary (about $55, an hour or two)
+scripts/verifier-eval.sh --all                  # every case, one summary (about $45–60, two hours)
 scripts/verifier-eval.sh steadier-merge-gate    # one case
 scripts/verifier-eval.sh --patch NAME HEAD      # store a new case's audited commit as a patch (below)
 ```
 
-**Cost.** A case costs what an audit does: about $4.50 (the runs below: $X–$Y). The set has 12 cases, so a full run
-is about $55 and, run one after another, an hour or two. Each case's `--max-usd` (20 by default) caps a runaway.
+**Cost.** A case costs what an audit does: $2.87 to $5.02 in the runs below, about 10 minutes each (1.6–2.7 M
+tokens, nearly all cache reads). The set has 12 cases, so a full run is about $45–60 and, one case after another,
+about two hours. Each case's `--max-usd` (20 by default) caps a runaway.
 
 **Reading a score.** One run of one case is one sample: a verifier that finds a bug once may miss it the next
 time. Compare whole summaries, and rerun a case that changed before calling it a regression. A bug counts as found
@@ -83,4 +84,17 @@ code it added; its line's places are `expect-no-Important`.
 
 ## Summaries
 
-RESULTS
+### 2026-10-26, partial (the-verifier-s-eval): 3 of 12 cases, checklist auto, model fable
+
+Not a full run: the task allowed three paid runs, to check that new cases score as they should.
+
+| Case | Score | Cost | What the findings say |
+|---|---|---|---|
+| steadier-merge-gate | 0 of 1 found | $3.57, 10.1 min | Missed: 3 Nits on the rerun's reporting and a Pre-existing test failure; nothing on a crashed or stopped run being rerun with --filter. A real miss (no finding mentions it). |
+| a-base-branch-the | 2 of 2 by place, 1 by an Important finding | $5.02, 9.8 min | F1 found as Important (the PrivateWriteLint failure, from the full suite run). F2 matched only by place: a Nit at BaseMoves.swift:114 about which typed lines `check()` counts, not about a team command still running. In substance F2 was missed. |
+| the-phone-shows-needs | clean, 0 Important | $2.87, 9.6 min | No false alarm: 3 findings, none Important. |
+
+Bugs found: 2 of 3 by place, 1 of 3 by substance and as Important. False alarms: 0 on 1 clean case. Tokens 6.8 M
+in total, cost $11.46. The other nine cases have resolved in a dry run (`--all --dry-run`: 12 of 12) but haven't
+been scored. Before this branch, a-fix-s-regression scored 3 of 3 with the checklist and 0 of 3 without
+(security-checklist-for).
