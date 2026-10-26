@@ -1392,3 +1392,9 @@
 - 2026-10-26 11:19 Automatically (auto_advance): Started the audit of review-level-from-the at dd4190a6 (Its review is audit).
 - 2026-10-26 11:20 Automatically (auto_advance): Started the audit of one-step-revert-of at 62e65b04 (Its review is audit).
 - 2026-10-26 11:28 Merged the-lead-can-archive: The lead can archive superseded decisions, so every lead start reads less (no audit: review none)
+- 2026-10-26 11:28 Automatically (auto_advance): Merged the-lead-can-archive (The lead can archive superseded decisions, so every lead start reads less) into project-lead at 3c469a36, review none: on its worker's done report on b3e69ea2 and the full test run.
+- 2026-10-26 11:28 Audit of one-step-revert-of: complete, clean, round 1: 3 Nit open
+- 2026-10-26 11:28 Automatically (auto_advance): Cleaned up the-lead-can-archive (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-10-26 11:29 Audit of review-level-from-the: complete, clean, round 1: 2 Nit open
+- 2026-10-26 11:30 Planned catch-and-fix-the: Catch and fix the 3 s main-thread stalls with a lead's chat shown
+- 2026-10-26 11:36 Merged review-level-from-the: Review level from the change itself, and a REVIEW.md per project
