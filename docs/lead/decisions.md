@@ -194,3 +194,7 @@ The user's convention is that CLAUDE.md points to AGENTS.md, and they note that 
 
 The user answered F770E6F6 with "Install now". Checked: the host is still pid 31589, the app relaunched as pid 97924, and the lead's tool server switched in place to inode 307525655 and holds advancing.lock. The archive list is docs/process/lead-rules.md's superseded and obsolete entries, minus the ones only partly superseded.
 
+## 2026-10-26 21:09:21 Installed project-lead at 325207e on 2026-10-26 21:08 (battery 52 %): revert follow-ups, the verifier eval set, the README fix.
+
+The user answered A1BE83E7 "Install now". Verified: host pid 31589 unchanged, app relaunched as pid 62220, the lead's tool server (pid 10199) switched in place to inode 309016916 and holds advancing.lock.
+
