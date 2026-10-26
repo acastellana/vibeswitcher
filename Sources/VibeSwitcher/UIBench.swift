@@ -731,7 +731,7 @@ enum UIBench {
                             print("  grew since minute 2, by class (malloc blocks), then blocks of no class by size:")
                             var classed = baseline.census, unclassed = baseline.census, after = census, afterRaw = census
                             classed.unclassed = [:]; after.unclassed = [:]; unclassed.classes = [:]; afterRaw.classes = [:]
-                            for row in HeapCensus.growth(from: classed, to: after, top: 16) + HeapCensus.growth(from: unclassed, to: afterRaw, top: 5) {
+                            for row in HeapCensus.growth(from: classed, to: after, top: 30) + HeapCensus.growth(from: unclassed, to: afterRaw, top: 5) {
                                 print(String(format: "    %-60@ %+8.2f MB %+8ld blocks  (%ld → %ld)", row.name as NSString,
                                              mb(Double(row.after.bytes - row.before.bytes)), row.after.blocks - row.before.blocks,
                                              row.before.blocks, row.after.blocks))
@@ -755,6 +755,10 @@ enum UIBench {
                     print(String(format: "  minute %3d  footprint %6.1f MB (least %6.1f)  malloc in use %6.1f MB (of %6.1f)  live views %@ chats %@  sessions %d  rows %d",
                                  sample.minute, sample.footprint, sample.floor, sample.inUse, mb(Double(stats.size_allocated)), IdleBench.Live.views.map(String.init) ?? "n/a",
                                  IdleBench.Live.chats.map(String.init) ?? "n/a", self.host.sessions.count, self.store.sessions.count))
+                    // Views in the window's tree: views let go of leave it; ones that grow in number here are drawn.
+                    func viewCount(_ view: NSView) -> Int { 1 + view.subviews.reduce(0) { $0 + viewCount($1) } }
+                    print("              views in the window \(self.window?.window?.contentView.map(viewCount) ?? 0)"
+                          + (self.sidebarWindow?.contentView.map { ", in the sidebar \(viewCount($0))" } ?? ""))
                     // The chat's own counts (entries, items, how many laid out).
                     if let chat = self.window?.debugState().split(separator: "\n").first(where: { $0.hasPrefix("chat ") }) {
                         print("              " + (chat.split(separator: " ").filter { !$0.hasPrefix("path=") && !$0.hasPrefix("draft=") && $0 != "chars" }
