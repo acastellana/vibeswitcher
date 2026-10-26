@@ -1327,3 +1327,15 @@
 - 2026-10-26 01:46 Merged a-short-project-map: A short project map every worker reads first (CLAUDE.md)
 - 2026-10-26 01:46 Automatically (auto_advance): Merged a-short-project-map (A short project map every worker reads first (CLAUDE.md)) into project-lead at ede10c4a, on its passing audit and the full test run.
 - 2026-10-26 01:55 Merged every-task-gets-a: Every task gets a receipt: time, tokens, cost, rounds, rollback
+- 2026-10-26 01:55 Automatically (auto_advance): Merged every-task-gets-a (Every task gets a receipt: time, tokens, cost, rounds, rollback) into project-lead at 46628021, on its passing audit and the full test run.
+- 2026-10-26 01:55 Automatically (auto_advance): Cleaned up open-sessions-pick-up (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-26 01:55 Automatically (auto_advance): Cleaned up today-s-flaky-tests (freed 1.8 GB of build output and temporary folders). It stays done.
+- 2026-10-26 01:55 Automatically (auto_advance): Cleaned up a-short-project-map (freed 931 MB of build output and temporary folders). It stays done.
+- 2026-10-26 01:55 Automatically (auto_advance): Cleaned up every-task-gets-a (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-10-26 01:55 Started a worker on a-fresh-worktree-starts
+- 2026-10-26 01:55 Automatically (auto_advance): Started a worker on a-fresh-worktree-starts (A fresh worktree starts from a copy of the last build), its after tasks done (open-sessions-pick-up, each-task-has-a, today-s-flaky-tests).
+- 2026-10-26 01:55 Started a worker on the-lead-s-rules
+- 2026-10-26 01:55 Automatically (auto_advance): Started a worker on the-lead-s-rules (The lead's rules that matter become checks, not just notes), its after tasks done (every-task-gets-a, open-sessions-pick-up, notifications-only-when, today-s-flaky-tests).
+- 2026-10-26 01:55 Started a worker on the-app-s-memory
+- 2026-10-26 01:55 Automatically (auto_advance): Started a worker on the-app-s-memory (The app's memory stops growing over a working day).
+- 2026-10-26 01:56 Ended needs-you-follow-ups's worker (idle since its done report on c4ff2d0b) to make room on the Mac for its audit
