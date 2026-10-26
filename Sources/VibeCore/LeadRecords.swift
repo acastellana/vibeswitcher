@@ -293,7 +293,8 @@ public final class LeadRecords: @unchecked Sendable {
     /// records' lock, as the commit reads them. Each moves byte for byte, its date with it, appended to the archive under
     /// one `# Archived <time>: <reason>` line for the call (the archive is only ever appended to); decisions.md keeps
     /// the rest as they were, in their order, and one pointer line to the archive under its title. A name is an entry's
-    /// heading (without `## `) or its start up to a word, e.g. its stamp `2026-10-17 12:15`; one that names no entry,
+    /// heading (without `## `) or its start up to a word, e.g. its stamp `2026-10-17 12:15` (which fits one stamped
+    /// `2026-10-17 12:15:04` too); one that names no entry,
     /// or several, refuses the whole call with nothing changed.
     static func archive(_ names: [String], reason: String, in store: BoardStore, now: Date = Date()) throws -> Archived {
         let reason = Redaction.secrets(in: reason.split(whereSeparator: \.isNewline).joined(separator: " ")).trimmingCharacters(in: .whitespaces)
@@ -311,10 +312,14 @@ public final class LeadRecords: @unchecked Sendable {
             }
             let (preamble, entries) = rawEntries(text)
             let headings = entries.map(heading)
+            // Each heading with its stamp's seconds dropped too: docs/process/lead-rules.md names entries by the minute.
+            let minutes = headings.map { $0.replacingOccurrences(of: #"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}):\d{2}"#, with: "$1", options: .regularExpression) }
             var chosen = Set<Int>()
             var problems: [String] = []
             for name in wanted {
-                let matches = headings.indices.filter { headings[$0] == name || headings[$0].hasPrefix(name + " ") }
+                let matches = headings.indices.filter { index in
+                    [headings[index], minutes[index]].contains { $0 == name || $0.hasPrefix(name + " ") }
+                }
                 switch matches.count {
                 case 0: problems.append("“\(name)” names no entry in decisions.md")
                 case 1: chosen.insert(matches[0])

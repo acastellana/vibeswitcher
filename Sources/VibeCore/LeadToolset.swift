@@ -450,7 +450,7 @@ public final class LeadToolset: MCPToolset {
                             properties: ["decision": P(type: "string", description: "The decision"), "why": P(type: "string", description: "The reason")],
                             required: ["decision", "why"]),
                 MCPToolInfo(name: "archive_decisions", description: "Move decisions that no longer hold from decisions.md to decisions-archive.md, unchanged and with their dates (superseded, obsolete, or now enforced by a check): every lead start reads decisions.md, not the archive. decisions.md keeps the rest in order and one line pointing to the archive; nothing is deleted. An entry that's unknown, or a name that fits several, refuses the call with nothing moved.",
-                            properties: ["entries": P(type: "array", description: "The entries to move, each by its heading (without ##) or its start, e.g. its stamp \"2026-10-17 12:15\"", items: "string"),
+                            properties: ["entries": P(type: "array", description: "The entries to move, each by its heading (without ##) or its start, e.g. its stamp \"2026-10-17 12:15\" (to the minute or the second)", items: "string"),
                                          "reason": P(type: "string", description: "Why they go, in one line (it heads this batch in the archive)")],
                             required: ["entries", "reason"]),
                 MCPToolInfo(name: "record_incident", description: "Record an incident (something broke the user's work: a hang, a lost message, a reverted merge) in incidents.md, and plan a task that turns it into a check that runs before merge (a test, or a case in regression_command's corpus), so a merge that brings it back is refused.",
