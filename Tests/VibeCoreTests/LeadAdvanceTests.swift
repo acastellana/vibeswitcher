@@ -771,6 +771,56 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(reports(runtime).contains { $0.contains("Started a worker on second") && $0.contains("its after tasks done (first)") })
     }
 
+    // MARK: after a revert
+
+    /// With auto_advance off, task "change" merged by the lead and reverted, its worktree left there; `before` runs
+    /// first (more tasks added while the switch is off). auto_advance is on again when it returns, no loop started.
+    func revertedChange(_ before: (LeadToolset) -> Void = { _ in }) throws -> (root: String, runtime: FakeRuntime, lead: LeadToolset) {
+        let (root, runtime, lead) = try team(test: nil, ["auto_advance": false])
+        #expect(!lead.call("add_task", ["title": "Change", "goal": "g", "acceptance": ["a"]]).isError)
+        before(lead)
+        #expect(!lead.call("start_worker", ["task": "change"]).isError)
+        try commit("b.txt", "bee\n", in: Worktrees.path(root: root, slug: "change"))
+        #expect(!(try seat("worker-change", runtime)).call("report", doneReport("added b.txt")).isError)
+        let merged = lead.call("merge", ["task": "change"])
+        #expect(!merged.isError, "\(merged.text)")
+        let reverted = lead.call("revert", ["task": "change", "reason": "b.txt broke the build"])
+        #expect(!reverted.isError, "\(reverted.text)")
+        #expect(task("change", root)?.status == .reverted && task("change", root)?.worktree != nil)
+        #expect(FileManager.default.fileExists(atPath: Worktrees.path(root: root, slug: "change")))
+        #expect(!lead.call("configure", ["auto_advance": true]).isError)
+        return (root, runtime, lead)
+    }
+
+    @Test func aPlannedTaskAfterARevertedOneIsToldToTheLeadOnceAndDoesntStart() throws {
+        let (root, runtime, lead) = try revertedChange { lead in
+            #expect(!lead.call("add_task", ["title": "Next", "goal": "g", "acceptance": ["a"], "after": ["change"]]).isError)
+        }
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        let told = { reports(runtime).filter { $0.contains("next won't start by itself: it comes after change, which was merged and then reverted") } }
+        #expect(advancing.until { !told().isEmpty })
+        // More passes (each nudged one, as the folder watch would) say it no more.
+        advancing.settle()
+        LeadAdvance.nudge(root: root)
+        advancing.settle()
+        #expect(told().count == 1, "\(reports(runtime))")
+        #expect(task("next", root)?.status == .planned && task("next", root)?.worker == nil)
+    }
+
+    @Test func aRevertedTasksWorktreeIsCleanedUpAndItStaysReverted() throws {
+        let (root, runtime, lead) = try revertedChange()
+        let worktree = Worktrees.path(root: root, slug: "change")
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        #expect(advancing.until { task("change", root)?.worktree == nil && reports(runtime).contains { $0.contains("Cleaned up change") } },
+                "\(reports(runtime))")
+        #expect(!FileManager.default.fileExists(atPath: worktree))
+        #expect(!Git.run(["rev-parse", "--verify", "--quiet", "refs/heads/agent/change"], in: root).ok)
+        #expect(task("change", root)?.status == .reverted && task("change", root)?.merged?.revertedBy != nil)
+        #expect(reports(runtime).contains { $0.contains("It stays reverted.") }, "\(reports(runtime))")
+    }
+
     @Test func aStartWaitsForTheMacsRoomAndGoesOnTheAppsNudge() throws {
         let (root, runtime, lead) = try team()
         lead.macLimits = { MacLimits(maxSessions: 1) }

@@ -338,7 +338,7 @@ public final class LeadAdvance: @unchecked Sendable {
         for task in tasks {
             switch task.status {
             case .failed: sendBack(task.slug, onHold: onHold)
-            case .done: cleanup(task.slug)
+            case .done, .reverted: cleanup(task.slug)
             default: break
             }
         }
@@ -539,12 +539,13 @@ public final class LeadAdvance: @unchecked Sendable {
         return !mac.isBusy(threshold: limits.loadLimit) && mac.sessions + need <= limits.maxSessions
     }
 
-    /// A merged task whose worktree or branch is still there.
+    /// A merged task (a reverted one too: its work is out of the base, and it stays reverted) whose worktree or
+    /// branch is still there.
     private func cleanup(_ slug: String) {
-        guard let task = due(slug, [.done]), task.merged != nil,
+        guard let task = due(slug, [.done, .reverted]), task.merged != nil,
               task.worktree != nil || lead.advanceHead(slug) != nil else { return }
         step("cleanup|\(slug)") {
-            guard due(slug, [.done]) != nil else { throw NotDue() }
+            guard due(slug, [.done, .reverted]) != nil else { throw NotDue() }
             let result = try lead.advanceCleanup(slug)
             return LeadToolset.clip(result.text, 300)
         }
@@ -570,14 +571,15 @@ public final class LeadAdvance: @unchecked Sendable {
     }
 
     /// What `task` still waits on: its `after` tasks not done yet (a folded one counts as its carrier); nil when it
-    /// never starts by itself (one is abandoned or gone), told once.
+    /// never starts by itself (one is abandoned, reverted or gone), told once.
     private func waiting(_ task: LeadTask, _ board: LeadBoard) -> [String]? {
         var left: [String] = []
         for slug in task.after ?? [] {
             var other = board.task(slug)
             if other?.status == .folded, let carrier = other?.foldedInto { other = board.task(carrier) }
-            guard let other, !other.isAbandoned, other.status != .abandoned else {
-                once("after|\(task.slug)|\(slug)", "\(task.slug) won't start by itself: it comes after \(slug), which is abandoned or gone. update_task(\(task.slug), after: …) or start_worker it.")
+            guard let other, !other.isAbandoned, ![.abandoned, .reverted].contains(other.status) else {
+                let why = other?.status == .reverted ? "which was merged and then reverted (its work is out of the base)" : "which is abandoned or gone"
+                once("after|\(task.slug)|\(slug)", "\(task.slug) won't start by itself: it comes after \(slug), \(why). update_task(\(task.slug), after: …) or start_worker it.")
                 return nil
             }
             if other.status != .done { left.append(slug) }

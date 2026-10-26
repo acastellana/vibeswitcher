@@ -115,6 +115,17 @@ struct KeepAwakeTests {
         #expect(!team.working)
     }
 
+    /// A revert runs the tests on the reverted base as a merge does: the Mac stays awake under it too.
+    @Test func theLeadRevertingIsWorkToo() {
+        var team = Team()
+        let reverting = ToolActivity.describe(toolName: "mcp__vibeswitcher__revert", input: ["task": "fix", "reason": "it broke"])
+        #expect(reverting == "revert (vibeswitcher)")
+        team.set(team.lead, .working, activity: reverting)
+        #expect(team.working)
+        team.set(team.lead, .done, activity: reverting)
+        #expect(!team.working)
+    }
+
     @Test func theProjectsWorkingAreReadPerBoard() {
         var busy = Team()
         busy.set(busy.worker, .working)

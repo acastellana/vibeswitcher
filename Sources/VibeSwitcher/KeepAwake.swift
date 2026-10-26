@@ -73,19 +73,20 @@ final class KeepAwake: ObservableObject {
         "VibeSwitcher: team working on \((root as NSString).lastPathComponent)"
     }
 
-    /// What a lead's `merge` tool call shows as its session's activity while it runs (see `ToolActivity`).
+    /// What a lead's `merge` and `revert` tool calls show as its session's activity while they run (see `ToolActivity`).
     static let mergeActivity = ToolActivity.describe(toolName: "mcp__vibeswitcher__merge", input: [:])
+    static let revertActivity = ToolActivity.describe(toolName: "mcp__vibeswitcher__revert", input: [:])
 
     /// Whether a lead's team works: a worker or verifier of its board runs a turn (or shells after one, its tests in
-    /// the background), or the lead merges (its `merge` tool call rebases and runs the tests: its session reads
-    /// working, on that tool, until the merge ends). One waiting on you, or done, isn't working. `hosted` and
+    /// the background), or the lead merges or reverts (its `merge` or `revert` tool call runs the tests: its session
+    /// reads working, on that tool, until the call ends). One waiting on you, or done, isn't working. `hosted` and
     /// `sessions` by host session id.
     static func working(board: LeadBoard, hosted: [String: HostSession], sessions: [String: Session]) -> Bool {
         func live(_ id: String) -> Session? { hosted[id]?.isLive == true ? sessions[id] : nil }
         let members = board.tasks.flatMap { [$0.worker, $0.verifier] }.compactMap { $0 }
         if members.contains(where: { live($0).map { [.working, .background].contains($0.status) } == true }) { return true }
         guard let lead = board.leadSession.flatMap(live) else { return false }
-        return lead.status == .working && lead.activity == mergeActivity
+        return lead.status == .working && [mergeActivity, revertActivity].contains(lead.activity)
     }
 
     /// The projects whose team works, of the boards a refresh read (by root) and the sessions as it read them.
