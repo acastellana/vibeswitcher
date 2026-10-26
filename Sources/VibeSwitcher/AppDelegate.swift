@@ -97,6 +97,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private var visibilityTimer: Heartbeat.Subscription?
     private var hiddenReadings = 0
     private var notificationTimer: Heartbeat.Subscription?
+    /// Gives malloc's free pages back as the footprint grows (see `FootprintRelief`).
+    private let footprintRelief = FootprintRelief()
     private var terminationSignal: DispatchSourceSignal?
     /// VibeSwitcher's own freezes, crashes and error lines, told to the lead of the project with watch_app_logs on.
     private var appHealth: AppHealthWatcher?
@@ -269,6 +271,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .store(in: &cancellables)
         visibilityTimer = Heartbeat.shared.every(2) { [weak self] in self?.updateFloatingPanel() }
         notificationTimer = Heartbeat.shared.every(15) { [weak self] in self?.notifier?.refreshAuthorization() }
+        footprintRelief.start()
 
         store.$sessions
             .receive(on: RunLoop.main)

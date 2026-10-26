@@ -55,7 +55,7 @@ enum UIBench {
                  without: Set((value("--soak-without") ?? "").split(separator: ",").map(String.init)),
                  leads: min(max(value("--soak-leads").flatMap(Int.init) ?? 2, 1), Soak.leadNames.count),
                  churn: value("--soak-churn").flatMap(Double.init).flatMap { $0 > 0 ? $0 : nil },
-                 replay: value("--soak-replay"), sidebar: arguments.contains("--soak-sidebar"))
+                 replay: value("--soak-replay"), sidebar: arguments.contains("--soak-sidebar"), relief: arguments.contains("--soak-relief"))
         }
         let bench = Bench(minutes: minutes, onscreen: arguments.contains("--onscreen"), ticking: arguments.contains("--ticking"),
                           transcript: transcript, soak: soak)
@@ -97,6 +97,8 @@ enum UIBench {
         var replay: String?
         /// The sidebar too (the menu's list of sessions, as Settings › Sidebar shows it), in a window off screen.
         var sidebar = false
+        /// At each census, malloc's free pages given back (`malloc_zone_pressure_relief`), the footprint shown before and after.
+        var relief = false
         static let leadNames = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]
         /// What a worker's session runs: it retitles itself every `$1` seconds (a change the host sends the app each
         /// time), printing a line of agent-shaped output, and ends once the file `$2` is there (its task merged).
@@ -354,6 +356,7 @@ enum UIBench {
         var window: MainWindowController?
         var cancellables: Set<AnyCancellable> = []
         let stalls = StallMeter()
+        let footprintRelief = FootprintRelief()
         /// The made-up agents, by the tty of the window session they run in (read on the scanner's queue).
         private let lock = NSLock()
         private var agentTTYs: [String: (pid: Int32, root: String)] = [:]
@@ -440,6 +443,7 @@ enum UIBench {
                     + (self.window?.debugState() ?? "window never opened")
             }
             HangWatchdog.shared.start()
+            footprintRelief.start()
             UserDefaults.standard.set(ProcessInfo.processInfo.environment["VIBESWITCHER_BENCH_INSPECTOR"] ?? "team", forKey: "inspectorTab")
             _ = leads
             store.start()
@@ -718,9 +722,17 @@ enum UIBench {
                 DispatchQueue.global().async {
                     let regions = UIBench.memoryKinds()
                     let census = HeapCensus.take()
+                    // `--soak-relief`: how much of the footprint is malloc's free pages it hasn't given back.
+                    var relief = ""
+                    if soak.relief {
+                        let before = IdleBench.Usage.now().footprint
+                        malloc_zone_pressure_relief(nil, 0)
+                        relief = String(format: "; footprint %.1f → %.1f MB after malloc's pressure relief", mb(Double(before)),
+                                        mb(Double(IdleBench.Usage.now().footprint)))
+                    }
                     DispatchQueue.main.async {
-                        print(String(format: "  census %@: %ld blocks, %.1f MB in malloc blocks", label as NSString, census.total.blocks,
-                                     mb(Double(census.total.bytes))))
+                        print(String(format: "  census %@: %ld blocks, %.1f MB in malloc blocks%@", label as NSString, census.total.blocks,
+                                     mb(Double(census.total.bytes)), relief as NSString))
                         if let baseline {
                             print("  grew since minute 2, by kind of memory (the process's own task_info and malloc's zones):")
                             let names = Set(baseline.regions.keys).union(regions.keys)
@@ -735,6 +747,16 @@ enum UIBench {
                                 print(String(format: "    %-60@ %+8.2f MB %+8ld blocks  (%ld → %ld)", row.name as NSString,
                                              mb(Double(row.after.bytes - row.before.bytes)), row.after.blocks - row.before.blocks,
                                              row.before.blocks, row.after.blocks))
+                            }
+                            // Views and what hosts them, by how many more there are: views no window holds are kept by something.
+                            let views = HeapCensus.growth(from: classed, to: after, top: .max).filter { row in
+                                row.after.blocks - row.before.blocks >= 20
+                                    && ["View", "Row", "Cell", "Host", "Table", "Controller", "Layer"].contains { row.name.contains($0) }
+                            }.sorted { $0.after.blocks - $0.before.blocks > $1.after.blocks - $1.before.blocks }
+                            if !views.isEmpty { print("  views, rows, cells and hosts, by how many more:") }
+                            for row in views.prefix(30) {
+                                print(String(format: "    %-60@ %+8ld  (%ld → %ld)", String(row.name.prefix(120)) as NSString,
+                                             row.after.blocks - row.before.blocks, row.before.blocks, row.after.blocks))
                             }
                         }
                         fflush(stdout)
