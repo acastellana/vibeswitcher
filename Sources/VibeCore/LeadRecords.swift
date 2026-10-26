@@ -92,23 +92,39 @@ public final class LeadRecords: @unchecked Sendable {
     /// A flush when `interval` has passed since the last one; nil when it isn't due.
     @discardableResult
     public func tick(base: String, now: Date = Date()) -> Outcome? {
+        due(now) ? flush(base: base, now: now) : nil
+    }
+
+    private func due(_ now: Date = Date()) -> Bool {
         lock.lock()
-        let due = now.timeIntervalSince(lastFlush) >= interval
-        lock.unlock()
-        return due ? flush(base: base, now: now) : nil
+        defer { lock.unlock() }
+        return now.timeIntervalSince(lastFlush) >= interval
     }
 
     /// Ticks every `every` seconds on a queue of its own while this lives; `base` gives the branch, or nil to skip
-    /// (the session no longer holds the lead's role).
-    public func start(every: TimeInterval = 30, base: @escaping @Sendable () -> String?) {
+    /// (the session no longer holds the lead's role). A due tick runs through `run`, the tool server's
+    /// `MCPServer.background`: an install's switch of builds waits for it as for a call, so the commit is never cut
+    /// between the branch's update and the vault's head (which the next merge would take for a move outside the
+    /// lead). False from `run` (the server is ending) skips it. The queue waits for each, so ticks never overlap.
+    public func start(every: TimeInterval = 30, run: @escaping (@escaping () -> Void) -> Bool = { $0(); return true },
+                      base: @escaping @Sendable () -> String?) {
         lock.lock()
         defer { lock.unlock() }
         guard timer == nil else { return }
         let timer = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "vibeswitcher.lead-records"))
         timer.schedule(deadline: .now() + every, repeating: every)
         timer.setEventHandler { [weak self] in
-            guard let self, let branch = base() else { return }
-            self.tick(base: branch)
+            guard let self, self.due() else { return }
+            let done = DispatchSemaphore(value: 0)
+            let started = run {
+                // Not stopped by the server's cancel either (as merge's fast-forward): a commit is seconds, and one
+                // cut there leaves the branch moved and the vault's head not.
+                ShellCancel.with(nil) {
+                    if let branch = base() { self.tick(base: branch) }
+                }
+                done.signal()
+            }
+            if started { done.wait() }
         }
         timer.resume()
         self.timer = timer

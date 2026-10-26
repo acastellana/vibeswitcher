@@ -322,9 +322,9 @@ public final class LeadToolset: MCPToolset {
 
     /// The lead's server commits the decision and progress logs every few minutes while it holds the role
     /// (`LeadRecords`), besides after each merge.
-    public func keepRecords() {
+    public func keepRecords(run: @escaping (@escaping () -> Void) -> Bool = { $0(); return true }) {
         guard role == .lead else { return }
-        records.start { [weak self] in
+        records.start(run: run) { [weak self] in
             guard let self, (try? self.authenticate()) != nil else { return nil }
             return self.base
         }

@@ -176,6 +176,72 @@ struct LeadRecordsTests: LeadTeamFixture {
         #expect(Git.run(["rev-list", "--count", "\(first)..main"], in: root).output == "2")
     }
 
+    /// The timer's commit runs as the tool server's background work: a new build's switch waits for one under way,
+    /// so it's never cut between the branch's update and the vault's head (a move "outside the lead" for the next merge).
+    @Test func anInstallsSwitchWaitsForACommitUnderWay() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        #expect(!lead.call("record_decision", ["decision": "Keep it", "why": "w"]).isError)
+        let first = head("main", root)
+        let records = LeadRecords(store: BoardStore(root: root), vault: vault(for: runtime), now: .distantPast)
+        // Due once: the ticks after the commit find nothing to do.
+        records.interval = 3600
+
+        let binary = temp.url("vibeswitcher-mcp").path
+        try "build 1".write(toFile: binary, atomically: true, encoding: .utf8)
+        let build = Locked(BinaryWatch.Identity(modified: 1, size: 1, inode: 1))
+        let watch = BinaryWatch(path: binary, running: build.get(), identify: { _ in build.get() })
+        let server = MCPServer(name: "vibeswitcher", version: "1", toolset: LeadAdvanceTests.NoTools(), watch: watch)
+        let asked = DispatchSemaphore(value: 0)
+        let switches = Locked(0)
+        server.switchWhen = {
+            switches.change { $0 += 1 }
+            asked.signal()
+            return false
+        }
+        var input: [Int32] = [-1, -1], output: [Int32] = [-1, -1]
+        #expect(pipe(&input) == 0 && pipe(&output) == 0)
+        let served = DispatchSemaphore(value: 0)
+        Thread.detachNewThread {
+            server.serve(input: input[0], output: output[1])
+            served.signal()
+        }
+        defer {
+            close(input[1])
+            _ = served.wait(timeout: .now() + 20)
+            for fd in [input[0], output[0], output[1]] { close(fd) }
+        }
+        // A commit under way (held where the tick asks for the branch), and a new build installed meanwhile.
+        let release = DispatchSemaphore(value: 0)
+        let started = DispatchSemaphore(value: 0)
+        let held = Locked(false)
+        records.start(every: 0.05, run: { server.background($0) }) {
+            if !held.get() {
+                held.set(true)
+                started.signal()
+                release.wait()
+            }
+            return "main"
+        }
+        #expect(started.wait(timeout: .now() + 30) == .success)
+        build.set(BinaryWatch.Identity(modified: 2, size: 2, inode: 2))
+        // The server reads and answers a request (it looks whether to switch first): no switch while the commit runs.
+        let ping = Data(#"{"jsonrpc":"2.0","id":1,"method":"ping"}"#.utf8) + Data([0x0A])
+        _ = ping.withUnsafeBytes { write(input[1], $0.baseAddress, $0.count) }
+        var reply = [UInt8](repeating: 0, count: 4096)
+        var answer = [pollfd(fd: output[0], events: Int16(POLLIN), revents: 0)]
+        #expect(poll(&answer, 1, 30_000) == 1)
+        #expect(Darwin.read(output[0], &reply, reply.count) > 0)
+        #expect(switches.get() == 0)
+        // Once it ends, the switch is tried: the commit is on the branch and the vault has it as the lead's.
+        release.signal()
+        #expect(asked.wait(timeout: .now() + 30) == .success)
+        #expect(switches.get() >= 1)
+        #expect(head("main~1", root) == first)
+        #expect(vault.head(root: root, branch: "main") == head("main", root))
+    }
+
     @Test func indexLockIsWaitedForAndAFailureIsReported() throws {
         let root = try repo()
         let lead = try lead(root, FakeRuntime())

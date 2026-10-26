@@ -276,8 +276,9 @@ let toolset = MCPHostedToolset(attempt: {
     toolset.testLock = TestLock.standard()
     // No tools: that's the host's answer, unless it couldn't be asked by then either.
     if toolset.tools.isEmpty && !hostAnswers(.standard) { return nil }
-    // The lead's decision and progress logs go into the repository every few minutes (and after each merge).
-    toolset.keepRecords()
+    // The lead's decision and progress logs go into the repository every few minutes (and after each merge), each
+    // commit as the server's background work: an install's switch waits for it, never cutting it halfway.
+    toolset.keepRecords { work in slot.server?.background(work) ?? false }
     // Finished work moves on by itself (auto_advance), each run of passes as the server's background work: an install's
     // switch waits for it, and the new build's first pass takes what's still due.
     toolset.startAdvancing { work in slot.server?.background(work) ?? false }
