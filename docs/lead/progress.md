@@ -1443,3 +1443,9 @@
 - 2026-10-26 16:38 Planned after-a-revert-dependent: After a revert: dependent tasks are told, cleanup happens, the Mac stays awake (review audit)
 - 2026-10-26 16:38 Planned the-verifier-s-eval: The verifier's eval set: real past bugs and clean commits, run when its prompt or model changes
 - 2026-10-26 16:39 Merged readme-says-the-right: README says the right audit-round cap (no audit: review none)
+- 2026-10-26 16:39 Automatically (auto_advance): Merged readme-says-the-right (README says the right audit-round cap) into project-lead at 4ae32002, review none: on its worker's done report on 32a3e215 and the full test run.
+- 2026-10-26 16:39 Automatically (auto_advance): Cleaned up readme-says-the-right (freed 908 MB of build output and temporary folders). It stays done.
+- 2026-10-26 16:40 Started a worker on after-a-revert-dependent
+- 2026-10-26 16:40 Automatically (auto_advance): Started a worker on after-a-revert-dependent (After a revert: dependent tasks are told, cleanup happens, the Mac stays awake).
+- 2026-10-26 16:40 Started a worker on the-verifier-s-eval
+- 2026-10-26 16:40 Automatically (auto_advance): Started a worker on the-verifier-s-eval (The verifier's eval set: real past bugs and clean commits, run when its prompt or model changes).
