@@ -674,6 +674,9 @@ public struct LeadTask: Codable, Equatable, Sendable, Identifiable {
     public var workedAt: Double?
     /// Its working time reached its budget (see `LeadBudget`): until the lead changes budget_min.
     public var overBudget: LeadOverBudget?
+    /// What it cost, once it ended (merged, folded or abandoned): see `LeadReceipt`. nil for tasks that ended before
+    /// receipts, and for any still open.
+    public var receipt: LeadReceipt?
 
     /// Its review level: none unless the lead set audit.
     public var reviewLevel: Review { review ?? .none }

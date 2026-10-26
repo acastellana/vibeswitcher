@@ -691,9 +691,11 @@ public enum Worktrees {
     /// The lead's records under `records` (`records_dir`) land as the base has them, conflicted or merged cleanly
     /// (`baseRecords`), and conflicts only in them don't stop it (`takeBaseRecords`).
     /// With `rerun`, a failing test command may run once more (see `runChecks`): `passedOnRerun` when that passes.
+    /// `tested` hears the passing test command's output (the rerun's, when that's what passed), for its test count.
     public static func rebaseAndTest(root: String, commit: String, onto base: String, setup: String? = nil, test: String?,
                                      scratch: URL, home: URL? = nil, timeout: TimeInterval = testTimeout,
-                                     lock: TestLock?, records: String? = nil, rerun: ((String) -> String?)? = nil) -> Check {
+                                     lock: TestLock?, records: String? = nil, rerun: ((String) -> String?)? = nil,
+                                     tested output: ((String) -> Void)? = nil) -> Check {
         let path = scratch.path
         let home = (home ?? scratch.deletingLastPathComponent().appendingPathComponent(scratch.lastPathComponent + "-home")).path
         let cancel = ShellCancel.current
@@ -742,6 +744,7 @@ public enum Worktrees {
         let (stopped, outputs) = runChecks(setup: setup, test: test, in: path, home: home, timeout: timeout, lock: lock,
                                            as: "VibeSwitcher's merge test of \(commit.prefix(8))", place: root, rerun: rerun)
         if let stopped { return stopped }
+        if let last = outputs.last, last.name != "init_command" { output?(last.output) }
         if let again = outputs.last, again.name == "rerun", let first = outputs.dropLast().last {
             return .passedOnRerun(commit: tested, failed: first.output, rerun: again.output)
         }

@@ -136,6 +136,9 @@ public final class LeadToolset: MCPToolset {
     var sessionTempRoot = SessionTemp.root
     /// The Mac's power source as the app last read it (see `PowerState.load`). Faked in tests.
     var power: () -> PowerState? = { PowerState.load() }
+    /// The home whose `.claude/projects` holds its workers' and verifiers' transcripts, read for receipts (see
+    /// `LeadReceipts`). A scratch one in tests.
+    var claudeHome = VibePaths.home
     /// How often merge reads the load again while it waits for it to drop below load_threshold.
     var loadPoll: TimeInterval = 15
     /// The Mac-wide limits as set in Settings (see `MacLimits`), read at each call. Faked in tests.
@@ -872,6 +875,9 @@ public final class LeadToolset: MCPToolset {
         var budgetCleared = false
         let appended = (arguments["append_context"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let note = appended.isEmpty ? nil : leadNote(.context, appended, on: slug)
+        // Folded or abandoned, it ends: its receipt's tokens are read before the board's lock is taken.
+        let ending: LeadReceipt.Ending? = status == .folded ? .folded : status == .abandoned ? .abandoned : nil
+        let usage = ending == nil ? nil : store.load().task(slug).map(receiptUsage)
         var changed: [String] = []
         try boardChange { board in
             guard let index = board.taskIndex(slug) else { return }
@@ -938,10 +944,18 @@ public final class LeadToolset: MCPToolset {
                     board.tasks[index].workedAt = nil
                     board.tasks[index].overBudget = nil
                 }
+                let before = board.tasks[index].status
                 board.tasks[index].status = status
                 board.tasks[index].keptBecause = status == .kept ? reason : nil
                 board.tasks[index].abandonedBecause = status == .abandoned ? reason : nil
                 board.tasks[index].foldedInto = target?.slug
+                // Ended now (not when it was already folded or abandoned): its receipt, counted again over every round
+                // of work if it ended before and was reopened. Open again: none (it's written when it ends).
+                if let ending, let usage, board.tasks[index].status != before {
+                    board.tasks[index].receipt = LeadReceipt(board.tasks[index], ending: ending, questions: board.questions, usage: usage)
+                } else if ending == nil {
+                    board.tasks[index].receipt = nil
+                }
                 changed.append("state \(status.rawValue)" + (target.map { " into \($0.slug)" } ?? ""))
             } else if !reason.isEmpty, board.tasks[index].status == .abandoned {
                 board.tasks[index].abandonedBecause = reason
@@ -1249,6 +1263,8 @@ public final class LeadToolset: MCPToolset {
             let rounds = previous.attempts ?? (previous.worker == nil ? 0 : 1)
             board.tasks[index].attempts = rounds == 0 || previous.status == .failed ? rounds + 1 : rounds
             board.tasks[index].startedAt = previous.startedAt ?? Date().timeIntervalSince1970
+            // Working again: a receipt from an earlier ending goes; the next ending counts every round.
+            board.tasks[index].receipt = nil
             board.tasks[index].blocker = nil
             board.tasks[index].status = .running
             board.tasks[index].worker = session
@@ -1377,6 +1393,11 @@ public final class LeadToolset: MCPToolset {
         let tail = data.count > 2_000_000 ? data.suffix(2_000_000) : data
         log.append(ChatReader.read(Data(tail), format: format).events)
         return MCPToolResult(text: SessionDigest.text(log, limit: 12_000) + (waiting.map { "\n\n" + Self.waitingSection($0) } ?? ""))
+    }
+
+    /// The tokens `task`'s own workers and verifiers spent, from their transcripts, for its receipt (see `LeadReceipts`).
+    func receiptUsage(_ task: LeadTask) -> LeadReceipts.Usage {
+        LeadReceipts.usage(root: root, slug: task.slug, since: task.createdAt, home: claudeHome)
     }
 
     /// read_session's last section: "Waiting on: since 09:52 (6 min), the prompt it shows:" and that prompt in full.
@@ -1958,13 +1979,15 @@ public final class LeadToolset: MCPToolset {
         let tested: String
         var rerun: MergeRerun.Plan?
         var flaked: (plan: MergeRerun.Plan, log: String?)?
+        // The passing run's test count, for its receipt.
+        var testCount: Int?
         switch Worktrees.rebaseAndTest(root: root, commit: commit, onto: current, setup: workflow.initCommand, test: workflow.mergeChecks,
                                        scratch: vault.scratch(root: root, "merge-\(slug)"), home: vault.scratch(root: root, "merge-\(slug)-home"),
                                        timeout: workflow.testTimeout, lock: heavyLock(workflow), records: workflow.recordsDir,
                                        rerun: { output in
                                            rerun = MergeRerun.plan(after: output, workflow: workflow)
                                            return rerun?.command
-                                       }) {
+                                       }, tested: { testCount = LeadReceipt.testCount($0) }) {
         case .passed(let commit): tested = commit
         case .passedOnRerun(let commit, let failed, let again):
             guard let plan = rerun else { throw Problem(text: "Not merged: \(slug)'s tests passed on a rerun nobody planned.") }
@@ -2009,11 +2032,17 @@ public final class LeadToolset: MCPToolset {
         case .merged:
             try vault.setHead(tested, root: root, branch: base)
             let flakes = flaked.map { $0.plan.tests.isEmpty ? [MergeRerun.unnamed] : $0.plan.tests } ?? []
+            // Its receipt, written with the merge: its transcripts read before the board's lock is taken.
+            let usage = receiptUsage(task)
+            let brought = Int(Git.run(["rev-list", "--count", "\(current)..\(tested)"], in: root).output)
             let planned = try store.update { board -> [(test: String, slug: String)] in
                 guard let index = board.taskIndex(slug) else { return [] }
                 board.tasks[index].status = .done
                 board.tasks[index].merged = LeadMergeRecord(commit: tested, tested: workflow.testCommand != nil, onto: current,
                                                              regression: workflow.regressionCommand.map { _ in true }, audited: audited ? nil : false)
+                board.tasks[index].receipt = LeadReceipt(board.tasks[index], ending: .merged, questions: board.questions, usage: usage,
+                                                         tests: workflow.testCommand == nil ? nil : testCount, mergeReruns: flaked == nil ? 0 : 1,
+                                                         commits: brought)
                 guard !flakes.isEmpty else { return [] }
                 // The flake ledger, and a task for each test that flaked once too often (once: `recordFlakes`).
                 return board.recordFlakes(flakes, task: slug, commit: tested, now: Date().timeIntervalSince1970).map { test, merges in
@@ -2241,10 +2270,15 @@ public final class LeadToolset: MCPToolset {
         freed += temporary.reduce(0) { $0 + removeFolder($1.path) }
         freed += sweepFinished(board, except: slug)
         try? vault.retire(root: root, task: slug)
+        // Cleaned up unmerged after a worker ran: abandoned, as the board reads it, so it gets its receipt.
+        let usage = [.done, .folded, .abandoned].contains(task.status) || task.isAbandoned ? nil : receiptUsage(task)
         let after = try store.update { board -> LeadTask? in
             guard let index = board.taskIndex(slug) else { return nil }
             board.tasks[index].worktree = nil
             if ![.done, .folded, .abandoned].contains(board.tasks[index].status) { board.tasks[index].status = .failed }
+            if let usage, board.tasks[index].isAbandoned {
+                board.tasks[index].receipt = LeadReceipt(board.tasks[index], ending: .abandoned, questions: board.questions, usage: usage)
+            }
             return board.tasks[index]
         }
         // Its workers and verifiers, this one and any before it, are history now: off the session list.
@@ -3336,6 +3370,8 @@ public final class LeadToolset: MCPToolset {
         let settled = board.tasks.filter { !endedIDs.contains($0.id) }
         if let merged = Self.mergedLine(settled) { lines.append("\n" + merged) }
         if let abandoned = Self.abandonedLine(settled) { lines.append("\n" + abandoned) }
+        // The scorecard's cost line: the batch's receipts summed, and its most expensive task.
+        if let receipts = LeadReceiptTotals.line(board) { lines.append("\n" + receipts) }
         if !ended.isEmpty {
             lines.append("\nworker ended (\(ended.count)), not running:")
             lines += ended.prefix(Self.statusTasks).map { task, who in
@@ -3659,6 +3695,7 @@ public final class LeadToolset: MCPToolset {
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             var lines = [String(decoding: try encoder.encode(task), as: UTF8.self)]
             lines.append("\nReview: \(task.reviewLevel.rawValue)" + (task.merged.map { $0.unaudited ? " (merged with no audit)" : "" } ?? ""))
+            if let receipt = task.receipt { lines.append("\n" + receipt.line) }
             if let sessions, let ended = Self.endedMember(task, sessions) { lines.append("\nNow: \(ended)") }
             // From the vault, where only the task's own worker records it with its done (the board's copy is anyone's).
             if let kept = try? vault.unaudited(root: root, task: task.slug), let commit = kept.reported, let evidence = kept.evidence {
@@ -3684,6 +3721,7 @@ public final class LeadToolset: MCPToolset {
         var lines = ["Board of \(project) (base \(workflow.base)): \(board.tasks.count) task(s)\(tally.isEmpty ? "" : ": \(tally)"). board(task) shows one in full, with its score."]
         let scorecard = LeadScorecard(board)
         if scorecard.merged > 0 { lines.append(scorecard.line) }
+        if let receipts = LeadReceiptTotals.line(board) { lines.append(receipts) }
         if board.tasks.contains(where: { !LeadTeams.isFinished($0) }) { lines.append(Self.reviewLegend) }
         lines += board.tasks.map { task in
             let ended = sessions.flatMap { Self.endedMember(task, $0) }

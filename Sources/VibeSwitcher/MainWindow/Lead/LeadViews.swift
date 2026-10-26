@@ -851,7 +851,8 @@ struct TeamRecords: View, Equatable {
         VStack(alignment: .leading, spacing: 18) {
             if !board.tasks.isEmpty {
                 teamSection("Scorecard") {
-                    ScorecardView(scorecard: LeadScorecard(board, now: (clock ?? Date()).timeIntervalSince1970))
+                    ScorecardView(scorecard: LeadScorecard(board, now: (clock ?? Date()).timeIntervalSince1970),
+                                  receipts: LeadReceiptTotals.current(board))
                 }
             }
             let closed = board.questions.filter { !$0.isOpen }

@@ -271,6 +271,8 @@ struct TeamTaskList: View {
 /// saying what it means in its help tag; merges without tests under it.
 struct ScorecardView: View {
     let scorecard: LeadScorecard
+    /// The batch's receipts summed (`LeadReceiptTotals.current`): nil when no task has one, and then nothing shows.
+    var receipts: (totals: LeadReceiptTotals, last: Double?)? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -285,9 +287,21 @@ struct ScorecardView: View {
                 Text(Self.footnote(scorecard))
                     .font(.system(size: 10.5)).foregroundStyle(scorecard.mergedWithoutTests > 0 ? AnyShapeStyle(Color.orange) : AnyShapeStyle(.tertiary))
             }
+            if let receipts {
+                Text(Self.cost(receipts.totals, last: receipts.last))
+                    .font(.system(size: 10.5)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .help("Each finished task's receipt: its worker's working time, and the tokens its worker and verifier sessions spent, "
+                        + "read from their transcripts. Costs are estimates at the API prices of \(receipts.totals.pricesAsOf).")
+            }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(scorecard.spoken)
+        .accessibilityLabel(scorecard.spoken + (receipts.map { " " + Self.cost($0.totals, last: $0.last) } ?? ""))
+    }
+
+    /// "This batch: 4 tasks, 6.2 h of worker time, 61M tokens, est. $38.12; most expensive: …".
+    static func cost(_ totals: LeadReceiptTotals, last: Double?) -> String {
+        (last == nil ? "This batch: " : "Last batch: ") + totals.text + "."
     }
 
     /// A number, what it is and, dim under it, why it's not shown ("too few audited tasks (1)"); its meaning on hover.

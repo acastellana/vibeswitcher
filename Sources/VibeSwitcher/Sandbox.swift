@@ -619,6 +619,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
         // A lead's Team tab: a task at work, two blocked (one after it, one with no word why), one whose verifier ended
         // twice, merged ones of which
         // one was audited, a question withdrawn lately and several answered, the Mac line, the Mac kept awake.
+        // An all-done card with its batch's receipts summed (`LeadReceiptTotals`), its task list open.
+        ("all-done", { driver in
+            let mark = Driver.allDoneMark()
+            return AnyView(AllDoneCard(mark: mark, chat: ChatModel(), expanded: [AllDoneCard.key(mark)]).frame(width: 560).padding(16))
+        }),
         ("lead-team", { driver in
             let team = Driver.leadTeam()
             return AnyView(LeadTeamView(root: driver.home + "/projects/stakegen", board: team.board, seen: team.seen, open: { _ in },
@@ -650,6 +655,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             done.worktree = nil
             done.merged = LeadMergeRecord(commit: "abc\(index)def0", tested: true, audited: index == 1 ? nil : false, at: now - Double(index) * 3_000)
             done.review = index == 1 ? .audit : LeadTask.Review.none
+            done.receipt = Driver.receipt(worked: Double(index) * 1_500, opus: index * 900_000, fable: index == 1 ? 2_400_000 : nil, end: now - Double(index) * 3_000)
             return done
         }
         var audits = LeadAuditLedger()
@@ -690,6 +696,46 @@ private final class Driver: NSObject, NSApplicationDelegate {
         seen[verifier] = MemberSeen(live: false, needsYou: false, working: false, activity: nil, since: nil, startedAt: Date(timeIntervalSince1970: now - 900))
         let decisions = (1...16).map { LeadDecision(at: now - Double($0) * 900, text: "Earlier decision \($0)", why: "") }
         return (board, seen, decisions)
+    }
+
+    /// A merged task's receipt: `opus` tokens of its worker's (mostly cache reads, as a worker's are), `fable` of its
+    /// verifier's.
+    static func receipt(worked: Double, opus: Int, fable: Int?, end: Double) -> LeadReceipt {
+        func tokens(_ total: Int, _ model: String) -> LeadTokens {
+            let read = total * 9 / 10, write = total / 20, output = total / 50
+            var tokens = LeadTokens(input: total - read - write - output, output: output, cacheRead: read, cacheWrite: write, cacheWrite1h: write,
+                                    sessions: 1, models: [model])
+            let price = LeadPrices.price(model)!
+            tokens.cost = (Double(tokens.input) * price.input + Double(output) * price.output + Double(read) * price.cacheRead
+                           + Double(write) * price.input * 2) / 1_000_000
+            return tokens
+        }
+        return LeadReceipt(ending: .merged, startedAt: end - worked * 1.6, endedAt: end, worked: worked, worker: tokens(opus, "claude-opus-5-5"),
+                           verifier: fable.map { tokens($0, "claude-fable-5-1") }, rounds: fable == nil ? 0 : 1, tests: 1_412)
+    }
+
+    /// The `all-done` sheet's mark: a batch of four, three merged with receipts and one folded.
+    static func allDoneMark() -> LeadAllDone {
+        let now = Date().timeIntervalSince1970
+        let made: [(String, String, LeadAllDone.Task.Outcome, LeadReceipt?)] = [
+            ("payout-ledger", "Payout ledger reconciles nightly", .merged, receipt(worked: 5_400, opus: 14_800_000, fable: 3_100_000, end: now - 900)),
+            ("payout-report", "Payout report shows reconciled totals", .merged, receipt(worked: 2_700, opus: 6_200_000, fable: nil, end: now - 600)),
+            ("stake-history", "Stake history pages load under a second", .merged, receipt(worked: 1_800, opus: 4_100_000, fable: nil, end: now - 300)),
+            ("old-widget", "Old staking widget", .folded, nil),
+        ]
+        var tasks: [LeadTask] = []
+        for (slug, title, _, receipt) in made {
+            var task = LeadTask(slug: slug, title: title, contract: LeadContract(goal: title, acceptance: [], boundaries: [], context: ""), status: .done)
+            task.receipt = receipt
+            tasks.append(task)
+        }
+        var mark = LeadAllDone(id: "sandbox-all-done", at: now - 60, since: now - 4 * 3_600, tasks: made.map { .init(slug: $0.0, title: $0.1, outcome: $0.2) })
+        mark.summary = .init(headline: "Payouts now reconcile every night, and the stake history loads fast.", bullets: [
+            "The payout ledger is checked against the bank's records each night, and the report shows the reconciled totals.",
+            "Stake history pages load in under a second.",
+        ], byModel: true)
+        mark.receipts = LeadReceiptTotals(tasks)
+        return mark
     }
 
     /// Two updates for the `results` sheet, their images in a scratch project under the sandbox's home.

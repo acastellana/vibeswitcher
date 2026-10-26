@@ -51,6 +51,18 @@ struct AllDoneCard: View {
             } else {
                 Text("Writing a short summary of what was done…").font(.system(size: 12)).foregroundStyle(.secondary)
             }
+            if let receipts = mark.receipts {
+                // What the batch cost: its receipts summed (marks from before receipts have none, and show nothing).
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "receipt").font(.system(size: 11)).foregroundStyle(.secondary).accessibilityHidden(true)
+                    Text(Self.cost(receipts))
+                }
+                .font(.system(size: 11.5)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .help("Each task's receipt: its worker's working time, and the tokens its worker and verifier sessions spent, read "
+                    + "from their transcripts. Costs are estimates at the API prices of \(receipts.pricesAsOf).")
+            }
             Button { withAnimation(reduceMotion ? nil : .easeOut(duration: 0.15)) { chat.toggle(Self.key(mark)) } } label: {
                 HStack(spacing: 5) {
                     Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold))
@@ -87,6 +99,9 @@ struct AllDoneCard: View {
         .contextMenu { Button("Copy Summary") { Pasteboard.copy(Self.text(mark)) } }
     }
 
+    /// "Cost: 4 tasks, 6.2 h of worker time, 61M tokens, est. $38.12; most expensive: …".
+    static func cost(_ receipts: LeadReceiptTotals) -> String { "Cost: " + receipts.text + "." }
+
     /// "5 tasks · 4 merged".
     static func count(_ mark: LeadAllDone) -> String {
         "\(mark.tasks.count) task\(mark.tasks.count == 1 ? "" : "s") · \(mark.merged) merged"
@@ -112,6 +127,7 @@ struct AllDoneCard: View {
     static func text(_ mark: LeadAllDone) -> String {
         var lines = ["All tasks finished"]
         if let summary = mark.summary { lines += [summary.headline] + summary.bullets.map { "- \($0)" } }
+        if let receipts = mark.receipts { lines.append(cost(receipts)) }
         lines.append(count(mark))
         lines += mark.tasks.map { "- \($0.title) (\(word($0.outcome)))" }
         return lines.joined(separator: "\n")

@@ -42,6 +42,8 @@ public struct LeadAllDone: Codable, Equatable, Sendable, Identifiable {
     public var summary: Summary?
     /// When the user opened the lead after it (the sidebar's check goes then).
     public var seenAt: Double?
+    /// Its tasks' receipts summed (`LeadReceiptTotals`); nil when none has one (marks from before receipts).
+    public var receipts: LeadReceiptTotals?
 
     public var merged: Int { tasks.filter { $0.outcome == .merged }.count }
 
@@ -134,8 +136,10 @@ public enum BatchSummary {
         guard let previous, hasOpenWork(previous), !hasOpenWork(current) else { return nil }
         let tasks = batch(current)
         guard tasks.contains(where: { $0.status == .done }) else { return nil }
-        return LeadAllDone(id: id, at: now, since: batchStart(current),
-                           tasks: tasks.map { .init(slug: $0.slug, title: $0.title, outcome: outcome($0)) })
+        var mark = LeadAllDone(id: id, at: now, since: batchStart(current),
+                               tasks: tasks.map { .init(slug: $0.slug, title: $0.title, outcome: outcome($0)) })
+        mark.receipts = LeadReceiptTotals(tasks)
+        return mark
     }
 
     /// Makes the mark on `board` (the one read under the board's lock: another writer may have marked it already, and
