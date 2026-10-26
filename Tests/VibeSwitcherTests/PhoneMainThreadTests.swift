@@ -96,6 +96,25 @@ struct PhoneMainThreadTests {
         return try #require(answer?.json["token"] as? String)
     }
 
+    /// Pairs the test's phone after another one, as the devices file the access loads may hold one: its token, and
+    /// `done`, which unpairs it and checks the other one is still paired (then unpairs that too).
+    private func pairBesideAnother(_ access: PhoneAccess) throws -> (token: String, done: () -> Void) {
+        let other = try pair(access)
+        let token = try pair(access)
+        return (token, {
+            unpair(access, token: token)
+            #expect(!access.devices.contains { $0.tokenHash == RemoteAuth.hash(token) })
+            #expect(access.devices.contains { $0.tokenHash == RemoteAuth.hash(other) }, "the test's cleanup removed another phone")
+            unpair(access, token: other)
+        })
+    }
+
+    /// Removes the phone `token` belongs to, if it's still paired, and no other: the devices file is the same for every
+    /// suite in the run (~/.vibeswitcher/remote), and the others pair their own phones in it at the same time.
+    private func unpair(_ access: PhoneAccess, token: String) {
+        if let device = access.devices.first(where: { $0.tokenHash == RemoteAuth.hash(token) }) { access.remove(device) }
+    }
+
     /// What the main thread did while a stand-in Terminal read of `readTime` went on.
     struct Waited {
         var answer: Answer
@@ -162,8 +181,8 @@ struct PhoneMainThreadTests {
         let store = try await storeWithATerminalSession()
         let access = PhoneAccess(store: store)
         access.serveForTests(.init(dnsName: Self.host, login: Self.login, httpsAvailable: true))
-        let token = try pair(access)
-        defer { access.remove(access.devices[0]) }
+        let (token, unpaired) = try pairBesideAnother(access)
+        defer { unpaired() }
 
         // Apart, so each read isn't answered from the screen kept for 0.8 s.
         try await mainStaysFree(access, pause: 1, { try request("GET", "/api/screen?tty=\(Self.tty)", token: token) }) { answer in
@@ -176,12 +195,12 @@ struct PhoneMainThreadTests {
         let store = try await storeWithATerminalSession()
         let access = PhoneAccess(store: store)
         access.serveForTests(.init(dnsName: Self.host, login: Self.login, httpsAvailable: true))
-        let token = try pair(access)
+        let (token, unpaired) = try pairBesideAnother(access)
         let wasAllowed = access.inputAllowed
         access.inputAllowed = true
         defer {
             access.inputAllowed = wasAllowed
-            access.remove(access.devices[0])
+            unpaired()
         }
         let sid = try #require(store.sessions.first { $0.tty == Self.tty }).identity
 

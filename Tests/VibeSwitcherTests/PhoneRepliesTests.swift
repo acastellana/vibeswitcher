@@ -115,8 +115,14 @@ struct PhoneRepliesTests {
         access.inputAllowed = true
         return (access, token, {
             access.inputAllowed = wasAllowed
-            for device in access.devices { access.remove(device) }
+            unpair(access, token: token)
         })
+    }
+
+    /// Removes the phone `token` belongs to, if it's still paired, and no other: the devices file is the same for every
+    /// suite in the run (~/.vibeswitcher/remote), and the others pair their own phones in it at the same time.
+    private func unpair(_ access: PhoneAccess, token: String) {
+        if let device = access.devices.first(where: { $0.tokenHash == RemoteAuth.hash(token) }) { access.remove(device) }
     }
 
     /// Pairs a phone named `name` with `access`, as a phone does: its token.
@@ -448,7 +454,11 @@ struct PhoneRepliesTests {
         // same for every suite in the run: another one pairs its own beside this one).
         var other = ""
         let (access, token, done) = try serve(store) { other = try pair($0, name: "Another phone") }
-        defer { done() }
+        defer {
+            done()
+            #expect(access.devices.contains { $0.tokenHash == RemoteAuth.hash(other) }, "serve's cleanup removed another phone")
+            unpair(access, token: other)
+        }
         // The read goes on until the test lets it end (off the main thread, on the reads queue).
         let reading = Box(false)
         let release = DispatchSemaphore(value: 0)
