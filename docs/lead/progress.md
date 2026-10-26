@@ -1349,3 +1349,6 @@
 - 2026-10-26 02:10 Audit of needs-you-follow-ups: complete, clean, round 1: 3 Nit open, 1 Pre-existing open
 - 2026-10-26 02:10 Planned the-phone-shows-needs: The phone shows "needs you" only for the user, like the Mac (review audit)
 - 2026-10-26 02:30 Merged needs-you-follow-ups: "Needs you" follow-ups: open question, red dot, base-branch alert
+- 2026-10-26 02:30 Automatically (auto_advance): Merged needs-you-follow-ups ("Needs you" follow-ups: open question, red dot, base-branch alert) into project-lead at e3e9bfe6, on its passing audit and the full test run.
+- 2026-10-26 02:31 Automatically (auto_advance): Cleaned up needs-you-follow-ups (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-10-26 02:31 Ended the-lead-s-rules's worker (idle since its done report on 8abcbca4) to make room on the Mac for its audit
