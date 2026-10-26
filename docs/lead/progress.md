@@ -1456,3 +1456,5 @@
 - 2026-10-26 17:12 Automatically (auto_advance): Cleaned up after-a-revert-dependent (freed 2.2 GB of build output and temporary folders). It stays done.
 - 2026-10-26 17:22 Raised the-verifier-s-eval to audit (the risk check, at f111a305): it changes 577 lines outside tests, over risk_lines (400)
 - 2026-10-26 17:22 Automatically (auto_advance): Started the audit of the-verifier-s-eval at f111a305 (The risk check raised it to audit: it changes 577 lines outside tests, over risk_lines (400)).
+- 2026-10-26 17:39 Audit of the-verifier-s-eval: complete, clean, round 1: 4 Nit open
+- 2026-10-26 17:46 Merged the-verifier-s-eval: The verifier's eval set: real past bugs and clean commits, run when its prompt or model changes
