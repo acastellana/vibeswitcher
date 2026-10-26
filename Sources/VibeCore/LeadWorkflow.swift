@@ -50,6 +50,11 @@ public struct LeadWorkflow: Equatable, Sendable {
     /// or audited, a clean audit merged, open Important findings sent back, a merged task cleaned up, and a planned task
     /// whose `after` tasks are done started. False: the lead does each.
     public var autoAdvance = true
+    /// The risk check (see `LeadRisk`): a review none task whose branch changes more lines than this is audited
+    /// (`risk_lines:`; 0: no size trigger).
+    public var riskLines = LeadRisk.defaultLines
+    /// The risk check's model pass (`risk_model:`; false: the deterministic triggers only).
+    public var riskModel = true
     /// This project's lead gets VibeSwitcher's own health digests (`watch_app_logs:`, see `AppHealth`): its freezes,
     /// crashes and error lines, and a daily trend. Off for every project but the one that builds VibeSwitcher.
     public var watchAppLogs = false
@@ -112,6 +117,8 @@ public struct LeadWorkflow: Equatable, Sendable {
                 case "sensitive_paths": workflow.sensitivePaths = globs(value)
                 case "records_dir": workflow.recordsDir = recordsFolder(value)
                 case "auto_advance": workflow.autoAdvance = flag(value) ?? true
+                case "risk_lines": workflow.riskLines = Int(value).map { max(0, $0) } ?? LeadRisk.defaultLines
+                case "risk_model": workflow.riskModel = flag(value) ?? true
                 case "watch_app_logs": workflow.watchAppLogs = flag(value) ?? false
                 default: break
                 }
@@ -346,7 +353,7 @@ public struct LeadWorkflow: Equatable, Sendable {
     public static let configurable = ["test_command", "regression_command", "init_command", "base_branch", "verifier_model", "max_workers",
                                       "disk_warning_gb", "disk_floor_gb", "test_timeout_min", "task_budget_min",
                                       "heavy_slots", "audit_finders", "audit_nit_cap", "merge_policy", "sensitive_paths", "records_dir",
-                                      "auto_advance", "watch_app_logs"]
+                                      "auto_advance", "risk_lines", "risk_model", "watch_app_logs"]
 
     /// Writes the workflow file (`.vibeswitcher/workflow.md`), private to you (0600), atomically: the template the first
     /// time (`BoardStore.prepare`), the lead's `configure` after.
@@ -503,6 +510,14 @@ public struct LeadWorkflow: Equatable, Sendable {
     # merged task cleaned up, and a planned task started once the tasks in its `after` list are done. false: the lead
     # does each. Empty: true.
     auto_advance: true
+    # The risk check: before a review none task merges, its branch's diff is read, and it's audited instead when it
+    # changes more lines than this, or has code that deletes or rewrites files or data, changes permissions, spawns
+    # processes or adds locks or threads, or changes the suite's own test or build infrastructure. 0: no size trigger.
+    # Empty: 400.
+    risk_lines: 400
+    # Whether the risk check also asks headless Claude (the diff's stat, the contract and REVIEW.md; no code): it can
+    # only raise a task to audit. Empty: true.
+    risk_model: true
     ---
     Notes for the lead: conventions, priorities, what not to touch. The lead reads this at the start of every session.
     """
@@ -713,7 +728,10 @@ public enum LeadPrompts {
             + "visibility, anything that exposes it to others), irreversible operations (migrations, deleting or rewriting "
             + "data, anything outward-facing) or complex "
             + "changes (concurrency, many parts at once, hard to test). A task whose branch touches sensitive_paths is audited "
-            + "whatever you set."
+            + "whatever you set, and so is one whose change the risk check flags when it reports done (its size over "
+            + "risk_lines; code that deletes files or data, changes permissions, spawns processes or adds locks or threads; "
+            + "the suite's own test or build infrastructure; or headless Claude's raise): the check only raises, and you're "
+            + "told why."
 
         /// What the lead does with a worker's done report on a review none task.
         public static let leadUnaudited = "A review none task needs no audit: merge(task) takes its worker's done report on "
@@ -1258,7 +1276,8 @@ public enum LeadPrompts {
     }
 
     public static func verifier(task: LeadTask, root: String, workflow: LeadWorkflow, reaudit: Reaudit? = nil, finder: Finder? = nil,
-                                merged: Merged? = nil, notes: Notes = Notes(), report: String? = nil, policy: String = WorkingPolicy.load()) -> String {
+                                merged: Merged? = nil, notes: Notes = Notes(), report: String? = nil, policy: String = WorkingPolicy.load(),
+                                guide: String? = nil) -> String {
         """
         You are the verifier for a task of the project lead of \(root). You are read-only: don't edit, fix, commit or \
         stage anything. Check the branch agent/\(task.slug) in this worktree against its contract, independently of \
@@ -1298,10 +1317,22 @@ public enum LeadPrompts {
 
         \(WorkerBrief.render(task))
 
-        \(reportSection(report))
+        \(guideSection(guide, base: workflow.base))\(reportSection(report))
 
         \(notesSection(notes))
         """
+    }
+
+    static let guideHeading = "## The project's REVIEW.md"
+
+    /// The verifier's section of the owner's REVIEW.md, as the base branch has it (`LeadRisk.reviewGuide`); "" without
+    /// one.
+    static func guideSection(_ guide: String?, base: String) -> String {
+        guard let guide, !guide.isEmpty else { return "" }
+        return guideHeading + "\n"
+            + "The project owner's word on what matters in this code, what to ignore and what counts as a Nit, from \(base) "
+            + "(the branch's own copy doesn't count). Weigh findings and the report format by it; the rules above still hold:\n"
+            + guide + "\n\n"
     }
 
     /// A re-audit's instructions: the open findings, the closed ones, and the diff its new findings come from.

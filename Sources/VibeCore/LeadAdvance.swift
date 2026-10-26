@@ -4,7 +4,8 @@ import Foundation
 /// `auto_advance`, on unless set false; a task opts out with its own `auto_advance: false`). Over 2026-10-22..25, 59 %
 /// of task time was finished work waiting for the lead, often overnight, and about 1.15 of 5 worker slots were used.
 /// Each pass looks at the board and the vault as they are and takes the steps that are due:
-/// - a review none task whose worker reported done on its branch's head merges (merge's full test run is its check);
+/// - a review none task whose worker reported done on its branch's head merges (merge's full test run is its check),
+///   unless the risk check (`LeadRisk`) raises it to audit from what its branch changes: then it's audited instead;
 /// - an audit task reported done gets its audit, and a passing verdict on its head merges;
 /// - a verdict that left Important findings open sends its worker the open ids to answer with answer_findings (once
 ///   per verdict), or starts a worker to get them when its own has ended; a verdict the round cap says to reconsider
@@ -359,9 +360,16 @@ public final class LeadAdvance: @unchecked Sendable {
         }
         // An audit under way on this commit: its verdict comes, unless its verifier ended without one.
         if vault.current(.verifier, root: root, task: slug)?.auditing == head { return auditAgain(slug, head: head, busy: busy) }
+        // The risk check runs here too (`LeadRisk`): a review none task whose change it flags is audited, not merged.
         if let needed = lead.advanceReviewNeeded(slug, commit: head) {
             let finders = lead.workflow.auditFinders
-            guard !busy, hasRoom(slug, need: finders) else { return roomWait("audit(\(slug))", need: finders) }
+            guard !busy, hasRoom(slug, need: finders) else {
+                // Raised: the lead hears why now, though its audit waits for the Mac's room.
+                if let raised = lead.store.load().task(slug)?.riskRaised {
+                    once("risk|\(slug)|\(raised.commit)", "\(slug) is audited, not merged: \(raised.reason) (the risk check raised it from review none). Its audit starts once the Mac has room.")
+                }
+                return roomWait("audit(\(slug))", need: finders)
+            }
             step("audit|\(slug)|\(head)") {
                 guard due(slug, [.review]) != nil else { throw NotDue() }
                 _ = try lead.advanceAudit(slug)

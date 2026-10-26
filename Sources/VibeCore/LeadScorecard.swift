@@ -26,6 +26,8 @@ public struct LeadTaskScore: Codable, Equatable, Sendable {
     public var mergedUnaudited: Bool?
     /// Its review level (none, or audit); nil in scores counted before review levels.
     public var review: LeadTask.Review?
+    /// Why the risk check raised it from review none to audit (see `LeadRisk`); nil when it didn't.
+    public var riskRaised: String?
     /// The base's commit that reverted its merge (all or part of it), once one did.
     public var revertedBy: String?
     /// When these were counted.
@@ -33,7 +35,7 @@ public struct LeadTaskScore: Codable, Equatable, Sendable {
 
     public init(roundsToPass: Int? = nil, rounds: Int = 0, importantFindings: Int = 0, questions: Int = 0, answers: Int = 0,
                 waitingOnUser: Double = 0, mergedWithoutTests: Bool? = nil, mergedUnaudited: Bool? = nil, review: LeadTask.Review? = nil,
-                revertedBy: String? = nil, asOf: Double = Date().timeIntervalSince1970) {
+                riskRaised: String? = nil, revertedBy: String? = nil, asOf: Double = Date().timeIntervalSince1970) {
         self.roundsToPass = roundsToPass
         self.rounds = rounds
         self.importantFindings = importantFindings
@@ -43,6 +45,7 @@ public struct LeadTaskScore: Codable, Equatable, Sendable {
         self.mergedWithoutTests = mergedWithoutTests
         self.mergedUnaudited = mergedUnaudited
         self.review = review
+        self.riskRaised = riskRaised
         self.revertedBy = revertedBy
         self.asOf = asOf
     }
@@ -57,7 +60,7 @@ public struct LeadTaskScore: Codable, Equatable, Sendable {
             // Its worker owns it through merge: no audit to count.
             parts.append("Review none: no audit")
         } else {
-            if review == .audit { parts.append("Review audit") }
+            if review == .audit { parts.append("Review audit" + (riskRaised.map { " (audited: \(LeadToolset.clip($0, 90)), as the risk check found)" } ?? "")) }
             parts.append(roundsToPass.map { "Passed on audit \($0)" } ?? (rounds == 0 ? "Not audited yet" : "\(rounds) audit\(rounds == 1 ? "" : "s"), not passed yet"))
             parts.append("\(importantFindings) Important finding\(importantFindings == 1 ? "" : "s")")
         }
@@ -86,7 +89,7 @@ public struct LeadTaskScore: Codable, Equatable, Sendable {
                   questions: asked.count, answers: asked.filter { $0.answer != nil }.count,
                   waitingOnUser: asked.reduce(0) { $0 + $1.waitingOnUser(now: now) },
                   mergedWithoutTests: folded ? nil : task.merged.map { !$0.tested }, mergedUnaudited: folded ? nil : task.merged.map(\.unaudited),
-                  review: task.reviewLevel, revertedBy: folded ? nil : task.merged?.revertedBy, asOf: now)
+                  review: task.reviewLevel, riskRaised: task.riskRaised?.reason, revertedBy: folded ? nil : task.merged?.revertedBy, asOf: now)
     }
 }
 

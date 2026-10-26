@@ -147,6 +147,14 @@ public final class LeadToolset: MCPToolset {
     var roomWaits = LeadWitness.RoomWaits()
     /// Moves finished work on by itself (see `LeadAdvance`), once `startAdvancing` is called (the lead's server).
     var advancing: LeadAdvance?
+    /// The risk check's model pass (see `LeadRisk`): a prompt in, the answer out, or nil (no Claude, an error, out of
+    /// time). The lead's tool server sets headless Claude (`ClaudeHeadless.risk`); nil (tests that don't fake it):
+    /// the deterministic triggers only.
+    public var riskModel: ((String) -> String?)?
+    /// The model pass's answers by task and commit (nil: keep, an error or a timeout), so a merge after auto_advance's
+    /// look, or a pass after another, doesn't ask again.
+    private var riskAnswers: [String: String?] = [:]
+    private let riskLock = NSLock()
     /// Status said once that workflow.md's Mac-wide keys are ignored.
     private var toldIgnoredKeys = false
     private let tellingIgnoredKeys = NSLock()
@@ -477,6 +485,8 @@ public final class LeadToolset: MCPToolset {
                                                            options: LeadWorkflow.MergePolicy.allCases.map(\.rawValue)),
                                          "sensitive_paths": P(type: "string", description: "The globs ask_sensitive holds back, comma-separated, as in .gitignore (empty: Claude's settings and instructions, .github, .env files, entitlements, keys)"),
                                          "auto_advance": P(type: "boolean", description: "Whether VibeSwitcher moves finished work on by itself (default true): a task reported done is merged (review none) or audited, a clean audit merged, open Important findings sent back to its worker, a merged task cleaned up, and a planned task started once its after tasks are done; you get one report of what it did. false: you do each"),
+                                         "risk_lines": P(type: "integer", description: "The risk check's size trigger: a review none task whose branch changes more lines than this (added and removed) is audited instead of merged when it reports done (default 400; 0: no size trigger)"),
+                                         "risk_model": P(type: "boolean", description: "Whether the risk check also asks headless Claude, from the diff's stat, the contract and the base branch's REVIEW.md (no code), to raise a review none task to audit (default true); it only raises, and a timeout or error leaves the deterministic triggers' result"),
                                          "watch_app_logs": P(type: "boolean", description: "Whether you get VibeSwitcher's own health digests (default false; only for the project that builds VibeSwitcher): its freezes, crashes and error lines as it logs them, and a daily trend, each as a witness report to turn into tasks where it's a real bug")]),
             ]
         }
@@ -1528,7 +1538,8 @@ public final class LeadToolset: MCPToolset {
             session = try launch(.verifier, task: slug, name: "verify-\(slug)", in: Worktrees.path(root: root, slug: slug),
                                  label: "Verifier: \(task.title)", trust: config.isEmpty,
                                  prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, merged: merged,
-                                                              notes: leadNotes(task), report: doneReport(task, head: head)),
+                                                              notes: leadNotes(task), report: doneReport(task, head: head),
+                                                              guide: LeadRisk.reviewGuide(root: root, base: workflow.base)),
                                  start: "Verify the task now, then call submit_audit.", model: auditModel(workflow), auditing: head)
         }
         try store.update { board in
@@ -1598,7 +1609,7 @@ public final class LeadToolset: MCPToolset {
         let changed = Git.run(["diff", "--name-only", "\(workflow.base)...\(head)"], in: root).output.split(whereSeparator: \.isNewline).map(String.init)
         let sensitive = changed.filter { path in workflow.sensitiveGlobs.contains { LeadWorkflow.matches(path, glob: $0) } }
         let focuses = LeadPrompts.Focus.panel(count, sensitive: !sensitive.isEmpty)
-        let notes = leadNotes(task), report = doneReport(task, head: head)
+        let notes = leadNotes(task), report = doneReport(task, head: head), guide = LeadRisk.reviewGuide(root: root, base: workflow.base)
         let earlier = try endEarlierVerifiers(task, not: "Not audited, no finder started")
         let id = UUID().uuidString
         var sessions: [String] = []
@@ -1610,7 +1621,7 @@ public final class LeadToolset: MCPToolset {
                 sessions.append(try launch(.verifier, task: slug, name: index == 1 ? "verify-\(slug)" : "finder\(index)-\(slug)",
                                            in: Worktrees.path(root: root, slug: slug), label: "Verifier: \(task.title) (finder \(index)/\(count): \(focus.rawValue))",
                                            trust: trust, prompt: LeadPrompts.verifier(task: task, root: root, workflow: workflow, reaudit: recheck, finder: finder,
-                                                                                      merged: merged, notes: notes, report: report),
+                                                                                      merged: merged, notes: notes, report: report, guide: guide),
                                            start: "Look for findings in your focus now, then call submit_audit.", model: auditModel(workflow), auditing: head,
                                            finder: LeadVault.Finder(panel: id, index: index, size: count, focus: focus.rawValue, nitCap: workflow.auditNitCap)))
             } catch {
@@ -1949,7 +1960,7 @@ public final class LeadToolset: MCPToolset {
             (commit, audited) = (verdict.commit, true)
         } else {
             let head = branchHead(Worktrees.branch(slug))
-            if let needed = reviewNeeded(slug, commit: head) {
+            if let needed = reviewNeeded(slug, commit: head, model: true) {
                 throw Problem(text: (vault.missingVerdictReason(root: root, task: slug)
                     ?? "\(slug) has no passing audit. Run audit: merge takes a complete, clean verdict.") + " " + needed)
             }
@@ -2139,13 +2150,19 @@ public final class LeadToolset: MCPToolset {
     /// Why `slug`'s merge needs a passing audit, in a sentence; nil when it doesn't: review none on the board and in
     /// the vault (only the lead lowers it there), no audit started on it (once one is, its verdict decides), and its
     /// branch at `commit` touches nothing in sensitive_paths (always audited, whatever its review says).
-    private func reviewNeeded(_ slug: String, commit: String?) -> String? {
-        let level = store.load().task(slug)?.reviewLevel ?? .none
+    /// Past those, the risk check (see `LeadRisk`): its deterministic triggers on what the branch changes, then, with
+    /// `model` (merge, and auto_advance's step to it, in the lead's server), headless Claude's word. A raise is the
+    /// vault's review audit from then on (`raiseReview`), never lowered by it.
+    private func reviewNeeded(_ slug: String, commit: String?, model: Bool = false) -> String? {
+        let task = store.load().task(slug)
+        let level = task?.reviewLevel ?? .none
         let kept: LeadVault.Unaudited
         do { kept = try vault.unaudited(root: root, task: slug) } catch {
             return "Its review level can't be read from the vault (\(error)), so it's audited."
         }
-        if level.atLeast(kept.review) == .audit { return "Its review is audit." }
+        if level.atLeast(kept.review) == .audit {
+            return "Its review is audit." + (task?.riskRaised.map { " (audited: \($0.reason), as the risk check found.)" } ?? "")
+        }
         if vault.current(.verifier, root: root, task: slug) != nil { return "An audit was started on it: its verdict decides." }
         guard let commit else { return "Its branch \(Worktrees.branch(slug)) isn't there." }
         let workflow = self.workflow
@@ -2158,7 +2175,63 @@ public final class LeadToolset: MCPToolset {
             return "It touches sensitive_paths (" + sensitive.prefix(8).joined(separator: ", ") + (sensitive.count > 8 ? ", …" : "")
                 + "), so it's treated as audit whatever its review says."
         }
-        return nil
+        return riskRaise(task, commit: commit, workflow: workflow, model: model)
+    }
+
+    /// What `LeadRisk` says of `task`'s branch at `commit`, as reviewNeeded's sentence; nil: it stays review none. The
+    /// model pass runs only when nothing deterministic raised it, once per commit, and its keep, error or timeout leave
+    /// the deterministic result. Only the stat, the contract and the base branch's REVIEW.md go to it.
+    private func riskRaise(_ task: LeadTask?, commit: String, workflow: LeadWorkflow, model: Bool) -> String? {
+        guard let task else { return nil }
+        let range = "\(workflow.base)...\(commit)"
+        let numstat = Git.run(["diff", "--numstat", "--no-color", range], in: root)
+        guard numstat.ok else { return "What its branch changes can't be read for the risk check (\(numstat.error)), so it's audited." }
+        var reason = LeadRisk.deterministic(changes: LeadRisk.changes(numstat: numstat.output), patch: {
+            let patch = Git.run(["diff", "-U0", "--no-color", range], in: root)
+            return patch.ok ? patch.output : nil
+        }, workflow: workflow)
+        var byModel = false
+        if reason == nil, model, workflow.riskModel, let ask = riskModel {
+            let key = "\(task.slug)@\(commit)"
+            riskLock.lock()
+            let asked = riskAnswers[key]
+            riskLock.unlock()
+            let answer: String?
+            if let asked {
+                answer = asked
+            } else {
+                let stat = Git.run(["diff", "--stat", "--no-color", range], in: root)
+                let prompt = LeadRisk.prompt(stat: stat.ok ? stat.output : "(the stat can't be read)", contract: WorkerBrief.render(task),
+                                             guide: LeadRisk.reviewGuide(root: root, base: workflow.base))
+                if case .raise(let why)? = LeadRisk.parse(ask(prompt)) { answer = why } else { answer = nil }
+                riskLock.lock()
+                riskAnswers[key] = .some(answer)
+                riskLock.unlock()
+            }
+            if let answer {
+                reason = "headless Claude said raise: \(answer)"
+                byModel = true
+            }
+        }
+        guard let reason else { return nil }
+        if role == .lead { raiseReview(task.slug, LeadRiskRaise(reason: reason, commit: commit, byModel: byModel)) }
+        return "The risk check raised it to audit: \(reason)."
+    }
+
+    /// Records the risk check's raise: the vault's review audit (what merge goes by, which only the lead lowers), the
+    /// board's level and why (for showing), and a line in the progress log, once.
+    private func raiseReview(_ slug: String, _ raise: LeadRiskRaise) {
+        try? vault.setReview(.audit, root: root, task: slug)
+        var first = false
+        try? store.update { board in
+            guard let index = board.taskIndex(slug) else { return }
+            board.tasks[index].review = .audit
+            if board.tasks[index].riskRaised == nil {
+                board.tasks[index].riskRaised = raise
+                first = true
+            }
+        }
+        if first { try? store.appendProgress("Raised \(slug) to audit (the risk check, at \(raise.commit.prefix(8))): \(raise.reason)") }
     }
 
     /// The commit a review none task merges at: its branch's head, as long as its own worker reported done on it (as
@@ -2768,6 +2841,10 @@ public final class LeadToolset: MCPToolset {
                 guard !value.isEmpty else { break }
                 guard let count = Int(value), count >= 0 else { throw Problem(text: "audit_nit_cap must be a whole number, 0 or more.") }
                 value = String(count)
+            case "risk_lines":
+                guard !value.isEmpty else { break }
+                guard let count = Int(value), count >= 0 else { throw Problem(text: "risk_lines must be a whole number of lines, 0 (no size trigger) or more.") }
+                value = String(count)
             case "task_budget_min":
                 guard !value.isEmpty else { break }
                 guard let count = Int(value), count >= 0 else { throw Problem(text: "task_budget_min must be a whole number of minutes, 0 (no budget) or more.") }
@@ -2788,7 +2865,7 @@ public final class LeadToolset: MCPToolset {
                     throw Problem(text: "records_dir is a folder inside the repository (e.g. docs/lead), not in .git or .vibeswitcher; empty keeps the logs in .vibeswitcher.")
                 }
                 value = folder
-            case "auto_advance" where !value.isEmpty, "watch_app_logs" where !value.isEmpty:
+            case "auto_advance" where !value.isEmpty, "watch_app_logs" where !value.isEmpty, "risk_model" where !value.isEmpty:
                 // A JSON true or false arrives as a number.
                 let flag = (given as? Bool) ?? LeadWorkflow.flag(value)
                 guard let flag else { throw Problem(text: "\(key) is true or false.") }
@@ -2822,12 +2899,14 @@ public final class LeadToolset: MCPToolset {
                                           "audit_finders": String(after.auditFinders), "audit_nit_cap": String(after.auditNitCap),
                                           "merge_policy": after.mergePolicy?.rawValue ?? "", "sensitive_paths": after.sensitivePaths?.joined(separator: ", ") ?? "",
                                           "records_dir": after.recordsDir ?? "", "auto_advance": String(after.autoAdvance),
+                                          "risk_lines": String(after.riskLines), "risk_model": String(after.riskModel),
                                           "watch_app_logs": String(after.watchAppLogs)]
             // A limit cleared reads back as its default.
             let defaults = ["disk_warning_gb": Self.gb(LeadWorkflow().diskWarningGB), "disk_floor_gb": Self.gb(LeadWorkflow().diskFloorGB),
                             "test_timeout_min": Self.gb(LeadWorkflow().testTimeoutMinutes), "task_budget_min": String(LeadWorkflow().taskBudgetMinutes),
                             "audit_finders": String(LeadWorkflow().auditFinders), "audit_nit_cap": String(LeadWorkflow().auditNitCap),
-                            "auto_advance": String(LeadWorkflow().autoAdvance), "watch_app_logs": String(LeadWorkflow().watchAppLogs)]
+                            "auto_advance": String(LeadWorkflow().autoAdvance), "watch_app_logs": String(LeadWorkflow().watchAppLogs),
+                            "risk_lines": String(LeadWorkflow().riskLines), "risk_model": String(LeadWorkflow().riskModel)]
             for change in changes where read[change.key] != (change.value.isEmpty ? defaults[change.key] ?? "" : change.value) {
                 throw Problem(text: "Wrote workflow.md, but \(change.key) reads back as \"\(read[change.key] ?? "")\", not \"\(change.value)\". Check the file.")
             }
@@ -3570,6 +3649,7 @@ public final class LeadToolset: MCPToolset {
     private func taskLine(_ task: LeadTask, _ sessions: [String: LeadSessionInfo]?) -> String {
         var line = "- \(task.slug): \(Self.clip(task.title, 60))"
         if task.reviewLevel == .audit, task.status != .done { line += " — review audit" }
+        if let raised = task.riskRaised, task.status != .done { line += " — audited: \(Self.clip(raised.reason, 90))" }
         if task.status == .kept { line += " — kept: \(Self.clip(task.keptBecause ?? "no reason recorded", 80))" }
         if task.status == .folded { line += " — folded into \(task.foldedInto ?? "another task")" }
         if task.status == .abandoned { line += " — abandoned: \(Self.clip(task.abandonedBecause ?? "no reason recorded", 80))" }
@@ -3775,6 +3855,8 @@ public final class LeadToolset: MCPToolset {
         lines.append("- sensitive_paths: \(workflow.sensitiveGlobs.joined(separator: ", "))\(workflow.sensitivePaths == nil ? " (the defaults)" : "")")
         lines.append("- auto_advance: " + (workflow.autoAdvance ? "true (finished work moves on by itself: merged, audited, sent back, cleaned up; planned tasks start once their after tasks are done)"
             : "false (you start, audit, merge and clean up each task yourself)"))
+        lines.append("- risk_lines: " + (workflow.riskLines > 0 ? "\(workflow.riskLines) (a review none task changing more lines is audited instead of merged)" : "0 (no size trigger)"))
+        lines.append("- risk_model: " + (workflow.riskModel ? "true (headless Claude may raise a review none task to audit, from the diff's stat, the contract and REVIEW.md)" : "false (the risk check's deterministic triggers only)"))
         if workflow.watchAppLogs {
             lines.append("- watch_app_logs: true (VibeSwitcher's own freezes, crashes, error lines and daily trend come to you as witness reports)")
         }
@@ -3801,7 +3883,8 @@ public final class LeadToolset: MCPToolset {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             var lines = [String(decoding: try encoder.encode(task), as: UTF8.self)]
-            lines.append("\nReview: \(task.reviewLevel.rawValue)" + (task.merged.map { $0.unaudited ? " (merged with no audit)" : "" } ?? ""))
+            lines.append("\nReview: \(task.reviewLevel.rawValue)" + (task.merged.map { $0.unaudited ? " (merged with no audit)" : "" } ?? "")
+                + (task.riskRaised.map { " (audited: \($0.reason), raised by the risk check at \($0.commit.prefix(8)))" } ?? ""))
             if let receipt = task.receipt { lines.append("\n" + receipt.line) }
             if let sessions, let ended = Self.endedMember(task, sessions) { lines.append("\nNow: \(ended)") }
             // From the vault, where only the task's own worker records it with its done (the board's copy is anyone's).
@@ -3894,7 +3977,7 @@ extension LeadToolset {
     func advanceCleanup(_ slug: String) throws -> MCPToolResult { try cleanup(slug, force: false) }
     func advanceMessage(_ slug: String, _ text: String) throws -> MCPToolResult { try message(slug, ["text": text]) }
     func advanceTell(_ text: String) throws -> Bool { try tellLead(text, about: LeadAdvance.sender) }
-    func advanceReviewNeeded(_ slug: String, commit: String?) -> String? { reviewNeeded(slug, commit: commit) }
+    func advanceReviewNeeded(_ slug: String, commit: String?) -> String? { reviewNeeded(slug, commit: commit, model: true) }
     func advanceHead(_ slug: String) -> String? { branchHead(Worktrees.branch(slug)) }
     func advanceSessions() throws -> [LeadSessionInfo] { try hostSessions("the session host can't be read") }
     func advanceExclusively<T>(_ body: () throws -> T) throws -> T { try exclusively("advance", body) }

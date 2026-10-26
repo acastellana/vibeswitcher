@@ -274,6 +274,9 @@ let toolset = MCPHostedToolset(attempt: {
     let toolset = LeadToolset(arguments: arguments, runtime: runtime, wait: 3)
     // Merges and audits hold the Mac-wide test and build lock around their tests, as `vs-heavy` does.
     toolset.testLock = TestLock.standard()
+    // The risk check's model pass (see `LeadRisk`): headless Claude, as the all-done summary's, from the diff's stat,
+    // the contract and REVIEW.md only.
+    toolset.riskModel = ClaudeHeadless.risk
     // No tools: that's the host's answer, unless it couldn't be asked by then either.
     if toolset.tools.isEmpty && !hostAnswers(.standard) { return nil }
     // The lead's decision and progress logs go into the repository every few minutes (and after each merge), each
