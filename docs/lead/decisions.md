@@ -460,3 +460,7 @@ The worker measured it on 2026-10-26. A fresh worktree's first swift build takes
 
 The hold was for the malloc-lock stall (183–572 ms with 8 MB slack, on a loaded Mac). Now that the relief only runs in the background, at 24 MB slack its longest run measured 42 ms. The leak fix (d6ecc41, HostConnection.finish clears its handlers) stays as it was.
 
+## 2026-10-26 08:42:36 Installed project-lead at b91fa2e on 2026-10-26 08:42, on battery at 82%. It brings the whole batch: notifications, the memory leak, time budgets, receipts, CLAUDE.md, rule checks, flake fixes and switch fixes.
+
+The user answered 133FA6B0 with "Install now". Checked: the host is still pid 31589, the app relaunched as pid 12647, and the lead's tool server (pid 10199) switched in place to the new binary (inode 304239769) and holds advancing.lock again.
+
