@@ -1309,3 +1309,7 @@
 - 2026-10-26 00:54 Ended a-short-project-map's worker (idle since its done report on 7b12b36d) to make room on the Mac for its audit
 - 2026-10-26 00:54 Automatically (auto_advance): Started the audit of a-short-project-map at 7b12b36d (Its review is audit).
 - 2026-10-26 01:05 Ended every-task-gets-a's worker (idle since its done report on d99581e2) to make room on the Mac for its audit
+- 2026-10-26 01:05 Audit of a-short-project-map: complete, clean, round 1: 1 Nit open
+- 2026-10-26 01:05 Automatically (auto_advance): Started the audit of every-task-gets-a at d99581e2 (It touches sensitive_paths (Sources/VibeCore/Worktrees.swift, Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-10-26 01:08 Audit of open-sessions-pick-up: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
+- 2026-10-26 01:08 Planned the-records-commit-can: The records commit can't be cut by a tool-server switch
