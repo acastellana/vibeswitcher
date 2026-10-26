@@ -100,15 +100,18 @@ final class HangWatchdog: @unchecked Sendable {
         }
         RunLoop.main.add(snapshot, forMode: .common)
         Thread.detachNewThread { [weak self] in
+            // Four looks a second while it answers (the wakes cost power); every `catchEvery` while it's late.
+            var late = false
             while let self {
-                usleep(useconds_t(self.catchEvery * 1_000_000))
-                self.tick()
+                usleep(useconds_t((late ? self.catchEvery : max(self.catchEvery, 0.25)) * 1_000_000))
+                late = self.tick()
             }
         }
     }
 
-    /// One look from the watchdog's thread (the caught stacks and every .log write are its own).
-    private func tick() {
+    /// One look from the watchdog's thread (the caught stacks and every .log write are its own); whether the main
+    /// thread is late.
+    private func tick() -> Bool {
         lock.lock()
         let event = detector.check()
         let late = detector.lateSince
@@ -136,6 +139,7 @@ final class HangWatchdog: @unchecked Sendable {
         case nil:
             if sampled { writeReport(withStacks: false) }
         }
+        return late != nil
     }
 
     private func record(since: Date, state: String) {
