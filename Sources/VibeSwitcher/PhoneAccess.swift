@@ -518,8 +518,9 @@ final class PhoneAccess: ObservableObject {
     }
 
     /// `/api/state`'s word for a session's state, the glossary's (`StateWord`; app.js shows it as is). A paused
-    /// session keeps it: the phone tags it Paused beside it, as the popover does.
-    static func statusLabel(_ session: Session) -> String { session.status.label }
+    /// session keeps it: the phone tags it Paused beside it, as the popover does. As the Mac reads it (`shownStatus`):
+    /// "needs you" is only ever you, so a team member waiting on input says it waits on its lead.
+    static func statusLabel(_ session: Session) -> String { LeadTeams.label(of: session) }
 
     private func stateObject(for device: PairedDevice) -> [String: Any] {
         readMenusIfDue()
@@ -527,7 +528,7 @@ final class PhoneAccess: ObservableObject {
             var row: [String: Any] = [
                 "tty": session.tty, "number": index + 1, "name": Redaction.secrets(in: session.displayName),
                 "sid": session.identity, "project": Redaction.secrets(in: session.project),
-                "agent": session.agent.rawValue, "status": session.status.rawValue,
+                "agent": session.agent.rawValue, "status": session.shownStatus.rawValue,
                 "statusLabel": Self.statusLabel(session), "inTerminal": session.inTerminalApp || session.inWindow, "inWindow": session.inWindow, "viewing": session.isCurrent,
             ]
             if session.statusSince > Date.distantPast.addingTimeInterval(1) { row["since"] = session.statusSince.timeIntervalSince1970 }
@@ -566,21 +567,24 @@ final class PhoneAccess: ObservableObject {
         ]
     }
 
-    /// The menu to offer as buttons for `session`: read lately, and not one the phone has just answered.
+    /// The menu to offer as buttons for `session`: read lately, and not one the phone has just answered. Never a team
+    /// member's: its lead answers its prompts, not you.
     private func offeredMenu(_ session: Session) -> PhoneMenu.Shown? {
         let key = session.identity
+        guard !session.isTeamMember else { return nil }
         guard let entry = menus[key], entry.at.timeIntervalSinceNow > -Self.menuFresh, let menu = entry.menu else { return nil }
         if let answer = answered[key], answer.until > Date(), answer.fingerprint == PhoneMenu.fingerprint(menu, sid: key) { return nil }
         return menu
     }
 
-    /// Reads the screens of the sessions waiting on you (in the window or a Terminal tab) for their menus, each at most
-    /// every `menuReadEvery`, one read per session at a time. What it finds shows in the next state.
+    /// Reads the screens of the sessions waiting on you (in the window or a Terminal tab; not a team member waiting on
+    /// its lead) for their menus, each at most every `menuReadEvery`, one read per session at a time. What it finds
+    /// shows in the next state.
     private func readMenusIfDue() {
         let live = Set(store.sessions.map(\.identity))
         menus = menus.filter { live.contains($0.key) }
         answered = answered.filter { live.contains($0.key) && $0.value.until > Date() }
-        for session in store.sessions where session.status == .needsInput && session.pausedUntil == nil
+        for session in store.sessions where session.status == .needsInput && !session.waitsOnLead && session.pausedUntil == nil
             && (session.inTerminalApp || session.inWindow) {
             let key = session.identity, tty = session.tty
             if menuReads.contains(key) { continue }
@@ -627,7 +631,7 @@ final class PhoneAccess: ObservableObject {
             return
         }
         screenWaiters[key] = [respond]
-        let needsInput = session.status == .needsInput
+        let needsInput = session.status == .needsInput && !session.waitsOnLead
         let finish: (String?) -> Void = { raw in
             // Visible screen only, credentials masked, trailing blank lines dropped.
             var lines = Redaction.secrets(in: raw ?? "").components(separatedBy: "\n")

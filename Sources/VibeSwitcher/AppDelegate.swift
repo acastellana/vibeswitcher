@@ -449,10 +449,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         let index = Int(bitPattern: data) - 1
         let own = store.split.own
         guard own.indices.contains(index) else { return "" }
-        let session = own[index]
+        return Self.dotToolTip(own[index], number: index + 1)
+    }
+
+    /// A menu bar dot's tooltip: its state as its row reads it (`LeadTeams.label`), so a team member waiting on its
+    /// lead doesn't say it needs you, and a lead with a question for you open does.
+    static func dotToolTip(_ session: Session, number: Int) -> String {
         let task = session.task.map { "\n\($0)" } ?? ""
         let paused = session.isPaused ? " · paused" : ""
-        return "\(index + 1). \(session.displayName) · \(session.status.label)\(paused)\(task)\nClick to switch · right-click for the list"
+        return "\(number). \(session.displayName) · \(LeadTeams.label(of: session))\(paused)\(task)\nClick to switch · right-click for the list"
     }
 
     /// Whether macOS is actually showing our menu bar icon. When the right side of the menu bar
