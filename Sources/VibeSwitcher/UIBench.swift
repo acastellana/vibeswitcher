@@ -22,12 +22,13 @@ import VibeCore
 /// each board, 32 by default).
 ///
 /// `--soak MINUTES [--soak-workers N] [--soak-upserts PER_SECOND] [--soak-without hooks,boards,transcripts,switches]
-/// [--soak-leads L] [--soak-churn SECONDS]` (memory, 2026-10-25): instead of the three phases, a
+/// [--soak-leads L] [--soak-churn SECONDS] [--soak-replay TRANSCRIPT] [--soak-sidebar]` (memory, 2026-10-25): instead of the three phases, a
 /// working day's traffic for MINUTES, to see whether the footprint levels off. Beside the L (2) leads, N (6) made-up
 /// workers whose sessions retitle themselves (`sessionChanged` from the host, PER_SECOND (2) in all), their agents' hook events (one a second), the leads' boards written and a decision added every 10 s (by
 /// another process), every transcript growing a turn every 5 s, and the window switching to the next session, on its
 /// chat, every 30 s. With `--soak-churn`, every SECONDS the oldest worker's task merges and its session ends, and a new
-/// worker starts on a new task (teams whose sessions come and go, 2026-10-26). Each minute: the footprint, malloc's bytes
+/// worker starts on a new task (teams whose sessions come and go, 2026-10-26); with `--soak-replay` the transcripts grow
+/// by a real transcript's lines instead of made-up turns; with `--soak-sidebar` the sidebar's list is shown too. Each minute: the footprint, malloc's bytes
 /// in use and the live views and chats; every 10 minutes (and at the end) what grew since the second minute, by kind of
 /// memory (`memoryKinds`, the process's own task_info) and by class (`HeapCensus`). At the
 /// end, `RESULT soak-…` lines and a check: over the last 20 minutes each minute's least footprint (read every 5 s)
@@ -53,7 +54,8 @@ enum UIBench {
                  upserts: value("--soak-upserts").flatMap(Double.init) ?? 2,
                  without: Set((value("--soak-without") ?? "").split(separator: ",").map(String.init)),
                  leads: min(max(value("--soak-leads").flatMap(Int.init) ?? 2, 1), Soak.leadNames.count),
-                 churn: value("--soak-churn").flatMap(Double.init).flatMap { $0 > 0 ? $0 : nil })
+                 churn: value("--soak-churn").flatMap(Double.init).flatMap { $0 > 0 ? $0 : nil },
+                 replay: value("--soak-replay"), sidebar: arguments.contains("--soak-sidebar"))
         }
         let bench = Bench(minutes: minutes, onscreen: arguments.contains("--onscreen"), ticking: arguments.contains("--ticking"),
                           transcript: transcript, soak: soak)
@@ -90,6 +92,11 @@ enum UIBench {
         /// it, as it does a merged task's), and a new worker starts on a new task of the next lead's (nil: the same
         /// workers all day).
         var churn: Double?
+        /// A real transcript whose lines the transcripts grow by (two every 5 s each, each transcript from its own
+        /// place in it), instead of made-up turns: real agents' tool output, images and lengths.
+        var replay: String?
+        /// The sidebar too (the menu's list of sessions, as Settings › Sidebar shows it), in a window off screen.
+        var sidebar = false
         static let leadNames = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta"]
         /// What a worker's session runs: it retitles itself every `$1` seconds (a change the host sends the app each
         /// time), printing a line of agent-shaped output, and ends once the file `$2` is there (its task merged).
@@ -133,6 +140,52 @@ enum UIBench {
             }
         }
         return kinds
+    }
+
+    /// `--soak-replay`: a real transcript's lines, handed out in order to each transcript that grows by them (each
+    /// from its own place, round to the start at its end), read from the file as they're needed.
+    final class Replay {
+        private let source: String
+        private var offsets: [String: UInt64] = [:]
+        private var starts = 0
+
+        init(source: String) { self.source = source }
+
+        func append(lines count: Int, to path: String) {
+            guard let input = FileHandle(forReadingAtPath: source), let output = FileHandle(forWritingAtPath: path) else { return }
+            defer { try? input.close(); try? output.close() }
+            let size = (try? input.seekToEnd()) ?? 0
+            guard size > 0 else { return }
+            var offset: UInt64
+            if let kept = offsets[path] {
+                offset = kept
+            } else {
+                // Each new transcript starts further in (after a newline), so they don't all hold the same lines.
+                starts += 1
+                offset = size / 7 * UInt64(starts % 7)
+                if offset > 0 {
+                    try? input.seek(toOffset: offset)
+                    let chunk = (try? input.read(upToCount: 1 << 20)) ?? Data()
+                    offset = chunk.firstIndex(of: 0x0A).map { offset + UInt64($0 - chunk.startIndex + 1) } ?? 0
+                }
+            }
+            var data = Data(), found = 0
+            while found < count {
+                if offset >= size { offset = 0 }
+                try? input.seek(toOffset: offset)
+                guard let chunk = try? input.read(upToCount: 1 << 16), !chunk.isEmpty else { break }
+                var taken = chunk.count
+                for (index, byte) in chunk.enumerated() where byte == 0x0A {
+                    found += 1
+                    if found == count { taken = index + 1; break }
+                }
+                data.append(chunk.prefix(taken))
+                offset += UInt64(taken)
+            }
+            offsets[path] = offset
+            _ = try? output.seekToEnd()
+            try? output.write(contentsOf: data)
+        }
     }
 
     /// One more exchange at the end of a made-up transcript (a prompt, a tool call and its result, an answer).
@@ -561,8 +614,28 @@ enum UIBench {
             spawnWorker(period: period)
         }
 
+        private var replay: Replay?
+        private var sidebarWindow: NSWindow?
+
         private func soakRun(_ soak: Soak) {
             model.showsChat = true
+            if let source = soak.replay {
+                replay = Replay(source: source)
+                print("soak: transcripts grow by \(source)'s lines")
+            }
+            if soak.sidebar {
+                // As AppDelegate makes the sidebar's, off screen.
+                let content = PopoverView(store: store, state: PopoverState(), preferences: Preferences(), onOpen: { _ in },
+                                          onInstallHooks: {}, onQuit: {}, isSidebar: true)
+                let window = NSWindow(contentRect: NSRect(x: -20_000, y: -20_000, width: 340, height: 800), styleMask: [.borderless],
+                                      backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false
+                window.contentView = NSHostingView(rootView: content)
+                window.orderFrontRegardless()
+                window.setFrameOrigin(NSPoint(x: -20_000, y: -20_000))
+                sidebarWindow = window
+                print("soak: the sidebar shown off screen")
+            }
             let off = soak.without
             if !off.isEmpty { print("soak: without \(off.sorted().joined(separator: ", "))") }
             var tick = 0, rounds = 0, switches = 0
@@ -604,7 +677,9 @@ enum UIBench {
             // Every transcript a turn longer every 5 s.
             soakTimers.append(Heartbeat.shared.every(5) { [weak self] in
                 guard let self, !off.contains("transcripts") else { return }
-                for path in Array(self.transcripts.values) + self.workers.map(\.transcript) { UIBench.appendTurn(to: path, turn: tick) }
+                for path in Array(self.transcripts.values) + self.workers.map(\.transcript) {
+                    if let replay = self.replay { replay.append(lines: 2, to: path) } else { UIBench.appendTurn(to: path, turn: tick) }
+                }
             })
             // The window on the next session, on its chat, every 30 s.
             soakTimers.append(Heartbeat.shared.every(30) { [weak self] in
@@ -649,7 +724,7 @@ enum UIBench {
                         if let baseline {
                             print("  grew since minute 2, by kind of memory (the process's own task_info and malloc's zones):")
                             let names = Set(baseline.regions.keys).union(regions.keys)
-                            for (name, delta) in names.map({ ($0, (regions[$0] ?? 0) - (baseline.regions[$0] ?? 0)) }).sorted(by: { $0.1 > $1.1 }).prefix(6) {
+                            for (name, delta) in names.map({ ($0, (regions[$0] ?? 0) - (baseline.regions[$0] ?? 0)) }).sorted(by: { $0.1 > $1.1 }) {
                                 print(String(format: "    %-32@ %+7.1f MB  (%.1f → %.1f MB)", name as NSString, mb(delta),
                                              mb(baseline.regions[name] ?? 0), mb(regions[name] ?? 0)))
                             }
@@ -677,8 +752,8 @@ enum UIBench {
                                         floor: mb(Double(min(least, usage.footprint))))
                     least = .max
                     samples.append(sample)
-                    print(String(format: "  minute %3d  footprint %6.1f MB (least %6.1f)  malloc in use %6.1f MB  live views %@ chats %@  sessions %d  rows %d",
-                                 sample.minute, sample.footprint, sample.floor, sample.inUse, IdleBench.Live.views.map(String.init) ?? "n/a",
+                    print(String(format: "  minute %3d  footprint %6.1f MB (least %6.1f)  malloc in use %6.1f MB (of %6.1f)  live views %@ chats %@  sessions %d  rows %d",
+                                 sample.minute, sample.footprint, sample.floor, sample.inUse, mb(Double(stats.size_allocated)), IdleBench.Live.views.map(String.init) ?? "n/a",
                                  IdleBench.Live.chats.map(String.init) ?? "n/a", self.host.sessions.count, self.store.sessions.count))
                     // The chat's own counts (entries, items, how many laid out).
                     if let chat = self.window?.debugState().split(separator: "\n").first(where: { $0.hasPrefix("chat ") }) {

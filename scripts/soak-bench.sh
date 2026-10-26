@@ -8,7 +8,7 @@
 # Unlike scripts/ui-bench.sh it runs on a loaded Mac: memory doesn't depend on the load (CPU figures aren't judged here).
 #
 # scripts/soak-bench.sh [-b BINARY] [-n NAME] MINUTES [--soak-workers N] [--soak-upserts PER_SECOND] [--soak-without LIST]
-#   [--soak-leads L] [--soak-churn SECONDS]
+#   [--soak-leads L] [--soak-churn SECONDS] [--soak-replay TRANSCRIPT] [--soak-sidebar]
 #   -b BINARY: the build (.build/debug/VibeSwitcher).  -n NAME: the log's name (soak): .build/soak/NAME.log
 #   (SOAK_BENCH_LOGS: another folder).
 set -euo pipefail
