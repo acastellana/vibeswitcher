@@ -1418,3 +1418,5 @@
 - 2026-10-26 12:03 Automatically (auto_advance): Cleaned up one-step-revert-of (freed 1.3 GB of build output and temporary folders). It stays done.
 - 2026-10-26 12:03 Automatically (auto_advance): Cleaned up agents-md-holds-the (freed 877 MB of build output and temporary folders). It stays done.
 - 2026-10-26 12:03 Automatically (auto_advance): Started the audit of the-risk-check-s at ceee658a (Its review is audit).
+- 2026-10-26 12:14 Audit of the-risk-check-s: complete, clean, round 1: 2 Nit open
+- 2026-10-26 12:21 Merged the-risk-check-s: The risk check's size trigger counts source lines, not tests
