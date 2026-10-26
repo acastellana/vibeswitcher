@@ -253,6 +253,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     private var fakeCount = 0
 
     var home: String { VibePaths.home }
+    let watchdog = HangWatchdog(samples: false)
     var control: URL { state.appendingPathComponent("control", isDirectory: true) }
 
     init(state: URL, shots: URL, fakeClaude: String?, minutes: Double) {
@@ -296,6 +297,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
         store.hostScreens = { [weak self] in self?.host.screens ?? [:] }
         store.requestHostScreens = { [weak self] in self?.host.refreshScreens(ttys: $0) }
         _ = leads
+        // Its own freezes, reported as the app's are (in its own ~/.vibeswitcher/debug), without `sample`.
+        watchdog.describeState = { [weak self] in self?.window?.debugState() ?? "window never opened" }
+        watchdog.start()
         store.start()
         startFake(label: "Fake Claude") { [weak self] problem in
             guard let self else { return }
@@ -421,10 +425,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     /// A fake project lead: a session labelled as a lead, its board (tasks in every state, a question it withdrew)
     /// in its folder, and a conversation of short replies between tool calls, with a worker's FYI and a worker's question.
-    func startLead(_ done: @escaping (String?) -> Void) {
+    func startLead(transcript: String? = nil, _ done: @escaping (String?) -> Void) {
         let slug = "sandbox-lead"
         let root = ((home as NSString).appendingPathComponent("projects/\(slug)") as NSString).standardizingPath
-        let (lines, withdrawnAt) = Self.leadTurns(now: Date())
+        var (lines, withdrawnAt) = Self.leadTurns(now: Date())
+        if let transcript { lines = transcript }
         let contract = LeadContract(goal: "A sandbox task.", acceptance: ["It shows."], boundaries: [], context: "")
         let tasks: [(String, String, LeadTask.Status)] = [
             ("sync-landing-base-with-2", "Sync landing-base with main", .running),
@@ -620,7 +625,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("send", "presses Return in the composer: the message goes to the fake session"),
         ("tell JSON", "hands the selected fake Claude a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("new [LABEL]", "starts another fake session"),
-        ("lead", "shows a fake project lead's chat, at its end (started the first time): a board of tasks, a withdrawn question, tool runs and workers' messages"),
+        ("hangs [reset]", "the sandbox's main-thread freezes (its hang reports, as the health digest tells them) and its longest wait between two beats (reset: from now on)"),
+        ("lead [FILE]", "shows a fake project lead's chat, at its end (started the first time, on FILE's transcript if given): a board of tasks, a withdrawn question, tool runs and workers' messages"),
         ("team", "starts a fake worker on the fake lead's running task, in its worktree (start the lead first); select it and tell it a permission to see it wait on its lead"),
         ("ask [TEXT]", "puts an open question for you (TEXT, or a made-up one) on the fake lead's board (start the lead first): its row reads needs you"),
         ("unfold", "shows the selected lead's team under its row in the sidebar"),
@@ -862,7 +868,21 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 }
             }
             if fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) { return show() }
-            startLead { problem in if let problem { reply(false, problem) } else { show() } }
+            // A transcript of your own making for it (a long one, to time the chat on): its lines instead of the made-up ones.
+            var transcript: String?
+            if !rest.isEmpty {
+                guard rest.hasPrefix("/"), let text = try? String(contentsOfFile: rest, encoding: .utf8) else { return reply(false, "no transcript at \(rest)") }
+                transcript = text
+            }
+            startLead(transcript: transcript) { problem in if let problem { reply(false, problem) } else { show() } }
+        case "hangs":
+            // The main thread's freezes so far, as the app's health digest tells them, and its longest wait for a beat.
+            let folders = AppHealth.Folders(debug: watchdog.folder, reports: state.appendingPathComponent("no-crashes"))
+            var lines = folders.hangNames().map { AppHealth.Watch.line([folders.hang($0)]) }
+            if let longest = watchdog.longestGap(reset: rest == "reset") {
+                lines.append(String(format: "longest between beats (0.25 s apart when free): %.2f s, ended %@", longest.gap, "\(longest.at)"))
+            }
+            reply(true, lines.isEmpty ? "none" : lines.joined(separator: "\n"))
         case "team": startWorker { problem in reply(problem == nil, problem ?? "worker started") }
         case "unfold":
             guard let row = model.selectedRow else { return reply(false, "nothing selected") }

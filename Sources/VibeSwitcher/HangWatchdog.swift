@@ -25,6 +25,18 @@ final class HangWatchdog: @unchecked Sendable {
     /// At most this many stacks a stall (then the first ones are what's kept).
     static let maxCaught = 300
     private var beats = 0
+    private var lastBeat: Date?
+    private var longest: (gap: TimeInterval, at: Date)?
+    /// The longest time between two beats (0.25 s apart when the main thread is free) since the last reset, and when
+    /// it ended: for the sandbox's measurements.
+    func longestGap(reset: Bool = false) -> (gap: TimeInterval, at: Date)? {
+        lock.lock()
+        defer {
+            if reset { longest = nil }
+            lock.unlock()
+        }
+        return longest
+    }
     /// How many times the main thread beat (for tests: it's being watched once it has).
     var beatCount: Int {
         lock.lock()
@@ -69,8 +81,11 @@ final class HangWatchdog: @unchecked Sendable {
         let beat = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
             guard let self else { return }
             self.lock.lock()
-            self.detector.beat()
+            let now = Date()
+            self.detector.beat(at: now)
             self.beats += 1
+            if let last = self.lastBeat, now.timeIntervalSince(last) > (self.longest?.gap ?? 0) { self.longest = (now.timeIntervalSince(last), now) }
+            self.lastBeat = now
             self.lock.unlock()
         }
         RunLoop.main.add(beat, forMode: .common)

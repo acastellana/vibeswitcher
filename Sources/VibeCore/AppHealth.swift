@@ -681,7 +681,7 @@ public enum AppHealth {
         static let sampleWait: TimeInterval = 120
 
         /// One line for freezes with the same top frames.
-        static func line(_ group: [Hang]) -> String {
+        public static func line(_ group: [Hang]) -> String {
             let hang = group[0]
             var words = ["- \(hang.name)" + (group.count > 1 ? " and \(group.count - 1) more like it (\(group.dropFirst().map(\.name).joined(separator: ", ")))" : "") + ":"]
             words.append(hang.duration.map { String(format: "stuck %.1f s", $0) + ";" } ?? "stuck, no recovery recorded;")
