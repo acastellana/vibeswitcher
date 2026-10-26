@@ -1388,3 +1388,7 @@
 - 2026-10-26 11:01 Automatically (auto_advance): Started a worker on agents-md-holds-the (AGENTS.md holds the few rules agents can't discover; CLAUDE.md just imports it).
 - 2026-10-26 11:01 Started a worker on the-lead-can-archive
 - 2026-10-26 11:01 Automatically (auto_advance): Started a worker on the-lead-can-archive (The lead can archive superseded decisions, so every lead start reads less).
+- 2026-10-26 11:16 Planned the-risk-check-s: The risk check's size trigger counts source lines, not tests (review audit)
+- 2026-10-26 11:19 Automatically (auto_advance): Started the audit of review-level-from-the at dd4190a6 (Its review is audit).
+- 2026-10-26 11:20 Automatically (auto_advance): Started the audit of one-step-revert-of at 62e65b04 (Its review is audit).
+- 2026-10-26 11:28 Merged the-lead-can-archive: The lead can archive superseded decisions, so every lead start reads less (no audit: review none)
