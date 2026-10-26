@@ -1375,3 +1375,4 @@
 - 2026-10-26 08:01 Kept the-app-s-memory unmerged: Lead hold before merge: FootprintRelief's malloc-lock stall (183–572 ms measured) can freeze the UI. Change requested; set back once the worker has re-reported.
 - 2026-10-26 08:26 Automatically (auto_advance): Didn't start the-app-s-memory: the-app-s-memory's worker is still running. Send it what to do with message, or stop_worker first.
 - 2026-10-26 08:32 Merged the-app-s-memory: The app's memory stops growing over a working day (no audit: review none)
+- 2026-10-26 08:33 Update: Batch done: quieter notifications, a memory leak fixed, steadier merges — Everything since the last install (eb5c4fb) is merged into project-lead: 15 tasks, 1 dropped. It reaches your app only through an install.
