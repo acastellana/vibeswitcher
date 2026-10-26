@@ -202,8 +202,7 @@ struct SessionStoreTests {
         AppStatus.enabled = false
         try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: stateDir) }
-        let clock = Clock()
-        let started = clock.now.addingTimeInterval(-3600)
+        let started = Date().addingTimeInterval(-3600)
         let worktrees = "/r/acme/.vibeswitcher/worktrees"
         // tty, label (nil: in Terminal), cwd
         let sessions: [(String, String?, String)] = [
@@ -211,23 +210,27 @@ struct SessionStoreTests {
             ("ttys992", "Worker: B", "\(worktrees)/b"), ("ttys993", "Worker: C", "\(worktrees)/c"),
             ("ttys994", "Verifier: A", "\(worktrees)/a"), ("ttys995", nil, "/r/notes"), ("ttys996", "w", "/r/site"),
         ]
-        func hook(_ tty: String, _ event: String) throws {
-            var state = HookState(agent: .claude, tty: tty, lastEvent: event, lastEventAt: clock.now.timeIntervalSince1970)
-            state.agentPid = Int32(tty.dropFirst(4))!
-            try state.save(to: stateDir.appendingPathComponent("\(tty).json"))
-        }
         var procs = [Int32(960): ProcInfo(pid: 960, ppid: 1, tty: nil, comm: "vibeswitcher-hos", startTime: started, agent: nil)]
         var cwds: [Int32: String] = [:]
         for (tty, _, cwd) in sessions {
             let pid = Int32(tty.dropFirst(4))!
             procs[pid] = ProcInfo(pid: pid, ppid: 960, tty: tty, comm: "claude", startTime: started, agent: .claude)
             cwds[pid] = cwd
-            try hook(tty, "PreToolUse")
         }
         let table = procs, dir = stateDir
         let store = SessionStore(scanner: SessionScanner(processes: { table }, stateDir: { dir }, cwd: { cwds[$0] },
                                                          arguments: { _ in [] }))
+        // The test's clock starts once the store has launched: a "done" from before its launch (by the Mac's own
+        // clock) counts as already seen, so a clock started earlier, on a Mac slow enough that setting up took longer
+        // than the 5 s it's moved on below, made the worker's "done" read as idle and never shown.
+        let clock = Clock()
         store.clock = { clock.now }
+        func hook(_ tty: String, _ event: String) throws {
+            var state = HookState(agent: .claude, tty: tty, lastEvent: event, lastEventAt: clock.now.timeIntervalSince1970)
+            state.agentPid = Int32(tty.dropFirst(4))!
+            try state.save(to: stateDir.appendingPathComponent("\(tty).json"))
+        }
+        for (tty, _, _) in sessions { try hook(tty, "PreToolUse") }
         var attention: [String] = []
         store.onAttention = { attention.append($0.tty) }
         store.updateHosted(sessions.compactMap { tty, label, cwd in
