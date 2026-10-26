@@ -1362,3 +1362,6 @@
 - 2026-10-26 02:55 Automatically (auto_advance): Cleaned up the-records-commit-can (freed 995 MB of build output and temporary folders). It stays done.
 - 2026-10-26 03:07 Audit of the-lead-s-rules: complete, clean, round 1: 2 Nit open
 - 2026-10-26 03:10 Merged sessionstoretests-team: SessionStoreTests' team-count test holds on a loaded Mac (no audit: review none)
+- 2026-10-26 03:10 Automatically (auto_advance): Merged sessionstoretests-team (SessionStoreTests' team-count test holds on a loaded Mac) into project-lead at f6c4456e, review none: on its worker's done report on d717ebe1 and the full test run.
+- 2026-10-26 03:10 Automatically (auto_advance): Cleaned up sessionstoretests-team (freed 976 MB of build output and temporary folders). It stays done.
+- 2026-10-26 03:17 Merged the-lead-s-rules: The lead's rules that matter become checks, not just notes
