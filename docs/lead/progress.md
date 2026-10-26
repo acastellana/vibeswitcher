@@ -1348,3 +1348,4 @@
 - 2026-10-26 02:06 Automatically (auto_advance): Started a worker on the-records-commit-can (The records commit can't be cut by a tool-server switch), its after tasks done (open-sessions-pick-up).
 - 2026-10-26 02:10 Audit of needs-you-follow-ups: complete, clean, round 1: 3 Nit open, 1 Pre-existing open
 - 2026-10-26 02:10 Planned the-phone-shows-needs: The phone shows "needs you" only for the user, like the Mac (review audit)
+- 2026-10-26 02:30 Merged needs-you-follow-ups: "Needs you" follow-ups: open question, red dot, base-branch alert
