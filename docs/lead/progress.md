@@ -1454,3 +1454,5 @@
 - 2026-10-26 17:11 Merged after-a-revert-dependent: After a revert: dependent tasks are told, cleanup happens, the Mac stays awake
 - 2026-10-26 17:11 Automatically (auto_advance): Merged after-a-revert-dependent (After a revert: dependent tasks are told, cleanup happens, the Mac stays awake) into project-lead at 9dc85d71, on its passing audit and the full test run.
 - 2026-10-26 17:12 Automatically (auto_advance): Cleaned up after-a-revert-dependent (freed 2.2 GB of build output and temporary folders). It stays done.
+- 2026-10-26 17:22 Raised the-verifier-s-eval to audit (the risk check, at f111a305): it changes 577 lines outside tests, over risk_lines (400)
+- 2026-10-26 17:22 Automatically (auto_advance): Started the audit of the-verifier-s-eval at f111a305 (The risk check raised it to audit: it changes 577 lines outside tests, over risk_lines (400)).
