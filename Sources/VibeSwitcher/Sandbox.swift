@@ -430,7 +430,6 @@ private final class Driver: NSObject, NSApplicationDelegate {
             ("sync-landing-base-with-2", "Sync landing-base with main", .running),
             ("gen-attention-badge", "Your GEN attention badge counts the right things", .blocked),
             ("ui-consistency-pass", "UI consistency pass over the sidebar", .blocked),
-            ("session-cleanup", "Clean up ended sessions' folders", .review),
             ("landing-copy", "Landing page copy for the launch", .done),
             ("landing-hero", "Landing hero image and its dark variant", .done),
             ("sidebar-review", "Sidebar review fixes", .done),
@@ -441,12 +440,6 @@ private final class Driver: NSObject, NSApplicationDelegate {
             // Its board makes the folders it's in.
             try BoardStore(root: root).update { board in
                 board.tasks = tasks.map { LeadTask(slug: $0.0, title: $0.1, contract: contract, status: $0.2) }
-                // One the risk check raised from review none to audit (see `LeadRisk`): its row says why.
-                if let index = board.taskIndex("session-cleanup") {
-                    board.tasks[index].review = .audit
-                    board.tasks[index].riskRaised = LeadRiskRaise(reason: "it has code that deletes or rewrites files or data (Sources/Cleanup.swift: try fm.removeItem(at: folder))",
-                                                                  commit: "0123456789abcdef", byModel: false)
-                }
                 var question = LeadQuestion(text: "Should the sidebar keep its review badges?", options: ["Keep them", "Drop them"],
                                             at: withdrawnAt - 300)
                 question.withdrawnAt = withdrawnAt
@@ -705,7 +698,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let verifier = UUID().uuidString
         twice.verifier = verifier
         twice.verifierRetry = LeadVerifierRetry(commit: "abc1234def0", first: LeadWitness.agentQuitEnding, verifiers: [verifier], second: "killed by SIGTERM")
-        board.tasks = merged + [working, after, unsaid, twice, abandoned]
+        // Review none, raised to audit by the risk check (see `LeadRisk`) when its worker reported done.
+        var raised = task("Clean up ended sessions' folders", .review, since: 2 * 60)
+        raised.review = .audit
+        raised.riskRaised = LeadRiskRaise(reason: "it has code that deletes or rewrites files or data (Sources/Cleanup.swift: try fm.removeItem(at: folder))",
+                                          commit: "abc1234def0", byModel: false)
+        board.tasks = merged + [working, after, unsaid, twice, raised, abandoned]
 
         var withdrawn = LeadQuestion(text: "Sidebar review found three overlapping rows. Re-plan the sidebar as one task, or fix each row on its own?\nThe review's notes are in progress.md.",
                                      options: ["One task", "Each row"], at: now - 1_500)
