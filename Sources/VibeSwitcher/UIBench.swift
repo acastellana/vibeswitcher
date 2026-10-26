@@ -819,6 +819,17 @@ enum UIBench {
             let floorSpread = window.map { abs($0.floor - floorMedian) }.max() ?? 0
             print(String(format: "RESULT soak-last-20-min-least %.1f-%.1f MB (median %.1f, at most %.1f MB from it)", floors.first ?? 0,
                          floors.last ?? 0, floorMedian, floorSpread))
+            // How fast each minute's least footprint grew over the last 40 minutes, a least-squares line through them: the
+            // footprint saws up and down between malloc's reliefs (`FootprintRelief`), so the two ends alone say little.
+            let recent = samples.filter { $0.minute > last.minute - 40 }
+            if recent.count >= 3 {
+                let meanX = Double(recent.map(\.minute).reduce(0, +)) / Double(recent.count)
+                let meanY = recent.map(\.floor).reduce(0, +) / Double(recent.count)
+                let spread = recent.reduce(0.0) { $0 + pow(Double($1.minute) - meanX, 2) }
+                let slope = recent.reduce(0.0) { $0 + (Double($1.minute) - meanX) * ($1.floor - meanY) } / spread
+                print(String(format: "RESULT soak-last-40-min-growth-mb-per-hour %.1f (each minute's least, minutes %d-%d)", slope * 60,
+                             recent[0].minute, last.minute))
+            }
             if last.minute >= 25 {
                 // Judged on each minute's least footprint: a terminal's GPU memory comes and goes within a minute.
                 UIBench.check(floorSpread <= 50, String(format: "soak: the least footprint of each of the last 20 minutes within ±50 MB of their median (%.1f MB)",
