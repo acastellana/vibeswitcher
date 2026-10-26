@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import VibeCore
 
 /// Gives malloc's free pages back to the system once the app's footprint has grown by `slack` over what it was after
 /// the last time (10-26). Malloc keeps the pages it freed dirty, counted in the footprint, until the system runs short
@@ -38,8 +39,13 @@ final class FootprintRelief {
                 floor = min(floor ?? now, now)
                 return
             }
+            // It holds malloc's locks while it runs: how long, in the log, to see what it costs a big heap.
+            let started = DispatchTime.now()
             relieve()
-            self.floor = footprint() ?? now
+            let after = footprint() ?? now
+            Breadcrumbs.shared.note(String(format: "footprint relief: %.0f → %.0f MB in %.0f ms", now, after,
+                                           Double(DispatchTime.now().uptimeNanoseconds - started.uptimeNanoseconds) / 1e6))
+            self.floor = after
         }
     }
 }
