@@ -1477,3 +1477,5 @@
 - 2026-10-27 03:54 Audit of the-lead-chat-s: complete, clean, round 1: 1 Important open, 3 Nit open
 - 2026-10-27 04:04 The worker on the-lead-chat-s answered findings: the-lead-chat-s:F1 fixed at 9939e7e2: 9939e7e: TeamHistory sorts the finished rows once per board (with the board positions) in TeamRowsCache. On a member's session change, TeamRows.rows(board, seen:, history:) sorts only the open tasks' rows (4 on a 254-task board) and merges them into the sorted history in one linear pass, with no sort over all rows. The .finished comparator now breaks ties by board position, which makes the order total, so the merge gives exactly the old single sort's order. …
 - 2026-10-27 04:05 Automatically (auto_advance): Started the audit of the-lead-chat-s at f50c0a71 (An audit was started on it: its verdict decides).
+- 2026-10-27 04:12 Audit of the-lead-chat-s: complete, clean, round 2: 1 Important closed, 4 Nit (1 open)
+- 2026-10-27 04:20 Merged the-lead-chat-s: The lead chat's 10 s freeze: SwiftUI's key-view loop rebuild during layout
