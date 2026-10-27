@@ -202,3 +202,7 @@ The user answered A1BE83E7 "Install now". Verified: host pid 31589 unchanged, ap
 
 The user answered E6FC9C18 "Install now" and ran it themselves after the failed try. Verified: host pid 31589 unchanged, app pid 80943, lead tool server switched to inode 312283634 and holds advancing.lock. Next: watch the health watcher's freeze reports with this lead's chat open to confirm the fix; Spaces.currentDesktops (a window-server call on main in SessionStore.apply) is the next suspect if freezes remain.
 
+## 2026-10-27 15:22:53 Installed the status-first sidebar icons and folder-starts-lead batch at 15:21 on 2026-10-27, at the user's answer to F2AF00BC. The host (pid 31589) and the tool servers kept running. The app logo is one task, app-logo-concepts-first: concepts first, the user picks, then the same worker wires the pick in. It has auto_advance off and an audit, because it touches build-app.sh.
+
+The logo is a taste call, so the user chooses from rendered options. One agent owns it end to end. Phase 1 must not be merged on its own, so auto_advance is off.
+

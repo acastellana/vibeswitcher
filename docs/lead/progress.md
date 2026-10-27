@@ -1523,3 +1523,5 @@
 - 2026-10-27 13:40 Automatically (auto_advance): Merged leads-start-in-an (Leads start in an empty repo too, and the empty sidebar offers a lead) into project-lead at c4b7dc11, on its passing audit and the full test run. (Its first test run failed on unsetEmptyOrAnExitIsNotFound(), aBannerBeforeTheValueIsLeftOut(), aShellThatWaitsIsStopped() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/leads-start-in-an/merge-test.log.)
 - 2026-10-27 13:41 Automatically (auto_advance): Cleaned up leads-start-in-an (freed 1.2 GB of build output and temporary folders). It stays done.
 - 2026-10-27 13:42 Update: Batch done: status-first sidebar icons, and picking a folder starts its lead — 3 tasks have merged since the last install (1236e30).
+- 2026-10-27 15:22 Planned app-logo-concepts-first: App logo: concepts first, then the chosen one in the Dock, Finder, phone and menu bar (review audit)
+- 2026-10-27 15:22 Started a worker on app-logo-concepts-first
