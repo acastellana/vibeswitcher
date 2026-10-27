@@ -1530,3 +1530,4 @@
 - 2026-10-27 16:24 Dismissed app-logo-concepts-first:F1: The lead accepted it deliberately: about 5 MB of concept PNGs in history isn't worth a history rewrite, which the permission check denied anyway. The lead's later message, which the verifier didn't see, withdrew the rewrite request.
 - 2026-10-27 16:26 Audit of app-logo-concepts-first: complete, clean, round 2: 1 Important closed, 1 Nit open
 - 2026-10-27 16:33 Merged app-logo-concepts-first: App logo: concepts first, then the chosen one in the Dock, Finder, phone and menu bar
+- 2026-10-27 16:34 Update: New app logo merged: A · Stack — **What changed:** VibeSwitcher has a real icon in the Dock, Finder, Cmd-Tab and notifications, and the phone app uses the same logo. It's drawn by `scripts/app-icon.swift`; run `bash scripts/app-icon.…
