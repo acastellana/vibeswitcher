@@ -1513,3 +1513,7 @@
 - 2026-10-27 12:17 Started a worker on leads-start-in-an
 - 2026-10-27 12:17 Automatically (auto_advance): Started a worker on leads-start-in-an (Leads start in an empty repo too, and the empty sidebar offers a lead), its after tasks done (choosing-a-project, sidebar-rows-the-status).
 - 2026-10-27 13:06 Automatically (auto_advance): Started the audit of leads-start-in-an at 4218536e (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-10-27 13:23 Audit of leads-start-in-an: complete, clean, round 1: 1 Important open, 2 Nit open
+- 2026-10-27 13:23 Automatically (auto_advance): Sent leads-start-in-an's worker the open Important findings leads-start-in-an:F1 from its audit at 4218536e.
+- 2026-10-27 13:25 The worker on leads-start-in-an answered findings: leads-start-in-an:F1 fixed at 97914e98: Commit 97914e9, FolderRepository.make: - With plan.inRepository, the index, .git/info and .git/info/exclude are checked with attributesOfItem, which doesn't follow a final link. These are the paths `rev-parse --git-path` gives. If any of them is a symbolic link, make returns '<path> is a symbolic link…' before anything changes: no .gitignore, no add, no write, nothing created through it. - The exclude write and the undo's restore of the index and exclude n…
+- 2026-10-27 13:26 Automatically (auto_advance): Started the audit of leads-start-in-an at 97914e98 (An audit was started on it: its verdict decides).
