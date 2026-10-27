@@ -182,6 +182,22 @@ struct PhoneLeadsTests {
         #expect(onBoard(world, answered)?.answeredFrom == .mac)
     }
 
+    @Test func nothingIsAnsweredWhileTheMacIsLockedAndAnAnswerIsAnnouncedOnTheMac() async throws {
+        let world = try world()
+        let question = try ask(world)
+        let announced = Box<[String]>([])
+        world.access.onEvent = { title, body in announced.value.append("\(title): \(body)") }
+        world.access.screenLocked = { true }
+        let locked = try await call(world, "POST", "/api/lead/answer", token: world.token, body: answerBody(world, question, "Everyone"))
+        #expect(locked.0 == 423)
+        #expect(onBoard(world, question)?.answer == nil)
+        #expect(announced.value.isEmpty)
+        world.access.screenLocked = { false }
+        let unlocked = try await call(world, "POST", "/api/lead/answer", token: world.token, body: answerBody(world, question, "Everyone"))
+        #expect(unlocked.0 == 200)
+        #expect(announced.value == ["Lead phone answered shop's lead: “Everyone”"])
+    }
+
     @Test func answeringIsOffWhileRepliesFromThePhoneAreOff() async throws {
         let world = try world()
         let question = try ask(world)

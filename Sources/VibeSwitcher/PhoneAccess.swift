@@ -487,6 +487,8 @@ final class PhoneAccess: ObservableObject {
         guard inputAllowed else {
             return respond(.error(403, "Replying from the phone is off. Turn it on in VibeSwitcher › Settings… › Phone."))
         }
+        // Nothing reaches a session while the Mac is locked, as for typing: the answer is typed into the lead.
+        guard !screenLocked() else { return respond(.error(423, RemoteInput.Failure.locked.description)) }
         guard let answerLead else { return respond(.error(503, "Answering the lead isn't available right now.")) }
         let object = body(request) ?? [:]
         guard let leadID = object["lead"] as? String, let questionID = object["question"] as? String,
@@ -508,7 +510,9 @@ final class PhoneAccess: ObservableObject {
         answerLead(lead.root, question, version, text) { [weak self] outcome, approval in
             switch outcome {
             case .answered(let answered, let saw):
-                self?.audit("\(device.name) answered \(project)'s question “\(Redaction.secrets(in: String(answered.text.prefix(60))))”: “\(Redaction.secrets(in: String(text.prefix(60))))”")
+                let said = "“\(Redaction.secrets(in: String(text.prefix(60))))”"
+                self?.audit("\(device.name) answered \(project)'s question “\(Redaction.secrets(in: String(answered.text.prefix(60))))”: \(said)")
+                self?.onEvent?("\(device.name) answered \(project)'s lead", said)
                 var reply: [String: Any] = ["ok": true, "saw": saw, "question": PhoneLeads.question(answered)]
                 if let approval { reply["notice"] = approval }
                 respond(.json(reply))
