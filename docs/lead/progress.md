@@ -1554,3 +1554,9 @@
 - 2026-10-27 18:32 Automatically (auto_advance): Cleaned up lead-chat-freeze (freed 0 MB of build output and temporary folders). It stays done.
 - 2026-10-27 18:34 Started a worker on lead-chat-deliver-wake
 - 2026-10-27 18:34 Automatically (auto_advance): Started a worker on lead-chat-deliver-wake (Lead chat: deliver, wake and flush still stat or decode the board on the main thread), its after tasks done (lead-chat-freeze).
+- 2026-10-27 20:08 Automatically (auto_advance): Started the audit of land-pr-1-host at ce044a8b (Its review is audit).
+- 2026-10-27 20:14 Planned lead-chat-freezes-of: Lead chat freezes of 3–25 s: SwiftUI accessibility tree and session-list rebuilds on a long lead chat
+- 2026-10-27 20:14 Planned audit-must-not-end: audit() must not end a verifier already running on the same commit
+- 2026-10-27 20:14 Incident: The app froze about 20 times, 2–25 s each, between 19:31 and 20:12 on 2026-10-27, with stakegen's long lead chat selected. The time went to SwiftUI accessibilit… (in lead-chat-freezes-of); planned turn-this-incident-into-2 to turn it into a check
+- 2026-10-27 20:14 Folded turn-this-incident-into-2 into lead-chat-freezes-of: that task carries its work
+- 2026-10-27 20:18 Merged lead-chat-deliver-wake: Lead chat: deliver, wake and flush still stat or decode the board on the main thread (no audit: review none)

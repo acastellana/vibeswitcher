@@ -7,3 +7,10 @@ Evidence: 2026-10-27, task launch-video (worker session 8D1B0D7B, last turn 2026
 Task: launch-video
 Check: task turn-this-incident-into turns it into a check that runs before merge.
 
+## 2026-10-27 20:14:19 The app froze about 20 times, 2–25 s each, between 19:31 and 20:12 on 2026-10-27, with stakegen's long lead chat selected. The time went to SwiftUI accessibility, layout and session-list rebuilds.
+
+Evidence: ~/.vibeswitcher/debug/hang-20261027-193139 … hang-20261027-201159 (the longest is hang-20261027-200308 at 25.2 s). In every one, a lead session was selected (stakegen, about 290 entries), the chat was shown and the window was not key. The loads ranged from 8 to 36. The top frames were SwiftUI AccessibilityNode.updateChildren, AccessibilityProperties.merge, NSAccessibility entry points, SessionListView.body → LeadTeams.arrange, and LeadTeamPane.body → MacLoad.count. The fix task is lead-chat-freezes-of; its acceptance includes a bench with an accessibility client walking a 300-entry chat.
+
+Task: lead-chat-freezes-of
+Check: task turn-this-incident-into-2 turns it into a check that runs before merge.
+

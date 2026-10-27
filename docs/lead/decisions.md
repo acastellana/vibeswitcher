@@ -218,3 +218,7 @@ The user asked for the install. The lead never pushes; the user does.
 
 The user said "review and work towards merge". The PR touches sensitive paths (the host, the vault, build-app.sh) and would break Apple Events under Hardened Runtime as written. Allowing OSC 52 from the focused pane keeps nvim and tmux copying working, while closing the hidden-output attack the PR targets. The user can still choose to block it entirely.
 
+## 2026-10-27 20:14:32 Same setback twice: the lead restarted an audit that auto_advance's verifier was already running, ending it. The fix is a check in the tool (task audit-must-not-end), not a note. Until it lands, the lead reads board(task) for a running verifier before calling audit on an auto_advance task. Today's freeze storm (20 freezes of 2–25 s with stakegen's long lead chat) is one task, lead-chat-freezes-of, with an accessibility bench as its regression check; the incident's own task is folded into it.
+
+Rule 10: a setback that happens twice gets a check. Freezes that long are material. The bench in that task is the check that runs before merge, so a second task would duplicate it.
+
