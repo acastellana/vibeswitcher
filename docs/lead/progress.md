@@ -1531,3 +1531,7 @@
 - 2026-10-27 16:26 Audit of app-logo-concepts-first: complete, clean, round 2: 1 Important closed, 1 Nit open
 - 2026-10-27 16:33 Merged app-logo-concepts-first: App logo: concepts first, then the chosen one in the Dock, Finder, phone and menu bar
 - 2026-10-27 16:34 Update: New app logo merged: A · Stack — **What changed:** VibeSwitcher has a real icon in the Dock, Finder, Cmd-Tab and notifications, and the phone app uses the same logo. It's drawn by `scripts/app-icon.swift`; run `bash scripts/app-icon.…
+- 2026-10-27 17:53 Planned launch-video-v3-narrated: Launch video v3: narrated (ElevenLabs), October film's style, v2's under-the-hood story, new logo
+- 2026-10-27 17:54 Started a worker on launch-video-v3-narrated
+- 2026-10-27 17:54 Incident: message() to a long-idle worker (its turn had ended about 24 h before) said "Typed into … as its next prompt", but the prompt was never submitted. It sat as a d… (in launch-video); planned turn-this-incident-into to turn it into a check
+- 2026-10-27 17:54 Started a worker on turn-this-incident-into
