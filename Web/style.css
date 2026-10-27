@@ -6,11 +6,13 @@
      4.5:1 on its fill (StatusPalette in the app; StatusAccessibilityTests checks both). */
   --st-needsInput: #c4001a; --st-working: #9c4400; --st-background: #0058b8; --st-done: #1a7330; --st-idle: #636366;
   --on-status: #ffffff; --claude: #a9502f;
+  /* The Team view's marks the status palette has no colour for: blocked (purple), kept (teal). */
+  --st-blocked: #7b2fb5; --st-kept: #0b6e6a;
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #111214; --card: #1c1e22; --text: #f2f2f4; --muted: #9a9aa0; --line: rgba(255,255,255,0.08);
     --warn: #ff7a72; --st-needsInput: #ff7a72; --st-working: #ff9f0a; --st-background: #5eb0ff; --st-done: #30d158;
-    --st-idle: #aeaeb2; --on-status: #1f1f1f; --claude: #e8876a; }
+    --st-idle: #aeaeb2; --on-status: #1f1f1f; --claude: #e8876a; --st-blocked: #c99cff; --st-kept: #5ed3cc; }
 }
 /* Reduce Motion: nothing slides, fades or scrolls smoothly. */
 @media (prefers-reduced-motion: reduce) {
@@ -199,3 +201,69 @@ select.chip-btn { appearance: none; -webkit-appearance: none; }
 .row:disabled { opacity: 0.5; }
 .devPage .detail { -webkit-line-clamp: 1; }
 .devPageLink { color: var(--accent); font-weight: 600; font-size: 15px; }
+
+/* Project leads: a lead's row with its questions, its team folded under it, and its page. */
+.leadBlock { margin-bottom: 8px; }
+.leadBlock > .row { margin-bottom: 0; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+.leadBar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; background: var(--card); border-top: 1px solid var(--line);
+  border-radius: 0 0 12px 12px; padding: 4px 12px 6px 46px; font-size: 13px; }
+.roleTag { flex: none; font-size: 10px; font-weight: 700; color: var(--on-status); background: var(--st-background);
+  border-radius: 4px; padding: 0 4px; }
+.roleLine { font-size: 12px; color: var(--muted); }
+.qCount { font-weight: 600; color: var(--st-working); }
+.qCount.blocking { color: var(--st-needsInput); }
+.teamToggle, .teamLink { border: 0; background: none; color: var(--st-background); font-size: 13px; padding: 6px 0; min-height: 32px; }
+.teamLink { margin-left: auto; font-weight: 600; }
+.allDoneTag { color: var(--st-done); font-weight: 600; }
+.team { margin: 6px 0 0 18px; border-left: 2px solid var(--line); padding-left: 8px; }
+.team .row { margin-bottom: 6px; }
+.qStack { display: grid; gap: 8px; margin-top: 8px; }
+.qOrder { margin: 0 2px; }
+.qCard { background: var(--card); border-radius: 12px; padding: 12px; border: 1.5px solid var(--st-background); }
+.qCard.blocking { border-color: var(--st-needsInput); }
+.qHead { display: flex; align-items: center; gap: 8px; }
+.qPriority { font-size: 10px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; border-radius: 9px; padding: 1px 7px;
+  color: var(--on-status); background: var(--st-working); }
+.qPriority.blocking { background: var(--st-needsInput); }
+.qPriority.whenever { background: var(--line); color: var(--muted); }
+.qText { font-size: 16px; font-weight: 650; margin: 8px 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.qWhy { font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.qRevised { font-size: 12.5px; color: var(--muted); margin: 4px 0; }
+.qRevised summary { color: var(--st-working); }
+.qEarlier { margin: 6px 0 0 14px; }
+.qTimer { margin: 8px 0 2px; padding: 7px 10px; border-radius: 9px; background: color-mix(in srgb, var(--accent) 12%, transparent); font-size: 14px; }
+.qTimer.held { background: var(--bg); color: var(--muted); }
+.option.proposed { border-width: 2px; display: flex; justify-content: space-between; align-items: center; }
+.proposedTag { font-size: 10px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--st-background); }
+.option.proposed:active .proposedTag { color: #fff; }
+.qAnswer { display: flex; gap: 8px; margin: 8px 0 6px; }
+.qAnswer input { flex: 1; min-width: 0; font-size: 16px; }
+.qAnswer .primary { flex: none; min-height: 44px; }
+.qNote { margin: 0 0 6px; }
+.qClosed { background: var(--card); border: 1px dashed var(--muted); border-radius: 10px; padding: 8px 12px; opacity: 0.85; font-size: 13px; }
+.qClosedWhy { color: var(--muted); }
+.qClosedText { color: var(--muted); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.allDone { border: 1.5px solid var(--st-done); border-radius: 12px; padding: 12px; margin: 12px 0;
+  background: color-mix(in srgb, var(--st-done) 8%, var(--card)); }
+.allDoneHead { display: flex; justify-content: space-between; align-items: baseline; color: var(--st-done); }
+.allDoneHeadline { font-weight: 650; margin: 8px 0 2px; }
+.allDoneBullets { margin: 4px 0 6px; padding-left: 20px; font-size: 14px; }
+.allDoneCost { margin: 4px 0; }
+.allDoneTasks summary { font-size: 13px; color: var(--muted); padding: 4px 0; }
+.outcome { padding: 2px 0 2px 14px; }
+.outcome.merged { color: var(--st-done); }
+.update .updateHead { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
+.updateBody { font-size: 13.5px; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 6px; }
+.tasks { padding: 6px 12px; }
+.taskGroup { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin: 10px 0 4px; }
+.taskRow { display: flex; gap: 8px; align-items: flex-start; padding: 5px 0; border-top: 1px solid var(--line); }
+.taskTitle { flex: 1; min-width: 0; font-size: 14px; overflow-wrap: anywhere; }
+.taskState { flex: none; font-size: 12px; font-weight: 600; color: var(--muted); }
+.mark { flex: none; width: 16px; text-align: center; font-weight: 800; color: var(--muted); }
+.mark.failed, .mark.stalled, .mark.ended, .mark.reverted, .taskState.failed, .taskState.stalled, .taskState.ended, .taskState.reverted { color: var(--st-needsInput); }
+.mark.waits, .mark.working, .mark.rework, .taskState.waits, .taskState.working, .taskState.rework { color: var(--st-working); }
+.mark.review, .taskState.review { color: var(--st-background); }
+.mark.merge, .mark.merged, .mark.folded, .taskState.merge, .taskState.merged, .taskState.folded { color: var(--st-done); }
+.mark.blocked, .taskState.blocked { color: var(--st-blocked); }
+.mark.kept, .taskState.kept { color: var(--st-kept); }
+.scorecard { font-size: 13.5px; display: grid; gap: 6px; }

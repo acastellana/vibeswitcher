@@ -108,19 +108,24 @@ function forgetToken(reason) {
 // ---------- Views ----------
 
 function show(view) {
-  for (const id of ['pair', 'list', 'session']) $(id).hidden = id !== view;
-  $('back').hidden = view !== 'session';
+  for (const id of ['pair', 'list', 'session', 'lead']) $(id).hidden = id !== view;
+  $('back').hidden = view !== 'session' && view !== 'lead';
   $('prev').hidden = view !== 'session';
   $('next').hidden = view !== 'session';
   document.body.classList.toggle('in-session', view === 'session');
   $('bell').hidden = view === 'pair';
   clearInterval(listTimer);
   clearInterval(screenTimer);
+  if (view !== 'lead') openLeadID = null;
   if (view === 'list') {
     current = null;
     $('title').textContent = 'VibeSwitcher';
     refreshList();
     listTimer = setInterval(() => { if (!document.hidden) refreshList(); }, 3000);
+  } else if (view === 'lead') {
+    current = null;
+    refreshLead();
+    listTimer = setInterval(() => { if (!document.hidden) refreshLead(); }, 4000);
   } else if (view === 'session') {
     refreshScreen();
     screenTimer = setInterval(() => { if (!document.hidden) { refreshScreen(); refreshList(false); } }, 1500);
@@ -179,12 +184,19 @@ async function refreshList(render = true) {
   $('notifyCard').hidden = Boolean(state.device.push) || !('PushManager' in window);
   $('bell').classList.toggle('on', Boolean(state.device.push));
   if (current) { refreshConversation(); return renderSessionMeta(); }
+  if (openLeadID) return;
   renderBriefScope();
   if (render) renderList();
 }
 
 function renderList() {
-  const sessions = state.sessions;
+  // An answer being written to a lead's question: the list waits, so the box keeps its text and the keyboard.
+  if (document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('qInput')) return;
+  // The leads' workers and verifiers fold under their lead, as on the Mac: they aren't your own sessions (nor counted
+  // as yours). A team whose lead isn't listed stays where it is.
+  const leadIDs = new Set(state.sessions.filter(s => s.role === 'lead').map(s => s.lead));
+  const isMember = s => (s.role === 'worker' || s.role === 'verifier') && leadIDs.has(s.lead);
+  const sessions = state.sessions.filter(s => !isMember(s));
   const counts = $('counts');
   counts.replaceChildren();
   for (const status of ORDER) {
@@ -200,25 +212,35 @@ function renderList() {
   if (paused) counts.append(el('span', 'chip', `⏸ ${counted('paused', paused)}`));
   const list = $('sessions');
   list.replaceChildren(...sessions.map(session => {
-    const row = el('button', session.paused ? 'row paused' : 'row');
-    row.type = 'button';
-    row.addEventListener('click', () => openSession(session.tty));
-    const text = el('div', 'text');
-    const first = el('div', 'line1');
-    first.append(el('b', 'name', session.name), el('span', `agent ${session.agent}`, session.agent === 'claude' ? 'Claude' : 'Codex'));
-    if (session.paused) first.append(el('span', 'pausedTag', `⏸ ${WORDS.paused.label}`));
-    const when = el('span', `when ${session.status}`, `${session.statusLabel} ${elapsed(session.since)}`.trim());
-    first.append(when);
-    text.append(first);
-    if (session.task) text.append(el('div', 'task', session.task));
-    if (session.activity) text.append(el('div', 'detail', `⚙ ${session.activity} · ${elapsed(session.activitySince)}`));
-    else if (session.detail) text.append(el('div', `detail ${session.status === 'needsInput' ? 'strong' : ''}`, session.detail));
-    row.append(badge(session), text);
-    return row;
+    const row = sessionRow(session);
+    const lead = session.role === 'lead' && (state.leads || []).find(l => l.id === session.lead);
+    return lead ? leadBlock(lead, row, state.sessions.filter(s => isMember(s) && s.lead === lead.id)) : row;
   }));
   $('empty').hidden = sessions.length > 0;
   renderToday();
   refreshDevPages();
+}
+
+function sessionRow(session) {
+  const row = el('button', session.paused ? 'row paused' : 'row');
+  row.type = 'button';
+  row.addEventListener('click', () => openSession(session.tty));
+  const text = el('div', 'text');
+  const first = el('div', 'line1');
+  first.append(el('b', 'name', session.name), el('span', `agent ${session.agent}`, session.agent === 'claude' ? 'Claude' : 'Codex'));
+  if (session.role === 'lead') first.append(el('span', 'roleTag', 'Lead'));
+  if (session.paused) first.append(el('span', 'pausedTag', `⏸ ${WORDS.paused.label}`));
+  const when = el('span', `when ${session.status}`, `${session.statusLabel} ${elapsed(session.since)}`.trim());
+  first.append(when);
+  text.append(first);
+  if (session.role === 'worker' || session.role === 'verifier') {
+    text.append(el('div', 'roleLine', `${session.role}${session.teamTask ? ` · ${session.teamTask}` : ''}`));
+  }
+  if (session.task) text.append(el('div', 'task', session.task));
+  if (session.activity) text.append(el('div', 'detail', `⚙ ${session.activity} · ${elapsed(session.activitySince)}`));
+  else if (session.detail) text.append(el('div', `detail ${session.status === 'needsInput' ? 'strong' : ''}`, session.detail));
+  row.append(badge(session), text);
+  return row;
 }
 
 function renderToday() {
@@ -234,6 +256,289 @@ function renderToday() {
                el('span', p.waiting > p.working ? 'warn' : 'muted', `waited ${short(p.waiting)}`));
     return row;
   }));
+}
+
+// ---------- Project leads ----------
+// A lead's row as the Mac's sidebar has it: its questions for you, its team's summary ("team: 2 working · 1 waits on
+// lead") folding its workers and verifiers under it, and its page (Team ›). Its questions are answered here as on the
+// Mac's answer card, through the same path on the Mac (POST /api/lead/answer); a withdrawn or decided one is a dim line.
+
+const teamOpen = new Set();          // leads whose team is unfolded on this phone
+const drafts = new Map();            // question id → the answer being written
+const answering = new Set();         // question ids with an answer on its way (a second tap waits for it)
+const answerNotes = new Map();       // question id → { text, error } shown under its card
+let openLeadID = null;               // the lead whose page is shown
+let leadBusy = false;
+let leadPage = null;
+
+const PRIORITY = { blocking: 'Blocking', important: 'Important', whenever: 'Whenever' };
+
+function clockText(at) {
+  const date = new Date((at - clockOffset) * 1000);
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+// "8 min", "45 s": what's left of a timer, rounded up (the Mac's timeLeft).
+function timeLeft(seconds) {
+  return seconds >= 60 ? `${Math.ceil(seconds / 60)} min` : `${Math.max(1, Math.ceil(seconds))} s`;
+}
+
+function questionCount(count) { return `${count} question${count === 1 ? '' : 's'} for you`; }
+
+function leadBlock(lead, row, members) {
+  const block = el('div', 'leadBlock');
+  block.append(row);
+  const bar = el('div', 'leadBar');
+  if (lead.open) bar.append(el('span', lead.blocking ? 'qCount blocking' : 'qCount', `? ${questionCount(lead.open)}`));
+  if (members.length) {
+    const open = teamOpen.has(lead.id);
+    const toggle = el('button', 'teamToggle', `${lead.summary || `team: ${members.length}`} ${open ? '▾' : '▸'}`);
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', String(open));
+    toggle.addEventListener('click', () => {
+      if (teamOpen.has(lead.id)) teamOpen.delete(lead.id); else teamOpen.add(lead.id);
+      renderList();
+    });
+    bar.append(toggle);
+  }
+  if (lead.allDone) bar.append(el('span', 'allDoneTag', '✓ All done'));
+  const page = el('button', 'teamLink', 'Team ›');
+  page.type = 'button';
+  page.addEventListener('click', () => openLead(lead.id));
+  bar.append(page);
+  block.append(bar);
+  if (members.length && teamOpen.has(lead.id)) {
+    const team = el('div', 'team');
+    team.append(...members.map(sessionRow));
+    block.append(team);
+  }
+  if (lead.questions.length) block.append(questionStack(lead));
+  return block;
+}
+
+function questionStack(lead) {
+  const stack = el('div', 'qStack');
+  const open = lead.questions.filter(q => q.state === 'open');
+  if (open.length > 1) stack.append(el('div', 'muted small qOrder', 'Answer in any order'));
+  stack.append(...lead.questions.map(q => questionCard(lead, q)));
+  return stack;
+}
+
+function questionCard(lead, q) {
+  if (q.state === 'withdrawn' || q.state === 'autoDecided') {
+    const line = el('div', `qClosed ${q.state}`);
+    line.append(q.state === 'withdrawn'
+      ? el('div', 'qClosedWhy', `✕ Withdrawn: ${q.withdrawReason || 'no reason given'}`)
+      : el('div', 'qClosedWhy', `✓ Went ahead with ${q.proposal || ''}: no answer in ${q.decideIn} min`));
+    line.append(el('div', 'qClosedText', q.text));
+    return line;
+  }
+  const card = el('div', `qCard ${q.priority}`);
+  card.dataset.question = q.id;
+  const head = el('div', 'qHead');
+  head.append(el('span', `qPriority ${q.priority}`, PRIORITY[q.priority] || q.priority),
+              el('span', 'muted small', `asked ${elapsed(q.askedAt)} ago`));
+  card.append(head, el('div', 'qText', q.text));
+  if (q.whyNow) card.append(el('div', 'qWhy', q.whyNow));
+  if (q.revised) {
+    const history = el('details', 'qRevised');
+    history.append(el('summary', null, `✎ Updated ${clockText(q.revised.at)}: ${q.revised.note}`));
+    for (const earlier of [...q.revised.earlier].reverse()) {
+      const item = el('div', 'qEarlier');
+      item.append(el('div', 'muted small', `Version ${earlier.version}, until ${clockText(earlier.until)}`),
+                  el('s', null, earlier.text));
+      if (earlier.options.length) item.append(el('div', 'muted small', earlier.options.join(' · ')));
+      history.append(item);
+    }
+    card.append(history);
+  }
+  if (q.proposal && q.decideBy) {
+    const left = q.decideBy - (Date.now() / 1000 + clockOffset);
+    const timer = el('div', 'qTimer');
+    timer.append('⏱ Going with ', el('b', null, q.proposal), left > 0 ? ` in ${timeLeft(left)}` : ' now');
+    card.append(timer);
+  } else if (q.held && q.proposal) {
+    const held = el('div', 'qTimer held');
+    held.append('⏸ Held: the timer is off. The lead proposed ', el('b', null, q.proposal), '; it waits for your answer.');
+    card.append(held);
+  }
+  const canAnswer = Boolean(state && state.inputAllowed);
+  const busy = answering.has(q.id);
+  if (q.options.length) {
+    const options = el('div', 'options');
+    for (const option of q.options) {
+      const button = el('button', option === q.proposal ? 'option proposed' : 'option');
+      button.type = 'button';
+      button.append(el('span', null, option));
+      if (option === q.proposal) button.append(el('span', 'proposedTag', 'Proposed'));
+      button.disabled = !canAnswer || busy;
+      button.addEventListener('click', () => answerQuestion(lead, q, option));
+      options.append(button);
+    }
+    card.append(options);
+  }
+  const form = el('form', 'qAnswer');
+  const input = el('input', 'qInput');
+  input.placeholder = q.options.length ? 'Or answer in your own words' : 'Your answer';
+  input.maxLength = 2000;
+  input.value = drafts.get(q.id) || '';
+  input.disabled = !canAnswer || busy;
+  input.addEventListener('input', () => drafts.set(q.id, input.value));
+  const send = el('button', 'primary', 'Answer');
+  send.type = 'submit';
+  send.disabled = !canAnswer || busy;
+  form.append(input, send);
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    const text = input.value.trim();
+    if (text) answerQuestion(lead, q, text);
+  });
+  card.append(form);
+  const note = answerNotes.get(q.id);
+  if (note) card.append(el('div', note.error ? 'error qNote' : 'status qNote', note.text));
+  if (!canAnswer) {
+    card.append(el('div', 'muted small', 'Replying is off. Turn it on on the Mac: VibeSwitcher › Settings… › Phone.'));
+  } else if (q.proposal && q.decideBy) {
+    card.append(el('div', 'muted small', `Pick another answer, or the lead goes ahead with ${q.proposal} at ${clockText(q.decideBy)}.`));
+  } else {
+    card.append(el('div', 'muted small', 'It keeps working while you think; the answer reaches it at its next step.'));
+  }
+  return card;
+}
+
+/// Your answer, for the version of the question this phone showed. Once: a second tap waits for the first.
+async function answerQuestion(lead, q, text) {
+  if (answering.has(q.id)) return;
+  answering.add(q.id);
+  answerNotes.delete(q.id);
+  redrawLeads();
+  try {
+    const reply = await api('/api/lead/answer', { method: 'POST', body: JSON.stringify({ lead: lead.id, question: q.id, version: q.version, text }),
+                                                  unknownOutcome: "Couldn't tell whether the Mac got your answer. Check the lead before answering again." });
+    drafts.delete(q.id);
+    answerNotes.set(q.id, { text: reply.notice || `Answered: ${text} ✓`, error: Boolean(reply.notice) });
+  } catch (error) {
+    answerNotes.set(q.id, { text: error.message, error: true });
+  } finally {
+    answering.delete(q.id);
+  }
+  if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+  if (openLeadID) refreshLead(); else refreshList();
+  redrawLeads();
+}
+
+function redrawLeads() {
+  if (openLeadID) renderLead(); else if (state) renderList();
+}
+
+// ---------- A lead's page ----------
+
+function openLead(id) {
+  openLeadID = id;
+  leadPage = null;
+  $('leadPage').replaceChildren(el('p', 'muted center', 'Loading…'));
+  show('lead');
+}
+
+async function refreshLead() {
+  if (leadBusy || !openLeadID || !token) return;
+  leadBusy = true;
+  const id = openLeadID;
+  try {
+    const [page, fresh] = await Promise.all([api(`/api/lead?lead=${encodeURIComponent(id)}`), api('/api/state')]);
+    if (id !== openLeadID) return;
+    leadPage = page;
+    state = fresh;
+    clockOffset = state.now - Date.now() / 1000;
+  } catch (error) {
+    if (id === openLeadID) $('leadPage').replaceChildren(el('p', 'error', error.message));
+    return;
+  } finally {
+    leadBusy = false;
+  }
+  renderLead();
+}
+
+const MARKS = {
+  waits: '…', failed: '✕', blocked: '⊘', stalled: '⏸', ended: '■', working: '●', rework: '↻', review: '◆', merge: '◈',
+  queued: '○', merged: '✓', folded: '↳', kept: '▣', abandoned: '−', reverted: '↶',
+};
+const GROUPS = [['needsYou', 'The lead’s to handle'], ['working', 'Working'], ['review', 'In review'], ['queued', 'Queued'], ['finished', null]];
+
+function renderLead() {
+  if (!leadPage || document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('qInput')) return;
+  const page = leadPage;
+  $('title').textContent = page.project;
+  $('subtitle').textContent = page.summary || 'Project lead';
+  const parts = [];
+  const lead = (state && state.leads || []).find(l => l.id === page.id);
+  if (lead && lead.questions.length) {
+    parts.push(el('h3', 'sectionTitle', lead.open ? questionCount(lead.open) : 'No questions waiting'), questionStack(lead));
+  }
+  if (page.allDone) parts.push(allDoneCard(page.allDone));
+  if (page.updates.length) {
+    parts.push(el('h3', 'sectionTitle', 'Latest updates'));
+    for (const update of page.updates) {
+      const card = el('div', 'card update');
+      const head = el('div', 'updateHead');
+      head.append(el('b', null, update.title), el('span', 'muted small', clockText(update.at)));
+      card.append(head, el('div', 'updateBody', update.body));
+      if (update.images) card.append(el('div', 'muted small', `${update.images} image${update.images === 1 ? '' : 's'} on the Mac`));
+      parts.push(card);
+    }
+  }
+  parts.push(el('h3', 'sectionTitle', 'Tasks'));
+  const tasks = el('div', 'card tasks');
+  for (const [group, title] of GROUPS) {
+    const rows = page.tasks.filter(t => t.group === group);
+    if (!rows.length) continue;
+    tasks.append(el('div', 'taskGroup', group === 'finished' ? page.finished.title : `${title} (${rows.length})`));
+    for (const task of rows) {
+      const row = el('div', 'taskRow');
+      const mark = el('span', `mark ${task.mark}`, MARKS[task.mark] || '•');
+      mark.setAttribute('aria-hidden', 'true');
+      const text = el('div', 'text');
+      const first = el('div', 'line1');
+      first.append(el('span', 'taskTitle', task.title), el('span', `taskState ${task.mark}`, task.stateText));
+      text.append(first);
+      if (task.line) text.append(el('div', 'detail', task.line));
+      row.append(mark, text);
+      tasks.append(row);
+    }
+    if (group === 'finished' && page.finished.count > page.finished.shown) {
+      tasks.append(el('div', 'muted small', `and ${page.finished.count - page.finished.shown} earlier`));
+    }
+  }
+  if (!page.tasks.length) tasks.append(el('div', 'muted small', 'No tasks on the board.'));
+  parts.push(tasks);
+  if (page.scorecard || page.cost) {
+    const score = el('div', 'card scorecard');
+    if (page.scorecard) score.append(el('div', null, page.scorecard));
+    if (page.cost) score.append(el('div', 'muted small', page.cost));
+    parts.push(score);
+  }
+  $('leadPage').replaceChildren(...parts);
+}
+
+function allDoneCard(mark) {
+  const card = el('div', 'allDone');
+  const head = el('div', 'allDoneHead');
+  head.append(el('b', null, '✓ All tasks finished'), el('span', 'muted small', clockText(mark.at)));
+  card.append(head);
+  if (mark.headline) {
+    card.append(el('div', 'allDoneHeadline', mark.headline));
+    const bullets = el('ul', 'allDoneBullets');
+    bullets.append(...(mark.bullets || []).map(b => el('li', null, b)));
+    card.append(bullets);
+  } else {
+    card.append(el('div', 'muted small', 'Writing a short summary of what was done…'));
+  }
+  if (mark.cost) card.append(el('div', 'muted small allDoneCost', mark.cost));
+  const list = el('details', 'allDoneTasks');
+  list.append(el('summary', null, mark.count));
+  list.append(...mark.tasks.map(t => el('div', `small outcome ${t.outcome}`, `${t.outcome === 'merged' ? '✓' : t.outcome === 'reverted' ? '↶' : '−'} ${t.title}`)));
+  card.append(list);
+  return card;
 }
 
 // ---------- Dev pages ----------
