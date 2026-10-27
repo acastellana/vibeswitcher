@@ -555,6 +555,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let access = phone ?? PhoneAccess(store: store)
         access.hostClient = host
         access.inputAllowed = true
+        PhoneLeads.wire(access, controller: leads, model: model)
         phone = access
         let port = UInt16.random(in: 50_000...59_999)
         access.serveInSandbox(port: port, status: status) { [weak self] token in

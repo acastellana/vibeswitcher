@@ -177,6 +177,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         phoneAccess.brief = phoneBriefer.brief
         phoneAccess.briefProject = phoneBriefer.brief(project:_:)
         phoneAccess.briefingProjects = phoneBriefer.projects
+        PhoneLeads.wire(phoneAccess, controller: leadController, model: windowModel)
         phoneAccess.startIfEnabled()
 
         if UserDefaults.standard.object(forKey: Self.positionKey) == nil {

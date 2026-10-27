@@ -130,6 +130,13 @@ final class PhoneAccess: ObservableObject {
     var briefProject: ((String, @escaping (PhoneBriefing) -> Void) -> Void)?
     /// The led projects a phone may ask a briefing of, by name (the card's picker); any other name is refused.
     var briefingProjects: () -> [String] = { [] }
+    /// The running leads as the Mac shows them (`PhoneLeads.leads`), read on the main thread at each ask.
+    var leads: () -> [PhoneLeads.Lead] = { [] }
+    /// Answers a lead's question as you (`LeadController.answer`, what the Mac's answer card calls), from the phone: the
+    /// root, the question, the version the phone showed, the text; then what came of it, on the main thread. Nil: the
+    /// route answers 503.
+    var answerLead: ((_ root: String, _ question: LeadQuestion, _ saw: Int, _ text: String,
+                      _ done: @escaping (LeadAnswerOutcome, String?) -> Void) -> Void)?
     /// Each phone's briefing, by device: being written (that press's number and project), or written and kept until
     /// its next press.
     private var briefings: [String: Briefed] = [:]
@@ -448,12 +455,68 @@ final class PhoneAccess: ObservableObject {
         case ("POST", "/api/preview"): preview(request, device: device, respond: reply)
         // Read-only, like /api/state and /api/screen: nothing is typed, so the screen lock doesn't apply (the phone is
         // where a briefing is wanted while away from a locked Mac), and neither does the replies switch.
+        // The lead's page: read-only, like /api/state.
+        case ("GET", "/api/lead"): reply(leadPage(request))
+        case ("POST", "/api/lead/answer"): answerLeadQuestion(request, device: device, respond: reply)
         case ("POST", "/api/briefing"): reply(startBriefing(request, device: device))
         case ("GET", "/api/briefing"): reply(briefing(for: device))
         case ("POST", "/api/unpair"):
             remove(device)
             respond(.json(["ok": true]))
         default: respond(.error(404, "not found"))
+        }
+    }
+
+    /// One lead's page (`?lead=<id>`, see `PhoneLeads.page`).
+    private func leadPage(_ request: HTTPRequest) -> HTTPResponse {
+        guard let id = request.query["lead"], let lead = leads().first(where: { PhoneLeads.id(root: $0.root) == id }) else {
+            return .error(404, Self.noLead)
+        }
+        return .json(PhoneLeads.page(lead))
+    }
+
+    static let noLead = "That lead isn't running any more. Go back to the list."
+    static let questionClosed = "That question isn't open any more, so your answer wasn't sent. Here it is now."
+
+    /// Your answer to a lead's question from the phone (`{"lead", "question", "version", "text"}`): through the Mac's
+    /// own path (`answerLead`, `LeadController.answer`), as yours, from the phone, tied to the version the phone showed.
+    /// Only an open question: a withdrawn, answered or decided one is refused with how it is now (on the Mac you may
+    /// still send one as a note; here a tap on a card that just closed would send what wasn't meant as one). Replies
+    /// must be allowed, as for typing: the answer reaches the lead as input. A second tap finds it answered.
+    private func answerLeadQuestion(_ request: HTTPRequest, device: PairedDevice, respond: @escaping (HTTPResponse) -> Void) {
+        guard inputAllowed else {
+            return respond(.error(403, "Replying from the phone is off. Turn it on in VibeSwitcher › Settings… › Phone."))
+        }
+        guard let answerLead else { return respond(.error(503, "Answering the lead isn't available right now.")) }
+        let object = body(request) ?? [:]
+        guard let leadID = object["lead"] as? String, let questionID = object["question"] as? String,
+              let version = (object["version"] as? NSNumber)?.intValue, let raw = object["text"] as? String else {
+            return respond(.error(400, "lead, question, version and text are needed"))
+        }
+        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, text.count <= 2_000 else { return respond(.error(400, "The answer is empty or too long.")) }
+        guard let lead = leads().first(where: { PhoneLeads.id(root: $0.root) == leadID }) else { return respond(.error(404, Self.noLead)) }
+        guard let question = lead.board.questions.first(where: { $0.id == questionID }) else {
+            return respond(.error(404, "That question is no longer on the lead's board."))
+        }
+        let project = (lead.root as NSString).lastPathComponent
+        let closed: (LeadQuestion) -> HTTPResponse = { now in
+            .json(["error": Self.questionClosed, "question": PhoneLeads.question(now)], status: 409)
+        }
+        // As last read: the board's own check, under its lock, is the one that counts (see `LeadBoard.answer`).
+        guard question.isOpen else { return respond(closed(question)) }
+        answerLead(lead.root, question, version, text) { [weak self] outcome, approval in
+            switch outcome {
+            case .answered(let answered, let saw):
+                self?.audit("\(device.name) answered \(project)'s question “\(Redaction.secrets(in: String(answered.text.prefix(60))))”: “\(Redaction.secrets(in: String(text.prefix(60))))”")
+                var reply: [String: Any] = ["ok": true, "saw": saw, "question": PhoneLeads.question(answered)]
+                if let approval { reply["notice"] = approval }
+                respond(.json(reply))
+            case .alreadyAnswered(let now), .notOpen(let now), .withdrawn(let now), .afterAutoDecision(let now):
+                respond(closed(now))
+            case .missing:
+                respond(.error(404, "That question is no longer on the lead's board."))
+            }
         }
     }
 
@@ -576,11 +639,18 @@ final class PhoneAccess: ObservableObject {
             if let eventAt = session.eventAt { row["eventAt"] = eventAt }
             row["hasTranscript"] = session.transcriptPath != nil
             if let menu = offeredMenu(session) { row["menu"] = PhoneMenu.json(menu, sid: session.identity) }
+            // A lead, or a member of a lead's team (listed under its lead, not as one of your own sessions).
+            if let role = session.teamRole, let lead = PhoneLeads.id(of: session) {
+                row["role"] = role.rawValue
+                row["lead"] = lead
+                if role != .lead, let task = session.cwd.flatMap(LeadTeams.task(ofWorktree:)) { row["teamTask"] = Redaction.secrets(in: task) }
+            }
             return row
         }
         let today = store.today
         return [
             "sessions": sessions,
+            "leads": PhoneLeads.state(leads()),
             "today": ["agentsWorking": today.agentsWorking, "waitingOnYou": today.waitingOnYou,
                       "projects": today.byProject().prefix(8).map { ["project": Redaction.secrets(in: $0.project), "working": $0.working,
                                                                       "waiting": $0.waiting, "background": $0.background] }],

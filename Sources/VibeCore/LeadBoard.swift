@@ -816,6 +816,11 @@ public struct LeadQuestion: Codable, Equatable, Sendable, Identifiable {
     public var autoDecidedAt: Double?
     /// The task it's about (its slug), when the lead said: its wait on the user counts on that task's score.
     public var task: String?
+    /// Where the user answered it: the Mac's answer card, or the paired phone. Nil on older boards (the Mac then).
+    public var answeredFrom: AnswerSource?
+
+    /// Where an answer came from.
+    public enum AnswerSource: String, Codable, Sendable { case mac, phone }
 
     public init(id: String = UUID().uuidString, text: String, options: [String], priority: Priority? = nil, whyNow: String? = nil,
                 proposal: String? = nil, decideIn: Int? = nil, at: Double = Date().timeIntervalSince1970) {
@@ -921,6 +926,9 @@ public enum LeadAnswerOutcome: Equatable, Sendable {
     case afterAutoDecision(LeadQuestion)
     /// It was answered already (another window, the phone).
     case alreadyAnswered(LeadQuestion)
+    /// Not recorded: it wasn't open any more (withdrawn, answered or decided by its timer) and the answer came from
+    /// where only open questions are answered (the phone).
+    case notOpen(LeadQuestion)
     case missing
 
     /// The message for the lead, if any: the answer tied to the wording the user saw.
@@ -946,7 +954,7 @@ public enum LeadAnswerOutcome: Equatable, Sendable {
             }
             return went + ". They would have chosen otherwise: \(text)\n"
                 + "Take it as a note: weigh changing course (it was a reversible choice), and record_decision if you do."
-        case .alreadyAnswered, .missing:
+        case .alreadyAnswered, .notOpen, .missing:
             return nil
         }
     }
@@ -1237,17 +1245,21 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     /// The user's answer to the version of the question they saw. It's tied to that version, so when the lead
     /// revised it meanwhile the lead learns which wording was answered; a withdrawn question keeps the answer but
     /// stays withdrawn.
-    public mutating func answer(_ id: String, with text: String, saw version: Int, at: Double = Date().timeIntervalSince1970) -> LeadAnswerOutcome {
+    /// `openOnly`: answered only while it's open (the phone's answers): a withdrawn or decided one is left as it is.
+    public mutating func answer(_ id: String, with text: String, saw version: Int, from source: LeadQuestion.AnswerSource = .mac,
+                                openOnly: Bool = false, at: Double = Date().timeIntervalSince1970) -> LeadAnswerOutcome {
         guard let index = questions.firstIndex(where: { $0.id == id }) else { return .missing }
         switch questions[index].state {
         case .answered: return .alreadyAnswered(questions[index])
         case .autoDecided where questions[index].answer != nil: return .alreadyAnswered(questions[index])
+        case .withdrawn where openOnly, .autoDecided where openOnly: return .notOpen(questions[index])
         case .open, .withdrawn, .autoDecided: break
         }
         let saw = min(max(version, 1), questions[index].version)
         questions[index].answer = text
         questions[index].answeredAt = at
         questions[index].answeredVersion = saw
+        questions[index].answeredFrom = source
         switch questions[index].state {
         case .withdrawn: return .withdrawn(questions[index])
         case .autoDecided: return .afterAutoDecision(questions[index])

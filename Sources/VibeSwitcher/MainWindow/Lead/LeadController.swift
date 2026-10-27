@@ -620,11 +620,17 @@ final class LeadController: ObservableObject {
     /// it's told which wording you answered; if the lead had withdrawn it, the card says so and the lead gets your
     /// answer as a note. An answer approving a held merge ("Approve <commit>") is recorded in the vault too, where
     /// merge looks for it (see `LeadVault.recordApproval`).
-    func answer(_ question: LeadQuestion, root: String, with text: String) {
+    /// The phone's answers come here too (`from: .phone`), tied to the version the phone showed (`saw`), and only to an
+    /// open question; `done` hears what came of it (and what became of an approval), on the main thread.
+    func answer(_ question: LeadQuestion, root: String, with text: String, saw: Int? = nil, from source: LeadQuestion.AnswerSource = .mac,
+                done: ((LeadAnswerOutcome, String?) -> Void)? = nil) {
         let store = BoardStore(root: root)
         let vault = self.vault
+        let seen = saw ?? question.version
         reads.async({ _ -> (LeadAnswerOutcome, String?) in
-            let outcome = (try? store.update { board in board.answer(question.id, with: text, saw: question.version) }) ?? .missing
+            let outcome = (try? store.update { board in
+                board.answer(question.id, with: text, saw: seen, from: source, openOnly: source == .phone)
+            }) ?? .missing
             guard case .answered(let answered, _) = outcome else { return (outcome, nil) }
             do {
                 guard let tasks = try vault.recordApproval(text, of: answered, root: root) else { return (outcome, nil) }
@@ -644,9 +650,12 @@ final class LeadController: ObservableObject {
                 self.answerNotices[question.id] = "Already answered: \(answered.answer ?? answered.proposal ?? ""). Your new answer wasn't sent."
             case .missing:
                 self.answerNotices[question.id] = "That question is no longer on the board. Your answer wasn't sent."
+            case .notOpen:
+                break   // the phone says so: nothing changed on the board, nor on the Mac's card
             }
             if let message = outcome.message(given: text) { self.deliver(message, from: .user, root: root) }
             self.refresh()
+            done?(outcome, approval)
         }
     }
 
