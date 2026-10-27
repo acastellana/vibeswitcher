@@ -1501,3 +1501,7 @@
 - 2026-10-27 11:50 Audit of sidebar-rows-the-status: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
 - 2026-10-27 11:52 Audit of choosing-a-project: complete, clean, round 1: 1 Important open, 5 Nit open
 - 2026-10-27 11:59 Merged sidebar-rows-the-status: Sidebar rows: the status is the big icon, Claude/Codex the small badge
+- 2026-10-27 11:59 Automatically (auto_advance): Merged sidebar-rows-the-status (Sidebar rows: the status is the big icon, Claude/Codex the small badge) into project-lead at 0b6e4898, on its passing audit and the full test run.
+- 2026-10-27 12:00 Automatically (auto_advance): Cleaned up sidebar-rows-the-status (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-10-27 12:00 The worker on choosing-a-project answered findings: choosing-a-project:F1 fixed at 59ba49b1: 25b927a: after `git add -A`, make lists the index (git ls-files -z), runs `git rm --cached` on every secret-named path, checks the index again, and fails (undoing .git and the .gitignore it wrote) if one is still there. A .gitignore negation like !.env can no longer get one into the commit. Test aSecretTheFoldersGitignoreUnignoresIsStillLeftOut (.gitignore '!.env\n!*.pem\n'): fails on 7858f7e (ls-files held .env and a/server.pem), passes on 25b927a.; choo…
+- 2026-10-27 12:01 Automatically (auto_advance): Started the audit of choosing-a-project at 59ba49b1 (An audit was started on it: its verdict decides).
