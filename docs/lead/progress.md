@@ -1579,3 +1579,5 @@
 - 2026-10-27 21:15 Incident: The witness reports "ended without a verdict (its agent quit; the session's shell is still open)" while the agent's claude process is still alive and waiting on… (in land-pr-1-host); planned turn-this-incident-into-3 to turn it into a check
 - 2026-10-27 21:15 Review of turn-this-incident-into-3: audit
 - 2026-10-27 21:16 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-10-27 21:20 Planned main-thread-overloaded: Main thread overloaded while an alert is up: SessionStore.apply, LeadController.refreshed → Redaction.secrets, SwiftUI re-render (stalls of 5–95 s)
+- 2026-10-27 21:20 Abandoned hang-detector-don-t: The premise was wrong. An idle modal already beats (the timer runs in .common modes), so the End Session reports were real stalls in the alert's modal loop, and muting them would hide real freezes. The real bug is task main-thread-overloaded.
