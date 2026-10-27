@@ -1449,6 +1449,8 @@ final class ChatCodeHeader: NSView {
         button.target = button
         button.action = #selector(ClosureButton.fire(_:))
         button.isBordered = false
+        // Out of the key-view loop, as the rows' SwiftUI controls (`chatRowControl`).
+        button.refusesFirstResponder = true
         button.font = .systemFont(ofSize: 10.5)
         button.contentTintColor = .secondaryLabelColor
         if let symbol {
@@ -1514,6 +1516,7 @@ struct CodeBlockHeader: View {
                 Label(copied ? "Copied" : "Copy", systemImage: copied ? "checkmark" : "doc.on.doc").font(.system(size: 10.5))
             }
             .buttonStyle(.borderless)
+            .chatRowControl()
         }
         .padding(.horizontal, 10).padding(.vertical, 5)
     }

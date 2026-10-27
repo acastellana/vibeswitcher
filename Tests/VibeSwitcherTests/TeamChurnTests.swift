@@ -65,6 +65,85 @@ struct TeamChurnTests {
         #expect(cache.seen("/r", board: board, rows: [], now: Self.now) == TeamSeen(members: [:], listed: false))
     }
 
+    /// A day's board, 250 tasks merged or abandoned (10-27, the lead's chat froze for 5 to 18 s): a member's session
+    /// changing makes again only the rows of the tasks under way; the finished ones' are made once a board.
+    @Test func aMembersChangeLeavesTheFinishedRowsAsTheyWere() {
+        let cache = TeamRowsCache()
+        let worker = UUID()
+        var board = Self.board()
+        board.tasks[0].worker = worker.uuidString
+        for index in 0..<250 {
+            var task = TeamRowsTests.task("done-\(index)", index % 9 == 0 ? .abandoned : .done)
+            // Some finished at the same moment: the board's order tells them apart.
+            task.since = Self.now.timeIntervalSince1970 - Double(index / 2) * 60
+            board.tasks.append(task)
+        }
+        // Kept, under way for the board but finished as shown: its row is merged in among the finished ones.
+        var kept = TeamRowsTests.task("kept", .kept)
+        kept.since = Self.now.timeIntervalSince1970 - 100 * 60
+        board.tasks.append(kept)
+        var all = [Self.hosted(worker)]
+        func rows() -> [TeamRow] { cache.rows("/r", board: board, seen: cache.seen("/r", board: board, rows: all, now: Self.now)) }
+        #expect(rows() == TeamRows.rows(board, seen: TeamRows.seen(all, now: Self.now)))
+        all[0] = Self.hosted(worker, title: "Still working", ended: true)
+        let changed = rows()
+        #expect(changed.first { $0.id == "fix" }?.state == "Worker ended")
+        // The same rows, in the same order, as made from scratch, and as when every task's row read the sessions.
+        #expect(changed == TeamRows.rows(board, seen: TeamRows.seen(all, now: Self.now)))
+        let seen = TeamSeen(members: TeamRows.seen(all, now: Self.now), listed: true)
+        let everyRowRead = TeamRows.sorted(board.tasks.map { TeamRows.row($0, seen: seen.members, listed: seen.listed, board: board) }, board: board)
+        #expect(changed.map(\.id) == everyRowRead.map(\.id))
+        #expect(changed == everyRowRead)
+        #expect(changed.firstIndex { $0.id == "kept" } == everyRowRead.firstIndex { $0.id == "kept" })
+        #expect(cache.made == 2)
+        #expect(cache.finishedMade == 1)
+        // The board changed: its finished rows made again, once.
+        board.tasks[3].title = "Old, renamed"
+        #expect(rows().contains { $0.task.title == "Old, renamed" })
+        #expect(cache.finishedMade == 2)
+    }
+
+    /// A board is told from another by its lists' storage (`LeadBoard.isSame`), never field by field: a copy is the
+    /// same, a changed copy or another read of the file is not.
+    @Test func boardsAreToldApartByWhatWasRead() throws {
+        let board = Self.board()
+        let copy = board
+        #expect(copy.isSame(as: board))
+        var changed = board
+        changed.tasks[0].title = "Renamed"
+        #expect(!changed.isSame(as: board) && copy.isSame(as: board))
+        var asked = board
+        asked.leadTTY = "ttys9"
+        #expect(!asked.isSame(as: board))
+        // Read again: equal, not the same (its rows are made again, once).
+        let read = try JSONDecoder().decode(LeadBoard.self, from: JSONEncoder().encode(board))
+        #expect(read == board && !read.isSame(as: board))
+        #expect(LeadBoard().isSame(as: LeadBoard()))
+        // Changed in place, where Swift keeps an array's storage when nothing else holds it: what it's compared with
+        // holds it (the cache's kept board, SwiftUI's last view), so a change copies it first and is told apart. With
+        // room to grow (an append in place), and an element's field set (the same count):
+        let cache = TeamRowsCache()
+        var grown = Self.board()
+        grown.tasks.reserveCapacity(64)
+        func rows() -> [TeamRow] { cache.rows("/r", board: grown, seen: TeamSeen(members: [:], listed: false)) }
+        #expect(rows().count == 4)
+        grown.tasks.append(TeamRowsTests.task("new", .planned))
+        #expect(rows().contains { $0.id == "new" })
+        grown.tasks[0].status = .done
+        #expect(rows().first { $0.id == "fix" }?.state == "Merged")
+        grown.tasks[0].title = "Fixed"
+        #expect(rows().first { $0.id == "fix" }?.task.title == "Fixed")
+        #expect(cache.made == 4)
+        let shown = grown
+        grown.tasks[1].status = .done
+        #expect(!grown.isSame(as: shown))
+        // Every stored property is compared: a new one goes in `isSame` too.
+        #expect(Mirror(reflecting: LeadBoard()).children.map { $0.label ?? "" } == [
+            "leadSession", "leadPid", "leadTTY", "baseBranch", "tasks", "questions", "updates", "reports", "reportsSeenAt", "removed",
+            "allDone", "flakes",
+        ])
+    }
+
     @Test func membersAreTheBoardsWorkersVerifiersAndFinders() {
         var board = Self.board()
         board.tasks[1].panel = LeadAuditPanel(focuses: ["a", "b"], sessions: ["f-1", "f-2"], commit: "abc", logs: [], run: "r")

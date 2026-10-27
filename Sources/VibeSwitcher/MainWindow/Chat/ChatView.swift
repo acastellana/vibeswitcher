@@ -2,6 +2,25 @@ import AppKit
 import SwiftUI
 import VibeCore
 
+/// Answers a lead's question from a row of the chat's history (`answerLeadQuestion`): the same closure on every
+/// render. A new one each time a lead's board changed was a new environment for the whole chat: every row's
+/// environment was looked at again and every AppKit-drawn button took its appearance again, in layout
+/// (hang-20261027-020733, 5.4 s).
+final class LeadAnswer {
+    private weak var leads: LeadController?
+    private var root: String?
+
+    func aim(_ leads: LeadController, root: String?) {
+        self.leads = leads
+        self.root = root
+    }
+
+    private(set) lazy var answer: (LeadQuestion, String) -> Void = { [weak self] question, text in
+        guard let self, let leads = self.leads, let root = self.root else { return }
+        leads.answer(question, root: root, with: text)
+    }
+}
+
 /// The middle pane's Chat: the conversation, what the agent is doing now, search, and the composer.
 struct ChatContainer: View {
     @ObservedObject var chat: ChatModel
@@ -21,11 +40,14 @@ struct ChatContainer: View {
     @State private var cardKeys = AnswerCardKeys()
     /// What you were writing under the lead's questions, kept when one closes (it moves into the conversation).
     @State private var questionDrafts = LeadQuestionDrafts()
+    /// Answers a lead's question from the chat's history, one closure for as long as the chat is up.
+    @State private var leadAnswer = LeadAnswer()
 
     var body: some View {
         VStack(spacing: 0) {
             if chat.searchActive { ChatSearchBar(chat: chat) }
             let lead = model.selectedRow.flatMap(leads.lead(for:))
+            let _ = leadAnswer.aim(leads, root: lead?.root)
             if let lead {
                 TeamStrip(board: lead.board) { task in
                     if let id = task.worker.flatMap(UUID.init(uuidString:)) { model.select(hostID: id) }
@@ -47,7 +69,7 @@ struct ChatContainer: View {
                 .environment(\.chatRunner, chat.runner)
                 .environment(\.teamSummaries, leads.summaries)
                 .environment(\.leadQuestionDrafts, questionDrafts)
-                .environment(\.answerLeadQuestion) { question, text in if let lead { leads.answer(question, root: lead.root, with: text) } }
+                .environment(\.answerLeadQuestion, leadAnswer.answer)
                 // The lead's all-done cards, in its own conversation only.
                 .onChange(of: lead?.board.allDone ?? [], initial: true) { _, marks in chat.showAllDone(marks) }
                 // Its questions that closed without your answer, where they closed (only open ones are pinned under it).

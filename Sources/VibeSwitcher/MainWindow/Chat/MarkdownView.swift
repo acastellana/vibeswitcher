@@ -295,6 +295,7 @@ struct RunButton: View {
                 Label(sent ? "Sent" : "Run", systemImage: sent ? "checkmark" : "play.fill").font(.system(size: 10.5))
             }
             .buttonStyle(.borderless)
+            .chatRowControl()
             .help("Runs it in this session: \(prompt)")
         }
     }
@@ -347,7 +348,7 @@ struct CodeBlockView: View {
             }
             if limited {
                 Button("Show all \(lines.count) lines") { showAll = true }
-                    .buttonStyle(.borderless).font(.system(size: 11)).padding(.horizontal, 10).padding(.bottom, 8)
+                    .buttonStyle(.borderless).font(.system(size: 11)).chatRowControl().padding(.horizontal, 10).padding(.bottom, 8)
             }
         }
         .background(RoundedRectangle(cornerRadius: 8).fill(Color(nsColor: .textBackgroundColor).opacity(0.55)))

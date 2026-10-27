@@ -46,6 +46,7 @@ struct TeamMessageCard: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .chatRowControl()
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(open ? message.title : "\(message.title): \(message.gist)")
             .accessibilityValue(open ? "Expanded" : "Collapsed")

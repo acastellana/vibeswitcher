@@ -2,6 +2,16 @@ import AppKit
 import SwiftUI
 import VibeCore
 
+extension View {
+    /// A control on a row of the conversation (a disclosure, Show all, Reveal in Finder): left out of SwiftUI's
+    /// key-view loop. SwiftUI keeps an AppKit proxy view for each focusable control of the window's hosting view and
+    /// rebuilds them all, in layout, each time the set of focusable controls changes: with a button on every tool run
+    /// and team message, a long lead chat taking in new rows froze the window for 10 s (hang-20261027-014048).
+    /// VoiceOver still reaches and presses it (it's an accessibility button); the keyboard goes to the composer, the
+    /// answer card and the Team panel instead of through every row.
+    func chatRowControl() -> some View { focusable(false) }
+}
+
 /// A run of tool calls between two messages: one summary line (and any screenshots), opening to each tool.
 struct ToolGroupView: View {
     let id: String
@@ -42,6 +52,7 @@ struct ToolGroupView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .chatRowControl()
             if !images.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
@@ -111,6 +122,7 @@ struct ToolRowView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .chatRowControl()
             if open {
                 ToolDetailView(tool: tool).padding(.leading, 23).padding(.bottom, 8)
             }
@@ -228,7 +240,7 @@ private struct PathLabel: View {
             Button { NSWorkspace.shared.selectFile(path, inFileViewerRootedAtPath: "") } label: {
                 Image(systemName: "arrow.up.forward.square").accessibilityLabel("Reveal in Finder")
             }
-                .buttonStyle(.borderless).font(.system(size: 10.5)).help("Reveal in Finder")
+                .buttonStyle(.borderless).font(.system(size: 10.5)).help("Reveal in Finder").chatRowControl()
         }
     }
 }
@@ -251,7 +263,7 @@ private struct OutputView: View {
             }
             .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.07)))
             if !showAll, lines.count > limit + 5 {
-                Button("Show all \(lines.count) lines") { showAll = true }.buttonStyle(.borderless).font(.system(size: 11))
+                Button("Show all \(lines.count) lines") { showAll = true }.buttonStyle(.borderless).font(.system(size: 11)).chatRowControl()
             } else if truncated {
                 Text("Output cut at \(ChatReader.outputLimit / 1024) KB").font(.system(size: 10.5)).foregroundStyle(.tertiary)
             }

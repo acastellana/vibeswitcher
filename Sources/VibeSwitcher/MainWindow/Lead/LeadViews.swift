@@ -39,7 +39,8 @@ extension LeadTask {
     var shownStatus: Status { isAbandoned ? .abandoned : status }
 }
 
-/// Over the lead's chat: the board at a glance, one chip per task (click: open its worker).
+/// Over the lead's chat: the board at a glance, the counts by status and a chip for each task under way and the latest
+/// finished (`chips`; click: open its worker).
 struct TeamStrip: View {
     let board: LeadBoard
     let open: (LeadTask) -> Void
@@ -48,6 +49,18 @@ struct TeamStrip: View {
 
     /// How wide the fade at the chips' right edge is.
     static let fade: CGFloat = 32
+    /// The finished tasks shown as chips: the latest few. The rest are in the counts beside "Team" (and the Team tab).
+    static let finishedChips = 5
+
+    /// The tasks with a chip, in the strip's order: every task still under way, then the latest finished ones. A chip
+    /// for each of a board's 254 tasks was a button and a tooltip each, all made again whenever the board changed, and
+    /// as many key-view proxies and tracking areas in the chat's window: the lead's chat froze for 5 to 18 s (10-27).
+    static func chips(_ board: LeadBoard) -> [LeadTask] {
+        let open = board.tasks.filter { !LeadTeams.isFinished($0) }
+        let finished = board.tasks.filter(LeadTeams.isFinished)
+            .sorted { LeadTeams.finishedAt($0) > LeadTeams.finishedAt($1) }.prefix(finishedChips)
+        return (open + finished).sorted { $0.shownStatus.attentionRank < $1.shownStatus.attentionRank }
+    }
 
     var body: some View {
         // Drawn again only when the board or its count of reports waiting changes, not each time the chat is.
@@ -62,7 +75,8 @@ private struct TeamStripContent: View, Equatable {
     let waiting: Int?
     let open: (LeadTask) -> Void
 
-    static func == (a: TeamStripContent, b: TeamStripContent) -> Bool { a.board == b.board && a.waiting == b.waiting }
+    /// The same board (`isSame`), not an equal one: telling equal boards apart walked all their tasks on every draw.
+    static func == (a: TeamStripContent, b: TeamStripContent) -> Bool { a.board.isSame(as: b.board) && a.waiting == b.waiting }
 
     var body: some View {
         let order = LeadTask.Status.attentionOrder
@@ -97,7 +111,7 @@ private struct TeamStripContent: View, Equatable {
             if !board.tasks.isEmpty {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
-                        ForEach(board.tasks.sorted { $0.shownStatus.attentionRank < $1.shownStatus.attentionRank }) { task in
+                        ForEach(TeamStrip.chips(board)) { task in
                             Button { open(task) } label: {
                                 HStack(spacing: 5) {
                                     Circle().fill(task.shownStatus.color).frame(width: 7, height: 7)

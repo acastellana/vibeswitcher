@@ -73,6 +73,7 @@ struct AllDoneCard: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            .chatRowControl()
             .accessibilityLabel(Self.count(mark))
             .accessibilityValue(open ? "Expanded" : "Collapsed")
             .accessibilityHint(open ? "Hides the list of tasks" : "Lists the tasks")

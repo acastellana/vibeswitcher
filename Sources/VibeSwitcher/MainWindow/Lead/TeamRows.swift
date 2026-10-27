@@ -138,20 +138,61 @@ struct TeamSeen: Equatable {
     var listed = false
 }
 
+extension LeadBoard {
+    /// The same board as read, not only an equal one: each list the same storage (a copy of a board is the same, a
+    /// changed copy or another read of the file is not). As cheap for a day's 254 tasks as for 4: a whole `==` walked
+    /// them field by field, contract by contract, on every draw (hang-20261027-023457). Every stored property is
+    /// here (`TeamChurnTests` counts them). An array changed in place keeps its storage only while nothing else holds
+    /// it, and the board compared with is held (the cache's, SwiftUI's last view): a change made since copies first.
+    func isSame(as other: LeadBoard) -> Bool {
+        func same<T>(_ a: [T], _ b: [T]) -> Bool {
+            a.count == b.count && (a.isEmpty || a.withUnsafeBufferPointer { a in b.withUnsafeBufferPointer { $0.baseAddress == a.baseAddress } })
+        }
+        func same<T>(_ a: [T]?, _ b: [T]?) -> Bool {
+            switch (a, b) {
+            case (nil, nil): return true
+            case let (a?, b?): return same(a, b)
+            default: return false
+            }
+        }
+        return leadSession == other.leadSession && leadPid == other.leadPid && leadTTY == other.leadTTY && baseBranch == other.baseBranch
+            && same(tasks, other.tasks) && same(questions, other.questions) && same(updates, other.updates) && same(reports, other.reports)
+            && reportsSeenAt == other.reportsSeenAt && same(removed, other.removed) && same(allDone, other.allDone) && same(flakes, other.flakes)
+    }
+}
+
+/// A board's finished tasks' rows in the order shown, and each task's place on the board: made and sorted once a
+/// board (`TeamRowsCache`), the rows of the tasks under way are merged into them (`TeamRows.rows`).
+struct TeamHistory {
+    let rows: [TeamRow]
+    let position: [String: Int]
+
+    init(_ board: LeadBoard) {
+        position = TeamRows.positions(board)
+        rows = TeamRows.sorted(board.tasks.filter(TeamRows.readsBoardOnly).map { TeamRows.row($0, seen: [:], board: board) }, position: position)
+    }
+}
+
 /// Each lead's Team rows as last made (`TeamRows.rows`), kept while its board and its members' sessions are the same.
 /// The Team tab and the sidebar ask on every draw, and every session the host changed redrew them: mapping and sorting
 /// a day's 200-odd tasks each time froze the window for seconds (10-24, 10-25).
 final class TeamRowsCache {
+    // Boards by `isSame`: equal ones read again aren't worth a walk through all their tasks to tell.
     private var kept: [String: (board: LeadBoard, seen: TeamSeen, rows: [TeamRow])] = [:]
     private var members: [String: (board: LeadBoard, ids: Set<String>)] = [:]
+    /// The finished tasks' rows, by board alone (`TeamRows.readsBoardOnly`), sorted: a member's session changing remakes
+    /// and sorts only the rows of the tasks under way, however many have finished (a day's 250, 2026-10-27).
+    private var finished: [String: (board: LeadBoard, history: TeamHistory)] = [:]
     /// How many times rows were made (for tests).
     private(set) var made = 0
+    /// How many times the finished tasks' rows were made (for tests).
+    private(set) var finishedMade = 0
 
     /// What `board`'s rows read of the window's `rows` (`TeamRows.seen`), under `key`: only its members' rows are
     /// looked at, and whether the host's sessions are known at all.
     func seen(_ key: String, board: LeadBoard, rows: [WindowRow], now: Date) -> TeamSeen {
         let ids: Set<String>
-        if let kept = members[key], kept.board == board {
+        if let kept = members[key], kept.board.isSame(as: board) {
             ids = kept.ids
         } else {
             ids = TeamRows.members(board)
@@ -163,9 +204,17 @@ final class TeamRowsCache {
 
     /// `board`'s rows (`TeamRows.rows`), made again only when it or `seen` changed since the last under `key`.
     func rows(_ key: String, board: LeadBoard, seen: TeamSeen) -> [TeamRow] {
-        if let kept = kept[key], kept.seen == seen, kept.board == board { return kept.rows }
+        if let kept = kept[key], kept.seen == seen, kept.board.isSame(as: board) { return kept.rows }
         made += 1
-        let rows = TeamRows.rows(board, seen: seen)
+        let history: TeamHistory
+        if let kept = finished[key], kept.board.isSame(as: board) {
+            history = kept.history
+        } else {
+            finishedMade += 1
+            history = TeamHistory(board)
+            finished[key] = (board, history)
+        }
+        let rows = TeamRows.rows(board, seen: seen, history: history)
         kept[key] = (board, seen, rows)
         return rows
     }
@@ -174,6 +223,7 @@ final class TeamRowsCache {
     func keep(where keep: (String) -> Bool) {
         kept = kept.filter { keep($0.key) }
         members = members.filter { keep($0.key) }
+        finished = finished.filter { keep($0.key) }
     }
 }
 
@@ -209,18 +259,60 @@ enum TeamRows {
     }
 
     static func rows(_ board: LeadBoard, seen: TeamSeen) -> [TeamRow] {
-        let position = Dictionary(board.tasks.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
-        return board.tasks.map { row($0, seen: seen.members, listed: seen.listed, board: board) }.sorted { a, b in
-            if a.group != b.group { return a.group < b.group }
-            switch a.group {
-            case .needsYou:
-                if (a.mark == .waits) != (b.mark == .waits) { return a.mark == .waits }
-                return position[a.id, default: 0] < position[b.id, default: 0]
-            case .working: return (a.task.startedAt ?? a.task.createdAt, position[a.id, default: 0]) < (b.task.startedAt ?? b.task.createdAt, position[b.id, default: 0])
-            case .review: return (a.since ?? .distantFuture, position[a.id, default: 0]) < (b.since ?? .distantFuture, position[b.id, default: 0])
-            case .queued: return position[a.id, default: 0] < position[b.id, default: 0]
-            case .finished: return finishedAt(a.task) > finishedAt(b.task)
+        rows(board, seen: seen, history: TeamHistory(board))
+    }
+
+    /// Merged, folded, abandoned or reverted: its row reads the board alone, never what a session is doing (`row`).
+    static func readsBoardOnly(_ task: LeadTask) -> Bool {
+        [.done, .folded, .abandoned, .reverted].contains(task.status)
+    }
+
+    /// The other tasks' rows merged into `history` (of the same board), in the order shown: only the tasks under way
+    /// are sorted, the finished ones were once a board (a sort of all 254 rows was most of a frozen refresh, 10-27).
+    static func rows(_ board: LeadBoard, seen: TeamSeen, history: TeamHistory) -> [TeamRow] {
+        let open = sorted(board.tasks.filter { !readsBoardOnly($0) }.map { row($0, seen: seen.members, listed: seen.listed, board: board) },
+                          position: history.position)
+        // Both in the order shown, and it's total (a task's place breaks every tie): merged, it's as if sorted together.
+        var rows: [TeamRow] = []
+        rows.reserveCapacity(open.count + history.rows.count)
+        var next = history.rows.startIndex
+        for row in open {
+            while next < history.rows.endIndex, precedes(history.rows[next], row, position: history.position) {
+                rows.append(history.rows[next])
+                next += 1
             }
+            rows.append(row)
+        }
+        rows += history.rows[next...]
+        return rows
+    }
+
+    /// Each task's place on the board.
+    static func positions(_ board: LeadBoard) -> [String: Int] {
+        Dictionary(board.tasks.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// Every task's row, sorted at once (the order `rows` keeps).
+    static func sorted(_ rows: [TeamRow], board: LeadBoard) -> [TeamRow] {
+        sorted(rows, position: positions(board))
+    }
+
+    static func sorted(_ rows: [TeamRow], position: [String: Int]) -> [TeamRow] {
+        rows.sorted { precedes($0, $1, position: position) }
+    }
+
+    private static func precedes(_ a: TeamRow, _ b: TeamRow, position: [String: Int]) -> Bool {
+        if a.group != b.group { return a.group < b.group }
+        switch a.group {
+        case .needsYou:
+            if (a.mark == .waits) != (b.mark == .waits) { return a.mark == .waits }
+            return position[a.id, default: 0] < position[b.id, default: 0]
+        case .working: return (a.task.startedAt ?? a.task.createdAt, position[a.id, default: 0]) < (b.task.startedAt ?? b.task.createdAt, position[b.id, default: 0])
+        case .review: return (a.since ?? .distantFuture, position[a.id, default: 0]) < (b.since ?? .distantFuture, position[b.id, default: 0])
+        case .queued: return position[a.id, default: 0] < position[b.id, default: 0]
+        case .finished:
+            let (x, y) = (finishedAt(a.task), finishedAt(b.task))
+            return x != y ? x > y : position[a.id, default: 0] < position[b.id, default: 0]
         }
     }
 

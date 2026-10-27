@@ -691,6 +691,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("send", "presses Return in the composer: the message goes to the fake session"),
         ("tell JSON", "hands the selected fake Claude a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("new [LABEL]", "starts another fake session"),
+        ("views", "the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls layout)"),
+        ("scroll top|middle|bottom", "scrolls the shown chat"),
+        ("size WxH", "resizes the main window's content (e.g. 1728x1015)"),
+        ("board [N]", "adds N finished tasks (default 250) to the fake lead's board (start the lead first)"),
+        ("churn [N]", "changes the fake lead's board N times (default 40), 0.15 s apart, each read and shown as a real change is"),
+        ("publish [N]", "has the lead controller publish N times (default 50), each laid out and drawn, and times them"),
         ("hangs [reset]", "the sandbox's main-thread freezes (its hang reports, as the health digest tells them) and its longest wait between two beats (reset: from now on)"),
         ("lead [FILE]", "shows a fake project lead's chat, at its end (started the first time, on FILE's transcript if given): a board of tasks, a withdrawn question, tool runs and workers' messages"),
         ("team", "starts a fake worker on the fake lead's running task, in its worktree (start the lead first); select it and tell it a permission to see it wait on its lead"),
@@ -904,6 +910,80 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let rest = words.dropFirst().joined(separator: " ")
         switch words.first ?? "" {
         case "status": reply(true, status())
+        case "views": reply(true, views())
+        case "board":
+            // The fake lead's board grown by N finished tasks (a day's worth of a busy lead's), each with a contract.
+            let count = max(1, Int(rest) ?? 250)
+            let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
+            let contract = LeadContract(goal: "A finished sandbox task, its goal as long as a real one's: what changes, where, and how it's checked.",
+                                        acceptance: ["It shows."], boundaries: [], context: "")
+            do {
+                try BoardStore(root: root).update { board in
+                    let start = board.tasks.count
+                    for index in start..<(start + count) {
+                        var task = LeadTask(slug: "finished-\(index)", title: "Finished task \(index) of the sandbox lead", contract: contract,
+                                            status: index % 9 == 0 ? .abandoned : .done)
+                        task.since = Date().timeIntervalSince1970 - Double(count - index) * 60
+                        board.tasks.append(task)
+                    }
+                }
+            } catch {
+                return reply(false, "couldn't write the lead's board: \(error)")
+            }
+            leads.refresh()
+            settle { reply(true, "\(count) finished tasks added to the lead's board") }
+        case "churn":
+            // The fake lead's board changing N times, 0.15 s apart (a checkpoint each, as a busy team's do), each read
+            // and shown the way a real change is (`LeadController.refresh`): `hangs` then says what it cost.
+            let count = max(1, Int(rest) ?? 40)
+            let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
+            func step(_ index: Int) {
+                guard index < count else { return settle { reply(true, "board changed \(count) times") } }
+                try? BoardStore(root: root).update { board in
+                    guard let at = board.tasks.firstIndex(where: { $0.status == .running }) else { return }
+                    board.tasks[at].checkpoints = (board.tasks[at].checkpoints ?? []) + [LeadCheckpoint(text: "Checkpoint \(index)")]
+                }
+                leads.refresh()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { step(index + 1) }
+            }
+            step(0)
+        case "publish":
+            // The lead controller publishing N times (a board changed), each laid out and drawn: what one costs the
+            // window with the chat shown.
+            guard let shown = window?.window else { return reply(false, "no window") }
+            let count = max(1, Int(rest) ?? 50)
+            var longest = 0.0
+            let started = Date()
+            for _ in 0..<count {
+                let at = Date()
+                leads.objectWillChange.send()
+                RunLoop.main.run(mode: .default, before: Date())
+                shown.contentView?.layoutSubtreeIfNeeded()
+                shown.displayIfNeeded()
+                longest = max(longest, Date().timeIntervalSince(at))
+            }
+            let total = Date().timeIntervalSince(started)
+            reply(true, String(format: "%d publishes: %.1f ms each, longest %.1f ms", count, total * 1000 / Double(count), longest * 1000))
+        case "scroll":
+            // The chat's scroll view: the one holding its messages.
+            func holdsChat(_ view: NSView) -> Bool { view is ChatTextView || view.subviews.contains(where: holdsChat) }
+            func find(_ view: NSView) -> NSScrollView? {
+                if let scroll = view as? NSScrollView, let document = scroll.documentView, holdsChat(document) { return scroll }
+                return view.subviews.lazy.compactMap(find).first
+            }
+            guard let root = window?.window?.contentView, let scroll = find(root), let document = scroll.documentView else {
+                return reply(false, "no chat shown")
+            }
+            let height = document.frame.height - scroll.contentSize.height
+            let y = rest == "top" ? 0 : rest == "middle" ? height / 2 : height
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, y)))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            settle { reply(true, "scrolled to \(Int(y)) of \(Int(height))") }
+        case "size":
+            let parts = rest.split(separator: "x").compactMap { Double($0) }
+            guard parts.count == 2, let shown = window?.window else { return reply(false, "size WIDTHxHEIGHT") }
+            shown.setContentSize(NSSize(width: parts[0], height: parts[1]))
+            settle { reply(true, "window \(Int(parts[0]))×\(Int(parts[1]))") }
         case "chat": chat(rest, reply)
         case "terminal":
             model.showsChat = false
@@ -992,6 +1072,28 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// The main window's view tree in numbers: each display cycle walks all of it (tracking areas, cursor rects, the
+    /// key-view loop), so its size is what a stall in those scales with.
+    private func views() -> String {
+        guard let root = window?.window?.contentView?.superview else { return "no window" }
+        var kinds: [String: Int] = [:], total = 0, deepest = 0, keyLoop = 0
+        var hosts: [String] = []
+        func size(_ view: NSView) -> Int { view.subviews.reduce(1) { $0 + size($1) } }
+        func walk(_ view: NSView, _ depth: Int) {
+            total += 1
+            if view is NSHostingView<AnyView> || String(describing: type(of: view)).hasPrefix("NSHostingView") {
+                hosts.append("  host at depth \(depth): \(size(view)) views, \(Int(view.frame.width))×\(Int(view.frame.height)), \(String(describing: type(of: view)).prefix(50))")
+            }
+            deepest = max(deepest, depth)
+            if view.canBecomeKeyView { keyLoop += 1 }
+            kinds[String(describing: type(of: view)).prefix(60).description, default: 0] += 1
+            view.subviews.forEach { walk($0, depth + 1) }
+        }
+        walk(root, 0)
+        let top = kinds.sorted { $0.value > $1.value }.filter { $0.value > 4 || $0.key.contains("KeyView") }.map { "  \($0.value) \($0.key)" }
+        return (["\(total) views, \(deepest) deep, \(keyLoop) can be key views"] + top + hosts).joined(separator: "\n")
+    }
+
     private func status() -> String {
         let app = NSApp as? SandboxApplication
         var lines = ["pid \(getpid())", "state \(state.path)", "home \(home)", "vibeswitcher \(VibePaths.root.path)",
@@ -1036,6 +1138,14 @@ private final class Driver: NSObject, NSApplicationDelegate {
             hook.lastEventAt = Date().timeIntervalSince1970
             hook.toolName = "Bash"
             hook.request = "Bash: " + (op["command"] as? String ?? "")
+            try? hook.save(to: stateFile)
+        }
+        // At work: the hook state a real Claude leaves mid-tool, so the chat shows its working line.
+        if op["op"] as? String == "work", var hook = HookState.load(from: stateFile) {
+            hook.lastEvent = "PreToolUse"
+            hook.lastEventAt = Date().timeIntervalSince1970
+            hook.toolName = "Bash"
+            hook.toolStartedAt = Date().timeIntervalSince1970
             try? hook.save(to: stateFile)
         }
         reply(true, "told \(fake.label) \(json)")
