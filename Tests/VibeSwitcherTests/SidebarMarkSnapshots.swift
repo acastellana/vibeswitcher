@@ -23,7 +23,7 @@ struct SidebarMarkSnapshots {
         rows.append((Self.agent("Claude paused", agent: .claude, status: .working, paused: true, now: now, index: 10), nil, false))
         rows.append((Self.agent("Codex working", agent: .codex, status: .working, now: now, index: 11), nil, false))
         rows.append((Self.agent("Codex needs you", agent: .codex, status: .needsInput, now: now, index: 12), nil, false))
-        let shell = HostSession(id: UUID(), tty: "ttys099", childPID: 1, cwd: "/tmp/shell", command: "zsh", label: "Shell", agent: nil,
+        let shell = HostSession(id: UUID(), tty: "ttys099", childPID: 1, cwd: LeadGroupSnapshots.root + "-shell", command: "zsh", label: "Shell", agent: nil,
                                 title: "Shell", startedAt: now - 600, cols: 120, rows: 40, exit: nil)
         rows.append((WindowRow(content: .hosted(shell), project: "shell"), nil, false))
         rows.append((LeadGroupSnapshots.hosted("Ended", slug: "ended", started: now - 900, exit: HostSession.Exit(status: 0, at: now - 60)).row,
@@ -58,7 +58,7 @@ struct SidebarMarkSnapshots {
 
     static func agent(_ label: String, agent: Agent, status: SessionStatus, paused: Bool = false, role: LeadLaunch.Role? = nil,
                       now: Date, index: Int) -> WindowRow {
-        var session = Session(tty: "ttys0\(index)", agent: agent, pid: Int32(100 + index), startedAt: now - 600, cwd: "/tmp/\(index)",
+        var session = Session(tty: "ttys0\(index)", agent: agent, pid: Int32(100 + index), startedAt: now - 600, cwd: LeadGroupSnapshots.root + "-\(index)",
                               project: "project", task: nil, status: status, statusSince: now - 120, detail: nil, hasHooks: true,
                               inTerminalApp: false)
         session.customName = label

@@ -99,7 +99,8 @@ struct AgentMark: View {
             RoundedRectangle(cornerRadius: layout.badgeRadius, style: .continuous)
                 .fill(kind.color.gradient)
                 .frame(width: layout.badge.width, height: layout.badge.height)
-                .overlay(Image(systemName: kind.symbol).font(.system(size: layout.badge.width * 0.6, weight: .bold)).foregroundStyle(.white))
+                .overlay(Image(systemName: kind.symbol).font(.system(size: layout.badge.width * 0.6, weight: .bold)).foregroundStyle(.white)
+                    .accessibilityHidden(true))
                 .offset(x: layout.badge.minX, y: layout.badge.minY)
         }
         .frame(width: size, height: size, alignment: .topLeading)
