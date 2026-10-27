@@ -322,6 +322,29 @@ struct LeadDeliveryByActivityTests {
         #expect(SteerInbox.pending(tty: agent.tty, root: root).map(\.text) == ["a", "c", "c2", "d", "e"])
     }
 
+    /// launch-video, 2026-10-27 (worker session 8D1B0D7B, between turns since 2026-10-26 16:27): message() typed the
+    /// lead's prompt into its empty box and said "Typed into launch-video's worker as its next prompt", but the Enter
+    /// didn't submit it: the prompt sat in the box as a draft, and sessions still said "finished its turn". The resend
+    /// with clear_draft cleared it, typed it again, and said the same while it sat there again. A prompt the box keeps
+    /// isn't said to be typed.
+    @Test func aPromptLeftInTheBoxIsntSaidToBeTyped() throws {
+        let root = scratch()
+        let agent = LeadAgent(pid: 7, tty: "ttys905", session: "8D1B0D7B-0000-0000-0000-000000000000")
+        var shown = empty
+        var typed: [String] = []
+        // The keys go out, and the text stays in the box: its Enter wasn't taken.
+        let type: (String) -> Bool = { typed.append($0); shown = self.screen($0); return true }
+        let first = try LeadDelivery.deliver("Re-render the narrated cut", from: .lead("lead of vibeswitcher"), to: agent,
+                                             activity: .idle(background: nil), screen: { shown }, typeInto: type, root: root)
+        #expect(typed.count == 1)
+        #expect(first != .typed)
+        let again = try LeadDelivery.deliver("Re-render the narrated cut", from: .lead("lead of vibeswitcher"), to: agent,
+                                             activity: .idle(background: nil), screen: { shown }, typeInto: type, clearDraft: true,
+                                             clear: { shown = self.empty; return true }, root: root)
+        #expect(typed.count == 2)
+        #expect(again != .typed)
+    }
+
     @Test func theBoxIsRead() {
         #expect(LeadDelivery.box(in: empty) == .empty)
         #expect(LeadDelivery.box(in: screen("fix the\nlogin")) == .draft("fix the\nlogin"))
