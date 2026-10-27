@@ -1465,3 +1465,6 @@
 - 2026-10-27 00:52 Started a worker on the-phone-shows-leads
 - 2026-10-27 00:52 Automatically (auto_advance): Started a worker on the-phone-shows-leads (The phone shows leads and their teams the way the Mac now does).
 - 2026-10-27 01:08 Started a worker on the-phone-shows-leads
+- 2026-10-27 01:57 Planned the-lead-chat-s: The lead chat's 10 s freeze: SwiftUI's key-view loop rebuild during layout
+- 2026-10-27 01:57 Started a worker on the-lead-chat-s
+- 2026-10-27 01:57 Automatically (auto_advance): Started a worker on the-lead-chat-s (The lead chat's 10 s freeze: SwiftUI's key-view loop rebuild during layout).
