@@ -1576,3 +1576,6 @@
 - 2026-10-27 21:02 Planned hang-detector-don-t: Hang detector: don't report a modal alert the user is answering as a freeze
 - 2026-10-27 21:04 Started a worker on hang-detector-don-t
 - 2026-10-27 21:04 Automatically (auto_advance): Started a worker on hang-detector-don-t (Hang detector: don't report a modal alert the user is answering as a freeze).
+- 2026-10-27 21:15 Incident: The witness reports "ended without a verdict (its agent quit; the session's shell is still open)" while the agent's claude process is still alive and waiting on… (in land-pr-1-host); planned turn-this-incident-into-3 to turn it into a check
+- 2026-10-27 21:15 Review of turn-this-incident-into-3: audit
+- 2026-10-27 21:16 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.

@@ -222,3 +222,7 @@ The user said "review and work towards merge". The PR touches sensitive paths (t
 
 Rule 10: a setback that happens twice gets a check. Freezes that long are material. The bench in that task is the check that runs before merge, so a second task would duplicate it.
 
+## 2026-10-27 21:15:52 Don't restart an audit or a worker on a witness "agent quit" report until `ps` confirms the agent's claude process is gone. On 2026-10-27 such reports were false: the agent was alive and waiting on a background load run. The fix is task turn-this-incident-into-3.
+
+Two verifier runs on PR #1 were reported as quit; one was alive and the lead killed it, which wasted about 7 minutes of verifier work and load-run time. The witness check is wrong under Claude Code's background commands.
+

@@ -14,3 +14,10 @@ Evidence: ~/.vibeswitcher/debug/hang-20261027-193139 … hang-20261027-201159 (t
 Task: lead-chat-freezes-of
 Check: task turn-this-incident-into-2 turns it into a check that runs before merge.
 
+## 2026-10-27 21:15:41 The witness reports "ended without a verdict (its agent quit; the session's shell is still open)" while the agent's claude process is still alive and waiting on a background command. The lead then restarts the audit and throws away a working verifier.
+
+Evidence: 2026-10-27, task land-pr-1-host. The verifier with claude pid 1558 (spawned 20:57:23) was reported as quit; its transcript (~/.claude/projects/-Users-albert-dev-vibeswitcher--vibeswitcher-worktrees-land-pr-1-host/42d3d0fc-….jsonl) shows it mid-request at 21:03:42. The lead re-audited and it was killed at 21:04:34 (host.log). The next verifier (claude pid 19328, spawned 21:04:35) started a background load run (test-under-load.sh) and ended its turn at 21:09:17 with "I'll finish the audit when it reports". The witness again said "its agent quit", but `ps` shows pid 19328 alive, with the parent vibeswitcher-host. The hang-detector-don-t worker was reported the same way at about 21:03. Probable cause: the witness judges "agent quit" from the terminal's foreground process (or the screen showing a shell prompt), which changes while Claude Code runs a background shell. It should check that the agent's own process (the session's claude pid) has exited.
+
+Task: land-pr-1-host
+Check: task turn-this-incident-into-3 turns it into a check that runs before merge.
+
