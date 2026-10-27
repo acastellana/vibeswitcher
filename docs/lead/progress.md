@@ -1512,3 +1512,4 @@
 - 2026-10-27 12:17 Automatically (auto_advance): Cleaned up choosing-a-project (freed 1.3 GB of build output and temporary folders). It stays done.
 - 2026-10-27 12:17 Started a worker on leads-start-in-an
 - 2026-10-27 12:17 Automatically (auto_advance): Started a worker on leads-start-in-an (Leads start in an empty repo too, and the empty sidebar offers a lead), its after tasks done (choosing-a-project, sidebar-rows-the-status).
+- 2026-10-27 13:06 Automatically (auto_advance): Started the audit of leads-start-in-an at 4218536e (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
