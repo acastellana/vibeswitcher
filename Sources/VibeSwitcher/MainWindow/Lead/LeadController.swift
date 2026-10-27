@@ -304,6 +304,14 @@ final class LeadController: ObservableObject {
     @Published private(set) var replacedLeads: [UUID: ReplacedLead] = [:]
     /// Lead sessions a start replaced, by root: replaced from that moment, before the new lead's board names it.
     private var replacing: [UUID: String] = [:]
+    /// The lead session each root's board named at the last look (read off the main thread, see `markReplaced`).
+    private var holders: [String: UUID] = [:]
+    /// A look at the boards for `markReplaced` or `keepRunningLeads` is under way: none other is asked for meanwhile
+    /// (on a disk slow enough to stall a stat, they'd queue up ahead of the boards' writes).
+    private var marking = false
+    /// How many starts replaced a lead so far: a look begun before one is stale (it may name the replaced lead still).
+    private var replacements = 0
+    private var keepingRunning = false
     /// What's typed into each replaced lead so far.
     private var lines: [UUID: HostInput.Line] = [:]
     /// The leads' inboxes, and the home whose agents' folders hold transcripts (scratch ones in tests).
@@ -546,11 +554,14 @@ final class LeadController: ObservableObject {
     /// keeps its role, bound again to its session when the vault binds it there; none is replaced. One the vault
     /// gives no role stays as it is (its tools say so); Project Lead then asks before starting another.
     private func keepRunningLeads() {
-        guard host.state != .connecting else { return }
+        guard host.state != .connecting, !keepingRunning else { return }
+        keepingRunning = true
         // Which lead holds each root's role, from its board read off the main thread (see `LeadFiles.names`).
         let sessions = host.sessions
         reads.async({ files in Self.leadSessions(sessions) { files.names.board($0).leadSession } }) { [weak self] running in
-            guard let self, self.host.state != .connecting else { return }
+            guard let self else { return }
+            self.keepingRunning = false
+            guard self.host.state != .connecting else { return }
             self.keepRunning(running)
         }
     }
@@ -635,7 +646,14 @@ final class LeadController: ObservableObject {
                     Breadcrumbs.shared.note("lead: the replaced lead on \(tty) " + (handed != nil ? "left its last turns for the new one"
                         : "left no turns (\(transcript == nil ? "no transcript" : "nothing the user said"))"))
                 }
-                DispatchQueue.main.sync { if let old = replacedSession { self?.replacing[old] = root } }
+                DispatchQueue.main.sync {
+                    guard let self, let old = replacedSession else { return }
+                    // Replaced from now on: the start released the role, so no board read is waited for.
+                    self.replacing[old] = root
+                    self.replacements += 1
+                    self.holders[root] = nil
+                    self.markReplaced(holders: self.holders)
+                }
                 let launch = try LeadLaunch.prepare(
                     role: .lead, root: root, task: nil, base: base,
                     prompt: LeadPrompts.lead(project: project, root: root, workflow: workflow, policy: policy),
@@ -824,7 +842,10 @@ final class LeadController: ObservableObject {
     /// them and the new lead is still starting. What was said of each is kept. The boards are read off the main
     /// thread (a stat of one waited 3 s on a busy disk, hang-20261027-175604), the sessions marked on it.
     private func markReplaced() {
+        guard !marking else { return }
+        marking = true
         let roots = leadRoots
+        let replacements = replacements
         reads.async({ files in
             files.names.keep(roots)
             var holders: [String: UUID] = [:]
@@ -833,7 +854,11 @@ final class LeadController: ObservableObject {
             }
             return holders
         }) { [weak self] holders in
-            self?.markReplaced(holders: holders)
+            guard let self else { return }
+            self.marking = false
+            guard self.replacements == replacements else { return }  // The next refresh looks again.
+            self.holders = holders
+            self.markReplaced(holders: holders)
         }
     }
 
