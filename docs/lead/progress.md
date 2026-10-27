@@ -1538,3 +1538,7 @@
 - 2026-10-27 18:06 Planned lead-chat-freeze: Lead chat freeze: LeadController.refresh loads the board (LeadNames.board) on the main thread
 - 2026-10-27 18:07 Started a worker on lead-chat-freeze
 - 2026-10-27 18:07 Automatically (auto_advance): Started a worker on lead-chat-freeze (Lead chat freeze: LeadController.refresh loads the board (LeadNames.board) on the main thread).
+- 2026-10-27 18:11 Planned land-pr-1-host: Land PR #1 (host security boundaries): apply it, fix what the review found, merge through project-lead (review audit)
+- 2026-10-27 18:12 Started a worker on land-pr-1-host
+- 2026-10-27 18:21 Merged turn-this-incident-into: Turn this incident into a check: message() to a long-idle worker (its turn had ended about 24… (no audit: review none)
+- 2026-10-27 18:21 Flaky in turn-this-incident-into's merge: aHostWhoseRunnerDiedIsEnded() failed the first test run and passed its rerun (the failing tests only); merged on the rerun

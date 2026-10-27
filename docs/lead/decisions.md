@@ -214,3 +214,7 @@ The lead proposed it with a 30 min timer and the user didn't answer in time, so 
 
 The user asked for the install. The lead never pushes; the user does.
 
+## 2026-10-27 18:12:00 PR #1 (host security boundaries) lands through project-lead as task land-pr-1-host. The PR's commit is applied with its authorship kept, the review's fixes go on top, and it gets a full audit and the merge gate; the user then pushes and closes the PR. On OSC 52, terminal clipboard writes are allowed only from the focused, visible pane, and refused from hidden terminals, replays and background panes.
+
+The user said "review and work towards merge". The PR touches sensitive paths (the host, the vault, build-app.sh) and would break Apple Events under Hardened Runtime as written. Allowing OSC 52 from the focused pane keeps nvim and tmux copying working, while closing the hidden-output attack the PR targets. The user can still choose to block it entirely.
+
