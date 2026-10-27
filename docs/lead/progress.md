@@ -1526,3 +1526,7 @@
 - 2026-10-27 15:22 Planned app-logo-concepts-first: App logo: concepts first, then the chosen one in the Dock, Finder, phone and menu bar (review audit)
 - 2026-10-27 15:22 Started a worker on app-logo-concepts-first
 - 2026-10-27 15:27 Update: Logo: four concepts to choose from — The app has never had an icon; the Dock shows macOS's generic one. Here are four concepts. Each uses the app's real status shapes and colours.
+- 2026-10-27 16:24 Audit of app-logo-concepts-first: incomplete, clean, round 1: 1 Important open, 1 Nit open
+- 2026-10-27 16:24 Dismissed app-logo-concepts-first:F1: The lead accepted it deliberately: about 5 MB of concept PNGs in history isn't worth a history rewrite, which the permission check denied anyway. The lead's later message, which the verifier didn't see, withdrew the rewrite request.
+- 2026-10-27 16:26 Audit of app-logo-concepts-first: complete, clean, round 2: 1 Important closed, 1 Nit open
+- 2026-10-27 16:33 Merged app-logo-concepts-first: App logo: concepts first, then the chosen one in the Dock, Finder, phone and menu bar
