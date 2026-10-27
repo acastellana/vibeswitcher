@@ -1473,3 +1473,4 @@
 - 2026-10-27 02:33 Merged the-phone-shows-leads: The phone shows leads and their teams the way the Mac now does
 - 2026-10-27 02:33 Automatically (auto_advance): Merged the-phone-shows-leads (The phone shows leads and their teams the way the Mac now does) into project-lead at ff88128b, on its passing audit and the full test run.
 - 2026-10-27 02:33 Automatically (auto_advance): Cleaned up the-phone-shows-leads (freed 1.5 GB of build output and temporary folders). It stays done.
+- 2026-10-27 02:48 Automatically (auto_advance): Started the audit of the-lead-chat-s at 1daffc1b (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
