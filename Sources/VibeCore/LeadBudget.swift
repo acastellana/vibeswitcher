@@ -37,12 +37,15 @@ public enum LeadBudget {
         }
     }
 
-    /// The running tasks whose workers work now (see `counts`), by task id.
+    /// The running tasks whose workers work now (see `counts`), by task id. Only the running tasks are copied.
     public static func working(board: LeadBoard, seen: [String: LeadWitness.Seen]) -> Set<String> {
-        Set(board.tasks.compactMap { task in
-            guard let worker = task.worker, worker != task.stopped, let info = seen[worker], counts(info, task: task) else { return nil }
-            return task.id
-        })
+        var working: Set<String> = []
+        for index in board.tasks.indices where board.tasks[index].status == .running {
+            let task = board.tasks[index]
+            guard let worker = task.worker, worker != task.stopped, let info = seen[worker], counts(info, task: task) else { continue }
+            working.insert(task.id)
+        }
+        return working
     }
 
     /// "2 h 5 min" of working time.
@@ -93,37 +96,61 @@ extension LeadBoard {
     /// last count (at most `LeadBudget.longestStep`, written at most every `LeadBudget.step`); any other stops counting.
     /// A running task whose time reached its budget (its own, else `defaultMinutes`) is marked over budget, once per
     /// budget: the lead changing budget_min clears it. Returns the tasks marked now, and whether anything changed.
+    /// Only the tasks in `budgeted` are copied or changed: a board of hundreds of finished tasks costs no more than
+    /// its running ones (hang-20261027-041428 caught it copying and comparing each of 254 on the main thread).
     @discardableResult
     public mutating func noteWork(_ working: Set<String>, defaultMinutes: Int, now: Double = Date().timeIntervalSince1970)
         -> (reached: [LeadTask], changed: Bool) {
         var reached: [LeadTask] = []
         var changed = false
-        for index in tasks.indices {
+        for index in budgeted {
             var task = tasks[index]
-            if task.status == .running, working.contains(task.id) {
-                if let since = task.workedAt {
-                    let step = now - since
-                    if step >= LeadBudget.step {
-                        task.worked = (task.worked ?? 0) + min(step, LeadBudget.longestStep)
-                        task.workedAt = now
-                    }
-                } else {
-                    task.workedAt = now
-                }
-            } else {
-                task.workedAt = nil
-            }
-            if task.status == .running, task.overBudget == nil, let minutes = LeadBudget.minutes(task, default: defaultMinutes),
-               (task.worked ?? 0) >= Double(minutes) * 60 {
-                task.overBudget = LeadOverBudget(minutes: minutes, at: now)
-                reached.append(task)
-            }
-            if task != tasks[index] {
+            let noted = Self.noteWork(&task, working: working.contains(task.id), defaultMinutes: defaultMinutes, now: now)
+            if noted.reached { reached.append(task) }
+            if noted.changed {
                 tasks[index] = task
                 changed = true
             }
         }
         return (reached, changed)
+    }
+
+    /// Whether `noteWork` would change anything, without changing the board: the witness asks on the main thread, and
+    /// only then writes it, off it.
+    public func notesWork(_ working: Set<String>, defaultMinutes: Int, now: Double = Date().timeIntervalSince1970) -> Bool {
+        budgeted.contains { index in
+            var task = tasks[index]
+            return Self.noteWork(&task, working: working.contains(task.id), defaultMinutes: defaultMinutes, now: now).changed
+        }
+    }
+
+    /// The tasks the budget looks at, by index: the running ones, and any other still holding the start of a count
+    /// (`workedAt`, from before it stopped running), which `noteWork` clears. Reads two fields of each task.
+    var budgeted: [Int] { tasks.indices.filter { tasks[$0].status == .running || tasks[$0].workedAt != nil } }
+
+    /// One task's count (see `noteWork`): whether it changed, and whether it reached its budget now.
+    private static func noteWork(_ task: inout LeadTask, working: Bool, defaultMinutes: Int, now: Double) -> (changed: Bool, reached: Bool) {
+        let before = (worked: task.worked, workedAt: task.workedAt)
+        if task.status == .running, working {
+            if let since = task.workedAt {
+                let step = now - since
+                if step >= LeadBudget.step {
+                    task.worked = (task.worked ?? 0) + min(step, LeadBudget.longestStep)
+                    task.workedAt = now
+                }
+            } else {
+                task.workedAt = now
+            }
+        } else {
+            task.workedAt = nil
+        }
+        var reached = false
+        if task.status == .running, task.overBudget == nil, let minutes = LeadBudget.minutes(task, default: defaultMinutes),
+           (task.worked ?? 0) >= Double(minutes) * 60 {
+            task.overBudget = LeadOverBudget(minutes: minutes, at: now)
+            reached = true
+        }
+        return (reached || task.worked != before.worked || task.workedAt != before.workedAt, reached)
     }
 
     /// The tasks over their budget that aren't finished, the earliest first.

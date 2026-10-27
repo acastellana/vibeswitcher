@@ -1167,20 +1167,19 @@ final class LeadController: ObservableObject {
         }
         disks[root] = disk
         // Working time, and the stop at a task's time budget (see `LeadBudget`): counted on the board as it is when
-        // written, so each budget is told once, to its worker and to the lead.
+        // written, so each budget is told once, to its worker and to the lead. Here only its running tasks are looked
+        // at, and nothing is copied or written: the count is written off the main thread, under the board's lock.
         let working = LeadBudget.working(board: board, seen: seen)
         let budget = workflow.taskBudgetMinutes, at = now.timeIntervalSince1970
-        var counted = board
-        if counted.noteWork(working, defaultMinutes: budget, now: at).changed {
-            var agents: [String: LeadAgent] = [:]
-            for task in board.tasks {
-                guard let worker = task.worker, let session = team.sessions[worker] else { continue }
-                agents[task.id] = LeadAgent(pid: session.pid, tty: session.tty, session: worker)
-            }
+        if board.notesWork(working, defaultMinutes: budget, now: at) {
+            let sessions = team.sessions
             reads.async({ _ in
                 (try? BoardStore(root: root).update { $0.noteWork(working, defaultMinutes: budget, now: at).reached }) ?? []
             }) { [weak self] reached in
-                for task in reached { self?.stopForBudget(task, root: root, worker: agents[task.id], defaultMinutes: budget) }
+                for task in reached {
+                    let agent = task.worker.flatMap { worker in sessions[worker].map { LeadAgent(pid: $0.pid, tty: $0.tty, session: worker) } }
+                    self?.stopForBudget(task, root: root, worker: agent, defaultMinutes: budget)
+                }
             }
         }
         // On the board too, for status and the Team view, until the worker moves again.
