@@ -201,7 +201,15 @@ final class HostRuntime: LeadRuntime {
                                             let sent = (try? HostCall.send(.input(id: id, bytes: Data(HostInput.bytes(forKey: "interrupt") ?? []), reply: false), socket: self.socket)) != nil
                                             usleep(300_000)
                                             return sent
-                                        })
+                                        },
+                                        enter: { [socket] in (try? HostCall.type([HostInput.Write(bytes: [13], delay: 0)], into: id, socket: socket)) != nil },
+                                        turnStarted: { [observer] in
+                                            switch observer.activity(session, agentPid: agent.pid) {
+                                            case .working, .needsInput: return true
+                                            case .idle, .apiError, .unknown: return false
+                                            }
+                                        },
+                                        pause: { usleep(250_000) })
     }
 
     /// A host that can't be read is an error, never "no sessions": the tools that act on that answer (start a second

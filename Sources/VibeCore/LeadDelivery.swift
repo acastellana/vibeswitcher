@@ -46,6 +46,9 @@ extension LeadDelivery {
         /// Asked to clear the draft, it couldn't: what the box held before, and what it showed after the ^C (nil:
         /// the keys didn't go out, or the screen couldn't be read). The message waits (as `queued`).
         case draftStayed(before: String, after: String?)
+        /// Typed, but the box kept it (what it shows) and no turn started, one more Enter too (see `submitted`). It's
+        /// in the box, not the inbox.
+        case notSubmitted(String)
     }
 
     /// What Claude Code's input box shows: nothing typed, a draft, or no box at all (a dialog is on screen: a
@@ -163,16 +166,18 @@ extension LeadDelivery {
     @discardableResult
     public static func deliver(_ text: String, from sender: SteerMessage.Sender, to agent: LeadAgent, activity: LeadActivity,
                                screen: (() -> String?)?, typeInto: ((String) -> Bool)?, clearDraft: Bool = false,
-                               clear: (() -> Bool)? = nil, root: URL = VibePaths.root) throws -> Delivered {
+                               clear: (() -> Bool)? = nil, enter: (() -> Bool)? = nil, turnStarted: (() -> Bool)? = nil,
+                               pause: () -> Void = {}, root: URL = VibePaths.root) throws -> Delivered {
         try deliver(text, from: sender, to: agent, activity: activity, styledScreen: screen.map { read in { read().map { Screen(text: $0) } } },
-                    typeInto: typeInto, clearDraft: clearDraft, clear: clear, root: root)
+                    typeInto: typeInto, clearDraft: clearDraft, clear: clear, enter: enter, turnStarted: turnStarted, pause: pause, root: root)
     }
 
     /// As above, reading the screen with how it's drawn, which tells Claude's suggested prompt from a draft.
     @discardableResult
     public static func deliver(_ text: String, from sender: SteerMessage.Sender, to agent: LeadAgent, activity: LeadActivity,
                                styledScreen screen: (() -> Screen?)?, typeInto: ((String) -> Bool)?, clearDraft: Bool = false,
-                               clear: (() -> Bool)? = nil, root: URL = VibePaths.root) throws -> Delivered {
+                               clear: (() -> Bool)? = nil, enter: (() -> Bool)? = nil, turnStarted: (() -> Bool)? = nil,
+                               pause: () -> Void = {}, root: URL = VibePaths.root) throws -> Delivered {
         let post = { try SteerInbox.post(SteerMessage(text: text, from: sender, agentPid: agent.pid), tty: agent.tty, root: root) }
         switch activity {
         case .working, .unknown:
@@ -194,9 +199,15 @@ extension LeadDelivery {
             try post()
             return .queued
         }
+        // Keys that went out; whether the prompt went in is read back (nil: they didn't go out).
+        func type() -> Delivered? {
+            let prompt = typed(text, from: sender)
+            guard typeInto(prompt) else { return nil }
+            return submitted(prompt, screen: screen, enter: enter, turnStarted: turnStarted, pause: pause)
+        }
         switch box(in: shown) {
         case .empty:
-            if typeInto(typed(text, from: sender)) { return .typed }
+            if let done = type() { return done }
         case .dialog(let lines):
             try post()
             return .awaitingAnswer(lines)
@@ -210,12 +221,12 @@ extension LeadDelivery {
             if clear(), let after = screen() {
                 switch box(in: after) {
                 case .empty:
-                    if typeInto(typed(text, from: sender)) { return .typed }
+                    if let done = type() { return done }
                     seen = ""
                 case .draft(let again) where again == draft && after.runs == nil:
                     // The same text drawn again right after the ^C emptied the box: Claude's suggested prompt, which a
                     // host too old to say what's dim shows as text. Typing replaces it.
-                    if typeInto(typed(text, from: sender)) { return .typed }
+                    if let done = type() { return done }
                     seen = again
                 case .draft(let again), .dialog(let again):
                     seen = again
@@ -226,6 +237,47 @@ extension LeadDelivery {
         }
         try post()
         return .queued
+    }
+
+    /// How many times `submitted` reads the screen after the keys (and again after its one more Enter), `pause` apart.
+    public static let submitReads = 12
+
+    /// Whether a prompt typed into an idle agent's box went in. launch-video, 2026-10-27: a worker between turns for
+    /// 24 h kept the lead's typed prompt in its box as a draft (its Enter wasn't taken), twice, and message() said
+    /// "Typed into … as its next prompt" both times. It went in once a turn starts (`turnStarted`), the box lets go of it
+    /// (empty after showing it; without `turnStarted`, empty at all) or a dialog opens. Still in the box after
+    /// `submitReads` reads, `enter` presses Enter once more and it's read again; still there, it's `.notSubmitted`.
+    /// Never seen in the box and no turn seen either: `.typed`, all that can be told.
+    static func submitted(_ prompt: String, screen: () -> Screen?, enter: (() -> Bool)?, turnStarted: (() -> Bool)?,
+                          pause: () -> Void) -> Delivered {
+        // What the box still shows of the prompt after the reads; nil once it went in.
+        func left() -> String? {
+            var held: String?
+            for _ in 0..<submitReads {
+                pause()
+                if turnStarted?() == true { return nil }
+                guard let shown = screen() else { continue }
+                switch box(in: shown) {
+                case .draft(let draft):
+                    if holds(draft, prompt) { held = draft }
+                case .empty:
+                    if held != nil || turnStarted == nil { return nil }
+                case .dialog:
+                    return nil
+                }
+            }
+            return held
+        }
+        guard let held = left() else { return .typed }
+        guard let enter, enter() else { return .notSubmitted(held) }
+        return left().map { .notSubmitted($0) } ?? .typed
+    }
+
+    /// Whether the box's `draft` is the typed `prompt`: its start (the box wraps it), or Claude's stand-in for a long
+    /// paste. Anything else there (Claude's suggestion on a host that doesn't say what's dim) isn't it.
+    static func holds(_ draft: String, _ prompt: String) -> Bool {
+        let squeezed = { (text: String) in text.filter { !$0.isWhitespace } }
+        return draft.hasPrefix("[Pasted text") || squeezed(draft).hasPrefix(String(squeezed(prompt).prefix(40)))
     }
 }
 

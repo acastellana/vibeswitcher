@@ -1405,6 +1405,11 @@ public final class LeadToolset: MCPToolset {
             let saw = after.map { $0.isEmpty ? "then read empty, but typing didn't go out" : "still showed “\(Self.clip($0))”" }
                 ?? "couldn't be cleared (the ^C didn't go out, or its screen couldn't be read)"
             return MCPToolResult(text: "\(slug)'s worker is between turns with “\(Self.clip(before))” in its input box. clear_draft sent one ^C, and the box \(saw). The message waits in its inbox and goes in with its next prompt or once the box reads empty. Don't send it again; read_session to see where it is, or tell the user what's in its box.")
+        case .notSubmitted(let shown):
+            return MCPToolResult(text: "Typed into \(slug)'s worker (it was between turns\(clear ? "; a leftover draft was cleared first" : "")), but it wasn't submitted: "
+                                 + "its input box still shows “\(Self.clip(shown))” and no turn started, one more Enter too. It's in its box, not its inbox. "
+                                 + "message again with clear_draft: true to clear it and type it once more; if that isn't submitted either, stop_worker and "
+                                 + "start_worker (its worktree and commits stay), or tell the user what's in its box.")
         case .queued:
             return MCPToolResult(text: "\(slug)'s worker is between turns, but its screen couldn't be read, so the message waits in its inbox; it goes in with its next prompt, or as soon as the box reads empty. read_session to see where it is.")
         }

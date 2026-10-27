@@ -345,6 +345,45 @@ struct LeadDeliveryByActivityTests {
         #expect(again != .typed)
     }
 
+    /// What's said of a typed prompt: in once a turn starts or the box lets go of it; still in the box, one more Enter,
+    /// then not submitted (it's in the box, so not in the inbox too).
+    @Test func aTypedPromptIsReadBackUntilItGoesIn() throws {
+        let root = scratch()
+        let agent = LeadAgent(pid: 7, tty: "ttys906", session: "s")
+        let idle = LeadActivity.idle(background: nil)
+        var shown = empty
+        var enters = 0
+        var pauses = 0
+        let type: (String) -> Bool = { shown = self.screen($0); return true }
+        // The Enter after the paste wasn't taken; one more submits it.
+        #expect(try LeadDelivery.deliver("a", from: .lead("lead"), to: agent, activity: idle, screen: { shown }, typeInto: type,
+                                         enter: { enters += 1; shown = self.empty; return true }, pause: { pauses += 1 }, root: root) == .typed)
+        #expect(enters == 1 && pauses > LeadDelivery.submitReads)
+        // Neither Enter is taken.
+        let stuck = try LeadDelivery.deliver("b", from: .lead("lead"), to: agent, activity: idle, screen: { shown }, typeInto: type,
+                                             enter: { enters += 1; return true }, root: root)
+        guard case .notSubmitted(let left) = stuck else { Issue.record("still in the box: \(stuck)"); return }
+        #expect(left.hasSuffix("] b") && enters == 2)
+        #expect(SteerInbox.pending(tty: agent.tty, root: root).isEmpty)
+        // A turn started: in, whatever the screen shows yet.
+        shown = empty
+        var started = false
+        #expect(try LeadDelivery.deliver("c", from: .lead("lead"), to: agent, activity: idle, screen: { shown },
+                                         typeInto: { text in shown = self.screen(text); started = true; return true },
+                                         enter: { enters += 1; return true }, turnStarted: { started }, root: root) == .typed)
+        #expect(enters == 2)
+        // The box shows it, then lets go of it.
+        shown = empty
+        var reads = 0
+        #expect(try LeadDelivery.deliver("d", from: .lead("lead"), to: agent, activity: idle,
+                                         screen: { reads += 1; return reads == 2 ? shown : self.empty },
+                                         typeInto: type, enter: { enters += 1; return true }, turnStarted: { false }, root: root) == .typed)
+        #expect(enters == 2 && reads == 3)
+        // Something else in the box (Claude's suggestion, drawn as text by an old host) isn't the prompt.
+        #expect(!LeadDelivery.holds("open rotate.html so I can try it", LeadDelivery.typed("e", from: .lead("lead"))))
+        #expect(LeadDelivery.holds("[Pasted text #1 +12 lines]", LeadDelivery.typed("e", from: .lead("lead"))))
+    }
+
     @Test func theBoxIsRead() {
         #expect(LeadDelivery.box(in: empty) == .empty)
         #expect(LeadDelivery.box(in: screen("fix the\nlogin")) == .draft("fix the\nlogin"))
@@ -490,6 +529,10 @@ struct LeadMessageToolTests: LeadTeamFixture {
         runtime.delivery = .typed
         #expect(!lead.call("message", ["task": "one", "text": "go on", "clear_draft": true]).isError)
         #expect(runtime.clearedDrafts == 1)
+        // launch-video, 2026-10-27: typed, but its box kept it.
+        runtime.delivery = .notSubmitted("[VibeSwitcher · from lead of x, not the user] go on")
+        let stuck = lead.call("message", ["task": "one", "text": "go on"]).text
+        #expect(stuck.contains("wasn't submitted") && stuck.contains("go on”") && !stuck.contains("as its next prompt"))
         // Typed only when it's between turns; mid-turn it's steered.
         runtime.delivery = .steered
         #expect(lead.call("message", ["task": "one", "text": "go on"]).text.contains("while it works"))
