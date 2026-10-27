@@ -1495,3 +1495,4 @@
 - 2026-10-27 11:15 Started a worker on sidebar-rows-the-status
 - 2026-10-27 11:16 Planned choosing-a-project: Choosing a project folder starts its lead, not a plain Claude session
 - 2026-10-27 11:16 Started a worker on choosing-a-project
+- 2026-10-27 11:35 Automatically (auto_advance): Started the audit of sidebar-rows-the-status at 1f4cdd59 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
