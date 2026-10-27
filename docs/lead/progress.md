@@ -1569,3 +1569,5 @@
 - 2026-10-27 20:36 Audit of land-pr-1-host: incomplete, clean, round 1: 2 Important open, 2 Nit open
 - 2026-10-27 20:44 Planned issue-2-workers: Issue #2: workers' vibeswitcher tools can come up empty (role bind races Claude Code 2.1.311's faster MCP start) (review audit)
 - 2026-10-27 20:50 Merged audit-must-not-end: audit() must not end a verifier already running on the same commit (no audit: review none)
+- 2026-10-27 20:50 Automatically (auto_advance): Merged audit-must-not-end (audit() must not end a verifier already running on the same commit) into project-lead at 1ee1cf96, review none: on its worker's done report on 5fcadba4 and the full test run.
+- 2026-10-27 20:50 Automatically (auto_advance): Cleaned up audit-must-not-end (freed 986 MB of build output and temporary folders). It stays done.
