@@ -41,6 +41,7 @@ struct EndedSessionTests {
         // Its own ~/.vibeswitcher (for the launcher copy), never the user's.
         host.environment = ["CFFIXED_USER_HOME": home.path, "HOME": home.path, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin"]
         host.standardError = FileHandle.nullDevice
+        let key = try TestHosts.authorize(host)
         try TestHosts.run(host)
         defer {
             TestHosts.end(host)
@@ -49,7 +50,7 @@ struct EndedSessionTests {
             try? FileManager.default.removeItem(at: home)
         }
         #expect(eventually { FileManager.default.fileExists(atPath: socket) })
-        let client = try TestClient(socket: socket)
+        let client = try TestClient(socket: socket, appKey: key)
         func ended(_ id: UUID) -> Bool {
             client.hasEvent { if case .sessionChanged(let s) = $0 { return s.id == id && s.exit != nil }; return false }
         }

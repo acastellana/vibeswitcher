@@ -101,6 +101,7 @@ struct ParserCostTests {
         host.arguments = ["--socket", socket, "--lock", dir + "/h.lock", "--idle-exit", "600", "--log", dir + "/session.log"]
         host.environment = ["HOME": home, "CFFIXED_USER_HOME": home, "SHELL": "/bin/sh", "PATH": "/usr/bin:/bin", "TMPDIR": dir + "/"]
         host.standardError = FileHandle.nullDevice
+        let key = try TestHosts.authorize(host)
         try TestHosts.run(host)
         var sessions: [HostSession] = []
         defer {
@@ -109,7 +110,7 @@ struct ParserCostTests {
             try? FileManager.default.removeItem(atPath: dir)
         }
         #expect(eventually { FileManager.default.fileExists(atPath: socket) })
-        let client = try TestClient(socket: socket)
+        let client = try TestClient(socket: socket, appKey: key)
         let commands: [String?] = [nil, nil, nil, nil, Self.printer, Self.printer, Self.printer, Self.printer, Self.fullScreen, Self.burst]
         sessions = try commands.map { try client.spawn($0) }
         sessions.forEach { client.attach($0.id) }

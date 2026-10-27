@@ -74,6 +74,7 @@ if let limit = value(after: "--parser-stall-limit").flatMap(TimeInterval.init), 
 config.logPath = value(after: "--log") ?? (ownsLaunchers ? VibePaths.root.appendingPathComponent("debug/host.log").path : nil)
 // What a build this one hands over to is started with: the same, without this start's handover.
 let handoverFlags: [String: Bool] = ["--handover": true, "--handover-fallback": true, "--handover-fail-restore": false,
+                                     "--handover-fallback-app": true, "--app-executable": true,
                                      HostStart.appKeyFlag: false]
 config.arguments = arguments.dropFirst().enumerated().reduce(into: (kept: [String](), skip: false)) { result, item in
     if result.skip { result.skip = false; return }
@@ -92,7 +93,9 @@ func goBack(_ statePath: String, _ error: Error) -> Never {
     log("couldn't take over: \(error)")
     if let fallback = value(after: "--handover-fallback") {
         log("going back to \(fallback)")
-        log("\(HostHandover.exec(fallback, arguments: config.arguments + ["--handover", statePath], inherit: nil))")
+        var arguments = config.arguments + ["--handover", statePath]
+        if let app = value(after: "--handover-fallback-app") { arguments += ["--app-executable", app] }
+        log("\(HostHandover.exec(fallback, arguments: arguments, inherit: nil))")
     }
     unlink(statePath)
     exit(1)
@@ -115,8 +118,10 @@ if let handoverPath {
     }
 }
 
-// The app sits beside this binary in the bundle (and in a build folder).
-config.appExecutable = URL(fileURLWithPath: executable).deletingLastPathComponent().appendingPathComponent("VibeSwitcher").path
+// Only an actual restoration may carry the original app's location from the old host's argv.
+// A fresh launch must not let a script designate itself as the app and replace a keyless host's key.
+config.appExecutable = (restoring != nil ? value(after: "--app-executable") : nil)
+    ?? URL(fileURLWithPath: executable).deletingLastPathComponent().appendingPathComponent("VibeSwitcher").path
 // The lead's vault: the user's host keeps it sealed under ~/.vibeswitcher/lead with its Keychain key; a scratch host
 // (on its own lock) keeps one in memory only, never touching the user's.
 // After a handover, the vault is the one the build before held in memory (its secrets), not what's on disk.

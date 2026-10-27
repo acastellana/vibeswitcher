@@ -224,6 +224,13 @@ else
     # Even when the build or a test failed: they don't need the build, and their result is worth having. Not in --perf.
     if [[ -z $perf ]]; then
         run_web_tests Tests/Web || status=1
+        # These use a private host, synthetic data and ad-hoc signed copies: no user sessions or Keychain.
+        if [[ -x .build/debug/vibeswitcher-host ]]; then
+            run_web_tests Tests/SecurityAudit || status=1
+        else
+            echo "security socket/signing tests: no built host at .build/debug/vibeswitcher-host"
+            status=1
+        fi
     fi
 fi
 end_leftovers "$mark" || status=1

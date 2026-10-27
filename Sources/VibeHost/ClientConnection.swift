@@ -136,23 +136,37 @@ final class ClientConnection {
 
     private func readAvailable() {
         var buffer = [UInt8](repeating: 0, count: 65_536)
-        var arrived = false
-        while !closed {
+        var bytesRead = 0, framesRead = 0
+        // Bound work per turn as well as memory: a continuously writing client must yield to other sessions.
+        func deliver() -> Bool {
+            do {
+                while !closed, framesRead < 64, let frame = try decoder.next() {
+                    framesRead += 1
+                    onFrame?(frame.kind, frame.payload)
+                }
+                return !closed
+            } catch {
+                close()
+                return false
+            }
+        }
+        guard deliver() else { return }
+        while !closed, bytesRead < 256 * 1024, framesRead < 64 {
             let count = Darwin.read(fd, &buffer, buffer.count)
             if count > 0 {
-                arrived = true
+                bytesRead += count
+                onRead?()
                 decoder.append(Data(buffer[0..<count]))
-            } else if count < 0, errno == EAGAIN || errno == EINTR {
-                break
+                guard deliver() else { return }
+            } else if count < 0, errno == EINTR {
+                continue
+            } else if count < 0, errno == EAGAIN {
+                return
             } else {
                 return close()
             }
         }
-        if arrived { onRead?() }
-        do {
-            while !closed, let frame = try decoder.next() { onFrame?(frame.kind, frame.payload) }
-        } catch {
-            close()
-        }
+        // There may be complete frames left in the decoder even when the socket is already drained.
+        if !closed { queue.async { [weak self] in self?.readAvailable() } }
     }
 }

@@ -4,3 +4,16 @@ build/
 .superpowers/
 .scratch/
 .sourcekit-lsp/
+
+# Local credentials and app state must stay outside public commits.
+.env
+.env.*
+!.env.example
+!.env.*.example
+!.env.template
+*.p12
+*.pfx
+*.key
+id_rsa
+id_ed25519
+.vibeswitcher/

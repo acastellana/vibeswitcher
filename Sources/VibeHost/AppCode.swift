@@ -9,7 +9,12 @@ enum AppCode {
     /// The process `token` names, as it runs now (Security refuses a token whose pid exec'd since), is valid code
     /// whose cdhash is the one of the code at `executable`.
     static func runs(_ token: audit_token_t, executable: String) -> Bool {
-        guard let cdhash = cdhash(atPath: executable) else { return false }
+        // Universal binaries can run a different CPU subtype from Security's default on-disk selection
+        // (e.g. arm64e.x1). Compare the configured executable's exact running slice, never a path alone.
+        var architecture = proc_archinfo()
+        let size = Int32(MemoryLayout<proc_archinfo>.size)
+        guard proc_pidinfo(token.pid, PROC_PIDARCHINFO, 0, &architecture, size) == size,
+              let cdhash = cdhash(atPath: executable, architecture: architecture) else { return false }
         var token = token
         let audit = Data(bytes: &token, count: MemoryLayout<audit_token_t>.size)
         var guest: SecCode?
@@ -24,9 +29,13 @@ enum AppCode {
     }
 
     /// The cdhash of the code on disk at `path` (for a universal binary, this machine's architecture).
-    static func cdhash(atPath path: String) -> Data? {
+    static func cdhash(atPath path: String, architecture: proc_archinfo? = nil) -> Data? {
         var code: SecStaticCode?
-        guard SecStaticCodeCreateWithPath(URL(fileURLWithPath: path) as CFURL, [], &code) == errSecSuccess, let code else { return nil }
+        let attributes: [CFString: Any] = architecture.map {
+            [kSecCodeAttributeArchitecture: $0.p_cputype, kSecCodeAttributeSubarchitecture: $0.p_cpusubtype]
+        } ?? [:]
+        guard SecStaticCodeCreateWithPathAndAttributes(URL(fileURLWithPath: path) as CFURL, [], attributes as CFDictionary,
+                                                       &code) == errSecSuccess, let code else { return nil }
         var information: CFDictionary?
         guard SecCodeCopySigningInformation(code, [], &information) == errSecSuccess,
               let information = information as? [String: Any] else { return nil }

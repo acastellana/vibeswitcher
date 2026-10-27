@@ -75,8 +75,12 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     /// The views off screen waiting to be let go, each by the release that's still theirs (shown again: none).
     private var releases: [UUID: UUID] = [:]
 
-    init(host: HostClient) {
+    /// Injectable so OSC 52 regression tests can use a named pasteboard, never the user's clipboard.
+    private let clipboard: NSPasteboard
+
+    init(host: HostClient, clipboard: NSPasteboard = .general) {
         self.host = host
+        self.clipboard = clipboard
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -348,9 +352,8 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     }
 
     func clipboardCopy(source: TerminalView, content: Data) {
-        guard let text = String(data: content, encoding: .utf8) else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        // OSC 52 is untrusted output, including hidden terminals and replays. The clipboard dependency
+        // is intentionally untouched. User Copy uses TerminalView.copy(_:) directly and still works.
     }
 
     /// Programs don't get to read your clipboard.

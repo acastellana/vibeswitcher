@@ -1,0 +1,309 @@
+AUDITORÍA DE SEGURIDAD — VIBESWITCHER
+Fecha: 27 de octubre de 2026
+Repositorio: https://github.com/acastellana/vibeswitcher
+Commit examinado: dc2b9e31bf406e8b6055774ac3bbdadbbad84fd6
+
+Actualización posterior: los cuatro hallazgos tienen correcciones locales y
+pruebas de regresión. Este documento conserva el estado anterior a los fixes;
+el resultado de la implementación y su validación está en SECURITY-FIXES.txt.
+
+DICTAMEN
+
+No daría esta versión por segura para ejecutar proyectos o agentes no confiables
+en una cuenta con credenciales y sesiones sensibles. Hay defensas útiles y no
+he encontrado indicios de exfiltración encubierta en las rutas examinadas, pero
+he identificado cuatro problemas de seguridad: dos de prioridad alta y dos
+media. Dos cuentan con reproducciones dinámicas sobre un host aislado; los
+otros dos están sustentados por el recorrido del código.
+
+Los ataques descritos requieren código ejecutándose como el usuario del Mac,
+o salida de terminal controlada por un atacante. No se ha demostrado una
+intrusión remota sin autenticación desde Internet. Compartir usuario Unix es
+una frontera débil: un proceso con esos privilegios ya puede modificar muchos
+archivos del usuario. Aquí importa especialmente porque la aplicación ejecuta
+código de proyectos, distingue roles y protege algunas operaciones mediante
+una identidad y claves propias.
+
+Esta revisión es manual, orientada a superficies de ataque, con comprobaciones
+dinámicas acotadas. No es una revisión línea por línea de todo el repositorio,
+una certificación ni una garantía de ausencia de vulnerabilidades.
+
+ALCANCE Y MÉTODO
+
+Se inspeccionaron el manifiesto y las revisiones fijadas; los servidores HTTP,
+el socket Unix y su protocolo; identidad y autenticación de clientes; creación
+de terminales y ejecución de comandos; bóveda y acceso al Keychain; permisos y
+escrituras privadas; reglas de agentes; ejecución de hooks y código de ramas;
+proxy de previews, cookies y tickets; acceso móvil y revocación; JavaScript y
+service worker; redacción de secretos; resúmenes y síntesis de voz; scripts de
+construcción y firma, y pruebas existentes relacionadas.
+
+Se siguieron AGENTS.md y REVIEW.md. No se instalaron aplicaciones ni paquetes,
+no se cambió la lista de llaveros, no se leyeron secretos del usuario, no se
+tocaron terminales o ventanas reales y no se ejecutó la aplicación instalada.
+SwiftPM descargó las dependencias fijadas para intentar la compilación local.
+Las reproducciones usan datos ficticios, sockets propios, HOME aislado y un
+lock alternativo: ese modo del host mantiene la bóveda solo en memoria y no
+consulta el Keychain del usuario.
+
+1. ALTA / P1 — CLIENTES NO AUTENTICADOS PUEDEN ACCEDER A OTRAS TERMINALES
+
+Evidencia:
+  Sources/VibeHost/HostServer.swift:252 — acceptAll comprueba el UID y conserva
+    clientes con caller .unknown; la conexión no exige resolver proveApp.
+  Sources/VibeHost/HostServer.swift:360 — hello devuelve todas las sesiones.
+  Sources/VibeHost/HostServer.swift:363 — spawn no comprueba autorización.
+  Sources/VibeHost/HostServer.swift:386 — attach no comprueba autorización y
+    convierte al cliente en primary antes de enviar el replay.
+  Sources/VibeHost/HostServer.swift:425 — screen, styledScreen e history no
+    limitan la lectura según el llamante o la pertenencia a un equipo.
+  Sources/VibeCore/LeadVault.swift:672 — mayType devuelve true si la sesión no
+    tiene un rol en la bóveda, incluso para .unknown.
+
+Escenario:
+  Un script de un proyecto o un proceso del mismo usuario abre host.sock, pide
+  hello para descubrir los UUID, y lee screen/history o se adjunta a otra
+  sesión. Para una sesión ordinaria también puede introducir texto y Enter.
+  Si esa terminal contiene un shell, puede hacer que ejecute comandos; si
+  contiene un agente, puede introducir instrucciones con apariencia de entrada
+  humana. El contenido del protocolo local es crudo, sin el filtrado aplicado
+  a las pantallas del móvil. La lectura no está restringida ni siquiera a los
+  integrantes del mismo equipo. Adjuntarse también permite interferir con el
+  cliente principal y sus respuestas automáticas.
+
+Reproducción ejecutada:
+  Tests/SecurityAudit/host-access.test.mjs arranca un host privado y abre dos
+  conexiones desde Node, sin clave ni proveApp. La primera crea una terminal
+  ficticia; la segunda descubre su UUID, lee AUDIT_FAKE_SECRET y envía una línea.
+  La terminal devuelve AUDIT_RECEIVED:synthetic-input. Resultado: confirmado.
+
+Límite:
+  La escritura en sesiones con rol sí pasa por reglas adicionales; esta prueba
+  no demuestra escritura directa en un lead protegido. No hay escalada a root.
+
+Corrección recomendada:
+  Denegar por defecto spawn, attach, screen, styledScreen, history, resize,
+  remove e input para .unknown. Definir permisos explícitos por operación y
+  sesión para app, sesión propia y lead. Aplicar esa política antes de cambiar
+  primary o devolver datos. Añadir pruebas negativas para sesiones ordinarias,
+  equipos distintos, código de ramas y clientes sin prueba de identidad.
+
+2. ALTA / P1 — FIRMA SIN HARDENED RUNTIME PERMITE INYECTAR CÓDIGO
+
+Evidencia:
+  scripts/build-app.sh:129 — las cuatro llamadas a codesign no incluyen
+    --options runtime; no se configura validación de bibliotecas endurecida.
+  Sources/VibeHost/AppCode.swift:11 — se usa la firma/cdhash del ejecutable
+    para reconocer el código de la aplicación.
+  Sources/VibeHost/VaultStorage.swift:52 — la persistencia de la bóveda depende
+    de una clave del Keychain accesible al host.
+  Sources/VibeCore/LeadVaultAppProof.swift:34 — la identidad de la app accede
+    a la clave que responde a los desafíos del host.
+
+Escenario:
+  Un proceso del usuario puede lanzar un binario sin Hardened Runtime con
+  DYLD_INSERT_LIBRARIES apuntando a una biblioteca suya. El código inyectado
+  ejecuta dentro del proceso firmado: verificar la firma del ejecutable no
+  acredita que todas sus bibliotecas sean confiables. Por ello, las fronteras
+  que confían en esa identidad para custodiar claves o conceder autoridad
+  necesitan endurecimiento adicional.
+
+Reproducción ejecutada:
+  Tests/SecurityAudit/library-injection.test.mjs compila una biblioteca mínima
+  en un directorio temporal y la carga en el host de depuración. Su constructor
+  imprime AUDIT_INJECTED signature_status=0 y termina antes de main. El estado
+  0 procede de SecCodeCheckValidity del proceso en ejecución. El SHA-256 del
+  ejecutable permanece idéntico. codesign muestra flags=0x2(adhoc), sin runtime.
+  Resultado: inyección y validez dinámica simultáneas confirmadas.
+
+Límite:
+  La prueba usa el host compilado localmente, no un paquete de distribución
+  instalado. El script de distribución presenta la misma omisión de runtime.
+  No se intentó extraer claves reales, falsificar aprobaciones ni demostrar
+  un bypass completo de Keychain/TCC. Esas consecuencias requieren validación
+  específica; la posibilidad de ejecutar código inyectado está demostrada.
+
+Corrección recomendada:
+  Firmar app y helpers con Hardened Runtime y conservar la validación de
+  bibliotecas; no habilitar excepciones DYLD o de library validation sin una
+  necesidad demostrada. Validar los flags del artefacto final en CI. Repetir la
+  prueba contra el paquete final con una biblioteca ajena y comprobar rechazo.
+  Usar una identidad de distribución apropiada y notarización para distribuir.
+  Mantener cerrada la clave local de firma fuera de la operación de firma:
+  dejarla desbloqueada reduce la protección frente a otros procesos del usuario.
+
+3. MEDIA / P2 — SALIDA OSC 52 SOBRESCRIBE EL PORTAPAPELES SIN CONSENTIMIENTO
+
+Evidencia:
+  Sources/VibeSwitcher/MainWindow/TerminalPane.swift:350 — clipboardCopy borra
+    NSPasteboard.general y escribe el texto recibido sin preguntar ni verificar
+    que la terminal sea la visible o que exista una acción del usuario.
+  SwiftTerm 1.19.0, Sources/SwiftTerm/Terminal.swift:2682 — oscClipboard decodifica
+    la secuencia OSC 52 y llama al delegado de copia.
+  SwiftTerm 1.19.0, Sources/SwiftTerm/Mac/MacTerminalView.swift:3321 — el delegado
+    reenvía esa copia a la aplicación.
+
+Escenario:
+  Un comando, fichero o respuesta de servidor que imprima una secuencia OSC 52
+  puede reemplazar el portapapeles por otro texto. El siguiente pegado puede
+  contener una orden, una dirección o un destinatario diferente del esperado.
+  También importa en terminales adjuntas ocultas o al reproducir salida pasada:
+  el control de ReplayGate protege respuestas enviadas al host, pero no este
+  efecto lateral de clipboardCopy.
+
+Ejemplo inocuo de la secuencia, para una futura prueba con portapapeles falso:
+  ESC ] 52 ; c ; QVVESVRfQ0xJUEJPQVJE BEL
+  El payload base64 representa AUDIT_CLIPBOARD.
+
+Validación:
+  Recorrido estático en el código de la app y la dependencia exacta descargada.
+  No se modificó el portapapeles real durante la auditoría. La lectura del
+  portapapeles está correctamente deshabilitada mediante clipboardRead -> nil.
+
+Corrección recomendada:
+  Deshabilitar por defecto escrituras OSC 52, o pedir permiso por sesión ante
+  una acción visible. Rechazarlas en replay y terminales ocultas. Diferenciar
+  la copia explícita del usuario de las solicitudes que llegan del programa.
+
+4. MEDIA / P2 — LECTURA DEL SOCKET SIN PRESUPUESTO PREVIO A VALIDAR FRAMES
+
+Evidencia:
+  Sources/VibeHost/ClientConnection.swift:137 — readAvailable lee en un bucle
+    hasta EAGAIN, acumulando todos los bytes en decoder antes de llamar a next.
+  Sources/VibeCore/HostProtocol.swift:89 — append no impone un límite de buffer.
+  Sources/VibeCore/HostProtocol.swift:99 — el máximo de 1 MiB se comprueba en
+    next, después de finalizar el bucle de lectura.
+  Sources/VibeHost/HostServer.swift:252 — no hay cupo global de clientes en la
+    aceptación ni límite de sesiones en la ruta spawn del protocolo.
+
+Escenario:
+  Un cliente del mismo usuario que escribe continuamente puede hacer crecer
+  la memoria antes de que se rechace un frame inválido, o monopolizar el hilo
+  del servidor mientras este sigue leyendo. Muchas conexiones o solicitudes
+  spawn multiplican el coste y afectan todas las terminales alojadas.
+  Que exista un límite por frame o por cola de salida no limita esta entrada.
+
+Validación:
+  Análisis estático del orden exacto read -> append -> next. No se provocó OOM,
+  agotamiento de descriptores ni una interrupción deliberada del Mac. La escala
+  del consumo y el tiempo de bloqueo no se han medido.
+
+Corrección recomendada:
+  Validar/consumir frames después de cada bloque leído, limitar bytes y frames
+  atendidos por turno de la cola, cerrar conexiones con buffer excesivo y fijar
+  cupos globales de clientes/sesiones. Probar entrada continua, frames parciales
+  y múltiples clientes con un presupuesto de memoria acotado.
+
+DEFENSAS OBSERVADAS
+
+  - Phone Access escucha en loopback, comprueba Host y cuenta Tailscale y exige
+    tokens de dispositivo para las API autenticadas. El emparejamiento tiene
+    caducidad y número de intentos limitado; los tokens se guardan como hash.
+  - La entrada móvil comprueba bloqueo del Mac, revocación, permiso de entrada
+    e identidad de sesión, incluso entre escrituras diferidas.
+  - Las respuestas HTTP incluyen CSP restrictiva, no-store y otras cabeceras.
+    El servidor HTTP limita conexiones, tamaños y tiempos de recepción.
+  - Los previews restringen destinos a localhost y usan tickets de un uso,
+    cookies HttpOnly y sesiones revocables. Los cookies HttpOnly del servidor
+    de desarrollo se mantienen en una jar separada por sesión de preview.
+  - La bóveda usa ChaChaPoly y claves de Keychain; la app prueba posesión de
+    una clave mediante HMAC con un desafío fresco. La protección es útil,
+    aunque debe completarse con el endurecimiento del punto 2.
+  - Existen utilidades de escritura privada 0600 y directorios 0700, reparación
+    de permisos de versiones anteriores y redacción de secretos en múltiples
+    superficies. No debe suponerse que el filtrado reconoce cualquier secreto.
+  - La ejecución Git interna desactiva transporte, fsmonitor y drivers de diff
+    externos, examina configuraciones ejecutables y copia hooks aceptados.
+  - El resumen headless usa herramientas vacías, configuración restringida y
+    carpeta separada. Esto reduce el impacto de instrucciones en las notas.
+
+RIESGOS DE DISEÑO QUE EL USUARIO DEBE CONOCER
+
+  - Los roles, los worktrees y el HOME temporal no son un sandbox del sistema
+    operativo. El código de las ramas sigue ejecutándose con el UID del usuario
+    y puede acceder a sus archivos según los permisos del sistema. El propio
+    LeadVault.swift lo documenta como guard rail. Para proyectos no confiables,
+    usar otra cuenta macOS o una VM con credenciales mínimas.
+  - Los resúmenes envían notas de proyectos a Claude. Si hay una clave ElevenLabs
+    disponible, la voz puede enviar el texto del resumen a ElevenLabs. Esa clave
+    puede encontrarse automáticamente en el shell o en key.env. El borrado de
+    patrones de secretos no elimina información comercial confidencial.
+  - Un móvil emparejado puede seguir leyendo pantallas y resúmenes con el Mac
+    bloqueado: el bloqueo protege escritura, no toda lectura. Es una decisión
+    documentada. El token del móvil se conserva en localStorage hasta retirarlo.
+  - Los cookies de previews que no son HttpOnly comparten host entre puertos;
+    scripts de otro preview podrían leerlos. El README reconoce esta limitación.
+    No usar previews simultáneos de distinta confianza con cookies sensibles.
+  - GitGuard acepta como baseline los hooks ya presentes al primer uso. Hace
+    falta confiar en el estado inicial del repositorio, no solo en sus cambios.
+  - El cifrado de la bóveda detecta alteraciones, pero no convierte toda la
+    carpeta ~/.vibeswitcher en inaccesible a otros procesos del mismo usuario.
+
+DEPENDENCIAS Y CADENA DE SUMINISTRO
+
+Package.swift fija SwiftTerm exactamente a 1.19.0. Package.resolved fija:
+  SwiftTerm: 464df5207fc2432e16c9a23abe538187196daf5f
+  swift-argument-parser 1.8.2: 6a52f3251125d74daf04fcbd5e6f08a75d074382
+La resolución de esta compilación conservó el lockfile sin cambios.
+
+Se consultaron las páginas oficiales de avisos de ambas dependencias. SwiftTerm
+publica GHSA-jq43-q8mx-r7mq / CVE-2022-23465. El commit a94e6b24d24ce9680ad79884992e1dff8e150a31,
+que el aviso identifica como frontera del parche, es ancestro de la revisión
+fijada: git merge-base --is-ancestor devolvió 0. No atribuyo ese CVE histórico
+a esta revisión. La página de swift-argument-parser no mostraba avisos públicos.
+Esta consulta no equivale a un escaneo exhaustivo de todas las bases de CVE,
+ni valida binarios precompilados descargados por otros medios.
+
+Fuentes consultadas el 27 de octubre de 2026:
+  https://github.com/migueldeicaza/SwiftTerm/security/advisories
+  https://github.com/migueldeicaza/SwiftTerm/security/advisories/GHSA-jq43-q8mx-r7mq
+  https://github.com/apple/swift-argument-parser/security/advisories
+  https://github.com/migueldeicaza/SwiftTerm/blob/main/SECURITY.md
+
+PRUEBAS, RESULTADOS Y LÍMITES
+
+1) Intento de suite Swift enfocada, usando scripts/test.sh y HOME temporal:
+   La compilación por defecto falla: no existe el compilador metal en este
+   entorno de Command Line Tools. Las pruebas Swift no llegaron a ejecutarse.
+   Los tres tests web existentes sí pasaron (phone-briefing/menu/replies).
+
+2) Intento con --build-system native, mediante un wrapper temporal de swift:
+   Permitió compilar VibeCore, VibeHost y vibeswitcher-host. La compilación de
+   la aplicación gráfica falló por ausencia de SwiftUIMacros.StateMacro y sus
+   errores derivados en SwiftUI. No se cambiaron fuentes para sortearlo.
+   Tampoco se ejecutó la suite Swift ni se validaron todos los lints requeridos.
+   Las tres pruebas web existentes volvieron a pasar.
+
+3) Reproducciones específicas de esta auditoría:
+   scripts/test.sh --web Tests/SecurityAudit
+   Resultado final: 2 de 2 pasaron, confirmando el comportamiento vulnerable
+   de los puntos 1 y 2. Pasar estas pruebas NO significa que la app sea segura:
+   son sondas de auditoría que esperan demostrar el acceso/inyección actuales.
+   Una corrección deberá convertirlas en pruebas de rechazo.
+
+4) Repetición mediante el arnés del repositorio bajo carga ligera:
+   scripts/test-under-load.sh --load 1 --max-time 90 -- \
+     bash scripts/test.sh --web Tests/SecurityAudit
+   Resultado: salida 0, 2 de 2; el arnés limpió los procesos temporales.
+
+Node se tomó del runtime ya disponible en Codex; no se instaló. Los scripts
+de reproducción requieren macOS, clang y el host ya compilado en la ruta
+arm64 de .build. Los logs originales se conservaron en .build/security-audit/.
+
+No se ejecutó la suite completa, pruebas sobre Keychain real, TCC/Accesibilidad,
+un tailnet y móvil reales, la aplicación empaquetada de release, fuzzing de
+larga duración ni pruebas destructivas de saturación. No se ha comprobado la
+correspondencia de un binario externo con este código. No se aplicaron fixes,
+no se creó commit y no se cambió código de producción.
+
+ORDEN RECOMENDADO
+
+  1. Resolver la autorización del protocolo local y endurecer la firma.
+  2. Desactivar la escritura OSC 52 por defecto y acotar la entrada del socket.
+  3. Compilar el paquete final en un entorno completo y ejecutar pruebas
+     negativas de autorización/inyección, suite de seguridad y lints.
+  4. Validar en dispositivo real el acceso móvil, la revocación y los previews.
+  5. Hasta entonces, usar solo proyectos confiables o una cuenta/VM aislada;
+     mantener desactivado el acceso móvil y servicios de voz si no se necesitan.
+
+4 Important (2 alta, 2 media), 0 Nit

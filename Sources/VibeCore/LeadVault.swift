@@ -668,8 +668,9 @@ extension LeadVault {
 
         /// Whether `caller` may type into `session`: one that holds a role in a team takes keys only from the app,
         /// from itself, and (a worker's or verifier's) from its repository's lead. Any other session takes them from
-        /// anyone, as before.
+        /// a known caller; the host also scopes that caller to its own sessions and descendants.
         public func mayType(into session: String, from caller: Caller) -> Bool {
+            guard caller != .unknown else { return false }
             lock.lock()
             defer { lock.unlock() }
             let holds = state.teams.values.filter { team in team.members.contains { $0.session == session } }

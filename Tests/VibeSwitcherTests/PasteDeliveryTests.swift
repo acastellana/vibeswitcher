@@ -17,6 +17,7 @@ struct PasteDeliveryTests {
         let socket: String
         let server: HostServer
         let host: HostClient
+        let key: SymmetricKey
         let folder = scratchRoot.appendingPathComponent("paste-\(UUID().uuidString.prefix(8))")
 
         @MainActor
@@ -24,6 +25,7 @@ struct PasteDeliveryTests {
             let launcher = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host").path
             socket = try temp.shortFolder("vsh-paste") + "/h.sock"
             let key = SymmetricKey(size: .bits256)
+            self.key = key
             var config = HostServer.Config(socketPath: socket, lockPath: socket + ".lock", shell: "/bin/sh", launcher: launcher,
                                            baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()],
                                            hostBuild: HostBuild.id(ofExecutableAt: HostClient.hostExecutable.path))

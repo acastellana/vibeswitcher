@@ -145,8 +145,9 @@ final class DroppingHost {
         let folder = host.dir + "/mcp"
         try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
         FileManager.default.createFile(atPath: folder + "/a.in", contents: nil)
+        let courier = try Courier(host.dir + "/lead-courier", socket: host.socket)
         // Its home is the scratch one, for Foundation too (which reads CFFIXED_USER_HOME, not HOME): never the user's host.
-        let lead = try app.spawn("set +m; export HOME='\(host.home)' CFFIXED_USER_HOME='\(host.home)' VIBESWITCHER_MCP_TEST_RUNTIME_SOCKET='\(runtimeSocket)'; "
+        let lead = try app.spawn("set +m; (\(courier.command)) & export HOME='\(host.home)' CFFIXED_USER_HOME='\(host.home)' VIBESWITCHER_MCP_TEST_RUNTIME_SOCKET='\(runtimeSocket)'; "
             + "cd '\(root)'; while [ ! -f '\(folder)/go' ]; do sleep 0.05; done; "
             + "tail -n +1 -f '\(folder)/a.in' | '\(mcp)' --root '\(root)' --role lead > '\(folder)/a.out' 2> '\(folder)/a.err'", cwd: root)
         sessions.append(lead)
@@ -154,6 +155,13 @@ final class DroppingHost {
             Issue.record("the app got no lead grant: \(host.log)"); return
         }
         #expect(app.vault(.bind(grant: grant, root: root, session: lead.id.uuidString)) == .ok)
+        // The worker must be an actual member of the lead's team, not just a board entry. Other
+        // projects' sessions are intentionally absent from the lead's host session list now.
+        let issued = try courier.send([.vault(.issue(role: .worker, root: root, task: "one", auditing: nil))])
+        guard case .vault(.grant(let workerGrant))? = issued[2] else {
+            Issue.record("The scratch lead could not issue its worker grant"); return
+        }
+        #expect(try courier.send([.vault(.bind(grant: workerGrant, root: root, session: worker.id.uuidString))])[2] == .vault(.ok))
         FileManager.default.createFile(atPath: folder + "/go", contents: nil)
 
         let server = LeadToolServerHandoverTests.Server(folder: folder, name: "a")

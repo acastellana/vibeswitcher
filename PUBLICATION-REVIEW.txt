@@ -1,0 +1,48 @@
+PUBLICATION REVIEW — 27 October 2026
+
+Scope
+
+Reviewed the public repository before publishing the four security fixes.
+Fetched origin/main at a468677ddcfa528ddf71800e28a16201aa311a73 and merged it
+into the security branch. The final tree has 849 tracked files before this report.
+The history scan covered 989 existing reachable commits, all 3,872 locally
+stored historical blobs, commit messages, current tracked and unignored files,
+terminal captures, JSONL/log fixtures and decompressed verifier patches.
+16 gzip representations were examined across history and the working tree.
+Ignored build output and private scan evidence are not included in the PR.
+
+Checks and results
+
+The scan reused the repository's 16 vendor credential patterns and added private
+key material, JWT, credential-bearing URL, bearer and high-entropy assignment
+checks. It found 29 deduplicated candidate occurrences across history and the
+pre-merge working tree. Every candidate was reviewed in context: fabricated
+redaction fixtures, documented examples, or a shell expression generating a
+random password at runtime. No real credential was identified. The merged tree
+and commit messages were checked again; no additional concern was found.
+
+401 unique PNG images from current files and historical blobs were processed
+locally with Apple's Vision OCR, with no processing errors. OCR text contained
+no matches for the credential checks. The 18 images with no recognized text
+were inspected visually: icons and compact status indicators. PNG text metadata
+was scanned too. No screenshot or scan output was uploaded to an OCR service.
+The generated app icon is supported by its checked-in drawing source.
+
+No tracked environment credentials, private key files, signing key archives or
+runtime databases were found. Added ignore rules for local environment files,
+private signing/key files and .vibeswitcher state, while keeping environment
+example/template files eligible for version control. The existing
+SecretShapeLintTests continues checking tracked and unignored files in tests.
+
+Limits
+
+Pattern checks, entropy heuristics and OCR cannot prove the absence of secrets:
+unknown formats, obfuscation and OCR errors can evade detection. This review
+covers local Git objects and the repository tree, not GitHub Actions secrets,
+release attachments, forks, deleted server-side refs or external services.
+No credential was sent to a provider for validity testing. Historical synthetic
+fixtures remain in history; there was no force push or history rewrite.
+The repository includes UI text, terminal captures and ordinary author/project
+identifiers; this review does not claim that all identifying information has
+been anonymized. See SECURITY-FIXES.txt for regression test evidence and the
+remaining application security limitations.

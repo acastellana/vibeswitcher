@@ -14,6 +14,9 @@ public final class HostServer {
         public var baseEnvironment: [String: String]
         public var hostBuild: Int
         public var ringCapacity = 8 << 20
+        /// Global resource budgets, including clients that have not authenticated and ended sessions.
+        public var maxClients = 128
+        public var maxSessions = 256
         /// Quit after this long with no live session and no app connected; nil: never.
         public var idleExit: TimeInterval? = 600
         /// Ended sessions are forgotten after this long.
@@ -99,7 +102,7 @@ public final class HostServer {
     private var openedByApp: Set<UUID> = []
     /// Where input to a session came from: the app (your keys, the phone, the composer, its replies to the terminal's
     /// queries), the session itself (a process on its own terminal), or another process (a session's, or one
-    /// outside them all: a worker's Bash can type into any session outside a team).
+    /// outside them all). Access is checked before accepting input.
     enum InputSource: Equatable {
         case app, itself
         case another(LeadVault.Caller)
@@ -257,6 +260,10 @@ public final class HostServer {
                 Darwin.close(fd)
                 continue
             }
+            guard clients.count < max(1, config.maxClients) else {
+                Darwin.close(fd)
+                continue
+            }
             UnixSocket.configure(fd)
             let client = ClientConnection(fd: fd, queue: queue)
             client.peer = UnixSocket.peerToken(fd)
@@ -344,7 +351,31 @@ public final class HostServer {
 
     private var allInfo: [HostSession] { order.compactMap { sessions[$0]?.info } }
 
+    /// Session access is scoped equally for reads, subscriptions and mutations. A lead may access its
+    /// team and a session its own children; sharing the Unix uid grants no authority over other sessions.
+    private func authorized(_ request: HostRequest, from client: ClientConnection) -> Bool {
+        let caller = caller(of: client)
+        switch request {
+        case .hello, .proveApp, .enrollApp, .replaceAppKey, .vault:
+            // Metadata only before authentication; proof and vault operations enforce their own policies.
+            return true
+        case .spawn:
+            if caller == .app { return true }
+            guard case .session(let id) = caller, let id = UUID(uuidString: id) else { return false }
+            return sessions[id]?.info.isLive == true
+        case .shutdown, .handover:
+            return caller == .app
+        case .attach(let id, _, _), .detach(let id), .input(let id, _, _), .inputUnit(let id, _, _),
+             .resize(let id, _, _), .screen(let id), .styledScreen(let id), .history(let id, _),
+             .kill(let id), .remove(let id):
+            return mayKill(id, from: caller)
+        }
+    }
+
+    private static let unauthorized = HostEvent.error("This connection is not authorized to access that session or operation.")
+
     private func handle(_ kind: HostFrame.Kind, _ payload: Data, from client: ClientConnection) {
+        checkPeer(client)
         guard kind == .control else { return client.close() }
         guard let envelope = try? HostCoding.decode(HostRequestEnvelope.self, from: payload) else {
             // A request this host doesn't know (a newer app): say so, and keep the connection. Only what isn't a
@@ -354,15 +385,28 @@ public final class HostServer {
             return client.send(HostEventEnvelope(replyTo: numbered.seq, event: .error("This session host doesn't know that request; it may be older than the app.")))
         }
         let key = ObjectIdentifier(client)
-        let reply: (HostEvent) -> Void = { client.send(HostEventEnvelope(replyTo: envelope.seq, event: $0)) }
+        let asynchronousRead: Bool
+        switch envelope.request {
+        case .screen, .styledScreen, .history: asynchronousRead = true
+        default: asynchronousRead = false
+        }
+        let reply: (HostEvent) -> Void = { event in
+            // Parser replies can arrive after a peer changed identity or a team changed ownership.
+            self.checkPeer(client)
+            client.send(HostEventEnvelope(replyTo: envelope.seq,
+                                         event: !asynchronousRead || self.authorized(envelope.request, from: client) ? event : Self.unauthorized))
+        }
+        guard authorized(envelope.request, from: client) else { return reply(Self.unauthorized) }
         let missing = HostEvent.error("No such session.")
         switch envelope.request {
         case .hello:
-            reply(.welcome(protocolVersion: HostProtocol.version, hostBuild: config.hostBuild, sessions: allInfo,
+            let visible = allInfo.filter { mayKill($0.id, from: caller(of: client)) }
+            reply(.welcome(protocolVersion: HostProtocol.version, hostBuild: config.hostBuild, sessions: visible,
                            capabilities: config.capabilities, pid: getpid(), startedAt: startedAt))
         case .spawn(let request):
             // Started now, it would be torn down with the host a moment later.
             guard !shuttingDown else { return reply(.error(HostProtocol.shuttingDown)) }
+            guard sessions.count < max(1, config.maxSessions) else { return reply(.error("The session host has reached its session limit. Remove ended sessions first.")) }
             do {
                 let session = try HostedSession.spawn(request, shell: config.shell, launcher: config.launcher, baseEnvironment: config.baseEnvironment,
                                                       ringCapacity: config.ringCapacity, queue: queue, parser: config.parser)
@@ -401,7 +445,8 @@ public final class HostServer {
             updateAttachment(id)
             reply(.ok)
         case .input(let id, let bytes, let isReply):
-            guard let session = sessions[id], admitInput(to: id, from: client, reply: isReply) else { return }
+            guard let session = sessions[id] else { return reply(missing) }
+            guard admitInput(to: id, from: client, reply: isReply) else { return reply(Self.unauthorized) }
             let refused = HostEvent.error("Input refused: the program isn't reading it and the host's buffer is full. None of these \(bytes.count) bytes went in.")
             let write = { (taken: Bool) in
                 guard !(taken ? session.writeTaken(bytes) : session.write(bytes)), session.info.isLive else { return }
@@ -566,6 +611,12 @@ public final class HostServer {
         log("pid \(client.peer?.pid ?? 0) is no longer the one sending on its connection: it's no one to the vault now")
         client.caller = .unknown
         client.runsAppCode = false
+        let attached = client.attached
+        client.attached.removeAll()
+        for id in attached {
+            client.dropQueuedOutput(of: id)
+            updateAttachment(id)
+        }
     }
 
     /// Who the process `token` names is: a process in one of the live sessions (its program or anything under it,
@@ -655,7 +706,10 @@ public final class HostServer {
                     self.sessions.values.forEach { $0.suspendParser() }
                     parsersStopped = true
                     // The rest is the new build's: clients reconnect to the same socket.
-                    let arguments = self.config.arguments + ["--handover", path, "--handover-fallback", self.config.fallback ?? self.config.launcher]
+                    var arguments = self.config.arguments + ["--handover", path, "--handover-fallback", self.config.fallback ?? self.config.launcher]
+                    // The fallback is a private launcher copy, not next to the app. Carry the original app
+                    // location through argv so restoring it never infers identity from the mutable state file.
+                    if let app = self.config.appExecutable { arguments += ["--handover-fallback-app", app] }
                     throw HostHandover.exec(executable, arguments: arguments, inherit: state.descriptors)
                 } catch {
                     if parsersStopped { self.sessions.values.forEach { $0.resumeParser() } }
@@ -724,6 +778,13 @@ public final class HostServer {
     private func deliver(_ data: Data, of id: UUID) {
         let frames = HostFrame.output(session: id, bytes: data)
         for client in clients.values where client.attached.contains(id) {
+            checkPeer(client)
+            guard client.attached.contains(id), mayKill(id, from: caller(of: client)) else {
+                client.attached.remove(id)
+                client.dropQueuedOutput(of: id)
+                updateAttachment(id)
+                continue
+            }
             guard !client.sendOutput(id, frames: frames) else { continue }
             // Fell behind: stop sending it this session; it attaches again and gets a fresh replay.
             client.attached.remove(id)
@@ -740,7 +801,17 @@ public final class HostServer {
     }
 
     private func broadcast(_ event: HostEvent, except: ObjectIdentifier? = nil) {
-        for (key, client) in clients where key != except { client.send(HostEventEnvelope(replyTo: nil, event: event)) }
+        let session: UUID
+        switch event {
+        case .sessionChanged(let info): session = info.id
+        case .sessionRemoved(let id), .bell(let id): session = id
+        default: return
+        }
+        for (key, client) in clients where key != except {
+            checkPeer(client)
+            guard mayKill(session, from: caller(of: client)) else { continue }
+            client.send(HostEventEnvelope(replyTo: nil, event: event))
+        }
     }
 
     private func dropClient(_ key: ObjectIdentifier) {
@@ -750,6 +821,8 @@ public final class HostServer {
     }
 
     private func forget(_ id: UUID) {
+        // Authorize removal notifications before dropping the parent/child relationship.
+        broadcast(.sessionRemoved(id: id))
         sessions.removeValue(forKey: id)?.close()
         inputOrders.removeValue(forKey: id)?.close()
         startedBy[id] = nil
@@ -758,7 +831,6 @@ public final class HostServer {
         order.removeAll { $0 == id }
         primary[id] = nil
         for client in clients.values { client.attached.remove(id) }
-        broadcast(.sessionRemoved(id: id))
     }
 
     /// Ends each verifier session that gave its verdict or cast its ballot (the vault records when) `submittedGrace`

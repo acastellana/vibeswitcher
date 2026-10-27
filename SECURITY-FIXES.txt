@@ -1,0 +1,150 @@
+CORRECCIONES DE SEGURIDAD — 27 de octubre de 2026
+
+Se han implementado correcciones para los cuatro hallazgos de SECURITY-AUDIT.txt.
+El informe original describe el commit auditado, antes de estos cambios locales.
+Este trabajo no instala ni relanza la aplicación del usuario.
+
+1. Autorización del servidor de terminales
+
+   HostServer aplica una política común antes de leer, adjuntar, escribir,
+   redimensionar, crear, eliminar o terminar sesiones. Un cliente desconocido
+   no obtiene autoridad por compartir UID. La app debe probar su clave; una
+   sesión accede a sí misma y sus descendientes, y un lead a su equipo. La bóveda
+   sigue restringiendo la escritura en roles protegidos.
+
+   hello filtra las sesiones; las emisiones de cambios, bells y salida también
+   se filtran. La identidad se vuelve a comprobar por mensaje y antes de
+   respuestas diferidas. Al perderla, se retiran suscripciones y salida pendiente.
+
+   HostConnection repite el hello después de la prueba criptográfica y no
+   presenta a la app una lista vacía recibida antes de autenticarse. Se conserva
+   la compatibilidad de negociación con hosts antiguos que no envían desafíos.
+
+   Los tests que simulaban clientes legítimos sin clave ahora usan claves propias
+   del host de prueba; no se ha añadido una excepción de autenticación para tests.
+   HostCall permite inyectar explícitamente esa clave por llamada sin compartir
+   estado global entre pruebas paralelas.
+
+   La verificación de código compara el cdhash de la arquitectura concreta del
+   proceso con esa misma arquitectura del ejecutable configurado. Esto mantiene
+   el criterio estricto para binarios universales arm64e/arm64e.x1.
+
+   En un rollback del host, el launcher privado conserva por argv la ubicación
+   de la app original. La identidad no se deduce de un fichero de estado que
+   otro proceso pueda editar. Las pruebas existentes de rollback verifican que
+   la app vuelva a autenticarse y recupere sus sesiones y terminales.
+   Ese argumento solo se acepta al restaurar un host, nunca en un arranque
+   fresco. Una prueba externa intenta designar Node como app y reemplazar la
+   clave del host: se rechaza. Los fixtures externos usan copias privadas con la
+   disposición real app/helper, sin excepciones de identidad por argumentos.
+
+2. Hardened Runtime
+
+   scripts/build-app.sh firma la app y los tres helpers con --options runtime,
+   sin excepciones para DYLD ni desactivación de la validación de bibliotecas.
+   La prueba ejecuta la función real de firma del script sobre copias temporales,
+   comprueba las cuatro firmas e intenta DYLD_INSERT_LIBRARIES en cada copia.
+   Se comprueba que el proceso llega a su entrada esperada y que el constructor
+   inyectado no se ejecuta; un simple crash no cuenta como prueba de rechazo.
+
+3. Portapapeles
+
+   El delegado clipboardCopy del terminal rechaza las escrituras solicitadas
+   por programas mediante OSC 52, incluyendo salida oculta o reproducida.
+   Copiar una selección mediante la acción explícita de SwiftTerm sigue usando
+   TerminalView.copy(_:), que es una ruta distinta.
+
+   La prueba introduce OSC 52 en el parser real y comprueba el texto y el contador
+   de cambios de un NSPasteboard con nombre único. No usa el portapapeles personal.
+
+4. Presupuestos del socket
+
+   HostFrameDecoder limita los bytes sin consumir a un frame máximo más el
+   siguiente bloque de lectura. Al superar el límite, libera el contenido y
+   mantiene el estado de rechazo; no devuelve un frame anterior al error.
+
+   El servidor procesa frames entre lecturas y atiende como máximo 64 mensajes
+   o 256 KiB por turno, antes de ceder la cola. Continúa los frames ya recibidos
+   aunque el socket no vuelva a producir un evento. El cliente también consume
+   frames entre lecturas y limita los bytes atendidos por turno.
+
+   Hay un máximo configurable de 128 conexiones y 256 sesiones por host. Las
+   sesiones terminadas cuentan para este último: eliminarlas libera capacidad.
+   El error lo explica sin crear un proceso adicional.
+
+PRUEBAS AÑADIDAS
+
+   Tests/VibeHostTests/SecurityHardeningTests.swift
+     Rechazo de operaciones sin autenticación, ausencia de salida y avisos para
+     desconocidos, hello autenticado y límites de conexiones/sesiones.
+
+   Tests/VibeHostTests/SessionAuthorizationTests.swift
+     Procesos reales de sesiones ficticias: acceso propio y de lead a worker;
+     rechazo de worker a lead y de accesos a otro proyecto.
+
+   Tests/VibeCoreTests/SocketBoundsTests.swift
+     Rechazo del buffer excesivo y aceptación de frames máximos fragmentados.
+
+   Tests/VibeHostTests/SocketSchedulingTests.swift
+     Un pipeline de 128 peticiones cede la cola antes de agotar el pipeline y
+     luego continúa hasta procesarlo entero, sin perder frames.
+
+   Tests/VibeSwitcherTests/TerminalClipboardSecurityTests.swift
+     Parser OSC 52 real y portapapeles aislado.
+
+   Tests/SecurityAudit/*.test.mjs
+     Cliente externo sin identidad contra host privado y prueba de inyección
+     contra las cuatro firmas creadas por el script de distribución.
+
+VALIDACIÓN
+
+   La selección ampliada pasó: 209 pruebas en 50 suites. Incluye todo el módulo
+   VibeHost, negociación/reconexión, rollback, entrada concurrente, pegado,
+   protocolo, los nuevos controles de seguridad y los lints exigidos por AGENTS.md.
+   El resultado contiene tres incidencias conocidas e intencionales del arnés,
+   que prueba fallos de fixtures y comprueba que se limpien; no hay fallos nuevos.
+   Además pasaron 3 pruebas web del teléfono y 2 pruebas externas de seguridad.
+
+   Antes de los fixes, las pruebas de autorización, buffer y portapapeles
+   reprodujeron los fallos; la prueba de firma falló por ausencia de runtime.
+   Se retiraron después, mediante git apply -R, las correcciones de clipboard
+   y del turno de lectura: ambas pruebas fallaron con el comportamiento anterior.
+   Se reaplicaron los parches y se repitió con éxito la validación ampliada.
+
+   Dos ejecuciones simultáneas bajo carga de 2 núcleos pasaron cada una 65 pruebas
+   en 13 suites, incluyendo el caso de TMPDIR largo, sin dejar procesos abiertos.
+   La repetición ampliada pasó también: 162 pruebas en 39 suites en cada una de
+   dos ejecuciones simultáneas bajo la misma carga, con las tres incidencias
+   conocidas e intencionales del arnés y sin fallos nuevos ni procesos abiertos.
+   Tras restringir el argumento de identidad al rollback, se repitieron los
+   22 casos de arranque, recuperación y autenticación en dos ejecuciones bajo
+   carga: ambas pasaron, con dos incidencias conocidas del arnés y sin procesos
+   abiertos. La selección ampliada de 209 casos también se repitió y pasó.
+   Las dos pruebas externas se repitieron bajo carga de 2 núcleos: ambas pasaron.
+
+   Los resultados finales y sus logs se registran en .build/security-audit/.
+   final-validation.log: selección ampliada y pruebas web/externas.
+   before-fixes.log y signing-before.log: fallos antes de corregir.
+   negative-controls.log: comprobación inversa de clipboard y turno del socket.
+   load-65-tests.log: primera repetición bajo carga.
+   load-full.log y load-full-run-{1,2}.log: repetición ampliada bajo carga.
+   fresh-identity-before.log: regresión del argumento de identidad en arranque fresco.
+   load-startup.log y load-startup-run-{1,2}.log: repetición final de arranque/rollback.
+   load-external.log: rechazo de identidad falsa e inyección bajo carga.
+   Se usan scripts/test.sh y scripts/test-under-load.sh, con HOME temporal.
+
+   En este Mac, el build por defecto requiere un compilador Metal no instalado.
+   La validación Swift usa el sistema native y el SDK 26.5 ya instalado, añadiendo
+   las rutas del framework Testing y su macro de las Command Line Tools.
+   El wrapper local utilizado está en .build/security-audit/toolchain/swift e
+   incluye los rpaths del framework Testing y lib_TestingInterop. Las pruebas
+   del repositorio siguen usando las herramientas que tenga configuradas el Mac.
+   No se instalaron herramientas ni se cambiaron los SDK del sistema.
+
+   La prueba de firma usa binarios temporales y firma ad hoc; no consulta ni
+   modifica el Keychain. No sustituye una prueba del paquete release final ni
+   la notarización de una distribución pública.
+
+   Estas correcciones reducen las superficies detectadas. Los agentes y comandos
+   siguen ejecutándose como el usuario: worktrees, roles y HOME temporal no son
+   aislamiento del sistema operativo frente a proyectos maliciosos.

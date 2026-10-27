@@ -84,9 +84,10 @@ import Testing
             TestHosts.end(host)
             remove(socket, home)
         }
+        let key = try TestHosts.authorize(host)
         try TestHosts.run(host, owner: runner.processIdentifier)
         #expect(eventually { FileManager.default.fileExists(atPath: socket) })
-        let client = try TestClient(socket: socket)
+        let client = try TestClient(socket: socket, appKey: key)
         let session = try client.spawn(keepRunning)
         // Never idle while its session runs: nothing but the watchdog would end it.
         Thread.sleep(forTimeInterval: 2)
@@ -128,9 +129,10 @@ import Testing
         }
         let hostEnded = DispatchSemaphore(value: 0)
         host.terminationHandler = { _ in hostEnded.signal() }
+        let key = try TestHosts.authorize(host)
         try TestHosts.run(host)
         var connected: TestClient?
-        #expect(eventually { connected = try? TestClient(socket: socket); return connected != nil })
+        #expect(eventually { connected = try? TestClient(socket: socket, appKey: key); return connected != nil })
         let client = try #require(connected)
         let sessions = try (0..<2).map { _ in try client.spawn(keepRunning).childPID }
         #expect(eventually { sessions.allSatisfy { (ProcessTable.info(pid: $0)?.comm ?? "") == "sleep" } })
@@ -174,9 +176,10 @@ import Testing
             remove(socket, home)
             unlink(log)
         }
+        let key = try TestHosts.authorize(host)
         try TestHosts.run(host)
         var connected: TestClient?
-        #expect(eventually { connected = try? TestClient(socket: socket); return connected != nil })
+        #expect(eventually { connected = try? TestClient(socket: socket, appKey: key); return connected != nil })
         let client = try #require(connected)
         let seq = client.send(.hello(protocolVersion: HostProtocol.version, app: "test"))
         #expect(eventually { client.reply(to: seq) != nil })

@@ -48,13 +48,15 @@ struct HostFrameTests {
         let frames = HostFrame.output(session: id, bytes: bytes)
         #expect(frames.count == 3)
         var decoder = HostFrameDecoder()
-        frames.forEach { decoder.append($0) }
         var joined = Data()
-        while let frame = try decoder.next() {
-            #expect(frame.kind == .output)
-            let (session, chunk) = try #require(HostFrame.parseOutput(frame.payload))
-            #expect(session == id)
-            joined.append(chunk)
+        for bytes in frames {
+            decoder.append(bytes)
+            while let frame = try decoder.next() {
+                #expect(frame.kind == .output)
+                let (session, chunk) = try #require(HostFrame.parseOutput(frame.payload))
+                #expect(session == id)
+                joined.append(chunk)
+            }
         }
         #expect(joined == bytes)
         #expect(HostFrame.output(session: id, bytes: Data()).isEmpty)
