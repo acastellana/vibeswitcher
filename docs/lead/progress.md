@@ -1560,3 +1560,9 @@
 - 2026-10-27 20:14 Incident: The app froze about 20 times, 2–25 s each, between 19:31 and 20:12 on 2026-10-27, with stakegen's long lead chat selected. The time went to SwiftUI accessibilit… (in lead-chat-freezes-of); planned turn-this-incident-into-2 to turn it into a check
 - 2026-10-27 20:14 Folded turn-this-incident-into-2 into lead-chat-freezes-of: that task carries its work
 - 2026-10-27 20:18 Merged lead-chat-deliver-wake: Lead chat: deliver, wake and flush still stat or decode the board on the main thread (no audit: review none)
+- 2026-10-27 20:18 Automatically (auto_advance): Merged lead-chat-deliver-wake (Lead chat: deliver, wake and flush still stat or decode the board on the main thread) into project-lead at 1c688f06, review none: on its worker's done report on e5f93ecf and the full test run.
+- 2026-10-27 20:18 Automatically (auto_advance): Cleaned up lead-chat-deliver-wake (freed 974 MB of build output and temporary folders). It stays done.
+- 2026-10-27 20:18 Started a worker on lead-chat-freezes-of
+- 2026-10-27 20:18 Automatically (auto_advance): Started a worker on lead-chat-freezes-of (Lead chat freezes of 3–25 s: SwiftUI accessibility tree and session-list rebuilds on a long lead chat).
+- 2026-10-27 20:18 Started a worker on audit-must-not-end
+- 2026-10-27 20:18 Automatically (auto_advance): Started a worker on audit-must-not-end (audit() must not end a verifier already running on the same commit).
