@@ -1567,3 +1567,5 @@
 - 2026-10-27 20:18 Started a worker on audit-must-not-end
 - 2026-10-27 20:18 Automatically (auto_advance): Started a worker on audit-must-not-end (audit() must not end a verifier already running on the same commit).
 - 2026-10-27 20:36 Audit of land-pr-1-host: incomplete, clean, round 1: 2 Important open, 2 Nit open
+- 2026-10-27 20:44 Planned issue-2-workers: Issue #2: workers' vibeswitcher tools can come up empty (role bind races Claude Code 2.1.311's faster MCP start) (review audit)
+- 2026-10-27 20:50 Merged audit-must-not-end: audit() must not end a verifier already running on the same commit (no audit: review none)
