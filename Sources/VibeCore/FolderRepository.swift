@@ -89,7 +89,7 @@ public enum FolderRepository {
         var exclude = URL(fileURLWithPath: dotGit).appendingPathComponent("info/exclude")
         if plan.inRepository {
             guard ProjectCreation.existing(dotGit) != .none else { return .failed("\(ProjectCreation.tildePath(folder)) has no .git.") }
-            guard !git(["rev-parse", "--verify", "--quiet", "HEAD"], folder).ok else {
+            guard isEmptyRepository(folder, git: git) else {
                 return .failed("\(ProjectCreation.tildePath(folder)) has a commit already.")
             }
             // .git can be a file naming the git directory (a worktree's, a submodule's): git says where they are.
@@ -154,7 +154,9 @@ public enum FolderRepository {
             do {
                 try FileManager.default.createDirectory(at: exclude.deletingLastPathComponent(), withIntermediateDirectories: true)
                 let lines = leftOut.map { "/" + escapedPattern($0) }.joined(separator: "\n") + "\n"
-                let existing = (try? String(contentsOf: exclude, encoding: .utf8)) ?? ""
+                var existing = (try? String(contentsOf: exclude, encoding: .utf8)) ?? ""
+                // One edited without a last newline: its last pattern isn't run into the first of these.
+                if !existing.isEmpty, !existing.hasSuffix("\n") { existing += "\n" }
                 try Data((existing + lines).utf8).write(to: exclude)
             } catch {
                 return undo(.failed("The files left out couldn't be noted in .git/info/exclude: \(error.localizedDescription)"))
@@ -163,6 +165,14 @@ public enum FolderRepository {
         let committed = git(["commit", "--quiet", "--allow-empty", "-m", ProjectCreation.commitMessage], folder)
         guard committed.ok else { return undo(failed("commit", committed)) }
         return nil
+    }
+
+    /// A repository with no commits at all: HEAD unborn and no refs. An orphan branch (`git checkout --orphan`) or a
+    /// fetch with nothing checked out has commits elsewhere: no first commit is made there.
+    public static func isEmptyRepository(_ folder: String, git: ProjectCreation.GitRunner = { Git.run($0, in: $1) }) -> Bool {
+        guard !git(["rev-parse", "--verify", "--quiet", "HEAD"], folder).ok else { return false }
+        let refs = git(["for-each-ref", "--count=1"], folder)
+        return refs.ok && refs.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// A path as a gitignore pattern that matches only itself.

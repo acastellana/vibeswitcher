@@ -303,7 +303,8 @@ extension ProjectFolderStartTests {
         #expect(plan.leftOut == [".env"])
         let question = ProjectFolderStart.emptyRepositoryQuestion(plan)
         #expect(question.title == "“\((chosen as NSString).lastPathComponent)” has no commits yet.")
-        #expect(question.text.contains("a first commit of its 3 files") && question.text.contains("nothing is pushed"))
+        #expect(question.text.contains("in \(ProjectCreation.tildePath(chosen)), a first commit of its 3 files"))
+        #expect(question.text.contains("nothing is pushed"))
         #expect(question.text.contains("Left out, as they look like secrets: .env."))
 
         let problem = await Task.detached { FolderRepository.make(plan, git: git) }.value
@@ -334,6 +335,42 @@ extension ProjectFolderStartTests {
         #expect(ProjectCreation.existing(chosen + "/.gitignore") == .none)
         #expect(await tracked(chosen, git: real) == ["staged.txt"])
         #expect(try String(contentsOfFile: chosen + "/.git/info/exclude", encoding: .utf8) == excludeBefore)
+    }
+
+    /// An exclude file edited without a last newline: its last pattern and the first left out stay two lines.
+    @Test func anExcludeWithoutALastNewlineKeepsItsPatterns() async throws {
+        let git = try scratchGit()
+        let chosen = try await emptyRepository([".gitignore": "*.tmp\n", "main.py": "print(1)\n", ".env": "TOKEN=1\n"], git: git)
+        try "*.log".write(toFile: chosen + "/.git/info/exclude", atomically: true, encoding: .utf8)
+        let plan = try await Task.detached { [chosen, scratch = temp.url("pfs-scratch")] in
+            try FolderRepository.plan(for: chosen, scratch: scratch, git: git).get()
+        }.value
+        let problem = await Task.detached { FolderRepository.make(plan, git: git) }.value
+        #expect(problem == nil, "\(problem?.message ?? "")")
+        #expect(try String(contentsOfFile: chosen + "/.git/info/exclude", encoding: .utf8) == "*.log\n/.env\n")
+        let status = await Task.detached { git(["status", "--porcelain", "--untracked-files=all"], chosen).output }.value
+        #expect(status.isEmpty, "\(status)")
+    }
+
+    /// A repository whose HEAD is unborn but has commits elsewhere (an orphan branch) isn't an empty one.
+    @Test func anOrphanBranchIsNoEmptyRepository() async throws {
+        let git = try scratchGit()
+        let chosen = try await emptyRepository(["main.py": "print(1)\n"], staged: ["main.py"], git: git)
+        let empty = await Task.detached { FolderRepository.isEmptyRepository(chosen, git: git) }.value
+        #expect(empty)
+        let plan = try await Task.detached { [chosen, scratch = temp.url("pfs-scratch")] in
+            try FolderRepository.plan(for: chosen, scratch: scratch, git: git).get()
+        }.value
+        let orphaned = await Task.detached {
+            [git(["commit", "-q", "-m", "first"], chosen), git(["checkout", "-q", "--orphan", "pages"], chosen)].allSatisfy(\.ok)
+        }.value
+        #expect(orphaned)
+        let still = await Task.detached { FolderRepository.isEmptyRepository(chosen, git: git) }.value
+        #expect(!still)
+        let problem = await Task.detached { FolderRepository.make(plan, git: git) }.value
+        #expect(problem?.message.contains("has a commit already") == true)
+        let count = await Task.detached { git(["rev-list", "--count", "--all"], chosen).output }.value
+        #expect(count.trimmingCharacters(in: .whitespacesAndNewlines) == "1")
     }
 
     /// `git rm --cached` refuses an entry that differs from both HEAD (none yet) and the work tree, without -f: a
@@ -449,6 +486,12 @@ extension LeadRelaunchTests {
         // A start from outside the app (anything can post it) offers no commit: it's told how, as before.
         controller.startLead(in: root, askAboutMovedHead: false)
         #expect(await until { asked.count == 2 })
+        #expect(asked.last == "The repository has no commits yet.")
+        // A folder inside it (the repository could be a stray git init in a parent, your home): its whole tree isn't
+        // offered for a commit either.
+        try FileManager.default.createDirectory(atPath: root + "/sub", withIntermediateDirectories: true)
+        controller.startLead(in: root + "/sub")
+        #expect(await until { asked.count == 3 })
         #expect(asked.last == "The repository has no commits yet.")
 
         #expect(!Git.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: root).ok)

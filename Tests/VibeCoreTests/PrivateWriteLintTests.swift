@@ -34,7 +34,7 @@ struct PrivateWriteLintTests {
         "Sources/VibeCore/LeadRecords.swift": (2, "records_dir: the repository's own committed files, with its usual modes"),
         "Sources/VibeCore/HookInstaller.swift": (2, "the agents' settings (~/.claude, ~/.codex): theirs"),
         "Sources/VibeCore/ProjectCreation.swift": (3, "a new project the user makes, with its usual modes"),
-        "Sources/VibeCore/FolderRepository.swift": (3, "a folder the user chose for a lead: its .gitignore, and git's .git/info/exclude, with their usual modes"),
+        "Sources/VibeCore/FolderRepository.swift": (4, "a folder the user chose for a lead: its .gitignore, and git's .git/info/exclude, with their usual modes; an empty repository's index and exclude put back as they were"),
         "Sources/VibeSwitcher/AppDelegate.swift": (4, "the hook binary (bin/, a program: 0755) and snapshots to paths the user gives"),
         "Sources/VibeSwitcher/Snapshot.swift": (1, "a snapshot to a path the user gives"),
         "Sources/VibeSwitcher/MainWindow/MainWindowController.swift": (1, "a chat export to where the user saves it"),

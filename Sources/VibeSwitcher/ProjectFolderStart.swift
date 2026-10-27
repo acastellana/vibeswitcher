@@ -49,7 +49,8 @@ struct ProjectFolderStart {
     /// The question for a repository with no commits yet, from what its first commit would hold.
     static func emptyRepositoryQuestion(_ plan: FolderRepository.Plan) -> (title: String, text: String) {
         let name = (plan.folder as NSString).lastPathComponent
-        let text = "A project lead's workers start from a commit. VibeSwitcher can make " + firstCommit(plan)
+        let text = "A project lead's workers start from a commit. VibeSwitcher can make, in \(ProjectCreation.tildePath(plan.folder)), "
+            + firstCommit(plan)
         return ("“\(name)” has no commits yet.", text)
     }
 

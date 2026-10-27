@@ -400,10 +400,15 @@ final class LeadController: ObservableObject {
             let top = Git.run(["rev-parse", "--show-toplevel"], in: folder)
             let root = (top.output as NSString).standardizingPath
             let hasCommits = top.ok && !top.output.isEmpty && Git.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: root).ok
-            // No commits yet, and you asked in the app: what its first commit would hold (a start from outside the
-            // app, which anything can post, offers no commit).
-            let firstCommit = top.ok && !top.output.isEmpty && !hasCommits && askAboutMovedHead
-                ? FolderRepository.plan(for: root, scratch: FileManager.default.temporaryDirectory) : nil
+            // No commits at all, and you asked in the app for this repository's top folder: what its first commit would
+            // hold. A start from outside the app (anything can post it) offers no commit, nor does a folder inside
+            // the repository (a stray git init in a parent, your home folder), nor one with commits elsewhere (an
+            // orphan branch, a fetch).
+            let chosen = URL(fileURLWithPath: folder).resolvingSymlinksInPath().standardizedFileURL.path
+            let home = URL(fileURLWithPath: NSHomeDirectory()).resolvingSymlinksInPath().standardizedFileURL.path
+            let offers = top.ok && !top.output.isEmpty && !hasCommits && askAboutMovedHead && chosen == root && root != home
+                && FolderRepository.isEmptyRepository(root)
+            let firstCommit = offers ? FolderRepository.plan(for: root, scratch: FileManager.default.temporaryDirectory) : nil
             DispatchQueue.main.async {
                 guard let self else { return }
                 guard top.ok, !top.output.isEmpty else {

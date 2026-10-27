@@ -228,6 +228,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         snapshot: { [weak self] in BriefingModel.Snapshot(boards: self?.leads.boards ?? [:], sessions: self?.store.sessions ?? []) },
         language: { .preferred() }, keyStore: BriefingKey(saved: AppProof.MemorySecret()), generate: { _ in nil })
     var window: MainWindowController?
+    /// The main window's actions (`sheet new-session-menu` lists the empty sidebar's menu from them).
+    var windowActions: WindowActions?
     var settings: SettingsWindowController?
     var sheet: NSWindow?
     var sheetName: String?
@@ -655,6 +657,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             startLead: { [weak self] _ in self?.refuse("starting a project lead (a real agent)") },
             projectsFolder: { [weak self] in (self?.home ?? "") + "/projects" },
             projectCreated: { [weak self] folder, _ in self?.refuse("starting a lead in the new project \(folder)") })
+        windowActions = actions
         let controller = MainWindowController(store: store, host: host, model: model, actions: actions, leads: leads, briefing: briefing)
         controller.pane.configure = { [weak self, weak controller] view in
             guard let self else { return }
@@ -700,6 +703,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("send", "presses Return in the composer: the message goes to the fake session"),
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("new [codex|shell] [LABEL]", "starts another fake session: a Claude, or a Codex or a plain shell"),
+        ("clear", "ends and removes every fake session: the sidebar is empty, with its New Session menu"),
         ("views", "the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls layout)"),
         ("scroll top|middle|bottom", "scrolls the shown chat"),
         ("size WxH", "resizes the main window's content (e.g. 1728x1015)"),
@@ -717,7 +721,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
         ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
-        ("sheet NAME", "shows a sheet on the window: " + (Driver.sheets.map(\.name) + Driver.windowSheets.map(\.name) + ["choose-folder"]).joined(separator: ", ")),
+        ("sheet NAME", "shows a sheet on the window: " + (Driver.sheets.map(\.name) + Driver.windowSheets.map(\.name) + ["choose-folder", "new-session-menu"]).joined(separator: ", ")),
         ("close settings|sheet", "closes Settings or the sheet"),
         ("shot NAME", "draws each window, light and dark, into the shots folder"),
         ("quit", "quits (the host and fake sessions end with it)"),
@@ -763,6 +767,20 @@ private final class Driver: NSObject, NSApplicationDelegate {
             let scratch = URL(fileURLWithPath: driver.home + "/scratch")
             guard case .success(let plan) = FolderRepository.plan(for: folder, scratch: scratch) else { return nil }
             let alert = ProjectFolderStart.notRepositoryAlert(plan)
+            alert.layout()
+            return alert.window
+        }),
+        // A repository with no commits yet, staged file and all: the first commit LeadController offers.
+        ("empty-repository", { driver in
+            let folder = driver.home + "/projects/empty-repo"
+            try? VibePaths.ensurePrivate(URL(fileURLWithPath: folder + "/src"))
+            for (name, text) in [("README.md", "# Empty\n"), ("src/main.swift", "print(1)\n"), ("deploy.key", "-\n")] {
+                try? VibePaths.writePrivate(Data(text.utf8), to: URL(fileURLWithPath: folder + "/" + name))
+            }
+            guard Git.run(["init", "--quiet"], in: folder).ok, Git.run(["add", "README.md"], in: folder).ok else { return nil }
+            let scratch = URL(fileURLWithPath: driver.home + "/scratch")
+            guard case .success(let plan) = FolderRepository.plan(for: folder, scratch: scratch) else { return nil }
+            let alert = ProjectFolderStart.emptyRepositoryAlert(plan)
             alert.layout()
             return alert.window
         }),
@@ -1026,6 +1044,17 @@ private final class Driver: NSObject, NSApplicationDelegate {
             composer.doCommand(by: #selector(NSResponder.insertNewline(_:)))
             reply(true, "sent")
         case "tell": tell(rest, reply)
+        case "clear":
+            // Ended first, then removed (the host keeps an ended session's row until it's removed).
+            let ids = host.sessions.map(\.id)
+            ids.forEach(host.kill)
+            waitFor({ [weak self] in self?.host.sessions.allSatisfy { !$0.isLive } ?? true }) { [weak self] _ in
+                guard let self else { return }
+                for id in ids { self.window?.pane.forget(id); self.host.remove(id) }
+                self.waitFor({ self.host.sessions.isEmpty && self.store.sessions.isEmpty }) { cleared in
+                    self.settle { reply(cleared, cleared ? "cleared: no sessions" : "sessions left: \(self.host.sessions.count)") }
+                }
+            }
         case "new":
             // "new codex LABEL" and "new shell LABEL": a Codex row, a plain shell's.
             let words = rest.split(separator: " ", maxSplits: 1).map(String.init)
@@ -1200,6 +1229,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
             return reply(true, "folder panel (drawn out of process: shot can't draw it): button “\(panel.prompt ?? "")”, "
                          + "folders only: \(panel.canChooseDirectories && !panel.canChooseFiles), starts in \(panel.directoryURL?.path ?? "?")")
         }
+        if name == "new-session-menu" {
+            // A menu draws only while it's open, in a tracking loop on screen: this lists the empty sidebar's
+            // (`NewSessionMenu(folder: nil)`), from the window's actions.
+            guard let actions = windowActions else { return reply(false, "no main window") }
+            let items = actions.presets(nil).map(\.name) + ["—", NewSessionMenu.leadItem(folder: nil, actions: actions).title]
+            return reply(true, "the empty sidebar's New Session menu: " + items.joined(separator: ", "))
+        }
         if let entry = Self.windowSheets.first(where: { $0.name == name }) {
             closeSheet()
             guard let shown = entry.make(self) else { return reply(false, "couldn't make \(name)") }
@@ -1211,7 +1247,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             return settle { reply(true, "sheet \(name) shown") }
         }
         guard let entry = Self.sheets.first(where: { $0.name == name }) else {
-            return reply(false, "no sheet \(name): " + (Self.sheets.map(\.name) + Self.windowSheets.map(\.name) + ["choose-folder"]).joined(separator: ", "))
+            return reply(false, "no sheet \(name): " + (Self.sheets.map(\.name) + Self.windowSheets.map(\.name) + ["choose-folder", "new-session-menu"]).joined(separator: ", "))
         }
         guard let parent = window?.window else { return reply(false, "no window") }
         closeSheet()
