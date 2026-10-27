@@ -50,7 +50,7 @@ struct LeadRelaunchTests {
         }
     }
 
-    func world() throws -> World {
+    func world(startHost: Bool = true) throws -> World {
         AppStatus.enabled = false
         let url = temp.url("relaunch")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -70,7 +70,7 @@ struct LeadRelaunchTests {
         config.appKey = key
         config.appExecutable = HostServer.executable(of: getpid())
         let server = HostServer(config: config)
-        try server.start()
+        if startHost { try server.start() }
         let book = LeadVault.Book()
         let stateDir = temp.url("state")
         try FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
@@ -105,6 +105,77 @@ struct LeadRelaunchTests {
         }
         controller.answersTrust = false
         return (host, controller)
+    }
+
+    @Test func theFirstLeadStartsItsHostBeforeRequestingAVaultGrant() async throws {
+        let world = try world(startHost: false)
+        defer { world.stop() }
+        // Match the production app/helper layout so code identity is verified without a test bypass.
+        let bundle = temp.url("cold-app")
+        try FileManager.default.createDirectory(at: bundle, withIntermediateDirectories: true)
+        let original = Bundle(for: RelaunchAnchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host")
+        let helper = bundle.appendingPathComponent("vibeswitcher-host")
+        try FileManager.default.copyItem(at: original, to: helper)
+        let app = try #require(HostServer.executable(of: getpid()))
+        try FileManager.default.copyItem(atPath: app, toPath: bundle.appendingPathComponent("VibeSwitcher").path)
+        let executable = helper.path
+        let host = HostClient(socketPath: world.socket, appKey: { world.key }, startExecutable: { executable },
+                              bundledBuild: { HostBuild.id(ofExecutableAt: executable) })
+        host.hostArguments = ["--socket", world.socket, "--lock", world.socket + ".lock", "--idle-exit", "5"]
+            + HostClient.endsWithThisProcess
+        var hostPID: Int32?
+        defer { if let pid = hostPID { kill(pid, SIGTERM) } }
+        let vault = LeadVault(folder: temp.url("cold-vault")) { request in
+            let event = try HostCall.request(.vault(request), socket: world.socket, appKey: world.key)
+            guard case .vault(let reply) = event else { throw LeadVault.Refused("Unexpected scratch host reply") }
+            return reply
+        }
+        let store = SessionStore(scanner: SessionScanner(processes: { [:] }, stateDir: { world.stateDir }, cwd: { _ in nil }, arguments: { _ in [] }))
+        let controller = LeadController(host: host, store: store, vault: vault, inbox: temp.url("cold-inbox"), home: temp.url("home").path) { _ in
+            "exec /bin/sleep 600"
+        }
+        controller.answersTrust = false
+        var problems: [String] = []
+        controller.confirm = { title, text, _ in problems.append(title + " " + text); return 0 }
+        controller.startLead(in: world.root)
+        #expect(await until(timeout: 30) { !problems.isEmpty || !host.sessions.isEmpty })
+        hostPID = host.hostPID
+        try #require(problems.isEmpty, "\(problems)")
+        let lead = try #require(host.sessions.first)
+        #expect(lead.label == "Lead · \(world.project)")
+        let bound = await Task.detached {
+            let deadline = Date().addingTimeInterval(30)
+            while Date() < deadline {
+                if vault.current(.lead, root: world.root, task: nil)?.session == lead.id.uuidString { return true }
+                try? await Task.sleep(nanoseconds: 20_000_000)
+            }
+            return false
+        }.value
+        #expect(bound)
+        host.kill(lead.id)
+        #expect(await until(timeout: 30) { host.sessions.first { $0.id == lead.id }?.isLive == false })
+        let pid = try #require(hostPID)
+        kill(pid, SIGTERM)
+        #expect(await until(timeout: 30) { kill(pid, 0) != 0 })
+        hostPID = nil
+    }
+
+    @Test func aHostStartupFailureIsReportedBeforeAskingTheVault() async throws {
+        let world = try world(startHost: false)
+        defer { world.stop() }
+        let host = HostClient(socketPath: world.socket, appKey: { world.key }, startExecutable: { "/missing-scratch-helper" })
+        let vault = LeadVault(folder: temp.url("unasked-vault")) { _ in
+            Issue.record("The vault was asked before its host was ready")
+            throw CancellationError()
+        }
+        let store = SessionStore(scanner: SessionScanner(processes: { [:] }, stateDir: { world.stateDir }, cwd: { _ in nil }, arguments: { _ in [] }))
+        let controller = LeadController(host: host, store: store, vault: vault, inbox: temp.url("cold-inbox"), home: temp.url("home").path) { _ in "unused" }
+        var problems: [String] = []
+        controller.confirm = { _, text, _ in problems.append(text); return 0 }
+        controller.startLead(in: world.root)
+        #expect(await until(timeout: 30) { !problems.isEmpty })
+        #expect(problems == ["Couldn't start the session host: vibeswitcher-host is missing from the app"])
+        #expect(host.sessions.isEmpty)
     }
 
     @Test func aStartAskedBeforeTheHostsWelcomeWaitsForItsSessions() {

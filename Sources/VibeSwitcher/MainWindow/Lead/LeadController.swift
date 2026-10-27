@@ -541,6 +541,19 @@ final class LeadController: ObservableObject {
         if case .outdated = host.state, !host.hostCapabilities.contains(HostProtocol.Capability.leadVault) {
             return offerHostRestart()
         }
+        // The first lead needs the vault before spawn() gets a chance to start the host. Wait for its
+        // authenticated welcome first, then reconsider any existing lead discovered on that connection.
+        guard host.isUsable else {
+            host.ensureHost { [weak self] error in
+                guard let self else { return }
+                if let error {
+                    Breadcrumbs.shared.note("lead: couldn't start the session host: \(error)")
+                    return self.alert("The lead didn't start.", error)
+                }
+                self.startLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead)
+            }
+            return
+        }
         // Preparing runs git (the board's folder, the base branch): off the main thread, one start per root at a time.
         guard startingLeads.insert(root).inserted else { return }
         let project = (root as NSString).lastPathComponent

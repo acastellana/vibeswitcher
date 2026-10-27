@@ -63,7 +63,7 @@ final class HostClient: ObservableObject {
     /// welcome says how it went.
     private var handoverWaitedOut = false
     /// The pid the connected host gave in its welcome (nil from an older host).
-    private var hostPID: Int32?
+    private(set) var hostPID: Int32?
     /// The bundled build a handover was last asked for: asked once per build, so a failing one isn't asked again
     /// and again (the window's restart asks once more).
     private var handedOverTo: Int?
@@ -124,6 +124,8 @@ final class HostClient: ObservableObject {
 
     /// The bundled host a handover asks for; a test's scratch build instead.
     private let handoverExecutable: () -> String
+    /// The bundled helper to start; tests provide their own built helper.
+    private let startExecutable: () -> String
 
     /// Added to the arguments of a host this client starts: a bench's `endsWithThisProcess`. None for the app's, which
     /// outlives the app.
@@ -133,10 +135,12 @@ final class HostClient: ObservableObject {
     static var endsWithThisProcess: [String] { ["--exit-with", String(getpid())] }
 
     init(socketPath: String = VibePaths.hostSocket.path, appKey: @escaping () -> SymmetricKey? = { nil },
+         startExecutable: @escaping () -> String = { HostClient.hostExecutable.path },
          bundledBuild: @escaping () -> Int = { HostBuild.id(ofExecutableAt: HostClient.hostExecutable.path) },
          handoverExecutable: @escaping () -> String = { HostClient.hostExecutable.path },
          reconnectDelays: [TimeInterval] = [0.2, 0.5, 1, 2, 3, 5], note: @escaping (String) -> Void = { Breadcrumbs.shared.note($0) }) {
         self.socketPath = socketPath
+        self.startExecutable = startExecutable
         self.handoverExecutable = handoverExecutable
         proofKey = appKey
         self.bundledBuild = bundledBuild
@@ -235,7 +239,7 @@ final class HostClient: ObservableObject {
 
     /// Detached (own session, not our child for signals), stdout/stderr appended to host.log.
     private func startHost() throws {
-        let path = Self.hostExecutable.path
+        let path = startExecutable()
         guard FileManager.default.isExecutableFile(atPath: path) else {
             throw HostClientError(message: "vibeswitcher-host is missing from the app")
         }
