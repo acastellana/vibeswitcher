@@ -1573,3 +1573,6 @@
 - 2026-10-27 20:50 Automatically (auto_advance): Cleaned up audit-must-not-end (freed 986 MB of build output and temporary folders). It stays done.
 - 2026-10-27 20:56 The worker on land-pr-1-host answered findings: land-pr-1-host:F1 fixed at 1e051c49: c96c73e: aReplayNeverSetsTheClipboard waits until the host's own screen (a .screen read, re-asked every 20 ms) shows 'replayed ready', which the program prints after its OSC 52, and only then calls pane.show. The OSC 52 is then in the host's ring and reaches the view as replay. Under load (--load 24 -r 5, with the hardening, upgrade and tool-server suites): all 5 runs passed and left nothing behind.; land-pr-1-host:F2 fixed at 1e051c49: df04b20 + 1e051c4: run…
 - 2026-10-27 20:57 Automatically (auto_advance): Started the audit of land-pr-1-host at 1e051c49 (Its review is audit).
+- 2026-10-27 21:02 Planned hang-detector-don-t: Hang detector: don't report a modal alert the user is answering as a freeze
+- 2026-10-27 21:04 Started a worker on hang-detector-don-t
+- 2026-10-27 21:04 Automatically (auto_advance): Started a worker on hang-detector-don-t (Hang detector: don't report a modal alert the user is answering as a freeze).
