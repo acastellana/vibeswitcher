@@ -24,7 +24,7 @@ struct StartPage: View {
                     .background(RoundedRectangle(cornerRadius: 10).fill(.quaternary.opacity(0.35)))
                 }
                 HStack(spacing: 10) {
-                    Button { actions.newSession(nil, nil) } label: { Label("Choose Folder…", systemImage: "folder.badge.plus") }
+                    Button { actions.chooseFolderForLead() } label: { Label("Choose Folder…", systemImage: "folder.badge.plus") }
                         .help("Pick a project's folder and start its project lead")
                     Button { newProject = true } label: { Label("New Project…", systemImage: "plus.rectangle.on.folder") }
                         .accessibilityLabel("New project")

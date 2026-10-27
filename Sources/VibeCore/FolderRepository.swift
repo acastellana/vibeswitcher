@@ -1,8 +1,9 @@
 import Foundation
 
 /// A folder you chose for a project that isn't in a git repository: made one so its lead can start, with a first
-/// commit of its files (workers start from commits). `plan` says what would be committed and touches nothing; `make`
-/// does it, or leaves the folder as it was. The commit stays on this Mac: nothing is pushed.
+/// commit of its files (workers start from commits). A repository with no commits yet gets the same first commit,
+/// without the git init. `plan` says what would be committed and touches nothing; `make` does it, or leaves the folder
+/// as it was. The commit stays on this Mac: nothing is pushed.
 public enum FolderRepository {
     /// File names that look like secrets: never committed here.
     public static let secretNames = [".env", ".env.*", "*.pem", "*.key", "id_rsa*", "id_ed25519*", "id_ecdsa*", "*.p12"]
@@ -29,10 +30,13 @@ public enum FolderRepository {
         public var leftOut: [String]
         /// Folders holding a repository of their own: committed as a reference to it, without their files.
         public var nested: [String] = []
+        /// `folder` is already a repository, with no commits yet: no git init, and what's staged is committed too.
+        public var inRepository = false
     }
 
     /// What `make` would commit in `folder`. Lists it with a git directory of its own in `scratch` (removed after),
-    /// so the folder isn't touched. Runs git: call off the main thread.
+    /// so the folder isn't touched; a repository's top folder (one with a .git, and no commits yet) is listed with its
+    /// own, which `ls-files` only reads. Runs git: call off the main thread.
     public static func plan(for folder: String, scratch: URL, git: ProjectCreation.GitRunner = { Git.run($0, in: $1) })
         -> Result<Plan, ProjectCreation.Problem> {
         guard ProjectCreation.existing(folder) == .folder else { return .failure(.failed("\(ProjectCreation.tildePath(folder)) isn't a folder.")) }
@@ -47,34 +51,68 @@ public enum FolderRepository {
         } catch {
             return .failure(.failed("The folder's files couldn't be listed: \(error.localizedDescription)"))
         }
-        let gitDir = probe.appendingPathComponent("git").path
-        let made = git(["init", "--quiet", "--bare", gitDir], folder)
-        guard made.ok else { return .failure(failed("init", made)) }
-        var listing = ["--git-dir=\(gitDir)", "--work-tree=\(folder)", "ls-files", "-z", "--others", "--exclude-standard"]
+        let inRepository = ProjectCreation.existing((folder as NSString).appendingPathComponent(".git")) != .none
+        var listing: [String]
+        if inRepository {
+            // Its own excludes (.git/info/exclude) count, and what's already staged is committed too.
+            listing = ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]
+        } else {
+            let gitDir = probe.appendingPathComponent("git").path
+            let made = git(["init", "--quiet", "--bare", gitDir], folder)
+            guard made.ok else { return .failure(failed("init", made)) }
+            listing = ["--git-dir=\(gitDir)", "--work-tree=\(folder)", "ls-files", "-z", "--others", "--exclude-standard"]
+        }
         // The .gitignore that will be there, as if it were: root-relative patterns, like .git/info/exclude.
         if addsGitignore { listing.append("--exclude-from=\(ours.path)") }
         let listed = git(listing, folder)
         guard listed.ok else { return .failure(failed("ls-files", listed)) }
-        let all = listed.output.split(separator: "\0").map(String.init)
+        let all = Set(listed.output.split(separator: "\0").map(String.init)).sorted()
         var files = all.filter { !looksSecret($0) }
         if addsGitignore, !files.contains(".gitignore") { files.append(".gitignore") }
         // git lists a folder holding a repository of its own as "name/", and doesn't look inside it.
         let nested = all.filter { $0.hasSuffix("/") }.map { String($0.dropLast()) }
         return .success(Plan(folder: folder, addsGitignore: addsGitignore, files: files.sorted(),
-                             leftOut: all.filter(looksSecret).sorted(), nested: nested.sorted()))
+                             leftOut: all.filter(looksSecret).sorted(), nested: nested.sorted(), inRepository: inRepository))
     }
 
     /// git init (on the default branch) in `plan.folder`, its .gitignore if it had none, and a first commit of all its
-    /// files but the ones left out. When a step fails, what this made (.git, the .gitignore) is removed. Runs git and
-    /// writes files: call off the main thread.
+    /// files but the ones left out. When a step fails, what this made (.git, the .gitignore) is removed. In a repository
+    /// with no commits yet (`plan.inRepository`) there's no git init, and a failed step puts its index and
+    /// .git/info/exclude back as they were instead. Runs git and writes files: call off the main thread.
     public static func make(_ plan: Plan, git: ProjectCreation.GitRunner = { Git.run($0, in: $1) }) -> ProjectCreation.Problem? {
         let folder = plan.folder
         let dotGit = (folder as NSString).appendingPathComponent(".git")
-        guard ProjectCreation.existing(dotGit) == .none else { return .failed("\(ProjectCreation.tildePath(folder)) already has a .git.") }
         let gitignorePath = (folder as NSString).appendingPathComponent(".gitignore")
         var wroteGitignore = false
+        /// In a repository: its index and exclude file, and what they held before (nil: missing).
+        var kept: [(path: URL, data: Data?)] = []
+        var exclude = URL(fileURLWithPath: dotGit).appendingPathComponent("info/exclude")
+        if plan.inRepository {
+            guard ProjectCreation.existing(dotGit) != .none else { return .failed("\(ProjectCreation.tildePath(folder)) has no .git.") }
+            guard !git(["rev-parse", "--verify", "--quiet", "HEAD"], folder).ok else {
+                return .failed("\(ProjectCreation.tildePath(folder)) has a commit already.")
+            }
+            // .git can be a file naming the git directory (a worktree's, a submodule's): git says where they are.
+            var paths: [URL] = []
+            for name in ["index", "info/exclude"] {
+                let found = git(["rev-parse", "--git-path", name], folder)
+                let path = found.output.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard found.ok, !path.isEmpty else { return failed("rev-parse", found) }
+                paths.append(URL(fileURLWithPath: path, relativeTo: URL(fileURLWithPath: folder, isDirectory: true)).standardizedFileURL)
+            }
+            exclude = paths[1]
+            kept = paths.map { ($0, try? Data(contentsOf: $0)) }
+        } else {
+            guard ProjectCreation.existing(dotGit) == .none else { return .failed("\(ProjectCreation.tildePath(folder)) already has a .git.") }
+        }
         func undo(_ problem: ProjectCreation.Problem) -> ProjectCreation.Problem {
-            try? FileManager.default.removeItem(atPath: dotGit)
+            if plan.inRepository {
+                for (path, data) in kept {
+                    if let data { try? data.write(to: path) } else { try? FileManager.default.removeItem(at: path) }
+                }
+            } else {
+                try? FileManager.default.removeItem(atPath: dotGit)
+            }
             if wroteGitignore { try? FileManager.default.removeItem(atPath: gitignorePath) }
             return problem
         }
@@ -87,9 +125,11 @@ public enum FolderRepository {
                 wroteGitignore = true
             }
         }
-        let branch = ProjectCreation.branch(fromConfig: git(["config", "--get", "init.defaultBranch"], folder))
-        let initialized = git(["init", "--quiet", "--initial-branch=\(branch)"], folder)
-        guard initialized.ok else { return undo(failed("init", initialized)) }
+        if !plan.inRepository {
+            let branch = ProjectCreation.branch(fromConfig: git(["config", "--get", "init.defaultBranch"], folder))
+            let initialized = git(["init", "--quiet", "--initial-branch=\(branch)"], folder)
+            guard initialized.ok else { return undo(failed("init", initialized)) }
+        }
         let added = git(["add", "-A"], folder)
         guard added.ok else { return undo(failed("add", added)) }
         // What's staged, looked at again: a secret-named file that came since the plan, or one the folder's .gitignore
@@ -98,7 +138,9 @@ public enum FolderRepository {
         guard staged.ok else { return undo(failed("ls-files", staged)) }
         let secrets = staged.output.split(separator: "\0").map(String.init).filter(looksSecret)
         if !secrets.isEmpty {
-            let removed = git(["rm", "--cached", "--quiet", "--ignore-unmatch", "--"] + secrets.map { ":(literal)\($0)" }, folder)
+            // -f: git refuses an entry that differs from both HEAD and the file (a repository of its own named like a
+            // secret, a file rewritten since the add) otherwise. It only takes it out of the index; the file stays.
+            let removed = git(["rm", "--cached", "-f", "--quiet", "--ignore-unmatch", "--"] + secrets.map { ":(literal)\($0)" }, folder)
             guard removed.ok else { return undo(failed("rm --cached", removed)) }
             let check = git(["ls-files", "-z"], folder)
             guard check.ok else { return undo(failed("ls-files", check)) }
@@ -109,7 +151,6 @@ public enum FolderRepository {
         let leftOut = Set(plan.leftOut).union(secrets).sorted()
         if !leftOut.isEmpty {
             // Kept out of later commits too (a worker's `git add -A`), without changing the folder's own files.
-            let exclude = URL(fileURLWithPath: dotGit).appendingPathComponent("info/exclude")
             do {
                 try FileManager.default.createDirectory(at: exclude.deletingLastPathComponent(), withIntermediateDirectories: true)
                 let lines = leftOut.map { "/" + escapedPattern($0) }.joined(separator: "\n") + "\n"

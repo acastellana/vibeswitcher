@@ -400,15 +400,43 @@ final class LeadController: ObservableObject {
             let top = Git.run(["rev-parse", "--show-toplevel"], in: folder)
             let root = (top.output as NSString).standardizingPath
             let hasCommits = top.ok && !top.output.isEmpty && Git.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: root).ok
+            // No commits yet, and you asked in the app: what its first commit would hold (a start from outside the
+            // app, which anything can post, offers no commit).
+            let firstCommit = top.ok && !top.output.isEmpty && !hasCommits && askAboutMovedHead
+                ? FolderRepository.plan(for: root, scratch: FileManager.default.temporaryDirectory) : nil
             DispatchQueue.main.async {
                 guard let self else { return }
                 guard top.ok, !top.output.isEmpty else {
                     return self.alert("A project lead needs a git repository.", "\(folder) isn't in one. Run git init (and make a first commit) first.")
                 }
                 guard hasCommits else {
-                    return self.alert("The repository has no commits yet.", "Workers branch from main: make a first commit in \(root), then start the lead.")
+                    guard let firstCommit else {
+                        return self.alert("The repository has no commits yet.", "Workers branch from main: make a first commit in \(root), then start the lead.")
+                    }
+                    return self.offerFirstCommit(firstCommit, root: root, goal: goal, show: show)
                 }
                 self.startLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead)
+            }
+        }
+    }
+
+    /// A repository with no commits yet: the first commit a folder in no repository gets (`FolderRepository`), if you
+    /// say so, then its lead.
+    private func offerFirstCommit(_ plan: Result<FolderRepository.Plan, ProjectCreation.Problem>, root: String, goal: String?, show: Bool) {
+        let name = (root as NSString).lastPathComponent
+        switch plan {
+        case .failure(let problem):
+            alert("“\(name)” has no commits yet.", "Workers start from a commit, and its files couldn't be listed: \(problem.message)")
+        case .success(let plan):
+            let question = ProjectFolderStart.emptyRepositoryQuestion(plan)
+            guard confirm(question.title, question.text, ProjectFolderStart.emptyRepositoryButtons) == 0 else { return }
+            DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+                let problem = FolderRepository.make(plan)
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    if let problem { return self.alert("“\(name)” couldn't get a first commit.", problem.message) }
+                    self.startLead(root: root, goal: goal, show: show, askAboutMovedHead: true)
+                }
             }
         }
     }

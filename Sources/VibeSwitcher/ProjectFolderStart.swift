@@ -38,9 +38,35 @@ struct ProjectFolderStart {
     /// The question for a folder in no repository, from what making it one would commit.
     static func notRepositoryQuestion(_ plan: FolderRepository.Plan) -> (title: String, text: String) {
         let name = (plan.folder as NSString).lastPathComponent
+        let text = "A project lead works in a git repository. VibeSwitcher can run git init in \(ProjectCreation.tildePath(plan.folder)) "
+            + "and make " + firstCommit(plan)
+        return ("“\(name)” isn't a git repository.", text)
+    }
+
+    /// The answer to a repository with no commits yet (LeadController's start): the first commit, or nothing.
+    static let emptyRepositoryButtons = ["Make a first commit and start the lead", "Cancel"]
+
+    /// The question for a repository with no commits yet, from what its first commit would hold.
+    static func emptyRepositoryQuestion(_ plan: FolderRepository.Plan) -> (title: String, text: String) {
+        let name = (plan.folder as NSString).lastPathComponent
+        let text = "A project lead's workers start from a commit. VibeSwitcher can make " + firstCommit(plan)
+        return ("“\(name)” has no commits yet.", text)
+    }
+
+    /// The alert asking it (the sandbox draws it too; LeadController asks it with `confirm`).
+    static func emptyRepositoryAlert(_ plan: FolderRepository.Plan) -> NSAlert {
+        let question = emptyRepositoryQuestion(plan)
+        let alert = NSAlert()
+        alert.messageText = question.title
+        alert.informativeText = question.text
+        emptyRepositoryButtons.forEach { alert.addButton(withTitle: $0) }
+        return alert
+    }
+
+    /// "a first commit of its N files…", what's left out and what's committed as a reference.
+    private static func firstCommit(_ plan: FolderRepository.Plan) -> String {
         let count = plan.files.count
-        var text = "A project lead works in a git repository. VibeSwitcher can run git init in \(ProjectCreation.tildePath(plan.folder)) "
-            + "and make a first commit of its \(count == 1 ? "1 file" : "\(count) files")"
+        var text = "a first commit of its \(count == 1 ? "1 file" : "\(count) files")"
             + (plan.addsGitignore ? " (with a .gitignore for secrets and build output)" : "")
             + ". The commit stays on this Mac: nothing is pushed."
         if !plan.leftOut.isEmpty {
@@ -51,7 +77,7 @@ struct ProjectFolderStart {
             let shown = plan.nested.prefix(8).joined(separator: ", ") + (plan.nested.count > 8 ? " and \(plan.nested.count - 8) more" : "")
             text += "\n\nA repository of its own, committed as a reference (its files aren't included): \(shown)."
         }
-        return ("“\(name)” isn't a git repository.", text)
+        return text
     }
 
     /// The alert asking it (the sandbox draws it too).

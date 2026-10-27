@@ -277,3 +277,184 @@ extension LeadRelaunchTests {
         #expect(asked.isEmpty)
     }
 }
+
+/// A repository with no commits yet: the first commit a folder in no repository gets, without the git init.
+extension ProjectFolderStartTests {
+    /// An empty repository in a scratch folder holding `files`, `staged` added to its index.
+    func emptyRepository(_ files: [String: String], staged: [String] = [], git: @escaping ProjectCreation.GitRunner) async throws -> String {
+        let chosen = try folder(files)
+        let made = await Task.detached {
+            git(["init", "-q", "-b", "main"], chosen).ok && (staged.isEmpty || git(["add", "--"] + staged, chosen).ok)
+        }.value
+        #expect(made)
+        return chosen
+    }
+
+    @Test func anEmptyRepositoryGetsAFirstCommitOfItsFilesButSecretsStagedOnesToo() async throws {
+        let git = try scratchGit()
+        let chosen = try await emptyRepository([".gitignore": "*.log\n!.env\n", "main.py": "print(1)\n", "staged.txt": "s\n",
+                                                ".env": "TOKEN=1\n", "debug.log": "x\n"],
+                                               staged: ["staged.txt", ".env"], git: git)
+        let plan = try await Task.detached { [chosen, scratch = temp.url("pfs-scratch")] in
+            try FolderRepository.plan(for: chosen, scratch: scratch, git: git).get()
+        }.value
+        #expect(plan.inRepository && !plan.addsGitignore)
+        #expect(plan.files == [".gitignore", "main.py", "staged.txt"])
+        #expect(plan.leftOut == [".env"])
+        let question = ProjectFolderStart.emptyRepositoryQuestion(plan)
+        #expect(question.title == "“\((chosen as NSString).lastPathComponent)” has no commits yet.")
+        #expect(question.text.contains("a first commit of its 3 files") && question.text.contains("nothing is pushed"))
+        #expect(question.text.contains("Left out, as they look like secrets: .env."))
+
+        let problem = await Task.detached { FolderRepository.make(plan, git: git) }.value
+        #expect(problem == nil, "\(problem?.message ?? "")")
+        #expect(await tracked(chosen, git: git) == [".gitignore", "main.py", "staged.txt"])
+        let count = await Task.detached { git(["rev-list", "--count", "HEAD"], chosen).output }.value
+        #expect(count.trimmingCharacters(in: .whitespacesAndNewlines) == "1")
+        #expect(try String(contentsOfFile: chosen + "/.git/info/exclude", encoding: .utf8).contains("/.env\n"))
+        // Made once: a second make finds the commit and does nothing.
+        let again = await Task.detached { FolderRepository.make(plan, git: git) }.value
+        #expect(again?.message.contains("has a commit already") == true)
+    }
+
+    @Test func aFailedFirstCommitInAnEmptyRepositoryPutsItsIndexBack() async throws {
+        let real = try scratchGit()
+        let git: ProjectCreation.GitRunner = { args, directory in
+            args.first == "commit" ? Git.Result(status: 1, output: "", error: "no identity") : real(args, directory)
+        }
+        let chosen = try await emptyRepository(["main.py": "print(1)\n", "staged.txt": "s\n", "id_rsa": "k\n"], staged: ["staged.txt"], git: real)
+        let excludeBefore = try String(contentsOfFile: chosen + "/.git/info/exclude", encoding: .utf8)
+        let plan = try await Task.detached { [chosen, scratch = temp.url("pfs-scratch")] in
+            try FolderRepository.plan(for: chosen, scratch: scratch, git: git).get()
+        }.value
+        #expect(plan.addsGitignore)
+        let problem = await Task.detached { FolderRepository.make(plan, git: git) }.value
+        #expect(problem?.message.contains("no identity") == true)
+        #expect(ProjectCreation.existing(chosen + "/.git") == .folder)
+        #expect(ProjectCreation.existing(chosen + "/.gitignore") == .none)
+        #expect(await tracked(chosen, git: real) == ["staged.txt"])
+        #expect(try String(contentsOfFile: chosen + "/.git/info/exclude", encoding: .utf8) == excludeBefore)
+    }
+
+    /// `git rm --cached` refuses an entry that differs from both HEAD (none yet) and the work tree, without -f: a
+    /// repository of its own named like a secret, with a change of its own.
+    @Test func aNestedRepositoryNamedLikeASecretIsLeftOut() async throws {
+        let git = try scratchGit()
+        let chosen = try folder([".gitignore": "*.log\n", "main.py": "print(1)\n", "vendor/.env/a.txt": "a\n"])
+        let nested = chosen + "/vendor/.env"
+        let made = await Task.detached {
+            [git(["init", "-q", "-b", "main"], nested), git(["add", "-A"], nested), git(["commit", "-q", "-m", "x"], nested)].allSatisfy(\.ok)
+        }.value
+        #expect(made)
+        try "b\n".write(toFile: nested + "/b.txt", atomically: true, encoding: .utf8)
+        let plan = try await Task.detached { [chosen, scratch = temp.url("pfs-scratch")] in
+            try FolderRepository.plan(for: chosen, scratch: scratch, git: git).get()
+        }.value
+        let problem = await Task.detached { FolderRepository.make(plan, git: git) }.value
+        #expect(problem == nil, "\(problem?.message ?? "")")
+        #expect(await tracked(chosen, git: git) == [".gitignore", "main.py"])
+        #expect(ProjectCreation.existing(nested + "/b.txt") == .file)
+    }
+
+    /// The same for a secret file rewritten between the add and the rm.
+    @Test func aSecretRewrittenSinceTheAddIsLeftOut() async throws {
+        let real = try scratchGit()
+        let git: ProjectCreation.GitRunner = { args, directory in
+            if args.first == "rm" { try? "TOKEN=2\n".write(toFile: directory + "/.env", atomically: true, encoding: .utf8) }
+            return real(args, directory)
+        }
+        let chosen = try folder([".gitignore": "!.env\n", "main.py": "print(1)\n", ".env": "TOKEN=1\n"])
+        let plan = try await Task.detached { [chosen, scratch = temp.url("pfs-scratch")] in
+            try FolderRepository.plan(for: chosen, scratch: scratch, git: git).get()
+        }.value
+        let problem = await Task.detached { FolderRepository.make(plan, git: git) }.value
+        #expect(problem == nil, "\(problem?.message ?? "")")
+        #expect(await tracked(chosen, git: real) == [".gitignore", "main.py"])
+        #expect(try String(contentsOfFile: chosen + "/.env", encoding: .utf8) == "TOKEN=2\n")
+    }
+
+    /// The empty sidebar's New Session menu: Project Lead… asks for a folder, as Home's Choose Folder… does.
+    @Test func theEmptySidebarsMenuOffersALeadInAFolderYouChoose() {
+        var newSessions: [(preset: String?, folder: String?)] = []
+        var leads: [String] = []
+        let actions = WindowActions(
+            newSession: { newSessions.append(($0?.name, $1)) }, endSession: { _ in }, resume: { _ in }, remove: { _ in }, rename: { _ in },
+            pause: { _, _ in }, resumePaused: { _ in }, openInTerminal: { _ in }, presets: { _ in [] }, isLive: { _ in false },
+            canResume: { _ in false }, resumeCommand: { _ in nil }, settings: {}, moveToWindow: { _ in }, startLead: { leads.append($0) })
+        let empty = NewSessionMenu.leadItem(folder: nil, actions: actions)
+        #expect(empty.title == "Project Lead…")
+        empty.action()
+        actions.chooseFolderForLead()  // Home's Choose Folder…
+        #expect(newSessions.count == 2 && newSessions.allSatisfy { $0.preset == nil && $0.folder == nil })
+        #expect(ProjectFolderStart.plan(preset: nil, folder: nil) == .chooseForLead)
+        #expect(leads.isEmpty)
+        // A project's ⊕: its lead, with no panel.
+        let project = NewSessionMenu.leadItem(folder: "/p", actions: actions)
+        #expect(project.title == "Project Lead")
+        project.action()
+        #expect(leads == ["/p"] && newSessions.count == 2)
+    }
+}
+
+extension LeadRelaunchTests {
+    /// A scratch repository with no commits yet (its own identity, as `world()`'s), holding a file and a secret.
+    func emptyRepository() throws -> String {
+        let url = temp.url("empty")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        let root = url.resolvingSymlinksInPath().path
+        for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: root) }
+        try "one\n".write(toFile: root + "/a.txt", atomically: true, encoding: .utf8)
+        try "TOKEN=1\n".write(toFile: root + "/deploy.key", atomically: true, encoding: .utf8)
+        return root
+    }
+
+    @Test func anEmptyRepositoryIsOfferedAFirstCommitAndItsLeadStarts() async throws {
+        let world = try world()
+        defer { world.stop() }
+        let root = try emptyRepository()
+        let (host, controller) = relaunched(world)
+        var asked: [(title: String, buttons: [String])] = []
+        var selected: [UUID] = []
+        controller.confirm = { title, _, buttons in asked.append((title, buttons)); return 0 }
+        controller.select = { selected.append($0) }
+        host.connectIfRunning()
+        #expect(await until { host.state == .connected })
+
+        controller.startLead(in: root)
+        #expect(await until { !selected.isEmpty })
+        let name = (root as NSString).lastPathComponent
+        #expect(asked.map(\.title) == ["“\(name)” has no commits yet."])
+        #expect(asked.first?.buttons == ["Make a first commit and start the lead", "Cancel"])
+        #expect(Git.run(["rev-list", "--count", "HEAD"], in: root).output == "1")
+        #expect(Git.run(["ls-files"], in: root).output.split(separator: "\n") == [".gitignore", "a.txt"])
+        let lead = try #require(host.sessions.first { $0.id == selected.first })
+        #expect(lead.label == "Lead · \(name)" && lead.cwd == root)
+    }
+
+    @Test func decliningTheFirstCommitChangesNothing() async throws {
+        let world = try world()
+        defer { world.stop() }
+        let root = try emptyRepository()
+        let (host, controller) = relaunched(world)
+        var asked: [String] = []
+        controller.confirm = { title, _, buttons in asked.append(title); return buttons.count - 1 }
+        controller.select = { _ in Issue.record("a lead was shown") }
+        host.connectIfRunning()
+        #expect(await until { host.state == .connected })
+        let before = try FileManager.default.contentsOfDirectory(atPath: root + "/.git").sorted()
+
+        controller.startLead(in: root)
+        #expect(await until { asked.count == 1 })
+        #expect(asked == ["“\((root as NSString).lastPathComponent)” has no commits yet."])
+        // A start from outside the app (anything can post it) offers no commit: it's told how, as before.
+        controller.startLead(in: root, askAboutMovedHead: false)
+        #expect(await until { asked.count == 2 })
+        #expect(asked.last == "The repository has no commits yet.")
+
+        #expect(!Git.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: root).ok)
+        #expect(Git.run(["ls-files"], in: root).output.isEmpty)
+        #expect(ProjectCreation.existing(root + "/.gitignore") == .none)
+        #expect(try FileManager.default.contentsOfDirectory(atPath: root + "/.git").sorted() == before)
+        #expect(host.sessions.isEmpty)
+    }
+}

@@ -196,4 +196,8 @@ struct WindowActions {
     var projectsFolder: () -> String = { ProjectCreation.defaultLocation }
     /// A project New Project… just made: listed on Home, then the project lead started in it with the first goal, if any.
     var projectCreated: (_ folder: String, _ goal: String?) -> Void = { _, _ in }
+
+    /// You pick a project's folder and its lead starts there (`ProjectFolderStart`): Home's Choose Folder…, the empty
+    /// sidebar's Project Lead….
+    func chooseFolderForLead() { newSession(nil, nil) }
 }

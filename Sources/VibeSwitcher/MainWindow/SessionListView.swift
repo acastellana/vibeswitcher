@@ -347,10 +347,9 @@ struct NewSessionMenu: View {
             ForEach(actions.presets(folder)) { preset in
                 Button(preset.name) { actions.newSession(preset, folder) }
             }
-            if let folder {
-                Divider()
-                Button("Project Lead") { actions.startLead(folder) }
-            }
+            Divider()
+            let lead = Self.leadItem(folder: folder, actions: actions)
+            Button(lead.title, action: lead.action)
         } label: {
             if let title {
                 Text(title)
@@ -363,5 +362,11 @@ struct NewSessionMenu: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("New session in this project")
+    }
+
+    /// The menu's lead: the folder's, or with no folder (the empty sidebar) one you choose, as Home's Choose Folder….
+    static func leadItem(folder: String?, actions: WindowActions) -> (title: String, action: () -> Void) {
+        guard let folder else { return ("Project Lead…", actions.chooseFolderForLead) }
+        return ("Project Lead", { actions.startLead(folder) })
     }
 }
