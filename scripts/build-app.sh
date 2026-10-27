@@ -106,6 +106,8 @@ cp Resources/Info.plist "$APP/Contents/Info.plist"
 # The phone web app (Phone Access), served by the app itself.
 mkdir -p "$APP/Contents/Resources"
 cp -R Web "$APP/Contents/Resources/Web"
+# The app's icon (CFBundleIconFile in Info.plist), drawn by scripts/app-icon.sh.
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"
 # vs-heavy, on PATH in every session the app starts (the session host puts this folder first).
 mkdir -p "$APP/Contents/Resources/bin"
 cp Resources/bin/vs-heavy "$APP/Contents/Resources/bin/vs-heavy"

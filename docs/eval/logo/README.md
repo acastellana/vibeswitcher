@@ -11,3 +11,6 @@ redraws every file here. `overview.png` puts the concepts side by side; for each
 - **D · Prompt**: a terminal prompt whose cursor is the "needs you" mark.
 
 The status marks and colours are the app's own (`StatusMark`, `StatusPalette` in Sources/VibeCore/MenuBarDots.swift).
+
+Picked: **A · Stack** (2026-10-27). It is the app's icon now: `bash scripts/app-icon.sh` redraws Resources/AppIcon.icns
+and the phone's Web/icon-192.png and Web/icon-512.png from the same code.

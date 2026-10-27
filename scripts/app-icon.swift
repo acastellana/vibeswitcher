@@ -1,5 +1,6 @@
 // Draws VibeSwitcher's app icon with CoreGraphics, so it can be redrawn: nothing here needs more than macOS.
 //
+//   bash scripts/app-icon.sh                               # the app icon: Resources/AppIcon.icns, Web/icon-192.png, icon-512.png
 //   swift scripts/app-icon.swift concepts docs/eval/logo   # every concept: master, contact sheet, Dock mocks, overview
 //
 // Shapes follow the macOS icon grid: a 1024 canvas, an 824 px rounded-square body centred on it, a soft shadow below.
@@ -140,12 +141,34 @@ struct Concept {
     let key: String
     let name: String
     let idea: String
-    let draw: (CGContext) -> Void
+    /// The body's gradient, top to bottom, and how bright its top edge is.
+    let top: RGB, bottom: RGB, edge: CGFloat
+    /// What sits on the body, in the 1024 canvas.
+    let motif: (CGContext) -> Void
+
+    /// The Mac icon: the body, its shadow and the motif.
+    func draw(_ c: CGContext) {
+        drawBody(c, top: top, bottom: bottom, edge: edge)
+        motif(c)
+    }
+
+    /// The phone's icon: the body's gradient to every edge (the phone cuts its own shape), and the motif shrunk so all
+    /// of it, shadows included, stays inside the central circle a maskable icon keeps (80 % of the side).
+    func drawFullBleed(_ c: CGContext) {
+        c.drawLinearGradient(gradient([top.cg(), bottom.cg()]), start: CGPoint(x: 512, y: 1024), end: CGPoint(x: 512, y: 0),
+                             options: [])
+        c.translateBy(x: 512, y: 512)
+        c.scaleBy(x: Self.phoneScale, y: Self.phoneScale)
+        c.translateBy(x: -512, y: -512)
+        unit *= Self.phoneScale
+        motif(c)
+    }
+
+    static let phoneScale: CGFloat = 0.85
 }
 
 /// Stacked sessions: the front one needs you, the ones behind are working and done.
 func drawStack(_ c: CGContext) {
-    drawBody(c, top: RGB(0x3B3E46), bottom: RGB(0x16171B))
     let front = CGRect(x: 212, y: 236, width: 600, height: 414)
     let middle = CGRect(x: 262, y: front.maxY - 300, width: 500, height: 374)
     let back = CGRect(x: 312, y: middle.maxY - 300, width: 400, height: 374)
@@ -182,7 +205,6 @@ func drawStack(_ c: CGContext) {
 
 /// A lead and its team: the lead (ringed, like the session you're viewing in the menu bar) above three workers.
 func drawTeam(_ c: CGContext) {
-    drawBody(c, top: RGB(0x3D43A3), bottom: RGB(0x15173F), edge: 0.16)
     let lead = CGPoint(x: 512, y: 640)
     let team = [CGPoint(x: 268, y: 318), CGPoint(x: 512, y: 300), CGPoint(x: 756, y: 318)]
     // The links: from under the lead, curving down to each worker.
@@ -217,7 +239,6 @@ func drawTeam(_ c: CGContext) {
 
 /// A rotary switch: the knob points at the session that needs you, among the others' marks.
 func drawDial(_ c: CGContext) {
-    drawBody(c, top: RGB(0xFCFCFD), bottom: RGB(0xD5D7DD), edge: 0.6)
     let knob = CGPoint(x: 512, y: 448)
     let radius: CGFloat = 208
     let marks: [(Mark, RGB, CGFloat)] = [
@@ -257,7 +278,6 @@ func drawDial(_ c: CGContext) {
 
 /// A terminal prompt whose cursor is a status mark: a session waiting on you.
 func drawPrompt(_ c: CGContext) {
-    drawBody(c, top: RGB(0x2C2C31), bottom: RGB(0x0C0C0E), edge: 0.14)
     c.setStrokeColor(CGColor(gray: 1, alpha: 1))
     c.setLineWidth(96)
     c.setLineCap(.round)
@@ -273,16 +293,18 @@ func drawPrompt(_ c: CGContext) {
     c.restoreGState()
 }
 
+/// The app's icon is the first; the others are the concepts it was picked from (docs/eval/logo), kept so they redraw.
 let concepts = [
     Concept(key: "a-stack", name: "A · Stack", idea: "Stacked sessions: the front one needs you, behind it one works and one is done.",
-            draw: drawStack),
+            top: RGB(0x3B3E46), bottom: RGB(0x16171B), edge: 0.10, motif: drawStack),
     Concept(key: "b-team", name: "B · Team", idea: "A lead, ringed like the session you're viewing, linked to its team of three.",
-            draw: drawTeam),
+            top: RGB(0x3D43A3), bottom: RGB(0x15173F), edge: 0.16, motif: drawTeam),
     Concept(key: "c-dial", name: "C · Dial", idea: "A rotary switch whose knob points at the session that needs you.",
-            draw: drawDial),
+            top: RGB(0xFCFCFD), bottom: RGB(0xD5D7DD), edge: 0.6, motif: drawDial),
     Concept(key: "d-prompt", name: "D · Prompt", idea: "A terminal prompt whose cursor is the \"needs you\" mark.",
-            draw: drawPrompt),
+            top: RGB(0x2C2C31), bottom: RGB(0x0C0C0E), edge: 0.14, motif: drawPrompt),
 ]
+let appIcon = concepts[0]
 
 // MARK: - Rendering
 
@@ -298,6 +320,16 @@ func render(_ concept: Concept, px: Int) -> CGImage {
     unit = CGFloat(px) / 1024
     c.scaleBy(x: unit, y: unit)
     concept.draw(c)
+    unit = 1
+    return c.makeImage()!
+}
+
+/// The phone's icon at `px` × `px`: opaque, square, the motif inside the maskable safe zone.
+func renderPhone(_ concept: Concept, px: Int) -> CGImage {
+    let c = context(px, px)
+    unit = CGFloat(px) / 1024
+    c.scaleBy(x: unit, y: unit)
+    concept.drawFullBleed(c)
     unit = 1
     return c.makeImage()!
 }
@@ -452,7 +484,22 @@ case "concepts":
     }
     write(overview(), to: "\(out)/overview.png")
     print("Wrote \(concepts.count) concepts and overview.png to \(out)")
+case "iconset" where arguments.count == 2:
+    // The sizes iconutil reads from an .iconset folder, each drawn at its own size.
+    let out = arguments.dropFirst().first!
+    for points in [16, 32, 128, 256, 512] {
+        write(render(appIcon, px: points), to: "\(out)/icon_\(points)x\(points).png")
+        write(render(appIcon, px: points * 2), to: "\(out)/icon_\(points)x\(points)@2x.png")
+    }
+case "phone" where arguments.count == 3:
+    let size = Int(arguments.dropFirst().first!)!
+    write(renderPhone(appIcon, px: size), to: arguments.last!)
 default:
-    print("usage: swift scripts/app-icon.swift concepts [folder]")
+    print("""
+    usage: swift scripts/app-icon.swift concepts [folder]   # the concept sheets (docs/eval/logo)
+           swift scripts/app-icon.swift iconset FOLDER       # the app icon's .iconset, for iconutil
+           swift scripts/app-icon.swift phone SIZE FILE      # the phone web app's icon, a maskable PNG
+    scripts/app-icon.sh runs the last two: it redraws Resources/AppIcon.icns and Web/icon-192.png, Web/icon-512.png.
+    """)
     exit(2)
 }
