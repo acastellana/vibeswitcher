@@ -352,6 +352,33 @@ extension ProjectFolderStartTests {
         #expect(status.isEmpty, "\(status)")
     }
 
+    /// F1 (audit): a .git the app didn't make whose info folder or exclude file is a symbolic link to somewhere else:
+    /// nothing is written through it, and the repository is left as it was.
+    @Test func aSymlinkedExcludeInAnEmptyRepositoryIsRefused() async throws {
+        let git = try scratchGit()
+        for linked in ["info", "info/exclude"] {
+            let chosen = try await emptyRepository([".gitignore": "*.tmp\n", "main.py": "print(1)\n", ".env": "TOKEN=1\n"],
+                                                   staged: ["main.py"], git: git)
+            let elsewhere = temp.url("pfs-elsewhere").resolvingSymlinksInPath().path
+            try FileManager.default.createDirectory(atPath: elsewhere, withIntermediateDirectories: true)
+            try "outside\n".write(toFile: elsewhere + "/exclude", atomically: true, encoding: .utf8)
+            let link = chosen + "/.git/" + linked
+            try FileManager.default.removeItem(atPath: link)
+            try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: linked == "info" ? elsewhere : elsewhere + "/exclude")
+            let plan = try await Task.detached { [chosen, scratch = temp.url("pfs-scratch")] in
+                try FolderRepository.plan(for: chosen, scratch: scratch, git: git).get()
+            }.value
+            #expect(plan.leftOut == [".env"])
+            let problem = await Task.detached { FolderRepository.make(plan, git: git) }.value
+            #expect(problem?.message.contains("is a symbolic link") == true, "\(linked): \(problem?.message ?? "made")")
+            #expect(try String(contentsOfFile: elsewhere + "/exclude", encoding: .utf8) == "outside\n", "\(linked)")
+            #expect(try FileManager.default.contentsOfDirectory(atPath: elsewhere) == ["exclude"], "\(linked)")
+            let empty = await Task.detached { FolderRepository.isEmptyRepository(chosen, git: git) }.value
+            #expect(empty, "\(linked)")
+            #expect(await tracked(chosen, git: git) == ["main.py"], "\(linked)")
+        }
+    }
+
     /// A repository whose HEAD is unborn but has commits elsewhere (an orphan branch) isn't an empty one.
     @Test func anOrphanBranchIsNoEmptyRepository() async throws {
         let git = try scratchGit()

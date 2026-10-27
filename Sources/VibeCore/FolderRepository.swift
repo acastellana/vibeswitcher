@@ -101,6 +101,14 @@ public enum FolderRepository {
                 paths.append(URL(fileURLWithPath: path, relativeTo: URL(fileURLWithPath: folder, isDirectory: true)).standardizedFileURL)
             }
             exclude = paths[1]
+            // A .git the app didn't make: what it writes there (the exclude file, the index put back) isn't written
+            // through a symbolic link to somewhere else. Refused before anything changes.
+            for path in [paths[0], exclude.deletingLastPathComponent(), exclude] {
+                let type = (try? FileManager.default.attributesOfItem(atPath: path.path))?[.type] as? FileAttributeType
+                if type == .typeSymbolicLink {
+                    return .failed("\(ProjectCreation.tildePath(path.path)) is a symbolic link: VibeSwitcher writes only into the repository's own files.")
+                }
+            }
             kept = paths.map { ($0, try? Data(contentsOf: $0)) }
         } else {
             guard ProjectCreation.existing(dotGit) == .none else { return .failed("\(ProjectCreation.tildePath(folder)) already has a .git.") }
@@ -108,7 +116,8 @@ public enum FolderRepository {
         func undo(_ problem: ProjectCreation.Problem) -> ProjectCreation.Problem {
             if plan.inRepository {
                 for (path, data) in kept {
-                    if let data { try? data.write(to: path) } else { try? FileManager.default.removeItem(at: path) }
+                    // Atomic: a new file renamed over it, as git writes them, never written through a link.
+                    if let data { try? data.write(to: path, options: .atomic) } else { try? FileManager.default.removeItem(at: path) }
                 }
             } else {
                 try? FileManager.default.removeItem(atPath: dotGit)
@@ -157,7 +166,7 @@ public enum FolderRepository {
                 var existing = (try? String(contentsOf: exclude, encoding: .utf8)) ?? ""
                 // One edited without a last newline: its last pattern isn't run into the first of these.
                 if !existing.isEmpty, !existing.hasSuffix("\n") { existing += "\n" }
-                try Data((existing + lines).utf8).write(to: exclude)
+                try Data((existing + lines).utf8).write(to: exclude, options: .atomic)
             } catch {
                 return undo(.failed("The files left out couldn't be noted in .git/info/exclude: \(error.localizedDescription)"))
             }
