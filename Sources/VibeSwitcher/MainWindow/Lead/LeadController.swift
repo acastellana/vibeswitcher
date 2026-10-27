@@ -269,7 +269,10 @@ final class LeadController: ObservableObject {
     private var wakes: [String: LeadWake] = [:]
     private var wakeLater: Set<String> = []
     /// Messages for a lead that isn't running right now (restarting): delivered once a lead runs there again.
-    private var held: [String: [(text: String, sender: SteerMessage.Sender)]] = [:]
+    /// Each in the order it was sent (`order`, taken on the main thread as it's sent, and kept when it's held again):
+    /// whether it's held is known only once the boards' queue has looked, and one sent later may be held first.
+    private var held: [String: [(order: Int, text: String, sender: SteerMessage.Sender)]] = [:]
+    private var sent = 0
     /// What the team's agents are doing, from their hooks and transcripts together (see `LeadActivity`).
     private let observer = LeadObserver()
     /// Roots whose lead is being prepared (off the main thread) right now.
@@ -665,7 +668,7 @@ final class LeadController: ObservableObject {
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.startingLeads.remove(root)
-                if !waiting.isEmpty { self.held[root, default: []] += waiting.map { (text: $0.text, sender: $0.from) } }
+                for message in waiting { self.hold(message.text, from: message.from, root: root) }
                 switch prepared {
                 case .failure(let error):
                     self.replacing = self.replacing.filter { $0.value != root }
@@ -794,8 +797,10 @@ final class LeadController: ObservableObject {
     /// message posted, on the boards' queue (a stat of a board waited 3 s on a busy disk, hang-20261027-175604): one
     /// at a time, in the order delivered. `then` hears on the main thread whether it reached the lead's inbox (false:
     /// held until a lead runs).
-    private func deliver(_ text: String, from sender: SteerMessage.Sender, root: String, then: @escaping (Bool) -> Void = { _ in }) {
+    private func deliver(_ text: String, from sender: SteerMessage.Sender, root: String, order: Int? = nil,
+                         then: @escaping (Bool) -> Void = { _ in }) {
         let (leadRuns, inbox) = (self.leadRuns, self.inbox)
+        let order = order ?? next()
         // The board as it is now names the lead that holds the role (none while a new one starts, see
         // `LeadHandover`); if that one is gone (a restart under way), the message would be dropped by the next lead's
         // hook: keep it until a lead runs again. Only the lead's fields are read here (see `LeadNames`).
@@ -808,11 +813,24 @@ final class LeadController: ObservableObject {
             if went {
                 self.wake(root: root)
             } else {
-                self.held[root, default: []].append((text, sender))
+                self.hold(text, from: sender, root: root, order: order)
                 Breadcrumbs.shared.note("lead: holding a message for \((root as NSString).lastPathComponent) (no lead running)")
             }
             then(went)
         }
+    }
+
+    private func next() -> Int {
+        sent += 1
+        return sent
+    }
+
+    /// Kept until a lead runs, among what's held in the order it was sent.
+    private func hold(_ text: String, from sender: SteerMessage.Sender, root: String, order: Int? = nil) {
+        let order = order ?? next()
+        var waiting = held[root] ?? []
+        waiting.insert((order, text, sender), at: waiting.firstIndex { $0.order > order } ?? waiting.endIndex)
+        held[root] = waiting
     }
 
     // MARK: Replaced leads
@@ -1325,7 +1343,7 @@ final class LeadController: ObservableObject {
         if noted.noteStalls(stalls) { reads.async { _ in try? BoardStore(root: root).update { $0.noteStalls(stalls) } } }
         // A lead runs again: what was held for it goes now.
         if let waiting = held.removeValue(forKey: root) {
-            for message in waiting { deliver(message.text, from: message.sender, root: root) }
+            for message in waiting { deliver(message.text, from: message.sender, root: root, order: message.order) }
         }
         wake(root: root)
     }

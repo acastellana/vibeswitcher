@@ -278,13 +278,39 @@ struct ReplacedLeadRoutingTests {
         return shown
     }
 
-    /// A lead between turns (its hooks said Stop) whose screen shows Claude's empty box: `cat` echoes what's typed.
-    func idleLead(in world: World) async throws -> HostSession {
+    /// Messages held while no lead runs go to the next one in the order they were sent: whether one is held is known
+    /// only on the boards' queue, so a message sent while a refresh reads the boards is held after the refresh has
+    /// sent the older ones on again, and they're held again behind it.
+    @Test func heldMessagesGoInTheOrderTheyWereSent() async throws {
+        let world = try world()
+        defer { world.stop() }
+        let old = try await oldLead(in: world)
+        let new = try await replace(in: world, old: old)
+        #expect(await until { world.controller.replacedLeads[old.id]?.live == new.id })
+        world.controller.leadRuns = { _ in false }
+        #expect(world.controller.route("first words", typedInto: old.id))
+        #expect(await until { world.controller.replacedLeads[old.id]?.notice?.contains("first words") == true })
+        // A refresh's read is on the queue (this one's, or one under way): the second goes behind it, the first is
+        // sent on again once it's read.
+        world.controller.refresh()
+        #expect(world.controller.route("second words", typedInto: old.id))
+        #expect(await until { world.controller.replacedLeads[old.id]?.notice?.contains("second words") == true })
+        world.controller.leadRuns = { _ in true }
+        let delivered = { SteerInbox.pending(tty: new.tty, root: world.inbox).filter { $0.agentPid == new.childPID } }
+        world.controller.refresh()
+        #expect(await until { delivered().count == 2 })
+        #expect(delivered().map { String($0.text.suffix(12)) } == ["first words", "second words"].map { String(" \($0)".suffix(12)) })
+    }
+
+    /// A lead between turns (its hooks said Stop) whose screen shows Claude's empty box; what's typed into it lands in
+    /// `typed` (its `cat`'s output).
+    func idleLead(in world: World) async throws -> (session: HostSession, typed: URL) {
+        let typed = temp.url("typed")
         world.host.connectIfRunning()
         #expect(await until { world.host.state == .connected })
         let rule = String(repeating: "─", count: 30)
         var result: Result<HostSession, HostClientError>?
-        world.host.spawn(SpawnRequest(cwd: world.root, command: "printf '%s\\n' '\(rule)' '❯ ' '\(rule)'; exec /bin/cat", env: [:],
+        world.host.spawn(SpawnRequest(cwd: world.root, command: "printf '%s\\n' '\(rule)' '❯ ' '\(rule)'; exec /bin/cat > '\(typed.path)'", env: [:],
                                       cols: 80, rows: 24, keepShell: false, label: "Lead · \(world.project)", agent: "claude")) { result = $0 }
         #expect(await until { result != nil })
         let session = try #require(result).get()
@@ -300,7 +326,17 @@ struct ReplacedLeadRoutingTests {
         let state = VibePaths.stateFile(tty: session.tty)
         try FileManager.default.createDirectory(at: state.deletingLastPathComponent(), withIntermediateDirectories: true)
         try hook.save(to: state)
-        return session
+        return (session, typed)
+    }
+
+    /// What was typed into the lead once it holds `text` (or as it is when the hang guard runs out).
+    func typed(_ text: String, into file: URL) async -> String {
+        var typed = ""
+        _ = await until {
+            typed = (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+            return typed.contains(text)
+        }
+        return typed
     }
 
     /// Waking an idle lead for its reports reads the board off the main thread: the lead it names before the wait,
@@ -308,7 +344,7 @@ struct ReplacedLeadRoutingTests {
     @Test func aWakeUpReadsTheBoardOffTheMainThread() async throws {
         let world = try world()
         defer { world.stop() }
-        let lead = try await idleLead(in: world)
+        let (lead, file) = try await idleLead(in: world)
         defer { try? FileManager.default.removeItem(at: VibePaths.stateFile(tty: lead.tty)) }
         let looks = Looks()
         world.controller.boardLooked = { looks.add($0) }
@@ -316,8 +352,8 @@ struct ReplacedLeadRoutingTests {
         try SteerInbox.post(SteerMessage(text: "worker x blocked", from: .system("witness"), agentPid: lead.childPID,
                                          at: Date().timeIntervalSince1970 - 60), tty: lead.tty, root: world.inbox)
         world.controller.refresh()
-        let shown = await shows("1 new report", lead.id, world.host)
-        #expect(shown.contains("1 new report"), "\(shown)")
+        let typed = await typed("1 new report", into: file)
+        #expect(typed.contains("1 new report"), "\(typed)")
         #expect(looks.roots(main: false).contains(world.root))
         #expect(looks.roots(main: true) == [])
     }
@@ -327,14 +363,14 @@ struct ReplacedLeadRoutingTests {
     @Test func aFlushReadsTheBoardOffTheMainThread() async throws {
         let world = try world()
         defer { world.stop() }
-        let lead = try await idleLead(in: world)
+        let (lead, file) = try await idleLead(in: world)
         defer { try? FileManager.default.removeItem(at: VibePaths.stateFile(tty: lead.tty)) }
         let looks = Looks()
         world.controller.boardLooked = { looks.add($0) }
         try SteerInbox.post(SteerMessage(text: "make the films page", from: .user, agentPid: lead.childPID), tty: lead.tty, root: world.inbox)
         world.controller.refresh()
-        let shown = await shows("make the films page", lead.id, world.host)
-        #expect(shown.contains("make the films page"), "\(shown)")
+        let typed = await typed("make the films page", into: file)
+        #expect(typed.contains("make the films page"), "\(typed)")
         #expect(looks.roots(main: false).contains(world.root))
         #expect(looks.roots(main: true) == [])
     }
