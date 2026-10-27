@@ -279,11 +279,6 @@ function clockText(at) {
   return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
 }
 
-// "8 min", "45 s": what's left of a timer, rounded up (the Mac's timeLeft).
-function timeLeft(seconds) {
-  return seconds >= 60 ? `${Math.ceil(seconds / 60)} min` : `${Math.max(1, Math.ceil(seconds))} s`;
-}
-
 function questionCount(count) { return `${count} question${count === 1 ? '' : 's'} for you`; }
 
 function leadBlock(lead, row, members) {
@@ -363,9 +358,9 @@ function questionCard(lead, q) {
     card.append(history);
   }
   if (q.proposal && q.decideBy) {
-    const left = q.decideBy - (Date.now() / 1000 + clockOffset);
+    // What's left in the Mac's words, as of the last state (asked every few seconds).
     const timer = el('div', 'qTimer');
-    timer.append('⏱ Going with ', el('b', null, q.proposal), left > 0 ? ` in ${timeLeft(left)}` : ' now');
+    timer.append('⏱ Going with ', el('b', null, q.proposal), q.timeLeft ? ` in ${q.timeLeft}` : ' now');
     card.append(timer);
   } else if (q.held && q.proposal) {
     const held = el('div', 'qTimer held');

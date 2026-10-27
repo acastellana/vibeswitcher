@@ -75,7 +75,7 @@ enum PhoneLeads {
             let open = lead.board.openQuestions
             var object: [String: Any] = [
                 "id": id(root: lead.root), "project": masked((lead.root as NSString).lastPathComponent),
-                "questions": lead.board.questionStack(now: now).map(question),
+                "questions": lead.board.questionStack(now: now).map { question($0, now: now) },
                 "open": open.count, "blocking": lead.board.blockingQuestions,
                 "allDone": lead.board.hasUnseenAllDone,
             ]
@@ -86,7 +86,8 @@ enum PhoneLeads {
 
     /// A question as the Mac's card shows it: its wording, options, priority, why now, its proposal's timer (or held),
     /// its revision, and what closed it.
-    static func question(_ question: LeadQuestion) -> [String: Any] {
+    /// `timeLeft`: the Mac's words for what's left of a running timer ("8 min"), as of `now`.
+    static func question(_ question: LeadQuestion, now: Double = Date().timeIntervalSince1970) -> [String: Any] {
         var object: [String: Any] = [
             "id": question.id, "version": question.version, "text": masked(question.text), "options": question.options.map(masked),
             "priority": question.rank.rawValue, "state": question.state.rawValue, "askedAt": question.askedAt,
@@ -95,7 +96,10 @@ enum PhoneLeads {
         if let proposal = question.proposal {
             object["proposal"] = masked(proposal)
             object["decideIn"] = question.decideIn ?? LeadQuestion.defaultDecideIn
-            if question.isCounting, let deadline = question.decideBy { object["decideBy"] = deadline }
+            if question.isCounting, let deadline = question.decideBy {
+                object["decideBy"] = deadline
+                if deadline > now { object["timeLeft"] = timeLeft(deadline - now) }
+            }
             if question.heldAt != nil { object["held"] = true }
         }
         if let revisions = question.revisions, let last = revisions.last {

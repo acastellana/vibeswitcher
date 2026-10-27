@@ -44,7 +44,7 @@ struct PhoneLeadsTests {
         let root = base.appendingPathComponent("shop").resolvingSymlinksInPath().path
         let stateDir = base.appendingPathComponent("state"), inbox = base.appendingPathComponent("inbox"), home = base.appendingPathComponent("home")
         for dir in [root, stateDir.path, inbox.path, home.path] { try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true) }
-        let host = HostClient(socketPath: "/tmp/vsh-pl-\(UUID().uuidString.prefix(8)).sock")
+        let host = HostClient(socketPath: "\(shortScratchRoot)/vsh-pl-\(UUID().uuidString.prefix(8)).sock")
         let store = SessionStore(scanner: SessionScanner(processes: { [:] }, stateDir: { stateDir }, cwd: { _ in nil }, arguments: { _ in [] }))
         let vault = LeadVault.Book().vault(folder: base.appendingPathComponent("vault"), as: { .app })
         let controller = LeadController(host: host, store: store, vault: vault, inbox: inbox, home: home.path) { _ in "exec /bin/sleep 600 #" }
@@ -241,7 +241,8 @@ struct PhoneLeadsTests {
         let revised = try #require(blocking["revised"] as? [String: Any])
         #expect(revised["note"] as? String == "Testers first")
         #expect((revised["earlier"] as? [[String: Any]])?.first?["text"] as? String == "Launch to everyone?")
-        #expect(Set(timed.keys) == ["id", "version", "text", "options", "priority", "state", "askedAt", "whyNow", "proposal", "decideIn", "decideBy"])
+        #expect(Set(timed.keys) == ["id", "version", "text", "options", "priority", "state", "askedAt", "whyNow", "proposal", "decideIn", "decideBy", "timeLeft"])
+        #expect(timed["timeLeft"] as? String == "10 min")
         #expect(timed["proposal"] as? String == "Keep a PNG fallback")
         #expect(withdrawn["withdrawReason"] as? String == "Not needed")
 

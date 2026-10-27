@@ -142,7 +142,7 @@ const questions = [
     state: 'open', askedAt: now - 300,
     revised: { at: now - 120, note: 'Testers first', earlier: [{ version: 1, text: 'Launch to everyone?', options: ['Yes', 'No'], until: now - 120 }] } },
   { id: 'q-timer', version: 1, text: 'Keep a PNG fallback?', options: ['WebP only', 'Keep a PNG fallback'], priority: 'whenever',
-    state: 'open', askedAt: now - 60, whyNow: 'Images next', proposal: 'Keep a PNG fallback', decideIn: 10, decideBy: now + 450 },
+    state: 'open', askedAt: now - 60, whyNow: 'Images next', proposal: 'Keep a PNG fallback', decideIn: 10, decideBy: now + 450, timeLeft: '8 min' },
   { id: 'q-gone', version: 1, text: 'Re-plan the sidebar?', options: [], priority: 'important', state: 'withdrawn', askedAt: now - 900,
     withdrawReason: 'Not needed', closedAt: now - 30 },
 ];
