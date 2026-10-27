@@ -90,7 +90,7 @@ final class BaseMoves: ObservableObject {
         if !Set(asking.keys).isSubset(of: roots) { asking = asking.filter { roots.contains($0.key) } }
         let typed = sent.filter { now.timeIntervalSince1970 - $0.at <= Self.typedFor }
         for root in roots where !looking.contains(root) {
-            let stamp = branches[root].map { Self.stamps(root: root, branch: $0) }
+            let stamp = branches[root].map { self.stamps(root: root, branch: $0) }
             let due = lookedAt[root].map { now.timeIntervalSince($0) >= 30 } ?? true
             guard due || stamp != stamps[root] else { continue }
             looking.insert(root)
@@ -125,7 +125,7 @@ final class BaseMoves: ObservableObject {
         branches[root] = branch
         // Still running: look again at the next refresh, whatever the reflog says.
         guard outcome != .waiting else { return }
-        stamps[root] = Self.stamps(root: root, branch: branch)
+        stamps[root] = self.stamps(root: root, branch: branch)
         switch outcome {
         case .still, .waiting:
             asking[root] = nil
@@ -222,6 +222,14 @@ final class BaseMoves: ObservableObject {
     /// Where git logs the branch's moves, in a main checkout.
     static func reflog(root: String, branch: String) -> String {
         (root as NSString).appendingPathComponent(".git/logs/refs/heads/\(branch)")
+    }
+
+    /// Each root whose files were stamped, on the thread that stamped them (for tests).
+    var stamped: (String) -> Void = { _ in }
+
+    private func stamps(root: String, branch: String) -> Stamps {
+        stamped(root)
+        return Self.stamps(root: root, branch: branch)
     }
 
     static func stamps(root: String, branch: String) -> Stamps {
