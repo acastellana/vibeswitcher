@@ -210,3 +210,7 @@ The logo is a taste call, so the user chooses from rendered options. One agent o
 
 The lead proposed it with a 30 min timer and the user didn't answer in time, so it went ahead (question 33419991). Why it was asked: The worker is waiting on the pick to make it the app and phone icon.
 
+## 2026-10-27 16:45:16 Installed the new app logo (A · Stack) at 16:45 on 2026-10-27, at the user's answer to E37EB3C9. The host (pid 31589) kept running, and the installed Info.plist has CFBundleIconFile = AppIcon. Nothing has been pushed: project-lead is 50 commits ahead of origin/project-lead and of origin/main (dc2b9e3).
+
+The user asked for the install. The lead never pushes; the user does.
+
