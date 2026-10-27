@@ -1508,3 +1508,7 @@
 - 2026-10-27 12:09 Audit of choosing-a-project: complete, clean, round 2: 1 Important closed, 6 Nit (1 open)
 - 2026-10-27 12:16 Merged choosing-a-project: Choosing a project folder starts its lead, not a plain Claude session
 - 2026-10-27 12:16 Flaky in choosing-a-project's merge: aLongLeadChatKeepsItsRowsOutOfTheKeyViewLoop() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-10-27 12:16 Automatically (auto_advance): Merged choosing-a-project (Choosing a project folder starts its lead, not a plain Claude session) into project-lead at 5ecc41af, on its passing audit and the full test run. (Its first test run failed on aLongLeadChatKeepsItsRowsOutOfTheKeyViewLoop() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/choosing-a-project/merge-test.log.)
+- 2026-10-27 12:17 Automatically (auto_advance): Cleaned up choosing-a-project (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-10-27 12:17 Started a worker on leads-start-in-an
+- 2026-10-27 12:17 Automatically (auto_advance): Started a worker on leads-start-in-an (Leads start in an empty repo too, and the empty sidebar offers a lead), its after tasks done (choosing-a-project, sidebar-rows-the-status).
