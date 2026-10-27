@@ -206,3 +206,7 @@ The user answered E6FC9C18 "Install now" and ran it themselves after the failed 
 
 The logo is a taste call, so the user chooses from rendered options. One agent owns it end to end. Phase 1 must not be merged on its own, so auto_advance is off.
 
+## 2026-10-27 15:58:02 Which logo? (The four concepts are in the update.) → A · Stack
+
+The lead proposed it with a 30 min timer and the user didn't answer in time, so it went ahead (question 33419991). Why it was asked: The worker is waiting on the pick to make it the app and phone icon.
+
