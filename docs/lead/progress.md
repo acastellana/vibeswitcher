@@ -1498,3 +1498,6 @@
 - 2026-10-27 11:35 Automatically (auto_advance): Started the audit of sidebar-rows-the-status at 1f4cdd59 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
 - 2026-10-27 11:40 Automatically (auto_advance): Started the audit of choosing-a-project at 7858f7e0 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
 - 2026-10-27 11:41 Planned leads-start-in-an: Leads start in an empty repo too, and the empty sidebar offers a lead
+- 2026-10-27 11:50 Audit of sidebar-rows-the-status: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
+- 2026-10-27 11:52 Audit of choosing-a-project: complete, clean, round 1: 1 Important open, 5 Nit open
+- 2026-10-27 11:59 Merged sidebar-rows-the-status: Sidebar rows: the status is the big icon, Claude/Codex the small badge
