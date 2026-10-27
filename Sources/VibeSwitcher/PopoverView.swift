@@ -17,7 +17,7 @@ struct PopoverView: View {
     let onQuit: () -> Void
     var onRename: (Session) -> Void = { _ in }
     var onResetName: (Session) -> Void = { _ in }
-    var onNewSession: (LaunchPreset, String?) -> Void = { _, _ in }
+    var onNewSession: (LaunchPreset?, String?) -> Void = { _, _ in }
     /// A folder's presets, its default first (nil: other folder).
     var presetsFor: (String?) -> [LaunchPreset] = { _ in LaunchPresets.builtIns().global }
     var onEditCommands: () -> Void = {}
@@ -185,6 +185,8 @@ struct PopoverView: View {
                 }
             }
             Menu("Other Folder…") {
+                Button("Project Lead") { onNewSession(nil, nil) }
+                Divider()
                 ForEach(presetsFor(nil)) { preset in
                     Button(preset.name) { onNewSession(preset, nil) }
                 }

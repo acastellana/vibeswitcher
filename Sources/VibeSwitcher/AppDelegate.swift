@@ -632,12 +632,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         preferences.presets.presets(for: folder)
     }
 
+    /// A preset in a known folder starts there; without a folder you pick one, and its project lead starts
+    /// (`ProjectFolderStart`), or the preset you chose first.
     private func newSession(preset: LaunchPreset?, in folder: String?) {
         popover.performClose(nil)
-        guard let folder = folder ?? Launcher.chooseFolder(startingAt: popoverState.recentProjects.first
-            .map { ($0.path as NSString).deletingLastPathComponent }) else { return }
-        guard let preset = preset ?? presets(for: folder).first else { return }
-        startSession(preset, in: folder)
+        projectFolderStart.run(preset: preset, folder: folder)
+    }
+
+    private var projectFolderStart: ProjectFolderStart {
+        let recent = popoverState.recentProjects.first.map { ($0.path as NSString).deletingLastPathComponent }
+        return ProjectFolderStart(
+            chooseFolder: { Launcher.chooseFolder(startingAt: recent, prompt: $0) },
+            startLead: { [weak self] folder in
+                self?.showMainWindow()
+                self?.leadController.startLead(in: folder)
+            },
+            startSession: { [weak self] preset, folder in
+                guard let self, let preset = preset ?? self.presets(for: folder).first else { return }
+                self.startSession(preset, in: folder)
+            },
+            failed: { title, text in _ = LeadController.runAlert(title, text, ["OK"]) })
     }
 
     func startSession(_ preset: LaunchPreset, in folder: String) {

@@ -717,7 +717,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
         ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
-        ("sheet NAME", "shows a sheet on the window: " + Driver.sheets.map(\.name).joined(separator: ", ")),
+        ("sheet NAME", "shows a sheet on the window: " + (Driver.sheets.map(\.name) + Driver.windowSheets.map(\.name) + ["choose-folder"]).joined(separator: ", ")),
         ("close settings|sheet", "closes Settings or the sheet"),
         ("shot NAME", "draws each window, light and dark, into the shots folder"),
         ("quit", "quits (the host and fake sessions end with it)"),
@@ -749,6 +749,24 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 .frame(width: 360, height: 980))
         }),
     ]
+
+    /// AppKit windows `sheet NAME` shows too: the question for a chosen folder in no repository (a scratch folder under
+    /// the sandbox's home, with a .gitignore of its own that misses its secret-named files).
+    static var windowSheets: [(name: String, make: (Driver) -> NSWindow?)] { [
+        ("not-repository", { driver in
+            let folder = driver.home + "/projects/notes-app"
+            try? VibePaths.ensurePrivate(URL(fileURLWithPath: folder + "/src"))
+            for (name, text) in [("README.md", "# Notes\n"), ("src/main.py", "print('hi')\n"), (".gitignore", "*.log\n"),
+                                 (".env", "TOKEN=x\n"), ("server.pem", "-\n")] {
+                try? VibePaths.writePrivate(Data(text.utf8), to: URL(fileURLWithPath: folder + "/" + name))
+            }
+            let scratch = URL(fileURLWithPath: driver.home + "/scratch")
+            guard case .success(let plan) = FolderRepository.plan(for: folder, scratch: scratch) else { return nil }
+            let alert = ProjectFolderStart.notRepositoryAlert(plan)
+            alert.layout()
+            return alert.window
+        }),
+    ] }
 
     /// The `lead-team` sheet's board, as of now.
     static func leadTeam() -> (board: LeadBoard, seen: [String: MemberSeen], decisions: [LeadDecision]) {
@@ -1176,8 +1194,24 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// The sheet in a window of its own beside the main one, off screen as it is: attached with `beginSheet`, AppKit
     /// would move the main window on screen to show it. Its content is the sheet's, at the size `.sheet` gives it.
     private func showSheet(_ name: String, _ reply: @escaping (Bool, String) -> Void) {
+        if name == "choose-folder" {
+            // NSOpenPanel draws out of process (a remote view): `shot` can't draw it, so this says how it's set up.
+            let panel = Launcher.folderPanel(startingAt: home + "/projects", prompt: ProjectFolderStart.prompt(for: .chooseForLead))
+            return reply(true, "folder panel (drawn out of process: shot can't draw it): button “\(panel.prompt ?? "")”, "
+                         + "folders only: \(panel.canChooseDirectories && !panel.canChooseFiles), starts in \(panel.directoryURL?.path ?? "?")")
+        }
+        if let entry = Self.windowSheets.first(where: { $0.name == name }) {
+            closeSheet()
+            guard let shown = entry.make(self) else { return reply(false, "couldn't make \(name)") }
+            Sandbox.hide(shown)
+            sheet = shown
+            sheetName = name
+            shown.orderFrontRegardless()
+            Sandbox.hide(shown)
+            return settle { reply(true, "sheet \(name) shown") }
+        }
         guard let entry = Self.sheets.first(where: { $0.name == name }) else {
-            return reply(false, "no sheet \(name): " + Self.sheets.map(\.name).joined(separator: ", "))
+            return reply(false, "no sheet \(name): " + (Self.sheets.map(\.name) + Self.windowSheets.map(\.name) + ["choose-folder"]).joined(separator: ", "))
         }
         guard let parent = window?.window else { return reply(false, "no window") }
         closeSheet()

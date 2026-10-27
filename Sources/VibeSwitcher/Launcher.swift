@@ -46,16 +46,22 @@ enum Launcher {
         }
     }
 
-    /// Asks for a folder, starting in the most recent project's parent.
-    static func chooseFolder(startingAt directory: String?) -> String? {
+    /// Asks for a folder, starting in the most recent project's parent; `prompt` is the panel's button.
+    static func chooseFolder(startingAt directory: String?, prompt: String) -> String? {
+        let panel = folderPanel(startingAt: directory, prompt: prompt)
+        NSApp.activate()
+        return panel.runModal() == .OK ? panel.url?.path : nil
+    }
+
+    /// The panel `chooseFolder` shows (the sandbox draws it too).
+    static func folderPanel(startingAt directory: String?, prompt: String) -> NSOpenPanel {
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
-        panel.prompt = "Start Session Here"
+        panel.prompt = prompt
         if let directory { panel.directoryURL = URL(fileURLWithPath: directory) }
-        NSApp.activate()
-        return panel.runModal() == .OK ? panel.url?.path : nil
+        return panel
     }
 }
 

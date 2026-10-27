@@ -25,6 +25,7 @@ struct StartPage: View {
                 }
                 HStack(spacing: 10) {
                     Button { actions.newSession(nil, nil) } label: { Label("Choose Folder…", systemImage: "folder.badge.plus") }
+                        .help("Pick a project's folder and start its project lead")
                     Button { newProject = true } label: { Label("New Project…", systemImage: "plus.rectangle.on.folder") }
                         .accessibilityLabel("New project")
                         .help("Make a project in your projects folder (Settings › General), with git and a first commit")

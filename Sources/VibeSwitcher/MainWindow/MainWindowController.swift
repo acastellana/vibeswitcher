@@ -612,7 +612,9 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     @objc func newSessionAction(_ sender: Any?) { actions.newSession(nil, selectedFolder) }
 
     @objc func newShellAction(_ sender: Any?) {
-        actions.newSession(actions.presets(selectedFolder).first { $0.kind == .shell }, selectedFolder)
+        // No Shell preset: nothing (with no folder, a nil preset would start a project lead).
+        guard let shell = actions.presets(selectedFolder).first(where: { $0.kind == .shell }) else { return NSSound.beep() }
+        actions.newSession(shell, selectedFolder)
     }
 
     @objc func endSessionAction(_ sender: Any?) {
@@ -770,7 +772,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         let folder = selectedFolder.map { ($0 as NSString).lastPathComponent }
         var commands = [
             command("Next Session Needing You", "exclamationmark.bubble", "⌘J", #selector(nextNeedingYou(_:))),
-            command(folder.map { "New Session in \($0)" } ?? "New Session…", "plus", "⌘N", #selector(newSessionAction(_:))),
+            command(folder.map { "New Session in \($0)" } ?? "Start Project Lead in Folder…", "plus", "⌘N", #selector(newSessionAction(_:))),
             command(folder.map { "New Shell in \($0)" } ?? "New Shell…", "terminal", "⌥⌘N", #selector(newShellAction(_:))),
             command("Start Page", "house", "⇧⌘H", #selector(showHomeAction(_:))),
             command("Group by Attention", "exclamationmark.circle", "⌃⌘1", #selector(groupByAttention(_:))),
