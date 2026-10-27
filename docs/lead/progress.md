@@ -1487,3 +1487,5 @@
 - 2026-10-27 04:25 Automatically (auto_advance): Started a worker on the-time-budget-s (The time budget's bookkeeping runs off the main thread and only over running tasks).
 - 2026-10-27 04:43 Raised the-time-budget-s to audit (the risk check, at c1bcc223): headless Claude said raise: The change touches the main-thread time-budget path and adds a board write off-main; the task says no security or data-deletion issue, but REVIEW.md's "lock or wait on the main thread" and "test…
 - 2026-10-27 04:44 Automatically (auto_advance): Started the audit of the-time-budget-s at c1bcc223 (The risk check raised it to audit: headless Claude said raise: The change touches the main-thread time-budget path and adds a board write off-main; the task says no security or data-deletion issue, but REVIEW.md's "lock or wait on the main thread" and "test…).
+- 2026-10-27 05:12 Audit of the-time-budget-s: complete, clean, round 1: 1 Nit open
+- 2026-10-27 05:20 Merged the-time-budget-s: The time budget's bookkeeping runs off the main thread and only over running tasks
