@@ -248,6 +248,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         var cwd: String
         var transcript: String?
         var control: String?
+        /// nil: a plain shell, which no scan takes for an agent.
+        var agent: Agent? = .claude
     }
     private let lock = NSLock()
     /// By tty (read on the scanner's queue).
@@ -344,8 +346,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
     // MARK: Fake sessions
 
     private func processes() -> [Int32: ProcInfo] {
-        let agents = lock.withLock { fakes.mapValues(\.pid) }
-        return UIBench.processTable(agents: agents, launched: Date().addingTimeInterval(-3600))
+        let fakes = lock.withLock { self.fakes }
+        let launched = Date().addingTimeInterval(-3600)
+        var table = UIBench.processTable(agents: fakes.filter { $0.value.agent == .claude }.mapValues(\.pid), launched: launched)
+        for (tty, fake) in fakes where fake.agent == .codex {
+            table[fake.pid] = ProcInfo(pid: fake.pid, ppid: 60_000, tty: tty, comm: "codex", startTime: launched, agent: .codex)
+        }
+        return table
     }
 
     private func cwd(_ pid: Int32) -> String? {
@@ -353,9 +360,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
     }
 
     /// A new fake session: FakeClaude (or, without its script, a shell's `cat`) on a scratch pty of the sandbox's host,
-    /// with a short conversation already in its transcript and the hook state a Claude session leaves.
-    func startFake(label: String, slug named: String? = nil, transcript firstLines: String = Driver.firstTurn,
+    /// with a short conversation already in its transcript and the hook state a Claude session leaves. `agent` .codex:
+    /// the same fake, told apart as Codex; nil: a shell's `cat`, with no agent at all.
+    func startFake(label: String, slug named: String? = nil, transcript firstLines: String = Driver.firstTurn, agent: Agent? = .claude,
                    _ done: @escaping (String?) -> Void) {
+        let fakeClaude = agent == nil ? nil : self.fakeClaude
         fakeCount += 1
         let number = fakeCount
         let slug = named ?? "sandbox-project" + (number == 1 ? "" : "-\(number)")
@@ -377,25 +386,25 @@ private final class Driver: NSObject, NSApplicationDelegate {
             command = "printf 'A scratch terminal of the VibeSwitcher sandbox.\\n'; echo \"{\\\"pid\\\": $$}\" > '\(agentState)'; exec /bin/cat"
         }
         host.spawn(SpawnRequest(cwd: folder, command: command, env: [:], cols: 100, rows: 32, keepShell: false,
-                                label: label, agent: fakeClaude == nil ? nil : "claude")) { [weak self] result in
+                                label: label, agent: fakeClaude == nil ? nil : agent?.rawValue)) { [weak self] result in
             guard let self else { return }
             switch result {
             case .failure(let error): done(error.message)
             case .success(let session):
                 self.waitForPid(agentState, tries: 300) { pid in
                     guard let pid else { return done("the fake agent never said its pid") }
-                    var hook = HookState(agent: .claude, tty: session.tty, lastEvent: "Stop", lastEventAt: Date().timeIntervalSince1970 - 30)
+                    var hook = HookState(agent: agent ?? .claude, tty: session.tty, lastEvent: "Stop", lastEventAt: Date().timeIntervalSince1970 - 30)
                     hook.agentPid = pid
                     hook.sessionId = UUID().uuidString
                     hook.cwd = folder
                     hook.firstPrompt = "What does the sandbox do?"
                     hook.lastMessage = "Drive it with scripts/sandbox-app.sh."
-                    hook.transcriptPath = self.fakeClaude == nil ? nil : transcript
-                    if self.fakeClaude != nil { try? hook.save(to: VibePaths.stateFile(tty: session.tty)) }
+                    hook.transcriptPath = fakeClaude == nil ? nil : transcript
+                    if fakeClaude != nil { try? hook.save(to: VibePaths.stateFile(tty: session.tty)) }
                     self.lock.withLock {
                         self.fakes[session.tty] = Fake(id: session.id, tty: session.tty, label: label, pid: pid, cwd: folder,
-                                                       transcript: self.fakeClaude == nil ? nil : transcript,
-                                                       control: self.fakeClaude == nil ? nil : controlFile)
+                                                       transcript: fakeClaude == nil ? nil : transcript,
+                                                       control: fakeClaude == nil ? nil : controlFile, agent: agent)
                     }
                     self.store.refresh()
                     done(nil)
@@ -689,8 +698,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("terminal", "shows the selected session's terminal instead of its chat"),
         ("type TEXT", "types TEXT into the chat's composer (through its text view, as the keyboard does)"),
         ("send", "presses Return in the composer: the message goes to the fake session"),
-        ("tell JSON", "hands the selected fake Claude a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
-        ("new [LABEL]", "starts another fake session"),
+        ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
+        ("new [codex|shell] [LABEL]", "starts another fake session: a Claude, or a Codex or a plain shell"),
         ("views", "the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls layout)"),
         ("scroll top|middle|bottom", "scrolls the shown chat"),
         ("size WxH", "resizes the main window's content (e.g. 1728x1015)"),
@@ -1000,7 +1009,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
             reply(true, "sent")
         case "tell": tell(rest, reply)
         case "new":
-            startFake(label: rest.isEmpty ? "Fake Claude \(fakeCount + 1)" : rest) { problem in
+            // "new codex LABEL" and "new shell LABEL": a Codex row, a plain shell's.
+            let words = rest.split(separator: " ", maxSplits: 1).map(String.init)
+            let kinded = words.first == "codex" || words.first == "shell"
+            let agent: Agent? = words.first == "shell" ? nil : words.first == "codex" ? .codex : .claude
+            let label = kinded ? words.dropFirst().joined() : rest
+            startFake(label: label.isEmpty ? "Fake \(agent?.displayName ?? "Shell") \(fakeCount + 1)" : label, agent: agent) { problem in
                 reply(problem == nil, problem ?? "started")
             }
         case "lead":
@@ -1125,8 +1139,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
 
     private func tell(_ json: String, _ reply: @escaping (Bool, String) -> Void) {
         guard let op = (try? JSONSerialization.jsonObject(with: Data(json.utf8))) as? [String: Any] else { return reply(false, "not a JSON object: \(json)") }
+        // "to": a fake's label, to tell one that isn't selected (a turn ending on a selected row counts as seen: idle, not done).
         let selected = model.selectedRow?.hostID
-        guard let fake = fakeList.first(where: { $0.id == selected }) ?? fakeList.first, let file = fake.control,
+        let named = (op["to"] as? String).flatMap { to in fakeList.first { $0.label == to } }
+        guard let fake = named ?? fakeList.first(where: { $0.id == selected }) ?? fakeList.first, let file = fake.control,
               let handle = FileHandle(forWritingAtPath: file) else { return reply(false, "no fake Claude to tell") }
         handle.seekToEndOfFile()
         handle.write(Data((json + "\n").utf8))
@@ -1146,6 +1162,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
             hook.lastEventAt = Date().timeIntervalSince1970
             hook.toolName = "Bash"
             hook.toolStartedAt = Date().timeIntervalSince1970
+            try? hook.save(to: stateFile)
+        }
+        // Its turn over just now: the Stop a real Claude leaves, so the row reads done.
+        if op["op"] as? String == "done", var hook = HookState.load(from: stateFile) {
+            hook.lastEvent = "Stop"
+            hook.lastEventAt = Date().timeIntervalSince1970
             try? hook.save(to: stateFile)
         }
         reply(true, "told \(fake.label) \(json)")
