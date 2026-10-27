@@ -85,20 +85,26 @@ final class BaseMoves: ObservableObject {
         sent = Array((sent + [LeadVault.Typed(session: session, line: line, cwd: cwd, at: now)]).suffix(50))
     }
 
-    /// The leads' roots, every few seconds (the lead controller's refresh).
+    /// The leads' roots, every few seconds (the lead controller's refresh). The reflog's and workflow.md's stamps are
+    /// taken off the main thread too: a stat waited 3 s on a busy disk (hang-20261027-175604).
     func look(_ roots: Set<String>, now: Date = Date()) {
         if !Set(asking.keys).isSubset(of: roots) { asking = asking.filter { roots.contains($0.key) } }
         let typed = sent.filter { now.timeIntervalSince1970 - $0.at <= Self.typedFor }
         for root in roots where !looking.contains(root) {
-            let stamp = branches[root].map { self.stamps(root: root, branch: $0) }
+            let (known, last) = (branches[root], stamps[root])
             let due = lookedAt[root].map { now.timeIntervalSince($0) >= 30 } ?? true
-            guard due || stamp != stamps[root] else { continue }
             looking.insert(root)
-            lookedAt[root] = now
             background { [vault] in
+                guard due || known.map({ self.stamps(root: root, branch: $0) }) != last else {
+                    return self.main { self.looking.remove(root) }
+                }
                 let branch = Self.base(root: root)
                 let outcome = Self.check(vault: vault, root: root, branch: branch, typed: typed, now: now)
-                self.main { self.looked(root, branch: branch, outcome) }
+                let stamps = outcome == .waiting ? nil : self.stamps(root: root, branch: branch)
+                self.main {
+                    self.lookedAt[root] = now
+                    self.looked(root, branch: branch, outcome, stamps: stamps)
+                }
             }
         }
     }
@@ -120,12 +126,13 @@ final class BaseMoves: ObservableObject {
         return .taken(yours, .typed, used: used)
     }
 
-    func looked(_ root: String, branch: String, _ outcome: Outcome) {
+    /// What a look found, on the main thread, with the stamps it took after (nil: none, while a command still runs).
+    func looked(_ root: String, branch: String, _ outcome: Outcome, stamps taken: Stamps?) {
         looking.remove(root)
         branches[root] = branch
         // Still running: look again at the next refresh, whatever the reflog says.
-        guard outcome != .waiting else { return }
-        stamps[root] = self.stamps(root: root, branch: branch)
+        guard outcome != .waiting, let taken else { return }
+        stamps[root] = taken
         switch outcome {
         case .still, .waiting:
             asking[root] = nil

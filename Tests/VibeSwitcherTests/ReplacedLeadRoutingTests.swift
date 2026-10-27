@@ -158,7 +158,10 @@ struct ReplacedLeadRoutingTests {
         }
         #expect(world.controller.route("and the films page", typedInto: old.id))
 
-        let pending = SteerInbox.pending(tty: new.tty, root: world.inbox).filter { $0.agentPid == new.childPID }
+        // Delivered on the boards' queue, in order; the notice is said once each has gone.
+        let delivered = { SteerInbox.pending(tty: new.tty, root: world.inbox).filter { $0.agentPid == new.childPID } }
+        #expect(await until { delivered().count == 3 && world.controller.replacedLeads[old.id]?.notice?.contains("films") == true })
+        let pending = delivered()
         #expect(pending.count == 3)
         #expect(pending.allSatisfy { $0.from == .user && $0.seal != nil })
         #expect(SteerSeal.for(world.inbox).verify(pending) == [true, true, true])
@@ -241,6 +244,99 @@ struct ReplacedLeadRoutingTests {
         #expect(looks.roots(main: true) == [])
         #expect(await until { world.controller.replacedLeads[new.id]?.live == old.id && world.controller.replacedLeads[old.id] == nil })
         #expect(looks.roots(main: false).contains(world.root))
+    }
+
+    /// A message for the lead (here, typed into the replaced one) finds the lead the board names off the main thread,
+    /// and goes into its inbox there.
+    @Test func aMessageForTheLeadReadsItsBoardOffTheMainThread() async throws {
+        let world = try world()
+        defer { world.stop() }
+        let old = try await oldLead(in: world)
+        let new = try await replace(in: world, old: old)
+        #expect(await until { world.controller.replacedLeads[old.id]?.live == new.id })
+        let looks = Looks()
+        world.controller.boardLooked = { looks.add($0) }
+        #expect(world.controller.route("one", typedInto: old.id))
+        #expect(world.controller.route("two", typedInto: old.id))
+        #expect(looks.roots(main: true) == [])
+        let delivered = { SteerInbox.pending(tty: new.tty, root: world.inbox).filter { $0.agentPid == new.childPID } }
+        #expect(await until { delivered().count == 2 && world.controller.replacedLeads[old.id]?.notice?.contains("two") == true })
+        #expect(delivered().map { String($0.text.suffix(4)) } == [" one", " two"])
+        #expect(looks.roots(main: false).contains(world.root))
+        #expect(looks.roots(main: true) == [])
+    }
+
+    /// The session's screen once it shows `text` (or as it is when the hang guard runs out).
+    func shows(_ text: String, _ id: UUID, _ host: HostClient) async -> String {
+        let deadline = Date().addingTimeInterval(hangGuard)
+        var shown = ""
+        while Date() < deadline {
+            shown = await screen(id, host) ?? ""
+            if shown.contains(text) { break }
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return shown
+    }
+
+    /// A lead between turns (its hooks said Stop) whose screen shows Claude's empty box: `cat` echoes what's typed.
+    func idleLead(in world: World) async throws -> HostSession {
+        world.host.connectIfRunning()
+        #expect(await until { world.host.state == .connected })
+        let rule = String(repeating: "─", count: 30)
+        var result: Result<HostSession, HostClientError>?
+        world.host.spawn(SpawnRequest(cwd: world.root, command: "printf '%s\\n' '\(rule)' '❯ ' '\(rule)'; exec /bin/cat", env: [:],
+                                      cols: 80, rows: 24, keepShell: false, label: "Lead · \(world.project)", agent: "claude")) { result = $0 }
+        #expect(await until { result != nil })
+        let session = try #require(result).get()
+        #expect(await shows("❯", session.id, world.host).contains("❯"))
+        try BoardStore(root: world.root).prepare()
+        try BoardStore(root: world.root).update { board in
+            board.leadSession = session.id.uuidString
+            board.leadPid = session.childPID
+            board.leadTTY = session.tty
+        }
+        var hook = HookState(agent: .claude, tty: session.tty, lastEvent: "Stop", lastEventAt: Date().timeIntervalSince1970)
+        hook.agentPid = session.childPID
+        let state = VibePaths.stateFile(tty: session.tty)
+        try FileManager.default.createDirectory(at: state.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try hook.save(to: state)
+        return session
+    }
+
+    /// Waking an idle lead for its reports reads the board off the main thread: the lead it names before the wait,
+    /// and again once its screen is read, before the wake-up is typed.
+    @Test func aWakeUpReadsTheBoardOffTheMainThread() async throws {
+        let world = try world()
+        defer { world.stop() }
+        let lead = try await idleLead(in: world)
+        defer { try? FileManager.default.removeItem(at: VibePaths.stateFile(tty: lead.tty)) }
+        let looks = Looks()
+        world.controller.boardLooked = { looks.add($0) }
+        // A report that has waited past the wake-up's debounce.
+        try SteerInbox.post(SteerMessage(text: "worker x blocked", from: .system("witness"), agentPid: lead.childPID,
+                                         at: Date().timeIntervalSince1970 - 60), tty: lead.tty, root: world.inbox)
+        world.controller.refresh()
+        let shown = await shows("1 new report", lead.id, world.host)
+        #expect(shown.contains("1 new report"), "\(shown)")
+        #expect(looks.roots(main: false).contains(world.root))
+        #expect(looks.roots(main: true) == [])
+    }
+
+    /// Your words waiting for an idle lead are typed once its box is empty, after the board is read off the main
+    /// thread: it still names that lead.
+    @Test func aFlushReadsTheBoardOffTheMainThread() async throws {
+        let world = try world()
+        defer { world.stop() }
+        let lead = try await idleLead(in: world)
+        defer { try? FileManager.default.removeItem(at: VibePaths.stateFile(tty: lead.tty)) }
+        let looks = Looks()
+        world.controller.boardLooked = { looks.add($0) }
+        try SteerInbox.post(SteerMessage(text: "make the films page", from: .user, agentPid: lead.childPID), tty: lead.tty, root: world.inbox)
+        world.controller.refresh()
+        let shown = await shows("make the films page", lead.id, world.host)
+        #expect(shown.contains("make the films page"), "\(shown)")
+        #expect(looks.roots(main: false).contains(world.root))
+        #expect(looks.roots(main: true) == [])
     }
 }
 

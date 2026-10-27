@@ -321,4 +321,46 @@ final class BaseMovesTests {
         #expect(move.commits.isEmpty)
         #expect(move.reason?.contains("rewritten") == true)
     }
+
+    /// Where each root's reflog and workflow.md were stamped, and on which thread.
+    final class Stamped: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stamps: [(root: String, main: Bool)] = []
+
+        func add(_ root: String) {
+            lock.lock()
+            stamps.append((root, Thread.isMainThread))
+            lock.unlock()
+        }
+
+        func count(main: Bool) -> Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return stamps.filter { $0.main == main }.count
+        }
+    }
+
+    /// hang-20261027-175604: a stat waited 3 s on a busy disk. The lead controller's refresh looks at each base on the
+    /// main thread, and its reflog and workflow.md are stamped off it: after a look, and at the next to see whether
+    /// either changed.
+    @MainActor @Test func theBaseIsStampedOffTheMainThread() async throws {
+        try commit("b.txt")
+        let moves = BaseMoves(vault: app, reads: reads)
+        moves.onAsk = { [unowned self] _, move in asked.append(move.to) }
+        let stamped = Stamped()
+        moves.stamped = { stamped.add($0) }
+        moves.look([root])
+        #expect(await until { asked.count == 1 })
+        #expect(stamped.count(main: false) == 1)
+        // Nothing changed and not due: only the stamps are taken, to see that.
+        moves.look([root])
+        #expect(await until { stamped.count(main: false) == 2 })
+        // Then the next look begins (none while one is under way): it stamps again.
+        #expect(await until {
+            moves.look([root])
+            return stamped.count(main: false) >= 3
+        })
+        #expect(stamped.count(main: true) == 0)
+        #expect(asked.count == 1)
+    }
 }

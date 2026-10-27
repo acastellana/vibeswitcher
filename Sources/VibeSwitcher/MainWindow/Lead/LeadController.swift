@@ -152,10 +152,10 @@ struct TeamReading {
     }
 }
 
-/// The lead each board names (its pid, terminal and session), for what must know it now on the main thread: whom a
-/// message goes to, whether a wake-up or a flush still goes to the same lead, which session is the live lead. Only
-/// those fields are decoded (`BoardStore.loadLead`, under a millisecond for a MB of board), and only when the board's
-/// file changed; the rest of the board is read off the main thread (`LeadReads`).
+/// The lead each board names (its pid, terminal and session): whom a message goes to, whether a wake-up or a flush
+/// still goes to the same lead, which session is the live lead. Only those fields are decoded (`BoardStore.loadLead`,
+/// under a millisecond for a MB of board), and only when the board's file changed. Looked at on `LeadReads`' queue
+/// (`LeadFiles.names`): even the stat waited 3 s on a busy disk (hang-20261027-175604).
 struct LeadNames {
     private var kept: [String: (stamp: LeadFiles.Stamp, board: LeadBoard)] = [:]
     /// How many times a board's file was read (for tests).
@@ -284,8 +284,8 @@ final class LeadController: ObservableObject {
     /// The boards and decisions, and the teams' transcripts, read off the main thread (the boards written there too, to
     /// keep the order; `baseMoves` writes there as well).
     private let reads: LeadReads
-    /// The lead each board names, for the checks that must know it now on the main thread (only those fields read).
-    /// The 3 s refresh reads it off the main thread instead (`LeadFiles.names`).
+    /// The lead each board names, for the starts and the once-a-minute notices that look it up on the main thread
+    /// (`leadSessions`). Messages, wake-ups, flushes and the 3 s refresh read it off the main thread (`LeadFiles.names`).
     private var names = LeadNames()
     /// Each board looked at for the lead it names, on the thread that looks (for tests).
     var boardLooked: (String) -> Void = { _ in } {
@@ -790,22 +790,29 @@ final class LeadController: ObservableObject {
     }
 
     /// Steered in while the lead works; while it's idle the message waits in its inbox and `flush` types it as soon
-    /// as its input box is empty (never into your draft; a draft you send takes it along).
-    /// Returns whether it reached the lead's inbox (false: held until a lead runs).
-    @discardableResult
-    private func deliver(_ text: String, from sender: SteerMessage.Sender, root: String) -> Bool {
+    /// as its input box is empty (never into your draft; a draft you send takes it along). The board is read, and the
+    /// message posted, on the boards' queue (a stat of a board waited 3 s on a busy disk, hang-20261027-175604): one
+    /// at a time, in the order delivered. `then` hears on the main thread whether it reached the lead's inbox (false:
+    /// held until a lead runs).
+    private func deliver(_ text: String, from sender: SteerMessage.Sender, root: String, then: @escaping (Bool) -> Void = { _ in }) {
+        let (leadRuns, inbox) = (self.leadRuns, self.inbox)
         // The board as it is now names the lead that holds the role (none while a new one starts, see
         // `LeadHandover`); if that one is gone (a restart under way), the message would be dropped by the next lead's
         // hook: keep it until a lead runs again. Only the lead's fields are read here (see `LeadNames`).
-        guard let agent = LeadHandover.named(names.board(root)), leadRuns(agent),
-              (try? LeadDelivery.deliver(text, from: sender, to: agent, state: HookState.load(from: VibePaths.stateFile(tty: agent.tty)),
-                                         inputIsEmpty: nil, typeInto: nil, root: inbox)) != nil else {
-            held[root, default: []].append((text, sender))
-            Breadcrumbs.shared.note("lead: holding a message for \((root as NSString).lastPathComponent) (no lead running)")
-            return false
+        reads.async({ files in
+            guard let agent = LeadHandover.named(files.names.board(root)), leadRuns(agent) else { return false }
+            return (try? LeadDelivery.deliver(text, from: sender, to: agent, state: HookState.load(from: VibePaths.stateFile(tty: agent.tty)),
+                                              inputIsEmpty: nil, typeInto: nil, root: inbox)) != nil
+        }) { [weak self] went in
+            guard let self else { return }
+            if went {
+                self.wake(root: root)
+            } else {
+                self.held[root, default: []].append((text, sender))
+                Breadcrumbs.shared.note("lead: holding a message for \((root as NSString).lastPathComponent) (no lead running)")
+            }
+            then(went)
         }
-        wake(root: root)
-        return true
     }
 
     // MARK: Replaced leads
@@ -831,10 +838,12 @@ final class LeadController: ObservableObject {
         guard let replaced = replacedLeads[id] else { return false }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return true }
-        let went = deliver(replaced.routed(trimmed), from: .user, root: replaced.root)
-        replacedLeads[id]?.notice = ReplacedLead.notice(trimmed, to: replaced.project, at: Date().timeIntervalSince1970, held: !went)
-        Breadcrumbs.shared.note("lead: \(trimmed.count) chars typed into the replaced lead on \(replaced.tty) "
-                                + (went ? "went to" : "wait for") + " the lead of \(replaced.project)")
+        let at = Date().timeIntervalSince1970
+        deliver(replaced.routed(trimmed), from: .user, root: replaced.root) { [weak self] went in
+            self?.replacedLeads[id]?.notice = ReplacedLead.notice(trimmed, to: replaced.project, at: at, held: !went)
+            Breadcrumbs.shared.note("lead: \(trimmed.count) chars typed into the replaced lead on \(replaced.tty) "
+                                    + (went ? "went to" : "wait for") + " the lead of \(replaced.project)")
+        }
         return true
     }
 
@@ -886,17 +895,16 @@ final class LeadController: ObservableObject {
     /// answer) are typed as they are instead, and the reports go along with them. Always the lead the board names
     /// at that moment, looked up again before anything is typed: a lead replaced meanwhile gets nothing.
     private func wake(root: String) {
-        guard let lead = LeadHandover.named(names.board(root)) else { return }
-        let id = lead.session.flatMap(UUID.init(uuidString:))
-        let hosted = id.flatMap { id in host.sessions.first { $0.id == id } }
-        let observer = observer
-        // What waits for it, and what it's doing (its transcript), read off the main thread.
-        reads.async({ _ in
-            let pending = SteerInbox.pending(tty: lead.tty).filter { $0.agentPid == lead.pid }
-            return (pending, pending.first?.from == .user ? nil : hosted.map { observer.activity($0, agentPid: lead.pid) })
-        }) { [weak self] pending, activity in
-            guard let self, LeadHandover.named(self.names.board(root)) == lead else { return }
-            self.wake(root: root, lead: lead, pending: pending, activity: activity)
+        let (sessions, observer, inbox) = (host.sessions, observer, inbox)
+        // The lead the board names, what waits for it, and what it's doing (its transcript), read off the main thread.
+        reads.async({ files -> (lead: LeadAgent, pending: [SteerMessage], activity: LeadActivity?)? in
+            guard let lead = LeadHandover.named(files.names.board(root)) else { return nil }
+            let hosted = lead.session.flatMap(UUID.init(uuidString:)).flatMap { id in sessions.first { $0.id == id } }
+            let pending = SteerInbox.pending(tty: lead.tty, root: inbox).filter { $0.agentPid == lead.pid }
+            return (lead, pending, pending.first?.from == .user ? nil : hosted.map { observer.activity($0, agentPid: lead.pid) })
+        }) { [weak self] read in
+            guard let self, let read else { return }
+            self.wake(root: root, lead: read.lead, pending: read.pending, activity: read.activity)
         }
     }
 
@@ -925,19 +933,27 @@ final class LeadController: ObservableObject {
             flushing.insert(lead.tty)
             host.styledScreen(id) { [weak self] screen in
                 guard let self else { return }
-                self.flushing.remove(lead.tty)
-                guard LeadHandover.named(self.names.board(root)) == lead else { return }
-                // What waits now (its hook may have taken some meanwhile), typed only into an empty box: Claude's
-                // dim suggestion counts as empty, a draft or a dialog waits for the next try.
-                let reports = LeadWake.reports(SteerInbox.pending(tty: lead.tty), agentPid: lead.pid)
-                var state = self.wakes[key] ?? LeadWake()
-                state.type(reports: reports, box: screen.map(LeadDelivery.box(in:))) { text in
-                    self.typedAt[lead.tty] = Date()
-                    self.type(text, into: id)
-                    Breadcrumbs.shared.note("lead: woke the lead on \(lead.tty) for \(reports.count) report(s)")
-                    return true
+                // Still the lead the board names, and what waits now (its hook may have taken some meanwhile), read off
+                // the main thread.
+                let inbox = self.inbox
+                self.reads.async({ files in
+                    LeadHandover.named(files.names.board(root)) == lead
+                        ? LeadWake.reports(SteerInbox.pending(tty: lead.tty, root: inbox), agentPid: lead.pid) : nil
+                }) { [weak self] reports in
+                    guard let self else { return }
+                    self.flushing.remove(lead.tty)
+                    guard let reports else { return }
+                    // Typed only into an empty box: Claude's dim suggestion counts as empty, a draft or a dialog waits
+                    // for the next try.
+                    var state = self.wakes[key] ?? LeadWake()
+                    state.type(reports: reports, box: screen.map(LeadDelivery.box(in:))) { text in
+                        self.typedAt[lead.tty] = Date()
+                        self.type(text, into: id)
+                        Breadcrumbs.shared.note("lead: woke the lead on \(lead.tty) for \(reports.count) report(s)")
+                        return true
+                    }
+                    self.wakes[key] = state
                 }
-                self.wakes[key] = state
             }
         }
     }
@@ -948,10 +964,10 @@ final class LeadController: ObservableObject {
     private func flush(_ agent: LeadAgent, lead root: String? = nil) {
         guard let id = agent.session.flatMap(UUID.init(uuidString:)), let hosted = host.sessions.first(where: { $0.id == id }),
               !flushing.contains(agent.tty), Date().timeIntervalSince(typedAt[agent.tty] ?? .distantPast) > 10 else { return }
-        let observer = observer
+        let (observer, inbox) = (observer, inbox)
         // Whether something waits for it and it's between turns: its inbox and its transcript, read off the main thread.
         reads.async({ _ in
-            SteerInbox.pending(tty: agent.tty).contains { $0.agentPid == agent.pid } && observer.activity(hosted, agentPid: agent.pid).betweenTurns
+            SteerInbox.pending(tty: agent.tty, root: inbox).contains { $0.agentPid == agent.pid } && observer.activity(hosted, agentPid: agent.pid).betweenTurns
         }) { [weak self] ready in
             guard ready, let self else { return }
             self.type(waiting: agent, id: id, lead: root)
@@ -964,15 +980,26 @@ final class LeadController: ObservableObject {
         flushing.insert(agent.tty)
         host.styledScreen(id) { [weak self] screen in
             guard let self else { return }
-            self.flushing.remove(agent.tty)
-            if let root, LeadHandover.named(self.names.board(root)) != agent { return }
             // Claude's dim suggested prompt isn't a draft: typing replaces it.
-            guard let screen, LeadDelivery.box(in: screen) == .empty else { return }
-            LeadDelivery.flush(agent, betweenTurns: true, inputIsEmpty: { true }, typeInto: { text in
+            let (empty, inbox) = (screen.map { LeadDelivery.box(in: $0) == .empty } ?? false, self.inbox)
+            // A lead's only while its board still names it: the board and the inbox read off the main thread, what's
+            // taken from the inbox typed on it.
+            self.reads.async({ files -> String? in
+                if let root, LeadHandover.named(files.names.board(root)) != agent { return nil }
+                guard empty else { return nil }
+                var typed: String?
+                LeadDelivery.flush(agent, betweenTurns: true, inputIsEmpty: { true }, typeInto: { text in
+                    typed = text
+                    return true
+                }, root: inbox)
+                return typed
+            }) { [weak self] text in
+                guard let self else { return }
+                self.flushing.remove(agent.tty)
+                guard let text else { return }
                 self.typedAt[agent.tty] = Date()
                 self.type(text, into: id)
-                return true
-            })
+            }
         }
     }
 
