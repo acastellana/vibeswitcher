@@ -1525,3 +1525,4 @@
 - 2026-10-27 13:42 Update: Batch done: status-first sidebar icons, and picking a folder starts its lead — 3 tasks have merged since the last install (1236e30).
 - 2026-10-27 15:22 Planned app-logo-concepts-first: App logo: concepts first, then the chosen one in the Dock, Finder, phone and menu bar (review audit)
 - 2026-10-27 15:22 Started a worker on app-logo-concepts-first
+- 2026-10-27 15:27 Update: Logo: four concepts to choose from — The app has never had an icon; the Dock shows macOS's generic one. Here are four concepts. Each uses the app's real status shapes and colours.
