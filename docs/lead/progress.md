@@ -1491,3 +1491,7 @@
 - 2026-10-27 05:20 Merged the-time-budget-s: The time budget's bookkeeping runs off the main thread and only over running tasks
 - 2026-10-27 05:20 Automatically (auto_advance): Merged the-time-budget-s (The time budget's bookkeeping runs off the main thread and only over running tasks) into project-lead at bf59e32d, on its passing audit and the full test run.
 - 2026-10-27 05:21 Automatically (auto_advance): Cleaned up the-time-budget-s (freed 996 MB of build output and temporary folders). It stays done.
+- 2026-10-27 11:15 Planned sidebar-rows-the-status: Sidebar rows: the status is the big icon, Claude/Codex the small badge
+- 2026-10-27 11:15 Started a worker on sidebar-rows-the-status
+- 2026-10-27 11:16 Planned choosing-a-project: Choosing a project folder starts its lead, not a plain Claude session
+- 2026-10-27 11:16 Started a worker on choosing-a-project

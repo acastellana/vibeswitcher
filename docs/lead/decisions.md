@@ -198,3 +198,7 @@ The user answered F770E6F6 with "Install now". Checked: the host is still pid 31
 
 The user answered A1BE83E7 "Install now". Verified: host pid 31589 unchanged, app relaunched as pid 62220, the lead's tool server (pid 10199) switched in place to inode 309016916 and holds advancing.lock.
 
+## 2026-10-27 11:12:24 Installed project-lead at 1236e30 on 2026-10-27 11:12; the user ran the install. It brings the phone's lead/team UI and answers, the lead-chat freeze fix (chip strip, focus loop, Team rows cache) and the time-budget off-main fix. The lead's earlier attempt at 05:2x failed to sign with errSecInternalComponent, with the Mac locked and no keychain prompt possible.
+
+The user answered E6FC9C18 "Install now" and ran it themselves after the failed try. Verified: host pid 31589 unchanged, app pid 80943, lead tool server switched to inode 312283634 and holds advancing.lock. Next: watch the health watcher's freeze reports with this lead's chat open to confirm the fix; Spaces.currentDesktops (a window-server call on main in SessionStore.apply) is the next suspect if freezes remain.
+
