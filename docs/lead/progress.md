@@ -1542,3 +1542,9 @@
 - 2026-10-27 18:12 Started a worker on land-pr-1-host
 - 2026-10-27 18:21 Merged turn-this-incident-into: Turn this incident into a check: message() to a long-idle worker (its turn had ended about 24… (no audit: review none)
 - 2026-10-27 18:21 Flaky in turn-this-incident-into's merge: aHostWhoseRunnerDiedIsEnded() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-10-27 18:21 Automatically (auto_advance): Merged turn-this-incident-into (Turn this incident into a check: message() to a long-idle worker (its turn had ended about 24…) into project-lead at 2d2c0798, review none: on its worker's done report on d84c266a and the full test run. (Its first test run failed on aHostWhoseRunnerDiedIsEnded() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/turn-this-incident-into/merge-test.log.)
+- 2026-10-27 18:21 Automatically (auto_advance): Cleaned up turn-this-incident-into (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-27 18:24 Planned lead-chat-deliver-wake: Lead chat: deliver, wake and flush still stat or decode the board on the main thread
+- 2026-10-27 18:25 Kept launch-video-v3-narrated unmerged: This is a deliverable only: the video lives in this worktree's brag-output/. Never merge it, and don't clean it up until the user has the files.
+- 2026-10-27 18:25 Update: Launch film v3: narrated, 58 s — **Video:** `/Users/albert/dev/vibeswitcher/.vibeswitcher/worktrees/launch-video-v3-narrated/brag-output/brag.mp4` (1920×1080, 58 s). The poster `brag.jpg`, `share-copy.txt` and `brag-plan.md` (with th…
+- 2026-10-27 18:31 Merged lead-chat-freeze: Lead chat freeze: LeadController.refresh loads the board (LeadNames.board) on the main thread (no audit: review none)
