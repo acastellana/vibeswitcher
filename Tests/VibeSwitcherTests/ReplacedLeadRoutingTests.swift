@@ -201,6 +201,47 @@ struct ReplacedLeadRoutingTests {
         #expect(command.contains("starting as the project lead. Read status"))
         #expect(!command.contains("You replace") && !command.contains("replaced-lead-turns"))
     }
+
+    /// Where each board was looked at for the lead it names, and on which thread.
+    final class Looks: @unchecked Sendable {
+        private let lock = NSLock()
+        private var looks: [(root: String, main: Bool)] = []
+
+        func add(_ root: String) {
+            lock.lock()
+            looks.append((root, Thread.isMainThread))
+            lock.unlock()
+        }
+
+        func roots(main: Bool) -> [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            return looks.filter { $0.main == main }.map(\.root)
+        }
+    }
+
+    /// hang-20261027-175604: the 3 s refresh marked the replaced leads with a stat of each board on the main thread,
+    /// which waited 3.1 s on a busy disk with genswap's lead shown. The refresh reads the boards off the main thread
+    /// now, and marks the sessions on it with what they say.
+    @Test func theRefreshReadsWhichLeadHoldsTheRoleOffTheMainThread() async throws {
+        let world = try world()
+        defer { world.stop() }
+        let old = try await oldLead(in: world)
+        let new = try await replace(in: world, old: old)
+        #expect(await until { world.controller.replacedLeads[old.id]?.live == new.id })
+        let looks = Looks()
+        world.controller.boardLooked = { looks.add($0) }
+        // The role goes back to the old lead: only a read of the board marks the new one replaced now.
+        try BoardStore(root: world.root).update { board in
+            board.leadSession = old.id.uuidString
+            board.leadPid = old.childPID
+            board.leadTTY = old.tty
+        }
+        world.controller.refresh()
+        #expect(looks.roots(main: true) == [])
+        #expect(await until { world.controller.replacedLeads[new.id]?.live == old.id && world.controller.replacedLeads[old.id] == nil })
+        #expect(looks.roots(main: false).contains(world.root))
+    }
 }
 
 private final class ReplacedAnchor {}

@@ -48,6 +48,9 @@ struct LeadFiles {
     private var workflows: [String: (stamp: Stamp, recordsDir: String?)] = [:]
     /// How many times a file was read (for tests).
     private(set) var fileReads = 0
+    /// The lead each board names, for what the 3 s refresh needs of it (which lead sessions are replaced, which one
+    /// keeps the role): even a board's stamp is a stat, which waited 3 s on a busy disk (hang-20261027-175604).
+    var names = LeadNames()
 
     mutating func board(_ root: String) -> LeadBoard {
         let store = BoardStore(root: root)
@@ -157,8 +160,11 @@ struct LeadNames {
     private var kept: [String: (stamp: LeadFiles.Stamp, board: LeadBoard)] = [:]
     /// How many times a board's file was read (for tests).
     private(set) var fileReads = 0
+    /// Each board looked at, on the thread that looks (for tests).
+    var looked: (String) -> Void = { _ in }
 
     mutating func board(_ root: String) -> LeadBoard {
+        looked(root)
         let store = BoardStore(root: root)
         let stamp = LeadFiles.Stamp((store.folder as NSString).appendingPathComponent("board.json"))
         if let stamp, let hit = kept[root], hit.stamp == stamp { return hit.board }
@@ -166,6 +172,11 @@ struct LeadNames {
         let board = store.loadLead()
         kept[root] = stamp.map { ($0, board) }
         return board
+    }
+
+    /// Only these roots still have a lead.
+    mutating func keep(_ roots: Set<String>) {
+        kept = kept.filter { roots.contains($0.key) }
     }
 }
 
@@ -274,7 +285,16 @@ final class LeadController: ObservableObject {
     /// keep the order; `baseMoves` writes there as well).
     private let reads: LeadReads
     /// The lead each board names, for the checks that must know it now on the main thread (only those fields read).
+    /// The 3 s refresh reads it off the main thread instead (`LeadFiles.names`).
     private var names = LeadNames()
+    /// Each board looked at for the lead it names, on the thread that looks (for tests).
+    var boardLooked: (String) -> Void = { _ in } {
+        didSet {
+            let looked = boardLooked
+            names.looked = looked
+            reads.async { files in files.names.looked = looked }
+        }
+    }
     /// A refresh is reading the boards; one asked for meanwhile runs once it's done.
     private var refreshing = false
     private var refreshAgain = false
@@ -361,16 +381,27 @@ final class LeadController: ObservableObject {
     /// The live window sessions that are leads, by root. Where a replaced lead runs on beside the one that replaced
     /// it: the one the board names, else the newest.
     private var leadSessions: [String: HostSession] {
+        Self.leadSessions(host.sessions) { names.board($0).leadSession }
+    }
+
+    /// The live window sessions among `sessions` that are leads, by root; `named` reads the lead session a root's board
+    /// names (only where two leads share a root).
+    private static func leadSessions(_ sessions: [HostSession], named: (String) -> String?) -> [String: HostSession] {
         var result: [String: HostSession] = [:]
-        for session in host.sessions where session.isLive && LeadTeams.role(label: session.label) == .lead {
+        for session in sessions where session.isLive && LeadTeams.role(label: session.label) == .lead {
             let root = (session.cwd as NSString).standardizingPath
             if let other = result[root] {
-                let named = names.board(root).leadSession
+                let named = named(root)
                 if other.id.uuidString == named || (session.id.uuidString != named && session.startedAt < other.startedAt) { continue }
             }
             result[root] = session
         }
         return result
+    }
+
+    /// The roots with a live lead in the window (no board read: which of two leads it is doesn't matter here).
+    private var leadRoots: Set<String> {
+        Set(host.sessions.filter { $0.isLive && LeadTeams.role(label: $0.label) == .lead }.map { ($0.cwd as NSString).standardizingPath })
     }
 
     /// The lead a row is, if it is one: its root and board.
@@ -516,7 +547,16 @@ final class LeadController: ObservableObject {
     /// gives no role stays as it is (its tools say so); Project Lead then asks before starting another.
     private func keepRunningLeads() {
         guard host.state != .connecting else { return }
-        for (root, session) in leadSessions where adopting.insert(session.id).inserted {
+        // Which lead holds each root's role, from its board read off the main thread (see `LeadFiles.names`).
+        let sessions = host.sessions
+        reads.async({ files in Self.leadSessions(sessions) { files.names.board($0).leadSession } }) { [weak self] running in
+            guard let self, self.host.state != .connecting else { return }
+            self.keepRunning(running)
+        }
+    }
+
+    private func keepRunning(_ running: [String: HostSession]) {
+        for (root, session) in running where adopting.insert(session.id).inserted {
             let vault = self.vault
             let project = (root as NSString).lastPathComponent
             DispatchQueue.global(qos: .utility).async { [weak self] in
@@ -781,15 +821,27 @@ final class LeadController: ObservableObject {
     }
 
     /// Which lead sessions are replaced: another holds the role (`StatusRules.replacedLeads`), or a start replaced
-    /// them and the new lead is still starting. What was said of each is kept.
+    /// them and the new lead is still starting. What was said of each is kept. The boards are read off the main
+    /// thread (a stat of one waited 3 s on a busy disk, hang-20261027-175604), the sessions marked on it.
     private func markReplaced() {
+        let roots = leadRoots
+        reads.async({ files in
+            files.names.keep(roots)
+            var holders: [String: UUID] = [:]
+            for root in roots {
+                if let id = files.names.board(root).leadSession.flatMap(UUID.init(uuidString:)) { holders[root] = id }
+            }
+            return holders
+        }) { [weak self] holders in
+            self?.markReplaced(holders: holders)
+        }
+    }
+
+    /// Marks the lead sessions live now, with `holders` the lead session each root's board names.
+    private func markReplaced(holders: [String: UUID]) {
         let live = host.sessions.filter { $0.isLive && LeadTeams.role(label: $0.label) == .lead }
         let roots = Dictionary(uniqueKeysWithValues: live.map { ($0.id, ($0.cwd as NSString).standardizingPath) })
         replacing = replacing.filter { roots[$0.key] != nil }
-        var holders: [String: UUID] = [:]
-        for root in Set(roots.values) {
-            if let id = names.board(root).leadSession.flatMap(UUID.init(uuidString:)) { holders[root] = id }
-        }
         let replacedBy = StatusRules.replacedLeads(roots.map { (id: $0.key, root: $0.value) }, holders: holders)
         var marked: [UUID: ReplacedLead] = [:]
         for session in live {
@@ -931,7 +983,7 @@ final class LeadController: ObservableObject {
             return
         }
         refreshing = true
-        let roots = Set(leadSessions.keys)
+        let roots = leadRoots
         // The sessions as they are now, for the witness to read its teams' transcripts with (see `TeamReading`).
         let hosted = Dictionary(host.sessions.map { ($0.id.uuidString, $0) }, uniquingKeysWith: { first, _ in first })
         let sessions = Dictionary(store.sessions.compactMap { session in session.hostID.map { ($0.uuidString, session) } },
