@@ -129,7 +129,8 @@ enum PhoneLeads {
         let board = lead.board
         var object: [String: Any] = ["id": id(root: lead.root), "project": masked((lead.root as NSString).lastPathComponent)]
         if let summary = lead.summary { object["summary"] = summary }
-        if let mark = board.allDone?.last, !BatchSummary.hasOpenWork(board) || mark.seenAt == nil {
+        // The latest all-done card, as the lead's chat keeps it (read-only: opening the page doesn't mark it seen).
+        if let mark = board.allDone?.last {
             var card: [String: Any] = ["at": mark.at, "count": AllDoneCard.count(mark),
                                        "tasks": mark.tasks.map { ["title": masked($0.title), "outcome": $0.outcome.rawValue] }]
             if let summary = mark.summary {

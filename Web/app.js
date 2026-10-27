@@ -267,6 +267,7 @@ const teamOpen = new Set();          // leads whose team is unfolded on this pho
 const drafts = new Map();            // question id → the answer being written
 const answering = new Set();         // question ids with an answer on its way (a second tap waits for it)
 const answerNotes = new Map();       // question id → { text, error } shown under its card
+const answeredHere = new Map();      // question id → { lead, text, answer, at }: answered from this phone, said for a minute
 let openLeadID = null;               // the lead whose page is shown
 let leadBusy = false;
 let leadPage = null;
@@ -312,7 +313,7 @@ function leadBlock(lead, row, members) {
     team.append(...members.map(sessionRow));
     block.append(team);
   }
-  if (lead.questions.length) block.append(questionStack(lead));
+  if (lead.questions.length || [...answeredHere.values()].some(done => done.lead === lead.id)) block.append(questionStack(lead));
   return block;
 }
 
@@ -321,6 +322,15 @@ function questionStack(lead) {
   const open = lead.questions.filter(q => q.state === 'open');
   if (open.length > 1) stack.append(el('div', 'muted small qOrder', 'Answer in any order'));
   stack.append(...lead.questions.map(q => questionCard(lead, q)));
+  // An answered question leaves the stack, as on the Mac: a line says it went, for a minute.
+  const shown = new Set(lead.questions.map(q => q.id));
+  for (const [id, done] of answeredHere) {
+    if (Date.now() - done.at > 60000) { answeredHere.delete(id); continue; }
+    if (done.lead !== lead.id || shown.has(id)) continue;
+    const line = el('div', 'qClosed answered');
+    line.append(el('div', 'status', `✓ Answered: ${done.answer}`), el('div', 'qClosedText', done.text));
+    stack.append(line);
+  }
   return stack;
 }
 
@@ -417,6 +427,7 @@ async function answerQuestion(lead, q, text) {
                                                   unknownOutcome: "Couldn't tell whether the Mac got your answer. Check the lead before answering again." });
     drafts.delete(q.id);
     answerNotes.set(q.id, { text: reply.notice || `Answered: ${text} ✓`, error: Boolean(reply.notice) });
+    answeredHere.set(q.id, { lead: lead.id, text: q.text, answer: text, at: Date.now() });
   } catch (error) {
     answerNotes.set(q.id, { text: error.message, error: true });
   } finally {
@@ -463,7 +474,8 @@ const MARKS = {
   waits: '…', failed: '✕', blocked: '⊘', stalled: '⏸', ended: '■', working: '●', rework: '↻', review: '◆', merge: '◈',
   queued: '○', merged: '✓', folded: '↳', kept: '▣', abandoned: '−', reverted: '↶',
 };
-const GROUPS = [['needsYou', 'The lead’s to handle'], ['working', 'Working'], ['review', 'In review'], ['queued', 'Queued'], ['finished', null]];
+// The Team tab's order; only the finished ones have a title, as there ("Merged (4) · Reverted (1)").
+const GROUPS = ['needsYou', 'working', 'review', 'queued', 'finished'];
 
 function renderLead() {
   if (!leadPage || document.activeElement && document.activeElement.classList && document.activeElement.classList.contains('qInput')) return;
@@ -489,10 +501,10 @@ function renderLead() {
   }
   parts.push(el('h3', 'sectionTitle', 'Tasks'));
   const tasks = el('div', 'card tasks');
-  for (const [group, title] of GROUPS) {
+  for (const group of GROUPS) {
     const rows = page.tasks.filter(t => t.group === group);
     if (!rows.length) continue;
-    tasks.append(el('div', 'taskGroup', group === 'finished' ? page.finished.title : `${title} (${rows.length})`));
+    if (group === 'finished') tasks.append(el('div', 'taskGroup', page.finished.title));
     for (const task of rows) {
       const row = el('div', 'taskRow');
       const mark = el('span', `mark ${task.mark}`, MARKS[task.mark] || '•');

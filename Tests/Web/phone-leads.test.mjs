@@ -230,6 +230,13 @@ assert.equal(posts.length, 1, 'a double tap answers once');
 hold();
 await flush();
 assert.equal(one(all($('sessions'), 'qCard')[0], 'qNote').textContent, 'Answered: Thursday ✓');
+// Once the Mac's state no longer lists it (answered questions leave the stack), a line says it went.
+const answeredState = stateWith();
+answeredState.leads[0] = { ...lead, questions: questions.slice(1), open: 1, blocking: 0 };
+list(answeredState);
+const went = all($('sessions'), 'qClosed').find(line => line.classList.contains('answered'));
+assert.equal(went.children[0].textContent, '✓ Answered: Thursday');
+list(stateWith());
 
 // 4. In your own words, through the card's box.
 const card = all($('sessions'), 'qCard')[1];
@@ -268,8 +275,7 @@ const audit = taskRows.find(r => one(r, 'taskTitle').textContent === 'Clean up f
 assert.equal(one(audit, 'taskState').textContent, 'Needs audit 2m');
 assert.equal(one(audit, 'detail').textContent, 'Audited: it deletes files');
 assert.ok(one(taskRows[4], 'mark').classList.contains('reverted'));
-assert.deepEqual(all(leadView, 'taskGroup').map(g => g.textContent),
-                 ['The lead’s to handle (1)', 'Working (1)', 'In review (1)', 'Merged (1) · Reverted (1)']);
+assert.deepEqual(all(leadView, 'taskGroup').map(g => g.textContent), ['Merged (1) · Reverted (1)'], 'the finished ones under the Team tab\'s title');
 assert.equal(one(leadView, 'scorecard').children[0].textContent, leadPage.scorecard);
 assert.equal(all(leadView, 'qCard').length, 2, 'its questions on its page too');
 
