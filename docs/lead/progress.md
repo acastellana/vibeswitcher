@@ -1581,3 +1581,4 @@
 - 2026-10-27 21:16 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-10-27 21:20 Planned main-thread-overloaded: Main thread overloaded while an alert is up: SessionStore.apply, LeadController.refreshed → Redaction.secrets, SwiftUI re-render (stalls of 5–95 s)
 - 2026-10-27 21:20 Abandoned hang-detector-don-t: The premise was wrong. An idle modal already beats (the timer runs in .common modes), so the End Session reports were real stalls in the alert's modal loop, and muting them would hide real freezes. The real bug is task main-thread-overloaded.
+- 2026-10-27 21:44 Planned app-memory-grows-to: App memory grows to about 700 MB over a day (footprint 215 MB → 709 MB peak on 2026-10-27)
