@@ -231,6 +231,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
     var settings: SettingsWindowController?
     var sheet: NSWindow?
     var sheetName: String?
+    /// The phone's web app, once `phone` serves it.
+    var phone: PhoneAccess?
     /// What the drive asked for that the sandbox doesn't do (Terminal, a real agent, an alert).
     var refused: [String] = []
     private var cancellables: Set<AnyCancellable> = []
@@ -504,6 +506,69 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// More on the fake lead's board, for what the phone and the Lead view show of it: a proposal whose timer runs, a
+    /// blocking question the lead revised, the merged tasks' merges, a task the risk check raised to audit, one
+    /// reverted, an all-done card with its receipts, and two results.
+    func extras(_ done: @escaping (String?) -> Void) {
+        guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
+        let root = ((home as NSString).appendingPathComponent("projects/sandbox-lead") as NSString).standardizingPath
+        let now = Date().timeIntervalSince1970
+        let contract = LeadContract(goal: "A sandbox task.", acceptance: ["It shows."], boundaries: [], context: "")
+        do {
+            try BoardStore(root: root).update { board in
+                for index in board.tasks.indices where board.tasks[index].status == .done {
+                    board.tasks[index].merged = LeadMergeRecord(commit: "abc\(index)def0", tested: true, audited: false, at: now - Double(index + 1) * 1_800)
+                    board.tasks[index].review = LeadTask.Review.none
+                }
+                var raised = LeadTask(slug: "clean-ended-folders", title: "Clean up ended sessions' folders", contract: contract, status: .review)
+                raised.review = .audit
+                raised.since = now - 120
+                raised.riskRaised = LeadRiskRaise(reason: "it deletes files (Sources/Cleanup.swift: try fm.removeItem(at: folder))", commit: "abc1234def0", byModel: false)
+                var reverted = LeadTask(slug: "paste-images", title: "Paste images into the chat", contract: contract, status: .reverted)
+                reverted.merged = LeadMergeRecord(commit: "abc9def0", tested: true, audited: false, at: now - 6_000)
+                reverted.merged?.revertedBy = "fed9cba0"
+                reverted.merged?.revertReason = "The chat froze on a large paste; reverted, a fix-forward is planned."
+                board.tasks += [raised, reverted]
+                board.questions.append(LeadQuestion(text: "Ship the hero image as WebP only, or keep a PNG fallback?", options: ["WebP only", "Keep a PNG fallback"],
+                                                    priority: .whenever, whyNow: "The landing copy merges next; its images need one format.",
+                                                    proposal: "Keep a PNG fallback", decideIn: 10, at: now - 150))
+                var revised = LeadQuestion(text: "Launch to the testers on Thursday, or wait for the sidebar fixes?", options: ["Thursday", "Wait for the fixes"],
+                                           priority: .blocking, whyNow: "The testers' invite goes out tomorrow morning.", at: now - 900)
+                revised.revisions = [LeadQuestion.Revision(text: "Launch to everyone on Thursday?", options: ["Yes", "No"],
+                                                           note: "Only the testers get it first", at: now - 400)]
+                board.questions.append(revised)
+                board.allDone = [Driver.allDoneMark()]
+                board.updates = Driver.results(home: home)
+                board.refreshScores(now: now)
+            }
+        } catch {
+            return done("couldn't write the lead's board: \(error)")
+        }
+        done(nil)
+    }
+
+    /// The phone's web app, served for this sandbox (`PhoneAccess.serveInSandbox`) on a free port of 127.0.0.1, its
+    /// lead views reading this sandbox's leads: STATE/phone.json says where, the phone's token, and the headers
+    /// `tailscale serve` would add (a scratch proxy in front of it adds them; the web app is the Mac's, as served).
+    private func servePhone(_ reply: @escaping (Bool, String) -> Void) {
+        let status = TailscaleCLI.Status(dnsName: "sandbox-mac.tail0000.ts.net", login: "sandbox@example.invalid", httpsAvailable: true)
+        let access = phone ?? PhoneAccess(store: store)
+        access.hostClient = host
+        access.inputAllowed = true
+        phone = access
+        let port = UInt16.random(in: 50_000...59_999)
+        access.serveInSandbox(port: port, status: status) { [weak self] token in
+            guard let self else { return }
+            guard let token else { return reply(false, "couldn't open 127.0.0.1:\(port); try again") }
+            let file = self.state.appendingPathComponent("phone.json")
+            let info: [String: Any] = ["url": "http://127.0.0.1:\(port)/", "token": token,
+                                       "host": "\(status.dnsName):\(PhoneAccess.httpsPort)", "login": status.login]
+            guard let data = try? JSONSerialization.data(withJSONObject: info, options: [.prettyPrinted, .sortedKeys]),
+                  (try? VibePaths.writePrivate(data, to: file)) != nil else { return reply(false, "couldn't write \(file.path)") }
+            reply(true, "the phone's web app is served on http://127.0.0.1:\(port)/; \(file.path) has its token and headers")
+        }
+    }
+
     /// The fake lead's conversation, ending a minute ago: the transcript's lines, and when it withdrew its question.
     static func leadTurns(now: Date) -> (String, Double) {
         var lines: [String] = []
@@ -631,6 +696,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("ask [TEXT]", "puts an open question for you (TEXT, or a made-up one) on the fake lead's board (start the lead first): its row reads needs you"),
         ("unfold", "shows the selected lead's team under its row in the sidebar"),
         ("answer", "answers the fake lead's open questions: its row reads as its terminal does again"),
+        ("extras", "adds to the fake lead's board (start the lead first) a proposal on a timer, a revised question, a task needing an audit, an all-done card and two results"),
+        ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
         ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
@@ -890,6 +957,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
             settle { reply(true, "\(row.title)'s team shown") }
         case "ask": ask(rest, answer: false) { problem in reply(problem == nil, problem ?? "the lead asks you") }
         case "answer": ask("", answer: true) { problem in reply(problem == nil, problem ?? "its questions answered") }
+        case "extras": extras { problem in reply(problem == nil, problem ?? "the lead's board has a proposal, a revised question, an all-done card and results") }
+        case "phone": servePhone(reply)
         case "select":
             guard let row = WindowGroups.filter(model.sections, query: rest).first?.rows.first else { return reply(false, "no row matches \(rest)") }
             model.selectedID = row.id

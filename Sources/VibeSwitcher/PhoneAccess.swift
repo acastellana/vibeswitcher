@@ -465,6 +465,35 @@ final class PhoneAccess: ObservableObject {
         state == .off ? "Phone Access is off on the Mac." : "Phone Access is restarting on the Mac. Try again in a moment."
     }
 
+    /// The sandbox's phone (`scripts/sandbox-app.sh phone`): served on `port` of 127.0.0.1 as if `tailscale serve` relayed
+    /// it for `status`, with no Tailscale call and nothing mapped, and one phone paired, whose token `done` gets (nil:
+    /// the port couldn't be opened). Refused outside the sandbox (`Sandbox.isOn`): the app's Phone Access starts only
+    /// through `start`.
+    func serveInSandbox(port: UInt16, status: TailscaleCLI.Status, done: @escaping (String?) -> Void) {
+        guard Sandbox.isOn else { return done(nil) }
+        server?.stop()
+        tailscale = status
+        let server = RemoteServer { [weak self] request, respond in
+            DispatchQueue.main.async {
+                guard let self else { return respond(.error(503, "unavailable")) }
+                self.route(request, respond: respond)
+            }
+        }
+        self.server = server
+        server.start(port: port, onReady: { [weak self] in
+            guard let self else { return done(nil) }
+            self.state = .on
+            self.url = URL(string: "http://127.0.0.1:\(port)/")
+            let token = RemoteAuth.newToken()
+            self.devices = [PairedDevice(id: Base64URL.encode(WebPush.randomBytes(9)), name: "Sandbox phone", tokenHash: RemoteAuth.hash(token),
+                                         tailscaleLogin: status.login, pairedAt: Date())]
+            done(token)
+        }, onFailure: { [weak self] _ in
+            self?.server = nil
+            done(nil)
+        })
+    }
+
     #if DEBUG
     /// Tests: requests answered as once `tailscale serve` is up for `status`, with nothing listening or started.
     func serveForTests(_ status: TailscaleCLI.Status) {
