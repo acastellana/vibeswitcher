@@ -1535,3 +1535,6 @@
 - 2026-10-27 17:54 Started a worker on launch-video-v3-narrated
 - 2026-10-27 17:54 Incident: message() to a long-idle worker (its turn had ended about 24 h before) said "Typed into … as its next prompt", but the prompt was never submitted. It sat as a d… (in launch-video); planned turn-this-incident-into to turn it into a check
 - 2026-10-27 17:54 Started a worker on turn-this-incident-into
+- 2026-10-27 18:06 Planned lead-chat-freeze: Lead chat freeze: LeadController.refresh loads the board (LeadNames.board) on the main thread
+- 2026-10-27 18:07 Started a worker on lead-chat-freeze
+- 2026-10-27 18:07 Automatically (auto_advance): Started a worker on lead-chat-freeze (Lead chat freeze: LeadController.refresh loads the board (LeadNames.board) on the main thread).
