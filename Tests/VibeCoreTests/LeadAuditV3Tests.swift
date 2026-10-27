@@ -178,7 +178,7 @@ extension LeadFindingsToolTests {
         #expect(runtime.spawned.last { $0.command.contains("--name 'worker-add-b'") }?.command.contains("--model") == false)
         #expect(call(lead, "configure").text.contains("verifier_model: not set: audits run on fable"))
         runtime.claude = "claude --model fable"
-        _ = call(lead, "audit", ["task": "add-b"])
+        _ = call(lead, "audit", ["task": "add-b", "restart": true])
         #expect(runtime.spawned.last?.command.contains("--model 'opus'") == true)
     }
 }

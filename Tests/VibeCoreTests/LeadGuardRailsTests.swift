@@ -107,7 +107,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
         _ = try reported(lead, runtime, root: root)
         _ = lead.call("audit", ["task": "add-b"])
         let first = try seat("verify-add-b", runtime)
-        _ = lead.call("audit", ["task": "add-b"])
+        _ = lead.call("audit", ["task": "add-b", "restart": true])
         // The lead started another verifier: the first one's role is withdrawn.
         #expect(first.call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "ok"]).isError)
         #expect(lead.call("merge", ["task": "add-b"]).isError)

@@ -421,8 +421,9 @@ public final class LeadToolset: MCPToolset {
                 MCPToolInfo(name: "read_session", description: "A worker's or verifier's conversation, condensed (prompts, replies, tool runs, failures).",
                             properties: ["task": task, "who": P(type: "string", description: "worker (default) or verifier", options: ["worker", "verifier"])],
                             required: ["task"]),
-                MCPToolInfo(name: "audit", description: "Start the read-only verifier on a task's branch. Its report, not the worker's, decides. A worktree left on another branch or a detached HEAD is put back on agent/<slug> first (refused, and its worker told what to run, when it holds uncommitted files or commits the branch lacks).",
-                            properties: ["task": task], required: ["task"]),
+                MCPToolInfo(name: "audit", description: "Start the read-only verifier on a task's branch. Its report, not the worker's, decides. A worktree left on another branch or a detached HEAD is put back on agent/<slug> first (refused, and its worker told what to run, when it holds uncommitted files or commits the branch lacks). A verifier already auditing the branch's head is left alone (the reply says since when and on which commit); a new commit, or a verifier that has ended, starts a new one in its place.",
+                            properties: ["task": task, "restart": P(type: "boolean", description: "End the verifier already auditing the branch's head and start a new one on the same commit (its work is thrown away)")],
+                            required: ["task"]),
                 MCPToolInfo(name: "merge", description: "Merge a task: rebase onto the lead's branch (squashed when the worker merged it in), run the test command, fast-forward that branch. An audit task (or one whose branch touches sensitive_paths) needs its passing audit; a review none task needs only its worker's done report on the branch's head and the test command passing.",
                             properties: ["task": task], required: ["task"]),
                 MCPToolInfo(name: "revert", description: "Undo a merged task in one step: one commit on top of the lead's branch reverts the commits its merge put there, the test command runs on it, and the branch fast-forwards to it; the task reads reverted. It only adds a commit (nothing is reset or rewritten). Refused, with the branch untouched, when the tests fail or when later commits conflict with the revert (it names the files and the tasks that touched them: plan a fix-forward task instead).",
@@ -511,7 +512,7 @@ public final class LeadToolset: MCPToolset {
             case "stop_worker": return try stopWorker(try taskSlug(arguments))
             case "message": return try message(try taskSlug(arguments), arguments)
             case "read_session": return try readSession(try taskSlug(arguments), who: arguments["who"] as? String ?? "worker")
-            case "audit": return try audit(try taskSlug(arguments))
+            case "audit": return try audit(try taskSlug(arguments), restart: arguments["restart"] as? Bool ?? false)
             case "merge":
                 let merged = try merge(try taskSlug(arguments))
                 records.flush(base: base)
@@ -1477,8 +1478,11 @@ public final class LeadToolset: MCPToolset {
         }
     }
 
-    private func audit(_ slug: String) throws -> MCPToolResult {
+    private func audit(_ slug: String, restart: Bool = false) throws -> MCPToolResult {
         if let task = store.load().task(slug), Self.settledStates.contains(task.status) { throw Self.settledRefusal(task, "Not audited") }
+        // A verifier already at work on the branch's head is left to it: another would end it and throw its work away
+        // (2026-10-27: audit(land-pr-1-host) ended the one auto_advance had started on that very head).
+        if !restart, let running = try runningAudit(slug) { return MCPToolResult(text: running) }
         try checkBattery(not: "Not audited, no verifier started")
         // A worktree that left its branch goes back on it first (see putBackForAudit).
         let putBack = try store.load().task(slug).map { try putBackForAudit(slug, $0) } ?? ""
@@ -1595,6 +1599,33 @@ public final class LeadToolset: MCPToolset {
                                  + "Their findings are voted into one verdict, which arrives as a message once all \(panel.size) have submitted.\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
         }
         return MCPToolResult(text: noTools + putBack + behind + room + earlier + "Verifier started on \(slug) (checking \(head.prefix(8))). Its verdict arrives as a message.\(tested)\(round)\(flagged)\(Self.leftoversText(leftovers))\(cap)")
+    }
+
+    /// What audit's reply says of the task's audit still at work on its branch's head: the verifiers it waits on
+    /// (see `awaitedVerifiers`), none of which has submitted, ended or had its agent quit, on the commit the branch is
+    /// at now; nil when there's none (no audit, one on an older commit, or one whose verifier has died), and audit
+    /// starts a new one as before.
+    private func runningAudit(_ slug: String) throws -> String? {
+        guard let task = store.load().task(slug), task.evidence == nil, let head = branchHead(Worktrees.branch(slug)) else { return nil }
+        let waiting = task.awaitedVerifiers
+        guard !waiting.isEmpty else { return nil }
+        // The commit they check: the panel's, or the verifier's grant's.
+        let grant = vault.current(.verifier, root: root, task: slug)
+        let commit = task.panel?.commit ?? (grant?.session == task.verifier ? grant?.auditing : nil)
+        guard commit == head else { return nil }
+        let sessions = try hostSessions("whether \(slug)'s verifier is still auditing isn't known; no verifier was started or ended")
+        let roster = (try? vault.roster(root: root)) ?? []
+        let submitted = Set(roster.filter { $0.submittedAt != nil }.map(\.session))
+        for verifier in waiting {
+            guard !submitted.contains(verifier), let info = sessions.first(where: { $0.id == verifier }), info.live,
+                  runtime.agentEnding(info) == nil else { return nil }
+        }
+        let started = roster.first { $0.session == waiting[0] }?.boundAt ?? (grant?.session == waiting[0] ? grant?.issuedAt : nil)
+        let since = started.map { " since \(LeadBoard.clock($0)) (\(PendingPrompt.minutes($0, now: Date())) ago)" } ?? ""
+        let who = task.panel.map { "\($0.size) finders (\($0.progress); sessions \($0.sessions.joined(separator: ", ")))" } ?? "verifier (session \(waiting[0]))"
+        return "Not started again: \(slug)'s \(who) \(task.panel == nil ? "is" : "are") already auditing \(head.prefix(8))\(since), the branch's head, "
+            + "so it was left alone; its verdict arrives as a message. A new commit, or its verifier ending without a verdict, lets audit start "
+            + "another; audit(\(slug), restart: true) ends it now and starts one on the same commit, throwing its work away."
     }
 
     /// Why an audit's verifiers get the security checklist (`LeadPrompts.securitySection`); nil when they don't. The

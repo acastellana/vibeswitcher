@@ -517,7 +517,7 @@ struct LeadAdvanceTests: LeadTeamFixture {
         quits(first, runtime, root: root)
         #expect(advancing.until { task("add-b", root)?.verifierRetry != nil })
         // The lead audits again itself on the same commit (the retry's verifier stopped on an API error, say).
-        let audit = lead.call("audit", ["task": "add-b"])
+        let audit = lead.call("audit", ["task": "add-b", "restart": true])
         #expect(!audit.isError, "\(audit.text)")
         let third = try #require(task("add-b", root)?.verifier)
         #expect(!(task("add-b", root)?.verifierRetry?.verifiers.contains(third) ?? true))
