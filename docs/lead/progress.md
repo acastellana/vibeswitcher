@@ -1479,3 +1479,9 @@
 - 2026-10-27 04:05 Automatically (auto_advance): Started the audit of the-lead-chat-s at f50c0a71 (An audit was started on it: its verdict decides).
 - 2026-10-27 04:12 Audit of the-lead-chat-s: complete, clean, round 2: 1 Important closed, 4 Nit (1 open)
 - 2026-10-27 04:20 Merged the-lead-chat-s: The lead chat's 10 s freeze: SwiftUI's key-view loop rebuild during layout
+- 2026-10-27 04:20 Automatically (auto_advance): Merged the-lead-chat-s (The lead chat's 10 s freeze: SwiftUI's key-view loop rebuild during layout) into project-lead at 002d02cf, on its passing audit and the full test run.
+- 2026-10-27 04:20 Automatically (auto_advance): Cleaned up the-lead-chat-s (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-10-27 04:21 Update: Batch done: the phone catches up with the Mac, and the lead chat stops freezing — 2 tasks merged since the last install (325207e).
+- 2026-10-27 04:24 Planned the-time-budget-s: The time budget's bookkeeping runs off the main thread and only over running tasks
+- 2026-10-27 04:25 Started a worker on the-time-budget-s
+- 2026-10-27 04:25 Automatically (auto_advance): Started a worker on the-time-budget-s (The time budget's bookkeeping runs off the main thread and only over running tasks).
