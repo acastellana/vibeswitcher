@@ -1548,3 +1548,9 @@
 - 2026-10-27 18:25 Kept launch-video-v3-narrated unmerged: This is a deliverable only: the video lives in this worktree's brag-output/. Never merge it, and don't clean it up until the user has the files.
 - 2026-10-27 18:25 Update: Launch film v3: narrated, 58 s — **Video:** `/Users/albert/dev/vibeswitcher/.vibeswitcher/worktrees/launch-video-v3-narrated/brag-output/brag.mp4` (1920×1080, 58 s). The poster `brag.jpg`, `share-copy.txt` and `brag-plan.md` (with th…
 - 2026-10-27 18:31 Merged lead-chat-freeze: Lead chat freeze: LeadController.refresh loads the board (LeadNames.board) on the main thread (no audit: review none)
+- 2026-10-27 18:31 Automatically (auto_advance): Merged lead-chat-freeze (Lead chat freeze: LeadController.refresh loads the board (LeadNames.board) on the main thread) into project-lead at 9193643d, review none: on its worker's done report on 1d2cfb36 and the full test run.
+- 2026-10-27 18:31 Automatically (auto_advance): Didn't cleanup|lead-chat-freeze: Error Domain=NSPOSIXErrorDomain Code=9 "Bad file descriptor"
+- 2026-10-27 18:31 Automatically (auto_advance): Didn't start|lead-chat-deliver-wake: Error Domain=NSPOSIXErrorDomain Code=9 "Bad file descriptor"
+- 2026-10-27 18:32 Automatically (auto_advance): Cleaned up lead-chat-freeze (freed 0 MB of build output and temporary folders). It stays done.
+- 2026-10-27 18:34 Started a worker on lead-chat-deliver-wake
+- 2026-10-27 18:34 Automatically (auto_advance): Started a worker on lead-chat-deliver-wake (Lead chat: deliver, wake and flush still stat or decode the board on the main thread), its after tasks done (lead-chat-freeze).
