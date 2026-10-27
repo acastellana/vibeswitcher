@@ -215,7 +215,7 @@ struct WindowRowView: View {
                         .frame(width: 12).padding(.leading, 8)
                 }
                 AgentMark(kind: row.markKind, status: row.statusColor, hollow: row.statusIsHollow, size: nested ? 18 : 22, mark: row.statusMark,
-                          spoken: row.spokenStatus)
+                          spoken: row.spokenStatus, statusFirst: true)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 4) {
                         if role == .lead {

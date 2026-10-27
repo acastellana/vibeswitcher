@@ -30,7 +30,8 @@ enum MarkKind: Equatable {
     }
 }
 
-/// The colored square that says which agent runs in a row, with its status dot on the corner.
+/// The colored square that says which agent runs in a row, with its status dot on the corner. With `statusFirst` (the
+/// sidebar's rows) the two swap: the status's shape is the mark, the agent's square a badge on its corner.
 struct AgentMark: View {
     let kind: MarkKind
     var status: Color?
@@ -40,8 +41,27 @@ struct AgentMark: View {
     var mark: StatusMark?
     /// The status in words, for VoiceOver: "Claude, needs input".
     var spoken: String?
+    /// The status big and the agent small (when there's a status to show).
+    var statusFirst = false
 
     var body: some View {
+        content
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(spokenLabel)
+    }
+
+    /// What VoiceOver says, whichever part is big: "Claude, needs input".
+    var spokenLabel: String { spoken.map { "\(kind.name), \($0.lowercased())" } ?? kind.name }
+
+    @ViewBuilder private var content: some View {
+        if statusFirst, let status, let mark {
+            statusMark(mark, color: status)
+        } else {
+            agentMark
+        }
+    }
+
+    private var agentMark: some View {
         RoundedRectangle(cornerRadius: size * 0.28, style: .continuous)
             .fill(kind.color.gradient)
             .frame(width: size, height: size)
@@ -64,9 +84,42 @@ struct AgentMark: View {
                     .offset(x: dot * 0.3, y: dot * 0.3)
                 }
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(spoken.map { "\(kind.name), \($0.lowercased())" } ?? kind.name)
     }
+
+    private func statusMark(_ mark: StatusMark, color: Color) -> some View {
+        let layout = StatusFirstLayout(size: size)
+        return ZStack(alignment: .topLeading) {
+            StatusMarkView(mark, color: color, size: layout.status.width)
+                .offset(x: layout.status.minX, y: layout.status.minY)
+            // A ring in the window's colour round the badge, so it stands apart from the status and the row.
+            RoundedRectangle(cornerRadius: layout.badgeRadius + layout.ring, style: .continuous)
+                .fill(Color(nsColor: .windowBackgroundColor))
+                .frame(width: layout.badge.width + 2 * layout.ring, height: layout.badge.height + 2 * layout.ring)
+                .offset(x: layout.badge.minX - layout.ring, y: layout.badge.minY - layout.ring)
+            RoundedRectangle(cornerRadius: layout.badgeRadius, style: .continuous)
+                .fill(kind.color.gradient)
+                .frame(width: layout.badge.width, height: layout.badge.height)
+                .overlay(Image(systemName: kind.symbol).font(.system(size: layout.badge.width * 0.6, weight: .bold)).foregroundStyle(.white))
+                .offset(x: layout.badge.minX, y: layout.badge.minY)
+        }
+        .frame(width: size, height: size, alignment: .topLeading)
+    }
+}
+
+/// Where `AgentMark(statusFirst:)` draws its parts in its `size` square (y down): the status's shape at the top left,
+/// and the agent's badge on the bottom-right corner, past the square's edge, as the status dot was. The badge and its
+/// ring stay clear of the status's disc (no shape is cut), which is why the status is a little smaller than the square.
+struct StatusFirstLayout {
+    let size: CGFloat
+
+    var status: CGRect { CGRect(x: 0, y: 0, width: size * 0.8, height: size * 0.8) }
+    var badge: CGRect {
+        let side = size * 0.5
+        return CGRect(x: size - side * 0.6, y: size - side * 0.6, width: side, height: side)
+    }
+    var badgeRadius: CGFloat { badge.width * 0.28 }
+    /// The window-coloured ring round the badge.
+    var ring: CGFloat { max(1, size * 0.06) }
 }
 
 extension WindowRow {
