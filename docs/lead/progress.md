@@ -1590,3 +1590,4 @@
 - 2026-10-27 23:14 Started a worker on turn-this-incident-into-3
 - 2026-10-27 23:14 Automatically (auto_advance): Started a worker on turn-this-incident-into-3 (Witness: "agent quit" only when the agent's process has exited, not while it waits on a background command).
 - 2026-10-27 23:15 Automatically (auto_advance): Started the audit of lead-chat-freezes-of at 00d697c3 (Its review is audit. (audited: it has code that adds locks or threads (Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift: DispatchQueue.global(qos: .utility).async { [weak self] in), as the risk check found.)).
+- 2026-10-27 23:15 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
