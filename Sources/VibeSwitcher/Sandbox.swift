@@ -375,7 +375,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// with a short conversation already in its transcript and the hook state a Claude session leaves. `agent` .codex:
     /// the same fake, told apart as Codex; nil: a shell's `cat`, with no agent at all.
     func startFake(label: String, slug named: String? = nil, transcript firstLines: String = Driver.firstTurn, agent: Agent? = .claude,
-                   _ done: @escaping (String?) -> Void) {
+                   title: String? = nil, _ done: @escaping (String?) -> Void) {
         let fakeClaude = agent == nil ? nil : self.fakeClaude
         fakeCount += 1
         let number = fakeCount
@@ -393,7 +393,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
         if let fakeClaude {
             FileManager.default.createFile(atPath: transcript, contents: Data(firstLines.utf8))
             FileManager.default.createFile(atPath: controlFile, contents: nil)
-            command = "exec /usr/bin/python3 -I -u '\(fakeClaude)' '\(transcript)' '\(controlFile)' '\(agentState)'"
+            // A terminal title as Claude Code sets one (OSC 0), when given: 2.1.311 titles its sessions "worker-<slug>".
+            let titled = title.map { "printf '\\033]0;%s\\007' '\($0)'; " } ?? ""
+            command = titled + "exec /usr/bin/python3 -I -u '\(fakeClaude)' '\(transcript)' '\(controlFile)' '\(agentState)'"
         } else {
             command = "printf 'A scratch terminal of the VibeSwitcher sandbox.\\n'; echo \"{\\\"pid\\\": $$}\" > '\(agentState)'; exec /bin/cat"
         }
@@ -480,11 +482,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
         startFake(label: "Lead · \(slug)", slug: slug, transcript: lines, done)
     }
 
-    /// A fake worker on the fake lead's running task, in its worktree, named on the board as that task's worker.
-    func startWorker(_ done: @escaping (String?) -> Void) {
+    /// A fake worker on the fake lead's running task, in its worktree, named on the board as that task's worker; with
+    /// `title`, titled as Claude Code titles it ("worker-<slug>").
+    func startWorker(title: String? = nil, _ done: @escaping (String?) -> Void) {
         let lead = "sandbox-lead", slug = "sync-landing-base-with-2", label = "Worker: Sync landing-base with main"
         guard fakeList.contains(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
-        startFake(label: label, slug: "\(lead)/.vibeswitcher/worktrees/\(slug)") { [weak self] problem in
+        startFake(label: label, slug: "\(lead)/.vibeswitcher/worktrees/\(slug)", title: title) { [weak self] problem in
             guard let self else { return }
             if let problem { return done(problem) }
             guard let fake = self.fakeList.first(where: { $0.label == label }) else { return done("the worker isn't listed") }
@@ -499,6 +502,32 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 return done("couldn't write the lead's board: \(error)")
             }
             done(nil)
+        }
+    }
+
+    /// 2026-10-28's sidebar: the fake lead's worker and a verifier on its running task, titled as Claude Code 2.1.311
+    /// names sessions ("worker-<slug>", "verify-<slug>"), and the lead's agent moved into its `.vibeswitcher/worktrees`
+    /// (its hooks' cwd, as after a `cd` there). Its team still folds under it.
+    func startNamedTeam(_ done: @escaping (String?) -> Void) {
+        let slug = "sync-landing-base-with-2"
+        guard let lead = fakeList.first(where: { $0.label.hasPrefix("Lead · ") }) else { return done("no fake lead: lead first") }
+        startWorker(title: "worker-\(slug)") { [weak self] problem in
+            guard let self else { return }
+            if let problem { return done(problem) }
+            self.startFake(label: "Verifier: Sync landing-base with main", slug: "sandbox-lead/.vibeswitcher/worktrees/\(slug)",
+                           title: "verify-\(slug)") { [weak self] problem in
+                guard let self else { return }
+                if let problem { return done(problem) }
+                let file = VibePaths.stateFile(tty: lead.tty)
+                guard var hook = HookState.load(from: file) else { return done("the lead has no hook state") }
+                hook.cwd = (lead.cwd as NSString).appendingPathComponent(".vibeswitcher/worktrees")
+                do { try hook.save(to: file) } catch { return done("couldn't move the lead's cwd: \(error)") }
+                self.store.refresh()
+                let moved = hook.cwd
+                self.waitFor({ [weak self] in self?.store.sessions.first { $0.tty == lead.tty }?.cwd == moved }) { met in
+                    done(met ? nil : "the lead's session didn't read its new cwd")
+                }
+            }
         }
     }
 
@@ -723,6 +752,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("hangs [reset]", "the sandbox's main-thread freezes (its hang reports, as the health digest tells them) and its longest wait between two beats (reset: from now on)"),
         ("lead [FILE]", "shows a fake project lead's chat, at its end (started the first time, on FILE's transcript if given): a board of tasks, a withdrawn question, tool runs and workers' messages"),
         ("team", "starts a fake worker on the fake lead's running task, in its worktree (start the lead first); select it and tell it a permission to see it wait on its lead"),
+        ("team named", "starts the fake lead's worker and a verifier titled as Claude Code 2.1.311 names them (worker-<slug>, verify-<slug>) and moves the lead's agent into its .vibeswitcher/worktrees (start the lead first): its team still folds under it"),
         ("ask [TEXT]", "puts an open question for you (TEXT, or a made-up one) on the fake lead's board (start the lead first): its row reads needs you"),
         ("unfold", "shows the selected lead's team under its row in the sidebar"),
         ("answer", "answers the fake lead's open questions: its row reads as its terminal does again"),
@@ -1103,6 +1133,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
                 lines.append(String(format: "longest between beats (0.25 s apart when free): %.2f s, ended %@", longest.gap, "\(longest.at)"))
             }
             reply(true, lines.isEmpty ? "none" : lines.joined(separator: "\n"))
+        case "team" where rest == "named": startNamedTeam { problem in reply(problem == nil, problem ?? "worker and verifier started, the lead's agent in its worktrees folder") }
         case "team": startWorker { problem in reply(problem == nil, problem ?? "worker started") }
         case "unfold":
             guard let row = model.selectedRow else { return reply(false, "nothing selected") }
