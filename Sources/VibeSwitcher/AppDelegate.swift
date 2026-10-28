@@ -128,6 +128,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         HookBinary.sync()
         VibePaths.ensurePrivateDirectories()
         PrivateRepair.atLaunch()
+        // Script blocks' files a crash left behind (see `RunnableCommand.Script`).
+        RunnableCommand.Script.removeAll()
         hostClient.connectIfRunning()
         // Leads' witness and questions work with the window closed too.
         _ = leadController
@@ -783,6 +785,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         SidebarWorkspace.restoreHiddenWindows(timeout: 1)
         store.saveLedger()
         phoneAccess.shutdown()
+        // Script blocks written for Run and not run yet.
+        RunnableCommand.Script.removeAll()
     }
 
     func popoverDidClose(_ notification: Notification) {

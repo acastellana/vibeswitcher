@@ -334,6 +334,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         Breadcrumbs.shared.note("sandbox: quitting")
         Breadcrumbs.shared.flush()
+        RunnableCommand.Script.removeAll()
     }
 
     /// Quits after `minutes`, from a thread of its own: a main thread that's stuck still ends.
@@ -740,6 +741,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("terminal", "shows the selected session's terminal instead of its chat"),
         ("type TEXT", "types TEXT into the chat's composer (through its text view, as the keyboard does)"),
         ("send", "presses Return in the composer: the message goes to the fake session"),
+        ("run [yes]", "the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as Run does once you confirm (tell it {\"op\": \"realShell\"} first to see its output)"),
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("new [codex|shell] [LABEL]", "starts another fake session: a Claude, or a Codex or a plain shell"),
         ("clear", "ends and removes every fake session: the sidebar is empty, with its New Session menu"),
@@ -1085,6 +1087,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             composer.doCommand(by: #selector(NSResponder.insertNewline(_:)))
             reply(true, "sent")
         case "tell": tell(rest, reply)
+        case "run": runBlock(confirmed: rest == "yes", reply)
         case "clear":
             // Ended first, then removed (the host keeps an ended session's row until it's removed).
             let ids = host.sessions.map(\.id)
@@ -1314,6 +1317,37 @@ private final class Driver: NSObject, NSApplicationDelegate {
         sheet.orderFrontRegardless()
         Sandbox.hide(sheet)
         settle { reply(true, "sheet \(name) shown") }
+    }
+
+    /// The shown chat's last code block that has a Run (`RunButton`): what its confirmation shows, as the sheet; once
+    /// `confirmed`, run as the button runs it after you press Run there.
+    private func runBlock(confirmed: Bool, _ reply: @escaping (Bool, String) -> Void) {
+        guard let chat = window?.chat, model.showsChat else { return reply(false, "no chat: show a fake session's chat first (chat)") }
+        let replies = chat.items.compactMap { item -> String? in
+            guard case .reply(let entry) = item, case .reply(let text) = entry.kind else { return nil }
+            return text
+        }
+        let runnable = replies.reversed().lazy.compactMap { text in
+            MarkdownBlocks.parse(text).reversed().lazy.compactMap { block -> RunnableCommand.Runnable? in
+                guard case .code(let language, let code) = block else { return nil }
+                return RunnableCommand.runnable(code: code, language: language)
+            }.first
+        }.first
+        guard let runnable else { return reply(false, "no code block with a Run in the chat's replies") }
+        closeSheet()
+        if confirmed {
+            let ran = RunButton.run(runnable, with: chat.runner, confirm: { _ in true })
+            return settle { reply(ran, ran ? "ran it: \(runnable.prompt)" : "it couldn't be typed into the session") }
+        }
+        let alert = RunButton.confirmation(runnable)
+        alert.layout()
+        let shown = alert.window
+        Sandbox.hide(shown)
+        sheet = shown
+        sheetName = "run"
+        shown.orderFrontRegardless()
+        Sandbox.hide(shown)
+        settle { reply(true, "Run's confirmation shown (sheet-run)") }
     }
 
     func closeSheet() {

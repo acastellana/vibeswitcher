@@ -284,7 +284,8 @@ extension Array {
 
 /// Runs a code block's command in the session: typed in as `! command`, so it runs in the session's shell and the
 /// output joins the conversation. Shown only while a window session you can type into is selected. Anything longer than
-/// one plain line is shown in full first (see `RunnableCommand`).
+/// one plain line is shown in full first (see `RunnableCommand`); a script block is shown as it is, then written to its
+/// private file and run from there.
 struct RunButton: View {
     @ObservedObject var runner: ChatRunner
     let runnable: RunnableCommand.Runnable
@@ -295,8 +296,8 @@ struct RunButton: View {
     var body: some View {
         if runner.canRun {
             Button {
-                guard !runnable.needsConfirmation || Self.confirm(prompt) else { return }
-                guard runner.run(prompt) else { return NSSound.beep() }
+                guard Self.run(runnable, with: runner, confirm: { Self.confirmation($0).runModal() == .alertFirstButtonReturn })
+                else { return }
                 sent = true
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { sent = false }
             } label: {
@@ -308,16 +309,41 @@ struct RunButton: View {
         }
     }
 
-    /// The exact text that will be typed, wrapped so nothing sits off to the side.
-    private static func confirm(_ prompt: String) -> Bool {
+    /// Asks first when it must (`confirm`), writes a script's file, and types the prompt; false when it wasn't typed
+    /// (cancelled, the file couldn't be written, or the session couldn't take it: then the file goes too).
+    @discardableResult
+    static func run(_ runnable: RunnableCommand.Runnable, with runner: ChatRunner,
+                    confirm: (RunnableCommand.Runnable) -> Bool) -> Bool {
+        guard !runnable.needsConfirmation || confirm(runnable) else { return false }
+        do { try runnable.script?.write() } catch {
+            NSSound.beep()
+            return false
+        }
+        guard runner.run(runnable.prompt) else {
+            if let file = runnable.script?.file { try? FileManager.default.removeItem(at: file) }
+            NSSound.beep()
+            return false
+        }
+        return true
+    }
+
+    /// The exact text that will run, wrapped so nothing sits off to the side: what's typed, or a script's own lines
+    /// with what's typed to run them below.
+    static func confirmation(_ runnable: RunnableCommand.Runnable) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = "Run this in the session?"
-        alert.informativeText = "This is exactly what will be typed:"
+        if let script = runnable.script {
+            alert.informativeText = "These lines run as one \(script.shell) script, exactly as shown. It's typed as:\n\(runnable.prompt)"
+        } else {
+            alert.informativeText = "This is exactly what will be typed:"
+        }
+        let shown = runnable.script?.text ?? runnable.prompt
+        let lines = shown.components(separatedBy: "\n").count
         let scroll = NSTextView.scrollableTextView()
-        scroll.frame = NSRect(x: 0, y: 0, width: 460, height: 160)
+        scroll.frame = NSRect(x: 0, y: 0, width: 520, height: min(max(CGFloat(lines) * 16 + 12, 60), 320))
         scroll.hasVerticalScroller = true
         if let text = scroll.documentView as? NSTextView {
-            text.string = prompt
+            text.string = shown
             text.font = .monospacedSystemFont(ofSize: 11.5, weight: .regular)
             text.isEditable = false
             text.isSelectable = true
@@ -325,7 +351,7 @@ struct RunButton: View {
         alert.accessoryView = scroll
         alert.addButton(withTitle: "Run")
         alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
+        return alert
     }
 }
 

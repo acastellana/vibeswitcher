@@ -1,27 +1,80 @@
+import CryptoKit
 import Foundation
 
 /// A code block in a reply that's a shell command, as the prompt that runs it in the session (`! command`: Claude
 /// Code runs it in its shell and the output joins the conversation).
 ///
 /// Run must type only what the block shows: a block with characters you can't see (zero-width, bidi overrides,
-/// escape sequences), lines past what's on screen, or lines that mean something else once joined with `&&` gets no
-/// Run at all; anything else that isn't plainly harmless is shown in full to confirm first.
+/// escape sequences), lines past what's on screen, or a heredoc gets no Run at all; anything else that isn't plainly
+/// harmless is shown in full to confirm first. A bash, sh, zsh or shell block whose lines mean something only together
+/// (`if`/`fi`, `{ … }`, a quote across lines, a `;` at a line's end) isn't joined with `&&`: it runs as one script,
+/// its text exactly as shown, from a private file (`Script`).
 public enum RunnableCommand {
     static let shells: Set<String> = ["bash", "sh", "zsh", "shell", "console", "terminal"]
 
     public struct Runnable: Equatable, Sendable {
         /// Exactly what's typed into the session.
         public let prompt: String
-        /// More than one line, or not plainly harmless: ask first, showing `prompt` as it is.
+        /// More than one line, or not plainly harmless: ask first, showing what runs: `prompt` as it is, or a
+        /// script's text.
         public let needsConfirmation: Bool
+        /// A block run as one script: `prompt` runs its file, which `Script.write` makes first.
+        public var script: Script? = nil
+    }
+
+    /// A block run as one script: its text byte for byte, in a file only you can read under `folder`, run by `shell`
+    /// and removed once it has run (the rest at the app's quit, `Script.removeAll`). The file is named after the text,
+    /// so the Run button shown for a block always types the same prompt.
+    public struct Script: Equatable, Sendable {
+        public let text: String
+        /// bash, sh or zsh: the block's language (bash for `shell`).
+        public let shell: String
+        public let file: URL
+
+        /// The app's own: under VibeSwitcher's folder, private to you.
+        public static var folder: URL { VibePaths.root.appendingPathComponent("run-blocks") }
+
+        init(text: String, shell: String, folder: URL) {
+            self.text = text
+            self.shell = shell
+            let digest = SHA256.hash(data: Data((shell + "\n" + text).utf8)).prefix(12).map { String(format: "%02x", $0) }.joined()
+            file = folder.appendingPathComponent("block-\(digest).sh")
+        }
+
+        /// What's typed: the shell runs the file, then it's removed (also when the script exits early or fails).
+        public var prompt: String {
+            let path = Self.quoted(file.path)
+            return "! \(shell) \(path); rm -f \(path)"
+        }
+
+        /// Writes the file (0600, its folder 0700) with the block's text exactly.
+        public func write() throws {
+            try VibePaths.ensurePrivate(file.deletingLastPathComponent())
+            try VibePaths.writePrivate(Data(text.utf8), to: file)
+        }
+
+        /// Removes every script file in `folder`: at quit, and at launch for those a crash left.
+        public static func removeAll(in folder: URL = Script.folder) {
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []
+            for name in names where name.hasPrefix("block-") || name.hasPrefix(".block-") {
+                try? FileManager.default.removeItem(at: folder.appendingPathComponent(name))
+            }
+        }
+
+        static func quoted(_ path: String) -> String { "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'" }
     }
 
     public static func prompt(code: String, language: String?, visibleLines: Int? = nil) -> String? {
         runnable(code: code, language: language, visibleLines: visibleLines)?.prompt
     }
 
-    /// `visibleLines`: how many of the block's lines are on screen (nil: all of them).
-    public static func runnable(code: String, language: String?, visibleLines: Int? = nil) -> Runnable? {
+    /// The shell a script block runs in, by its language.
+    static let scriptShells: [String: String] = ["bash": "bash", "sh": "sh", "zsh": "zsh", "shell": "bash"]
+
+    /// `visibleLines`: how many of the block's lines are on screen (nil: all of them). `scripts`: where a script's
+    /// file goes.
+    public static func runnable(code: String, language: String?, visibleLines: Int? = nil,
+                                scripts: URL = Script.folder) -> Runnable? {
         let language = language?.lowercased()
         let raw = code.components(separatedBy: "\n")
         if let visibleLines, raw.dropFirst(visibleLines).contains(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) {
@@ -57,10 +110,25 @@ public enum RunnableCommand {
             pending = ""
         }
         if !pending.isEmpty { commands.append(pending.trimmingCharacters(in: .whitespaces)) }
-        guard !commands.isEmpty, commands.allSatisfy(readsAsTyped), commands.count == 1 || commands.allSatisfy(joinsCleanly)
-        else { return nil }
+        guard !commands.isEmpty else { return nil }
+        guard commands.allSatisfy(readsAsTyped), commands.count == 1 || commands.allSatisfy(joinsCleanly) else {
+            return script(code: code, lines: lines, sourceLines: sourceLines, language: language, folder: scripts)
+        }
         let prompt = "! " + commands.joined(separator: " && ")
         return Runnable(prompt: prompt, needsConfirmation: sourceLines > 1 || !plainlyHarmless(commands[0]))
+    }
+
+    /// Several lines of a bash, sh, zsh or shell block that only mean something together, as one script; nil for one
+    /// line, a block written as typed at a prompt (`$ `, `% `, `!`), or a long blank run that pushes the rest of a line
+    /// out of sight.
+    static func script(code: String, lines: [String], sourceLines: Int, language: String?, folder: URL) -> Runnable? {
+        guard sourceLines > 1, let shell = language.flatMap({ scriptShells[$0] }) else { return nil }
+        let content = lines.filter { !$0.isEmpty }
+        guard !content.contains(where: { $0.hasPrefix("$ ") || $0.hasPrefix("% ") || $0.hasPrefix("!") }),
+              !content.contains(where: { $0.contains(String(repeating: " ", count: 8)) || $0.contains("\t\t") })
+        else { return nil }
+        let script = Script(text: code, shell: shell, folder: folder)
+        return Runnable(prompt: script.prompt, needsConfirmation: true, script: script)
     }
 
     // MARK: What's refused

@@ -14,7 +14,8 @@ enum FakeClaude {
 # command runs until "background", which moves it to the background as the 120 s Bash timeout does) | "imageRead" (how
 # long a pasted image path takes to read, "seconds") | "child" (it starts `sleep 600` and goes on: in its own process
 # group, as a background shell, or with "foreground" in one of its own that takes the terminal's foreground; its pid
-# goes in "children") | "exit" (it quits, as /exit));
+# goes in "children") | "realShell" (from now on a `!` command really runs, in zsh, its output what it printed: the
+# sandbox's, to show a code block's Run) | "exit" (it quits, as /exit));
 # the agent writes its state (mode, tab, answers, the free-text field, queued messages) to STATE after every change.
 import datetime
 import json
@@ -46,6 +47,7 @@ state = {
     "suggest": 0,            # the slash menu's chosen row
     "dismissed": False,      # Esc closed the slash menu (until the box changes)
     "slowShell": False,      # a `!` command runs until "background" (Claude Code's 120 s Bash timeout)
+    "realShell": False,      # a `!` command really runs (in zsh), as Claude Code's do
     "imageRead": 1.0,        # how long a pasted image path takes to read (see `take_paste`)
     "reading": False,        # pasted image paths are being read
     "images": 0,             # the session's images so far ([Image #N])
@@ -262,7 +264,11 @@ def submit_prompt(text):
         return
     if text.startswith("!"):
         state["shell"] = {"command": text[1:].strip(), "at": now()}
-        if not state["slowShell"]:
+        if state["realShell"]:
+            ran = subprocess.run(["/bin/zsh", "-f", "-c", state["shell"]["command"]], stdin=subprocess.DEVNULL,
+                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
+            finish_shell(ran.stdout.decode(errors="replace").rstrip("\n"))
+        elif not state["slowShell"]:
             finish_shell("ran " + state["shell"]["command"])
         return
     content = text
@@ -660,6 +666,8 @@ def control():
             state["turns"] = True
         elif op == "slowShell":
             state["slowShell"] = True
+        elif op == "realShell":
+            state["realShell"] = True
         elif op == "imageRead":
             state["imageRead"] = command["seconds"]
         elif op == "background":
