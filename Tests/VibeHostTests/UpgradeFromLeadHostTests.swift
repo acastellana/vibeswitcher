@@ -32,8 +32,7 @@ import Testing
         let tree = work.appendingPathComponent("tree.tar")
         let temporary = work.appendingPathComponent("tmp")
         try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: true)
-        try run("/usr/bin/git", ["archive", "--output", tree.path, commit], in: repo)
-        try run("/usr/bin/tar", ["-xf", tree.path, "-C", source.path])
+        try export(commit, into: source, through: tree)
         // This checkout's resolved dependencies (the same versions: Package.resolved is unchanged since), cloned.
         for item in ["checkouts", "repositories", "workspace-state.json"] {
             try run("/bin/cp", ["-c", "-R", repo.appendingPathComponent(".build/\(item)").path, scratch.path + "/"])
@@ -50,6 +49,32 @@ import Testing
         return built
     }
 
+    /// Writes `commit`'s tree into `source` (by way of the archive `tree`), its agent files left out: AGENTS.md,
+    /// CLAUDE*.md, .claude/ and .mcp.json, in any folder (tar's --exclude matches at any depth). 2026-10-28: the export
+    /// under .build/old-hosts held the old commit's AGENTS.md and CLAUDE.md while it built, and the lead's audit
+    /// (Worktrees.localAgentConfig) took them for instructions the worktree held uncommitted: its verifier waited on a
+    /// trust question. The build needs neither.
+    static func export(_ commit: String, into source: URL, through tree: URL) throws {
+        try run("/usr/bin/git", ["archive", "--output", tree.path, commit], in: repo)
+        try run("/usr/bin/tar", ["-xf", tree.path, "-C", source.path,
+                                 "--exclude", "AGENTS.md", "--exclude", "CLAUDE*.md", "--exclude", ".claude", "--exclude", ".mcp.json"])
+    }
+
+    /// The agent files under .build that the lead's audit sees in this checkout (git status, ignored files included,
+    /// as Worktrees.localAgentConfig reads it): AGENTS.md, CLAUDE*.md, .mcp.json, and anything in a .claude folder.
+    static func agentFilesUnderBuild() -> [String] {
+        Worktrees.status(in: repo.path, ignored: true).map(\.path).filter { path in
+            let parts = path.split(separator: "/").map(String.init)
+            guard parts.first == ".build", let name = parts.last else { return false }
+            return name == "AGENTS.md" || name == ".mcp.json" || (name.hasPrefix("CLAUDE") && name.hasSuffix(".md")) || parts.contains(".claude")
+        }.sorted()
+    }
+
+    /// The old commit is in this clone.
+    static var hasOldCommit: Bool {
+        (try? run("/usr/bin/git", ["cat-file", "-e", "\(commit)^{commit}"], in: repo, limit: 30)) != nil
+    }
+
     /// The old build can be made here without downloading anything: built already, or its commit is in this clone, pins
     /// the same dependencies, and this checkout's resolved ones are in .build. A fresh clone without the commit, or another Mac without
     /// the dependencies, skips the test.
@@ -59,7 +84,7 @@ import Testing
         let dependencies = ["checkouts", "repositories", "workspace-state.json"]
             .allSatisfy { FileManager.default.fileExists(atPath: repo.appendingPathComponent(".build/\($0)").path) }
         // The same pins as this checkout's dependencies: otherwise the old build would want others, and download them.
-        return dependencies && (try? run("/usr/bin/git", ["cat-file", "-e", "\(commit)^{commit}"], in: repo, limit: 30)) != nil
+        return dependencies && hasOldCommit
             && (try? run("/usr/bin/git", ["diff", "--quiet", commit, "--", "Package.resolved"], in: repo, limit: 30)) != nil
     }
 
@@ -118,6 +143,22 @@ import Testing
         #expect(Date().timeIntervalSince(started) < hangGuard)
     }
 
+    /// The old commit's export, where the old host builds (.build/old-hosts/COMMIT/work-*/src), holds its files but
+    /// not its AGENTS.md or CLAUDE.md: while it's there, the audit sees no agent file under .build.
+    @Test(.enabled(if: hasOldCommit, "needs commit 6311e18 in this clone"))
+    func theOldCommitsExportLeavesItsAgentFilesOut() throws {
+        let tracked = try Self.run("/usr/bin/git", ["ls-tree", "--name-only", Self.commit], in: Self.repo).components(separatedBy: "\n")
+        #expect(tracked.contains("AGENTS.md") && tracked.contains("CLAUDE.md"), "the commit has no agent files to leave out")
+        let work = Self.repo.appendingPathComponent(".build/old-hosts/\(Self.commit)/work-\(UUID().uuidString.prefix(8))")
+        let source = work.appendingPathComponent("src")
+        try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: work) }
+        try Self.export(Self.commit, into: source, through: work.appendingPathComponent("tree.tar"))
+        #expect(FileManager.default.fileExists(atPath: source.appendingPathComponent("Package.swift").path))
+        #expect(FileManager.default.fileExists(atPath: source.appendingPathComponent("Sources").path))
+        #expect(Self.agentFilesUnderBuild() == [])
+    }
+
     @Test(.enabled(if: canBuildOldHost, "needs commit 6311e18 in this clone and its resolved dependencies in .build (or the old host built already in .build/old-hosts); a fresh clone or another Mac has neither, and nothing is downloaded"))
     func theAppSeesItsSessionsAfterAnOlderHostHandsOver() throws {
         let host = try ScratchHostProcess(old: try Self.oldHost())
@@ -159,5 +200,7 @@ import Testing
         let read = stranger.send(.screen(id: shell.id))
         #expect(eventually { stranger.reply(to: read) != nil })
         #expect(stranger.reply(to: read) == .error(HostProtocol.unauthorized))
+        // The old host's build left no agent file where the lead's audit would count it as the worktree's.
+        #expect(Self.agentFilesUnderBuild() == [])
     }
 }
