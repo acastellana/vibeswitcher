@@ -182,6 +182,51 @@ struct LeadStallTests {
         #expect((TranscriptProgress.read(url: file)?.lastWritten ?? 0) > then + 3_000)
     }
 
+    /// land-pr-1-host's worker on 2026-10-27: at 17:35Z it read a 383 KB file, its transcript's last line longer than
+    /// the 256 KB window the witness reads, so the window held no line to date it by. The reading took its subagent's,
+    /// ended at 17:16:34, and the lead heard "stalled … last activity 18 min ago" while the transcript was written every
+    /// few seconds. A worker whose transcript grows every second (each write a line past the window, its file's
+    /// modification time the injected clock) isn't stalled; once it stops, it is, as before.
+    @Test func aTranscriptGrowingInLinesPastTheWindowIsntAStall() throws {
+        let folder = temp.url("big-lines")
+        let file = folder.appendingPathComponent("abc.jsonl")
+        let subagent = folder.appendingPathComponent("abc/subagents/agent-1.jsonl")
+        try FileManager.default.createDirectory(at: subagent.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let start = (Date().timeIntervalSince1970 - 3_600).rounded()
+        func touch(_ url: URL, _ at: Double) throws {
+            try FileManager.default.setAttributes([.modificationDate: Date(timeIntervalSince1970: at)], ofItemAtPath: url.path)
+        }
+        try Self.midTurn(at: start - 20 * 60).write(to: file)
+        try Data("{}\n".utf8).write(to: subagent)
+        try touch(subagent, start - 19 * 60)
+        let output = String(repeating: "x", count: TranscriptTail.window + 4_096)
+        let board = Self.board()
+        var last = start
+        for second in 0..<5 {
+            last = start + Double(second)
+            let handle = try FileHandle(forWritingTo: file)
+            try handle.seekToEnd()
+            try handle.write(contentsOf: Self.lines([
+                #"{"type":"assistant","timestamp":"\#(Self.stamp(last))","isSidechain":false,"message":{"role":"assistant","content":[{"type":"tool_use","id":"r\#(second)","name":"Read","input":{}}]}}"#,
+                #"{"type":"user","timestamp":"\#(Self.stamp(last))","isSidechain":false,"message":{"role":"user","content":[{"tool_use_id":"r\#(second)","type":"tool_result","content":"\#(output)"}]}}"#,
+            ]))
+            try handle.close()
+            try touch(file, last)
+            let progress = try #require(TranscriptProgress.read(url: file))
+            #expect(abs((progress.lastWritten ?? 0) - last) < 0.01)
+            let seen = LeadWitness.Seen(live: true, status: .working, activity: .working(nil), lastActivity: progress.lastWritten)
+            #expect(LeadWitness.events(board: board, seen: ["w1": seen], now: Date(timeIntervalSince1970: last + 1)).isEmpty)
+        }
+        // It stops: 16 min on, it's silent since its last write.
+        let progress = try #require(TranscriptProgress.read(url: file))
+        let seen = LeadWitness.Seen(live: true, status: .working, activity: .working(nil), lastActivity: progress.lastWritten)
+        let events = LeadWitness.events(board: board, seen: ["w1": seen], now: Date(timeIntervalSince1970: last + 16 * 60))
+        let event = try #require(events.first)
+        #expect(events.count == 1)
+        #expect(event.text.contains("stalled: it reads as working, but its transcript hasn't grown and no shell of its runs, last activity 16 min ago"))
+        #expect(event.key == "w1|stalled-\(Int(last))")
+    }
+
     // MARK: (a) silent while it reads as working
 
     @Test func aWorkerThatReadsAsWorkingButWroteNothingFor15MinIsStalled() throws {

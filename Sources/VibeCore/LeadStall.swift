@@ -187,7 +187,24 @@ public struct TranscriptProgress: Equatable, Sendable {
         let start = size > UInt64(TranscriptTail.window) ? size - UInt64(TranscriptTail.window) : 0
         guard (try? handle.seek(toOffset: start)) != nil, var data = try? handle.readToEnd() else { return nil }
         if start > 0 { data = data.subdata(in: (data.startIndex + TranscriptReader.tailStart(data))..<data.endIndex) }
-        return read(data)
+        var progress = read(data)
+        // A last line longer than the window (a Read of a big file) leaves it no timestamped line: the file was last
+        // written when it was modified. Without this the reading fell back to a subagent that ended long before, and
+        // the worker read as silent while its transcript grew (land-pr-1-host, 2026-10-27 17:35Z: a 383 KB result).
+        if progress.lastWritten == nil, start > 0, !timestamped(data),
+           let modified = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date {
+            progress.lastWritten = modified.timeIntervalSince1970
+        }
+        return progress
+    }
+
+    /// Whether any complete line in `data` has a timestamp (a notice's included).
+    static func timestamped(_ data: Data) -> Bool {
+        var lines = TranscriptReader.lines(data)
+        if data.last != 0x0A, !lines.isEmpty { lines.removeLast() }
+        return lines.contains { line in
+            ((try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any])?["timestamp"] != nil
+        }
     }
 
     /// From complete transcript lines (a partial last line is skipped).
