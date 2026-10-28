@@ -57,6 +57,24 @@ import Testing
         #expect(eventually(timeout: 30) { !exists(session) })
     }
 
+    /// A test past its time limit (cancelled) still asks its host to end before it kills it: the host goes on SIGTERM,
+    /// not on a SIGKILL sent at once.
+    @Test func aCancelledTestsHostIsAskedToEndFirst() async throws {
+        let (host, socket, home) = host(idleExit: 600)
+        defer { remove(socket, home) }
+        try TestHosts.run(host)
+        #expect(eventually { FileManager.default.fileExists(atPath: socket) })
+        // Ended from a task that is cancelled already, as a test past its limit is.
+        let ending = Task.detached {
+            while !Task.isCancelled { await Task.yield() }
+            TestHosts.end(host)
+        }
+        ending.cancel()
+        await ending.value
+        #expect(host.terminationReason == .uncaughtSignal && host.terminationStatus == SIGTERM,
+                "ended by \(host.terminationReason == .uncaughtSignal ? "signal" : "exit") \(host.terminationStatus)")
+    }
+
     /// A handover scene whose test fails before it ends it: the host goes.
     @Test func aFailingSceneIsEnded() throws {
         var pid: pid_t = 0

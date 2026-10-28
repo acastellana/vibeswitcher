@@ -55,7 +55,11 @@ enum TestHosts {
         guard pid > 0 else { return }
         if host.isRunning {
             kill(pid, SIGTERM)
-            if !eventually(timeout: 10, { !host.isRunning }) { kill(pid, SIGKILL) }
+            // Its 10 s even in a cancelled test (past its time limit), where `eventually` would end at once: the host
+            // ends as any other does, its log saying who signalled it, not cut off by a SIGKILL straight away.
+            let deadline = Date().addingTimeInterval(10)
+            while host.isRunning, Date() < deadline { Thread.sleep(forTimeInterval: 0.02) }
+            if host.isRunning { kill(pid, SIGKILL) }
         }
         host.waitUntilExit()
         lock.withLock { _ = started.remove(pid) }
