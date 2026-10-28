@@ -1604,3 +1604,7 @@
 - 2026-10-28 07:33 Automatically (auto_advance): Started a worker on issue-2-workers (Issue #2: workers' vibeswitcher tools can come up empty (role bind races Claude Code 2.1.311's faster MCP start)), its after tasks done (land-pr-1-host).
 - 2026-10-28 07:36 Ended turn-this-incident-into-3's worker (idle since its done report on ee1aaad2) to make room on the Mac for its audit
 - 2026-10-28 07:36 Automatically (auto_advance): Started the audit of turn-this-incident-into-3 at ee1aaad2 (Its review is audit).
+- 2026-10-28 07:47 Incident: The lead's vibeswitcher tool server exits in the middle of a session ("connection closed (cleanly)"), leaving the lead with no tools until the user runs /mcp. I…; planned turn-this-incident-into-4 to turn it into a check
+- 2026-10-28 07:48 Review of turn-this-incident-into-4: audit
+- 2026-10-28 07:48 Ended sidebar-running-workers's worker (idle since its done report on 2ff6d0a2) to make room on the Mac for its audit
+- 2026-10-28 07:51 Audit of turn-this-incident-into-3: complete, clean, round 1: 2 Nit open

@@ -21,3 +21,9 @@ Evidence: 2026-10-27, task land-pr-1-host. The verifier with claude pid 1558 (sp
 Task: land-pr-1-host
 Check: task turn-this-incident-into-3 turns it into a check that runs before merge.
 
+## 2026-10-28 07:47:49 The lead's vibeswitcher tool server exits in the middle of a session ("connection closed (cleanly)"), leaving the lead with no tools until the user runs /mcp. It happened twice in 14 h. The first time was preceded by EBADF ("Bad file descriptor") from cleanup and start_worker.
+
+Evidence: 2026-10-27: cleanup(lead-chat-freeze) and auto_advance's start of lead-chat-deliver-wake failed with "Error Domain=NSPOSIXErrorDomain Code=9 'Bad file descriptor'". A manual cleanup failed the same way. Minutes later the tool server (pid 10199, running since Oct 24) was gone, and Claude's MCP log (~/Library/Caches/claude-cli-nodejs/-Users-albert-dev-vibeswitcher/mcp-logs-vibeswitcher/2026-10-24T14-28-45-819Z.jsonl) shows "connection closed after 764s (cleanly)" at 17:45Z. The user reconnected with /mcp at about 19:06Z. 2026-10-28: the server disconnected again at about 06:40Z and the user reconnected with /mcp. The tool server writes no log of its own, so the cause of the exit isn't recorded. The Mac was under heavy load (35–97) around both events, and slept at 2 % battery overnight.
+
+Check: task turn-this-incident-into-4 turns it into a check that runs before merge.
+
