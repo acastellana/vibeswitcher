@@ -1942,3 +1942,11 @@
 - 2026-10-28 20:50 Audit of a-full-suite-run: complete, clean, round 2: 4 Nit (1 open)
 - 2026-10-28 20:58 Audit of missing-tools-at-lead: complete, clean, round 1: 2 Nit open
 - 2026-10-28 20:59 Automatically (auto_advance): Merge of a-full-suite-run failed: Tests fail rebased onto project-lead: noFileNamesTheUsersOtherProjects() Sent its worker the output; it's back at work.
+- 2026-10-28 20:59 Automatically (auto_advance): Started the audit of team-panel-and-inspector at 96a86e6c (Its review is audit. (audited: it changes 508 lines outside tests, over risk_lines (400), as the risk check found.)).
+- 2026-10-28 20:59 Ended keep-awake-s-power's worker (idle since its done report on e98f96e7) to make room on the Mac for its audit
+- 2026-10-28 20:59 Automatically (auto_advance): Started the audit of keep-awake-s-power at e98f96e7 (Its review is audit. (audited: it has code that adds locks or threads (Sources/VibeSwitcher/KeepAwake.swift: private let queue = DispatchQueue(label: "VibeSwitcher.keep-awake", qos: .utilit), as the risk check found.)).
+- 2026-10-28 21:01 Audit of team-panel-and-inspector: complete, clean, round 2: 2 Important closed, 2 Nit open
+- 2026-10-28 21:06 Started a worker on missing-tools-at-lead
+- 2026-10-28 21:06 Automatically (auto_advance): Merge of missing-tools-at-lead failed: Tests fail rebased onto project-lead: noFileNamesTheUsersOtherProjects() Sent its worker the output; it's back at work.
+- 2026-10-28 21:12 Automatically (auto_advance): Merge of team-panel-and-inspector failed: Tests fail rebased onto project-lead: noFileNamesTheUsersOtherProjects() Sent its worker the output; it's back at work.
+- 2026-10-28 21:12 Automatically (auto_advance): Started the audit of urgent-mac-limit at 519952db (Its review is audit).

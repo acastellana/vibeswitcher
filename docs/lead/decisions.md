@@ -242,3 +242,7 @@ Each attempt to exempt git-ignored folders opened a new way for a worker to hide
 
 The repository is public. The user asked to scrub the other projects' names everywhere, the lead's records included, and the lead's records and task titles keep growing. The user declined lowering heavy slots.
 
+## 2026-10-28 21:12:59 Merges are held (auto_advance off) on team-panel-and-inspector, a-full-suite-run, missing-tools-at-lead, keep-awake-s-power and urgent-mac-limit until the leaked line in docs/lead/progress.md (written by auto_advance at 20:37 on 2026-10-28) is scrubbed by the user. Then the lead merges them by hand, urgent-mac-limit first, and turns auto_advance back on.
+
+PrivateNamesLint fails every merge's full suite on that one line, and each failed merge sends a passing branch back to its worker, wasting worker and review cycles. Only the user can edit docs/lead (workers are refused and the lead has no file edits).
+
