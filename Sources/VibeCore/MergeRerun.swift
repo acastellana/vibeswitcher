@@ -183,8 +183,10 @@ public enum MergeRerun {
 
     /// `test`'s lines in the evidence file at `path` (as `evidenceLog` wrote them), masked and capped again
     /// (`capped`): the file is the repository's to change. Nil when it can't be read (gone, or not a plain file).
+    /// Opened without blocking: a FIFO put in its place would otherwise hold the merge, and the board's lock it's read
+    /// under, until something wrote to it.
     static func evidence(for test: String, inLog path: String) -> [String]? {
-        let fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        let fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK)
         guard fd >= 0 else { return nil }
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
         var info = stat()

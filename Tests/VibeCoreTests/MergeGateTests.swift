@@ -493,6 +493,37 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(gone.contains("- \(last.flakes[0].task)'s merge (\(first)): (its file can't be read now)"), "\(gone)")
     }
 
+    @Test func anEvidenceFileThatIsntAPlainFileQuotesNothingAndDoesntBlock() throws {
+        let root = try repo()
+        let folder = root + "/.vibeswitcher/flakes"
+        try FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
+        // A FIFO in the file's place: opening it to read waits for a writer unless it's opened without blocking.
+        let fifo = folder + "/2026-10-28-add-b-0123abcd.log"
+        #expect(mkfifo(fifo, 0o600) == 0)
+        let read = DispatchSemaphore(value: 0)
+        let found = Locked<[String]?>(["unread"])
+        Thread.detachNewThread {
+            found.set(MergeRerun.evidence(for: "flaky()", inLog: fifo))
+            read.signal()
+        }
+        // Waits on the read itself; the bound is only for failing: a writer then frees the blocked read.
+        let returned = read.wait(timeout: .now() + 60) == .success
+        if !returned {
+            let writer = open(fifo, O_WRONLY | O_NONBLOCK)
+            if writer >= 0 { close(writer) }
+            read.wait()
+        }
+        #expect(returned, "reading a FIFO blocked")
+        #expect(found.get() == nil)
+        // A symbolic link is refused too.
+        let target = folder + "/real.log"
+        try MergeRerun.evidenceLog(task: "t", commit: "c", evidence: ["flaky()": ["✘ secret line"]], tests: ["flaky()"]).write(toFile: target, atomically: true, encoding: .utf8)
+        let link = folder + "/2026-10-28-add-b-4567cdef.log"
+        try FileManager.default.createSymbolicLink(atPath: link, withDestinationPath: target)
+        #expect(MergeRerun.evidence(for: "flaky()", inLog: target) == ["✘ secret line"])
+        #expect(MergeRerun.evidence(for: "flaky()", inLog: link) == nil)
+    }
+
     @Test func aBoardWhoseFlakesKeptTheirLinesDecodesAndDropsThemOnTheNextWrite() throws {
         let root = try repo()
         let store = BoardStore(root: root)
