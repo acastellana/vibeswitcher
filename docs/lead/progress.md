@@ -1846,3 +1846,5 @@
 - 2026-10-28 16:58 Started a worker on a-full-suite-run
 - 2026-10-28 16:58 Automatically (auto_advance): Started a worker on a-full-suite-run (A full-suite run hung 45 min: the old-host hand-over test (UpgradeFromLeadHostTests) can stall under load).
 - 2026-10-28 17:01 Planned a-hung-merge-test: A hung merge test run names the tests that started and never finished, in a readable file (review audit)
+- 2026-10-28 17:04 Started a worker on a-hung-merge-test
+- 2026-10-28 17:04 Automatically (auto_advance): Started a worker on a-hung-merge-test (A hung merge test run names the tests that started and never finished, in a readable file).
