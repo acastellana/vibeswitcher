@@ -1707,3 +1707,12 @@
 - 2026-10-28 11:04 Merged loginshellvariabletests: LoginShellVariableTests flake under load (timedOut reading the fake shell); 5 flakes this week (no audit: review none)
 - 2026-10-28 11:04 Flaky in loginshellvariabletests's merge: onlyTheFocusedVisiblePaneSetsTheClipboardLive() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
 - 2026-10-28 11:04 Planned fix-the-flaky-test-3: onlyTheFocusedVisiblePaneSetsTheClipboardLive() flaked 3 times within 7 days
+- 2026-10-28 11:04 Automatically (auto_advance): Merged loginshellvariabletests (LoginShellVariableTests flake under load (timedOut reading the fake shell); 5 flakes this week) into project-lead at 334d2f96, review none: on its worker's done report on 9b7dd4f3 and the full test run. (Its first test run failed on onlyTheFocusedVisiblePaneSetsTheClipboardLive() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/loginshellvariabletests/merge-test.log. onlyTheFocusedVisiblePaneSetsTheClipboardLive() flaked 3 times within 7 days: planned f….)
+- 2026-10-28 11:05 Automatically (auto_advance): Cleaned up loginshellvariabletests; ended pid 7450 (Worker: LoginShellVariableTests flake under load (timedOut reading the fake shell); 5 flakes this week) (freed 951 MB of build output and temporary folders). It stays done.
+- 2026-10-28 11:05 Started a worker on fix-the-flaky-test-3
+- 2026-10-28 11:05 Automatically (auto_advance): Started a worker on fix-the-flaky-test-3 (Fix the flaky test onlyTheFocusedVisiblePaneSetsTheClipboardLive()).
+- 2026-10-28 11:06 Audit of lead-chat-freezes-of: complete, clean, round 4: 1 Important closed, 4 Nit (1 open)
+- 2026-10-28 11:13 Folded fix-the-flaky-test-3 into terminalclipboardsecurit: that task carries its work
+- 2026-10-28 11:13 Planned flake-ledger-don-t: Flake ledger: don't plan a "fix the flaky test" task when an open task already names that test
+- 2026-10-28 11:15 Planned lead-chat-multi-line: Lead chat: multi-line shell blocks (if/then/fi, { … }) get a Run button that runs them as one script, after confirming (review audit)
+- 2026-10-28 11:16 Merged lead-chat-freezes-of: Lead chat freezes of 3–25 s: SwiftUI accessibility tree and session-list rebuilds on a long lead chat
