@@ -1873,3 +1873,11 @@
 - 2026-10-28 18:59 Planned scrub-the-names-of: Scrub the names of the user's other projects (stakegen, genswap) from the repository's current files, the lead's records included
 - 2026-10-28 18:59 Started a worker on scrub-the-names-of
 - 2026-10-28 19:04 Merged docs-touch-ups-the: Docs touch-ups: the sandbox's Team fixture uses a real project name ('stakegen') in a published screenshot; the lint list misses AgentExportLint
+- 2026-10-28 19:04 Automatically (auto_advance): Merged docs-touch-ups-the (Docs touch-ups: the sandbox's Team fixture uses a real project name ('stakegen') in a published screenshot; the lint list misses AgentExportLint) into project-lead at f6f2d554, on its passing audit and the full test run.
+- 2026-10-28 19:04 Automatically (auto_advance): Cleaned up docs-touch-ups-the; ended pid 33833 (Worker: Docs touch-ups: the sandbox's Team fixture uses a real project name ('stakegen') in a published screenshot; the lint list misses AgentExportLint) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-28 19:04 Raised systempower-onacpower to audit (the risk check, at 34b2024b): it has code that spawns processes (Sources/VibeSwitcher/PowerReading.swift: static func system() -> Reading {)
+- 2026-10-28 19:04 Automatically (auto_advance): systempower-onacpower is audited, not merged: it has code that spawns processes (Sources/VibeSwitcher/PowerReading.swift: static func system() -> Reading {) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-10-28 19:05 Started a worker on team-panel-and-inspector
+- 2026-10-28 19:05 Automatically (auto_advance): Started a worker on team-panel-and-inspector (Team panel and inspector: keep their accessibility tree small and their bodies cheap (freezes of 10–144 s with the lead selected)).
+- 2026-10-28 19:05 Started a worker on a-full-suite-run
+- 2026-10-28 19:11 Merged lead-start-preflight-on: Lead start preflight: on a new Mac, say plainly what's missing (claude, git, Command Line Tools) instead of failing with an error code
