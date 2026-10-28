@@ -182,8 +182,8 @@ public enum LeadTeams {
 
     /// Whether `session` is the lead of one of the `asking` roots: a lead whose folder is that root.
     public static func asks(_ session: Session, asking: Set<String>) -> Bool {
-        guard session.teamRole == .lead, let cwd = session.cwd, !asking.isEmpty else { return false }
-        return asking.contains((cwd as NSString).standardizingPath)
+        guard session.teamRole == .lead, let folder = session.startFolder ?? session.cwd, !asking.isEmpty else { return false }
+        return asking.contains((folder as NSString).standardizingPath)
     }
 
     /// "1 waits on lead", "2 wait on lead".

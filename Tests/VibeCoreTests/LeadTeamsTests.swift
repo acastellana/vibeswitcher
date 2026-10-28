@@ -186,6 +186,12 @@ struct LeadTeamsTests {
         #expect(lead(.working, boards: ["/r/acme": board]).state(now: now).group == .working)
         // Another project's question isn't this lead's.
         #expect(lead(.idle, boards: ["/r/other": board]).state(now: now).group == .idle)
+        // A lead whose agent ran `cd .vibeswitcher/worktrees` is still its window session's folder's lead.
+        var wandered = Session(tty: "ttys003", agent: .claude, pid: 3, startedAt: now, cwd: "/r/acme/.vibeswitcher/worktrees", project: "acme",
+                               task: "lead-acme", status: .idle, statusSince: now, detail: nil, hasHooks: true, inTerminalApp: false)
+        wandered.startFolder = "/r/acme"
+        wandered.teamRole = .lead
+        #expect(LeadTeams.asks(wandered, asking: LeadTeams.asking(["/r/acme": board])))
         // A worker in the lead's folder (it never is, but) isn't asked through the lead's board.
         var worker = Session(tty: "ttys002", agent: .claude, pid: 2, startedAt: now, cwd: "/r/acme", project: "acme", task: nil,
                              status: .idle, statusSince: now, detail: nil, hasHooks: true, inTerminalApp: false)

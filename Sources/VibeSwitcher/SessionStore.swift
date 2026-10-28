@@ -336,6 +336,7 @@ final class SessionStore: ObservableObject {
             session.eventAt = item.hook?.lastEventAt
             session.transcriptPath = transcripts[item.tty]
             session.hostID = window?.id
+            session.startFolder = window?.cwd
             session.teamRole = LeadTeams.role(label: window?.label)
             session.leadAsks = LeadTeams.asks(session, asking: leadsAsking)
             session.agentSessionID = item.hook?.sessionId

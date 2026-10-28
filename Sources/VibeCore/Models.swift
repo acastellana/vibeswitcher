@@ -133,6 +133,9 @@ public struct Session: Identifiable, Equatable, Sendable {
     /// The session host's id for it when it runs in VibeSwitcher's window; nil in Terminal.app or elsewhere.
     public var hostID: UUID?
     public var inWindow: Bool { hostID != nil }
+    /// The folder its window session was started in (the host's record); nil outside the window. `cwd` follows the
+    /// agent's `cd`s (a lead looking into `.vibeswitcher/worktrees`), this one doesn't: a lead's board is found by it.
+    public var startFolder: String?
     /// A lead, or a worker or verifier a lead started, from its window session's label (`LeadTeams.role`); nil for
     /// the rest of your sessions.
     public var teamRole: LeadLaunch.Role?

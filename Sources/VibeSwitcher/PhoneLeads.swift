@@ -56,7 +56,7 @@ enum PhoneLeads {
 
     /// The lead id of a session: a lead's own, or the one a worker's or verifier's worktree belongs to.
     static func id(of session: Session) -> String? {
-        guard let cwd = session.cwd else { return nil }
+        guard let cwd = session.startFolder ?? session.cwd else { return nil }
         switch session.teamRole {
         case .lead: return id(root: cwd)
         case .worker, .verifier: return LeadTeams.root(ofWorktree: cwd).map { id(root: $0) }
