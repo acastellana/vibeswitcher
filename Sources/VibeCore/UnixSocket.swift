@@ -41,7 +41,9 @@ public enum UnixSocket {
         return fd
     }
 
-    /// Listens on `path`, replacing a stale socket file; only the owner may connect (0600).
+    /// Listens on `path`, replacing a stale socket file; only the owner may connect (0600). The backlog is the most
+    /// the system takes (SOMAXCONN): a burst of callers (leads' tool servers, the app, hooks) each connecting at once
+    /// would otherwise be refused once a short queue fills, before the host's next accept.
     public static func listen(path: String) throws -> Int32 {
         unlink(path)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
@@ -55,7 +57,7 @@ public enum UnixSocket {
             }
             guard bound == 0 else { throw Failure.system("bind", errno) }
             guard chmod(path, 0o600) == 0 else { throw Failure.system("chmod", errno) }
-            guard Darwin.listen(fd, 16) == 0 else { throw Failure.system("listen", errno) }
+            guard Darwin.listen(fd, SOMAXCONN) == 0 else { throw Failure.system("listen", errno) }
         } catch {
             Darwin.close(fd)
             throw error
