@@ -162,6 +162,8 @@ public final class HostServer {
         startedAt = state.startedAt
         listenFD = state.listenFD
         for fd in [lockFD, listenFD] { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
+        // The socket keeps the backlog the build that first listened gave it (16, before): listening again sets ours.
+        _ = Darwin.listen(listenFD, SOMAXCONN)
         var state = state
         let secrets = HostHandover.takeSecrets(from: &state)
         queue.sync {
