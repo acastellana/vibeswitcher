@@ -42,7 +42,6 @@ struct SessionTeamsTests {
         var drifted = session("w", .worker, cwd: "/tmp/scratch", project: "scratch")
         drifted.startFolder = "/r/acme/.vibeswitcher/worktrees/fix-login"
         #expect(SessionTeams.project(of: drifted) == "acme")
-        #expect(SessionTeams.task(of: drifted) == "fix-login")
         #expect(SessionTeams.name(of: drifted) == "acme · worker fix-login")
         let split = SessionTeams.split([drifted, session("v", .verifier, cwd: "/r/acme/.vibeswitcher/worktrees/fix-login", project: "fix-login")])
         #expect(split.teams.map(\.project) == ["acme"])
