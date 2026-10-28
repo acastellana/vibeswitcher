@@ -1818,3 +1818,6 @@
 - 2026-10-28 14:30 Automatically (auto_advance): Started the audit of verifier-trust-check at b9663058 (Its review is audit).
 - 2026-10-28 14:30 Automatically (auto_advance): Started the audit of review-and-fix-the at 71df6221 (Its review is audit).
 - 2026-10-28 14:30 Automatically (auto_advance): Started the audit of keep-flake-evidence-out at 7314c3b7 (Its review is audit).
+- 2026-10-28 14:35 Audit of review-and-fix-the: complete, clean, round 2: 4 Nit (3 open)
+- 2026-10-28 14:39 Audit of keep-flake-evidence-out: complete, clean, round 1: 1 Nit open
+- 2026-10-28 14:41 Merged review-and-fix-the: Review and fix the mid-chat notifications: how reports, wakes and user messages reach a lead (and show in the chat)
