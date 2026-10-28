@@ -1777,3 +1777,5 @@
 - 2026-10-28 12:51 Audit of fix-the-flaky-test-4: complete, clean, round 1: 1 Nit open
 - 2026-10-28 12:51 Planned flake-evidence-readable: Flake evidence readable: the merge keeps each flaky test's failure lines where workers and verifiers can read them (review audit)
 - 2026-10-28 12:52 Merged hang-reports-are-pruned: Hang reports are pruned to the newest 10: keep a week (by age and total size), so tasks can read the reports they're about
+- 2026-10-28 12:52 Automatically (auto_advance): Merged hang-reports-are-pruned (Hang reports are pruned to the newest 10: keep a week (by age and total size), so tasks can read the reports they're about) into project-lead at 64ef5a1f, on its passing audit and the full test run.
+- 2026-10-28 12:57 Merged fix-the-flaky-test-4: Fix the flaky test indexLockIsWaitedForAndAFailureIsReported()
