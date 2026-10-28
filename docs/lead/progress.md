@@ -1654,3 +1654,16 @@
 - 2026-10-28 09:46 Audit of lead-chat-freezes-of: complete, clean, round 2: 1 Important closed, 4 Nit (1 open)
 - 2026-10-28 09:50 Audit of turn-this-incident-into-5: complete, clean, round 1: 2 Nit open
 - 2026-10-28 09:51 Merged archive-finished-tasks: Archive finished tasks out of board.json: the 4 MB, 277-task board makes the app freeze for up to 92 s
+- 2026-10-28 09:51 Automatically (auto_advance): Merged archive-finished-tasks (Archive finished tasks out of board.json: the 4 MB, 277-task board makes the app freeze for up to 92 s) into project-lead at 524977e6, on its passing audit and the full test run.
+- 2026-10-28 09:52 Automatically (auto_advance): Cleaned up archive-finished-tasks (freed 1.0 GB of build output and temporary folders). It stays done.
+- 2026-10-28 09:52 Audit of app-memory-grows-to: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
+- 2026-10-28 09:52 Started a worker on verifier-trust-check
+- 2026-10-28 09:52 Automatically (auto_advance): Started a worker on verifier-trust-check (Verifier trust check trips on agent files inside .build (ui-bench.sh's base checkout copies AGENTS.md/CLAUDE.md)).
+- 2026-10-28 09:54 Planned loginshellvariabletests: LoginShellVariableTests flake under load (timedOut reading the fake shell); 5 flakes this week
+- 2026-10-28 10:02 Audit of lead-chat-freezes-of at 7d17ccc3 tested its merged result f477224a onto project-lead: test command failed
+- 2026-10-28 10:02 Planned terminalclipboardsecurit: TerminalClipboardSecurityTests.onlyTheFocusedVisiblePaneSetsTheClipboardLive flakes (copied "REPLAYED" instead of "LIVE"): 3 times (review audit)
+- 2026-10-28 10:06 Audit of turn-this-incident-into-4: complete, clean, round 1: 3 Nit open, 1 Pre-existing open
+- 2026-10-28 10:06 Dismissed turn-this-incident-into-4:F4: Already its own task: terminalclipboardsecurit, which covers this flake and whether the replay gate leaks.
+- 2026-10-28 10:07 Merged app-memory-grows-to: App memory grows to about 700 MB over a day (footprint 215 MB → 709 MB peak on 2026-10-27)
+- 2026-10-28 10:07 Flaky in app-memory-grows-to's merge: aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone(), aShellThatWaitsIsStopped(), unsetEmptyOrAnExitIsNotFound(), aBannerBeforeTheValueIsLeftOut() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-10-28 10:07 Planned fix-the-flaky-test: unsetEmptyOrAnExitIsNotFound() flaked 3 times within 7 days
