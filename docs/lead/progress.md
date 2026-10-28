@@ -1937,3 +1937,8 @@
 - 2026-10-28 20:41 Ended missing-tools-at-lead's worker (idle since its done report on 64b86b44) to make room on the Mac for its audit
 - 2026-10-28 20:42 Started a worker on urgent-mac-limit
 - 2026-10-28 20:42 The worker on keep-awake-s-power answered findings: keep-awake-s-power:F1 fixed at e98f96e7: Commit e98f96e. SlowPower's gate gave up after 5 s, a wall-clock window. In the full suite on a loaded Mac, the first read hit that timeout while the test was still building its LeadController/SessionStore. It returned battery, so the first look wanted nothing (held []) and the queued second read started (reads 2). Both failed expectations require the first read to end before the gate opens, and only that timeout could end it. The gate now waits until the…
+- 2026-10-28 20:49 Audit of missing-tools-at-lead at 64b86b44 tested its merged result a99ea3b7 onto project-lead: the test command passed
+- 2026-10-28 20:49 Automatically (auto_advance): Started the audit of missing-tools-at-lead at 64b86b44 (Its review is audit).
+- 2026-10-28 20:50 Audit of a-full-suite-run: complete, clean, round 2: 4 Nit (1 open)
+- 2026-10-28 20:58 Audit of missing-tools-at-lead: complete, clean, round 1: 2 Nit open
+- 2026-10-28 20:59 Automatically (auto_advance): Merge of a-full-suite-run failed: Tests fail rebased onto project-lead: noFileNamesTheUsersOtherProjects() Sent its worker the output; it's back at work.
