@@ -1696,3 +1696,14 @@
 - 2026-10-28 10:42 Started a worker on fix-the-flaky-test-2
 - 2026-10-28 10:42 Automatically (auto_advance): Started a worker on fix-the-flaky-test-2 (Fix the flaky test aLongLeadChatKeepsItsRowsOutOfTheKeyViewLoop()).
 - 2026-10-28 10:42 Automatically (auto_advance): Merge of lead-chat-freezes-of failed: Conflicts with project-lead: the branch needs bringing up to date. Sent its worker the output; it's back at work.
+- 2026-10-28 10:55 Planned sidebardifftests-leave: SidebarDiffTests leave sidebar-diff-* and sidebar-groups-* in TMPDIR (load runs exit 1)
+- 2026-10-28 10:55 Automatically (auto_advance): lead-chat-freezes-of is audited, not merged: it has code that adds locks or threads (Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift: DispatchQueue.global(qos: .utility).async { [weak self] in) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-10-28 10:55 Planned the-lead-s-tools-2: The lead's tools reconnect by themselves: a stdio keeper that restarts a stopped tool server without Claude Code noticing (review audit)
+- 2026-10-28 10:56 Started a worker on sidebardifftests-leave
+- 2026-10-28 10:56 Automatically (auto_advance): Started a worker on sidebardifftests-leave (SidebarDiffTests leave sidebar-diff-* and sidebar-groups-* in TMPDIR (load runs exit 1)).
+- 2026-10-28 10:56 Started a worker on the-lead-s-tools-2
+- 2026-10-28 10:56 Automatically (auto_advance): Started a worker on the-lead-s-tools-2 (The lead's tools reconnect by themselves: a stdio keeper that restarts a stopped tool server without Claude Code noticing).
+- 2026-10-28 10:56 Automatically (auto_advance): Started the audit of lead-chat-freezes-of at 102b47fa (Its review is audit. (audited: it has code that adds locks or threads (Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift: DispatchQueue.global(qos: .utility).async { [weak self] in), as the risk check found.)).
+- 2026-10-28 11:04 Merged loginshellvariabletests: LoginShellVariableTests flake under load (timedOut reading the fake shell); 5 flakes this week (no audit: review none)
+- 2026-10-28 11:04 Flaky in loginshellvariabletests's merge: onlyTheFocusedVisiblePaneSetsTheClipboardLive() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-10-28 11:04 Planned fix-the-flaky-test-3: onlyTheFocusedVisiblePaneSetsTheClipboardLive() flaked 3 times within 7 days
