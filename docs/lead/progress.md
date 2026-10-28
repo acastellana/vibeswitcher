@@ -1788,3 +1788,9 @@
 - 2026-10-28 13:12 Audit of verifier-trust-check: complete, suspect, round 1: 1 Important open, 2 Nit open
 - 2026-10-28 13:12 Dismissed verifier-trust-check:F2: The lead accepts it: three correct doc lines describing the new base build, tied to the goal.
 - 2026-10-28 13:17 Automatically (auto_advance): Started the audit of flake-evidence-readable at d449a5e6 (Its review is audit).
+- 2026-10-28 13:25 The worker on verifier-trust-check answered findings: verifier-trust-check:F1 fixed at 3f89152c: 78e8966 + 3f89152: an ignored nested agent file is dropped only when git check-ignore -v names, as the deciding rule (not a negated one), a .gitignore in the matched folder or a folder above it, and that file's working content equals HEAD's blob (hash-object --no-filters vs ls-tree HEAD). An untracked .gitignore, a tracked one edited and not committed (even with its index entry marked assume-unchanged, which hides it from git diff), .git/info/exclude, a…
+- 2026-10-28 13:26 Audit of flake-evidence-readable: complete, clean, round 1: 3 Nit open
+- 2026-10-28 13:27 Automatically (auto_advance): Started the audit of verifier-trust-check at 3f89152c (Its review is audit).
+- 2026-10-28 13:27 Planned witness-stalled-false: Witness "stalled" false alarm: the progress reading (team.watched) goes stale while a worker's transcript keeps growing
+- 2026-10-28 13:35 Merged flake-evidence-readable: Flake evidence readable: the merge keeps each flaky test's failure lines where workers and verifiers can read them
+- 2026-10-28 13:35 Flaky in flake-evidence-readable's merge: headlessAnswersQueriesOnlyWhenNoClient() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
