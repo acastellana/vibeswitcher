@@ -1787,3 +1787,4 @@
 - 2026-10-28 13:01 Automatically (auto_advance): Started the audit of verifier-trust-check at 02cd89c8 (Its review is audit).
 - 2026-10-28 13:12 Audit of verifier-trust-check: complete, suspect, round 1: 1 Important open, 2 Nit open
 - 2026-10-28 13:12 Dismissed verifier-trust-check:F2: The lead accepts it: three correct doc lines describing the new base build, tied to the goal.
+- 2026-10-28 13:17 Automatically (auto_advance): Started the audit of flake-evidence-readable at d449a5e6 (Its review is audit).
