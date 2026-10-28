@@ -169,7 +169,7 @@ final class BaseMovesTests {
         #expect(asked.isEmpty)
     }
 
-    /// genswap, 2026-10-22: the window looked while the base was another branch; the lead then set base_branch to
+    /// project-c, 2026-10-22: the window looked while the base was another branch; the lead then set base_branch to
     /// fair-launch, and the user committed on it from its worktree in .claude/worktrees. The window has to see that.
     func switchedBase() throws -> (moves: BaseMoves, worktree: String) {
         Git.run(["branch", "fair-launch"], in: root)

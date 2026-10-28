@@ -289,7 +289,7 @@ struct LeadDeliveryByActivityTests {
         // A draft that doesn't clear stays, and the message waits behind it.
         #expect(try LeadDelivery.deliver("c", from: .lead("lead"), to: agent, activity: .idle(background: nil), screen: { draft },
                                          typeInto: type, clearDraft: true, clear: { false }, root: root) == .draftStayed(before: "half-written note", after: nil))
-        // genswap, 10-18: a host too old to say what's dim showed Claude's suggestion as text; ^C emptied the box and
+        // project-c, 10-18: a host too old to say what's dim showed Claude's suggestion as text; ^C emptied the box and
         // Claude drew the same suggestion again. The same text back after the ^C is that suggestion: typed over.
         let suggestion = screen("open rotate.html so I can try it")
         var clears = 0

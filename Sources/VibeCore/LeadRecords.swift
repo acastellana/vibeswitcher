@@ -49,7 +49,7 @@ public final class LeadRecords: @unchecked Sendable {
 
     public static let subject = "Lead: decisions and progress"
 
-    /// No trailer (Co-Authored-By or any other): a project's workflow may refuse them (genswap's regression_command
+    /// No trailer (Co-Authored-By or any other): a project's workflow may refuse them (project-c's regression_command
     /// does), and these commits land on its base among its own.
     static func message(_ dir: String) -> String {
         "\(subject)\n\nThe project lead's \(dir)/decisions.md, \(dir)/progress.md, \(dir)/incidents.md and \(dir)/decisions-archive.md, committed by VibeSwitcher for the lead "

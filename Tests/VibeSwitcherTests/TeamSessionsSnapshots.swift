@@ -15,7 +15,7 @@ struct TeamSessionsSnapshots {
 
     /// tty, window label (nil: in Terminal), cwd, the last hook event.
     static let sessions: [(String, String?, String, String)] = {
-        let acme = "/r/acme/.vibeswitcher/worktrees", genswap = "/r/genswap/.vibeswitcher/worktrees"
+        let acme = "/r/acme/.vibeswitcher/worktrees", projectC = "/r/project-c/.vibeswitcher/worktrees"
         return [
             ("ttys900", "Lead · acme", "/r/acme", "PreToolUse"),
             ("ttys901", nil, "/r/notes", "PermissionRequest"),
@@ -27,10 +27,10 @@ struct TeamSessionsSnapshots {
             ("ttys913", "Worker: Export", "\(acme)/export", "PermissionRequest"),
             ("ttys914", "Worker: Search", "\(acme)/search", "PreToolUse"),
             ("ttys915", "Verifier: Search", "\(acme)/search", "PreToolUse"),
-            ("ttys920", "Worker: Plan", "\(genswap)/plan", "PreToolUse"),
-            ("ttys921", "Worker: Fees", "\(genswap)/fees", "Stop"),
-            ("ttys922", "Verifier: Fees", "\(genswap)/fees", "PreToolUse"),
-            ("ttys923", "Worker: Oracle", "\(genswap)/oracle", "SessionStart"),
+            ("ttys920", "Worker: Plan", "\(projectC)/plan", "PreToolUse"),
+            ("ttys921", "Worker: Fees", "\(projectC)/fees", "Stop"),
+            ("ttys922", "Verifier: Fees", "\(projectC)/fees", "PreToolUse"),
+            ("ttys923", "Worker: Oracle", "\(projectC)/oracle", "SessionStart"),
         ]
     }()
 
@@ -71,7 +71,7 @@ struct TeamSessionsSnapshots {
         let split = store.split
         #expect(store.sessions.count == 14)
         #expect(Set(split.own.map(\.tty)) == ["ttys900", "ttys901", "ttys902", "ttys903"])
-        #expect(split.teams.map(\.project).sorted() == ["acme", "genswap"])
+        #expect(split.teams.map(\.project).sorted() == ["acme", "project-c"])
         #expect(split.teamCount == 10)
         // Dots, not counts: the menu bar draws your 4.
         #expect(split.own.count <= MenuBarDots.maxDots)

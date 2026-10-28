@@ -107,7 +107,7 @@ struct LeadBaseMovesTests: LeadTeamFixture {
         #expect(vault.headMoved(root: root, branch: "main") == nil)
     }
 
-    /// genswap keeps its base checked out in .claude/worktrees/fair-launch: a session of yours there commits on it.
+    /// project-c keeps its base checked out in .claude/worktrees/fair-launch: a session of yours there commits on it.
     @Test func aCommitFromYourSessionInALinkedWorktreeIsTaken() throws {
         let root = try repo()
         let runtime = FakeRuntime()
@@ -123,7 +123,7 @@ struct LeadBaseMovesTests: LeadTeamFixture {
         #expect(move.sessions == ["user-session"])
     }
 
-    /// genswap, 2026-10-22 18:07: the user ran the lead's `!` commit, so nothing told the host about it. The merge
+    /// project-c, 2026-10-22 18:07: the user ran the lead's `!` commit, so nothing told the host about it. The merge
     /// says what the window does about it (asks, here), never to restart the lead.
     @Test func theMergeSaysTheWindowIsAskingAndNeedsNoRestart() throws {
         let root = try repo()

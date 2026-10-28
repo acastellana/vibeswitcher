@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import VibeCore
 
-/// A task folded into another (2026-10-19, the genswap lead: "The board had no way to mark a task as merged into
+/// A task folded into another (2026-10-19, the project-c lead: "The board had no way to mark a task as merged into
 /// another one, so I marked them failed"; ten 'failed' in its Team header, and two overtaken tasks left 'blocked' on
 /// this project's board): a state of its own, counted with the merged ones, never failed or blocked, with its target.
 /// Beside it, abandoned (nothing will carry the work, counted apart) and removed (a record that never ran).

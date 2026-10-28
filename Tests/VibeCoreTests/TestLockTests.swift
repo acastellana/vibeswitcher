@@ -169,16 +169,16 @@ struct TestLockTests {
 
     @Test func twoVsHeavyRunsGoOneAfterTheOtherTheSecondSayingWhoHoldsIt() throws {
         let log = url("heavy.log").path
-        let a = try heavy("genswap-suite", log: log)
-        #expect(eventually { lines(log) == ["genswap-suite start"] })
+        let a = try heavy("project-c-suite", log: log)
+        #expect(eventually { lines(log) == ["project-c-suite start"] })
         let b = try heavy("tge-build", log: log)
         a.process.waitUntilExit()
         b.process.waitUntilExit()
         #expect(a.process.terminationStatus == 0 && b.process.terminationStatus == 0, "\(lines(a.output)) \(lines(b.output))")
-        #expect(lines(log) == ["genswap-suite start", "genswap-suite end", "tge-build start", "tge-build end"])
+        #expect(lines(log) == ["project-c-suite start", "project-c-suite end", "tge-build start", "tge-build end"])
         let said = lines(b.output).joined(separator: "\n")
         #expect(said.contains("vs-heavy: tge-build: waiting for the Mac-wide test and build lock"), "\(said)")
-        #expect(said.contains("held by pid ") && said.contains(", genswap-suite in "), "\(said)")
+        #expect(said.contains("held by pid ") && said.contains(", project-c-suite in "), "\(said)")
         #expect(said.contains("vs-heavy: tge-build: took the test and build lock (slot 1 of 1) after"), "\(said)")
         #expect(lines(a.output).isEmpty, "\(lines(a.output))")
         // The command's status is vs-heavy's.
@@ -732,18 +732,18 @@ struct TestLockTests {
     @Test func withTwoSlotsThreeVsHeavyRunsGiveTwoRunningAndOneWaitingThatNamesBoth() throws {
         let log = url("heavy.log").path
         let two = [TestLock.slotsVariable: "2"]
-        let a = try heavy("genswap-suite", sleep: 60, log: log, extra: two)
+        let a = try heavy("project-c-suite", sleep: 60, log: log, extra: two)
         let b = try heavy("tge-pytest", sleep: 60, log: log, extra: two)
-        #expect(eventually { Set(lines(log)) == ["genswap-suite start", "tge-pytest start"] })
+        #expect(eventually { Set(lines(log)) == ["project-c-suite start", "tge-pytest start"] })
         // The Swift side sees the same two slots held.
         let lock = TestLock(directory: url("heavy-locks").path, slots: 2)
         guard case .busy(let holders) = lock.acquire(as: "merge", timeout: 0.3) else { Issue.record("a third slot taken"); return }
-        #expect(Set(holders.compactMap(\.what)) == ["genswap-suite", "tge-pytest"])
+        #expect(Set(holders.compactMap(\.what)) == ["project-c-suite", "tge-pytest"])
         let c = try heavy("tge-build", sleep: 0, log: log, extra: two)
         #expect(eventually { lines(c.output).joined().contains("waiting for") })
         let said = lines(c.output).joined(separator: "\n")
         #expect(said.contains("vs-heavy: tge-build: waiting for the Mac-wide test and build lock (all 2 slots held"), "\(said)")
-        #expect(said.contains(", genswap-suite in \(Self.repo.path)") && said.contains(", tge-pytest in \(Self.repo.path)"), "\(said)")
+        #expect(said.contains(", project-c-suite in \(Self.repo.path)") && said.contains(", tge-pytest in \(Self.repo.path)"), "\(said)")
         // Which project: the repository a worktree of VibeSwitcher's belongs to, else the folder.
         let project = Self.repo.path.components(separatedBy: "/.vibeswitcher/worktrees/").first.map { URL(fileURLWithPath: $0).lastPathComponent }!
         #expect(said.contains("in \(Self.repo.path) (\(project)), for "), "\(said)")

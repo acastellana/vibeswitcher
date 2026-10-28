@@ -22,7 +22,7 @@ struct ProjectBriefingTests {
                                                                                    (minutesAgo: 20, text: "Merged docs: Docs"),
                                                                                    (minutesAgo: 10, text: "Audit of signing: incomplete, clean")]),
                                      board: board)
-        let sessions = [helpers.session("vibeswitcher", .needsInput), helpers.session("genswap", .needsInput),
+        let sessions = [helpers.session("vibeswitcher", .needsInput), helpers.session("project-c", .needsInput),
                         helpers.session("vibeswitcher", .working)]
         let input = Briefing.compose(project: source, sessions: sessions, lastBriefed: nil, now: now)
 
@@ -39,7 +39,7 @@ struct ProjectBriefingTests {
         #expect(text.contains("vibeswitcher: 3 new in its log; 1 landed, 1 running, 1 blocked, 2 questions for the user."))
         #expect(text.contains("  - Question for the user: Ship the install tonight?"))
         #expect(text.contains("  - Question for the user: Which logo?"))
-        #expect(!text.contains("genswap"))
+        #expect(!text.contains("project-c"))
 
         let prompt = BriefingPrompts.prompt(input, language: .english)
         #expect(prompt.contains("in the project vibeswitcher in the last 3 hours"))
@@ -58,12 +58,12 @@ struct ProjectBriefingTests {
         var board = LeadBoard()
         board.tasks = [task("x", "X", .running)]
         board.questions = [LeadQuestion(text: "Which logo?", options: [])]
-        let source = Briefing.Source(name: "genswap", progress: helpers.log([(minutesAgo: 600, text: "Update: long ago")]), board: board)
+        let source = Briefing.Source(name: "project-c", progress: helpers.log([(minutesAgo: 600, text: "Update: long ago")]), board: board)
         let input = Briefing.compose(project: source, sessions: [], lastBriefed: nil, now: now)
 
         #expect(input.projects[0].isQuiet)
-        #expect(input.lines == ["genswap: nothing new; 1 running, 1 question for the user.", "  - Question for the user: Which logo?"])
-        #expect(Briefing.template(input) == "Nothing new in genswap; 1 running, 1 question for the user. For you: Which logo?")
+        #expect(input.lines == ["project-c: nothing new; 1 running, 1 question for the user.", "  - Question for the user: Which logo?"])
+        #expect(Briefing.template(input) == "Nothing new in project-c; 1 running, 1 question for the user. For you: Which logo?")
         // Quiet with nothing on the board: one sentence.
         let empty = Briefing.compose(project: .init(name: "films", progress: nil, board: LeadBoard()), sessions: [], lastBriefed: nil, now: now)
         #expect(Briefing.template(empty) == "Nothing new in films.")
@@ -86,11 +86,11 @@ struct ProjectBriefingTests {
     @Test func theGlobalBriefingIsUnchanged() {
         var board = LeadBoard()
         board.questions = [LeadQuestion(text: "Which logo?", options: [])]
-        let input = Briefing.compose([.init(name: "genswap", progress: nil, board: board)], sessions: [], lastBriefed: nil, now: now)
+        let input = Briefing.compose([.init(name: "project-c", progress: nil, board: board)], sessions: [], lastBriefed: nil, now: now)
         #expect(input.project == nil)
-        #expect(input.lines == ["genswap: nothing new; 1 question for the user."])
+        #expect(input.lines == ["project-c: nothing new; 1 question for the user."])
         #expect(BriefingPrompts.prompt(input, language: .english).contains("across these projects"))
-        #expect(Briefing.template(input) == "In genswap, 1 question for the user.")
+        #expect(Briefing.template(input) == "In project-c, 1 question for the user.")
     }
 
     /// Redacted like the global one, before any model sees it.

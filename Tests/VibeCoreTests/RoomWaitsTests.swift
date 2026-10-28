@@ -3,14 +3,14 @@ import Testing
 @testable import VibeCore
 
 /// A lead refused for the Mac's room or load is woken once when there's room again, whichever project's sessions
-/// ended: before, nothing woke it, so genswap's lead slept and polled (2026-10-23 10:20 and 10:25, 10-24 13:21). The Mac
+/// ended: before, nothing woke it, so project-c's lead slept and polled (2026-10-23 10:20 and 10:25, 10-24 13:21). The Mac
 /// is faked (the sessions the host lists, the load), and so is the clock.
 extension LeadToolsetTests {
-    /// genswap's and films' teams with genswap's four ended.
-    static var genswapEnded: [LeadSessionInfo] {
+    /// project-c's and films' teams with project-c's four ended.
+    static var projectCEnded: [LeadSessionInfo] {
         neighbours.map { session in
             var session = session
-            if session.cwd.contains("/genswap/.vibeswitcher/") { session.live = false }
+            if session.cwd.contains("/project-c/.vibeswitcher/") { session.live = false }
             return session
         }
     }
@@ -30,18 +30,18 @@ extension LeadToolsetTests {
         #expect(refused.isError && refused.text.contains("VibeSwitcher sends you one message once there's room again"), "\(refused.text)")
         // Still full: nothing.
         #expect(roomWaits.look(mac: Self.mac(Self.neighbours, load: 3), limits: limits).isEmpty)
-        // genswap's team ends: one message, to this project's lead, naming what was refused.
-        let told = roomWaits.look(mac: Self.mac(Self.genswapEnded, load: 3), limits: limits)
+        // project-c's team ends: one message, to this project's lead, naming what was refused.
+        let told = roomWaits.look(mac: Self.mac(Self.projectCEnded, load: 3), limits: limits)
         #expect(told.count == 1)
         #expect(told.first?.root == (root as NSString).standardizingPath)
         let text = try #require(told.first?.text)
         #expect(text.hasPrefix("The Mac has room again for what was refused: start_worker(one). "), "\(text)")
         #expect(text.contains("2 team sessions across 1 project (films 2) (mac_max_sessions 6)"), "\(text)")
         // Once only.
-        #expect(roomWaits.look(mac: Self.mac(Self.genswapEnded, load: 3), limits: limits).isEmpty)
+        #expect(roomWaits.look(mac: Self.mac(Self.projectCEnded, load: 3), limits: limits).isEmpty)
         #expect(roomWaits.look(mac: Self.mac([], load: 1), limits: limits).isEmpty)
         // And the retry starts.
-        runtime.others = Self.genswapEnded
+        runtime.others = Self.projectCEnded
         #expect(!call(lead, "start_worker", ["task": "one"]).isError)
     }
 
@@ -69,11 +69,11 @@ extension LeadToolsetTests {
         let limits = MacLimits(maxSessions: 6)
         let now = Date(timeIntervalSince1970: 1_793_000_000)
         waits.record(root: "/Users/x/dev/vibeswitcher", what: "audit(a)", need: 3, now: now)
-        waits.record(root: "/Users/x/dev/genswap", what: "merge(b)", need: 0, now: now)
+        waits.record(root: "/Users/x/dev/project-c", what: "merge(b)", need: 0, now: now)
         // Four of six held: room for one worker, not for three finders; merge waits only on the load.
         let four = Self.mac(Array(Self.neighbours.prefix(4)), load: 2)
         #expect(four.sessions == 4)
-        #expect(waits.look(mac: four, limits: limits, now: now).map(\.root) == ["/Users/x/dev/genswap"])
+        #expect(waits.look(mac: four, limits: limits, now: now).map(\.root) == ["/Users/x/dev/project-c"])
         let three = Self.mac(Array(Self.neighbours.prefix(3)), load: 2)
         #expect(waits.look(mac: three, limits: limits, now: now).map(\.root) == ["/Users/x/dev/vibeswitcher"])
     }
@@ -103,7 +103,7 @@ extension LeadToolsetTests {
     }
 }
 
-/// genswap's leads spent 8–10 % of their tokens on witness wakes for battery, AC power and disk (31 wakes, each a full
+/// project-c's leads spent 8–10 % of their tokens on witness wakes for battery, AC power and disk (31 wakes, each a full
 /// turn that ended with "nothing to do"). A power change that doesn't cross the user's battery limit, and free space
 /// over disk_warning_gb, wake no lead; crossing the limit, or going under the warning, still does.
 struct QuietWakesTests {

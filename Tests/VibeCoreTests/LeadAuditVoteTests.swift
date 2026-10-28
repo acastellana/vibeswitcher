@@ -390,13 +390,13 @@ struct LeadAuditFindersTests: LeadTeamFixture {
         let runtime = FakeRuntime()
         let (root, lead) = try ready(runtime)
         // Six sessions at most, Mac-wide; four other projects' sessions leave room for two.
-        runtime.others = (1...4).map { LeadSessionInfo(id: "other-\($0)", cwd: "/Users/x/dev/genswap/.vibeswitcher/worktrees/t\($0)",
+        runtime.others = (1...4).map { LeadSessionInfo(id: "other-\($0)", cwd: "/Users/x/dev/project-c/.vibeswitcher/worktrees/t\($0)",
                                                          label: "Worker: t\($0)", live: true, status: "working", tty: nil) }
         let before = runtime.spawned.count
         let refused = call(lead, "audit", ["task": "add-b"])
         #expect(refused.isError)
         #expect(refused.text.contains("audit_finders is 3, and mac_max_sessions leaves room for 2 more sessions now"), "\(refused.text)")
-        #expect(refused.text.contains("4 team sessions across 1 project (genswap 4) (mac_max_sessions 6)"), "\(refused.text)")
+        #expect(refused.text.contains("4 team sessions across 1 project (project-c 4) (mac_max_sessions 6)"), "\(refused.text)")
         #expect(refused.text.contains(LeadPrompts.retryWhenWoken), "\(refused.text)")
         #expect(runtime.spawned.count == before)
         #expect(lines(runs).isEmpty, "nothing built or tested")

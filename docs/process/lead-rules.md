@@ -38,7 +38,7 @@ when part of it still holds).
 | 4 | The lead's records live in docs/lead, committed by the tool server only | decision 2026-10-17 17:45 | enforced by `LeadRecords` and the workers' deny rules on records_dir (`LeadRecordsTests`) |
 | 5 | Never merge a task a decision or the user holds back | decision 2026-10-18 15:05; brief :809 | enforced by the `kept` state, which merge and cleanup refuse (`LeadToolsetTests`); setting it is guidance (#G4) |
 | 6 | A worker's report is a claim: an audit task merges only on its verifier's verdict | brief :805 | enforced by merge reading the vault's verdict (`LeadGuardRailsTests`) |
-| 7 | One live verifier per task | decision 2026-10-25 08:03 (genswap 2026-10-24) | enforced by `endEarlierVerifiers` (`AuditEndsEarlierVerifierTests`) |
+| 7 | One live verifier per task | decision 2026-10-25 08:03 (project-c 2026-10-24) | enforced by `endEarlierVerifiers` (`AuditEndsEarlierVerifierTests`) |
 | 8 | audit refuses a branch that hasn't taken in the base's commits to its files; a clean trial merge is audited as merged | decisions 2026-10-20 10:44:17, 2026-10-24 18:27 (1); brief :806 | enforced by `checkUpToDate` (`LeadAuditV3Tests`) |
 | 9 | audit judges settings from the branch's commits; untracked files are leftovers | decision 2026-10-20 10:44:19 | enforced by `Worktrees.committedAgentConfig` and `leftovers` (`LeadToolsetTests`) |
 | 10 | merge refuses while an Important finding is open; an Important needs a failure scenario | decision 2026-10-25 08:03 (5); brief :826 | enforced by merge and `parsedFindings` (`LeadFindingsTests`) |

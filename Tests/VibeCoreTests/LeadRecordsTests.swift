@@ -128,7 +128,7 @@ struct LeadRecordsTests: LeadTeamFixture {
         #expect(head("\(commit)^@", root) == parent)
         #expect(files(of: commit, root) == Self.logs)
         #expect(Git.run(["log", "-1", "--format=%s", commit], in: root).output == LeadRecords.subject)
-        // No trailer of any kind (a workflow may refuse them: genswap's regression_command does).
+        // No trailer of any kind (a workflow may refuse them: project-c's regression_command does).
         let body = Git.run(["log", "-1", "--format=%B", commit], in: root).output
         #expect(Git.run(["log", "-1", "--format=%(trailers)", commit], in: root).output.isEmpty, "\(body)")
         #expect(!body.lowercased().contains("co-authored-by") && body == LeadRecords.message("docs/lead"), "\(body)")

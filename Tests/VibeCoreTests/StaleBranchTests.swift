@@ -153,7 +153,7 @@ struct StaleBranchTests: LeadTeamFixture {
         #expect(verifierStarted(runtime))
     }
 
-    /// genswap, 2026-10-23: a branch that held another base's records (`records_dir`) was refused for conflicting in
+    /// project-c, 2026-10-23: a branch that held another base's records (`records_dir`) was refused for conflicting in
     /// them, and its worker may not touch them. merge takes the base's records, so audit counts neither their
     /// conflicts nor their changes; a conflict in another file is refused as before, naming only that file.
     @Test func aConflictOnlyInTheLeadsRecordsIsAuditedAndAnotherFileStillRefused() throws {

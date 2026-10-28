@@ -8,7 +8,7 @@ import Testing
 /// session started.
 struct RoleSweepTests {
     static let now = Date(timeIntervalSince1970: 1_792_480_000)
-    let root = LeadVault.canonical("/Users/you/dev/genswap")
+    let root = LeadVault.canonical("/Users/you/dev/project-c")
     let other = LeadVault.canonical("/Users/you/dev/acme")
 
     func hosted(_ label: String, cwd: String, live: Bool = true) -> HostSession {
@@ -41,8 +41,8 @@ struct RoleSweepTests {
     }
 
     @Test func everyRoleSessionOfAFinishedTaskEndsOnItsOwnAndWhatLingersIsToldHourly() throws {
-        let tree = { (slug: String) in "/Users/you/dev/genswap/.vibeswitcher/worktrees/\(slug)" }
-        let lead = hosted("Lead · genswap", cwd: "/Users/you/dev/genswap")
+        let tree = { (slug: String) in "/Users/you/dev/project-c/.vibeswitcher/worktrees/\(slug)" }
+        let lead = hosted("Lead · project-c", cwd: "/Users/you/dev/project-c")
         let mine = hosted("Shell", cwd: tree("contract-plan-task-8"))
         let worker = hosted("Worker: Contract plan 8", cwd: tree("contract-plan-task-8"))
         let first = hosted("Verifier: Contract plan 8", cwd: tree("contract-plan-task-8"))
@@ -81,7 +81,7 @@ struct RoleSweepTests {
         #expect(world.told.count == 1)
         let lines = try #require(world.told.first).split(separator: "\n")
         #expect(lines.count == 5, "\(world.told)")
-        #expect(lines.dropFirst().prefix(3).allSatisfy { $0.hasPrefix("- The ") && $0.contains("on contract-plan-task-8 (genswap): idle 14.7 h, pid 4321, 300 MB") })
+        #expect(lines.dropFirst().prefix(3).allSatisfy { $0.hasPrefix("- The ") && $0.contains("on contract-plan-task-8 (project-c): idle 14.7 h, pid 4321, 300 MB") })
         // Once an hour at most.
         sweep.look(hosted: sessions, idleSince: idle, agent: agent, now: Self.now + 1_800)
         #expect(world.told.count == 1)
@@ -100,7 +100,7 @@ struct RoleSweepTests {
 
     /// A host that can't be asked, or doesn't know the roster (older than the app): nothing is ended.
     @Test func noRosterEndsNothing() {
-        let session = hosted("Worker: Done", cwd: "/Users/you/dev/genswap/.vibeswitcher/worktrees/done")
+        let session = hosted("Worker: Done", cwd: "/Users/you/dev/project-c/.vibeswitcher/worktrees/done")
         let world = World()
         world.roster = [LeadVault.RosterEntry(root: root, session: session.id.uuidString, role: .worker, task: "done", holds: true)]
         var board = LeadBoard()

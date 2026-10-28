@@ -31,7 +31,7 @@ extension PhoneBriefingTests {
         let fake = FakeScopedBriefer()
         access.brief = fake.brief
         access.briefProject = fake.brief(project:_:)
-        access.briefingProjects = { ["genswap", "vibeswitcher"] }
+        access.briefingProjects = { ["project-c", "vibeswitcher"] }
         return fake
     }
 
@@ -39,25 +39,25 @@ extension PhoneBriefingTests {
         let fake = scoped()
         let token = try pair()
         let state = send("GET", "/api/state", token: token)
-        #expect(state.json["briefingProjects"] as? [String] == ["genswap", "vibeswitcher"])
+        #expect(state.json["briefingProjects"] as? [String] == ["project-c", "vibeswitcher"])
 
-        let start = send("POST", "/api/briefing", token: token, body: #"{"project":"genswap"}"#)
+        let start = send("POST", "/api/briefing", token: token, body: #"{"project":"project-c"}"#)
         #expect(start.status == 200)
         #expect(start.json["writing"] as? Bool == true)
-        #expect(fake.presses == ["genswap"])
+        #expect(fake.presses == ["project-c"])
         // Asking again for the same one while it's written doesn't start a second.
-        #expect(send("POST", "/api/briefing", token: token, body: #"{"project":"genswap"}"#).json["writing"] as? Bool == true)
-        #expect(fake.presses == ["genswap"])
-        fake.finish("Genswap: one question for you.")
+        #expect(send("POST", "/api/briefing", token: token, body: #"{"project":"project-c"}"#).json["writing"] as? Bool == true)
+        #expect(fake.presses == ["project-c"])
+        fake.finish("Project-c: one question for you.")
         let done = send("GET", "/api/briefing", token: token)
-        #expect(done.json["text"] as? String == "Genswap: one question for you.")
-        #expect(done.json["project"] as? String == "genswap")
+        #expect(done.json["text"] as? String == "Project-c: one question for you.")
+        #expect(done.json["project"] as? String == "project-c")
 
         // No project (or null): the global one, through the same endpoint.
         #expect(send("POST", "/api/briefing", token: token, body: "{}").status == 200)
         fake.finish("All quiet.")
         #expect(send("POST", "/api/briefing", token: token, body: #"{"project":null}"#).status == 200)
-        #expect(fake.presses == ["genswap", nil, nil])
+        #expect(fake.presses == ["project-c", nil, nil])
         fake.finish("All quiet.")
         #expect(send("GET", "/api/briefing", token: token).json["project"] == nil)
     }
@@ -81,8 +81,8 @@ extension PhoneBriefingTests {
     @Test func aNameTheMacDoesntLeadIsRefused() throws {
         let fake = scoped()
         let token = try pair()
-        for body in [#"{"project":"films"}"#, #"{"project":"../../etc"}"#, #"{"project":"/Users/me/dev/genswap"}"#,
-                     #"{"project":""}"#, #"{"project":7}"#, #"{"project":["genswap"]}"#] {
+        for body in [#"{"project":"films"}"#, #"{"project":"../../etc"}"#, #"{"project":"/Users/me/dev/project-c"}"#,
+                     #"{"project":""}"#, #"{"project":7}"#, #"{"project":["project-c"]}"#] {
             let answer = send("POST", "/api/briefing", token: token, body: body)
             #expect(answer.status == 400, "\(body)")
             #expect(answer.json["error"] as? String == "No project lead runs in that project.")
@@ -91,7 +91,7 @@ extension PhoneBriefingTests {
         #expect(send("GET", "/api/briefing", token: token).status == 404)
         // Without a project briefer, a led name gets the route's 503, as the global one without a briefer does.
         access.briefProject = nil
-        #expect(send("POST", "/api/briefing", token: token, body: #"{"project":"genswap"}"#).status == 503)
+        #expect(send("POST", "/api/briefing", token: token, body: #"{"project":"project-c"}"#).status == 503)
         #expect(fake.presses.isEmpty)
     }
 
@@ -100,36 +100,36 @@ extension PhoneBriefingTests {
     @Test func aPhonesProjectBriefingKeepsItsOwnSinceAndNoKey() async throws {
         let key = BriefingButtonTests.key
         Stub.expect(voice: voiceID, body: Data("ID3-project-mp3".utf8))
-        let root = scratchRoot.appendingPathComponent("phone-project-\(UUID().uuidString)/genswap").path
+        let root = scratchRoot.appendingPathComponent("phone-project-\(UUID().uuidString)/project-c").path
         defer { try? FileManager.default.removeItem(atPath: (root as NSString).deletingLastPathComponent) }
         var board = LeadBoard()
         board.questions = [LeadQuestion(text: "Which logo?", options: [])]
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [Stub.self]
-        let claude = BriefingButtonTests.FakeClaude("Genswap está tranquilo; una pregunta te espera.")
+        let claude = BriefingButtonTests.FakeClaude("Project-c está tranquilo; una pregunta te espera.")
         let briefer = PhoneBriefer(snapshot: { .init(boards: [root: board, "/elsewhere/vibeswitcher": LeadBoard()], sessions: []) },
                                    language: { BriefingLanguage.named("es")! }, keyStore: AppProof.MemorySecret(key),
                                    generate: { claude.generate($0) },
                                    client: ElevenLabs(voice: voiceID, session: URLSession(configuration: configuration)),
                                    render: { _, _ in nil }, defaults: defaults, now: { 5000 })
-        #expect(briefer.projects() == ["genswap", "vibeswitcher"])
+        #expect(briefer.projects() == ["project-c", "vibeswitcher"])
         access.brief = briefer.brief
         access.briefProject = briefer.brief(project:_:)
         access.briefingProjects = briefer.projects
         defaults.set(1234.0, forKey: BriefingModel.lastKey)
         let token = try pair()
 
-        #expect(send("POST", "/api/briefing", token: token, body: #"{"project":"genswap"}"#).status == 200)
+        #expect(send("POST", "/api/briefing", token: token, body: #"{"project":"project-c"}"#).status == 200)
         try await waitFor { send("GET", "/api/briefing", token: token).json["writing"] == nil }
         let answer = send("GET", "/api/briefing", token: token)
-        #expect(answer.json["text"] as? String == "Genswap está tranquilo; una pregunta te espera.")
-        #expect(answer.json["project"] as? String == "genswap")
+        #expect(answer.json["text"] as? String == "Project-c está tranquilo; una pregunta te espera.")
+        #expect(answer.json["project"] as? String == "project-c")
         #expect(answer.json["voice"] as? String == "elevenlabs")
         #expect(!answer.text.contains(key))
         #expect(!answer.text.contains(Data(key.utf8).base64EncodedString()))
         #expect(Set(answer.json.keys) == ["text", "language", "at", "voice", "audio", "audioType", "project"])
         #expect(claude.prompts.count == 1)
-        #expect(claude.prompts[0].contains("in the project genswap"))
+        #expect(claude.prompts[0].contains("in the project project-c"))
         #expect(claude.prompts[0].contains("Question for the user: Which logo?"))
         // Its own stamp moved; the global one's didn't.
         #expect(defaults.object(forKey: BriefingModel.lastKey(.project(root: root))) as? Double == 5000)

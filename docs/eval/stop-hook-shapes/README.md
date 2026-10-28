@@ -1,6 +1,6 @@
 # What Claude Code shows for each Stop-hook answer
 
-Evidence: on 2026-10-19 08:06 the genswap lead's window showed the user's "done" answer under
+Evidence: on 2026-10-19 08:06 the project-c lead's window showed the user's "done" answer under
 `Ran 2 stop hooks` / `Stop hook error: [VibeSwitcher · messages, v2] …`, and the user asked what had gone wrong.
 Nothing had: VibeSwitcher hands over at the turn's end whatever arrived while the agent worked (a user answer, a
 report, a lead message) through the Stop hook, and it did so with `{"decision": "block", "reason": text}`, which

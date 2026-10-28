@@ -108,11 +108,11 @@ extension LeadToolsetTests {
         _ = call(lead, "start_worker", ["task": "add-b"])
         _ = call(try seat("worker-add-b", runtime), "report", doneReport("added"))
         #expect(!call(lead, "configure", ["audit_finders": "2", "test_command": "true", "test_timeout_min": "0.01"]).isError)
-        let holders = try fillSlots(1, notes: ["scripts/test.sh in /Users/a/dev/genswap"])
+        let holders = try fillSlots(1, notes: ["scripts/test.sh in /Users/a/dev/project-c"])
         defer { end(holders) }
         let told = Told()
         _ = ToolProgress.with(ToolProgress(every: 0.1, told.add)) { call(lead, "audit", ["task": "add-b"]) }
-        #expect(told.texts.contains { $0.contains("its one slot held") && $0.contains("scripts/test.sh in /Users/a/dev/genswap (genswap)") }, "\(told.texts)")
+        #expect(told.texts.contains { $0.contains("its one slot held") && $0.contains("scripts/test.sh in /Users/a/dev/project-c (project-c)") }, "\(told.texts)")
     }
 
     @Test func statusNamesASlotHeldOverThirtyMinutes() throws {

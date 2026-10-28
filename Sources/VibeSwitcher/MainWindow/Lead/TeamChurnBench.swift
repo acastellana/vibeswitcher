@@ -18,7 +18,7 @@ import VibeCore
 /// 4. churn: the sessions retitling: the main thread's CPU per upsert (over the quiet floor).
 /// With `--ax`, an accessibility client is attached as the user's was when the window froze for 3–25 s (10-27): SwiftUI's
 /// accessibility turned on in every hosting view of the window, the window's tree walked after each upsert (each
-/// element's role and children, as a client reads them), and the lead's transcript 75 turns (300 entries, the stakegen
+/// element's role and children, as a client reads them), and the lead's transcript 75 turns (300 entries, the project-b
 /// lead's 290-odd); the elements reached are printed with the phases.
 /// Each phase prints the main thread's longest block (its own CPU time while a post from another thread waited, and the
 /// wall clock's), and `RESULT team-churn …` lines. Nothing is checked: it's for comparing builds.
@@ -72,7 +72,7 @@ enum TeamChurnBench {
     }
 
     /// A lead's conversation, `turns` of it: your prompt, its reply in prose, a command it ran; each line stamped, the
-    /// last a minute before `now` (as the stakegen lead's 69 items).
+    /// last a minute before `now` (as the project-b lead's 69 items).
     static func transcript(turns: Int, now: Date) -> Data {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

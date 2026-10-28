@@ -1813,7 +1813,7 @@ public final class LeadToolset: MCPToolset {
 
     /// The task's verifiers still running (the board's, and any other in its worktree), ended before an audit starts
     /// its own: a task has one live verifier, or audit_finders finders, at a time. The new grant replaces theirs, so no
-    /// verdict can come from them now (2026-10-24: genswap's app-security-rpc-trust had four verifiers alive at once, one
+    /// verdict can come from them now (2026-10-24: project-c's app-security-rpc-trust had four verifiers alive at once, one
     /// per audit call on the same commit, until all four were ended with its fold). One the host doesn't end refuses the
     /// audit (`not`: what didn't happen): started beside it, the task would have one more. What audit's reply says of
     /// them; "" for none.

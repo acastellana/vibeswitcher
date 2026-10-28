@@ -78,7 +78,7 @@ public struct MacLoad: Equatable, Sendable {
     /// 12.34 → "12.3"; unknown → "unknown".
     public var loadText: String { load.map { String(format: "%.1f", $0) } ?? "unknown" }
 
-    /// "3 team sessions across 2 projects (vibeswitcher 2, genswap 1)".
+    /// "3 team sessions across 2 projects (vibeswitcher 2, project-c 1)".
     public var sessionsText: String {
         let projects = holders.count == 1 ? "1 project" : "\(holders.count) projects"
         let who = holders.isEmpty ? "" : " (" + holders.map { "\($0.project) \($0.sessions)" }.joined(separator: ", ") + ")"

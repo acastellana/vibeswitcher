@@ -29,7 +29,7 @@ struct BriefingSnapshots {
         let temp = Scratch()
         let defaults = temp.defaults("briefing-snapshots")
         let voice = BriefingButtonTests.FakeVoice()
-        let text = "In vibeswitcher, nine fixes landed and the install waits on your signing setup. Genswap has one question for you about the release notes, and its two workers are still running. Films was quiet. Two sessions need you: the api session and the docs session. Nothing else is stuck, so after those you're clear to step away for a while."
+        let text = "In vibeswitcher, nine fixes landed and the install waits on your signing setup. Project-c has one question for you about the release notes, and its two workers are still running. Films was quiet. Two sessions need you: the api session and the docs session. Nothing else is stuck, so after those you're clear to step away for a while."
         let model = BriefingModel(snapshot: { .init(boards: [:], sessions: []) }, language: { .english },
                                   keyStore: AppProof.MemorySecret(), generate: { _ in text }, voice: voice, defaults: defaults)
         model.press()

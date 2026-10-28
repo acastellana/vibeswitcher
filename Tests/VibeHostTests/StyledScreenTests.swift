@@ -224,7 +224,7 @@ struct StyledScreenTests {
     }
 }
 
-/// clear_draft against Claude's grey suggestion (genswap, 10-18: 8 refusals, 4 with clear_draft on, every one a
+/// clear_draft against Claude's grey suggestion (project-c, 10-18: 8 refusals, 4 with clear_draft on, every one a
 /// suggestion read through a session host too old to say what's dim).
 struct ClearDraftTests {
     let temp = Scratch()

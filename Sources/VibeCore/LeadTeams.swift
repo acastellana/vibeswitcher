@@ -73,7 +73,7 @@ public enum LeadTeams {
             entry.task == nil ? (LeadTeams.role(label: session.label) ?? entry.role) : entry.role
         }
 
-        /// The project's folder name: "genswap".
+        /// The project's folder name: "project-c".
         public var project: String { (entry.root as NSString).lastPathComponent }
         public var finishedAt: Double { LeadTeams.finishedAt(task) }
     }
@@ -128,7 +128,7 @@ public enum LeadTeams {
             self.finishedAt = finishedAt
         }
 
-        /// "verifier on contract-plan-task-8 (genswap): idle 14.7 h, pid 51234, 412 MB, task finished 15.0 h ago".
+        /// "verifier on contract-plan-task-8 (project-c): idle 14.7 h, pid 51234, 412 MB, task finished 15.0 h ago".
         public func line(now: Date) -> String {
             var parts = ["idle \(LeadTeams.hours(idle))"]
             if let pid { parts.append("pid \(pid)") }

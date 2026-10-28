@@ -221,7 +221,7 @@ struct GitGuardTests: LeadTeamFixture {
         #expect(marked(marks).isEmpty, "\(marked(marks))")
     }
 
-    /// A baseline taken from a hooks folder inside the working tree (stakegen's core.hooksPath .githooks) says so.
+    /// A baseline taken from a hooks folder inside the working tree (project-b's core.hooksPath .githooks) says so.
     @Test func aBaselineFromAHooksFolderInTheWorkingTreeSaysSo() throws {
         let url = temp.url("in-tree")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
@@ -405,8 +405,8 @@ struct GitGuardTests: LeadTeamFixture {
         #expect(marked(marks).isEmpty, "\(marked(marks))")
     }
 
-    /// Trust on first use: the hooks a repository has when the guard first sees it (genswap's commit-msg, which strips
-    /// the trailers genswap forbids) are its baseline, and keep running in the lead's git with no accept_git_hooks; the
+    /// Trust on first use: the hooks a repository has when the guard first sees it (project-c's commit-msg, which strips
+    /// the trailers project-c forbids) are its baseline, and keep running in the lead's git with no accept_git_hooks; the
     /// lead is told once which. A later change runs only once the lead accepts it.
     @Test func theHooksARepositoryHasWhenFirstSeenAreItsBaseline() throws {
         let url = temp.url("first-seen")

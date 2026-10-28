@@ -6,7 +6,7 @@ import VibeCore
 @testable import VibeSwitcher
 
 /// 2026-10-18: the 18:10 install replaced all three leads; the old ones kept answering the user for four hours with no
-/// tools, and genswap's "split the GenLayer layer out" and films' "do what we need to do" never reached a board. Here a
+/// tools, and project-c's "split the GenLayer layer out" and films' "do what we need to do" never reached a board. Here a
 /// scratch host (its own socket, lock and key; never the user's) runs a lead, the app replaces it, and what's typed
 /// into the old one goes to the new one.
 @MainActor
@@ -224,7 +224,7 @@ struct ReplacedLeadRoutingTests {
     }
 
     /// hang-20261027-175604: the 3 s refresh marked the replaced leads with a stat of each board on the main thread,
-    /// which waited 3.1 s on a busy disk with genswap's lead shown. The refresh reads the boards off the main thread
+    /// which waited 3.1 s on a busy disk with project-c's lead shown. The refresh reads the boards off the main thread
     /// now, and marks the sessions on it with what they say.
     @Test func theRefreshReadsWhichLeadHoldsTheRoleOffTheMainThread() async throws {
         let world = try world()

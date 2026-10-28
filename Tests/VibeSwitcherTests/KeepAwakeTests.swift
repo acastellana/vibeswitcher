@@ -177,11 +177,11 @@ struct KeepAwakeTests {
         let power = FakePower()
         let awake = KeepAwake(power: power)
         awake.mode = { .always }
-        awake.update(working: ["/Users/you/dev/vibeswitcher", "/Users/you/dev/genswap"])
-        #expect(power.names == ["VibeSwitcher: team working on vibeswitcher", "VibeSwitcher: team working on genswap"])
-        awake.update(working: ["/Users/you/dev/genswap"])
-        #expect(power.names == ["VibeSwitcher: team working on genswap"])
-        #expect(awake.held == ["/Users/you/dev/genswap"])
+        awake.update(working: ["/Users/you/dev/vibeswitcher", "/Users/you/dev/project-c"])
+        #expect(power.names == ["VibeSwitcher: team working on vibeswitcher", "VibeSwitcher: team working on project-c"])
+        awake.update(working: ["/Users/you/dev/project-c"])
+        #expect(power.names == ["VibeSwitcher: team working on project-c"])
+        #expect(awake.held == ["/Users/you/dev/project-c"])
     }
 
     @Test func onBatteryNothingIsHeldUnlessTheSettingSaysAlways() {

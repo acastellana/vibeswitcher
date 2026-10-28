@@ -232,7 +232,7 @@ struct BriefingButtonTests {
     /// No Claude: the English template, said so in the panel, and read in English.
     @Test func withoutClaudeTheTemplateIsReadInEnglish() async {
         let voice = FakeVoice()
-        let waiting = Session(tty: "ttys001", agent: .claude, pid: 1, startedAt: .distantPast, cwd: nil, project: "genswap", task: nil,
+        let waiting = Session(tty: "ttys001", agent: .claude, pid: 1, startedAt: .distantPast, cwd: nil, project: "project-c", task: nil,
                               status: .needsInput, statusSince: Date(), detail: nil, hasHooks: true, inTerminalApp: false)
         let (model, _) = model(key: nil, claude: FakeClaude(nil), voice: voice, language: "fr", sessions: [waiting])
         model.press()
@@ -240,7 +240,7 @@ struct BriefingButtonTests {
         #expect(model.briefing?.byModel == false)
         #expect(model.briefing?.notice == "Claude isn't available, so this is a template briefing in English.")
         #expect(voice.said.first?.language == "en")
-        #expect(voice.said.first?.text == "1 session needs you: genswap.")
+        #expect(voice.said.first?.text == "1 session needs you: project-c.")
     }
 
     /// Pressed while it's written: cancelled; what the model says later is dropped, nothing is read.

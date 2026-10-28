@@ -18,15 +18,15 @@ struct ProjectBriefingButtonTests {
     let defaults: UserDefaults
     let folder: URL
     let vibeswitcher: String
-    let genswap: String
+    let projectC: String
 
     init() throws {
         defaults = temp.defaults("project-briefing-tests")
         folder = temp.url("project-briefing-tests")
         vibeswitcher = folder.appendingPathComponent("vibeswitcher").path
-        genswap = folder.appendingPathComponent("genswap").path
+        projectC = folder.appendingPathComponent("project-c").path
         try write(log: [(20, "Merged docs: Docs"), (10, "Started a worker on phone-menu")], root: vibeswitcher)
-        try write(log: [(15, "Merged other: The other project's work")], root: genswap)
+        try write(log: [(15, "Merged other: The other project's work")], root: projectC)
     }
 
     /// A progress log as the lead's tool server writes it, each entry that many minutes before `now`, where the
@@ -46,12 +46,12 @@ struct ProjectBriefingButtonTests {
         board.tasks = [LeadTask(slug: "phone-menu", title: "The phone's menu", contract: LeadContract(goal: "", acceptance: [], boundaries: [], context: ""),
                                 status: .running)]
         board.questions = [LeadQuestion(text: "Ship the install tonight?", options: ["yes", "no"])]
-        return [vibeswitcher: board, genswap: LeadBoard()]
+        return [vibeswitcher: board, projectC: LeadBoard()]
     }
 
     func model(claude: FakeClaude, voice: FakeVoice) -> BriefingModel {
         let boards = boards()
-        let sessions = [Session(tty: "ttys001", agent: .claude, pid: 1, startedAt: .distantPast, cwd: nil, project: "genswap", task: nil,
+        let sessions = [Session(tty: "ttys001", agent: .claude, pid: 1, startedAt: .distantPast, cwd: nil, project: "project-c", task: nil,
                                 status: .needsInput, statusSince: Date(), detail: nil, hasHooks: true, inTerminalApp: false)]
         return BriefingModel(snapshot: { .init(boards: boards, sessions: sessions) }, language: { BriefingLanguage.named("es")! },
                              keyStore: AppProof.MemorySecret(nil), generate: { claude.generate($0) }, voice: voice, defaults: defaults,
@@ -84,7 +84,7 @@ struct ProjectBriefingButtonTests {
         #expect(prompt.contains("Work started: The phone's menu"))
         #expect(prompt.contains("Question for the user: Ship the install tonight?"))
         #expect(!prompt.contains("other project"))
-        #expect(!prompt.contains("genswap"))
+        #expect(!prompt.contains("project-c"))
         // The global model wasn't touched.
         #expect(global.briefing == nil && global.phase == .idle)
     }
@@ -109,7 +109,7 @@ struct ProjectBriefingButtonTests {
         let yesterday = now - 86_400
         defaults.set(yesterday, forKey: BriefingModel.lastKey)
         #expect(BriefingModel.lastKey(.all) == BriefingModel.lastKey)
-        #expect(BriefingModel.lastKey(.project(root: vibeswitcher)) != BriefingModel.lastKey(.project(root: genswap)))
+        #expect(BriefingModel.lastKey(.project(root: vibeswitcher)) != BriefingModel.lastKey(.project(root: projectC)))
 
         let project = global.project(vibeswitcher)
         #expect(project.lastBriefed == nil)
@@ -129,7 +129,7 @@ struct ProjectBriefingButtonTests {
         #expect(claude.prompts[1].contains("across these projects"))
         #expect(global.lastBriefed == now)
         #expect(project.lastBriefed == now)
-        #expect(global.project(genswap).lastBriefed == nil)
+        #expect(global.project(projectC).lastBriefed == nil)
     }
 
     /// One voice: a briefing that starts stops the one being read, whichever it was; its end idles the one speaking.
@@ -188,25 +188,25 @@ struct ProjectBriefingButtonTests {
     /// its own briefing.
     @Test func thePaletteOffersBothBriefings() {
         var ran: [String] = []
-        let withLead = PaletteItem.briefings(available: true, leadProject: "genswap", all: { ran.append("all") }, project: { ran.append("project") })
-        #expect(withLead.map(\.title) == ["Brief Me", "Brief Me on genswap"])
+        let withLead = PaletteItem.briefings(available: true, leadProject: "project-c", all: { ran.append("all") }, project: { ran.append("project") })
+        #expect(withLead.map(\.title) == ["Brief Me", "Brief Me on project-c"])
         #expect(withLead.map(\.id) == ["cmd:brief", "cmd:brief-project"])
         #expect(withLead[0].subtitle.hasPrefix("⇧⌘B") && withLead[1].subtitle.hasPrefix("⌥⇧⌘B"))
         withLead[1].run()
         withLead[0].run()
         #expect(ran == ["project", "all"])
         // Found by searching the project's name.
-        #expect(FuzzyMatch.rank(withLead, query: "brief gens") { $0.searchText }.first?.id == "cmd:brief-project")
+        #expect(FuzzyMatch.rank(withLead, query: "brief project-c") { $0.searchText }.first?.id == "cmd:brief-project")
 
         let noLead = PaletteItem.briefings(available: true, leadProject: nil, all: {}, project: {})
         #expect(noLead.map(\.title) == ["Brief Me"])
-        #expect(PaletteItem.briefings(available: false, leadProject: "genswap", all: {}, project: {}).isEmpty)
+        #expect(PaletteItem.briefings(available: false, leadProject: "project-c", all: {}, project: {}).isEmpty)
     }
 
     /// The Team tab's button says what it does.
     @Test func theTeamTabsButtonNamesTheProject() {
-        #expect(ProjectBriefingBar.help(.idle, name: "genswap").hasPrefix("Brief me on genswap: 30 seconds"))
-        #expect(ProjectBriefingBar.help(.writing, name: "genswap").contains("cancel"))
-        #expect(ProjectBriefingBar.help(.speaking, name: "genswap").contains("Stop"))
+        #expect(ProjectBriefingBar.help(.idle, name: "project-c").hasPrefix("Brief me on project-c: 30 seconds"))
+        #expect(ProjectBriefingBar.help(.writing, name: "project-c").contains("cancel"))
+        #expect(ProjectBriefingBar.help(.speaking, name: "project-c").contains("Stop"))
     }
 }

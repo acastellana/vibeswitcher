@@ -117,7 +117,7 @@ struct SidebarDiffTests {
             UserDefaults.standard.removeObject(forKey: WindowModel.endedOpenKey)
         }
         let model = WindowModel()
-        var members = [Self.member("Alpha", project: "genswap", label: "Shell"), Self.member("Beta", project: "acme", label: "Shell"),
+        var members = [Self.member("Alpha", project: "project-c", label: "Shell"), Self.member("Beta", project: "acme", label: "Shell"),
                        Self.member("Gamma", project: "acme", label: "Shell")]
         members[0].status = .needsInput
         members[2].host.exit = HostSession.Exit(status: 129, at: Self.now)
@@ -162,8 +162,8 @@ struct SidebarDiffTests {
         let model = WindowModel()
         model.grouping = .attention
         var random = Generator(state: seed)
-        var members = [Self.member("Lead", project: "genswap", label: "Lead · genswap"),
-                       Self.member("Alpha", project: "genswap", label: "Shell"),
+        var members = [Self.member("Lead", project: "project-c", label: "Lead · project-c"),
+                       Self.member("Alpha", project: "project-c", label: "Shell"),
                        Self.member("Beta", project: "acme", label: "Shell"),
                        Self.member("Gamma", project: "tools", label: "Shell")]
         let lead = "host:\(members[0].host.id)"
@@ -184,8 +184,8 @@ struct SidebarDiffTests {
             case 0 where members.count < 14:
                 // A worker starts under the lead.
                 let name = "w\(step)"
-                members.append(Self.member("Worker \(name)", project: "genswap", label: "Worker: \(name)",
-                                           cwd: "/Users/you/dev/genswap/.vibeswitcher/worktrees/\(name)"))
+                members.append(Self.member("Worker \(name)", project: "project-c", label: "Worker: \(name)",
+                                           cwd: "/Users/you/dev/project-c/.vibeswitcher/worktrees/\(name)"))
             case 1:
                 // One ends; or one ended long ago is removed.
                 let index = Int.random(in: 1..<members.count, using: &random)

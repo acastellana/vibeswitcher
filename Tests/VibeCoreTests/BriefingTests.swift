@@ -48,7 +48,7 @@ struct BriefingTests {
         quietBoard.tasks = [task("x", "X", .running)]
         quietBoard.questions = [LeadQuestion(text: "Which logo?", options: [])]
         let input = Briefing.compose([.init(name: "vibeswitcher", progress: log(entries.sorted { $0.minutesAgo > $1.minutesAgo }), board: board),
-                                      .init(name: "genswap", progress: log([(minutesAgo: 600, text: "Update: long ago")]), board: quietBoard),
+                                      .init(name: "project-c", progress: log([(minutesAgo: 600, text: "Update: long ago")]), board: quietBoard),
                                       .init(name: "films", progress: nil, board: LeadBoard())],
                                      sessions: [session("api", .needsInput), session("web", .working), session("docs", .needsInput)],
                                      lastBriefed: now - 60, now: now)
@@ -71,9 +71,9 @@ struct BriefingTests {
         #expect(!BriefingPrompts.prompt(input, language: .english).contains(String(token.dropFirst(4))))
         #expect(text.contains("Question for the user: Ship with key"))
         // Quiet projects: one line each, counts and all.
-        #expect(text.components(separatedBy: "\n").filter { $0.contains("genswap") }.count == 1)
+        #expect(text.components(separatedBy: "\n").filter { $0.contains("project-c") }.count == 1)
         #expect(text.components(separatedBy: "\n").filter { $0.hasPrefix("  ") && $0.contains("logo") }.isEmpty)
-        #expect(text.contains("genswap: nothing new; 1 running, 1 question for the user."))
+        #expect(text.contains("project-c: nothing new; 1 running, 1 question for the user."))
         #expect(text.contains("films: nothing new."))
         #expect(text.contains("Sessions waiting on the user: api, docs."))
         #expect(!text.contains("web"))
@@ -126,10 +126,10 @@ struct BriefingTests {
 
     /// The prompt names the language and the word budget; what the model says is what's shown.
     @Test func theModelWritesItInTheChosenLanguage() {
-        let input = Briefing.compose([.init(name: "genswap", progress: log([(minutesAgo: 5, text: "Merged a: A")]), board: LeadBoard())],
+        let input = Briefing.compose([.init(name: "project-c", progress: log([(minutesAgo: 5, text: "Merged a: A")]), board: LeadBoard())],
                                      sessions: [], lastBriefed: nil, now: now)
         let spanish = BriefingLanguage.named("es")!
-        let model = Model("**En genswap** se completó una tarea y nada te espera.\n")
+        let model = Model("**En project-c** se completó una tarea y nada te espera.\n")
         let written = Briefing.write(input, language: spanish, generate: { model.prompts.append($0); return model.answer }, now: now)
         #expect(model.prompts.count == 1)
         let prompt = model.prompts[0]
@@ -137,7 +137,7 @@ struct BriefingTests {
         #expect(prompt.contains("language code es"))
         #expect(prompt.contains("70 to 90 words"))
         #expect(prompt.contains("Landed: A"))
-        #expect(written.text == "En genswap se completó una tarea y nada te espera.")
+        #expect(written.text == "En project-c se completó una tarea y nada te espera.")
         #expect(written.byModel)
         #expect(written.language == spanish)
         #expect(written.notice == nil)
@@ -151,7 +151,7 @@ struct BriefingTests {
         board.tasks = [task("x", "X", .blocked)]
         board.questions = [LeadQuestion(text: "Signing setup?", options: [])]
         let input = Briefing.compose([.init(name: "vibeswitcher", progress: log((0..<9).map { (minutesAgo: Double(60 - $0), text: "Merged t\($0): Fix \($0)") }), board: board),
-                                      .init(name: "genswap", progress: nil, board: LeadBoard()),
+                                      .init(name: "project-c", progress: nil, board: LeadBoard()),
                                       .init(name: "films", progress: nil, board: LeadBoard())],
                                      sessions: [session("api", .needsInput)], lastBriefed: nil, now: now)
         let written = Briefing.write(input, language: BriefingLanguage.named("fr")!, generate: { _ in nil }, now: now)
@@ -159,7 +159,7 @@ struct BriefingTests {
         #expect(written.language == .english)
         #expect(written.notice == "Claude isn't available, so this is a template briefing in English.")
         #expect(written.text.hasPrefix("In vibeswitcher, 9 updates; 9 landed, 1 blocked, 1 question for the user. Latest: Landed: Fix 8."))
-        #expect(written.text.contains("Nothing new in films and genswap."))
+        #expect(written.text.contains("Nothing new in films and project-c."))
         #expect(written.text.hasSuffix("1 session needs you: api."))
         #expect(written.text.split(separator: " ").count <= 90)
         #expect(Briefing.template(Briefing.compose([], sessions: [], lastBriefed: nil, now: now)) == "No project lead is running and no session needs you.")

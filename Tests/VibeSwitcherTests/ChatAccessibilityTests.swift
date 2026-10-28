@@ -65,7 +65,7 @@ struct ChatAccessibilityTests {
         let projects = scratch.adopt(URL(fileURLWithPath: home).appendingPathComponent(".claude/projects/chat-ax-\(UUID().uuidString)"))
         try FileManager.default.createDirectory(at: projects, withIntermediateDirectories: true)
         let path = projects.appendingPathComponent("lead.jsonl")
-        // 75 turns of 4 entries: the stakegen lead's 290-odd.
+        // 75 turns of 4 entries: the project-b lead's 290-odd.
         try ChatKeyViewLoopTests.transcript(turns: 75).write(to: path)
 
         let chat = ChatModel()

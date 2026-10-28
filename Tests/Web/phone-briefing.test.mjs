@@ -272,12 +272,12 @@ assert.deepEqual(requests.map(r => `${r.method} ${r.path}`), ['POST /api/briefin
 for (const id of ['briefScopeRow', 'briefScope']) assert.ok(page.includes(`id="${id}"`), `index.html has #${id}`);
 assert.equal($('briefScopeRow').hidden, true, 'no led projects: no picker');
 const refresh = () => vm.runInContext('refreshList()', context);
-macState.briefingProjects = ['genswap', 'vibeswitcher'];
+macState.briefingProjects = ['project-c', 'vibeswitcher'];
 storage.set('vs.briefProject', 'vibeswitcher');
 await refresh();
 assert.equal($('briefScopeRow').hidden, false);
-assert.deepEqual($('briefScope').children.map(o => o.textContent), ['All projects', 'genswap', 'vibeswitcher']);
-assert.deepEqual($('briefScope').children.map(o => o.value), ['', 'genswap', 'vibeswitcher']);
+assert.deepEqual($('briefScope').children.map(o => o.textContent), ['All projects', 'project-c', 'vibeswitcher']);
+assert.deepEqual($('briefScope').children.map(o => o.value), ['', 'project-c', 'vibeswitcher']);
 assert.equal($('briefScope').value, 'vibeswitcher', 'the kept pick');
 assert.equal($('briefLabel').textContent, 'Brief me on vibeswitcher');
 requests.length = 0;
@@ -300,13 +300,13 @@ requests.length = 0;
 $('briefMe').click();
 await flush();
 assert.deepEqual(JSON.parse(requests[0].body), {});
-$('briefScope').value = 'genswap';
+$('briefScope').value = 'project-c';
 $('briefScope').dispatch('change');
-assert.equal(storage.get('vs.briefProject'), 'genswap');
+assert.equal(storage.get('vs.briefProject'), 'project-c');
 
 // A kept pick the Mac no longer leads is All projects, and is never posted.
 storage.set('vs.briefProject', 'films');
-macState.briefingProjects = ['genswap'];
+macState.briefingProjects = ['project-c'];
 await refresh();
 assert.equal($('briefScope').value, '');
 $('briefScope').value = 'films';   // not one of its options: not sent either
@@ -319,12 +319,12 @@ assert.deepEqual(JSON.parse(requests[0].body), {});
 const { getItem, setItem, removeItem } = context.localStorage;
 Object.assign(context.localStorage, { getItem() { throw new Error('denied'); }, setItem() { throw new Error('denied'); },
                                       removeItem() { throw new Error('denied'); } });
-macState.briefingProjects = ['genswap', 'vibeswitcher'];
+macState.briefingProjects = ['project-c', 'vibeswitcher'];
 await refresh();
 assert.equal($('briefScope').value, '');
-$('briefScope').value = 'genswap';
+$('briefScope').value = 'project-c';
 $('briefScope').dispatch('change');
-assert.equal($('briefLabel').textContent, 'Brief me on genswap');
+assert.equal($('briefLabel').textContent, 'Brief me on project-c');
 Object.assign(context.localStorage, { getItem, setItem, removeItem });
 
 // The Mac leads nothing now: the picker goes.

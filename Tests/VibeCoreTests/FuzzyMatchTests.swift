@@ -4,21 +4,21 @@ import Testing
 
 struct FuzzyMatchTests {
     @Test func charactersMustAppearInOrder() {
-        #expect(FuzzyMatch.score("gs", "genswap") != nil)
-        #expect(FuzzyMatch.score("GS", "genswap") != nil)
-        #expect(FuzzyMatch.score("sg", "genswap") == nil)
-        #expect(FuzzyMatch.score("x", "genswap") == nil)
-        #expect(FuzzyMatch.score("", "genswap") == 0)
+        #expect(FuzzyMatch.score("pj", "project-c") != nil)
+        #expect(FuzzyMatch.score("PJ", "project-c") != nil)
+        #expect(FuzzyMatch.score("jp", "project-c") == nil)
+        #expect(FuzzyMatch.score("x", "project-c") == nil)
+        #expect(FuzzyMatch.score("", "project-c") == 0)
     }
 
     @Test func wordStartsWin() {
-        let ranked = FuzzyMatch.rank(["genswap session", "New Session"], query: "ns") { $0 }
+        let ranked = FuzzyMatch.rank(["project-c sessions", "New Session"], query: "ns") { $0 }
         #expect(ranked.first == "New Session")
         #expect(FuzzyMatch.score("vs", "VibeSwitcher")! > FuzzyMatch.score("vs", "devserver")!)
     }
 
     @Test func consecutiveBeatsScattered() {
-        #expect(FuzzyMatch.score("swap", "genswap")! > FuzzyMatch.score("swap", "sxwxaxpx")!)
+        #expect(FuzzyMatch.score("ject", "project-c")! > FuzzyMatch.score("ject", "jxexcxtx")!)
     }
 
     @Test func shorterWinsTies() {

@@ -214,7 +214,7 @@ struct AppHealthWatcherTests {
             return root.path
         }
         let builds = try project("vibeswitcher", workflow: "---\nwatch_app_logs: true\n---\n")
-        let off = try project("genswap", workflow: "---\nwatch_app_logs: false\n---\n")
+        let off = try project("project-c", workflow: "---\nwatch_app_logs: false\n---\n")
         let unset = try project("films", workflow: "---\nmax_workers: 2\n---\n")
         let none = try project("tge", workflow: nil)
         #expect(LeadController.appHealthRoots([builds, off, unset, none]) == [builds])

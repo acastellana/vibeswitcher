@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import VibeCore
 
-/// genswap, 2026-10-24: app-security-rpc-trust had four verifiers alive at once (13:37, 13:50, 14:14, 14:22), one per
+/// project-c, 2026-10-24: app-security-rpc-trust had four verifiers alive at once (13:37, 13:50, 14:14, 14:22), one per
 /// audit call on the same commit, none of them ended by the next audit; all four went together at 14:31, when the task
 /// was folded. An audit now ends the task's earlier verifier first: a task has one live verifier, or audit_finders
 /// finders, at a time. On fake sessions only.

@@ -48,9 +48,9 @@ struct WorkingPolicyTests: LeadTeamFixture {
 
     @Test func everyLeadWorkerAndVerifierPromptHasItForAnyProject() {
         let workflow = LeadWorkflow.parse("---\ntest_command: pnpm test\nbase_branch: dev\n---")
-        let root = "/Users/someone/dev/genswap"
+        let root = "/Users/someone/dev/project-c"
         let prompts = [
-            ("lead", LeadPrompts.lead(project: "genswap", root: root, workflow: workflow, policy: Self.custom)),
+            ("lead", LeadPrompts.lead(project: "project-c", root: root, workflow: workflow, policy: Self.custom)),
             ("worker", LeadPrompts.worker(task: Self.task, root: root, workflow: workflow, policy: Self.custom)),
             ("verifier", LeadPrompts.verifier(task: Self.task, root: root, workflow: workflow, policy: Self.custom)),
         ]
@@ -84,23 +84,23 @@ struct WorkingPolicyTests: LeadTeamFixture {
     @Test func eachRunningLeadIsToldOnceWhenThisBuildFirstRunsAndOnceWhenItChanges() {
         let policy = Locked(WorkingPolicy.defaultText)
         let watch = watch(policy)
-        // This build's first look: genswap's and TGE's leads, started by an older build, are told once.
-        let first = watch.look(running: ["genswap-lead", "tge-lead"])
-        #expect(first?.leads == ["genswap-lead", "tge-lead"])
+        // This build's first look: project-c's and TGE's leads, started by an older build, are told once.
+        let first = watch.look(running: ["project-c-lead", "tge-lead"])
+        #expect(first?.leads == ["project-c-lead", "tge-lead"])
         #expect(first?.text == WorkingPolicy.witnessText(WorkingPolicy.defaultText))
         #expect(first?.text.contains("Apply it from now on") == true)
         // Looked at again (a minute on, or after a relaunch: a new watch on the same file), nothing.
-        #expect(watch.look(running: ["genswap-lead", "tge-lead"]) == nil)
-        #expect(self.watch(policy).look(running: ["genswap-lead", "tge-lead"]) == nil)
+        #expect(watch.look(running: ["project-c-lead", "tge-lead"]) == nil)
+        #expect(self.watch(policy).look(running: ["project-c-lead", "tge-lead"]) == nil)
         // A lead started since, with the policy in its prompt, isn't told it.
         watch.started("films-lead", with: WorkingPolicy.defaultText)
-        #expect(watch.look(running: ["genswap-lead", "tge-lead", "films-lead"]) == nil)
+        #expect(watch.look(running: ["project-c-lead", "tge-lead", "films-lead"]) == nil)
         // Changed: each running lead once, with the new text.
         policy.set(Self.custom)
-        let changed = watch.look(running: ["genswap-lead", "tge-lead", "films-lead"])
-        #expect(changed?.leads == ["genswap-lead", "tge-lead", "films-lead"])
+        let changed = watch.look(running: ["project-c-lead", "tge-lead", "films-lead"])
+        #expect(changed?.leads == ["project-c-lead", "tge-lead", "films-lead"])
         #expect(changed?.text.hasSuffix(Self.custom) == true)
-        #expect(watch.look(running: ["genswap-lead", "tge-lead", "films-lead"]) == nil)
+        #expect(watch.look(running: ["project-c-lead", "tge-lead", "films-lead"]) == nil)
         // A lead whose prompt had the old one (prepared before the change) is told the new one.
         watch.started("late-lead", with: WorkingPolicy.defaultText)
         #expect(watch.look(running: ["late-lead"])?.leads == ["late-lead"])
@@ -151,19 +151,19 @@ struct WorkingPolicyTests: LeadTeamFixture {
         let policy = Locked(WorkingPolicy.defaultText)
         let watch = watch(policy)
         // Told at minute 5; a compaction it shows from minute 3 (another id than any told) came before that.
-        #expect(watch.look(running: ["genswap-lead"], now: Self.at(5))?.leads == ["genswap-lead"])
-        #expect(watch.look(running: ["genswap-lead"], compactions: ["genswap-lead": Self.compaction("g0", at: 3)], now: Self.at(6)) == nil)
+        #expect(watch.look(running: ["project-c-lead"], now: Self.at(5))?.leads == ["project-c-lead"])
+        #expect(watch.look(running: ["project-c-lead"], compactions: ["project-c-lead": Self.compaction("g0", at: 3)], now: Self.at(6)) == nil)
         // A lead started with it in its prompt has it after any compaction: not told.
         watch.started("films-lead", with: WorkingPolicy.defaultText)
-        let compacted = ["films-lead": Self.compaction("f1", at: 30), "genswap-lead": Self.compaction("g1", at: 30)]
-        #expect(watch.look(running: ["films-lead", "genswap-lead"], compactions: compacted, now: Self.at(31))?.leads == ["genswap-lead"])
+        let compacted = ["films-lead": Self.compaction("f1", at: 30), "project-c-lead": Self.compaction("g1", at: 30)]
+        #expect(watch.look(running: ["films-lead", "project-c-lead"], compactions: compacted, now: Self.at(31))?.leads == ["project-c-lead"])
         // The policy changed: the prompted lead has the old one in its prompt, so it's told, and from then on it's
         // told again after a compaction like any lead told in a message.
         policy.set(Self.custom)
-        #expect(watch.look(running: ["films-lead", "genswap-lead"], compactions: compacted, now: Self.at(40))?.leads == ["films-lead", "genswap-lead"])
+        #expect(watch.look(running: ["films-lead", "project-c-lead"], compactions: compacted, now: Self.at(40))?.leads == ["films-lead", "project-c-lead"])
         let later = ["films-lead": Self.compaction("f2", at: 50)]
-        #expect(watch.look(running: ["films-lead", "genswap-lead"], compactions: later, now: Self.at(51))?.leads == ["films-lead"])
-        #expect(watch.look(running: ["films-lead", "genswap-lead"], compactions: later, now: Self.at(52)) == nil)
+        #expect(watch.look(running: ["films-lead", "project-c-lead"], compactions: later, now: Self.at(51))?.leads == ["films-lead"])
+        #expect(watch.look(running: ["films-lead", "project-c-lead"], compactions: later, now: Self.at(52)) == nil)
     }
 
     @Test func aTranscriptsLastCompactionIsItsLatestMainThreadBoundary() throws {
@@ -231,7 +231,7 @@ struct WorkingPolicyTests: LeadTeamFixture {
     // MARK: Every project's merge takes the same lock
 
     @Test func aMergeInAnyProjectWaitsForVsHeavysRunAndHoldsTheSameLock() throws {
-        let url = temp.url("genswap")
+        let url = temp.url("project-c")
         try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         let root = url.resolvingSymlinksInPath().path
         for args in [["init", "-q", "-b", "main"], ["config", "user.email", "t@t"], ["config", "user.name", "T"]] { Git.run(args, in: root) }

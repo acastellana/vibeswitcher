@@ -521,7 +521,7 @@ extension LeadWitness {
     /// The leads whose start_worker, audit or merge was refused for the Mac's room or load (see `MacLimits`), each
     /// woken once when there's room again, whichever project's sessions ended to make it. The refusal tells the lead
     /// not to poll; before this nothing woke it when another project's sessions ended, so leads slept and polled
-    /// (genswap's on 10-23 and 10-24). Each refusal is a file of its own in `folder`, written by the lead's tool server;
+    /// (project-c's on 10-23 and 10-24). Each refusal is a file of its own in `folder`, written by the lead's tool server;
     /// the app looks once a minute (`look`) and removes the ones it told, so a refusal written meanwhile isn't lost.
     public struct RoomWaits {
         /// One refused call.

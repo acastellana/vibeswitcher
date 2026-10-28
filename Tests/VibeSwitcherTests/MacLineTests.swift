@@ -16,7 +16,7 @@ struct MacLineTests {
     static let sessions = [
         hosted("/Users/x/dev/vibeswitcher/.vibeswitcher/worktrees/fix", "Worker: Fix"),
         hosted("/Users/x/dev/vibeswitcher/.vibeswitcher/worktrees/fix", "Verifier: Fix"),
-        hosted("/Users/x/dev/genswap/.vibeswitcher/worktrees/swap", "Worker: Swap"),
+        hosted("/Users/x/dev/project-c/.vibeswitcher/worktrees/swap", "Worker: Swap"),
         hosted("/Users/x/dev/films/.vibeswitcher/worktrees/cut", "Worker: Cut", ended: true),
         hosted("/Users/x/dev/films", "Lead · films"),
         hosted("/Users/x/dev/notes", "Claude"),
@@ -26,7 +26,7 @@ struct MacLineTests {
         let line = MacLine.make(Self.sessions, load: 12.34, limits: MacLimits(loadThreshold: 24))
         #expect(line.text == "Mac: load 12.3, 3 team sessions across 2 projects")
         #expect(!line.isOver)
-        #expect(line.spoken == "Whole Mac, all projects: load average 12.3 over the last minute; 3 team sessions across 2 projects (vibeswitcher 2, genswap 1)")
+        #expect(line.spoken == "Whole Mac, all projects: load average 12.3 over the last minute; 3 team sessions across 2 projects (vibeswitcher 2, project-c 1)")
     }
 
     @Test func overALimitItSaysWhichAndThatTheLeadWaits() {

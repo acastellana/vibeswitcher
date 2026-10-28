@@ -47,7 +47,7 @@ public enum Git {
 /// - takes its hooks from a copy the lead accepted (`accept`), kept in VibeSwitcher's private folder, never from the
 ///   repository's hooks folder: a hook planted there (post-merge, reference-transaction, post-checkout…) doesn't run.
 ///   The hooks a repository has when the guard first sees it are the baseline, accepted then (`baseline`), so the
-///   user's own keep running (genswap's commit-msg) and the lead is told once which; a later change there runs only
+///   user's own keep running (project-c's commit-msg) and the lead is told once which; a later change there runs only
 ///   once the lead accepts it, and is told to the lead (`notice`) until it does.
 /// - runs without the fsmonitor, without any transport (`protocol.allow=never`: no lazy fetch, so no credential helper
 ///   or ssh command), with diff's external drivers and textconv off (`--no-ext-diff --no-textconv`), and without a git
@@ -378,7 +378,7 @@ public enum GitGuard {
     /// The hook git runs in place of the accepted copy at `hook`: that copy, as branch code (`BranchCode`), never the
     /// lead. Under the marked wrapper, in a POSIX session of its own with no terminal, holding no descriptor but its
     /// standard three: the host gives nothing below the wrapper a session's standing, and a hook that escapes it can't
-    /// reach the lead's terminal. An accepted hook may run what its checkout holds (stakegen's call scripts in the
+    /// reach the lead's terminal. An accepted hook may run what its checkout holds (project-b's call scripts in the
     /// working tree: the branch's, in a merge's), so it never needs the lead's standing. perl forks, starts the session
     /// and closes the rest; without it, the wrapper alone.
     static func shim(running hook: String) -> String {

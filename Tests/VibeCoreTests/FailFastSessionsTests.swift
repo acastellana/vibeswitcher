@@ -3,7 +3,7 @@ import Foundation
 import Testing
 @testable import VibeCore
 
-/// genswap, 2026-10-24: no session of app-security-rpc-trust had the vibeswitcher tools, the worker nor its four
+/// project-c, 2026-10-24: no session of app-security-rpc-trust had the vibeswitcher tools, the worker nor its four
 /// verifiers, and nothing noticed: 3.7 M tokens went to verdicts that couldn't be filed, and the sessions held 4 of the
 /// Mac's 6 slots. The host now keeps when each worker's and verifier's tool server first asked who it is; one that
 /// hasn't `toolsWithin` after its start is told to the lead once, and ended. On fake sessions and a clock given.
@@ -113,7 +113,7 @@ struct ToolsConnectedTests {
 }
 
 extension LeadToolsetTests {
-    /// genswap: four verifiers in a row without tools, each audit started as if the last had simply ended. audit and
+    /// project-c: four verifiers in a row without tools, each audit started as if the last had simply ended. audit and
     /// start_worker now name the earlier session that never got its tools before they start another.
     @Test func auditNamesTheEarlierVerifierThatNeverGotItsTools() throws {
         let root = try repo()
@@ -205,7 +205,7 @@ extension LeadToolsetTests {
         #expect(FileManager.default.fileExists(atPath: Worktrees.path(root: root, slug: "one")))
     }
 
-    /// genswap, 2026-10-21: cleanup(force) answered "Cleaned up", and the lead told the user three tasks were abandoned;
+    /// project-c, 2026-10-21: cleanup(force) answered "Cleaned up", and the lead told the user three tasks were abandoned;
     /// they stayed failed (they never had a worker, LeadTask.isAbandoned). cleanup now says the state it leaves, as
     /// status and the board show it.
     @Test func cleanupSaysTheStateItLeavesTheTaskIn() throws {

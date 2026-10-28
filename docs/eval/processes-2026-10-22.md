@@ -52,8 +52,8 @@ It was written against project-lead at **fa9131e**. Items already in `docs/eval/
   4. The server keeps its port and its cwd, now in a worktree that `cleanup` removes.
 - **Where.** `Sources/VibeHost/HostedSession.swift:663-671` (`terminate`); `Sources/VibeHost/HostServer.swift:700-715` (`endOrphans`, parsers and tool servers only).
 - **Evidence (live, read-only).**
-  - pid 66813 `node test/ui/harness/serve.mjs 8833`: ppid 1, running 3 days 16 h, listening on 8833. Its cwd is `genswap/.vibeswitcher/worktrees/fix-connecting-a-wallet`, which no longer exists. Its environment carries `VIBESWITCHER_SESSION=20691B6C-…`, the host session that `app.log:1405` shows as that worker's (`fix-connecting-a-wallet`).
-  - pid 14391 `npm run serve`: ppid 1, running 4 days, cwd `genswap/.vibeswitcher/worktrees/prototype-genswap-as-the` (also gone).
+  - pid 66813 `node test/ui/harness/serve.mjs 8833`: ppid 1, running 3 days 16 h, listening on 8833. Its cwd is `project-c/.vibeswitcher/worktrees/fix-connecting-a-wallet`, which no longer exists. Its environment carries `VIBESWITCHER_SESSION=20691B6C-…`, the host session that `app.log:1405` shows as that worker's (`fix-connecting-a-wallet`).
+  - pid 14391 `npm run serve`: ppid 1, running 4 days, cwd `project-c/.vibeswitcher/worktrees/prototype-project-c-as-the` (also gone).
 - **Impact.**
   - Ports stay taken, so the next worker's server fails to bind. Worse, its tests can reach the stale server, which serves deleted code.
   - Memory and CPU leak for days.

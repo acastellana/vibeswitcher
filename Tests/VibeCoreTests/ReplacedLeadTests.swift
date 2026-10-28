@@ -3,7 +3,7 @@ import Testing
 @testable import VibeCore
 
 /// 2026-10-18: the 18:10 install replaced all three leads, and the old ones kept answering the user for four hours with
-/// no tools: genswap's "split the GenLayer layer out" and films' "do what we need to do" never reached a board. A
+/// no tools: project-c's "split the GenLayer layer out" and films' "do what we need to do" never reached a board. A
 /// replaced lead now says so in the window, what's typed into it goes to the live lead, and the new lead reads its
 /// last turns before greeting.
 struct ReplacedLeadTests {
@@ -13,18 +13,18 @@ struct ReplacedLeadTests {
 
     @Test func aLeadOtherThanTheOneItsBoardNamesIsReplacedByThatOne() {
         let old = UUID(), new = UUID(), other = UUID()
-        let leads = [(id: old, root: "/genswap"), (id: new, root: "/genswap"), (id: other, root: "/films")]
-        #expect(StatusRules.replacedLeads(leads, holders: ["/genswap": new, "/films": other]) == [old: new])
+        let leads = [(id: old, root: "/project-c"), (id: new, root: "/project-c"), (id: other, root: "/films")]
+        #expect(StatusRules.replacedLeads(leads, holders: ["/project-c": new, "/films": other]) == [old: new])
         // The board names a session that's gone (or none, a new lead still starting): nothing is said replaced by it.
-        #expect(StatusRules.replacedLeads(leads, holders: ["/genswap": UUID()]).isEmpty)
+        #expect(StatusRules.replacedLeads(leads, holders: ["/project-c": UUID()]).isEmpty)
         #expect(StatusRules.replacedLeads(leads, holders: [:]).isEmpty)
         // A lead of another project never replaces this one.
-        #expect(StatusRules.replacedLeads([(id: old, root: "/genswap"), (id: other, root: "/films")], holders: ["/genswap": other]).isEmpty)
+        #expect(StatusRules.replacedLeads([(id: old, root: "/project-c"), (id: other, root: "/films")], holders: ["/project-c": other]).isEmpty)
     }
 
     @Test func aReplacedLeadSaysWhereToContinueNotAnOrdinaryStatus() {
-        let replaced = ReplacedLead(root: "/genswap", project: "genswap", tty: "ttys004", live: UUID())
-        #expect(replaced.label == "replaced — continue in Lead · genswap")
+        let replaced = ReplacedLead(root: "/project-c", project: "project-c", tty: "ttys004", live: UUID())
+        #expect(replaced.label == "replaced — continue in Lead · project-c")
         #expect(replaced.rowState.text == replaced.label)
         #expect(replaced.rowState.group == .idle && replaced.rowState.since == nil)
         let ordinary = ["needs you", "working", "background", "done", "idle", "unknown", "paused", "starting", "shell"]
@@ -68,7 +68,7 @@ struct ReplacedLeadTests {
 
     func transcript(_ lines: [String]) throws -> (home: String, path: String) {
         let home = temp.url("home")
-        let folder = home.appendingPathComponent(".claude/projects/-genswap")
+        let folder = home.appendingPathComponent(".claude/projects/-project-c")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let file = folder.appendingPathComponent("old-lead.jsonl")
         try (lines.joined(separator: "\n") + "\n").write(to: file, atomically: true, encoding: .utf8)

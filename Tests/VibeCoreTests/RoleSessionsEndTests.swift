@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import VibeCore
 
-/// Role sessions end themselves when their job is done (2026-10-20): two genswap verifiers ran on idle for 14.7 h and
+/// Role sessions end themselves when their job is done (2026-10-20): two project-c verifiers ran on idle for 14.7 h and
 /// 20.6 h, their tasks long finished, because cleanup ended only a task's newest session. The vault's roster names
 /// every worker and verifier a team had (`LeadVault.Request.roster`), the app ends those of finished tasks from it
 /// (`LeadTeams.finishedRoles`), a submitted verifier's end is expected (`LeadWitness.Seen.submittedAt`), and what still
@@ -165,8 +165,8 @@ struct RoleSessionsEndTests: LeadTeamFixture {
     // MARK: Stranded
 
     @Test func strandedSessionsAreNamedInOneMessageALineEach() throws {
-        let canonical = LeadVault.canonical("/Users/you/dev/genswap")
-        let tree = { (slug: String) in "/Users/you/dev/genswap/.vibeswitcher/worktrees/\(slug)" }
+        let canonical = LeadVault.canonical("/Users/you/dev/project-c")
+        let tree = { (slug: String) in "/Users/you/dev/project-c/.vibeswitcher/worktrees/\(slug)" }
         let a = hosted(label: "Verifier: Contract plan 8", cwd: tree("contract-plan-task-8"))
         let b = hosted(label: "Verifier: Publish", cwd: tree("publish-the-new-shell"))
         let c = hosted(label: "Worker: Fresh", cwd: tree("fresh"))
@@ -183,8 +183,8 @@ struct RoleSessionsEndTests: LeadTeamFixture {
         let text = try #require(LeadWitness.strandedText(stranded, now: Self.now))
         let lines = text.split(separator: "\n").map(String.init)
         #expect(lines.count == 4, "\(text)")
-        #expect(lines[1] == "- The verifier on contract-plan-task-8 (genswap): idle 14.7 h, pid \(a.childPID), 412 MB, task finished 14.7 h ago")
-        #expect(lines[2].hasPrefix("- The verifier on publish-the-new-shell (genswap): idle 20.6 h, pid \(b.childPID), 412 MB"))
+        #expect(lines[1] == "- The verifier on contract-plan-task-8 (project-c): idle 14.7 h, pid \(a.childPID), 412 MB, task finished 14.7 h ago")
+        #expect(lines[2].hasPrefix("- The verifier on publish-the-new-shell (project-c): idle 20.6 h, pid \(b.childPID), 412 MB"))
         #expect(lines[0].hasPrefix("2 role sessions still run"))
         // Working, or idle less than an hour: not stranded; none, no message.
         #expect(LeadTeams.stranded(finished, idleSince: { _ in nil }, agent: { _ in (nil, nil) }, now: Self.now).isEmpty)

@@ -17,12 +17,12 @@ struct SessionTeamsTests {
             session("me", nil, cwd: "/r/notes", project: "notes"),
             session("lead", .lead, cwd: "/r/acme", project: "acme"),
             session("v1", .verifier, cwd: "/r/acme/.vibeswitcher/worktrees/fix-login", project: "fix-login"),
-            session("g1", .worker, cwd: "/r/genswap/.vibeswitcher/worktrees/plan", project: "plan"),
+            session("g1", .worker, cwd: "/r/project-c/.vibeswitcher/worktrees/plan", project: "plan"),
             session("w2", .worker, cwd: "/r/acme/.vibeswitcher/worktrees/docs", project: "docs"),
         ]
         let split = SessionTeams.split(sessions)
         #expect(split.own.map(\.tty) == ["me", "lead"])
-        #expect(split.teams.map(\.project) == ["acme", "genswap"])
+        #expect(split.teams.map(\.project) == ["acme", "project-c"])
         #expect(split.teams.map { $0.members.map(\.tty) } == [["w1", "v1", "w2"], ["g1"]])
         #expect(split.teamCount == 4)
         #expect(split.listed.map(\.tty) == ["me", "lead", "w1", "v1", "w2", "g1"])

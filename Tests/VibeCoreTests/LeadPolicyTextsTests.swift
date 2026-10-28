@@ -2,9 +2,9 @@ import Foundation
 import Testing
 @testable import VibeCore
 
-/// What a lead reads never pushes it against the user's working policy (2026-10-24, the review of the genswap, TGE and
+/// What a lead reads never pushes it against the user's working policy (2026-10-24, the review of the project-c, TGE and
 /// films leads): an update per merge (TGE posted 59), "try again in about 5 minutes" (TGE ran 48 sleep loops), a worker
-/// full suite on top of the merge's (20 of genswap's 30 contracts), and briefs asking for git commands workers are refused.
+/// full suite on top of the merge's (20 of project-c's 30 contracts), and briefs asking for git commands workers are refused.
 struct LeadPolicyTextsTests {
     static let task = LeadTask(slug: "split-layer", title: "Split the layer",
                                contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))
@@ -75,7 +75,7 @@ struct LeadPolicyTextsTests {
                        "only when its change touches shared test or build infrastructure"] {
             #expect(contracts.contains(needle), "contracts: missing \(needle)")
         }
-        #expect(LeadPrompts.lead(project: "genswap", root: "/r", workflow: LeadWorkflow.parse("")).contains(contracts))
+        #expect(LeadPrompts.lead(project: "project-c", root: "/r", workflow: LeadWorkflow.parse("")).contains(contracts))
         // add_task's acceptance says it too (LeadToolsetTests.addTasksAcceptanceSaysTheMergesRunIsTheOneFullSuite).
     }
 
@@ -104,7 +104,7 @@ struct LeadPolicyTextsTests {
         #expect(LeadPrompts.Policy.lintTests(in: other.path) == ["StyleLint"])
         #expect(LeadPrompts.worker(task: Self.task, root: other.path, workflow: LeadWorkflow.parse(""))
             .contains("run the repository's lint tests (`swift test --filter 'StyleLint'`) along with"))
-        let none = LeadPrompts.worker(task: Self.task, root: "/r/genswap", workflow: LeadWorkflow.parse(""))
+        let none = LeadPrompts.worker(task: Self.task, root: "/r/project-c", workflow: LeadWorkflow.parse(""))
         #expect(none.contains("Lints: before you report done, run your repository-wide lint or check tests, if any, along with the affected tests."))
         #expect(LeadPrompts.worker(task: Self.task, root: "/r", workflow: workflow, lints: ["A", "B"]).contains("--filter 'A|B'"))
     }
@@ -131,8 +131,8 @@ struct LeadPolicyTextsTests {
         #expect(FileManager.default.isExecutableFile(atPath: repository + "/" + LeadPrompts.Policy.sandboxScript))
 
         // A project without the sandbox script: no such paragraph.
-        let none = LeadPrompts.worker(task: Self.task, root: "/r/genswap", workflow: LeadWorkflow.parse(""))
-        #expect(LeadPrompts.Policy.workerScreenshots(in: "/r/genswap") == nil)
+        let none = LeadPrompts.worker(task: Self.task, root: "/r/project-c", workflow: LeadWorkflow.parse(""))
+        #expect(LeadPrompts.Policy.workerScreenshots(in: "/r/project-c") == nil)
         #expect(!none.contains("UI changes:") && none.contains("along with the affected tests. They take seconds and catch "
                                                                   + "what a filtered run misses, which otherwise only the merge's full run finds.\nDone:"))
     }
@@ -189,7 +189,7 @@ struct LeadPolicyTextsTests {
             let git = rules.filter { $0.hasPrefix("Bash(git ") }
             #expect(git.count > 30 && git.contains("Bash(git -C:*)") && git.contains("Bash(git worktree:*)") && git.contains("Bash(git tag:*)")
                     && git.contains("Bash(git commit --amend:*)"))
-            let lead = LeadPrompts.lead(project: "genswap", root: "/r", workflow: workflow)
+            let lead = LeadPrompts.lead(project: "project-c", root: "/r", workflow: workflow)
             let worker = LeadPrompts.worker(task: Self.task, root: "/r", workflow: workflow)
             for rule in git {
                 var command = String(rule.dropFirst("Bash(".count).dropLast())

@@ -81,7 +81,7 @@ A segmented control at the top: **Overview** | **Activity** (remembered).
 ## Command palette (⌘K)
 
 A floating panel over the window: a search field and results.
-- Items: every session row ("genswap — Borderless work", subtitle state); "New <preset> in <project>" for
+- Items: every session row ("project-c — Borderless work", subtitle state); "New <preset> in <project>" for
   recent projects × their presets; window commands (New Session…, New Shell, Group by Attention/Projects,
   Toggle Inspector, Settings…, Next Needing You).
 - Fuzzy match: the query's characters must appear in order (case-insensitive). Score favors matches at

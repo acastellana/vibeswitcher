@@ -208,7 +208,7 @@ struct WorktreesTests {
     /// The tree of `docs/lead` at `ref`: the same as another's when every record in it is the same.
     func recordsTree(_ ref: String, _ root: String) -> String { Git.run(["rev-parse", "\(ref):docs/lead"], in: root).output }
 
-    /// genswap, 2026-10-23: a branch that held another base's records conflicted with the base only in them, and waited
+    /// project-c, 2026-10-23: a branch that held another base's records conflicted with the base only in them, and waited
     /// 13.9 h for the user to resolve them by hand. Workers may not edit the records, so the base's are the right ones:
     /// a rebase that stops only on them takes the base's and goes on.
     @Test func aRebaseThatConflictsOnlyInTheLeadsRecordsLandsWithTheBasesRecords() throws {

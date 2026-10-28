@@ -3,7 +3,7 @@ import Testing
 @testable import VibeCore
 @testable import VibeHost
 
-/// A verifier that submitted its audit has no job left (2026-10-20: two of genswap's ran on idle 14.7 h and 20.6 h):
+/// A verifier that submitted its audit has no job left (2026-10-20: two of project-c's ran on idle 14.7 h and 20.6 h):
 /// the host ends its session `submittedGrace` after the vault stored its verdict, through its own logged end, as any
 /// kill. Sessions here are scratch shells, never Claude.
 struct SubmittedVerifierEndsTests {

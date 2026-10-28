@@ -69,10 +69,10 @@ struct WindowGroupsTests {
     }
 
     @Test func filterMatchesTitleProjectAndTaskIgnoringCase() {
-        let sections = [WindowSection(project: "genswap", rows: [agent("t1", project: "genswap", task: "Fix Router")]),
-                        WindowSection(project: "other", rows: [agent("t2", project: "other"), hosted(title: "GenSwap logs", project: "other")])]
+        let sections = [WindowSection(project: "project-c", rows: [agent("t1", project: "project-c", task: "Fix Router")]),
+                        WindowSection(project: "other", rows: [agent("t2", project: "other"), hosted(title: "Project-C logs", project: "other")])]
         #expect(WindowGroups.filter(sections, query: "router").flatMap(\.rows).map(\.id) == ["tty:t1"])
-        #expect(WindowGroups.filter(sections, query: "GENSWAP").map(\.project) == ["genswap", "other"])
+        #expect(WindowGroups.filter(sections, query: "PROJECT-C").map(\.project) == ["project-c", "other"])
         #expect(WindowGroups.filter(sections, query: "OTH").flatMap(\.rows).count == 2)
         #expect(WindowGroups.filter(sections, query: "zzz").isEmpty)
         #expect(WindowGroups.filter(sections, query: "  ") == sections)

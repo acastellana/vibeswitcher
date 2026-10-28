@@ -99,7 +99,7 @@ generic tool row. This needs the structured decision captured below, so it's bui
 - **After typing:**
   - If the hook state still shows the same `decisionId` 4 s later, the phone shows "Didn't go through:
     use the keys below, or answer on the Mac."
-  - Every answer is written to the audit log ("Android phone answered genswap: B").
+  - Every answer is written to the audit log ("Android phone answered project-c: B").
 
 ### Recommendation
 - A **Recommend** button on the card runs the briefing engine (see B) with:
@@ -147,7 +147,7 @@ generic tool row. This needs the structured decision captured below, so it's bui
   - A **Brief me** button in the session view.
   - A card showing *What happened / Waiting on you / Proposal*, plus ▶ Listen, "Updated 2 min ago" and
     Refresh.
-- **Audit:** "Android phone asked for a briefing of genswap".
+- **Audit:** "Android phone asked for a briefing of project-c".
 
 ## Errors
 

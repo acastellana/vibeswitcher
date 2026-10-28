@@ -448,7 +448,7 @@ struct LeadGuardRailsTests: LeadTeamFixture {
 
     // MARK: A stray pkill doesn't end the team (2026-10-17)
 
-    /// A genswap worker's `pkill -f "cat" -n` SIGTERMed 3 workers, 2 verifiers, every tool server and the app: BSD
+    /// A project-c worker's `pkill -f "cat" -n` SIGTERMed 3 workers, 2 verifiers, every tool server and the app: BSD
     /// pkill takes the `-n` after a pattern as a second pattern, which every role's `--name` matches (and "cat" is in
     /// /Applications). Shown on a scratch process shaped like a role's session, with pgrep (which only lists), among
     /// this test process's children only: the machine's other processes are no business of this test.

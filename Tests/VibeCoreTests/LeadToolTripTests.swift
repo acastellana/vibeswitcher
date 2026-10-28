@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import VibeCore
 
-/// The lead's tools not tripping the lead (2026-10-18 review of 3 vibeswitcher leads and the genswap lead): a task a
+/// The lead's tools not tripping the lead (2026-10-18 review of 3 vibeswitcher leads and the project-c lead): a task a
 /// decision holds back isn't merged, outputs fit in its context, wrong parameter names are named, host errors read as
 /// errors, and a host replacement doesn't leave the board saying "running".
 struct LeadToolTripTests: LeadTeamFixture {
@@ -47,7 +47,7 @@ struct LeadToolTripTests: LeadTeamFixture {
 
     // MARK: Holds
 
-    /// genswap, 14:52: a fresh lead merged an audited prototype its decisions.md said never to merge until the user
+    /// project-c, 14:52: a fresh lead merged an audited prototype its decisions.md said never to merge until the user
     /// had looked. The prompt says to check, and a kept task can't be merged by mistake.
     @Test func theLeadIsToldToCheckWhatHoldsATaskBack() {
         let prompt = LeadPrompts.lead(project: "p", root: "/r", workflow: LeadWorkflow())
@@ -134,7 +134,7 @@ struct LeadToolTripTests: LeadTeamFixture {
 
     // MARK: Parameter names
 
-    /// 53 progress calls and 3 reports here and in genswap passed `message`, and failed or lost their summary.
+    /// 53 progress calls and 3 reports here and in project-c passed `message`, and failed or lost their summary.
     @Test func workerToolsTakeTheNamesWorkersUse() throws {
         let root = try repo()
         let runtime = FakeRuntime()
@@ -235,7 +235,7 @@ struct LeadToolTripTests: LeadTeamFixture {
     // MARK: Size
 
     /// A board as big as this repository's gets (46 tasks, 30+ reports): status was 87–408 KB here, board 337 KB in
-    /// genswap. Synthetic: 60 tasks with long everything, 100 long reports.
+    /// project-c. Synthetic: 60 tasks with long everything, 100 long reports.
     func bigBoard(_ root: String, _ runtime: FakeRuntime) throws {
         let long = String(repeating: "word ", count: 400)
         let states: [LeadTask.Status] = [.planned, .running, .review, .done, .failed, .blocked, .kept]
