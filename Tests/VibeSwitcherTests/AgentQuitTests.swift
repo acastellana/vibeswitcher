@@ -11,17 +11,22 @@ import Testing
 /// (`LeadWitness.agentQuitEnding`, what `LeadRuntime.agentEnding` tells it).
 @MainActor
 struct AgentQuitTests {
-    /// The verifier on a task in review, as the witness sees it from `table`: its events, and auto_advance's ending.
-    func witness(_ hosted: HostSession, table: [Int32: ProcInfo], now: Date) -> (events: [String], ended: [String], ending: String?) {
+    /// The verifier on a task in review, as the app's witness sees it with no agent of its in the scan (the fake is
+    /// Python, never in it): its rule (`TeamReading.agentQuit`, from the table `TeamReading.read` reads), its events,
+    /// and auto_advance's ending from `table`.
+    func witness(root: URL, _ hosted: HostSession, table: [Int32: ProcInfo], now: Date) -> (quit: Bool, events: [String], ended: [String], ending: String?) {
         var task = LeadTask(slug: "audit-me", title: "audit-me", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))
         task.status = .review
         task.worker = "w1"
         task.verifier = hosted.id.uuidString
         var board = LeadBoard()
         board.tasks = [task]
-        let seen = [hosted.id.uuidString: LeadWitness.Seen(live: hosted.isLive, status: .background, agentQuit: !hosted.agentRuns(in: table),
+        let observer = LeadObserver(home: root.path, stateFile: { root.appendingPathComponent("state/\($0).json") })
+        let team = TeamReading.read(root: root.path, board: board, hosted: [hosted.id.uuidString: hosted], sessions: [:], observer: observer)
+        let quit = team.agentQuit(hosted.id.uuidString, session: nil, scanSaysQuit: hosted.agentQuit(now: now))
+        let seen = [hosted.id.uuidString: LeadWitness.Seen(live: hosted.isLive, status: .background, agentQuit: quit,
                                                            started: hosted.startedAt.timeIntervalSince1970)]
-        return (LeadWitness.events(board: board, seen: seen, now: now).map(\.text),
+        return (quit, LeadWitness.events(board: board, seen: seen, now: now).map(\.text),
                 LeadWitness.endedForAdvance(board: board, seen: seen, now: now),
                 LeadWitness.agentQuitEnding(hosted, table: table, now: now))
     }
@@ -42,6 +47,9 @@ struct AgentQuitTests {
     func anAgentWaitingOnABackgroundCommandHasNotQuit(_ setup: (keepShell: Bool, foreground: Bool)) async throws {
         let temp = Scratch()
         let h = try await Harness.start(temp, keepShell: setup.keepShell)
+        // The project the board is in (its folder takes the lead's loop's lock), removed with `temp`.
+        let root = temp.url("project")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { h.stop() }
         let agent = try #require((h.agent["pid"] as? Int).map(Int32.init))
         // Its turn ends on a long command it runs in the background (or one that takes the terminal's foreground).
@@ -56,7 +64,8 @@ struct AgentQuitTests {
 
         let waiting = try await table { $0[child] != nil && $0[agent] != nil }
         #expect(hosted.isLive && hosted.agentRuns(in: waiting))
-        let alive = witness(hosted, table: waiting, now: later)
+        let alive = witness(root: root, hosted, table: waiting, now: later)
+        #expect(!alive.quit)
         #expect(!alive.events.contains { $0.contains("ended without a verdict") }, "\(alive.events)")
         #expect(alive.ended.isEmpty && alive.ending == nil, "\(alive)")
 
@@ -73,7 +82,12 @@ struct AgentQuitTests {
             table[agent] == nil && table[child]?.ppid == 1 && !table.values.contains { $0.ppid == shell.childPID }
         }
         #expect(shell.isLive && !shell.agentRuns(in: exited))
-        let quit = witness(shell, table: exited, now: later)
+        // The witness reads a table of its own (none on a loaded Mac, read again: not known isn't quit).
+        var quit = witness(root: root, shell, table: exited, now: later)
+        #expect(await until(timeout: Harness.wait) {
+            quit = witness(root: root, shell, table: exited, now: later)
+            return quit.quit
+        })
         #expect(quit.events.contains { $0.contains("ended without a verdict (\(LeadWitness.agentQuitEnding))") }, "\(quit.events)")
         #expect(quit.ended == [shell.id.uuidString] && quit.ending == LeadWitness.agentQuitEnding, "\(quit)")
     }

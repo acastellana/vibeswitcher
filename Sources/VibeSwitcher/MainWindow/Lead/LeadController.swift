@@ -131,6 +131,12 @@ struct TeamReading {
     /// `HostSession.agentRuns`): only these have quit. One whose agent waits on a background command runs on.
     var agentGone: Set<String> = []
 
+    /// The member `id`'s agent quit, leaving its session's shell open: the scan has no agent on it a minute on
+    /// (`scanSaysQuit`, see `TableRead.agentQuit`), and its agent's own process has exited (`agentGone`).
+    func agentQuit(_ id: String, session: Session?, scanSaysQuit: Bool) -> Bool {
+        session == nil && scanSaysQuit && agentGone.contains(id)
+    }
+
     /// A worker's transcript is read whatever it shows: a stall is one that reads as working too (see `LeadStall`). A
     /// verifier's while it doesn't show working: a turn that ended on an API error reads as finished or waiting, and
     /// its transcript says which it was.
@@ -1281,7 +1287,7 @@ final class LeadController: ObservableObject {
             // process table was read, and from a table that could tell what runs on its terminal: while it can't be read
             // (a loaded Mac), or its process there couldn't be told (mid-exec), it's unknown, not ended.
             // And its agent's own process has exited (`TeamReading.agentGone`): one waiting on a background command runs on.
-            let quit = session == nil && store.agentQuit(info) && team.agentGone.contains(id)
+            let quit = team.agentQuit(id, session: session, scanSaysQuit: store.agentQuit(info))
             seen[id] = LeadWitness.Seen(live: info.isLive, exit: info.exit?.status, cause: info.exit?.cause, status: session?.status,
                                         since: session?.statusSince, detail: session?.detail, pending: watched?.tail?.pending,
                                         agentQuit: quit, apiError: apiError?.text,
