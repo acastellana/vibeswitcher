@@ -97,7 +97,7 @@ enum PowerBench {
             process.standardError = FileHandle.nullDevice
             do { try process.run() } catch { return finish("the host didn't start: \(error)") }
             hostProcess = process
-            host.$sessions.receive(on: RunLoop.main).sink { [weak self] in self?.store.updateHosted($0) }.store(in: &cancellables)
+            host.$sessions.receiveLatest(on: RunLoop.main).sink { [weak self] in self?.store.updateHosted($0) }.store(in: &cancellables)
             HangWatchdog.shared.start()
             _ = leads
             store.start()

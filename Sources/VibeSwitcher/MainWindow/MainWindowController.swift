@@ -162,10 +162,10 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             self.chat.scrollToBottom()
             return true
         }
-        model.$selectedID.removeDuplicates().receive(on: RunLoop.main)
+        model.$selectedID.removeDuplicates().receiveLatest(on: RunLoop.main)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.showSelection() } }
             .store(in: &cancellables)
-        model.$sections.receive(on: RunLoop.main)
+        model.$sections.receiveLatest(on: RunLoop.main)
             .sink { [weak self] _ in
                 DispatchQueue.main.async {
                     self?.showSelection()
@@ -174,7 +174,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
                 }
             }
             .store(in: &cancellables)
-        leads.$boards.receive(on: RunLoop.main)
+        leads.$boards.receiveLatest(on: RunLoop.main)
             .sink { [weak self] _ in
                 DispatchQueue.main.async {
                     self?.updateTitleAndBadge()
@@ -182,17 +182,17 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
                 }
             }
             .store(in: &cancellables)
-        leads.$replacedLeads.receive(on: RunLoop.main)
+        leads.$replacedLeads.receiveLatest(on: RunLoop.main)
             .sink { [weak self] replaced in
                 guard let self else { return }
                 if self.model.replacedLeads != replaced { self.model.replacedLeads = replaced }
                 DispatchQueue.main.async { self.updateTitleAndBadge() }
             }
             .store(in: &cancellables)
-        model.$showsChat.removeDuplicates().receive(on: RunLoop.main)
+        model.$showsChat.removeDuplicates().receiveLatest(on: RunLoop.main)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.showSelection() } }
             .store(in: &cancellables)
-        host.$sessions.receive(on: RunLoop.main)
+        host.$sessions.receiveLatest(on: RunLoop.main)
             .sink { [weak self] sessions in
                 guard let self else { return }
                 let known = Set(sessions.map(\.id))
@@ -201,7 +201,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
             .store(in: &cancellables)
         // Once the host has listed its sessions, unsent messages to ones it doesn't have (lost with a replaced host)
         // go: they'd be restored on every launch with nowhere to go.
-        host.$sessions.combineLatest(host.$state).receive(on: RunLoop.main)
+        host.$sessions.combineLatest(host.$state).receiveLatest(on: RunLoop.main)
             .sink { [weak self] sessions, state in
                 switch state {
                 case .connected, .outdated(_, true): self?.chat.outbox.forgetGone(known: Set(sessions.map(\.id)))

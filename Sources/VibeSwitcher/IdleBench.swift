@@ -246,8 +246,8 @@ enum IdleBench {
             }
             IdleBench.writeHooks(started: started, transcript: transcript)
             // Wired as the app delegate wires them.
-            host.$sessions.receive(on: RunLoop.main).sink { [weak self] in self?.store.updateHosted($0) }.store(in: &cancellables)
-            store.$sessions.combineLatest(host.$sessions, host.$state, store.$tableRead).receive(on: RunLoop.main)
+            host.$sessions.receiveLatest(on: RunLoop.main).sink { [weak self] in self?.store.updateHosted($0) }.store(in: &cancellables)
+            store.$sessions.combineLatest(host.$sessions, host.$state, store.$tableRead).receiveLatest(on: RunLoop.main)
                 .sink { [weak self] sessions, hosted, state, table in
                     self?.model.update(sessions: sessions, hosted: hosted, table: table, hostAnswered: state != .connecting)
                 }

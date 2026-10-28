@@ -240,11 +240,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .sink { [weak self] enabled in self?.leadController.summaries.enabled = enabled }
             .store(in: &cancellables)
         preferences.$sidebarAutoHide
-            .receive(on: RunLoop.main)
+            .receiveLatest(on: RunLoop.main)
             .sink { [weak self] autoHide in self?.sidebar.autoHide = autoHide }
             .store(in: &cancellables)
         preferences.$sidebarMode
-            .receive(on: RunLoop.main)
+            .receiveLatest(on: RunLoop.main)
             .sink { [weak self] enabled in
                 guard let self else { return }
                 self.sidebar.setEnabled(enabled)
@@ -263,11 +263,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         floatingPanel = FloatingPanelController(store: store, onOpen: { [weak self] in self?.open($0, source: "panel") },
                                                 onShowList: { [weak self] anchor in self?.togglePopover(anchor: anchor) })
         preferences.$sessionOrder
-            .receive(on: RunLoop.main)
+            .receiveLatest(on: RunLoop.main)
             .sink { [weak self] order in self?.store.order = order }
             .store(in: &cancellables)
         preferences.$floatingPanel
-            .receive(on: RunLoop.main)
+            .receiveLatest(on: RunLoop.main)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.updateFloatingPanel() } }
             .store(in: &cancellables)
         visibilityTimer = Heartbeat.shared.every(2) { [weak self] in self?.updateFloatingPanel() }
@@ -275,7 +275,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         footprintRelief.start()
 
         store.$sessions
-            .receive(on: RunLoop.main)
+            .receiveLatest(on: RunLoop.main)
             .sink { [weak self] sessions in
                 guard let self else { return }
                 // The dots are your own sessions: a lead's workers and verifiers are under it in the list.
@@ -297,17 +297,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             .store(in: &cancellables)
 
         hostClient.$state
-            .receive(on: RunLoop.main)
+            .receiveLatest(on: RunLoop.main)
             .sink { state in AppStatus.extras["host"] = "\(state)" }
             .store(in: &cancellables)
         store.hostScreens = { [weak self] in self?.hostClient.screens ?? [:] }
         store.requestHostScreens = { [weak self] ttys in self?.hostClient.refreshScreens(ttys: ttys) }
         hostClient.$sessions
-            .receive(on: RunLoop.main)
+            .receiveLatest(on: RunLoop.main)
             .sink { [weak self] sessions in self?.store.updateHosted(sessions) }
             .store(in: &cancellables)
         store.$sessions.combineLatest(hostClient.$sessions, hostClient.$state, store.$tableRead)
-            .receive(on: RunLoop.main)
+            .receiveLatest(on: RunLoop.main)
             .sink { [weak self] sessions, hosted, state, table in
                 self?.windowModel.update(sessions: sessions, hosted: hosted, table: table, hostAnswered: state != .connecting)
             }
@@ -358,7 +358,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             self?.showSettings(tab: (note.object as? String).flatMap(SettingsTab.init(rawValue:)) ?? .general)
         }
         preferences.$appearance
-            .receive(on: RunLoop.main)
+            .receiveLatest(on: RunLoop.main)
             .sink { [weak self] appearance in
                 DispatchQueue.main.async {
                     self?.mainWindow?.pane.scrollbackLines = appearance.scrollbackLines
@@ -367,7 +367,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             }
             .store(in: &cancellables)
         NSApp.publisher(for: \.effectiveAppearance)
-            .receive(on: RunLoop.main)
+            .receiveLatest(on: RunLoop.main)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.mainWindow?.pane.reconfigureAll() } }
             .store(in: &cancellables)
         if preferences.openWindowAtLaunch { showMainWindow() }
