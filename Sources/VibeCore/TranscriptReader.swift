@@ -2,7 +2,9 @@ import Foundation
 
 /// One row of the phone's Conversation tab.
 public struct TranscriptEntry: Equatable, Sendable {
-    public enum Kind: String, Sendable { case prompt, reply, tool, toolResult }
+    /// `notice`: what VibeSwitcher handed the agent (a report, a wake-up, your words relayed while it worked), shown as
+    /// its, never as yours (see `TeamMessage`); only in the phone's Conversation tab (`read`'s `notices`).
+    public enum Kind: String, Sendable { case prompt, reply, tool, toolResult, notice }
 
     public var kind: Kind
     /// The tool call id for `tool`/`toolResult` (a later result updates the row with that id).
@@ -15,6 +17,9 @@ public struct TranscriptEntry: Equatable, Sendable {
     public var failed = false
     public var at: Double?
     public var duration: Double?
+    /// For a notice: who it's from, as the Mac's chat titles it ("Report from the worker on x", "VibeSwitcher: reports
+    /// are waiting").
+    public var from: String?
 
     public var json: [String: Any] {
         var object: [String: Any] = ["kind": kind.rawValue, "id": id, "text": text]
@@ -24,6 +29,7 @@ public struct TranscriptEntry: Equatable, Sendable {
         if failed { object["failed"] = true }
         if let at { object["at"] = at }
         if let duration { object["duration"] = duration }
+        if let from { object["from"] = from }
         return object
     }
 }
@@ -251,7 +257,8 @@ public enum TranscriptReader {
 
     /// Entries from the complete lines in `data` (which starts at a line boundary), and how many bytes
     /// those lines took: a trailing partial line is left for the next read.
-    public static func read(_ data: Data, format: Format, outputLimit: Int = 4096) -> (entries: [TranscriptEntry], consumed: Int) {
+    /// `notices`: what VibeSwitcher handed the agent is in too (see `TranscriptEntry.Kind.notice`).
+    public static func read(_ data: Data, format: Format, outputLimit: Int = 4096, notices: Bool = false) -> (entries: [TranscriptEntry], consumed: Int) {
         guard let lastNewline = data.lastIndex(of: 0x0A) else { return ([], 0) }
         let consumed = lastNewline - data.startIndex + 1
         var entries: [TranscriptEntry] = []
@@ -260,8 +267,8 @@ public enum TranscriptReader {
             guard let object = (try? JSONSerialization.jsonObject(with: Data(line))) as? [String: Any] else { continue }
             // For lines without an id: the same line gets the same id on every read.
             let lineID = stableID(line)
-            let parsed = format == .claude ? claude(object, lineID: lineID, outputLimit: outputLimit)
-                                           : codex(object, lineID: lineID, outputLimit: outputLimit)
+            let parsed = format == .claude ? claude(object, lineID: lineID, outputLimit: outputLimit, notices: notices)
+                                           : codex(object, lineID: lineID, outputLimit: outputLimit, notices: notices)
             for entry in parsed {
                 // A result for a call in this same read completes that row.
                 if entry.kind == .toolResult, let index = toolIndex[entry.id] {
@@ -280,13 +287,17 @@ public enum TranscriptReader {
 
     // MARK: Claude Code
 
-    private static func claude(_ line: [String: Any], lineID: String, outputLimit: Int) -> [TranscriptEntry] {
+    private static func claude(_ line: [String: Any], lineID: String, outputLimit: Int, notices: Bool) -> [TranscriptEntry] {
         if line["isSidechain"] as? Bool == true || line["isMeta"] as? Bool == true { return [] }
         let type = line["type"] as? String
+        if notices, type == "attachment", let attachment = line["attachment"] as? [String: Any] {
+            return claudeNotices(attachment, at: time(line["timestamp"]) ?? time(attachment["timestamp"]), id: line["uuid"] as? String ?? lineID)
+        }
         guard type == "user" || type == "assistant", let message = line["message"] as? [String: Any] else { return [] }
         let at = time(line["timestamp"])
         let uuid = line["uuid"] as? String ?? lineID
         if let text = message["content"] as? String {
+            if notices, type == "user", let notice = notice(typed: text, id: uuid, at: at) { return [notice] }
             guard type == "user", let prompt = humanText(text) else { return [] }
             return [TranscriptEntry(kind: .prompt, id: uuid, text: prompt, at: at)]
         }
@@ -320,9 +331,31 @@ public enum TranscriptReader {
         return entries
     }
 
+    /// What VibeSwitcher handed the agent, as the Mac's chat reads it (`ChatReader`): a hook's added context (each
+    /// message under its sender), and a prompt it typed taken mid-turn (a queued command).
+    private static func claudeNotices(_ attachment: [String: Any], at: Double?, id: String) -> [TranscriptEntry] {
+        if attachment["type"] as? String == "queued_command", let text = attachment["prompt"] as? String {
+            let id = attachment["source_uuid"] as? String ?? id
+            return notice(typed: text, id: id, at: at).map { [$0] } ?? []
+        }
+        let contents = (attachment["content"] as? [String]) ?? (attachment["content"] as? String).map { [$0] } ?? []
+        return contents.flatMap(ChatReader.delivered).enumerated().map { index, message in
+            let from = message.team?.title ?? (message.fromLead ? "VibeSwitcher" : "You, relayed by VibeSwitcher")
+            return TranscriptEntry(kind: .notice, id: "\(id).\(index)", text: bounded(message.team?.body ?? message.text, limit: textLimit).0,
+                                   at: at, from: from)
+        }
+    }
+
+    /// A prompt VibeSwitcher typed for the agent (`LeadDelivery.typed`): a notice under its sender.
+    private static func notice(typed text: String, id: String, at: Double?) -> TranscriptEntry? {
+        guard let other = TypedText.agentMessage(text) else { return nil }
+        let from = TeamMessage.typed(text)?.title ?? "From \(other.from)"
+        return TranscriptEntry(kind: .notice, id: id, text: bounded(other.body, limit: textLimit).0, at: at, from: from)
+    }
+
     // MARK: Codex
 
-    private static func codex(_ line: [String: Any], lineID: String, outputLimit: Int) -> [TranscriptEntry] {
+    private static func codex(_ line: [String: Any], lineID: String, outputLimit: Int, notices: Bool) -> [TranscriptEntry] {
         guard line["type"] as? String == "response_item", let payload = line["payload"] as? [String: Any] else { return [] }
         let at = time(line["timestamp"])
         let id = payload["id"] as? String ?? payload["call_id"] as? String ?? lineID
@@ -331,7 +364,9 @@ public enum TranscriptReader {
             let parts = (payload["content"] as? [[String: Any]] ?? []).compactMap { $0["text"] as? String }
             let text = parts.joined(separator: "\n")
             switch payload["role"] as? String {
-            case "user": return humanText(text).map { [TranscriptEntry(kind: .prompt, id: id, text: $0, at: at)] } ?? []
+            case "user":
+                if notices, let notice = notice(typed: text, id: id, at: at) { return [notice] }
+                return humanText(text).map { [TranscriptEntry(kind: .prompt, id: id, text: $0, at: at)] } ?? []
             case "assistant":
                 guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
                 return [TranscriptEntry(kind: .reply, id: id, text: bounded(text, limit: textLimit).0, at: at)]
@@ -453,7 +488,7 @@ public enum TranscriptWindow {
             skipped = TranscriptReader.tailStart(data)
             data = data.subdata(in: (data.startIndex + skipped)..<data.endIndex)
         }
-        let result = TranscriptReader.read(data, format: format)
+        let result = TranscriptReader.read(data, format: format, notices: true)
         let cursor = plan.start + skipped + result.consumed
         return Chunk(entries: result.entries, cursor: cursor, pending: cursor < fileSize,
                      truncatedBefore: plan.fresh && plan.start > 0)
@@ -827,7 +862,7 @@ public enum LastTurns {
                 turns.append(Turn(prompt: entry, replies: []))
             case .reply:
                 if !turns.isEmpty { turns[turns.count - 1].replies.append(entry) }
-            case .tool, .toolResult:
+            case .tool, .toolResult, .notice:
                 continue
             }
         }

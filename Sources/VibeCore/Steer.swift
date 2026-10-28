@@ -25,6 +25,15 @@ public struct SteerMessage: Codable, Equatable, Sendable, Identifiable {
     /// How many characters of `text` its agent already has: a message longer than one delivery holds goes in parts
     /// (see `SteerReply.nextPart`). Outside the seal, so the text it's sealed with stays as sent.
     public var handedOver: Int?
+    /// When the app typed a wake-up prompt for it (see `LeadWake`, `SteerInbox.wake`): it goes in with that prompt,
+    /// through its UserPromptSubmit hook, not at a Stop or a step before it (a prompt typed while the agent was busy
+    /// waits for its turn to end). Outside the seal.
+    public var wokenAt: Double?
+
+    /// Whether it waits for the wake-up prompt typed for it, at `now` (see `LeadWake.heldFor`).
+    public func heldForWake(at now: Double) -> Bool {
+        wokenAt.map { now - $0 < LeadWake.heldFor } ?? false
+    }
 
     /// What its agent doesn't have yet.
     public var remainingText: String { String(text.dropFirst(handedOver ?? 0)) }
@@ -107,8 +116,10 @@ public enum SteerInbox {
     /// delivery (`SteerReply.nextPart`, then alone in the batch); it's recorded as delivered with its last part, and
     /// until then stays first in line, with how much of it was handed.
     @discardableResult
+    /// `holding` (a hook's now, but for UserPromptSubmit's): the messages from the first one a wake-up prompt was typed
+    /// for (`SteerMessage.heldForWake`) wait for that prompt, so they don't come at this event and again as the prompt.
     static func deliver(tty: String, agentPid: Int32, root: URL, sealer: SteerSeal? = nil, check: (URL, [String]) -> Bool,
-                        inParts: Bool = false, through hand: ([SteerMessage]) -> Int) -> [SteerMessage] {
+                        inParts: Bool = false, holding: Double? = nil, through hand: ([SteerMessage]) -> Int) -> [SteerMessage] {
         guard let url = try? file(tty, "jsonl", root: root), FileManager.default.fileExists(atPath: url.path),
               let probe = try? file(tty, "check", root: root) else { return [] }
         let sealer = sealer ?? .for(root)
@@ -118,7 +129,9 @@ public enum SteerInbox {
             let data = try handle.readToEnd() ?? Data()
             guard !data.isEmpty else { return }
             let mine = decode(data).filter { $0.agentPid == agentPid }
-            let ready = verified(mine, sealer: sealer)
+            // In order: none after a held one either.
+            let free = holding.map { now in Array(mine.prefix { !$0.heldForWake(at: now) }) } ?? mine
+            let ready = verified(free, sealer: sealer)
             let batch = Array(ready.prefix(SteerReply.fitting(ready)))
             guard !batch.isEmpty else { return }
             let armed = FileManager.default.fileExists(atPath: probe.path)
@@ -144,7 +157,10 @@ public enum SteerInbox {
                 }
             }
             var rest = Data()
-            for message in (partial.map { [$0] } ?? []) + mine.dropFirst(count) {
+            for var message in (partial.map { [$0] } ?? []) + mine.dropFirst(count) {
+                // A prompt went in with what it could hold (the wake-up's, or one typed): what's left, the rest of a long
+                // one or what didn't fit, comes at the next steps as ever, no longer held for a prompt.
+                if holding == nil, count > 0 { message.wokenAt = nil }
                 rest.append(try JSONEncoder().encode(message))
                 rest.append(0x0A)
             }
@@ -191,6 +207,53 @@ public enum SteerInbox {
             try handle.write(contentsOf: rest)
         }
         return withdrawn
+    }
+
+    /// The reports waiting for `agentPid` (see `LeadWake.reports`), handed to `type`, which types the wake-up prompt for
+    /// them (or takes it to type: true); those it did are marked as woken for (`SteerMessage.wokenAt`). Under the
+    /// inbox's lock, so a hook that took them first leaves nothing to wake for, and one after holds them for the prompt
+    /// (2026-10-28: a wake-up typed while the lead ran a `!` command was queued behind the turn, whose Stop hook handed
+    /// the report over first, so it came twice). Nil when none wait or `type` didn't type.
+    @discardableResult
+    public static func wake(tty: String, agentPid: Int32, root: URL = VibePaths.root, now: Double = Date().timeIntervalSince1970,
+                            type: ([SteerMessage]) -> Bool) -> [SteerMessage]? {
+        guard let url = try? file(tty, "jsonl", root: root), FileManager.default.fileExists(atPath: url.path) else { return nil }
+        var woken: [SteerMessage]?
+        try? locked(url) { handle in
+            try handle.seek(toOffset: 0)
+            var messages = decode(try handle.readToEnd() ?? Data())
+            let reports = LeadWake.reports(messages, agentPid: agentPid)
+            guard !reports.isEmpty, type(reports) else { return }
+            let ids = Set(reports.map(\.id))
+            var rest = Data()
+            for index in messages.indices {
+                if ids.contains(messages[index].id) { messages[index].wokenAt = now }
+                rest.append(try JSONEncoder().encode(messages[index]))
+                rest.append(0x0A)
+            }
+            try handle.truncate(atOffset: 0)
+            try handle.write(contentsOf: rest)
+            woken = reports
+        }
+        return woken
+    }
+
+    /// A prompt went in (its UserPromptSubmit hook runs): what a wake-up was typed for is no longer held for one, whether
+    /// or not this hook can hand it over (the seals can't be checked now, the disk is full): the next steps take it.
+    static func release(tty: String, agentPid: Int32, root: URL) {
+        guard let url = try? file(tty, "jsonl", root: root), let data = try? Data(contentsOf: url),
+              decode(data).contains(where: { $0.agentPid == agentPid && $0.wokenAt != nil }) else { return }
+        try? locked(url, wait: 1) { handle in
+            try handle.seek(toOffset: 0)
+            var rest = Data()
+            for var message in decode(try handle.readToEnd() ?? Data()) {
+                if message.agentPid == agentPid { message.wokenAt = nil }
+                rest.append(try JSONEncoder().encode(message))
+                rest.append(0x0A)
+            }
+            try handle.truncate(atOffset: 0)
+            try handle.write(contentsOf: rest)
+        }
     }
 
     /// Messages waiting for their agent.
@@ -354,10 +417,13 @@ public enum SteerReply {
     /// As above, with how the disk's checked (see `SteerInbox.deliver`).
     @discardableResult
     static func answer(_ payload: [String: Any], tty: String, agentPid: Int32, root: URL, check: (URL, [String]) -> Bool,
-                       write: (Data) -> Bool) -> Data? {
+                       now: Double = Date().timeIntervalSince1970, write: (Data) -> Bool) -> Data? {
         guard takesMessages(payload: payload), let event = payload["hook_event_name"] as? String else { return nil }
         var written: Data?
-        SteerInbox.deliver(tty: tty, agentPid: agentPid, root: root, check: check, inParts: true) { messages in
+        // Reports a wake-up prompt was typed for come with that prompt, never at a Stop or a step before it.
+        let holding = event == "UserPromptSubmit" ? nil : now
+        if holding == nil { SteerInbox.release(tty: tty, agentPid: agentPid, root: root) }
+        SteerInbox.deliver(tty: tty, agentPid: agentPid, root: root, check: check, inParts: true, holding: holding) { messages in
             guard let output = output(event: event, messages: messages), write(output) else { return 0 }
             written = output
             return messages.count

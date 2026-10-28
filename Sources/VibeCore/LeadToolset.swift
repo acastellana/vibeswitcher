@@ -1406,6 +1406,11 @@ public final class LeadToolset: MCPToolset {
     }
 
     private func message(_ slug: String, _ arguments: [String: Any]) throws -> MCPToolResult {
+        try sent(slug, arguments).result
+    }
+
+    /// message(), with what became of the message (auto_advance acts on it, see `LeadAdvance.sendToWorker`).
+    private func sent(_ slug: String, _ arguments: [String: Any]) throws -> (delivered: LeadDelivery.Delivered, result: MCPToolResult) {
         let text = try self.text(arguments, "text", missing: "Nothing to send.")
         guard let worker = store.load().task(slug)?.worker else { throw Problem(text: "\(slug) has no worker.") }
         let clear = arguments["clear_draft"] as? Bool ?? false
@@ -1433,26 +1438,28 @@ public final class LeadToolset: MCPToolset {
                 board.tasks[index].blocker = nil
             }
         }
+        let result: MCPToolResult
         switch delivered {
-        case .steered: return MCPToolResult(text: "Sent to \(slug)'s worker while it works; it gets it at its next step.")
-        case .typed: return MCPToolResult(text: "Typed into \(slug)'s worker as its next prompt (it was between turns\(clear ? "; a leftover draft was cleared first" : "")).")
+        case .steered: result = MCPToolResult(text: "Sent to \(slug)'s worker while it works; it gets it at its next step.")
+        case .typed: result = MCPToolResult(text: "Typed into \(slug)'s worker as its next prompt (it was between turns\(clear ? "; a leftover draft was cleared first" : "")).")
         case .awaitingAnswer(let asked):
-            return MCPToolResult(text: "\(slug)'s worker is stopped on a prompt\(asked.map { " (\($0))" } ?? ""). The message is in its inbox and goes in at its next step, once that's answered: answer it yourself if it's yours to, or ask the user.")
+            result = MCPToolResult(text: "\(slug)'s worker is stopped on a prompt\(asked.map { " (\($0))" } ?? ""). The message is in its inbox and goes in at its next step, once that's answered: answer it yourself if it's yours to, or ask the user.")
         case .behindDraft(let draft):
-            return MCPToolResult(text: "\(slug)'s worker is between turns, but its input box holds a draft: “\(Self.clip(draft))”. The message waits in its inbox (it goes in with the next prompt, or once the box is empty). To clear the draft and send now, message again with clear_draft: true.")
+            result = MCPToolResult(text: "\(slug)'s worker is between turns, but its input box holds a draft: “\(Self.clip(draft))”. The message waits in its inbox (it goes in with the next prompt, or once the box is empty). To clear the draft and send now, message again with clear_draft: true.")
         case .draftStayed(let before, let after):
             // clear_draft was on already: asking for it again would do the same.
             let saw = after.map { $0.isEmpty ? "then read empty, but typing didn't go out" : "still showed “\(Self.clip($0))”" }
                 ?? "couldn't be cleared (the ^C didn't go out, or its screen couldn't be read)"
-            return MCPToolResult(text: "\(slug)'s worker is between turns with “\(Self.clip(before))” in its input box. clear_draft sent one ^C, and the box \(saw). The message waits in its inbox and goes in with its next prompt or once the box reads empty. Don't send it again; read_session to see where it is, or tell the user what's in its box.")
+            result = MCPToolResult(text: "\(slug)'s worker is between turns with “\(Self.clip(before))” in its input box. clear_draft sent one ^C, and the box \(saw). The message waits in its inbox and goes in with its next prompt or once the box reads empty. Don't send it again; read_session to see where it is, or tell the user what's in its box.")
         case .notSubmitted(let shown):
-            return MCPToolResult(text: "Typed into \(slug)'s worker (it was between turns\(clear ? "; a leftover draft was cleared first" : "")), but it wasn't submitted: "
+            result = MCPToolResult(text: "Typed into \(slug)'s worker (it was between turns\(clear ? "; a leftover draft was cleared first" : "")), but it wasn't submitted: "
                                  + "its input box still shows “\(Self.clip(shown))” and no turn started, one more Enter too. It's in its box, not its inbox. "
                                  + "message again with clear_draft: true to clear it and type it once more; if that isn't submitted either, stop_worker and "
                                  + "start_worker (its worktree and commits stay), or tell the user what's in its box.")
         case .queued:
-            return MCPToolResult(text: "\(slug)'s worker is between turns, but its screen couldn't be read, so the message waits in its inbox; it goes in with its next prompt, or as soon as the box reads empty. read_session to see where it is.")
+            result = MCPToolResult(text: "\(slug)'s worker is between turns, but its screen couldn't be read, so the message waits in its inbox; it goes in with its next prompt, or as soon as the box reads empty. read_session to see where it is.")
         }
+        return (delivered, result)
     }
 
     private func readSession(_ slug: String, who: String) throws -> MCPToolResult {
@@ -4366,7 +4373,9 @@ extension LeadToolset {
         return merged
     }
     func advanceCleanup(_ slug: String) throws -> MCPToolResult { try cleanup(slug, force: false) }
-    func advanceMessage(_ slug: String, _ text: String) throws -> MCPToolResult { try message(slug, ["text": text]) }
+    func advanceMessage(_ slug: String, _ text: String, clearDraft: Bool) throws -> (delivered: LeadDelivery.Delivered, result: MCPToolResult) {
+        try sent(slug, ["text": text, "clear_draft": clearDraft])
+    }
     func advanceTell(_ text: String) throws -> Bool { try tellLead(text, about: LeadAdvance.sender) }
     func advanceReviewNeeded(_ slug: String, commit: String?) -> String? { reviewNeeded(slug, commit: commit, model: true) }
     func advanceHead(_ slug: String) -> String? { branchHead(Worktrees.branch(slug)) }

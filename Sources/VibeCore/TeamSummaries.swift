@@ -169,6 +169,7 @@ public enum SummaryPrompts {
         case .prompt: return "- Told: \(text)"
         case .reply: return "- Said: \(text)"
         case .tool, .toolResult: return "- \(entry.tool.map { "\($0): " } ?? "")\(text)"
+        case .notice: return "- \(entry.from ?? "VibeSwitcher") (not the user): \(text)"
         }
     }
 

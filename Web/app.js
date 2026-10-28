@@ -1018,6 +1018,13 @@ function entryNode(entry, full = false) {
     }
     return box;
   }
+  // What VibeSwitcher handed the agent (a report, a wake-up, your words relayed): its sender above it, never your blue.
+  if (entry.kind === 'notice') {
+    const notice = el('div', 'bubble fromVibe');
+    notice.append(el('div', 'bubbleFrom', entry.from || 'VibeSwitcher'), el('div', 'bubbleText', entry.text),
+                  el('div', 'bubbleTime', timeLabel(entry.at)));
+    return notice;
+  }
   // Not `reply`: that class already styles the reply form.
   const bubble = el('div', `bubble ${entry.kind === 'prompt' ? 'fromYou' : 'fromAgent'}`);
   bubble.append(el('div', 'bubbleText', entry.text), el('div', 'bubbleTime', timeLabel(entry.at)));

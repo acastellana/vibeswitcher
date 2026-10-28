@@ -8,11 +8,14 @@
   --on-status: #ffffff; --claude: #a9502f;
   /* The Team view's marks the status palette has no colour for: blocked (purple), kept (teal). */
   --st-blocked: #7b2fb5; --st-kept: #0b6e6a;
+  /* VibeSwitcher's messages in the Conversation tab: the Mac chat's purple, not your blue. */
+  --vibe: #7b2fb5; --vibe-bg: rgba(123,47,181,0.08); --vibe-line: rgba(123,47,181,0.3);
 }
 @media (prefers-color-scheme: dark) {
   :root { --bg: #111214; --card: #1c1e22; --text: #f2f2f4; --muted: #9a9aa0; --line: rgba(255,255,255,0.08);
     --warn: #ff7a72; --st-needsInput: #ff7a72; --st-working: #ff9f0a; --st-background: #5eb0ff; --st-done: #30d158;
-    --st-idle: #aeaeb2; --on-status: #1f1f1f; --claude: #e8876a; --st-blocked: #c99cff; --st-kept: #5ed3cc; }
+    --st-idle: #aeaeb2; --on-status: #1f1f1f; --claude: #e8876a; --st-blocked: #c99cff; --st-kept: #5ed3cc;
+    --vibe: #c99cff; --vibe-bg: rgba(201,156,255,0.1); --vibe-line: rgba(201,156,255,0.3); }
 }
 /* Reduce Motion: nothing slides, fades or scrolls smoothly. */
 @media (prefers-reduced-motion: reduce) {
@@ -184,6 +187,9 @@ select.chip-btn { appearance: none; -webkit-appearance: none; }
   white-space: pre-wrap; overflow-wrap: anywhere; }
 .bubble.fromYou { align-self: flex-end; background: var(--accent); color: #fff; border-bottom-right-radius: 4px; }
 .bubble.fromAgent { align-self: flex-start; background: var(--card); border-bottom-left-radius: 4px; }
+.bubble.fromVibe { align-self: flex-start; background: var(--vibe-bg); border: 1px solid var(--vibe-line);
+  border-bottom-left-radius: 4px; font-size: 13.5px; }
+.bubbleFrom { font-size: 11.5px; font-weight: 700; color: var(--vibe); margin-bottom: 2px; }
 .bubbleTime { font-size: 10.5px; opacity: 0.6; margin-top: 3px; text-align: right; }
 .toolRow { align-self: stretch; background: var(--card); border-radius: 10px; font-size: 12.5px; }
 .toolRow summary { display: flex; gap: 6px; align-items: baseline; padding: 7px 10px; list-style: none; }

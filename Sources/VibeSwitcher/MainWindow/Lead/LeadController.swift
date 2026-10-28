@@ -988,19 +988,21 @@ final class LeadController: ObservableObject {
             host.styledScreen(id) { [weak self] screen in
                 guard let self else { return }
                 // Still the lead the board names, and what waits now (its hook may have taken some meanwhile), read off
-                // the main thread.
+                // the main thread. Typed only into an empty box: Claude's dim suggestion counts as empty, a draft or a
+                // dialog waits for the next try. The reports it's for are marked in the inbox, under its lock, before
+                // it's typed: a Stop hook (the lead was busy after all, and the prompt waits for its turn to end) or a
+                // step before the prompt goes in leaves them to the prompt's hook, so they don't come twice.
                 let inbox = self.inbox
-                self.reads.async({ files in
-                    LeadHandover.named(files.names.board(root)) == lead
-                        ? LeadWake.reports(SteerInbox.pending(tty: lead.tty, root: inbox), agentPid: lead.pid) : nil
+                let box = screen.map(LeadDelivery.box(in:))
+                self.reads.async({ files -> [SteerMessage]? in
+                    guard LeadHandover.named(files.names.board(root)) == lead, box == .empty else { return nil }
+                    return SteerInbox.wake(tty: lead.tty, agentPid: lead.pid, root: inbox) { _ in true }
                 }) { [weak self] reports in
                     guard let self else { return }
                     self.flushing.remove(lead.tty)
                     guard let reports else { return }
-                    // Typed only into an empty box: Claude's dim suggestion counts as empty, a draft or a dialog waits
-                    // for the next try.
                     var state = self.wakes[key] ?? LeadWake()
-                    state.type(reports: reports, box: screen.map(LeadDelivery.box(in:))) { text in
+                    state.type(reports: reports, box: box) { text in
                         self.typedAt[lead.tty] = Date()
                         self.type(text, into: id)
                         Breadcrumbs.shared.note("lead: woke the lead on \(lead.tty) for \(reports.count) report(s)")

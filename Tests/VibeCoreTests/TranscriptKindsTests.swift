@@ -58,3 +58,44 @@ struct TranscriptKindsTests {
         #expect(ChatReader.read(withRequests, format: .claude).consumed == withRequests.count)
     }
 }
+
+/// What VibeSwitcher hands an agent mid-chat (a wake-up it typed, a hook's added context, a prompt it typed taken
+/// mid-turn) reaches the phone's Conversation tab as VibeSwitcher's, under its sender, never as the user's prompt.
+struct PhoneNoticeTests {
+    func chunk(_ lines: [[String: Any]]) throws -> [TranscriptEntry] {
+        var data = Data()
+        for line in lines {
+            data.append(try JSONSerialization.data(withJSONObject: line))
+            data.append(0x0A)
+        }
+        let plan = TranscriptWindow.Plan(start: 0, fresh: true)
+        return TranscriptWindow.chunk(data, plan: plan, fileSize: data.count, format: .claude).entries
+    }
+
+    @Test func wakeUpsHookContextAndRelayedWordsAreVibeSwitchersOnThePhone() throws {
+        let report = SteerMessage(text: "The worker on sidebardifftests-leave says it's done: cleaned up", from: .system("worker sidebardifftests-leave"), agentPid: 1)
+        let answer = SteerMessage(text: "use SQLite", from: .user, agentPid: 1)
+        let context = SteerReply.context([report, answer])
+        let wake = LeadDelivery.typed(LeadWake.prompt([report]), from: .system("reports"))
+        let entries = try chunk([
+            ["type": "user", "uuid": "u1", "timestamp": "2026-10-28T10:18:51.000Z", "message": ["role": "user", "content": "close the PR"]],
+            ["type": "attachment", "uuid": "a1", "timestamp": "2026-10-28T10:19:04.023Z",
+             "attachment": ["type": "hook_additional_context", "hookEvent": "Stop", "content": [context]]],
+            ["type": "user", "uuid": "u2", "timestamp": "2026-10-28T10:19:07.415Z", "message": ["role": "user", "content": wake]],
+            ["type": "attachment", "uuid": "a2", "timestamp": "2026-10-28T10:20:00.000Z",
+             "attachment": ["type": "queued_command", "prompt": LeadDelivery.typed("Merge project-lead in now", from: .lead("lead of vibeswitcher"))]],
+        ])
+        #expect(entries.map(\.kind) == [.prompt, .notice, .notice, .notice, .notice])
+        #expect(entries[0].text == "close the PR" && entries[0].from == nil)
+        #expect(entries[1].from == "Report from the worker on sidebardifftests-leave" && entries[1].text.hasPrefix("The worker on sidebardifftests-leave says it's done"))
+        #expect(entries[2].from == "You, relayed by VibeSwitcher" && entries[2].text == "use SQLite")
+        #expect(entries[3].from == "VibeSwitcher: reports are waiting" && entries[3].text == "1 new report (worker sidebardifftests-leave done). Call status.")
+        #expect(entries[4].from == "Message from lead of vibeswitcher" && entries[4].text == "Merge project-lead in now")
+        #expect(entries[3].json["from"] as? String == "VibeSwitcher: reports are waiting" && entries[3].json["kind"] as? String == "notice")
+        // Nowhere else: the summaries and digests read what the agent was told by the user only.
+        var data = Data()
+        data.append(try JSONSerialization.data(withJSONObject: ["type": "user", "uuid": "u2", "message": ["role": "user", "content": wake]]))
+        data.append(0x0A)
+        #expect(TranscriptReader.read(data, format: .claude).entries.isEmpty)
+    }
+}

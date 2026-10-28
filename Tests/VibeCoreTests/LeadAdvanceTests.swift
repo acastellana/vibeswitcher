@@ -390,6 +390,64 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(toWorker("add-b", root, runtime).filter { $0.contains("F1") }.count == 1)
     }
 
+    /// An audit task's worker reported done, and its verifier is at work (the loop stopped, as a long merge's test run
+    /// holds it): the finding it will submit.
+    func auditUnderWay(_ root: String, _ runtime: FakeRuntime, _ lead: LeadToolset) throws -> [String: Any] {
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        _ = lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"], "review": "audit"])
+        #expect(advancing.until { task("add-b", root)?.status == .running })
+        try work("add-b", file: "b.txt", root: root, runtime)
+        #expect(advancing.until { vault.current(.verifier, root: root, task: "add-b") != nil })
+        return ["severity": "Important", "file": "b.txt", "line": 1, "evidence": "b.txt says bee, the contract wants b",
+                "failure_scenario": "cat b.txt gives bee where the contract wants b", "status": "open"]
+    }
+
+    /// 2026-10-27, land-pr-1-host: the verdict told the lead VibeSwitcher sends the findings; the lead messaged the
+    /// worker about them 9 s later, which put the task back to running before the loop (in a merge's test run) came to
+    /// it, and the findings never went: the worker asked for them. They go all the same, once.
+    @Test func findingsGoBackEvenWhenTheLeadsMessagePutTheTaskBackToWorkFirst() throws {
+        let (root, runtime, lead) = try team()
+        let finding = try auditUnderWay(root, runtime, lead)
+        let verdict = try seat("verify-add-b", runtime).call("submit_audit", ["completion": "incomplete", "integrity": "clean", "summary": "one problem",
+                                                                                "tests": "passed", "findings": [finding]])
+        #expect(!verdict.isError, "\(verdict.text)")
+        #expect(!lead.call("message", ["task": "add-b", "text": "VibeSwitcher is sending you F1; handle the nit too."]).isError)
+        #expect(task("add-b", root)?.status == .running)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        #expect(advancing.until { toWorker("add-b", root, runtime).contains { $0.contains("F1: ") && $0.contains("contract wants b") }
+            && reports(runtime).contains { $0.contains("Sent add-b's worker the open Important findings add-b:F1") } })
+        advancing.settle()
+        #expect(toWorker("add-b", root, runtime).filter { $0.contains("F1: ") }.count == 1)
+    }
+
+    /// Typed into the worker's idle box but not submitted (its Enter wasn't taken, see `LeadDelivery.submitted`): it's
+    /// cleared and typed once more, and if the box keeps it again the lead is told it didn't go, never "Sent"; not
+    /// typed again at each pass.
+    @Test func findingsTheWorkersBoxKeptAreToldAsNotSentAndNotTypedAgainAndAgain() throws {
+        let (root, runtime, lead) = try team()
+        let finding = try auditUnderWay(root, runtime, lead)
+        runtime.calls.lock()
+        runtime.delivery = .notSubmitted("Your branch's audit (at 1234abcd) left 1 Important finding open")
+        runtime.calls.unlock()
+        _ = try seat("verify-add-b", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "summary": "one problem",
+                                                                     "tests": "passed", "findings": [finding]])
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        #expect(advancing.until { reports(runtime).contains { $0.contains("Couldn't send add-b's worker its open Important findings (add-b:F1)") } })
+        let told = try #require(reports(runtime).first { $0.contains("Couldn't send add-b's worker") })
+        #expect(told.contains("wasn't submitted"), "\(told)")
+        #expect(!reports(runtime).contains { $0.contains("Sent add-b's worker") })
+        advancing.settle()
+        advancing.settle()
+        runtime.calls.lock()
+        let cleared = runtime.clearedDrafts
+        runtime.calls.unlock()
+        // Typed, then cleared and typed again: twice in all.
+        #expect(toWorker("add-b", root, runtime).filter { $0.contains("F1: ") }.count == 2 && cleared == 1)
+    }
+
     @Test func pastTheRoundCapTheTaskIsLeftToTheLead() throws {
         let (root, runtime, lead) = try team()
         let advancing = Advancing(lead)
@@ -860,6 +918,38 @@ struct LeadAdvanceTests: LeadTeamFixture {
         power.set(PowerState(onBattery: false, percent: 60, charging: true))
         LeadAdvance.nudge(root: root)
         #expect(advancing.until { task("waits", root)?.status == .running })
+    }
+
+    /// 2026-10-27/28: on battery under the limit all night, the lead was told "Held: on battery…" again at each wake
+    /// from sleep (the app's reading stale, so none): a hold is told once, and again only when it changes.
+    @Test func aBatteryHoldIsToldOnceNotAgainWhenTheReadingGoesMissing() throws {
+        let (_, runtime, lead) = try team()
+        func held(_ limit: Int) -> PowerState {
+            var state = PowerState(onBattery: true, percent: 4)
+            state.heldUnder = limit
+            return state
+        }
+        let power = Locked<PowerState?>(held(10))
+        lead.power = { power.get() }
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        func holds() -> [String] { reports(runtime).filter { $0.contains("Held: on battery") } }
+        #expect(advancing.until { holds().count == 1 })
+        // The Mac sleeps (no reading), wakes still on battery under the limit, and again: nothing new to tell.
+        for reading in [nil, held(10), nil, held(10)] {
+            power.set(reading)
+            advancing.settle()
+        }
+        #expect(holds().count == 1, "\(holds())")
+        // A new limit is news; so is a hold after AC power came back.
+        power.set(held(20))
+        advancing.settle()
+        #expect(holds().count == 2 && holds()[1].contains("under your 20 % limit"), "\(holds())")
+        power.set(PowerState(onBattery: false, percent: 30, charging: true))
+        advancing.settle()
+        power.set(held(20))
+        advancing.settle()
+        #expect(holds().count == 3, "\(holds())")
     }
 
     // MARK: two at once, and restarts

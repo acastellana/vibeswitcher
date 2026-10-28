@@ -309,6 +309,9 @@ public struct LeadWake: Equatable, Sendable {
     public static let longest: TimeInterval = 8
     /// Reports waiting this long are shown on the lead's strip (it couldn't be woken: your draft, a dialog).
     public static let shownAfter: TimeInterval = 120
+    /// Reports a wake-up was typed for wait this long for its prompt (`SteerInbox.wake`); past it the prompt didn't
+    /// go in as one, and any hook hands them over.
+    public static let heldFor: TimeInterval = 10 * 60
 
     /// The reports the last wake-up was typed for; while all of them still wait, the lead hasn't taken a turn.
     public private(set) var typedFor: Set<String> = []
@@ -333,8 +336,12 @@ public struct LeadWake: Equatable, Sendable {
     /// The first half of a try: whether to read the lead's box now.
     public mutating func step(reports: [SteerMessage], activity: LeadActivity, now: Double) -> Step {
         let ids = Set(reports.map(\.id))
-        // One of them was taken: its hook ran, so the lead took a turn since the last wake-up.
+        // One of them was taken: its hook ran, so the lead took a turn since the last wake-up. Or the wake-up's hold on
+        // them ran out (`heldFor`) with none taken: its prompt didn't go in as one, so another may.
         if !typedFor.isEmpty, !typedFor.isSubset(of: ids) { typedFor = [] }
+        if !typedFor.isEmpty, reports.contains(where: { typedFor.contains($0.id) && ($0.wokenAt.map { now - $0 >= Self.heldFor } ?? false) }) {
+            typedFor = []
+        }
         guard let first = reports.map(\.at).min(), let last = reports.map(\.at).max(), typedFor.isEmpty,
               activity.betweenTurns else { return .none }
         let due = min(last + Self.debounce, first + Self.longest)
@@ -342,7 +349,8 @@ public struct LeadWake: Equatable, Sendable {
     }
 
     /// The second half: types the wake-up for the reports waiting now if the box reads empty. Nothing is marked
-    /// delivered (the prompt's hook hands them over). Returns whether it typed.
+    /// delivered (the prompt's hook hands them over); the app types through `SteerInbox.wake`, which marks them woken
+    /// for, so a Stop or a step before the prompt goes in leaves them to it. Returns whether it typed.
     @discardableResult
     public mutating func type(reports: [SteerMessage], box: LeadDelivery.Box?, typeInto: (String) -> Bool) -> Bool {
         guard typedFor.isEmpty, !reports.isEmpty, box == .empty,

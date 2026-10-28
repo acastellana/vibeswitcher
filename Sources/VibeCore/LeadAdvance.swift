@@ -273,6 +273,12 @@ public final class LeadAdvance: @unchecked Sendable {
         lock.unlock()
     }
 
+    private func forget(where matches: (String) -> Bool) {
+        lock.lock()
+        told = told.filter { !matches($0) }
+        lock.unlock()
+    }
+
     // MARK: A pass
 
     /// The workflow's switch as the lead set it: on, and workflow.md says what the vault recorded (a configure under
@@ -324,10 +330,16 @@ public final class LeadAdvance: @unchecked Sendable {
         }
         let power = lead.power()
         let onHold = power.map { $0.onBattery && $0.heldUnder != nil } ?? false
-        if onHold {
-            once("battery", "Held: on battery under your \(power?.heldUnder ?? 0) % limit, so nothing starts, audits or merges by itself until AC power returns.")
-        } else {
-            forget("battery")
+        // Told once a hold (and again under a new limit), forgotten only once a reading says it's over: no reading (the
+        // app's is stale after the Mac slept, or the app hung) says nothing about it. 2026-10-27/28: on battery all
+        // night, each wake from sleep found the reading stale, forgot the hold, and told it again with nothing new.
+        if let power {
+            if onHold, let limit = power.heldUnder {
+                forget(where: { $0.hasPrefix("battery|") && $0 != "battery|\(limit)" })
+                once("battery|\(limit)", "Held: on battery under your \(limit) % limit, so nothing starts, audits or merges by itself until AC power returns.")
+            } else {
+                forget(where: { $0.hasPrefix("battery|") })
+            }
         }
         let limits = lead.macLimits()
         let busy = lead.runtime.loadAverage().map { $0 > limits.loadLimit } ?? false
@@ -337,7 +349,9 @@ public final class LeadAdvance: @unchecked Sendable {
         let tasks = board.tasks.filter { $0.autoAdvance != false }
         for task in tasks {
             switch task.status {
-            case .failed: sendBack(task.slug, onHold: onHold)
+            // A running one too: the lead's message to its worker (the verdict's report says VibeSwitcher sends the
+            // findings) puts it back to work before this pass may come to it, a merge's test run ahead of it.
+            case .failed, .running: sendBack(task.slug, onHold: onHold)
             case .done, .reverted: cleanup(task.slug)
             default: break
             }
@@ -463,7 +477,8 @@ public final class LeadAdvance: @unchecked Sendable {
                 let message = "The merge of your branch (\(head.prefix(8))) failed: \(setback.reason)\n\n\(problem.text)\n\n"
                     + "Fix it on your branch, commit, run the affected tests, then report done again."
                 let unsent: String?
-                do { unsent = try sendToWorker(slug, message) } catch { unsent = "\(slug) is held or no longer moves by itself now" }
+                do { unsent = try sendToWorker(slug, message, states: [.failed]) } catch let stuck as NotSubmitted { unsent = stuck.text }
+                catch { unsent = "\(slug) is held or no longer moves by itself now" }
                 did("Merge of \(slug) failed: \(setback.reason) " + (unsent.map { "Its worker couldn't be told (\($0)): message it, or start_worker(\(slug)), with the output: \(LeadToolset.clip(problem.text, 600))" }
                     ?? "Sent its worker the output; it's back at work."))
             } else {
@@ -474,10 +489,13 @@ public final class LeadAdvance: @unchecked Sendable {
         }
     }
 
-    /// A verdict that left Important findings open on the branch's head goes back to its worker, once.
+    /// A verdict that left Important findings open on the branch's head goes back to its worker, once: failed, or
+    /// running again on that head with its live worker (2026-10-27, land-pr-1-host: the lead's message to the worker
+    /// moved it to running 9 s after the verdict, while a merge's test run held the loop, and the findings never went;
+    /// the worker had to ask for them).
     private func sendBack(_ slug: String, onHold: Bool) {
         let vault = lead.vault, root = lead.root
-        guard let task = due(slug, [.failed]), task.setback?.stage == .review,
+        guard let task = due(slug, [.failed, .running]), task.setback?.stage == .review,
               let head = lead.advanceHead(slug), task.autoSentBack != head,
               let verdict = vault.verdict(root: root, task: slug), verdict.commit == head, verdict.integrity == .clean,
               let ledger = vault.audits(root: root, task: slug), !ledger.reconsider, !ledger.blocking.isEmpty else { return }
@@ -488,20 +506,33 @@ public final class LeadAdvance: @unchecked Sendable {
             + "\nFix \(open.count == 1 ? "it" : "each") on your branch and commit, or disagree with a reason; answer each by id with answer_findings "
             + "(fixed or disagree), run the affected tests, then report done again: it's audited again then (a re-audit checks these findings' concerns and judges your answers)."
         let live = workerRuns(task)
-        // Its worker ended (made room for the audit, say): a new one in its worktree gets them, not on a battery hold.
-        if !live, onHold { return }
+        // Its worker ended (made room for the audit, say): a new one in its worktree gets them, not on a battery hold,
+        // and not for a running one (the witness tells the lead its worker ended).
+        if !live, onHold || task.status == .running { return }
         let unsent: String?
-        do { unsent = try sendToWorker(slug, text) } catch { return }
+        do { unsent = try sendToWorker(slug, text, states: [task.status]) } catch let stuck as NotSubmitted {
+            // Typed, but its box kept it, cleared and typed again too: not typed a third time at each pass. Said once.
+            markSentBack(slug, head)
+            once("sendback|\(slug)|\(head)", "Couldn't send \(slug)'s worker its open Important findings (\(ids)): \(stuck.text)")
+            return
+        } catch { return }
         if let unsent {
             once("sendback|\(slug)|\(head)", "Couldn't send \(slug)'s worker its open Important findings (\(ids)): \(unsent)")
             return
         }
+        markSentBack(slug, head)
+        did("Sent \(slug)'s worker the open Important findings \(ids) from its audit at \(head.prefix(8))" + (live ? "." : " (in a new worker: its last one had ended)."))
+    }
+
+    private func markSentBack(_ slug: String, _ head: String) {
         try? lead.store.update { board in
             guard let index = board.taskIndex(slug) else { return }
             board.tasks[index].autoSentBack = head
         }
-        did("Sent \(slug)'s worker the open Important findings \(ids) from its audit at \(head.prefix(8))" + (live ? "." : " (in a new worker: its last one had ended)."))
     }
+
+    /// The message was typed into its worker's box, but not submitted (see `LeadDelivery.submitted`): what message says.
+    private struct NotSubmitted: Error { let text: String }
 
     private func workerRuns(_ task: LeadTask?) -> Bool {
         guard let worker = task?.worker else { return false }
@@ -509,19 +540,25 @@ public final class LeadAdvance: @unchecked Sendable {
     }
 
     /// Sends `text` to the task's worker, starting one in its worktree first when its own has ended (it counts as a
-    /// start: max_workers and the Mac's room hold); nil when it went, else why not. Throws `NotDue` when the task
-    /// was held, opted out or switched off meanwhile (nothing sent).
-    private func sendToWorker(_ slug: String, _ text: String) throws -> String? {
+    /// start: max_workers and the Mac's room hold); nil when it went (into its context, or its inbox, where it waits
+    /// for its next step or prompt), else why not. Throws `NotDue` when the task was held, opted out or switched off
+    /// meanwhile, or left `states` (nothing sent); `NotSubmitted` when it was typed but its box kept it, once more
+    /// after clearing it too (before, a box that kept it was said as sent).
+    private func sendToWorker(_ slug: String, _ text: String, states: [LeadTask.Status]) throws -> String? {
         do {
             if !workerRuns(lead.store.load().task(slug)) {
-                _ = try lead.advanceStart(slug, when: { [self] in isDue($0, [.failed]) })
-            } else if due(slug, [.failed]) == nil {
+                _ = try lead.advanceStart(slug, when: { [self] in isDue($0, states) })
+            } else if due(slug, states) == nil {
                 throw NotDue()
             }
-            _ = try lead.advanceMessage(slug, text)
+            var sent = try lead.advanceMessage(slug, text, clearDraft: false)
+            if case .notSubmitted = sent.delivered { sent = try lead.advanceMessage(slug, text, clearDraft: true) }
+            if case .notSubmitted = sent.delivered { throw NotSubmitted(text: LeadToolset.clip(sent.result.text, 600)) }
             return nil
         } catch let notDue as NotDue {
             throw notDue
+        } catch let stuck as NotSubmitted {
+            throw stuck
         } catch let problem as LeadToolset.Problem {
             return LeadToolset.clip(problem.text, 400)
         } catch {
