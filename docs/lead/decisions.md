@@ -86,7 +86,7 @@ A verifier judges from the contract and the board; an approval that lives only i
 
 The user asked "push to gh" and "lets merge to main"; main was a straight ancestor, so a fast-forward kept history linear and the checkout on project-lead for the workers.
 
-## 2026-10-20 16:28:07 The lead does not message or otherwise touch the other projects' leads (genswap, TGE-ANALYSIS) for now: no SendMessage to them, no reviewing or reporting on their sessions; cross-project hygiene is left to the user and those leads.
+## 2026-10-20 16:28:07 The lead does not message or otherwise touch the other projects' leads (project-c, TGE-ANALYSIS) for now: no SendMessage to them, no reviewing or reporting on their sessions; cross-project hygiene is left to the user and those leads.
 
 The user's instruction on 2026-10-20 at 16:5x ("i dont want you to touch the othr leads for now") after the lead informed both leads about the end-of-day wrap-up.
 
@@ -138,7 +138,7 @@ Memory audit P1: parsers held 352 MB. After any handover or install the reach wa
 
 The 3-view cap gives most of the saving (290 → ~110–140 MB in the 12-session bench); a 30 s release saved ~50 MB more but would drop a session's long scrollback whenever the user steps away briefly.
 
-## 2026-10-24 16:30:16 The 2026-10-20 16:28 hold on reviewing other projects' leads is lifted for reviewing only: the lead reviews genswap's, TGE-ANALYSIS's and films' lead and worker sessions from their transcripts, boards and lead records. It doesn't message, steer or change anything in those projects. What the review finds becomes VibeSwitcher tasks or advice to the user, never actions in those projects.
+## 2026-10-24 16:30:16 The 2026-10-20 16:28 hold on reviewing other projects' leads is lifted for reviewing only: the lead reviews project-c's, TGE-ANALYSIS's and films' lead and worker sessions from their transcripts, boards and lead records. It doesn't message, steer or change anything in those projects. What the review finds becomes VibeSwitcher tasks or advice to the user, never actions in those projects.
 
 The user asked on 2026-10-24 at about 16:3x for an examination of how the other projects' leads are performing: overkill, mistakes, self-improvement. The earlier instruction 'don't touch the other leads' still holds for contacting or steering them.
 
@@ -218,7 +218,7 @@ The user asked for the install. The lead never pushes; the user does.
 
 The user said "review and work towards merge". The PR touches sensitive paths (the host, the vault, build-app.sh) and would break Apple Events under Hardened Runtime as written. Allowing OSC 52 from the focused pane keeps nvim and tmux copying working, while closing the hidden-output attack the PR targets. The user can still choose to block it entirely.
 
-## 2026-10-27 20:14:32 Same setback twice: the lead restarted an audit that auto_advance's verifier was already running, ending it. The fix is a check in the tool (task audit-must-not-end), not a note. Until it lands, the lead reads board(task) for a running verifier before calling audit on an auto_advance task. Today's freeze storm (20 freezes of 2–25 s with stakegen's long lead chat) is one task, lead-chat-freezes-of, with an accessibility bench as its regression check; the incident's own task is folded into it.
+## 2026-10-27 20:14:32 Same setback twice: the lead restarted an audit that auto_advance's verifier was already running, ending it. The fix is a check in the tool (task audit-must-not-end), not a note. Until it lands, the lead reads board(task) for a running verifier before calling audit on an auto_advance task. Today's freeze storm (20 freezes of 2–25 s with project-b's long lead chat) is one task, lead-chat-freezes-of, with an accessibility bench as its regression check; the incident's own task is folded into it.
 
 Rule 10: a setback that happens twice gets a check. Freezes that long are material. The bench in that task is the check that runs before merge, so a second task would duplicate it.
 

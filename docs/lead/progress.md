@@ -1116,7 +1116,7 @@
 - 2026-10-24 18:19 Started a worker on boundary-excursions-a
 - 2026-10-24 18:21 Audit of a-base-branch-the: complete, clean, round 2: 2 Important closed, 1 Nit closed
 - 2026-10-24 18:27 Merged a-base-branch-the: A base branch the user moves never blocks merges until a restart
-- 2026-10-24 18:27 Update: Merged: a base branch you move yourself no longer blocks merges until a restart — **What changed.** On 2026-10-22 genswap lost about 16 h after you committed on its base branch as the lead asked. There were three causes: the app kept watching the previous base branch after the lead…
+- 2026-10-24 18:27 Update: Merged: a base branch you move yourself no longer blocks merges until a restart — **What changed.** On 2026-10-22 project-c lost about 16 h after you committed on its base branch as the lead asked. There were three causes: the app kept watching the previous base branch after the lead…
 - 2026-10-24 18:27 Planned audit-takes-a-branch: Audit takes a branch whose trial merge is clean, and makes room by ending the task's own idle worker (review audit)
 - 2026-10-24 18:27 Planned workers-run-the-project: Workers run the project's lint tests before reporting done
 - 2026-10-24 18:27 Started a worker on workers-run-the-project
@@ -1301,7 +1301,7 @@
 - 2026-10-26 00:29 Automatically (auto_advance): Cleaned up a-verifier-that-ends (freed 1.1 GB of build output and temporary folders). It stays done.
 - 2026-10-26 00:34 Started a worker on every-task-gets-a
 - 2026-10-26 00:34 Automatically (auto_advance): Started a worker on every-task-gets-a (Every task gets a receipt: time, tokens, cost, rounds, rollback), its after tasks done (a-verifier-that-ends).
-- 2026-10-26 00:34 Automatically (auto_advance): Didn't audit open-sessions-pick-up: No verifier started: the Mac is shared by every project's team, and its 1-minute load is above load_threshold. Now: load 27.6 (load_threshold 24, twice the 12 cores), 9 team sessions across 3 projects (genswap 4, vibeswitcher 3, stakegen 2) (mac_max_sessions 10). VibeSwitcher sends you one message once there's room again. Don't sleep or poll: retry when you're next woken (a report, the user, or a VibeSwitcher message). Meanwhile merge and cleanup finished tasks (cleanup ends their sessions), pla…
+- 2026-10-26 00:34 Automatically (auto_advance): Didn't audit open-sessions-pick-up: No verifier started: the Mac is shared by every project's team, and its 1-minute load is above load_threshold. Now: load 27.6 (load_threshold 24, twice the 12 cores), 9 team sessions across 3 projects (project-c 4, vibeswitcher 3, project-b 2) (mac_max_sessions 10). VibeSwitcher sends you one message once there's room again. Don't sleep or poll: retry when you're next woken (a report, the user, or a VibeSwitcher message). Meanwhile merge and cleanup finished tasks (cleanup ends their sessions), pla…
 - 2026-10-26 00:54 Ended open-sessions-pick-up's worker (idle since its done report on 8641a7de) to make room on the Mac for its audit
 - 2026-10-26 00:54 Automatically (auto_advance): Started the audit of open-sessions-pick-up at 8641a7de (Its review is audit).
 - 2026-10-26 00:54 Ended today-s-flaky-tests's worker (idle since its done report on d9dc98e6) to make room on the Mac for its audit
@@ -1557,7 +1557,7 @@
 - 2026-10-27 20:08 Automatically (auto_advance): Started the audit of land-pr-1-host at ce044a8b (Its review is audit).
 - 2026-10-27 20:14 Planned lead-chat-freezes-of: Lead chat freezes of 3–25 s: SwiftUI accessibility tree and session-list rebuilds on a long lead chat
 - 2026-10-27 20:14 Planned audit-must-not-end: audit() must not end a verifier already running on the same commit
-- 2026-10-27 20:14 Incident: The app froze about 20 times, 2–25 s each, between 19:31 and 20:12 on 2026-10-27, with stakegen's long lead chat selected. The time went to SwiftUI accessibilit… (in lead-chat-freezes-of); planned turn-this-incident-into-2 to turn it into a check
+- 2026-10-27 20:14 Incident: The app froze about 20 times, 2–25 s each, between 19:31 and 20:12 on 2026-10-27, with project-b's long lead chat selected. The time went to SwiftUI accessibilit… (in lead-chat-freezes-of); planned turn-this-incident-into-2 to turn it into a check
 - 2026-10-27 20:14 Folded turn-this-incident-into-2 into lead-chat-freezes-of: that task carries its work
 - 2026-10-27 20:18 Merged lead-chat-deliver-wake: Lead chat: deliver, wake and flush still stat or decode the board on the main thread (no audit: review none)
 - 2026-10-27 20:18 Automatically (auto_advance): Merged lead-chat-deliver-wake (Lead chat: deliver, wake and flush still stat or decode the board on the main thread) into project-lead at 1c688f06, review none: on its worker's done report on e5f93ecf and the full test run.
@@ -1849,13 +1849,13 @@
 - 2026-10-28 17:04 Started a worker on a-hung-merge-test
 - 2026-10-28 17:04 Automatically (auto_advance): Started a worker on a-hung-merge-test (A hung merge test run names the tests that started and never finished, in a readable file).
 - 2026-10-28 17:09 Audit of docs-overhaul-a-clear: complete, clean, round 1: 3 Nit open
-- 2026-10-28 17:10 Planned docs-touch-ups-the: Docs touch-ups: the sandbox's Team fixture uses a real project name ('stakegen') in a published screenshot; the lint list misses AgentExportLint
+- 2026-10-28 17:10 Planned docs-touch-ups-the: Docs touch-ups: the sandbox's Team fixture uses a real project name ('project-b') in a published screenshot; the lint list misses AgentExportLint
 - 2026-10-28 17:11 Planned systempower-onacpower: SystemPower.onACPower blocks the main thread (6.4 s) from KeepAwake.update in LeadController.refreshed
 - 2026-10-28 17:20 Merged docs-overhaul-a-clear: Docs overhaul: a clear README and a docs/ guide set that match today's app
 - 2026-10-28 17:20 Automatically (auto_advance): Merged docs-overhaul-a-clear (Docs overhaul: a clear README and a docs/ guide set that match today's app) into project-lead at aa0737a3, on its passing audit and the full test run.
 - 2026-10-28 17:20 Automatically (auto_advance): Cleaned up docs-overhaul-a-clear; ended pid 63952 (Worker: Docs overhaul: a clear README and a docs/ guide set that match today's app) (freed 1.4 GB of build output and temporary folders). It stays done.
 - 2026-10-28 17:37 Started a worker on docs-touch-ups-the
-- 2026-10-28 17:37 Automatically (auto_advance): Started a worker on docs-touch-ups-the (Docs touch-ups: the sandbox's Team fixture uses a real project name ('stakegen') in a published screenshot; the lint list misses AgentExportLint).
+- 2026-10-28 17:37 Automatically (auto_advance): Started a worker on docs-touch-ups-the (Docs touch-ups: the sandbox's Team fixture uses a real project name ('project-b') in a published screenshot; the lint list misses AgentExportLint).
 - 2026-10-28 17:37 Started a worker on systempower-onacpower
 - 2026-10-28 17:37 Automatically (auto_advance): Started a worker on systempower-onacpower (SystemPower.onACPower blocks the main thread (6.4 s) from KeepAwake.update in LeadController.refreshed).
 - 2026-10-28 17:38 Planned the-mac-hit-load: The Mac hit load 150: load-test runs and heavy suites must not stack, and auto_advance must not start work on a momentary dip (review audit)
@@ -1870,14 +1870,15 @@
 - 2026-10-28 17:56 Audit of docs-touch-ups-the: complete, clean, round 1: 2 Pre-existing open
 - 2026-10-28 17:57 Planned keep-awake-s-power: Keep-awake's power assertions (IOPMAssertionCreateWithName/Release) run on the main thread and can block on powerd
 - 2026-10-28 18:51 Automatically (auto_advance): Didn't merge a-hung-merge-test: Not merged: the tests hung after 45 min on a-hung-merge-test rebased onto project-lead; they were stopped, with everything started under them. a-hung-merge-test stays as it was. The output so far: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/a-hung-merge-test/merge-test.log. If they only need longer, raise test_timeout_min (45 in workflow.md) with configure; else have the worker find what hangs.
-- 2026-10-28 18:59 Planned scrub-the-names-of: Scrub the names of the user's other projects (stakegen, genswap) from the repository's current files, the lead's records included
+- 2026-10-28 18:59 Planned scrub-the-names-of: Scrub the names of the user's other projects (project-b, project-c) from the repository's current files, the lead's records included
 - 2026-10-28 18:59 Started a worker on scrub-the-names-of
-- 2026-10-28 19:04 Merged docs-touch-ups-the: Docs touch-ups: the sandbox's Team fixture uses a real project name ('stakegen') in a published screenshot; the lint list misses AgentExportLint
-- 2026-10-28 19:04 Automatically (auto_advance): Merged docs-touch-ups-the (Docs touch-ups: the sandbox's Team fixture uses a real project name ('stakegen') in a published screenshot; the lint list misses AgentExportLint) into project-lead at f6f2d554, on its passing audit and the full test run.
-- 2026-10-28 19:04 Automatically (auto_advance): Cleaned up docs-touch-ups-the; ended pid 33833 (Worker: Docs touch-ups: the sandbox's Team fixture uses a real project name ('stakegen') in a published screenshot; the lint list misses AgentExportLint) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-28 19:04 Merged docs-touch-ups-the: Docs touch-ups: the sandbox's Team fixture uses a real project name ('project-b') in a published screenshot; the lint list misses AgentExportLint
+- 2026-10-28 19:04 Automatically (auto_advance): Merged docs-touch-ups-the (Docs touch-ups: the sandbox's Team fixture uses a real project name ('project-b') in a published screenshot; the lint list misses AgentExportLint) into project-lead at f6f2d554, on its passing audit and the full test run.
+- 2026-10-28 19:04 Automatically (auto_advance): Cleaned up docs-touch-ups-the; ended pid 33833 (Worker: Docs touch-ups: the sandbox's Team fixture uses a real project name ('project-b') in a published screenshot; the lint list misses AgentExportLint) (freed 1.1 GB of build output and temporary folders). It stays done.
 - 2026-10-28 19:04 Raised systempower-onacpower to audit (the risk check, at 34b2024b): it has code that spawns processes (Sources/VibeSwitcher/PowerReading.swift: static func system() -> Reading {)
 - 2026-10-28 19:04 Automatically (auto_advance): systempower-onacpower is audited, not merged: it has code that spawns processes (Sources/VibeSwitcher/PowerReading.swift: static func system() -> Reading {) (the risk check raised it from review none). Its audit starts once the Mac has room.
 - 2026-10-28 19:05 Started a worker on team-panel-and-inspector
 - 2026-10-28 19:05 Automatically (auto_advance): Started a worker on team-panel-and-inspector (Team panel and inspector: keep their accessibility tree small and their bodies cheap (freezes of 10–144 s with the lead selected)).
 - 2026-10-28 19:05 Started a worker on a-full-suite-run
 - 2026-10-28 19:11 Merged lead-start-preflight-on: Lead start preflight: on a new Mac, say plainly what's missing (claude, git, Command Line Tools) instead of failing with an error code
+- 2026-10-28 19:11 Automatically (auto_advance): Merged lead-start-preflight-on (Lead start preflight: on a new Mac, say plainly what's missing (claude, git, Command Line Tools) instead of failing with an error code) into project-lead at 3c279ba5, on its passing audit and the full test run.
