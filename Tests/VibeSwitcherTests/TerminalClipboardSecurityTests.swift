@@ -70,7 +70,10 @@ struct TerminalClipboardSecurityTests {
 
         /// A program that sets the clipboard to `REPLAYED` as it starts (before any view is attached), then for each line
         /// `<base64> <marker>` it reads, sets it to that and prints the marker: the marker on screen says the sequence
-        /// went through the view's parser.
+        /// went through the view's parser. Returns once the host's screen shows `<name> ready`: the program's copy,
+        /// printed before it, is then in the host's replay, so a view attached after reads it there. A view attached
+        /// before the program printed it gets it live, and the focused pane rightly takes it (2026-10-28: "REPLAYED"
+        /// on the clipboard under a loaded full suite).
         @MainActor
         func spawn(_ name: String) async throws -> UUID {
             if host.state != .connected {
@@ -84,7 +87,9 @@ struct TerminalClipboardSecurityTests {
                                         + "while read b m; do printf '\\033]52;c;%s\\007%s\\n' \"$b\" \"$m\"; done",
                                     env: [:], cols: 100, rows: 30, keepShell: false, label: name, agent: nil)) { result = $0 }
             #expect(await until { result != nil })
-            return try #require(result).get().id
+            let id = try #require(result).get().id
+            #expect(await hostShows("\(name) ready", in: id), "\(name) never started")
+            return id
         }
 
         /// The program sets the clipboard to `text`; returns once its marker reached the session's view.
@@ -169,9 +174,8 @@ struct TerminalClipboardSecurityTests {
     /// A view attached to a session that set the clipboard earlier gets that in its replay: refused, though focused.
     @Test func aReplayNeverSetsTheClipboard() async throws {
         let scene = try Scene()
-        let id = try await scene.spawn("replayed")
         // The program set the clipboard before the view attached: its marker, printed after, is on the host's screen.
-        #expect(await scene.hostShows("replayed ready", in: id))
+        let id = try await scene.spawn("replayed")
         let revision = scene.clipboard.changeCount
         scene.pane.show(hostID: id)
         #expect(await until { scene.pane.screenLines(id).contains("replayed ready") })
