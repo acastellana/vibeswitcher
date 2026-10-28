@@ -437,6 +437,9 @@ public final class HostServer {
             } catch HostedSession.Failure.noSuchFolder(let path) {
                 log.note("spawn failed: no such folder '\(path)', \(HostLog.peer(client.peerPID))")
                 reply(.error("No such folder: \(path)"))
+            } catch HostedSession.Failure.couldntStart(let said) {
+                log.note("spawn failed: \(said) in '\(request.cwd)', \(HostLog.peer(client.peerPID))")
+                reply(.error("Couldn't start the session. \(said)"))
             } catch {
                 log.note("spawn failed: \(error) in '\(request.cwd)', \(HostLog.peer(client.peerPID))")
                 reply(.error("Couldn't start the session."))

@@ -214,7 +214,13 @@ extension Shell {
 
         struct Failure: Error, CustomStringConvertible {
             var code: Int32
-            var description: String { "Couldn't start the command: \(String(cString: strerror(code)))." }
+            /// What was started, and where: ENOENT names the one missing (see `LaunchPreflight.couldntStart`).
+            var program = ""
+            var directory: String?
+            var description: String {
+                program.isEmpty ? "Couldn't start the command: \(String(cString: strerror(code)))."
+                    : LaunchPreflight.couldntStart(program, in: directory, code: code)
+            }
         }
 
         /// `session`: a POSIX session of its own (branch code, see `BranchCode`); else only a process group of its own,
@@ -248,7 +254,7 @@ extension Shell {
             // Only the child writes into them now: their ends close when it (and what it starts) is done.
             output.closeWriting()
             errors.closeWriting()
-            guard code == 0 else { throw Failure(code: code) }
+            guard code == 0 else { throw Failure(code: code, program: argv[0], directory: directory) }
             processIdentifier = pid
         }
 

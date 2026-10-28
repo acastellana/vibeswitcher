@@ -119,6 +119,11 @@ struct ProjectFolderStart {
     var startSession: (_ preset: LaunchPreset?, _ folder: String) -> Void
     /// Says why something couldn't be done.
     var failed: (_ title: String, _ text: String) -> Void
+    /// The command line a lead in a folder starts with (asked on the main thread), and what this Mac lacks to start it
+    /// (`LaunchPreflight`, looked at off the main thread, before git: without the Command Line Tools, git would only say
+    /// the folder isn't a repository).
+    var leadCommand: (_ folder: String) -> String = { _ in "claude" }
+    var preflight: (_ command: String) -> LaunchPreflight.Problem? = { _ in nil }
 
     func run(preset: LaunchPreset?, folder: String?) {
         let plan = Self.plan(preset: preset, folder: folder)
@@ -136,9 +141,12 @@ struct ProjectFolderStart {
 
     /// A folder in a repository (or inside one: its lead is that repository's) starts the lead; one in none asks first.
     func startLead(chosen folder: String) {
-        let (git, scratch) = (git, scratch)
+        let (git, scratch, preflight, command) = (git, scratch, preflight, leadCommand(folder))
         // git can be slow (a network volume): off the main thread.
         DispatchQueue.global(qos: .userInitiated).async {
+            if let missing = preflight(command) {
+                return DispatchQueue.main.async { self.failed(missing.title, "The lead wasn't started. " + missing.text) }
+            }
             let top = git(["rev-parse", "--show-toplevel"], folder)
             let inRepository = top.ok && !top.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             let plan = inRepository ? nil : FolderRepository.plan(for: folder, scratch: scratch, git: git)

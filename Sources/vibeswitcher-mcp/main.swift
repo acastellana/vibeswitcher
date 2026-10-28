@@ -177,6 +177,11 @@ final class HostRuntime: LeadRuntime {
         }
     }
 
+    /// The tool server itself is the helper its sessions start; the rest as the app looks (`LaunchPreflight.standard`).
+    func preflight(command: String) -> LaunchPreflight.Problem? {
+        LaunchPreflight.standard.check(command: command, helpers: [server])
+    }
+
     func answerTrust(session: String, folder: String) {
         guard let id = UUID(uuidString: session) else { return }
         TrustPrompt.answer(folder: folder, readScreen: {

@@ -3,9 +3,19 @@ import Foundation
 
 /// Unix-domain socket plumbing shared by the session host and the app.
 public enum UnixSocket {
-    public enum Failure: Error, Equatable {
+    public enum Failure: Error, Equatable, CustomStringConvertible {
         case pathTooLong
         case system(String, Int32)
+
+        /// Said in words, not as `system("connect", 2)`: a socket that isn't there is a session host that isn't running.
+        public var description: String {
+            switch self {
+            case .pathTooLong: return "the socket's path is too long"
+            case .system("connect", ENOENT):
+                return "the session host (vibeswitcher-host) isn't running: its socket isn't there (connect: No such file or directory)"
+            case .system(let call, let code): return "\(call): \(String(cString: strerror(code)))"
+            }
+        }
     }
 
     static func address(_ path: String) throws -> sockaddr_un {

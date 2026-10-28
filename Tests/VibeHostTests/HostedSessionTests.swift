@@ -233,3 +233,25 @@ struct HostedSessionTests {
         }
     }
 }
+
+extension HostedSessionTests {
+    /// A login shell that isn't there (`$SHELL` names an uninstalled one): the launcher's exec fails with ENOENT, and the
+    /// session's screen names the program and where it was expected, rather than ending with nothing on it.
+    @Test func aShellThatIsntThereIsNamedOnTheSessionsScreen() throws {
+        let probe = SessionProbe()
+        let session = try start("true", shell: "/no/such/bin/fakesh", probe: probe)
+        #expect(eventually { probe.text.contains("Couldn't start fakesh: it should be at /no/such/bin/fakesh, and isn't (No such file or directory).") },
+                "\(probe.diagnosis(session))")
+        #expect(eventually { probe.lastChange?.exit?.status == 127 })
+        probe.queue.sync { session.close() }
+    }
+
+    /// The launcher itself not there: the spawn's error says which program, at which path.
+    @Test func aLauncherThatIsntThereIsNamedInTheSpawnsFailure() {
+        let request = SpawnRequest(cwd: "/tmp", command: "true", env: [:], cols: 80, rows: 24, keepShell: false, label: "Test", agent: nil)
+        #expect(throws: HostedSession.Failure.couldntStart("Couldn't start vibeswitcher-host: it should be at /no/such/vibeswitcher-host, and isn't (No such file or directory).")) {
+            _ = try HostedSession.spawn(request, shell: "/bin/sh", launcher: "/no/such/vibeswitcher-host", baseEnvironment: [:],
+                                        ringCapacity: 1 << 16, queue: DispatchQueue(label: "launcher-missing"))
+        }
+    }
+}

@@ -339,6 +339,9 @@ final class LeadController: ObservableObject {
     var confirm: (_ title: String, _ text: String, _ buttons: [String]) -> Int = LeadController.runAlert
     /// Answers Claude's trust question in a lead the app started (off in tests: no real host to ask).
     var answersTrust = true
+    /// What this Mac lacks to start a lead with a command line (see `LaunchPreflight`), looked at off the main thread
+    /// before anything else of a start. Faked in tests.
+    var preflight: (_ command: String) -> LaunchPreflight.Problem? = { LaunchPreflight.standard.check(command: $0, helpers: LeadController.helpers) }
 
     init(host: HostClient, store: SessionStore, vault: LeadVault = .standard, inbox: URL = VibePaths.root,
          home: String = VibePaths.home, keepAwake: KeepAwake = KeepAwake(), sweepsRoles: Bool = false, claudeCommand: @escaping (String) -> String) {
@@ -398,6 +401,12 @@ final class LeadController: ObservableObject {
         Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
     }
 
+    /// The command line a lead in `folder` starts with (its project's Claude preset).
+    func command(for folder: String) -> String { claudeCommand(folder) }
+
+    /// The bundle's programs a lead needs: its tool server. None outside an app (a test run has no bundle of its own).
+    static var helpers: [String] { Bundle.main.bundleURL.pathExtension == "app" ? [serverPath] : [] }
+
     /// A goal from `vibeswitcher --lead` comes as a distributed notification, which any process can post.
     static let commandLineNote = "any process on this Mac can send one, so it isn't vouched for as the user's"
     static let commandLine = SteerMessage.Sender.system("vibeswitcher --lead on the command line; \(commandLineNote)")
@@ -453,8 +462,13 @@ final class LeadController: ObservableObject {
     /// post that notification. `show: false` leaves the window's selection alone.
     /// `askAboutMovedHead`: you asked in the app (not the notification), so a moved branch is yours to take.
     func startLead(in folder: String, goal: String? = nil, show: Bool = true, askAboutMovedHead: Bool = true) {
+        let (command, preflight) = (claudeCommand(folder), preflight)
         // git can be slow (a network volume, a git shim): find the repository off the main thread.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            // First: on a Mac without the Command Line Tools, git below would only say the folder isn't a repository.
+            if let missing = preflight(command) {
+                return DispatchQueue.main.async { self?.alert(missing.title, "The lead wasn't started. " + missing.text) }
+            }
             let top = Git.run(["rev-parse", "--show-toplevel"], in: folder)
             let root = (top.output as NSString).standardizingPath
             let hasCommits = top.ok && !top.output.isEmpty && Git.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: root).ok

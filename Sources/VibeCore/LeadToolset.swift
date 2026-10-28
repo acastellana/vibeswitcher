@@ -91,11 +91,17 @@ public protocol LeadRuntime: AnyObject {
     /// ("killed by SIGTERM"), or that its agent quit and left the session's shell open; nil while its agent runs, or
     /// when that can't be told.
     func agentEnding(_ session: LeadSessionInfo) -> String?
+    /// What this Mac lacks to start a session with `command` (the agent's CLI, git, the Command Line Tools, the tool
+    /// server): see `LaunchPreflight`. Blocks while the login shell answers.
+    func preflight(command: String) -> LaunchPreflight.Problem?
 }
 
 public extension LeadRuntime {
     /// None: the Mac-wide limits count the sessions `sessions` lists.
     func census() throws -> [HostCensus]? { nil }
+
+    /// Nothing looked at: a runtime that starts no real agent (the tests') lacks nothing.
+    func preflight(command: String) -> LaunchPreflight.Problem? { nil }
 
     /// From the Claude command's own --model only; the app's runtime also reads Claude's settings (see `HostRuntime`).
     func workerModel(root: String) -> String? { LeadWorkflow.claudeModel(command: claudeCommand(root: root)) }
@@ -1503,10 +1509,16 @@ public final class LeadToolset: MCPToolset {
     private func launch(_ role: LeadLaunch.Role, task slug: String, name: String, in folder: String, label: String, trust: Bool,
                         prompt: String, start: String, model: String? = nil, branch: String? = nil, auditing: String? = nil,
                         finder: LeadVault.Finder? = nil) throws -> String {
+        // Before a grant or a session: one started without its agent's CLI (or git) would only end, or wait out
+        // `toolsWait` for tools that never connect, and say nothing of why.
+        let command = runtime.claudeCommand(root: root)
+        if let missing = runtime.preflight(command: command) {
+            throw Problem(text: "Not started: \(missing.description) Tell the user: VibeSwitcher only checks for it and never installs anything.")
+        }
         let grant: String
         do { grant = try vault.issue(role: role, root: root, task: slug, auditing: auditing, finder: finder) } catch { throw Problem(text: "\(error)") }
         do {
-            let launch = try LeadLaunch.prepare(role: role, root: root, task: slug, base: runtime.claudeCommand(root: root), prompt: prompt,
+            let launch = try LeadLaunch.prepare(role: role, root: root, task: slug, base: command, prompt: prompt,
                                                 start: start, server: runtime.server, name: name, model: model, branch: branch,
                                                 records: workflow.recordsDir, folder: vault.runFolder(root: root, name: name),
                                                 cwd: folder, temporary: sessionTempRoot)

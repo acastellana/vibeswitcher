@@ -1,5 +1,6 @@
 import Darwin
 import Foundation
+import VibeCore
 
 /// Starts a program on a new pseudo-terminal that is its controlling terminal, handing it nothing of ours.
 ///
@@ -17,11 +18,16 @@ public enum PTYSpawn {
         let program = Array(arguments[2...])
         let argv = program.map { strdup($0) } + [nil]
         execv(program[0], argv)
+        // On the session's terminal, so its window says which program wasn't there (the shell named by $SHELL, say)
+        // rather than ending with nothing on it.
+        let said = "VibeSwitcher: " + LaunchPreflight.couldntStart(program[0], code: errno) + "\r\n"
+        _ = said.withCString { write(2, $0, strlen($0)) }
         _exit(127)
     }
 
+    /// `failure`: posix_spawn's errno when it couldn't start the launcher (0 when the terminal couldn't be made).
     static func spawn(launcher: String, executable: String, args: [String], env: [String], directory: String,
-                      size: inout winsize) -> (pid: pid_t, masterFD: Int32)? {
+                      size: inout winsize, failure: inout Int32) -> (pid: pid_t, masterFD: Int32)? {
         var master: Int32 = -1
         var slave: Int32 = -1
         guard openpty(&master, &slave, nil, nil, &size) == 0 else { return nil }
@@ -62,7 +68,9 @@ public enum PTYSpawn {
             release(envp, count: env.count)
         }
         var pid: pid_t = 0
-        guard posix_spawn(&pid, launcher, &actions, &attributes, argv, envp) == 0 else {
+        let code = posix_spawn(&pid, launcher, &actions, &attributes, argv, envp)
+        guard code == 0 else {
+            failure = code
             close(master)
             return nil
         }

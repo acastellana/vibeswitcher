@@ -653,7 +653,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 guard let self, let preset = preset ?? self.presets(for: folder).first else { return }
                 self.startSession(preset, in: folder)
             },
-            failed: { title, text in _ = LeadController.runAlert(title, text, ["OK"]) })
+            failed: { title, text in _ = LeadController.runAlert(title, text, ["OK"]) },
+            leadCommand: { [weak self] folder in self?.leadController.command(for: folder) ?? "claude" },
+            preflight: leadController.preflight)
     }
 
     func startSession(_ preset: LaunchPreset, in folder: String) {

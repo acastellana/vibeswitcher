@@ -9,6 +9,8 @@ public final class HostedSession {
     public enum Failure: Error, Equatable {
         case noSuchFolder(String)
         case spawnFailed
+        /// The launcher couldn't be started: what posix_spawn's errno says of it (see `LaunchPreflight.couldntStart`).
+        case couldntStart(String)
     }
 
     public private(set) var info: HostSession
@@ -138,8 +140,10 @@ public final class HostedSession {
         var size = winsize(ws_row: UInt16(rows), ws_col: UInt16(cols), ws_xpixel: 0, ws_ypixel: 0)
         let args = arguments(shell: shell, command: request.command, keepShell: request.keepShell)
         let env = environment(base: baseEnvironment, extra: request.env, id: id)
-        guard let child = PTYSpawn.spawn(launcher: launcher, executable: shell, args: args, env: env, directory: request.cwd, size: &size) else {
-            throw Failure.spawnFailed
+        var code: Int32 = 0
+        guard let child = PTYSpawn.spawn(launcher: launcher, executable: shell, args: args, env: env, directory: request.cwd, size: &size,
+                                         failure: &code) else {
+            throw code == 0 ? Failure.spawnFailed : Failure.couldntStart(LaunchPreflight.couldntStart(launcher, in: request.cwd, code: code))
         }
         // ptsname_r: ptsname's buffer is shared between threads, and sessions start from several at once.
         var buffer = [CChar](repeating: 0, count: 128)
