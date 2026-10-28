@@ -2240,7 +2240,7 @@ public final class LeadToolset: MCPToolset {
                 guard !flakes.isEmpty else { return [] }
                 // The flake ledger, and a task for each test that flaked once too often (once: `recordFlakes`), unless
                 // an open task names it already: its count goes in that task's context.
-                return board.recordFlakes(flakes, task: slug, commit: tested, now: flakedAt.timeIntervalSince1970, evidence: flakeLines,
+                return board.recordFlakes(flakes, task: slug, commit: tested, now: flakedAt.timeIntervalSince1970, logged: Set(flakeLines.keys),
                                           log: flakeLog).map { test, _, counted in
                     if let open = board.openTask(naming: test), let index = board.taskIndex(open.id) {
                         let context = board.tasks[index].contract.context.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2663,9 +2663,9 @@ public final class LeadToolset: MCPToolset {
 
     /// Saves a merge's test output where the lead can read it; its path, or nil when it couldn't be saved.
     /// Writes a merge's flake evidence to `MergeRerun.evidenceFile` (0600, in a 0700 folder in the repository's
-    /// ignored `.vibeswitcher/`); its path, or nil when it couldn't be written (the ledger keeps the lines anyway).
+    /// ignored `.vibeswitcher/`); its path, or nil when it couldn't be written (the merge's log in the vault keeps them).
     private func saveFlakeEvidence(_ evidence: [String: [String]], tests: [String], slug: String, commit: String, at date: Date) -> String? {
-        let file = MergeRerun.evidenceFile(root: root, task: slug, at: date)
+        let file = MergeRerun.evidenceFile(root: root, task: slug, commit: commit, at: date)
         let text = MergeRerun.evidenceLog(task: slug, commit: commit, evidence: evidence, tests: tests)
         guard (try? VibePaths.ensurePrivate(file.deletingLastPathComponent(), within: URL(fileURLWithPath: store.folder))) != nil,
               (try? VibePaths.writePrivate(Data(text.utf8), to: file)) != nil else { return nil }

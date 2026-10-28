@@ -133,23 +133,29 @@ public enum MergeRerun {
         var evidence: [String: [String]] = [:]
         for test in tests {
             guard let lines = found[test], !lines.isEmpty else { continue }
-            // Masked together, so a secret an expectation spreads over lines is seen whole.
-            let masked = Redaction.secrets(in: lines.joined(separator: "\n")).components(separatedBy: "\n")
-                .map { $0.count > evidenceWidth ? String($0.prefix(evidenceWidth - 1)) + "…" : $0 }
-            evidence[test] = masked.count > evidenceLimit
-                ? masked.prefix(evidenceLimit - 1) + ["… and \(masked.count - evidenceLimit + 1) more lines."] : masked
+            evidence[test] = capped(lines)
         }
         return evidence
     }
 
-    /// Where a merge's flake evidence is kept: `<root>/.vibeswitcher/flakes/<yyyy-mm-dd>-<task>.log`, in the
-    /// repository's ignored folder, where every session can read it.
-    public static func evidenceFile(root: String, task: String, at date: Date) -> URL {
+    /// `lines` with secrets masked, each cut at `evidenceWidth`, at most `evidenceLimit` of them. Masked together, so a
+    /// secret an expectation spreads over lines is seen whole. Lines it gave back come back the same.
+    static func capped(_ lines: [String]) -> [String] {
+        let masked = Redaction.secrets(in: lines.joined(separator: "\n")).components(separatedBy: "\n")
+            .map { $0.count > evidenceWidth ? String($0.prefix(evidenceWidth - 1)) + "…" : $0 }
+        return masked.count > evidenceLimit
+            ? masked.prefix(evidenceLimit - 1) + ["… and \(masked.count - evidenceLimit + 1) more lines."] : masked
+    }
+
+    /// Where a merge's flake evidence is kept: `<root>/.vibeswitcher/flakes/<yyyy-mm-dd>-<task>-<commit>.log`, in the
+    /// repository's ignored folder, where every session can read it. The merge's short commit tells a task's merges
+    /// on one day apart.
+    public static func evidenceFile(root: String, task: String, commit: String, at date: Date) -> URL {
         let format = DateFormatter()
         format.locale = Locale(identifier: "en_US_POSIX")
         format.calendar = Calendar(identifier: .gregorian)
         format.dateFormat = "yyyy-MM-dd"
-        return URL(fileURLWithPath: root).appendingPathComponent(".vibeswitcher/flakes/\(format.string(from: date))-\(task).log")
+        return URL(fileURLWithPath: root).appendingPathComponent(".vibeswitcher/flakes/\(format.string(from: date))-\(task)-\(commit.prefix(8)).log")
     }
 
     /// The evidence file's text: what flaked in `task`'s merge (tested at `commit`), and each test's lines.
@@ -163,13 +169,44 @@ public enum MergeRerun {
         return text
     }
 
-    /// For a task's context: each of `flakes`' failing lines, under the merge it held up and where its log is.
+    /// The most of an evidence file read back: more than a merge's evidence writes.
+    static let evidenceRead = 1 << 20
+
+    /// `test`'s lines in the evidence file at `path` (as `evidenceLog` wrote them), masked and capped again
+    /// (`capped`): the file is the repository's to change. Nil when it can't be read (gone, or not a plain file).
+    static func evidence(for test: String, inLog path: String) -> [String]? {
+        let fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW)
+        guard fd >= 0 else { return nil }
+        let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG,
+              let data = try? handle.read(upToCount: evidenceRead) else { return nil }
+        // A test's lines: under its name, after a blank line, each indented four spaces.
+        var lines: [String] = [], found = false, previous: String?
+        for line in String(decoding: data, as: UTF8.self).components(separatedBy: "\n") {
+            if found {
+                guard line.hasPrefix("    ") else { break }
+                lines.append(String(line.dropFirst(4)))
+            } else if line == test, previous == "" {
+                found = true
+            }
+            previous = line
+        }
+        return lines.isEmpty ? [] : capped(lines)
+    }
+
+    /// For a task's context: each of `flakes`' failing lines, read from its evidence file, under the merge it held up
+    /// and where that file is. The ledger keeps only the file's path: the board is read and rewritten by every lead
+    /// call, and 200 entries' lines would make it megabytes.
     static func quoted(_ flakes: [LeadFlake]) -> String {
         var text = ""
         for flake in flakes {
-            let lines: [String] = flake.lines ?? []
-            guard !lines.isEmpty || flake.log != nil else { continue }
-            text += "\n- \(flake.task)'s merge" + (flake.log.map { " (\($0))" } ?? "") + ":"
+            guard let log = flake.log else { continue }
+            text += "\n- \(flake.task)'s merge (\(log)):"
+            guard let lines = evidence(for: flake.test, inLog: log) else {
+                text += " (its file can't be read now)"
+                continue
+            }
             for line in lines { text += "\n    " + line }
         }
         return text.isEmpty ? "" : "\nThe failing runs' lines (secrets masked):" + text

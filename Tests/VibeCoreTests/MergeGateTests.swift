@@ -374,11 +374,16 @@ struct MergeGateTests: LeadTeamFixture {
         let lead = try lead(root, runtime)
         configure(lead, ["test_command": "bash scripts/test.sh"])
         let now = Date().timeIntervalSince1970
+        // Yesterday's merge's evidence file, named as before the merge's commit was in the name.
+        let earlier = root + "/.vibeswitcher/flakes/2026-10-27-later.log"
+        try FileManager.default.createDirectory(atPath: (earlier as NSString).deletingLastPathComponent, withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        try MergeRerun.evidenceLog(task: "later", commit: "c2", evidence: ["flaky()": ["✘ Test flaky() failed after 9.000 seconds with 1 issue."]], tests: ["flaky()"])
+            .write(toFile: earlier, atomically: true, encoding: .utf8)
         try BoardStore(root: root).update { board in
-            // An older entry, from before the ledger kept lines, and one that kept them.
+            // An older entry, from before the ledger kept evidence, and one whose file keeps it.
             board.flakes = [LeadFlake(test: "flaky()", task: "earlier", commit: "c1", at: now - 3 * 86_400),
-                            LeadFlake(test: "flaky()", task: "later", commit: "c2", at: now - 86_400, lines: ["✘ Test flaky() failed after 9.000 seconds with 1 issue."],
-                                      log: root + "/.vibeswitcher/flakes/2026-10-27-later.log")]
+                            LeadFlake(test: "flaky()", task: "later", commit: "c2", at: now - 86_400, log: earlier)]
         }
         try audited(lead, runtime, root: root)
 
@@ -388,11 +393,13 @@ struct MergeGateTests: LeadTeamFixture {
                      "↳ waited for the reply", "✘ Test flaky() failed after 0.010 seconds with 1 issue."]
         let board = BoardStore(root: root).load()
         let flake = try #require(board.flakes?.last)
-        #expect(flake.task == "add-b" && flake.lines == lines, "\(flake)")
-        // In the repository's ignored folder, private, named by the day and the task.
+        #expect(flake.task == "add-b", "\(flake)")
+        // In the repository's ignored folder, private, named by the day, the task and the merge's commit.
         let log = try #require(flake.log)
-        #expect(log == MergeRerun.evidenceFile(root: root, task: "add-b", at: Date(timeIntervalSince1970: flake.at)).path)
-        #expect(log.range(of: #"/\.vibeswitcher/flakes/\d{4}-\d{2}-\d{2}-add-b\.log$"#, options: .regularExpression) != nil, "\(log)")
+        #expect(log == MergeRerun.evidenceFile(root: root, task: "add-b", commit: flake.commit, at: Date(timeIntervalSince1970: flake.at)).path)
+        #expect(log.hasSuffix("-add-b-\(flake.commit.prefix(8)).log"), "\(log)")
+        #expect(log.range(of: #"/\.vibeswitcher/flakes/\d{4}-\d{2}-\d{2}-add-b-[0-9a-f]{8}\.log$"#, options: .regularExpression) != nil, "\(log)")
+        #expect(MergeRerun.evidence(for: "flaky()", inLog: log) == lines)
         let text = try String(contentsOfFile: log, encoding: .utf8)
         #expect(text.contains("\nflaky()\n" + lines.map { "    " + $0 }.joined(separator: "\n")), "\(text)")
         #expect(!text.contains("abc123def456"))
@@ -403,9 +410,99 @@ struct MergeGateTests: LeadTeamFixture {
         // The fix task quotes each merge's lines it has, under where they're kept.
         let fix = try #require(board.tasks.first { $0.title.hasPrefix("Fix the flaky test") })
         let context = fix.contract.context
-        #expect(context.contains("- later's merge (\(root)/.vibeswitcher/flakes/2026-10-27-later.log):\n    ✘ Test flaky() failed after 9.000 seconds"), "\(context)")
+        #expect(context.contains("- later's merge (\(earlier)):\n    ✘ Test flaky() failed after 9.000 seconds"), "\(context)")
         #expect(context.contains("- add-b's merge (\(log)):\n" + lines.map { "    " + $0 }.joined(separator: "\n")), "\(context)")
         #expect(!context.contains("earlier's merge") && !context.contains("abc123def456"), "\(context)")
+    }
+
+    @Test func twoMergesOfOneTaskOnOneDayLeaveTwoEvidenceFiles() throws {
+        let root = try repo()
+        try fakeSuite(root, passes: "[[ \"$*\" == *--filter* ]]")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        configure(lead, ["test_command": "bash scripts/test.sh"])
+        try audited(lead, runtime, root: root)
+        let first = lead.call("merge", ["task": "add-b"])
+        #expect(!first.isError, "\(first.text)")
+        // Its work goes on after the merge (as after a set-back), and merges again the same day.
+        try BoardStore(root: root).update { board in
+            let index = try #require(board.taskIndex("add-b"))
+            board.tasks[index].status = .running
+            board.tasks[index].merged = nil
+        }
+        try commit(["d.txt": "dee\n"], in: Worktrees.path(root: root, slug: "add-b"), "more of add-b's work")
+        #expect(!(try seat("worker-add-b", runtime).call("report", doneReport("done"))).isError)
+        #expect(!lead.call("audit", ["task": "add-b"]).isError)
+        let verdict = try seat("verify-add-b", runtime).call("submit_audit", ["completion": "complete", "integrity": "clean", "tests": "passed", "summary": "ok"])
+        #expect(!verdict.isError, "\(verdict.text)")
+        let second = lead.call("merge", ["task": "add-b"])
+        #expect(!second.isError, "\(second.text)")
+
+        let flakes = (BoardStore(root: root).load().flakes ?? []).filter { $0.task == "add-b" }
+        #expect(flakes.count == 2, "\(flakes)")
+        let logs = flakes.compactMap(\.log)
+        #expect(logs.count == 2 && Set(logs).count == 2, "\(logs)")
+        let folder = root + "/.vibeswitcher/flakes"
+        let files = try FileManager.default.contentsOfDirectory(atPath: folder).filter { $0.hasSuffix(".log") }
+        #expect(files.count == 2, "\(files)")
+        for (flake, log) in zip(flakes, logs) {
+            #expect(log.hasSuffix("-add-b-\(flake.commit.prefix(8)).log"), "\(log)")
+            #expect(MergeRerun.evidence(for: "flaky()", inLog: log)?.first?.hasPrefix("✘ Test flaky() recorded an issue") == true)
+        }
+    }
+
+    @Test func twoHundredFlakesWithEvidenceKeepTheBoardSmallAndTheFixQuotesTheirFiles() throws {
+        let root = try repo()
+        let store = BoardStore(root: root)
+        var board = LeadBoard()
+        let now = Date().timeIntervalSince1970
+        // The most a test's evidence keeps: `evidenceLimit` lines of `evidenceWidth` characters.
+        let lines = MergeRerun.capped((1...30).map { "✘ Test SomeLongerSuiteName.aTestWithARatherLongDescriptiveName() recorded an issue at File.swift:\($0):1: " + String(repeating: "x", count: 500) })
+        var due: [(test: String, merges: [String], flakes: [LeadFlake])] = []
+        for n in 0..<LeadBoard.keptFlakes {
+            let test = "SomeLongerSuiteName.aTestWithARatherLongDescriptiveName\(n % 60)()"
+            let task = "a-task-with-a-long-enough-slug-\(n)"
+            let commit = String(repeating: String(format: "%08x", n), count: 5)
+            let file = MergeRerun.evidenceFile(root: root, task: task, commit: commit, at: Date(timeIntervalSince1970: now))
+            try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try MergeRerun.evidenceLog(task: task, commit: commit, evidence: [test: lines], tests: [test]).write(to: file, atomically: true, encoding: .utf8)
+            due += board.recordFlakes([test], task: task, commit: commit, now: now + Double(n), logged: [test], log: file.path)
+        }
+        try store.update { $0.flakes = board.flakes }
+        let flakes = try #require(store.load().flakes)
+        #expect(flakes.count == LeadBoard.keptFlakes && flakes.allSatisfy { $0.log != nil })
+        let size = try #require(try FileManager.default.attributesOfItem(atPath: store.file)[.size] as? Int)
+        #expect(size < 100_000, "board.json is \(size) bytes")
+
+        // A fix task's context still quotes each merge's lines, read from its file.
+        let last = try #require(due.last)
+        let context = MergeRerun.fixContract(test: last.test, flakes: last.flakes, workflow: LeadWorkflow()).context
+        for flake in last.flakes {
+            #expect(context.contains("- \(flake.task)'s merge (\(try #require(flake.log))):\n" + lines.map { "    " + $0 }.joined(separator: "\n")), "\(context)")
+        }
+        let note = MergeRerun.flakeNote(test: last.test, flakes: last.flakes)
+        #expect(note.contains(lines[0]) && note.contains(lines[lines.count - 1]), "\(note)")
+        // A file that's gone is said so, and quotes nothing.
+        try FileManager.default.removeItem(atPath: try #require(last.flakes[0].log))
+        let gone = MergeRerun.fixContract(test: last.test, flakes: last.flakes, workflow: LeadWorkflow()).context
+        #expect(gone.contains("- \(last.flakes[0].task)'s merge (\(last.flakes[0].log!)): (its file can't be read now)"), "\(gone)")
+    }
+
+    @Test func aBoardWhoseFlakesKeptTheirLinesDecodesAndDropsThemOnTheNextWrite() throws {
+        let root = try repo()
+        let store = BoardStore(root: root)
+        try store.update { $0.flakes = [] }
+        var json = try #require(try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: store.file))) as? [String: Any])
+        json["flakes"] = [["test": "flaky()", "task": "old", "commit": "c1", "at": 1_000_000.0, "planned": "fix-it",
+                           "lines": ["✘ Test flaky() failed after 9.000 seconds with 1 issue."], "log": root + "/.vibeswitcher/flakes/2026-10-27-old.log"]]
+        try JSONSerialization.data(withJSONObject: json).write(to: URL(fileURLWithPath: store.file))
+
+        #expect(store.load().flakes == [LeadFlake(test: "flaky()", task: "old", commit: "c1", at: 1_000_000, planned: "fix-it",
+                                                  log: root + "/.vibeswitcher/flakes/2026-10-27-old.log")])
+        try store.update { _ in }
+        let written = try String(contentsOfFile: store.file, encoding: .utf8)
+        #expect(!written.contains("\"lines\"") && !written.contains("9.000 seconds"), "\(written)")
+        #expect(written.contains("2026-10-27-old.log") && store.load().flakes?.first?.planned == "fix-it")
     }
 
     @Test func aThirdFlakeOfATestAnOpenTaskNamesGoesInThatTasksContextNotANewTask() throws {

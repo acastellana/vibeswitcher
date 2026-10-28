@@ -1011,19 +1011,19 @@ public struct LeadFlake: Codable, Equatable, Sendable {
     public var at: Double
     /// The task planned to fix it, on the flake that made it due (`LeadBoard.recordFlakes`).
     public var planned: String?
-    /// Its failure lines from the failing run (`MergeRerun.evidence`), and the file in the repository's ignored folder
-    /// that keeps them with the merge's other flakes' (`MergeRerun.evidenceFile`). Optional: older entries have
-    /// neither, and a run that named no test's lines has none.
-    public var lines: [String]?
+    /// The file in the repository's ignored folder that keeps its failure lines from the failing run
+    /// (`MergeRerun.evidence`) with the merge's other flakes' (`MergeRerun.evidenceFile`); a task's context reads them
+    /// from there (`MergeRerun.quoted`). Only the path: lines here would grow the board by kilobytes an entry. Optional:
+    /// older entries have none, and a run that named no test's lines has none. (Entries that kept their lines here
+    /// still decode; the lines are dropped on the next write.)
     public var log: String?
 
-    public init(test: String, task: String, commit: String, at: Double, planned: String? = nil, lines: [String]? = nil, log: String? = nil) {
+    public init(test: String, task: String, commit: String, at: Double, planned: String? = nil, log: String? = nil) {
         self.test = test
         self.task = task
         self.commit = commit
         self.at = at
         self.planned = planned
-        self.lines = lines
         self.log = log
     }
 }
@@ -1097,18 +1097,17 @@ public struct LeadBoard: Codable, Equatable, Sendable {
 
     // MARK: Flakes
 
-    /// Records each of `tests` as having flaked in `task`'s merge (tested at `commit`), with its lines in `evidence` and
-    /// the `log` that keeps them. Returns those that flaked `flakeLimit` times within `flakeWindow` since a task was
+    /// Records each of `tests` as having flaked in `task`'s merge (tested at `commit`), those in `logged` with the `log`
+    /// that keeps their lines. Returns those that flaked `flakeLimit` times within `flakeWindow` since a task was
     /// last planned for them, each with the merges it held up and those flakes (oldest first): the caller plans one task
     /// each and marks it (`planned`), so a test makes one task, not one per flake. A flake recorded under
     /// `MergeRerun.unnamed` names no test, and plans nothing.
-    public mutating func recordFlakes(_ tests: [String], task: String, commit: String, now: Double, evidence: [String: [String]] = [:],
+    public mutating func recordFlakes(_ tests: [String], task: String, commit: String, now: Double, logged: Set<String> = [],
                                       log: String? = nil) -> [(test: String, merges: [String], flakes: [LeadFlake])] {
         var ledger = flakes ?? []
         var due: [(test: String, merges: [String], flakes: [LeadFlake])] = []
         for test in tests {
-            let lines = evidence[test]
-            ledger.append(LeadFlake(test: test, task: task, commit: commit, at: now, lines: lines, log: lines == nil ? nil : log))
+            ledger.append(LeadFlake(test: test, task: task, commit: commit, at: now, log: logged.contains(test) ? log : nil))
             guard test != MergeRerun.unnamed else { continue }
             let since = ledger.last { $0.test == test && $0.planned != nil }?.at ?? -.infinity
             let counted = ledger.filter { $0.test == test && $0.at > since && now - $0.at <= Self.flakeWindow }
