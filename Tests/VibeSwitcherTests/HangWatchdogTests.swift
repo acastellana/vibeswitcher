@@ -53,4 +53,45 @@ struct HangWatchdogTests {
         let hang = AppHealth.hang(name: "hang-x", log: log, sample: nil)
         #expect(hang.caught && (hang.duration ?? 0) >= 2.5, "\(hang)")
     }
+
+    /// Reports are kept a week, up to a total size, the oldest going first: 2026-10-28, the ten newest were all that
+    /// was kept, and a burst of freezes pushed out the reports a fix task named within hours.
+    @Test func pruningKeepsAWeekUpToTheSizeCap() throws {
+        let folder = temp.url("debug")
+        let fm = FileManager.default
+        try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+        let now = Date(timeIntervalSince1970: 1_761_393_730)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        // 30 hangs, one every 8 hours back from an hour ago (the 22nd, 169 hours ago, and on are older than a week); every third has a
+        // sample (.txt) too: 3500 bytes for those, 500 for the others.
+        var names: [String] = []
+        for index in 0..<30 {
+            let name = "hang-" + formatter.string(from: now.addingTimeInterval(-3600 - Double(index) * 8 * 3600))
+            names.append(name)
+            try Data(count: 500).write(to: folder.appendingPathComponent(name + ".log"))
+            if index % 3 == 0 { try Data(count: 3000).write(to: folder.appendingPathComponent(name + ".txt")) }
+        }
+        try Data(count: 10_000).write(to: folder.appendingPathComponent("app.log"))
+        func kept() -> [String] { AppHealth.Folders(debug: folder, reports: folder).hangNames() }
+        func files(_ range: Range<Int>) -> [String] {
+            range.flatMap { [names[$0] + ".log"] + ($0 % 3 == 0 ? [names[$0] + ".txt"] : []) }
+        }
+
+        // By age: the week's 21 are kept, sample and all, under a cap they don't reach (14 * 500 + 7 * 3500 bytes).
+        HangWatchdog.prune(folder, now: now, keepBytes: 50_000)
+        #expect(kept() == Array(names[0..<21]).sorted())
+        #expect(Set(try fm.contentsOfDirectory(atPath: folder.path)) == Set(files(0..<21) + ["app.log"]))
+        // By size: the newest 12 are 18000 bytes, the 13th (with its sample) would take them past 20000.
+        HangWatchdog.prune(folder, now: now, keepBytes: 20_000)
+        #expect(kept() == Array(names[0..<12]).sorted())
+        #expect(Set(try fm.contentsOfDirectory(atPath: folder.path)) == Set(files(0..<12) + ["app.log"]))
+        // The newest is kept even past the cap on its own.
+        HangWatchdog.prune(folder, now: now, keepBytes: 1)
+        #expect(kept() == [names[0]])
+        // A week on, it's old too, but still the newest.
+        HangWatchdog.prune(folder, now: now.addingTimeInterval(8 * 86_400))
+        #expect(kept() == [names[0]])
+    }
 }

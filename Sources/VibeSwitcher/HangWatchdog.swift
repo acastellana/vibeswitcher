@@ -207,13 +207,35 @@ final class HangWatchdog: @unchecked Sendable {
         onWrite?(report.name)
     }
 
-    /// The ten newest hangs are kept.
-    private func prune() {
+    /// Hangs are kept a week, and at most `keepBytes` of them (the oldest go first; the newest is always kept): a fix
+    /// task reads the reports it names. 2026-10-28, two workers and a verifier couldn't read theirs (hang-20261027-19xx
+    /// to 21xx): the ten newest were all that was kept, and the evening's 100+ freezes had pushed them out within hours.
+    static let keepFor: TimeInterval = 7 * 86_400
+    static let keepBytes = 50 << 20
+
+    private func prune() { Self.prune(folder, now: Date()) }
+
+    /// A hang's age is from its name (when it began; its files' last change if the name doesn't say), its size its
+    /// .log's and .txt's.
+    static func prune(_ folder: URL, now: Date, keepFor: TimeInterval = keepFor, keepBytes: Int = keepBytes) {
         let fm = FileManager.default
-        let hangs = ((try? fm.contentsOfDirectory(atPath: folder.path)) ?? []).filter { $0.hasPrefix("hang-") }.sorted()
-        let names = Set(hangs.map { ($0 as NSString).deletingPathExtension })
-        for old in names.sorted().dropLast(10) {
-            for ext in ["txt", "log"] { try? fm.removeItem(at: folder.appendingPathComponent("\(old).\(ext)")) }
+        let files = ((try? fm.contentsOfDirectory(atPath: folder.path)) ?? []).filter { $0.hasPrefix("hang-") && ($0.hasSuffix(".txt") || $0.hasSuffix(".log")) }
+        var hangs: [String: (began: Date, bytes: Int)] = [:]
+        for file in files {
+            let name = (file as NSString).deletingPathExtension
+            let attributes = try? fm.attributesOfItem(atPath: folder.appendingPathComponent(file).path)
+            let began = AppHealth.nameDate(name) ?? (attributes?[.modificationDate] as? Date) ?? now
+            let bytes = (attributes?[.size] as? NSNumber)?.intValue ?? 0
+            let known = hangs[name]
+            hangs[name] = (max(known?.began ?? began, began), (known?.bytes ?? 0) + bytes)
+        }
+        // Newest first: once the total is past `keepBytes`, every older one goes too.
+        let newest = hangs.sorted { ($0.value.began, $0.key) > ($1.value.began, $1.key) }
+        var total = 0
+        for (index, (name, hang)) in newest.enumerated() {
+            total += hang.bytes
+            guard index > 0, now.timeIntervalSince(hang.began) >= keepFor || total > keepBytes else { continue }
+            for ext in ["txt", "log"] { try? fm.removeItem(at: folder.appendingPathComponent("\(name).\(ext)")) }
         }
     }
 }

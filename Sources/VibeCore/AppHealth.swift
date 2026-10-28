@@ -211,7 +211,7 @@ public enum AppHealth {
     }
 
     /// When "hang-20261025-140210" began, in this Mac's time zone (as `HangWatchdog` names them).
-    static func nameDate(_ name: String) -> Date? {
+    public static func nameDate(_ name: String) -> Date? {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyyMMdd-HHmmss"
@@ -553,7 +553,7 @@ public enum AppHealth {
         }
 
         /// The reports in the folders now: new ones go into the digest under way (opened by the first). Returns whether
-        /// any was new. Names no longer there are forgotten (`HangWatchdog` keeps the ten newest), but not on an empty
+        /// any was new. Names no longer there are forgotten (`HangWatchdog` keeps a week of them), but not on an empty
         /// list: a folder that couldn't be read for a moment would make every report in it news again.
         @discardableResult
         public mutating func saw(hangs: [String], crashes: [String], now: Date) -> Bool {
