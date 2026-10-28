@@ -32,7 +32,8 @@ The lead turns what you ask for into tasks on its board. Each task has a contrac
 
 A task can also have a review level (below), an `after` list (tasks that must be done first), its own time budget
 (`budget_min`) and `auto_advance: false` to keep it out of automatic moves. The lead changes a task with
-`update_task`, and its states are planned, running, blocked, failed, kept, folded, abandoned and merged. A task made by
+`update_task`. A task's state (`LeadBoard.swift:549`) is planned, running, review (reported done, being checked), done
+(merged), failed, blocked, kept, folded, abandoned or reverted. A task made by
 mistake that never ran can be removed.
 
 ## Workers
@@ -232,7 +233,8 @@ not edit that folder.
 
 `workflow.md` (in `.vibeswitcher/`, git-ignored) holds the limits and commands below. The lead changes it with its
 `configure` tool, which keeps your comments. The guard rails (the test and setup commands, `merge_policy`,
-`sensitive_paths`, `records_dir`, `max_workers`, `heavy_slots`, `audit_finders`, `audit_nit_cap`, `auto_advance`)
+`sensitive_paths`, `records_dir`, `max_workers`, `heavy_slots`, `audit_finders`, `audit_nit_cap`, `auto_advance`,
+`risk_lines`, `risk_model`; `Sources/VibeCore/LeadVaultGuarded.swift:11`)
 count only as the lead last set them: when the file says anything else, `merge` and `start_worker` refuse until the
 lead sets them again.
 
@@ -255,6 +257,7 @@ Each value as the code sets it today. Paths are under `Sources/VibeCore/` unless
 | `audit_finders` | 1 (at most 3) | `LeadWorkflow.swift:38`, `:137` |
 | `audit_nit_cap` | 5 | `LeadWorkflow.swift:40` |
 | `risk_lines` | 400 | `LeadRisk.swift:23` |
+| `risk_model` | true (a model pass may also raise a task to audit) | `LeadWorkflow.swift:57` |
 | `auto_advance` | true | `LeadWorkflow.swift:52` |
 | `merge_policy` | unset: handled as `ask_sensitive` | `LeadWorkflow.swift:41-42` |
 | `sensitive_paths` | the list above | `LeadWorkflow.swift:189` |
