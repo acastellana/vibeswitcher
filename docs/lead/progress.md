@@ -1672,3 +1672,7 @@
 - 2026-10-28 10:08 Audit of lead-chat-freezes-of: complete, clean, round 3: 1 Important closed, 4 Nit (1 open)
 - 2026-10-28 10:17 Merged turn-this-incident-into-4: The lead's tool server exits mid-session (after EBADF): log why, find the cause, fix it
 - 2026-10-28 10:17 Flaky in turn-this-incident-into-4's merge: aLongLeadChatKeepsItsRowsOutOfTheKeyViewLoop() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-10-28 10:17 Automatically (auto_advance): Merged turn-this-incident-into-4 (The lead's tool server exits mid-session (after EBADF): log why, find the cause, fix it) into project-lead at aa4d2335, on its passing audit and the full test run. (Its first test run failed on aLongLeadChatKeepsItsRowsOutOfTheKeyViewLoop() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/turn-this-incident-into-4/merge-test.log.)
+- 2026-10-28 10:19 Audit of session-host-refuses: complete, clean, round 1: 2 Nit open
+- 2026-10-28 10:19 Audit of team-members-that-cd: complete, clean
+- 2026-10-28 10:25 Merged turn-this-incident-into-5: Mac-wide session limit blind to other projects since PR #1: give leads a Mac-wide census without reopening the host
