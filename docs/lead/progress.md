@@ -1785,3 +1785,5 @@
 - 2026-10-28 13:01 Started a worker on flake-evidence-readable
 - 2026-10-28 13:01 Automatically (auto_advance): Started a worker on flake-evidence-readable (Flake evidence readable: the merge keeps each flaky test's failure lines where workers and verifiers can read them).
 - 2026-10-28 13:01 Automatically (auto_advance): Started the audit of verifier-trust-check at 02cd89c8 (Its review is audit).
+- 2026-10-28 13:12 Audit of verifier-trust-check: complete, suspect, round 1: 1 Important open, 2 Nit open
+- 2026-10-28 13:12 Dismissed verifier-trust-check:F2: The lead accepts it: three correct doc lines describing the new base build, tied to the goal.
