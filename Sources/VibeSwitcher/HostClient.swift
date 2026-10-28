@@ -135,6 +135,8 @@ final class HostClient: ObservableObject {
     /// Added to the arguments of a host this client starts: a bench's `endsWithThisProcess`. None for the app's, which
     /// outlives the app.
     var hostArguments: [String] = []
+    /// The host this client starts: the bundled one (`hostExecutable`); a test's slow-starting one instead.
+    var hostPath: String?
 
     /// A bench's host ends, sessions and all, when the bench does, however it ends (see `HostServer.Config.owner`).
     static var endsWithThisProcess: [String] { ["--exit-with", String(getpid())] }
@@ -265,7 +267,7 @@ final class HostClient: ObservableObject {
 
     /// Detached (own session, not our child for signals), stdout/stderr appended to host.log.
     private func startHost() throws {
-        let path = Self.hostExecutable.path
+        let path = hostPath ?? Self.hostExecutable.path
         guard FileManager.default.isExecutableFile(atPath: path) else {
             throw HostClientError(message: "vibeswitcher-host is missing from the app")
         }
