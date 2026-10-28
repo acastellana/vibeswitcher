@@ -65,6 +65,8 @@ public final class LeadRecords: @unchecked Sendable {
     public var interval: TimeInterval = 300
     /// How long a commit waits for a held index.lock in the main checkout.
     var lockWait: TimeInterval = 5
+    /// What a commit does between two tries of a held index.lock (`Worktrees.withIndexLock`); nil waits 200 ms.
+    var lockPause: (() -> Void)?
     private let lock = NSLock()
     private var lastFlush: Date
     private var lastOutcome: Outcome?
@@ -171,7 +173,7 @@ public final class LeadRecords: @unchecked Sendable {
             }
         } catch { return .failed("\(error)") }
         let result = Worktrees.commitFiles(root: root, branch: base, paths: paths, contents: snapshot, message: Self.message(dir),
-                                           from: head, lockWait: lockWait)
+                                           from: head, lockWait: lockWait, lockPause: lockPause)
         switch result {
         case .unchanged: return .unchanged
         case .failed(let why): return .failed(why)

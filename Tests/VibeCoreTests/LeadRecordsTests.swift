@@ -247,14 +247,21 @@ struct LeadRecordsTests: LeadTeamFixture {
         let lead = try lead(root, FakeRuntime())
         #expect(!lead.call("record_decision", ["decision": "Ship it", "why": "it works"]).isError)
         let lock = root + "/.git/index.lock"
-        // Held for a moment: waited for.
+        // Held until the commit finds it held, then let go: waited for.
         FileManager.default.createFile(atPath: lock, contents: Data())
-        DispatchQueue.global().asyncAfter(deadline: .now() + 1) { unlink(lock) }
+        let refused = Locked(0)
+        lead.records.lockWait = 120
+        lead.records.lockPause = {
+            refused.set(refused.get() + 1)
+            unlink(lock)
+        }
         guard case .committed = lead.records.flush(base: "main") else { Issue.record("not committed"); return }
+        #expect(refused.get() == 1)
         // Held on: reported, never removed, nothing lost.
         let before = head("main", root)
         #expect(!lead.call("record_decision", ["decision": "Then this", "why": "w"]).isError)
         FileManager.default.createFile(atPath: lock, contents: Data())
+        lead.records.lockPause = nil
         lead.records.lockWait = 0.5
         guard case .failed = lead.records.flush(base: "main") else { Issue.record("didn't fail"); return }
         #expect(FileManager.default.fileExists(atPath: lock))

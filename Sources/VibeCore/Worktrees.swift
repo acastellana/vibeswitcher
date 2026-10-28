@@ -1751,11 +1751,11 @@ extension Worktrees {
     /// out at `root`, only those paths' entries in its index are set to what was committed (before the branch moves:
     /// so a stop between the two leaves them staged, never undone), and put back if the branch couldn't move; every
     /// other staged or unstaged change there stays exactly as it was. A held index.lock is waited for up to
-    /// `lockWait`, never removed. A path missing from the working tree is left as the branch has it. With `contents`,
-    /// a path's text is what it gives (a snapshot taken under the caller's lock) instead of the working tree's; with
-    /// `expected`, only on top of that head.
+    /// `lockWait` (`lockPause` between tries), never removed. A path missing from the working tree is left as the
+    /// branch has it. With `contents`, a path's text is what it gives (a snapshot taken under the caller's lock)
+    /// instead of the working tree's; with `expected`, only on top of that head.
     public static func commitFiles(root: String, branch: String, paths: [String], contents: [String: Data] = [:], message: String,
-                                   from expected: String? = nil, lockWait: TimeInterval = 5) -> FilesCommit {
+                                   from expected: String? = nil, lockWait: TimeInterval = 5, lockPause: (() -> Void)? = nil) -> FilesCommit {
         let git = { (args: [String], env: [String: String]) in
             Git.run(args, in: root, env: env, timeout: 60)
         }
@@ -1808,7 +1808,7 @@ extension Worktrees {
                 let fields = parts[0].split(separator: " ")
                 if fields.count == 3 { before[String(parts[1])] = "\(fields[0]),\(fields[1])" }
             }
-            let set = withIndexLock(root: root, wait: lockWait) {
+            let set = withIndexLock(root: root, wait: lockWait, pause: lockPause) {
                 git(["update-index", "--add"] + blobs.flatMap { ["--cacheinfo", "100644,\($0.blob),\($0.path)"] }, [:])
             }
             guard set.ok else { return .failed("The checkout's index couldn't be updated, nothing was committed: \(said(set))") }
@@ -1821,20 +1821,21 @@ extension Worktrees {
                 let args = blobs.flatMap { entry in
                     before[entry.path].map { ["--cacheinfo", "\($0),\(entry.path)"] } ?? ["--force-remove", entry.path]
                 }
-                _ = withIndexLock(root: root, wait: lockWait) { git(["update-index", "--add"] + args, [:]) }
+                _ = withIndexLock(root: root, wait: lockWait, pause: lockPause) { git(["update-index", "--add"] + args, [:]) }
             }
             return .failed("\(branch) moved meanwhile, nothing was committed: \(said(moved))")
         }
         return .committed(commit: commit, parent: head)
     }
 
-    /// Runs a git command that takes `root`'s index.lock, again for up to `wait` while another git holds it.
-    static func withIndexLock(root: String, wait: TimeInterval, _ run: () -> Git.Result) -> Git.Result {
+    /// Runs a git command that takes `root`'s index.lock, again for up to `wait` while another git holds it. `pause`
+    /// runs between a refused try and the next (200 ms by default; a test's releases the lock there).
+    static func withIndexLock(root: String, wait: TimeInterval, pause: (() -> Void)? = nil, _ run: () -> Git.Result) -> Git.Result {
         let deadline = Date().addingTimeInterval(wait)
         while true {
             let result = run()
             guard !result.ok, result.error.contains("index.lock"), Date() < deadline else { return result }
-            usleep(200_000)
+            if let pause { pause() } else { usleep(200_000) }
         }
     }
 }
