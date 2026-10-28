@@ -163,6 +163,10 @@ private final class WaitingPanel: NSPanel {
         super.init(contentRect: NSRect(x: 0, y: 0, width: 360, height: 110), styleMask: [.titled], backing: .buffered, defer: false)
         title = "VibeSwitcher"
         isReleasedWhenClosed = false
+        // Apple's installer comes to the front as it opens: this stays in sight beside it (a panel hides when its app
+        // isn't active, and VibeSwitcher is an accessory app).
+        hidesOnDeactivate = false
+        level = .floating
         let spinner = NSProgressIndicator()
         spinner.style = .spinning
         spinner.controlSize = .small
