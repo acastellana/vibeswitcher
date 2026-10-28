@@ -49,6 +49,24 @@ if CommandLine.arguments.count == 2, CommandLine.arguments[1] == MCPHandover.pro
 let handover = MCPHandover.take()
 if handover != nil { FileHandle.standardError.write(Data("vibeswitcher-mcp: switched in place to the new build\n".utf8)) }
 
+// Its own log (`MCPLog`): why it starts, switches and stops, which Claude Code's says nothing of. The role it was
+// started as names the file.
+let startedAs: String = {
+    let words = Array(CommandLine.arguments.dropFirst())
+    guard let at = words.firstIndex(of: "--role"), at + 1 < words.count else { return "lead" }
+    return words[at + 1]
+}()
+MCPLog.start(role: startedAs)
+MCPLog.note("started: pid \(getpid()), parent \(getppid()), as \(startedAs), \(MCPServer.describe(BinaryWatch.identity(of: Bundle.main.executablePath ?? CommandLine.arguments[0])))"
+            + (handover.map { ", switched in place from the \(MCPServer.describe($0.binary)) before it" } ?? ", fresh") + "; \(MCPLog.descriptors())")
+atexit { MCPLog.note("exiting: \(MCPLog.descriptors())") }
+// A write to a pipe or socket whose reader has gone fails (EPIPE) instead of ending the process unseen: noted, and
+// served on. Caught, not ignored: what a call starts gets SIGPIPE at its default.
+signal(SIGPIPE) { _ in }
+let brokenPipes = DispatchSource.makeSignalSource(signal: SIGPIPE, queue: .global())
+brokenPipes.setEventHandler { MCPLog.note("SIGPIPE: a write to a pipe or socket whose reader had gone (it fails with EPIPE; serving on)") }
+brokenPipes.resume()
+
 /// For MCPHandoverTests: a server with no host behind it whose tools say which build answers.
 /// `VIBESWITCHER_MCP_TEST_BUILD` names the build (a script standing in for one sets it), `VIBESWITCHER_MCP_TEST_BINARY`
 /// is where it's installed. `VIBESWITCHER_MCP_TEST_HOST` plays the session host: a file that's there while the host
@@ -95,6 +113,7 @@ if let build = environment["VIBESWITCHER_MCP_TEST_BUILD"], let installed = envir
     toolset.start { server.toolsSettled() }
     server.stop(on: [SIGTERM, SIGHUP])
     server.serve()
+    MCPLog.note("serve returned: exiting with status 0")
     exit(0)
 }
 
@@ -345,3 +364,4 @@ toolset.start { server.toolsSettled() }
 // merge's test command stopped, its scratch worktree removed) before it exits.
 server.stop(on: [SIGTERM, SIGHUP])
 server.serve()
+MCPLog.note("serve returned: exiting with status 0")

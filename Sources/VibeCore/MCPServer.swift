@@ -581,8 +581,13 @@ public final class MCPServer: @unchecked Sendable {
     public func stop() {
         lock.lock()
         stopping = true
-        let wake = self.wake
+        nudge()
         lock.unlock()
+    }
+
+    /// Wakes the input loop (a call ended, or it's to stop). Under `lock`: `serve` closes the pipe under it too, so the
+    /// byte never goes to a descriptor closed meanwhile, or to the file that took its number. The pipe doesn't block.
+    private func nudge() {
         if wake >= 0 { _ = Darwin.write(wake, [UInt8(1)], 1) }
     }
 
@@ -592,7 +597,10 @@ public final class MCPServer: @unchecked Sendable {
         for number in signals {
             signal(number) { _ in }
             let source = DispatchSource.makeSignalSource(signal: number, queue: .global())
-            source.setEventHandler { [weak self] in self?.stop() }
+            source.setEventHandler { [weak self] in
+                MCPLog.note("stopping: signal \(number) (\(String(cString: strsignal(number))))")
+                self?.stop()
+            }
             source.resume()
             lock.lock()
             signalSources.append(source)
@@ -630,9 +638,8 @@ public final class MCPServer: @unchecked Sendable {
             ShellCancel.with(token) { work() }
             lock.lock()
             running[key!] = nil
-            let wake = self.wake
+            nudge()
             lock.unlock()
-            if wake >= 0 { _ = Darwin.write(wake, [UInt8(1)], 1) }
         }
         return true
     }
@@ -649,9 +656,16 @@ public final class MCPServer: @unchecked Sendable {
             lock.lock()
             let idle = running.isEmpty
             lock.unlock()
-            if idle { return }
+            if idle {
+                if !calls.isEmpty { MCPLog.note("ended: \(calls.count) running call(s) cancelled and ended") }
+                return
+            }
             usleep(20_000)
         }
+        lock.lock()
+        let left = running.count
+        lock.unlock()
+        MCPLog.note("ended: \(left) of \(calls.count) cancelled call(s) still running after \(Int(stopGrace)) s")
     }
 
     /// Reads requests from `input` until it closes (or `stop`), answering on `output`, then ends its calls. Between
@@ -690,17 +704,26 @@ public final class MCPServer: @unchecked Sendable {
             lock.lock()
             wake = -1
             announce = nil
-            lock.unlock()
             for fd in wakeup where fd >= 0 { Darwin.close(fd) }
+            lock.unlock()
         }
         if let changed = toolsChanged() { respond(changed) }
 
         var chunk = [UInt8](repeating: 0, count: 65_536)
+        var turned = Date()
         while true {
             lock.lock()
             let stopped = stopping
             lock.unlock()
-            if stopped { return }
+            if stopped {
+                MCPLog.note("serve: stopped (asked to)")
+                return
+            }
+            // A second at most between turns: much more is the process held up (the Mac asleep, a stopped process,
+            // a reader starved on a loaded Mac), worth knowing if the client gave up meanwhile.
+            let gap = Date().timeIntervalSince(turned)
+            if gap > Self.stallNoted { MCPLog.note("serve: the input loop didn't turn for \(Int(gap)) s (asleep, stopped or starved)") }
+            turned = Date()
             switchIfDue(pending: pending)
             if let end = pending.firstIndex(of: 0x0A) {
                 var line = Data(pending[pending.startIndex..<end])
@@ -713,21 +736,40 @@ public final class MCPServer: @unchecked Sendable {
             var fds = [pollfd(fd: input, events: Int16(POLLIN), revents: 0), pollfd(fd: wakeup[0], events: Int16(POLLIN), revents: 0)]
             let ready = poll(&fds, wakeup[0] >= 0 ? 2 : 1, 1_000)
             if ready < 0 {
-                if errno == EINTR { continue }
+                let code = errno
+                if code == EINTR { continue }
+                // Short of memory for a moment (a loaded Mac): not the client's end, so not this server's.
+                if code == EAGAIN || code == ENOMEM {
+                    MCPLog.note("serve: poll failed with \(MCPLog.errnoText(code)); trying again")
+                    usleep(100_000)
+                    continue
+                }
+                MCPLog.note("serve: poll failed with \(MCPLog.errnoText(code)); ending, \(MCPLog.descriptors())")
                 return
             }
             if fds[1].revents != 0 { while Darwin.read(wakeup[0], &chunk, chunk.count) > 0 {} }
             guard fds[0].revents != 0 else { continue }
+            if fds[0].revents & Int16(POLLNVAL) != 0 {
+                // Not the client's doing: something in this process closed the descriptor it reads.
+                MCPLog.note("serve: input fd \(input) is no longer open (POLLNVAL: closed in this process); ending, \(MCPLog.descriptors())")
+                return
+            }
             let count = Darwin.read(input, &chunk, chunk.count)
+            let code = errno
             if count > 0 {
                 pending.append(contentsOf: chunk[0..<count])
-            } else if count == 0 || (errno != EINTR && errno != EAGAIN) {
+            } else if count == 0 || (code != EINTR && code != EAGAIN) {
+                MCPLog.note(count == 0 ? "serve: input ended (EOF: the client closed it)"
+                            : "serve: reading input failed with \(MCPLog.errnoText(code)); ending, \(MCPLog.descriptors())")
                 // Closed: the last line may have no newline.
                 if !Self.isBlank(pending) { receive(pending, respond: respond) }
                 return
             }
         }
     }
+
+    /// How long the input loop may go without turning before the log says so.
+    static let stallNoted: TimeInterval = 30
 
     private static func isBlank(_ line: Data) -> Bool {
         line.allSatisfy { $0 == 0x20 || $0 == 0x09 || $0 == 0x0D }
@@ -766,13 +808,22 @@ public final class MCPServer: @unchecked Sendable {
         guard switchWhen?() ?? true else { return }
         var handover = state
         handover.binary = build
+        MCPLog.note("switching to the build at \(watch.path) (\(Self.describe(build)))")
         let why = MCPHandover.replace(with: watch.path, arguments: Array(CommandLine.arguments.dropFirst()), state: handover,
                                       unchanged: { watch.still(build) })
+        MCPLog.note("didn't switch: \(why)")
         // Replaced again: the build there now is looked at on the next turn, as any new one.
         guard why != MCPHandover.replacedAgain else { return }
         // Said once per build and reason: a retry every minute that fails the same way adds nothing.
         guard watch.failed(build, because: why) else { return }
         FileHandle.standardError.write(Data("vibeswitcher-mcp: couldn't switch to the new build at \(watch.path): \(why); this build serves on\n".utf8))
+    }
+
+    /// A build as the log names it: its file's time, size and inode.
+    public static func describe(_ build: BinaryWatch.Identity?) -> String {
+        guard let build else { return "unknown build" }
+        let time = ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: build.modified))
+        return "build of \(time), \(build.size) bytes, inode \(build.inode)"
     }
 
     /// The toolset can tell its tools now (see `MCPToolset.settled`): the client hears if they aren't the ones it got.
@@ -832,9 +883,8 @@ public final class MCPServer: @unchecked Sendable {
                 if let reply { respond(reply) }
                 lock.lock()
                 running[key] = nil
-                let wake = self.wake
+                nudge()
                 lock.unlock()
-                if wake >= 0 { _ = Darwin.write(wake, [UInt8(1)], 1) }
             }
             return
         }
@@ -876,13 +926,24 @@ public final class MCPServer: @unchecked Sendable {
         case "tools/call":
             let tool = params["name"] as? String ?? ""
             let arguments = params["arguments"] as? [String: Any] ?? [:]
+            let started = Date()
             let result = toolset.call(tool, arguments)
+            if result.isError { Self.noteFailure(tool, result.text, after: Date().timeIntervalSince(started)) }
             var content = [["type": "text", "text": result.text]]
             if let notice = watch?.notice() { content.append(["type": "text", "text": notice]) }
             return reply(id, ["content": content, "isError": result.isError])
         default:
             return encode(["jsonrpc": "2.0", "id": id, "error": ["code": -32601, "message": "Method not found: \(method)"]])
         }
+    }
+
+    /// A tool call that failed, in the log: its name (a tool's name, or "other"), how long it took, and the errno its
+    /// error carries with the descriptors open then. Never its text: it may quote what the call was given.
+    static func noteFailure(_ tool: String, _ text: String, after seconds: TimeInterval) {
+        let known = tool.count <= 40 && tool.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "_" || $0 == "-") }
+        let code = MCPLog.errnoCode(in: text)
+        MCPLog.note("tool \(known ? tool : "other") failed after \(String(format: "%.1f", seconds)) s"
+                    + (code.map { ": \(MCPLog.errnoText($0)), \(MCPLog.descriptors())" } ?? ""))
     }
 
     private func remember(_ change: (inout MCPSession) -> Void) {

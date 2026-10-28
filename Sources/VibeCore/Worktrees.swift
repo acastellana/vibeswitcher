@@ -54,6 +54,47 @@ private final class PipeText: @unchecked Sendable {
     }
 }
 
+/// A pipe for a program's output, made with pipe(2), both ends close-on-exec. Not Foundation's `Pipe`: out of
+/// descriptors (EMFILE) its pipe() fails unseen and both its handles hold fd 0, this process's stdin (the tool server's
+/// input from Claude Code). The command then fails with EBADF, as the lead's cleanup and start_worker did (incident
+/// 4, 2026-10-27), or starts with its output on fd 0 and its reader reading the server's input. Here it isn't
+/// started, and the error says why (EMFILE, with the descriptors open).
+final class ShellPipe: @unchecked Sendable {
+    let reading: FileHandle
+    let writing: FileHandle
+    private let lock = NSLock()
+    private var writingOpen = true
+
+    struct Failure: Error, CustomStringConvertible {
+        var code: Int32
+        var description: String {
+            "Couldn't start the command: no pipe for its output (\(String(cString: strerror(code))); \(MCPLog.descriptors()))."
+        }
+    }
+
+    init() throws {
+        var fds: [Int32] = [-1, -1]
+        guard Darwin.pipe(&fds) == 0 else {
+            let code = errno
+            MCPLog.note("no pipe for a command: \(MCPLog.errnoText(code)), \(MCPLog.descriptors())")
+            throw Failure(code: code)
+        }
+        for fd in fds { _ = fcntl(fd, F_SETFD, FD_CLOEXEC) }
+        reading = FileHandle(fileDescriptor: fds[0], closeOnDealloc: true)
+        writing = FileHandle(fileDescriptor: fds[1], closeOnDealloc: true)
+    }
+
+    /// This process's write end, closed once the program has its copy: its output ends when the program's does.
+    /// Once, however often it's asked (the same pipe can be both outputs).
+    func closeWriting() {
+        lock.lock()
+        defer { lock.unlock() }
+        guard writingOpen else { return }
+        writingOpen = false
+        try? writing.close()
+    }
+}
+
 /// A worker's branch's code, as merge, an audit's shared run and init_command run it from the lead's tool server (see
 /// `Worktrees.runChecks`): never the lead to the session host. It runs under a wrapper that's marked (`isRunner`) and
 /// never execs, in a POSIX session of its own with no controlling terminal: the host gives nothing below the wrapper
@@ -81,28 +122,21 @@ public enum Shell {
                            timeout: TimeInterval = 120, grace: TimeInterval = 5, interleaved: Bool = false,
                            branchCode: Bool = false) -> Git.Result {
         let environment = ProcessInfo.processInfo.environment.merging(env) { $1 }
-        let out = Pipe(), err = Pipe()
+        let out: ShellPipe, err: ShellPipe
+        do {
+            out = try ShellPipe()
+            err = interleaved ? out : try ShellPipe()
+        } catch { return Git.Result(status: -1, output: "", error: "\(error)") }
+        // posix_spawn, not Process: out of descriptors, Process fails with EBADF (it couldn't make its own), which says
+        // nothing of why; posix_spawn's errno does.
         let process: Running
-        if branchCode {
-            do {
-                process = try Spawned(BranchCode.wrapper + [executable] + args, in: directory, environment: environment,
-                                      output: out, errors: interleaved ? out : err)
-            } catch { return Git.Result(status: -1, output: "", error: "\(error)") }
-        } else {
-            let started = Process()
-            started.executableURL = URL(fileURLWithPath: executable)
-            started.arguments = args
-            started.currentDirectoryURL = URL(fileURLWithPath: directory)
-            started.environment = environment
-            started.standardOutput = out
-            started.standardError = interleaved ? out : err
-            started.standardInput = FileHandle.nullDevice
-            do { try started.run() } catch { return Git.Result(status: -1, output: "", error: "\(error)") }
-            process = started
-        }
+        do {
+            process = try Spawned((branchCode ? BranchCode.wrapper : []) + [executable] + args, in: directory, environment: environment,
+                                  output: out, errors: err, session: branchCode)
+        } catch { return Git.Result(status: -1, output: "", error: "\(error)") }
         let pid = process.processIdentifier
-        // Process starts it as the leader of a process group of its own, whose id is its pid (as `Spawned` does, the
-        // leader of a session of its own): what it starts is in it
+        // It starts as the leader of a process group of its own (branch code: of a session of its own), whose id is
+        // its pid: what it starts is in it
         // too, also what has left its family since (a background job whose shell exited). Taken from the pid, not
         // looked up: a command that ends at once is gone before getpgid could ask, and its group with it. A group
         // with that id can only be the one it made (its pid isn't given out again while the group has members).
@@ -114,11 +148,11 @@ public enum Shell {
         let output = PipeText(), errors = PipeText()
         let readers = DispatchGroup()
         readers.enter()
-        Thread.detachNewThread { output.drain(out.fileHandleForReading); readers.leave() }
+        Thread.detachNewThread { output.drain(out.reading); readers.leave() }
         // Unused, its write end is still ours: reading it would never end.
         if !interleaved {
             readers.enter()
-            Thread.detachNewThread { errors.drain(err.fileHandleForReading); readers.leave() }
+            Thread.detachNewThread { errors.drain(err.reading); readers.leave() }
         }
         let deadline = Date().addingTimeInterval(timeout)
         let cancel = ShellCancel.current
@@ -169,8 +203,8 @@ extension Shell {
         func waitUntilExit()
     }
 
-    /// A program started with posix_spawn as the leader of a POSIX session of its own (`POSIX_SPAWN_SETSID`: no
-    /// controlling terminal, and a process group whose id is its pid, as Process makes one), stdin /dev/null, its
+    /// A program started with posix_spawn as the leader of a process group of its own, whose id is its pid, as Process
+    /// makes one, or of a POSIX session of its own (`POSIX_SPAWN_SETSID`: no controlling terminal either), stdin /dev/null, its
     /// output into the pipes given, nothing else of this process's open (`POSIX_SPAWN_CLOEXEC_DEFAULT`), every
     /// signal at its default. Reaped here.
     final class Spawned: Running {
@@ -183,11 +217,17 @@ extension Shell {
             var description: String { "Couldn't start the command: \(String(cString: strerror(code)))." }
         }
 
-        init(_ argv: [String], in directory: String, environment: [String: String], output: Pipe, errors: Pipe) throws {
+        /// `session`: a POSIX session of its own (branch code, see `BranchCode`); else only a process group of its own,
+        /// as Process starts one, keeping this process's controlling terminal.
+        init(_ argv: [String], in directory: String, environment: [String: String], output: ShellPipe, errors: ShellPipe,
+             session: Bool = true) throws {
             var attributes: posix_spawnattr_t?
             posix_spawnattr_init(&attributes)
             defer { posix_spawnattr_destroy(&attributes) }
-            posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF))
+            let own = session ? POSIX_SPAWN_SETSID : POSIX_SPAWN_SETPGROUP
+            posix_spawnattr_setflags(&attributes, Int16(own | POSIX_SPAWN_CLOEXEC_DEFAULT | POSIX_SPAWN_SETSIGMASK | POSIX_SPAWN_SETSIGDEF))
+            // Group 0: its own, its id its pid.
+            posix_spawnattr_setpgroup(&attributes, 0)
             var none = sigset_t(), all = sigset_t()
             sigemptyset(&none)
             sigfillset(&all)
@@ -197,8 +237,8 @@ extension Shell {
             posix_spawn_file_actions_init(&actions)
             defer { posix_spawn_file_actions_destroy(&actions) }
             posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
-            posix_spawn_file_actions_adddup2(&actions, output.fileHandleForWriting.fileDescriptor, 1)
-            posix_spawn_file_actions_adddup2(&actions, errors.fileHandleForWriting.fileDescriptor, 2)
+            posix_spawn_file_actions_adddup2(&actions, output.writing.fileDescriptor, 1)
+            posix_spawn_file_actions_adddup2(&actions, errors.writing.fileDescriptor, 2)
             posix_spawn_file_actions_addchdir_np(&actions, directory)
             let arguments = argv.map { strdup($0) } + [nil]
             let variables = environment.map { strdup("\($0.key)=\($0.value)") } + [nil]
@@ -206,8 +246,8 @@ extension Shell {
             var pid: pid_t = 0
             let code = posix_spawn(&pid, argv[0], &actions, &attributes, arguments, variables)
             // Only the child writes into them now: their ends close when it (and what it starts) is done.
-            try? output.fileHandleForWriting.close()
-            if errors !== output { try? errors.fileHandleForWriting.close() }
+            output.closeWriting()
+            errors.closeWriting()
             guard code == 0 else { throw Failure(code: code) }
             processIdentifier = pid
         }
@@ -248,7 +288,6 @@ extension Shell {
     }
 }
 
-extension Process: Shell.Running {}
 
 extension Shell {
     /// Signals a process and its descendants (plus `also`, an earlier walk: a descendant whose parent died since

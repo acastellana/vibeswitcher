@@ -1368,11 +1368,16 @@ public final class BoardStore: @unchecked Sendable {
         var leadSession: String?
     }
 
-    /// The board; throws when the file is there but doesn't read (a hand edit, a newer version), so nothing
-    /// writes an empty board over it.
+    /// The board; throws when the file is there but doesn't read (a hand edit, a newer version, or no descriptor to
+    /// read it with), so nothing writes an empty board over it.
     public func read() throws -> LeadBoard {
         if Thread.isMainThread { Self.noteReadOnMainThread() }
-        guard let data = FileManager.default.contents(atPath: file) else { return LeadBoard() }
+        guard let data = FileManager.default.contents(atPath: file) else {
+            // None yet is an empty board; one that couldn't be opened (EMFILE on a process out of descriptors) isn't.
+            let code = errno
+            guard access(file, F_OK) == 0 else { return LeadBoard() }
+            throw BoardError(text: "\(file) couldn't be read (\(String(cString: strerror(code)))); nothing was changed.")
+        }
         do {
             return try JSONDecoder().decode(LeadBoard.self, from: data)
         } catch {

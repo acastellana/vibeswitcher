@@ -254,9 +254,13 @@ public enum SteerInbox {
         let fd = open(url.path, O_RDWR | O_CREAT | O_NOFOLLOW, 0o600)
         guard fd >= 0 else { throw CocoaError(.fileWriteNoPermission) }
         let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
-        guard HookLock.exclusive(fd, within: wait) else { throw CocoaError(.fileLocking) }
-        defer { flock(fd, LOCK_UN) }
-        try body(handle)
+        // The handle closes `fd` as it goes: kept until the unlock, or Swift may let it go after its last use, and the
+        // unlock would go to a closed descriptor or to the file that took its number.
+        try withExtendedLifetime(handle) {
+            guard HookLock.exclusive(fd, within: wait) else { throw CocoaError(.fileLocking) }
+            defer { flock(fd, LOCK_UN) }
+            try body(handle)
+        }
     }
 }
 

@@ -85,6 +85,22 @@ struct BoardSafetyTests {
         #expect(try String(contentsOfFile: file, encoding: .utf8) == edited)
     }
 
+    /// A board that's there but can't be opened (a tool server out of descriptors, EMFILE: incident 4; here, no read
+    /// permission) is no empty board: an update writing one would lose every task.
+    @Test func aBoardThatCantBeOpenedIsNeverOverwritten() throws {
+        let root = temp.url("board").path
+        let store = BoardStore(root: root)
+        try store.update { $0.tasks.append(LeadTask(slug: "one", title: "One", contract: LeadContract(goal: "g", acceptance: ["a"], boundaries: [], context: ""))) }
+        let file = root + "/.vibeswitcher/board.json"
+        let before = try Data(contentsOf: URL(fileURLWithPath: file))
+        chmod(file, 0o200)
+        defer { chmod(file, 0o600) }
+        #expect(throws: BoardError.self) { try store.update { $0.updates = [] } }
+        chmod(file, 0o600)
+        #expect(try Data(contentsOf: URL(fileURLWithPath: file)) == before)
+        #expect(store.load().tasks.map(\.slug) == ["one"])
+    }
+
     @Test func aHeldLockIsReported() throws {
         let path = temp.url("lock").path
         let held = FileLock.attempt(path)

@@ -22,6 +22,9 @@ public final class HostConnection {
     private var decoder = HostFrameDecoder()
     private var readSource: DispatchSourceRead?
     private var writeSource: DispatchSourceWrite?
+    /// The sources on `fd` not cancelled yet: it's closed once there are none (libdispatch's rule, as the read
+    /// source's own cancel handler closing it could while a write source was still on it).
+    private let sources = DispatchGroup()
     private var outgoing = Data()
     private var nextSeq = 1
     private var closed = false
@@ -39,12 +42,17 @@ public final class HostConnection {
         held = appKey == nil ? nil : Data()
         let source = DispatchSource.makeReadSource(fileDescriptor: fd, queue: queue)
         source.setEventHandler { [weak self] in self?.readAvailable() }
-        source.setCancelHandler { [fd] in Darwin.close(fd) }
+        sources.enter()
+        source.setCancelHandler { [sources] in sources.leave() }
+        sources.notify(queue: queue) { [fd] in Darwin.close(fd) }
         readSource = source
         source.resume()
     }
 
-    deinit { readSource?.cancel() }
+    deinit {
+        writeSource?.cancel()
+        readSource?.cancel()
+    }
 
     /// Why a request didn't go out: none of it was sent.
     public enum SendFailure: Error, Equatable, CustomStringConvertible {
@@ -135,6 +143,8 @@ public final class HostConnection {
         } else if writeSource == nil {
             let source = DispatchSource.makeWriteSource(fileDescriptor: fd, queue: queue)
             source.setEventHandler { [weak self] in self?.flush() }
+            sources.enter()
+            source.setCancelHandler { [sources] in sources.leave() }
             source.resume()
             writeSource = source
         }
