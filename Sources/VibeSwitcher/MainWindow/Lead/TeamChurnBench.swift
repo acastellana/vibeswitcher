@@ -18,6 +18,12 @@ import VibeCore
 /// 4. churn: the sessions retitling: the main thread's CPU per upsert (over the quiet floor).
 /// Each phase prints the main thread's longest block (its own CPU time while a post from another thread waited, and the
 /// wall clock's), and `RESULT team-churn …` lines. Nothing is checked: it's for comparing builds.
+///
+/// `--modal SECONDS` (memory, 2026-10-28): instead of the phases, the main run loop held in the modal panel mode for
+/// SECONDS, as End Session…'s alert holds it while it's up (left open overnight, 2026-10-27: 990 MB by morning), while
+/// another thread writes the board every second (a checkpoint each time, as a lead's tools do) and the sessions retitle
+/// themselves. The footprint (the process's own task_info) every 5 s, then how long main takes to catch up once the
+/// modal ends: `RESULT team-churn modal-…` lines. `--modal-without boards,churn` leaves that traffic out.
 enum TeamChurnBench {
     /// The made-up board: as big as the real ones (vibeswitcher's 3.3 MB, 200-odd tasks), most of it merged.
     static func board(seed: Int) -> LeadBoard {
@@ -48,11 +54,14 @@ enum TeamChurnBench {
     }
 
     static func run(arguments: [String]) -> Never {
-        let seconds = arguments.lazy.compactMap(Double.init).first ?? 20
+        let seconds = arguments.prefix { !$0.hasPrefix("--modal") }.lazy.compactMap(Double.init).first ?? 20
         let app = NSApplication.shared
         app.setActivationPolicy(arguments.contains("--onscreen") ? .accessory : .prohibited)
         VibePaths.ensurePrivateDirectories()
-        let bench = Bench(seconds: seconds, onscreen: arguments.contains("--onscreen"))
+        let modal = arguments.firstIndex(of: "--modal").flatMap { arguments.indices.contains($0 + 1) ? Double(arguments[$0 + 1]) : nil }
+        let without = arguments.firstIndex(of: "--modal-without").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
+        let bench = Bench(seconds: seconds, onscreen: arguments.contains("--onscreen"), modal: modal,
+                          modalWithout: Set((without ?? "").split(separator: ",").map(String.init)))
         bench.start()
         app.run()
         exit(0)
@@ -112,6 +121,10 @@ enum TeamChurnBench {
     private final class Bench {
         let seconds: Double
         let onscreen: Bool
+        /// `--modal`'s seconds: that phase alone.
+        let modal: Double?
+        /// `--modal-without boards,churn`: traffic left out of it, to narrow a growth down.
+        let modalWithout: Set<String>
         let started = Date()
         let store: SessionStore
         let host = HostClient(appKey: HostClient.ownKey())
@@ -132,9 +145,11 @@ enum TeamChurnBench {
         static let workers = 6, others = 4, period = 2.0
         var leadID: UUID?
 
-        init(seconds: Double, onscreen: Bool) {
+        init(seconds: Double, onscreen: Bool, modal: Double?, modalWithout: Set<String>) {
             self.seconds = seconds
             self.onscreen = onscreen
+            self.modal = modal
+            self.modalWithout = modalWithout
             weak var weakSelf: Bench?
             store = SessionStore(scanner: SessionScanner(
                 processes: { weakSelf?.processes() ?? [:] },
@@ -271,6 +286,9 @@ enum TeamChurnBench {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
                     print("selected \(self.model.selectedRow?.project ?? "none"), its Team tab \(self.model.selectedRow.flatMap(self.leads.lead(for:)) != nil ? "shown" : "missing")")
                     print(self.window?.debugState() ?? "")
+                    // From the run loop as an event's handler is (End Session…'s alert ran from a menu's action), not
+                    // from a block of the main queue: inside one the main queue would wait for it, as it never did there.
+                    if let modal = self.modal { return RunLoop.main.perform(inModes: [.default]) { self.modalPhase(modal) } }
                     self.watchdog = BoardBench.Watchdog()
                     self.quiet()
                 }
@@ -370,6 +388,69 @@ enum TeamChurnBench {
                     print(String(format: "RESULT team-churn worst-block-ms %.0f (wall %.0f)", worst.cpu * 1000, worst.wall * 1000))
                     finish(nil)
                 }
+            }
+        }
+
+        /// The main run loop in the modal panel mode for `duration` s (what `NSAlert.runModal` does to it, without an
+        /// alert on screen), the board written every second from another thread and the sessions retitling; the
+        /// footprint every 5 s; then main's catching up, timed.
+        private func modalPhase(_ duration: Double) {
+            let flag = (NSHomeDirectory() as NSString).appendingPathComponent("churn-on")
+            if !modalWithout.contains("churn") { FileManager.default.createFile(atPath: flag, contents: nil) }
+            let writes = !modalWithout.contains("boards")
+            let upserts = upserts
+            var publishes = 0, listed = 0
+            store.$sessions.dropFirst().sink { _ in listed += 1 }.store(in: &cancellables)
+            leads.$boards.dropFirst().sink { _ in publishes += 1 }.store(in: &cancellables)
+            let footprint = { (UIBench.memoryKinds()["footprint"] ?? 0) / 1_048_576 }
+            let before = footprint()
+            print(String(format: "modal: the main run loop modal for %.0f s, the board written every second, %d sessions retitling; footprint %.0f MB",
+                         duration, Self.workers + Self.others, before))
+            fflush(stdout)
+            let done = DispatchSemaphore(value: 0)
+            let lock = NSLock()
+            var peak = before
+            let root = root
+            Thread.detachNewThread {
+                var round = 0
+                let began = Date()
+                while done.wait(timeout: .now() + 1) == .timedOut {
+                    round += 1
+                    if writes { try? BoardStore(root: root).update { board in
+                        let index = round % board.tasks.count
+                        board.tasks[index].checkpoints = (board.tasks[index].checkpoints ?? [])
+                            + [LeadCheckpoint(text: "checkpoint \(round): read the diff and ran the suite again")]
+                    } }
+                    guard round % 5 == 0 else { continue }
+                    let now = footprint()
+                    lock.lock()
+                    peak = max(peak, now)
+                    lock.unlock()
+                    print(String(format: "  %3.0f s: footprint %.0f MB", Date().timeIntervalSince(began), now))
+                    fflush(stdout)
+                }
+            }
+            let end = Date().addingTimeInterval(duration)
+            while Date() < end { _ = RunLoop.main.run(mode: .modalPanel, before: min(end, Date().addingTimeInterval(1))) }
+            done.signal()
+            try? FileManager.default.removeItem(atPath: flag)
+            let held = footprint()
+            lock.lock()
+            peak = max(peak, held)
+            lock.unlock()
+            // What waited for the default mode runs once main is back in it: its longest block then.
+            let watchdog = BoardBench.Watchdog()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [self] in
+                let block = watchdog.take()
+                watchdog.stop()
+                let after = footprint()
+                print(String(format: "RESULT team-churn modal-footprint-mb %.0f %.0f %.0f %.0f (before, at the modal's end, peak, 3 s after)",
+                             before, held, peak, after))
+                print(String(format: "RESULT team-churn modal-growth-mb-per-minute %.1f (%d boards published, %d host upserts, %d session lists)",
+                             (held - before) / duration * 60, publishes, self.upserts - upserts, listed))
+                print(String(format: "RESULT team-churn modal-catch-up-ms %.0f (main's longest block after the modal; wall %.0f)",
+                             block.cpu * 1000, block.wall * 1000))
+                finish(nil)
             }
         }
 
