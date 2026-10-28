@@ -68,7 +68,8 @@ struct WorkerToolsWaitTests: LeadTeamFixture {
         addTask(lead)
         // The worker's tool server asks who it is as soon as it starts, and again until its role is bound.
         let asked = DispatchSemaphore(value: 0)
-        runtime.onSpawn = { session in
+        // Unowned: the runtime keeps this closure, and the test's scratch folders go only once both are gone.
+        runtime.onSpawn = { [unowned runtime] session in
             let seat = FakeSeat(runtime, agent: LeadAgent(pid: 7000, tty: "ttys070", session: session))
             let mine = self.vault(for: seat)
             Thread.detachNewThread {
