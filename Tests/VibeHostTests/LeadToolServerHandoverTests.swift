@@ -8,7 +8,7 @@ import Testing
 /// its sessions over to a new build, and the real `vibeswitcher-mcp` runs in the lead's session (as Claude Code starts
 /// it there). The server that was running keeps its grant, and a server started again in the same session (what
 /// /mcp does, with the new build's tools) gets the same grant.
-@Suite(.serialized) struct LeadToolServerHandoverTests {
+@Suite(.serialized, hostTestLimit) struct LeadToolServerHandoverTests {
     /// One tool server in the session, talked to over files: requests appended to `<name>.in` (which it reads as
     /// Claude Code's pipe, `tail -f`), replies read from `<name>.out`.
     struct Server {

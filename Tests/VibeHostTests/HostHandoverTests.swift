@@ -142,7 +142,7 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
     return (0..<terminal.rows).compactMap { terminal.getLine(row: $0)?.translateToString(trimRight: true) }.joined(separator: "\n")
 }
 
-@Suite(.serialized) struct HostHandoverTests {
+@Suite(.serialized, hostTestLimit) struct HostHandoverTests {
     static let counter = "i=0; while :; do i=$((i+1)); echo n=$i; sleep 0.1; done"
     /// A job in a process group of its own (job control), then a line read and a telling exit status.
     static let job = "set -m; \(keepRunning) & echo bg=$!; read line; echo got:$line; exit 7"

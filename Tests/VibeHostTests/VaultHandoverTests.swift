@@ -66,7 +66,7 @@ extension TestClient {
 }
 
 /// The lead's vault through a handover: a real host process on a scratch home, socket and lock, two builds of it.
-@Suite(.serialized) struct VaultHandoverTests {
+@Suite(.serialized, hostTestLimit) struct VaultHandoverTests {
     let root = "/tmp/vault-handover-repo"
 
     /// What a worker's shell is refused, and must still be after a handover.

@@ -7,7 +7,7 @@ import Testing
 /// A session's parser keeps `SessionParser.scrollback` lines above its screen (a SwiftTerm line costs 3-5 KB); more
 /// history, the phone's scroll-back, is read on demand from the session's replay buffer (see `HistoryRead`), as far
 /// back as the 5,000 lines the parser kept before.
-@Suite(.serialized) struct LongHistoryTests {
+@Suite(.serialized, hostTestLimit) struct LongHistoryTests {
     /// `count` numbered lines, "line 1" up.
     static func numbered(_ count: Int) -> String { "seq 1 \(count) | sed 's/^/line /'" }
 

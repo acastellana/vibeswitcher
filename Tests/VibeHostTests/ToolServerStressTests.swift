@@ -8,7 +8,7 @@ import Testing
 /// ended mid-session ("connection closed (cleanly)"). Out of descriptors, Foundation's `Pipe()` fails unseen (both its
 /// handles hold fd 0, the server's stdin) and Process.run fails with that EBADF, as it does when it can't make its own.
 /// The real `vibeswitcher-mcp`, in a lead's session on a scratch host, under many tool calls at once.
-@Suite(.serialized) struct ToolServerStressTests {
+@Suite(.serialized, hostTestLimit) struct ToolServerStressTests {
     /// A lead's tool server on a scratch host, a repository whose board has a running task (`live`, its worker a
     /// session in its worktree) and finished ones with worktrees (`done-<n>`), as cleanup finds them.
     final class Rig {
@@ -153,7 +153,7 @@ import Testing
         let rig = try Rig()
         // A first round opens what stays open (the folder watch, the dispatch queues' kqueue): counted from after it.
         let first = try rig.burst(rig.round(2))
-        #expect(first.allSatisfy { $0 != nil }, "unanswered in the first round; stderr: \(rig.server.errors)")
+        try #require(first.allSatisfy { $0 != nil }, "unanswered in the first round; stderr: \(rig.server.errors)")
         var base: Int?
         #expect(eventually { base = rig.descriptors; return base != nil })
         let before = try #require(base)
@@ -169,7 +169,8 @@ import Testing
             }
         }
         var answers: [(text: String, isError: Bool)?] = []
-        for _ in 0..<5 { answers += try rig.burst(rig.round(4)) }
+        // A burst with a call unanswered waited out its hang guard: the next would too, so the test ends its bursts there.
+        for _ in 0..<5 where answers.allSatisfy({ $0 != nil }) { answers += try rig.burst(rig.round(4)) }
         stop.set()
         _ = callers.wait(timeout: .now() + hangGuard)
 
@@ -194,7 +195,7 @@ import Testing
         let rig = try Rig(limit: Self.lowLimit)
         var exhausted = false
         var answers: [(text: String, isError: Bool)?] = []
-        for _ in 0..<6 where !exhausted && rig.alive {
+        for _ in 0..<6 where !exhausted && rig.alive && answers.allSatisfy({ $0 != nil }) {
             answers += try rig.burst(rig.round(16))
             exhausted = rig.log.contains("EMFILE")
         }

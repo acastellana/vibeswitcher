@@ -6,7 +6,7 @@ import Testing
 
 /// No host a test starts outlives it (see `TestHosts`): on 2026-10-18 a handover scene's host, its runner gone, ran on
 /// for hours with the scene's sessions, never idle.
-@Suite(.serialized) struct TestHostsTests {
+@Suite(.serialized, hostTestLimit) struct TestHostsTests {
     struct Failure: Error {}
 
     /// A host on a scratch socket, lock and home, not yet started.

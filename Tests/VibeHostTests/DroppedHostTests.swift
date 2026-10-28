@@ -72,7 +72,7 @@ final class DroppingHost {
 }
 
 /// E-09: a host that drops the connection (a handover, a stop) is never a host with no sessions.
-@Suite(.serialized) struct DroppedHostTests {
+@Suite(.serialized, hostTestLimit) struct DroppedHostTests {
     @Test func aHostThatClosesBeforeItsWelcomeIsAnErrorNotNoSessions() throws {
         let host = try DroppingHost(.beforeWelcome)
         do {

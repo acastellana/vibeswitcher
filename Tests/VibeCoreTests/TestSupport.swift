@@ -32,10 +32,11 @@ private let fakeTheDisk: @convention(c) () -> Void = {
 /// this is only a guard, sized for a Mac running several suites at once (load 100+), never a measure of speed.
 let hangGuard: TimeInterval = 300
 
-/// Polls `condition` every 20 ms until it holds, or until `timeout` (a hang guard) passes.
+/// Polls `condition` every 20 ms until it holds, or until `timeout` (a hang guard) passes; at once when the test is
+/// cancelled (past its time limit).
 func eventually(timeout: TimeInterval = hangGuard, _ condition: () -> Bool) -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
+    while Date() < deadline, !Task.isCancelled {
         if condition() { return true }
         Thread.sleep(forTimeInterval: 0.02)
     }

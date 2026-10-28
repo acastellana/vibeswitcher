@@ -33,11 +33,12 @@ private let fakeTheDisk: @convention(c) () -> Void = {
 let hangGuard: TimeInterval = 300
 
 /// Whether `condition` holds within `timeout` seconds (a hang guard), checked every 20 ms. Awaiting lets the main
-/// thread run what's queued for it meanwhile.
+/// thread run what's queued for it meanwhile. A cancelled test (past its time limit) waits no more: its sleep would
+/// throw at once, and the loop spin until the deadline.
 @MainActor
 func until(timeout: TimeInterval = hangGuard, _ condition: () -> Bool) async -> Bool {
     let deadline = Date().addingTimeInterval(timeout)
-    while Date() < deadline {
+    while Date() < deadline, !Task.isCancelled {
         if condition() { return true }
         try? await Task.sleep(nanoseconds: 20_000_000)
     }

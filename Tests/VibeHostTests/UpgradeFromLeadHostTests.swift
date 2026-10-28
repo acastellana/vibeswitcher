@@ -9,7 +9,8 @@ import Testing
 /// build, sees them all and reaches them; a client that proves nothing sees none. The old build is the host of
 /// project-lead just before PR #1 landed, built once from that commit into .build/old-hosts (its dependencies from this
 /// checkout's, so nothing is downloaded). On a scratch host process (its own home, socket, lock and key).
-@Suite(.serialized) struct UpgradeFromLeadHostTests {
+/// Its time limit is `hostTestLimit`'s, plus the old host's build (`buildLimit`) that its first run makes.
+@Suite(.serialized, .timeLimit(.minutes(25))) struct UpgradeFromLeadHostTests {
     /// project-lead before PR #1.
     static let commit = "6311e1890da61ca763de25fe6f67e96ca746598e"
     static let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
@@ -176,10 +177,11 @@ import Testing
         #expect(shown.map(\.id) == [shell.id, done.id])
         before.close()
 
+        // A handover that doesn't happen ends the test here: every step after it would wait out a hang guard of its own.
         let seq = client.send(.handover(executable: host.newBinary))
-        #expect(eventually { client.reply(to: seq) != nil })
-        #expect(client.reply(to: seq) == .ok, "\(host.log)")
-        #expect(eventually { client.closed })
+        try #require(eventually { client.reply(to: seq) != nil }, "no answer to the handover: \(host.log)")
+        try #require(client.reply(to: seq) == .ok, "\(host.log)")
+        try #require(eventually { client.closed }, "the old build answered ok but kept the connection: \(host.log)")
 
         // The app proves itself to the new build and sees every session, as it was.
         let (app, _, newBuild, sessions, _, newPID, newStart) = try TestClient.welcomed(host.socket, appKey: host.appKey)
