@@ -1838,3 +1838,11 @@
 - 2026-10-28 16:50 Started a worker on lead-start-preflight-on
 - 2026-10-28 16:50 Automatically (auto_advance): Started a worker on lead-start-preflight-on (Lead start preflight: on a new Mac, say plainly what's missing (claude, git, Command Line Tools) instead of failing with an error code).
 - 2026-10-28 16:57 Merged fix-the-flaky-test-5: Fix the flaky test aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone() (no audit: review none)
+- 2026-10-28 16:57 Automatically (auto_advance): Merged fix-the-flaky-test-5 (Fix the flaky test aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone()) into project-lead at 584a6b55, review none: on its worker's done report on 509c7187 and the full test run.
+- 2026-10-28 16:57 Raised docs-overhaul-a-clear to audit (the risk check, at 0bdf23a8): it changes 1945 lines outside tests, over risk_lines (400)
+- 2026-10-28 16:57 Automatically (auto_advance): Started the audit of docs-overhaul-a-clear at 0bdf23a8 (The risk check raised it to audit: it changes 1945 lines outside tests, over risk_lines (400)).
+- 2026-10-28 16:57 Automatically (auto_advance): Cleaned up fix-the-flaky-test-5; ended pid 63419 (Worker: Fix the flaky test aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone()) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-10-28 16:58 Planned a-full-suite-run: A full-suite run hung 45 min: the old-host hand-over test (UpgradeFromLeadHostTests) can stall under load
+- 2026-10-28 16:58 Started a worker on a-full-suite-run
+- 2026-10-28 16:58 Automatically (auto_advance): Started a worker on a-full-suite-run (A full-suite run hung 45 min: the old-host hand-over test (UpgradeFromLeadHostTests) can stall under load).
+- 2026-10-28 17:01 Planned a-hung-merge-test: A hung merge test run names the tests that started and never finished, in a readable file (review audit)
