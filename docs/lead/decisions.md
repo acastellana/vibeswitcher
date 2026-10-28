@@ -234,3 +234,7 @@ The user asked for the install. The census regression comes from PR #1's filtere
 
 Records what's installed and pushed, and the one step left for the keeper to cover the lead's own session.
 
+## 2026-10-28 13:41:29 The audit's uncommitted agent-config scan stays strict: no ignore rule of any kind exempts a file. Trust questions caused by our own tools are fixed at the source, so no script or test writes a checkout with AGENTS.md/CLAUDE*.md/.claude/.mcp.json inside a worktree. verifier-trust-check was re-rolled on that contract; the old branch is archive/verifier-trust-check-1.
+
+Each attempt to exempt git-ignored folders opened a new way for a worker to hide instructions from the verifier (a self-made .gitignore or exclude, then pathspec magic ':/' making git name the committed rule). That's a security boundary, so the narrow, source-side fix is the safe one.
+

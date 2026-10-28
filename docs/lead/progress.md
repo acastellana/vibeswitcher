@@ -1797,3 +1797,12 @@
 - 2026-10-28 13:35 Automatically (auto_advance): Merged flake-evidence-readable (Flake evidence readable: the merge keeps each flaky test's failure lines where workers and verifiers can read them) into project-lead at f92d43e3, on its passing audit and the full test run. (Its first test run failed on headlessAnswersQueriesOnlyWhenNoClient() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/flake-evidence-readable/merge-test.log.)
 - 2026-10-28 13:35 Started a worker on witness-stalled-false
 - 2026-10-28 13:35 Automatically (auto_advance): Started a worker on witness-stalled-false (Witness "stalled" false alarm: the progress reading (team.watched) goes stale while a worker's transcript keeps growing).
+- 2026-10-28 13:40 Audit of verifier-trust-check: complete, clean, round 2: 2 Important (1 open), 2 Nit closed
+- 2026-10-28 13:41 Re-rolled verifier-trust-check after 2 audit rounds: its branch is kept as archive/verifier-trust-check-1
+- 2026-10-28 13:42 Audit of review-and-fix-the at 138049d6 tested its merged result cc036673 onto project-lead: the test command passed
+- 2026-10-28 13:42 Automatically (auto_advance): Started the audit of review-and-fix-the at 138049d6 (Its review is audit).
+- 2026-10-28 13:42 Started a worker on verifier-trust-check
+- 2026-10-28 13:42 Automatically (auto_advance): Started a worker on verifier-trust-check (Keep agent config copies out of worktrees' build folders (ui-bench base, old-host builds), and leave the audit's trust scan strict).
+- 2026-10-28 13:42 Planned keep-flake-evidence-out: Keep flake evidence out of board.json: the ledger stores only the evidence file's path (review audit)
+- 2026-10-28 13:43 Started a worker on keep-flake-evidence-out
+- 2026-10-28 13:43 Automatically (auto_advance): Started a worker on keep-flake-evidence-out (Keep flake evidence out of board.json: the ledger stores only the evidence file's path).
