@@ -13,7 +13,7 @@ final class ConcurrentRuntime: LeadRuntime, @unchecked Sendable {
     var spawned: Int { lock.withLock { started.count } }
 
     func claudeCommand(root: String) -> String { "claude --dangerously-skip-permissions" }
-    func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String, trust: Bool) throws -> String {
+    func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String) throws -> String {
         usleep(200_000)
         return lock.withLock {
             let id = "session-\(started.count + 1)"
@@ -21,6 +21,7 @@ final class ConcurrentRuntime: LeadRuntime, @unchecked Sendable {
             return id
         }
     }
+    func answerTrust(session: String, folder: String) {}
     func kill(_ session: String) {}
     func forget(_ session: String) {}
     func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String, clearDraft: Bool) throws -> LeadDelivery.Delivered { .steered }

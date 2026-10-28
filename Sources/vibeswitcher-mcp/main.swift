@@ -126,23 +126,23 @@ final class HostRuntime: LeadRuntime {
         return preset.flatMap(LaunchPlan.command(for:)) ?? "claude"
     }
 
-    func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String, trust: Bool) throws -> String {
+    func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String) throws -> String {
         let request = SpawnRequest(cwd: cwd, command: command, env: env, cols: 120, rows: 40, keepShell: false, label: label, agent: agent)
         switch try HostCall.request(.spawn(request), socket: socket) {
-        case .spawned(let session):
-            // A worktree is a new folder to Claude: answer its trust question for that folder (the user started
-            // the lead in this repository), unless the lead says not to (a branch that brings its own settings).
-            guard trust else { return session.id.uuidString }
-            TrustPrompt.answer(folder: cwd, readScreen: {
-                if case .screenText(_, let text)? = try? HostCall.request(.screen(id: session.id), socket: self.socket) { return text }
-                return nil
-            }, send: { writes in
-                try? HostCall.type(writes, into: session.id, socket: self.socket)
-            })
-            return session.id.uuidString
+        case .spawned(let session): return session.id.uuidString
         case .error(let message): throw HostCall.Failure(description: message)
         default: throw HostCall.Failure(description: "The session host didn't start the session.")
         }
+    }
+
+    func answerTrust(session: String, folder: String) {
+        guard let id = UUID(uuidString: session) else { return }
+        TrustPrompt.answer(folder: folder, readScreen: {
+            if case .screenText(_, let text)? = try? HostCall.request(.screen(id: id), socket: self.socket) { return text }
+            return nil
+        }, send: { writes in
+            try? HostCall.type(writes, into: id, socket: self.socket)
+        })
     }
 
     func kill(_ session: String) throws {
@@ -301,11 +301,19 @@ final class ServerSlot: @unchecked Sendable { var server: MCPServer? }
 let slot = ServerSlot()
 
 // The role comes from the session host, at a fresh start as after a switch of builds (never from the build before).
-// The session can start before VibeSwitcher has bound its role to it: give that a moment. A host that can't be asked
-// yet is asked again, for up to two minutes; one that answers decides.
+// The session can start before VibeSwitcher (a lead) or its lead (a worker, a verifier) has bound its role to it: Claude
+// Code 2.1.311 starts this server within a second of the session (issue #2). A host that answers that the session holds
+// no role is asked again for up to `roleWait` from this server's start, and the client is told its tools changed once
+// the role is there (`toolsSettled`). A host that can't be asked yet is asked again, for up to two minutes; one that
+// answers otherwise decides.
+let started = Date()
+let roleWait: TimeInterval = 45
 let toolset = MCPHostedToolset(attempt: {
     guard hostAnswers(.standard) else { return nil }
     let toolset = LeadToolset(arguments: arguments, runtime: runtime, wait: 3)
+    if toolset.awaitsRole && Date().timeIntervalSince(started) < roleWait { return nil }
+    // A worker or verifier it starts has its tools within this, or is ended and the call fails (see `LeadToolset.launch`).
+    toolset.toolsWait = roleWait
     // Merges and audits hold the Mac-wide test and build lock around their tests, as `vs-heavy` does.
     toolset.testLock = TestLock.standard()
     // The risk check's model pass (see `LeadRisk`): headless Claude, as the all-done summary's, from the diff's stat,

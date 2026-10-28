@@ -47,7 +47,7 @@ struct LeadRoleKeptTests: LeadTeamFixture {
         let old = try lead(root, runtime)
         #expect(!old.call("status", [:]).isError)
         // You started a new lead from the app: its session holds the role now.
-        let new = try runtime.spawn(cwd: root, command: "claude", env: [:], label: "Lead · kept", agent: "claude", trust: true)
+        let new = try runtime.spawn(cwd: root, command: "claude", env: [:], label: "Lead · kept", agent: "claude")
         let grant = try vault.startLead(root: root, branch: "main")
         try vault.bind(grant, root: root, session: new)
         let refused = old.call("status", [:])

@@ -59,8 +59,11 @@ public protocol LeadRuntime: AnyObject {
     var server: String { get }
     /// The project's Claude command (from its launch presets), flags included.
     func claudeCommand(root: String) -> String
-    /// Starts a window session, `env` added to its environment; with `trust`, answers Claude's trust question for `cwd` in it.
-    func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String, trust: Bool) throws -> String
+    /// Starts a window session, `env` added to its environment.
+    func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String) throws -> String
+    /// Answers Claude's trust question for `folder` in the session, if it asks (see `TrustPrompt.answer`): after the
+    /// session's role is bound, since that can take seconds and its tool server may ask who it is before.
+    func answerTrust(session: String, folder: String)
     /// Asks the host to end a session; throws what the host answered when it refused (or couldn't be asked).
     func kill(_ session: String) throws
     /// Has the host drop an ended session's record (it leaves the session list).
@@ -109,6 +112,9 @@ public extension LeadRuntime {
 public final class LeadToolset: MCPToolset {
     /// The session's role; nil when it holds none (then nothing is served and `refusal` says why).
     let role: LeadLaunch.Role?
+    /// The session host answered that the session holds no role (yet): VibeSwitcher or the lead may still be binding
+    /// it, so the tool server asks again for a while (see vibeswitcher-mcp).
+    public let awaitsRole: Bool
     let root: String
     let taskID: String?
     let runtime: LeadRuntime
@@ -144,6 +150,12 @@ public final class LeadToolset: MCPToolset {
     var macLimits: () -> MacLimits = { MacLimits.load() }
     /// Where a call refused for the Mac's room or load is kept, so the app's witness wakes this lead once there's room.
     var roomWaits = LeadWitness.RoomWaits()
+    /// How long a worker's or verifier's start waits for its tool server to ask the session host who it is (its
+    /// tools connected; see `LeadVault.RosterEntry.toolsAt`) before it's ended and the call fails: one that never
+    /// gets its tools can't report. 0 (tests that don't fake a tool server): not waited for. The tool server sets 45 s.
+    public var toolsWait: TimeInterval = 0
+    /// How often that wait reads the roster.
+    var toolsPoll: TimeInterval = 0.25
     /// Moves finished work on by itself (see `LeadAdvance`), once `startAdvancing` is called (the lead's server).
     var advancing: LeadAdvance?
     /// The risk check's model pass (see `LeadRisk`): a prompt in, the answer out, or nil (no Claude, an error, out of
@@ -237,6 +249,7 @@ public final class LeadToolset: MCPToolset {
             refusal = "This tool server was started for task \(expectedTask), but its session is for \(member?.task ?? "no task"). Refused."
         }
         self.refusal = refusal
+        awaitsRole = unknownRole == nil && problem == nil && member == nil
         grant = refusal == nil ? member?.id : nil
         role = refusal == nil ? member?.role : nil
         taskID = refusal == nil ? member?.task : nil
@@ -1448,8 +1461,11 @@ public final class LeadToolset: MCPToolset {
         "Waiting on:" + (prompt.waited(now: now).map { " \($0)," } ?? "") + " the prompt it shows:\n" + prompt.quoted
     }
 
-    /// Starts a worker or a verifier with a new grant (it replaces the role's earlier one), bound to its session once
-    /// that's started; its launch files go in the vault's folder.
+    /// Starts a worker or a verifier with a new grant (it replaces the role's earlier one), bound to its session as soon
+    /// as that's started, before its trust question is answered (with `trust`): Claude Code can start the session's tool
+    /// server at once (2.1.311 asks no trust question in a worktree), and one that asks before the bind waits for its
+    /// role. Then, with `toolsWait`, waits for its tools to connect: a session that never gets them is ended and the call
+    /// fails, rather than leave a worker that can't report. Its launch files go in the vault's folder.
     private func launch(_ role: LeadLaunch.Role, task slug: String, name: String, in folder: String, label: String, trust: Bool,
                         prompt: String, start: String, model: String? = nil, branch: String? = nil, auditing: String? = nil,
                         finder: LeadVault.Finder? = nil) throws -> String {
@@ -1467,13 +1483,45 @@ public final class LeadToolset: MCPToolset {
             if workflow.testTimeoutMinutes != LeadWorkflow().testTimeoutMinutes {
                 environment[TestLock.timeoutVariable] = "\(Int(workflow.testTimeout.rounded(.up)))s"
             }
-            let session = try runtime.spawn(cwd: folder, command: launch.command, env: environment, label: label,
-                                            agent: "claude", trust: trust)
-            try vault.bind(grant, root: root, session: session)
+            let session = try runtime.spawn(cwd: folder, command: launch.command, env: environment, label: label, agent: "claude")
+            do { try vault.bind(grant, root: root, session: session) } catch {
+                // A session without its role would run with no tools: it goes.
+                try? runtime.kill(session)
+                runtime.forget(session)
+                throw error
+            }
+            // A worktree is a new folder to Claude: its trust question is answered for that folder (the user started the
+            // lead in this repository), unless the lead says not to (a branch that brings its own settings).
+            guard trust else { return session }
+            runtime.answerTrust(session: session, folder: folder)
+            if !toolsConnected(session, role: role) {
+                try? runtime.kill(session)
+                let who = role == .worker ? "\(slug)'s worker" : "\(slug)'s \(finder == nil ? "verifier" : "finder")"
+                throw Problem(text: "\(who) was ended: its vibeswitcher tools didn't connect within \(Int(toolsWait)) s of its start (its tool server "
+                              + "never asked the session host which role its session holds), so it couldn't have reported, and its grant was withdrawn. "
+                              + "Try again once; if it happens again, tell the user: Claude Code's MCP log for \(folder) says why "
+                              + "(~/Library/Caches/claude-cli-nodejs/, mcp-logs-vibeswitcher).")
+            }
             return session
         } catch {
             try? vault.revoke(grant, root: root)
             throw error
+        }
+    }
+
+    /// Whether the session's tool server asked the session host who it is within `toolsWait` (see `launch`). True when
+    /// that isn't waited for (0), or can't be told: a host that doesn't keep the time (an older one, no `boundAt`) or
+    /// whose roster can't be read, or a role that went to another session meanwhile.
+    private func toolsConnected(_ session: String, role: LeadLaunch.Role) -> Bool {
+        guard toolsWait > 0 else { return true }
+        let deadline = Date().addingTimeInterval(toolsWait)
+        while true {
+            guard let roster = try? vault.roster(root: root),
+                  let entry = roster.first(where: { $0.session == session && $0.role == role && $0.holds }),
+                  entry.boundAt != nil else { return true }
+            if entry.toolsAt != nil { return true }
+            guard Date() < deadline else { return false }
+            Thread.sleep(forTimeInterval: toolsPoll)
         }
     }
 

@@ -3,6 +3,7 @@ import Testing
 @testable import VibeCore
 
 final class FakeRuntime: LeadRuntime {
+    /// Each session started; `trust` once its trust question was answered (after its role was bound).
     var spawned: [(id: String, cwd: String, command: String, label: String, trust: Bool)] = []
     /// What each session's environment added (its TMPDIR), by session.
     var environments: [String: [String: String]] = [:]
@@ -42,13 +43,24 @@ final class FakeRuntime: LeadRuntime {
     /// The project's Claude command, flags included.
     var claude = "claude --dangerously-skip-permissions"
     func claudeCommand(root: String) -> String { claude }
-    func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String, trust: Bool) throws -> String {
+    func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String) throws -> String {
         calls.lock()
         defer { calls.unlock() }
         let id = "session-\(spawned.count + 1)"
-        spawned.append((id, cwd, command, label, trust))
+        spawned.append((id, cwd, command, label, false))
         environments[id] = env
+        onSpawn?(id)
         return id
+    }
+    /// Called with each session just started, before its role is bound (a test's way into that moment).
+    var onSpawn: ((String) -> Void)?
+    /// Called with each session as its trust question is answered.
+    var onTrust: ((String) -> Void)?
+    func answerTrust(session: String, folder: String) {
+        calls.lock()
+        defer { calls.unlock() }
+        onTrust?(session)
+        if let index = spawned.lastIndex(where: { $0.id == session }) { spawned[index].trust = true }
     }
     func kill(_ session: String) throws {
         calls.lock()
@@ -115,9 +127,10 @@ final class FakeSeat: LeadRuntime {
     }
     var server: String { shared.server }
     func claudeCommand(root: String) -> String { shared.claudeCommand(root: root) }
-    func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String, trust: Bool) throws -> String {
-        try shared.spawn(cwd: cwd, command: command, env: env, label: label, agent: agent, trust: trust)
+    func spawn(cwd: String, command: String, env: [String: String], label: String, agent: String) throws -> String {
+        try shared.spawn(cwd: cwd, command: command, env: env, label: label, agent: agent)
     }
+    func answerTrust(session: String, folder: String) { shared.answerTrust(session: session, folder: folder) }
     func kill(_ session: String) throws { try shared.kill(session) }
     func forget(_ session: String) { shared.forget(session) }
     func steer(_ target: LeadTarget, from sender: SteerMessage.Sender, text: String, clearDraft: Bool) throws -> LeadDelivery.Delivered {

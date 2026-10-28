@@ -394,7 +394,8 @@ extension MCPToolset {
 /// A toolset that the session host's answer makes (it tells which role the session holds), when the host can't be
 /// asked yet. After an install it restarts, handing over to its new build, at the very moment the tool servers switch
 /// to theirs: rather than serve nothing for good, this asks again, less often each time, for up to `patience`, and
-/// answers calls meanwhile with `waiting`. Whatever the host answers is final (the toolset made from it decides).
+/// answers calls meanwhile with `waiting`. `attempt` decides which answers are final (vibeswitcher-mcp also asks again
+/// while the session has no role yet).
 public final class MCPHostedToolset: MCPToolset, @unchecked Sendable {
     public static let waiting = "The session host is restarting; try again in a few seconds."
 
@@ -425,7 +426,7 @@ public final class MCPHostedToolset: MCPToolset, @unchecked Sendable {
             settle(toolset)
             return
         }
-        FileHandle.standardError.write(Data("vibeswitcher-mcp: the session host can't be asked yet; asking again\n".utf8))
+        FileHandle.standardError.write(Data("vibeswitcher-mcp: the session host can't be asked yet, or its session holds no role yet; asking again\n".utf8))
         Thread.detachNewThread { [self] in
             let deadline = Date().addingTimeInterval(patience)
             var delay = firstDelay
