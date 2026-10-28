@@ -662,6 +662,13 @@ struct TestLockTests {
         #expect(heard.count >= 3, "\(heard.count)")
         #expect(heard.first?.map(\.slot) == [1, 2])
         #expect(TestLock.text(holders).hasPrefix("slot 1 held by pid \(getpid()), merge of a in /Users/a/dev/alpha (alpha), for "), "\(TestLock.text(holders))")
+        // For a repo's records: its own run as it is, another project's only as that.
+        let forAlpha = TestLock.text(holders, for: "/Users/a/dev/alpha")
+        #expect(forAlpha.hasPrefix("slot 1 held by pid \(getpid()), merge of a in /Users/a/dev/alpha (alpha), for "), "\(forAlpha)")
+        #expect(forAlpha.contains("; slot 2 held by another project's run, for ") && !forAlpha.contains("beta"), "\(forAlpha)")
+        let forBeta = TestLock.text(holders, for: "/Users/a/dev/beta/")
+        #expect(forBeta.hasPrefix("slot 1 held by another project's run, for ") && !forBeta.contains("alpha"), "\(forBeta)")
+        #expect(forBeta.contains("; slot 2 held by pid \(getpid()), audit run of b in /Users/a/dev/beta/.vibeswitcher/worktrees/x (beta), for "), "\(forBeta)")
         // One lets go: the third takes its slot, having waited for both.
         Self.after(0.5) { second.release() }
         guard case .held(let third, let waited, let behind) = lock.acquire(as: "merge of c", timeout: hangGuard) else { Issue.record("not taken"); return }
