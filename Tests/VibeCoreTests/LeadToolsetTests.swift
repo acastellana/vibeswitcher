@@ -58,6 +58,15 @@ final class FakeRuntime: LeadRuntime {
     }
     /// Called with each session just started, before its role is bound (a test's way into that moment).
     var onSpawn: ((String) -> Void)?
+    /// What the Mac lacks to start a session (nothing unless set), and each command looked at.
+    var preflight: LaunchPreflight?
+    var preflighted: [String] = []
+    func preflight(command: String) -> LaunchPreflight.Problem? {
+        calls.lock()
+        defer { calls.unlock() }
+        preflighted.append(command)
+        return preflight?.check(command: command, helpers: [])
+    }
     /// Called with each session as its trust question is answered.
     var onTrust: ((String) -> Void)?
     func answerTrust(session: String, folder: String) {
