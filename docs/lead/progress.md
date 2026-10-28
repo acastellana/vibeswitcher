@@ -1864,3 +1864,4 @@
 - 2026-10-28 17:40 Automatically (auto_advance): Started the audit of lead-start-preflight-on at f056cb39 (Its review is audit).
 - 2026-10-28 17:42 Automatically (auto_advance): Started the audit of a-hung-merge-test at 357de976 (Its review is audit).
 - 2026-10-28 17:43 Automatically (auto_advance): Started the audit of docs-touch-ups-the at 2d3e491b (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-10-28 17:51 Planned team-panel-and-inspector: Team panel and inspector: keep their accessibility tree small and their bodies cheap (freezes of 10–144 s with the lead selected)
