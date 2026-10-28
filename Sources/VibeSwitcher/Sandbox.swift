@@ -741,7 +741,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("terminal", "shows the selected session's terminal instead of its chat"),
         ("type TEXT", "types TEXT into the chat's composer (through its text view, as the keyboard does)"),
         ("send", "presses Return in the composer: the message goes to the fake session"),
-        ("run [yes]", "the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as Run does once you confirm (tell it {\"op\": \"realShell\"} first to see its output)"),
+        ("runblock [yes]", "the shown chat's last code block with a Run: shows what Run asks first, as the sheet; with yes, runs it as Run does once you confirm (tell it {\"op\": \"realShell\"} first to see its output)"),
         ("tell JSON", "hands a fake Claude (the selected one, or the one labelled \"to\") a FakeClaude op, e.g. '{\"op\": \"permission\", \"command\": \"swift build\"}' or '{\"op\": \"work\"}' (see Tests/VibeSwitcherTests/FakeClaude.swift)"),
         ("new [codex|shell] [LABEL]", "starts another fake session: a Claude, or a Codex or a plain shell"),
         ("clear", "ends and removes every fake session: the sidebar is empty, with its New Session menu"),
@@ -1087,7 +1087,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             composer.doCommand(by: #selector(NSResponder.insertNewline(_:)))
             reply(true, "sent")
         case "tell": tell(rest, reply)
-        case "run": runBlock(confirmed: rest == "yes", reply)
+        case "runblock": runBlock(confirmed: rest == "yes", reply)
         case "clear":
             // Ended first, then removed (the host keeps an ended session's row until it's removed).
             let ids = host.sessions.map(\.id)
@@ -1344,10 +1344,10 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let shown = alert.window
         Sandbox.hide(shown)
         sheet = shown
-        sheetName = "run"
+        sheetName = "runblock"
         shown.orderFrontRegardless()
         Sandbox.hide(shown)
-        settle { reply(true, "Run's confirmation shown (sheet-run)") }
+        settle { reply(true, "Run's confirmation shown (sheet-runblock)") }
     }
 
     func closeSheet() {
