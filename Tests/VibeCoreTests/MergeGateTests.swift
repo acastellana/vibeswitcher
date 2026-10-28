@@ -395,10 +395,13 @@ struct MergeGateTests: LeadTeamFixture {
         let flake = try #require(board.flakes?.last)
         #expect(flake.task == "add-b", "\(flake)")
         // In the repository's ignored folder, private, named by the day, the task and the merge's commit.
-        let log = try #require(flake.log)
+        // The ledger keeps it relative to the root.
+        let kept = try #require(flake.log)
+        #expect(kept == MergeRerun.evidencePath(task: "add-b", commit: flake.commit, at: Date(timeIntervalSince1970: flake.at)))
+        #expect(kept.range(of: #"^\.vibeswitcher/flakes/\d{4}-\d{2}-\d{2}-add-b-[0-9a-f]{8}\.log$"#, options: .regularExpression) != nil, "\(kept)")
+        #expect(kept.hasSuffix("-add-b-\(flake.commit.prefix(8)).log"), "\(kept)")
+        let log = root + "/" + kept
         #expect(log == MergeRerun.evidenceFile(root: root, task: "add-b", commit: flake.commit, at: Date(timeIntervalSince1970: flake.at)).path)
-        #expect(log.hasSuffix("-add-b-\(flake.commit.prefix(8)).log"), "\(log)")
-        #expect(log.range(of: #"/\.vibeswitcher/flakes/\d{4}-\d{2}-\d{2}-add-b-[0-9a-f]{8}\.log$"#, options: .regularExpression) != nil, "\(log)")
         #expect(MergeRerun.evidence(for: "flaky()", inLog: log) == lines)
         let text = try String(contentsOfFile: log, encoding: .utf8)
         #expect(text.contains("\nflaky()\n" + lines.map { "    " + $0 }.joined(separator: "\n")), "\(text)")
@@ -440,7 +443,7 @@ struct MergeGateTests: LeadTeamFixture {
 
         let flakes = (BoardStore(root: root).load().flakes ?? []).filter { $0.task == "add-b" }
         #expect(flakes.count == 2, "\(flakes)")
-        let logs = flakes.compactMap(\.log)
+        let logs = flakes.compactMap(\.log).map { MergeRerun.evidenceFile(root: root, log: $0) }
         #expect(logs.count == 2 && Set(logs).count == 2, "\(logs)")
         let folder = root + "/.vibeswitcher/flakes"
         let files = try FileManager.default.contentsOfDirectory(atPath: folder).filter { $0.hasSuffix(".log") }
@@ -466,7 +469,8 @@ struct MergeGateTests: LeadTeamFixture {
             let file = MergeRerun.evidenceFile(root: root, task: task, commit: commit, at: Date(timeIntervalSince1970: now))
             try FileManager.default.createDirectory(at: file.deletingLastPathComponent(), withIntermediateDirectories: true)
             try MergeRerun.evidenceLog(task: task, commit: commit, evidence: [test: lines], tests: [test]).write(to: file, atomically: true, encoding: .utf8)
-            due += board.recordFlakes([test], task: task, commit: commit, now: now + Double(n), logged: [test], log: file.path)
+            due += board.recordFlakes([test], task: task, commit: commit, now: now + Double(n), logged: [test],
+                                      log: MergeRerun.evidencePath(task: task, commit: commit, at: Date(timeIntervalSince1970: now)))
         }
         try store.update { $0.flakes = board.flakes }
         let flakes = try #require(store.load().flakes)
@@ -476,16 +480,17 @@ struct MergeGateTests: LeadTeamFixture {
 
         // A fix task's context still quotes each merge's lines, read from its file.
         let last = try #require(due.last)
-        let context = MergeRerun.fixContract(test: last.test, flakes: last.flakes, workflow: LeadWorkflow()).context
+        let context = MergeRerun.fixContract(test: last.test, flakes: last.flakes, workflow: LeadWorkflow(), root: root).context
         for flake in last.flakes {
-            #expect(context.contains("- \(flake.task)'s merge (\(try #require(flake.log))):\n" + lines.map { "    " + $0 }.joined(separator: "\n")), "\(context)")
+            #expect(context.contains("- \(flake.task)'s merge (\(root)/\(try #require(flake.log))):\n" + lines.map { "    " + $0 }.joined(separator: "\n")), "\(context)")
         }
-        let note = MergeRerun.flakeNote(test: last.test, flakes: last.flakes)
+        let note = MergeRerun.flakeNote(test: last.test, flakes: last.flakes, root: root)
         #expect(note.contains(lines[0]) && note.contains(lines[lines.count - 1]), "\(note)")
         // A file that's gone is said so, and quotes nothing.
-        try FileManager.default.removeItem(atPath: try #require(last.flakes[0].log))
-        let gone = MergeRerun.fixContract(test: last.test, flakes: last.flakes, workflow: LeadWorkflow()).context
-        #expect(gone.contains("- \(last.flakes[0].task)'s merge (\(last.flakes[0].log!)): (its file can't be read now)"), "\(gone)")
+        let first = MergeRerun.evidenceFile(root: root, log: try #require(last.flakes[0].log))
+        try FileManager.default.removeItem(atPath: first)
+        let gone = MergeRerun.fixContract(test: last.test, flakes: last.flakes, workflow: LeadWorkflow(), root: root).context
+        #expect(gone.contains("- \(last.flakes[0].task)'s merge (\(first)): (its file can't be read now)"), "\(gone)")
     }
 
     @Test func aBoardWhoseFlakesKeptTheirLinesDecodesAndDropsThemOnTheNextWrite() throws {

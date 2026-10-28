@@ -1011,11 +1011,11 @@ public struct LeadFlake: Codable, Equatable, Sendable {
     public var at: Double
     /// The task planned to fix it, on the flake that made it due (`LeadBoard.recordFlakes`).
     public var planned: String?
-    /// The file in the repository's ignored folder that keeps its failure lines from the failing run
-    /// (`MergeRerun.evidence`) with the merge's other flakes' (`MergeRerun.evidenceFile`); a task's context reads them
-    /// from there (`MergeRerun.quoted`). Only the path: lines here would grow the board by kilobytes an entry. Optional:
-    /// older entries have none, and a run that named no test's lines has none. (Entries that kept their lines here
-    /// still decode; the lines are dropped on the next write.)
+    /// The file in the repository's ignored folder (relative to its root; absolute in older entries) that keeps its
+    /// failure lines from the failing run (`MergeRerun.evidence`) with the merge's other flakes'
+    /// (`MergeRerun.evidencePath`); a task's context reads them from there (`MergeRerun.quoted`). Only the path: lines
+    /// here would grow the board by kilobytes an entry. Optional: older entries have none, and a run that named no
+    /// test's lines has none. (Entries that kept their lines here still decode; the lines are dropped on the next write.)
     public var log: String?
 
     public init(test: String, task: String, commit: String, at: Double, planned: String? = nil, log: String? = nil) {

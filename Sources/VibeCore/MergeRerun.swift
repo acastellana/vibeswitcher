@@ -147,15 +147,24 @@ public enum MergeRerun {
             ? masked.prefix(evidenceLimit - 1) + ["… and \(masked.count - evidenceLimit + 1) more lines."] : masked
     }
 
-    /// Where a merge's flake evidence is kept: `<root>/.vibeswitcher/flakes/<yyyy-mm-dd>-<task>-<commit>.log`, in the
-    /// repository's ignored folder, where every session can read it. The merge's short commit tells a task's merges
-    /// on one day apart.
-    public static func evidenceFile(root: String, task: String, commit: String, at date: Date) -> URL {
+    /// Where a merge's flake evidence is kept, relative to the repository's root (as the ledger keeps it, so the
+    /// board's size doesn't grow with the root's): `.vibeswitcher/flakes/<yyyy-mm-dd>-<task>-<commit>.log`, in its
+    /// ignored folder, where every session can read it. The merge's short commit tells a task's merges on one day apart.
+    public static func evidencePath(task: String, commit: String, at date: Date) -> String {
         let format = DateFormatter()
         format.locale = Locale(identifier: "en_US_POSIX")
         format.calendar = Calendar(identifier: .gregorian)
         format.dateFormat = "yyyy-MM-dd"
-        return URL(fileURLWithPath: root).appendingPathComponent(".vibeswitcher/flakes/\(format.string(from: date))-\(task)-\(commit.prefix(8)).log")
+        return ".vibeswitcher/flakes/\(format.string(from: date))-\(task)-\(commit.prefix(8)).log"
+    }
+
+    public static func evidenceFile(root: String, task: String, commit: String, at date: Date) -> URL {
+        URL(fileURLWithPath: evidenceFile(root: root, log: evidencePath(task: task, commit: commit, at: date)))
+    }
+
+    /// A ledger entry's `log` as a path to open: relative to `root`, or absolute as entries before kept it.
+    public static func evidenceFile(root: String, log: String) -> String {
+        log.hasPrefix("/") ? log : (root as NSString).appendingPathComponent(log)
     }
 
     /// The evidence file's text: what flaked in `task`'s merge (tested at `commit`), and each test's lines.
@@ -198,10 +207,10 @@ public enum MergeRerun {
     /// For a task's context: each of `flakes`' failing lines, read from its evidence file, under the merge it held up
     /// and where that file is. The ledger keeps only the file's path: the board is read and rewritten by every lead
     /// call, and 200 entries' lines would make it megabytes.
-    static func quoted(_ flakes: [LeadFlake]) -> String {
+    static func quoted(_ flakes: [LeadFlake], root: String) -> String {
         var text = ""
         for flake in flakes {
-            guard let log = flake.log else { continue }
+            guard let log = flake.log.map({ evidenceFile(root: root, log: $0) }) else { continue }
             text += "\n- \(flake.task)'s merge (\(log)):"
             guard let lines = evidence(for: flake.test, inLog: log) else {
                 text += " (its file can't be read now)"
@@ -215,15 +224,15 @@ public enum MergeRerun {
     /// The line added to an open task's context that names `test` (`LeadBoard.openTask(naming:)`) once it flaked
     /// `LeadBoard.flakeLimit` times within `LeadBoard.flakeWindow` (`flakes`, oldest first), in place of a task to fix
     /// it, with the failing runs' lines.
-    static func flakeNote(test: String, flakes: [LeadFlake]) -> String {
+    static func flakeNote(test: String, flakes: [LeadFlake], root: String) -> String {
         let merges = flakes.map(\.task)
         return "Flake ledger: \(test) flaked \(merges.count) times within \(Int(LeadBoard.flakeWindow / 86_400)) days (failed its first run and passed its rerun in the merges of \(merges.joined(separator: ", "))); no task was planned to fix it, as this one names it."
-            + quoted(flakes)
+            + quoted(flakes, root: root)
     }
 
     /// The task planned once `test` flaked `LeadBoard.flakeLimit` times within `LeadBoard.flakeWindow`: `flakes` (in
-    /// the merges they held up, oldest first), whose failing lines its context quotes.
-    static func fixContract(test: String, flakes: [LeadFlake], workflow: LeadWorkflow) -> LeadContract {
+    /// the merges they held up, oldest first), whose failing lines its context quotes from their files under `root`.
+    static func fixContract(test: String, flakes: [LeadFlake], workflow: LeadWorkflow, root: String) -> LeadContract {
         let merges = flakes.map(\.task)
         let tests = workflow.testCommand.map { "`\($0)` passes" } ?? "The project's tests pass"
         return LeadContract(
@@ -234,6 +243,6 @@ public enum MergeRerun {
                          tests],
             boundaries: ["The test and what it checks; nothing else changes unless it's the bug"],
             context: "Flake ledger (the board's flakes; status lists them): \(test) failed its first run and passed its rerun in the merges of \(merges.joined(separator: ", "))."
-                + quoted(flakes))
+                + quoted(flakes, root: root))
     }
 }
