@@ -1865,3 +1865,11 @@
 - 2026-10-28 17:42 Automatically (auto_advance): Started the audit of a-hung-merge-test at 357de976 (Its review is audit).
 - 2026-10-28 17:43 Automatically (auto_advance): Started the audit of docs-touch-ups-the at 2d3e491b (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
 - 2026-10-28 17:51 Planned team-panel-and-inspector: Team panel and inspector: keep their accessibility tree small and their bodies cheap (freezes of 10–144 s with the lead selected)
+- 2026-10-28 17:54 Audit of a-hung-merge-test: complete, clean, round 1: 1 Nit open, 1 Pre-existing open
+- 2026-10-28 17:56 Audit of lead-start-preflight-on: complete, clean, round 1: 6 Nit open, 1 Pre-existing open
+- 2026-10-28 17:56 Audit of docs-touch-ups-the: complete, clean, round 1: 2 Pre-existing open
+- 2026-10-28 17:57 Planned keep-awake-s-power: Keep-awake's power assertions (IOPMAssertionCreateWithName/Release) run on the main thread and can block on powerd
+- 2026-10-28 18:51 Automatically (auto_advance): Didn't merge a-hung-merge-test: Not merged: the tests hung after 45 min on a-hung-merge-test rebased onto project-lead; they were stopped, with everything started under them. a-hung-merge-test stays as it was. The output so far: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/a-hung-merge-test/merge-test.log. If they only need longer, raise test_timeout_min (45 in workflow.md) with configure; else have the worker find what hangs.
+- 2026-10-28 18:59 Planned scrub-the-names-of: Scrub the names of the user's other projects (stakegen, genswap) from the repository's current files, the lead's records included
+- 2026-10-28 18:59 Started a worker on scrub-the-names-of
+- 2026-10-28 19:04 Merged docs-touch-ups-the: Docs touch-ups: the sandbox's Team fixture uses a real project name ('stakegen') in a published screenshot; the lint list misses AgentExportLint

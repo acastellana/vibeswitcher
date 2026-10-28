@@ -238,3 +238,7 @@ Records what's installed and pushed, and the one step left for the keeper to cov
 
 Each attempt to exempt git-ignored folders opened a new way for a worker to hide instructions from the verifier (a self-made .gitignore or exclude, then pathspec magic ':/' making git name the committed rule). That's a security boundary, so the narrow, source-side fix is the safe one.
 
+## 2026-10-28 18:59:49 From 2026-10-28, the lead names the user's other projects only generically in anything that lands in this repository: decisions, progress, incidents, task titles and contexts. It writes 'project-b' or 'project-c', or "another project's lead", never their real names. A lint planned in scrub-the-names-of enforces it. Heavy slots stay at 3 (the user's choice), so load is controlled through the-mac-hit-load's scheduling fix instead.
+
+The repository is public. The user asked to scrub the other projects' names everywhere, the lead's records included, and the lead's records and task titles keep growing. The user declined lowering heavy slots.
+
