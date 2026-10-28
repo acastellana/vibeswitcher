@@ -92,6 +92,12 @@ public enum MergeRerun {
     /// What a flake is recorded under when the failed run named no test.
     public static let unnamed = "(the test command, naming no test)"
 
+    /// The line added to an open task's context that names `test` (`LeadBoard.openTask(naming:)`) once it flaked
+    /// `LeadBoard.flakeLimit` times within `LeadBoard.flakeWindow`, in place of a task to fix it.
+    static func flakeNote(test: String, merges: [String]) -> String {
+        "Flake ledger: \(test) flaked \(merges.count) times within \(Int(LeadBoard.flakeWindow / 86_400)) days (failed its first run and passed its rerun in the merges of \(merges.joined(separator: ", "))); no task was planned to fix it, as this one names it."
+    }
+
     /// The task planned once `test` flaked `LeadBoard.flakeLimit` times within `LeadBoard.flakeWindow`: in `merges`
     /// (the tasks whose merges it held up, oldest first).
     static func fixContract(test: String, merges: [String], workflow: LeadWorkflow) -> LeadContract {

@@ -157,12 +157,12 @@ struct MergeGateTests: LeadTeamFixture {
 
     /// A fake scripts/test.sh, committed: it logs its arguments, and fails naming flaky() unless `passes` (a shell
     /// condition) holds.
-    func fakeSuite(_ root: String, passes: String) throws {
+    func fakeSuite(_ root: String, passes: String, test: String = "flaky()") throws {
         try commit(["scripts/test.sh": """
             #!/bin/bash
             echo "run $*" >> \(RecentProjects.shellQuote(runs))
-            if \(passes); then echo "✔ Test flaky() passed after 0.010 seconds."; echo "✔ Test run with 1 test passed"; exit 0; fi
-            printf '%s\\n' \(Self.failure.split(separator: "\n").map { RecentProjects.shellQuote(String($0)) }.joined(separator: " "))
+            if \(passes); then echo "✔ Test \(test) passed after 0.010 seconds."; echo "✔ Test run with 1 test passed"; exit 0; fi
+            printf '%s\\n' \(Self.failure.replacingOccurrences(of: "flaky()", with: test).split(separator: "\n").map { RecentProjects.shellQuote(String($0)) }.joined(separator: " "))
             exit 1
             """], in: root, "the suite")
     }
@@ -303,6 +303,10 @@ struct MergeGateTests: LeadTeamFixture {
         try BoardStore(root: root).update { board in
             board.flakes = [LeadFlake(test: "flaky()", task: "earlier", commit: "c1", at: now - 3 * 86_400),
                             LeadFlake(test: "flaky()", task: "later", commit: "c2", at: now - 86_400)]
+            // A finished task naming it doesn't count: only an open one stands in for the fix.
+            var old = LeadTask(slug: "steady-flaky", title: "Steady flaky()", contract: LeadContract(goal: "flaky() passes", acceptance: [], boundaries: [], context: ""))
+            old.status = .done
+            board.tasks.append(old)
         }
         try audited(lead, runtime, root: root)
 
@@ -312,12 +316,74 @@ struct MergeGateTests: LeadTeamFixture {
         let fixes = board.tasks.filter { $0.title.hasPrefix("Fix the flaky test") }
         let fix = try #require(fixes.first)
         #expect(fixes.count == 1)
+        #expect(board.task("steady-flaky")?.contract.context == "")
         #expect(merged.text.contains("flaky() flaked 3 times within 7 days: planned \(fix.slug) to fix it."), "\(merged.text)")
         #expect(fix.status == .planned && fix.title == "Fix the flaky test flaky()")
         #expect(fix.contract.context.contains("earlier, later, add-b"), "\(fix.contract.context)")
         #expect(board.flakes?.last?.planned == fix.slug)
         let progress = try String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)
         #expect(progress.contains("Planned \(fix.slug): flaky() flaked 3 times within 7 days"), "\(progress)")
+    }
+
+    @Test func aThirdFlakeOfATestAnOpenTaskNamesGoesInThatTasksContextNotANewTask() throws {
+        let test = "onlyTheFocusedVisiblePaneSetsTheClipboardLive()"
+        let root = try repo()
+        try fakeSuite(root, passes: "[[ \"$*\" == *--filter* ]]", test: test)
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        configure(lead, ["test_command": "bash scripts/test.sh"])
+        let now = Date().timeIntervalSince1970
+        try BoardStore(root: root).update { board in
+            board.flakes = [LeadFlake(test: test, task: "earlier", commit: "c1", at: now - 3 * 86_400),
+                            LeadFlake(test: test, task: "later", commit: "c2", at: now - 86_400)]
+            // In review already, naming the test by its bare name, as a lead writes it.
+            var open = LeadTask(slug: "terminal-clipboard-security", title: "Terminal clipboard security",
+                                contract: LeadContract(goal: "Only the focused pane sets the clipboard; onlyTheFocusedVisiblePaneSetsTheClipboardLive stops flaking",
+                                                       acceptance: [], boundaries: [], context: "What it knew."))
+            open.status = .review
+            board.tasks.append(open)
+        }
+        try audited(lead, runtime, root: root)
+
+        let merged = lead.call("merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+        let board = BoardStore(root: root).load()
+        #expect(!board.tasks.contains { $0.title.hasPrefix("Fix the flaky test") }, "\(board.tasks.map(\.slug))")
+        let open = try #require(board.task("terminal-clipboard-security"))
+        #expect(open.status == .review)
+        #expect(open.contract.context.hasPrefix("What it knew.\n\nFlake ledger: \(test) flaked 3 times within 7 days"), "\(open.contract.context)")
+        #expect(open.contract.context.contains("earlier, later, add-b"), "\(open.contract.context)")
+        #expect(board.flakes?.last?.planned == open.slug)
+        #expect(merged.text.contains("\(test) flaked 3 times within 7 days: the open task terminal-clipboard-security names it"), "\(merged.text)")
+        let progress = try String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)
+        #expect(progress.contains("Noted in terminal-clipboard-security's context"), "\(progress)")
+        #expect(!progress.contains("Planned fix-the-flaky-test"), "\(progress)")
+    }
+
+    @Test func anOpenTaskNamesATestInItsTitleOrGoalAsAWholeName() {
+        func task(_ slug: String, title: String = "Something", goal: String, _ status: LeadTask.Status) -> LeadTask {
+            var task = LeadTask(slug: slug, title: title, contract: LeadContract(goal: goal, acceptance: [], boundaries: [], context: ""))
+            task.status = status
+            return task
+        }
+        var board = LeadBoard()
+        board.tasks = [task("merged", goal: "loginShellIsRead() passes", .done),
+                       task("longer", goal: "loginShellIsReadTwice stops flaking", .planned),
+                       task("short", goal: "a test that waits", .planned)]
+        // Finished, or only a longer name: nothing names it.
+        #expect(board.openTask(naming: "loginShellIsRead()") == nil)
+        // A short bare name counts only in full; the unnamed flake names nothing.
+        #expect(board.openTask(naming: "test()") == nil)
+        #expect(board.openTask(naming: MergeRerun.unnamed) == nil)
+        for status in [LeadTask.Status.planned, .running, .review, .blocked] {
+            board.tasks.append(task("open-\(status.rawValue)", title: "Fix loginShellIsRead", goal: "", status))
+            #expect(board.openTask(naming: "loginShellIsRead()")?.slug == "open-\(status.rawValue)")
+            board.tasks.removeLast()
+        }
+        board.tasks.append(task("legacy", goal: "LegacyTests.testFailsOnLinux, in full", .running))
+        #expect(board.openTask(naming: "LegacyTests.testFailsOnLinux")?.slug == "legacy")
+        #expect(board.openTask(naming: "Other.testFailsOnLinux")?.slug == "legacy")
+        #expect(board.openTask(naming: "test()") == nil)
     }
 
     // MARK: Catching up

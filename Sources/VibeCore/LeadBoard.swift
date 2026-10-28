@@ -1114,6 +1114,33 @@ public struct LeadBoard: Codable, Equatable, Sendable {
         flakes?[index].planned = slug
     }
 
+    /// The open task (planned, running, in review or blocked) whose title or goal names `test`, first on the board:
+    /// a due flake goes there instead of a new task (twice on 2026-10-28 the ledger planned a fix for a test an open
+    /// task was already fixing, and auto_advance started it). Named as `TestFailures` names it ("foo()",
+    /// "Suite.testFoo") or by its bare name ("foo", "testFoo") standing alone, not inside a longer identifier; a bare
+    /// name under 8 characters ("test") counts only in full, as plain words would match it.
+    public func openTask(naming test: String) -> LeadTask? {
+        guard test != MergeRerun.unnamed else { return nil }
+        var bare = test
+        if let paren = bare.firstIndex(of: "(") { bare = String(bare[..<paren]) }
+        bare = bare.split(separator: ".").last.map(String.init) ?? bare
+        let names = [test] + (bare.count >= 8 && bare != test ? [bare] : [])
+        func namesIt(_ text: String) -> Bool {
+            names.contains { name in
+                var from = text.startIndex
+                while let found = text.range(of: name, range: from..<text.endIndex) {
+                    let before = found.lowerBound == text.startIndex ? nil : text[text.index(before: found.lowerBound)]
+                    let after = found.upperBound == text.endIndex ? nil : text[found.upperBound]
+                    let identifier = { (c: Character?) in c.map { $0.isLetter || $0.isNumber || $0 == "_" } ?? false }
+                    if !identifier(before), !identifier(after) { return true }
+                    from = found.upperBound
+                }
+                return false
+            }
+        }
+        return tasks.first { [.planned, .running, .review, .blocked].contains($0.status) && (namesIt($0.title) || namesIt($0.contract.goal)) }
+    }
+
     /// For status: the tests that flaked within `flakeWindow` of `now`, the most flakes first, each with the merges
     /// it held up and the task planned for it; nil when none did.
     public func flakeLine(now: Double) -> String? {

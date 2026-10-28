@@ -2217,7 +2217,7 @@ public final class LeadToolset: MCPToolset {
             // Its receipt, written with the merge: its transcripts read before the board's lock is taken.
             let usage = receiptUsage(task)
             let brought = Int(Git.run(["rev-list", "--count", "\(current)..\(tested)"], in: root).output)
-            let planned = try store.update { board -> [(test: String, slug: String)] in
+            let planned = try store.update { board -> [(test: String, slug: String, noted: Bool)] in
                 guard let index = board.taskIndex(slug) else { return [] }
                 board.tasks[index].status = .done
                 board.tasks[index].merged = LeadMergeRecord(commit: tested, tested: workflow.testCommand != nil, onto: current,
@@ -2226,14 +2226,22 @@ public final class LeadToolset: MCPToolset {
                                                          tests: workflow.testCommand == nil ? nil : testCount, mergeReruns: flaked == nil ? 0 : 1,
                                                          commits: brought)
                 guard !flakes.isEmpty else { return [] }
-                // The flake ledger, and a task for each test that flaked once too often (once: `recordFlakes`).
+                // The flake ledger, and a task for each test that flaked once too often (once: `recordFlakes`), unless
+                // an open task names it already: its count goes in that task's context.
                 return board.recordFlakes(flakes, task: slug, commit: tested, now: Date().timeIntervalSince1970).map { test, merges in
+                    if let open = board.openTask(naming: test), let index = board.taskIndex(open.id) {
+                        let context = board.tasks[index].contract.context.trimmingCharacters(in: .whitespacesAndNewlines)
+                        let line = MergeRerun.flakeNote(test: test, merges: merges)
+                        board.tasks[index].contract.context = context.isEmpty ? line : context + "\n\n" + line
+                        board.notePlanned(open.slug, for: test)
+                        return (test, open.slug, true)
+                    }
                     let title = "Fix the flaky test " + Self.clip(test, 60)
                     let fix = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title,
                                        contract: MergeRerun.fixContract(test: test, merges: merges, workflow: workflow))
                     board.tasks.append(fix)
                     board.notePlanned(fix.slug, for: test)
-                    return (test, fix.slug)
+                    return (test, fix.slug, false)
                 }
             }
             // Nothing ran: say so, it isn't a pass.
@@ -2253,12 +2261,17 @@ public final class LeadToolset: MCPToolset {
             if let flaked {
                 let names = flakes.joined(separator: ", ")
                 try? store.appendProgress("Flaky in \(slug)'s merge: \(Self.clip(names, 300)) failed the first test run and passed its rerun (\(flaked.plan.filtered ? "the failing tests only" : "the whole test command")); merged on the rerun")
-                for (test, fix) in planned {
-                    try? store.appendProgress("Planned \(fix): \(test) flaked \(LeadBoard.flakeLimit) times within \(Int(LeadBoard.flakeWindow / 86_400)) days")
+                for (test, fix, noted) in planned {
+                    try? store.appendProgress((noted ? "Noted in \(fix)'s context (an open task naming it; no new task)" : "Planned \(fix)")
+                                              + ": \(test) flaked \(LeadBoard.flakeLimit) times within \(Int(LeadBoard.flakeWindow / 86_400)) days")
+                }
+                let due = planned.map { test, fix, noted -> String in
+                    let what = noted ? "the open task \(fix) names it, so that's noted in its context and no new task was planned." : "planned \(fix) to fix it."
+                    return "\(test) flaked \(LeadBoard.flakeLimit) times within \(Int(LeadBoard.flakeWindow / 86_400)) days: " + what
                 }
                 flakeNote = " (Its first test run failed on \(Self.clip(names, 300)) and the rerun of \(flaked.plan.filtered ? "those tests" : "the whole test command") passed, so it merged on the rerun: recorded in the flake ledger, which status lists."
                     + (flaked.log.map { " Both runs' output: \($0)." } ?? "")
-                    + (planned.isEmpty ? "" : " " + planned.map { "\($0.test) flaked \(LeadBoard.flakeLimit) times within \(Int(LeadBoard.flakeWindow / 86_400)) days: planned \($0.slug) to fix it." }.joined(separator: " "))
+                    + (due.isEmpty ? "" : " " + due.joined(separator: " "))
                     + ")"
             }
             let caughtUp = tellToCatchUp(merged: slug, from: current, to: tested, base: base)
