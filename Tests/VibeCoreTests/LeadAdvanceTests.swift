@@ -904,6 +904,38 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(advancing.until { task("waits", root)?.status == .running })
     }
 
+    /// 2026-10-28: load 150 at 17:30 on 12 cores, and at 17:38 auto_advance started two workers on a dip of the
+    /// 1-minute load with the 5-minute still at 64. The loop's room check judges by the greater of the two, so through
+    /// a series of readings (spike, dip, calm) it starts nothing until the 5-minute is under load_threshold too, even
+    /// nudged in the dip.
+    @Test func aDipOfTheOneMinuteLoadAfterASpikeStartsNothing() throws {
+        let (root, runtime, lead) = try team()
+        lead.macLimits = { MacLimits(maxSessions: 6, loadThreshold: 24) }
+        let set = { (one: Double, five: Double) in
+            runtime.calls.lock()
+            runtime.averages = MacLoad.Averages(one: one, five: five)
+            runtime.calls.unlock()
+        }
+        set(150.4, 102.16)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        _ = lead.call("add_task", ["title": "Dip", "goal": "g", "acceptance": ["a"]])
+        advancing.settle()
+        #expect(task("dip", root)?.status == .planned)
+        #expect(roomWaits.waits().contains { $0.wait.auto == true && $0.wait.what == "start_worker(dip)" }, "\(roomWaits.waits())")
+        // The dip: the 1-minute under load_threshold, the 5-minute not. Nudged as the app's watch would, it still waits.
+        set(20, 64)
+        LeadAdvance.nudge(root: root)
+        advancing.settle()
+        advancing.settle()
+        #expect(task("dip", root)?.status == .planned)
+        #expect(runtime.spawned.isEmpty)
+        // Calm: both under it.
+        set(8, 22)
+        LeadAdvance.nudge(root: root)
+        #expect(advancing.until { task("dip", root)?.status == .running })
+    }
+
     @Test func aBatteryHoldStopsStartsAndMergesUntilACPowerReturns() throws {
         let (root, _, lead) = try team()
         var low = PowerState(onBattery: true, percent: 20)

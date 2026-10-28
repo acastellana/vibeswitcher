@@ -747,6 +747,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("clear", "ends and removes every fake session: the sidebar is empty, with its New Session menu"),
         ("views", "the main window's AppKit views: how many, how deep, and the most common kinds (a chat that grows them stalls layout)"),
         ("scroll top|middle|bottom", "scrolls the shown chat"),
+        ("scroll settings top|middle|bottom", "scrolls the shown Settings tab"),
         ("size WxH", "resizes the main window's content (e.g. 1728x1015)"),
         ("board [N]", "adds N finished tasks (default 250) to the fake lead's board (start the lead first)"),
         ("churn [N]", "changes the fake lead's board N times (default 40), 0.15 s apart, each read and shown as a real change is"),
@@ -1065,6 +1066,18 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
             let total = Date().timeIntervalSince(started)
             reply(true, String(format: "%d publishes: %.1f ms each, longest %.1f ms", count, total * 1000 / Double(count), longest * 1000))
+        case "scroll" where rest.hasPrefix("settings"):
+            // The Settings tab's form: the window's first scroll view.
+            func first(_ view: NSView) -> NSScrollView? { (view as? NSScrollView) ?? view.subviews.lazy.compactMap(first).first }
+            guard let root = settings?.window?.contentView, let scroll = first(root), let document = scroll.documentView else {
+                return reply(false, "no settings shown")
+            }
+            let to = rest.dropFirst("settings".count).trimmingCharacters(in: .whitespaces)
+            let height = document.frame.height - scroll.contentSize.height
+            let y = to == "top" ? 0 : to == "middle" ? height / 2 : height
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: max(0, y)))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            settle { reply(true, "scrolled settings to \(Int(y)) of \(Int(height))") }
         case "scroll":
             // The chat's scroll view: the one holding its messages.
             func holdsChat(_ view: NSView) -> Bool { view is ChatTextView || view.subviews.contains(where: holdsChat) }

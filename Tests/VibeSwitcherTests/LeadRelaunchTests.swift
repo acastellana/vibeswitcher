@@ -31,7 +31,7 @@ struct LeadRelaunchTests {
         func transcript(of session: String) throws -> String? { nil }
         func currentAgent() -> LeadAgent? { nil }
         func isRunning(_ agent: LeadAgent) -> Bool { false }
-        func loadAverage() -> Double? { 0.5 }
+        func loadAverages() -> MacLoad.Averages? { MacLoad.Averages(one: 0.5, five: 0.5) }
     }
 
     struct World {

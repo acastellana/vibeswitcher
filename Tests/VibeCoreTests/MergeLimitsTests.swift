@@ -31,7 +31,7 @@ final class ConcurrentRuntime: LeadRuntime, @unchecked Sendable {
     func transcript(of session: String) throws -> String? { nil }
     func currentAgent() -> LeadAgent? { me }
     func isRunning(_ agent: LeadAgent) -> Bool { true }
-    func loadAverage() -> Double? { 0.5 }
+    func loadAverages() -> MacLoad.Averages? { MacLoad.Averages(one: 0.5, five: 0.5) }
 }
 
 extension LeadToolsetTests {

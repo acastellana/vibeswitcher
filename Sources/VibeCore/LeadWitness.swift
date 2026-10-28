@@ -565,7 +565,7 @@ extension LeadWitness {
         }
 
         /// What to tell each refused lead now that the Mac has room, one message per project: the waits `mac` has
-        /// room for under `limits` (the 1-minute load not over load_threshold, and with a wait's sessions the team
+        /// room for under `limits` (the load, `MacLoad.Averages.steady`, not over load_threshold, and with a wait's sessions the team
         /// sessions within mac_max_sessions). Those told are removed; the rest stay until there's room for them too.
         /// A project whose automatic steps were refused is nudged (`LeadAdvance.nudge`) instead: its lead's tool server
         /// tries them again, and only the lead's own refusals are told.

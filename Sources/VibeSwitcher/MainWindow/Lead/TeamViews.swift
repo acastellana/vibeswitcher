@@ -500,7 +500,7 @@ struct LeadTeamPane: View, Equatable {
     }
 
     private func request() {
-        load = MacLoad.oneMinute()
+        load = MacLoad.steady()
         limits = MacLimits.load()
         mac = MacLine.make(listed: hosted, load: load, limits: limits)
         let recent = DecisionFeed.split(decisions, now: Date().timeIntervalSince1970, reduceMotion: reduceMotion).recent.map(\.decision)

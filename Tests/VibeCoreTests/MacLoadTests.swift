@@ -41,6 +41,17 @@ extension LeadToolsetTests {
         #expect(MacLoad.oneMinute().map { $0 >= 0 } == true)
     }
 
+    /// The load the leads judge by is the greater of the 1- and 5-minute averages: on 2026-10-28 the 1-minute dipped
+    /// under load_threshold at 17:38 with the 5-minute still at 64, eight minutes after load 150, and work started.
+    @Test func theLoadTheLeadsJudgeByIsTheGreaterOfTheOneAndFiveMinuteAverages() {
+        #expect(MacLoad.Averages(one: 20, five: 64).steady == 64)
+        #expect(MacLoad.Averages(one: 138.22, five: 138.75).steady == 138.75)
+        #expect(MacLoad.Averages(one: 40, five: 12).steady == 40)
+        let now = MacLoad.averages()
+        #expect(now.map { $0.one >= 0 && $0.five >= 0 } == true)
+        #expect(MacLoad.steady().map { $0 >= 0 } == true)
+    }
+
     // MARK: The limits
 
     @Test func theMacLimitsAreSetOnceForTheMacNotInWorkflowMd() throws {
@@ -148,6 +159,28 @@ extension LeadToolsetTests {
         runtime.load = 3
         let started = call(lead, "start_worker", ["task": "one"])
         #expect(!started.isError, "\(started.text)")
+    }
+
+    /// start_worker and audit judge the load by the 5-minute average too: the 1-minute's dip after a spike isn't room.
+    @Test func aDipOfTheOneMinuteLoadAfterASpikeStartsNoWorkerNorAudit() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        lead.macLimits = { MacLimits(maxSessions: 6, loadThreshold: 24) }
+        for title in ["One", "Two"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
+        _ = call(lead, "start_worker", ["task": "one"])
+        _ = call(try seat("worker-one", runtime), "report", doneReport("done"))
+        runtime.averages = MacLoad.Averages(one: 20, five: 64)
+        let start = call(lead, "start_worker", ["task": "two"])
+        #expect(start.isError && start.text.contains("load 64.0"), "\(start.text)")
+        #expect(start.text.contains("the greater of its 1- and 5-minute averages"), "\(start.text)")
+        let audit = call(lead, "audit", ["task": "one"])
+        #expect(audit.isError && audit.text.contains("load 64.0"), "\(audit.text)")
+        #expect(runtime.spawned.count == 1)
+        // Once the 5-minute agrees, both go.
+        runtime.averages = MacLoad.Averages(one: 20, five: 22)
+        #expect(!call(lead, "start_worker", ["task": "two"]).isError)
+        #expect(!call(lead, "audit", ["task": "one"]).isError)
     }
 
     @Test func startWorkerRefusesAtTheMacWideCapCountingOtherProjects() throws {
@@ -346,6 +379,22 @@ extension LeadToolsetTests {
         #expect(merged.text.contains("waited") && merged.text.contains("from 150 below load_threshold"))
         #expect(runtime.loadReads - reads == 4)
         #expect(FileManager.default.fileExists(atPath: root + "/b.txt"))
+    }
+
+    /// The merge's wait reads the 5-minute average too: a 1-minute dip doesn't end it.
+    @Test func mergeWaitsThroughADipOfTheOneMinuteLoad() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        _ = try audited(lead, runtime, root: root)
+        lead.macLimits = { MacLimits(maxSessions: 6, loadThreshold: 24) }
+        lead.loadPoll = 0.01
+        runtime.averageReadings = [MacLoad.Averages(one: 150, five: 102), MacLoad.Averages(one: 20, five: 64),
+                                   MacLoad.Averages(one: 10, five: 30), MacLoad.Averages(one: 8, five: 23)]
+        let reads = runtime.loadReads
+        let merged = call(lead, "merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(runtime.loadReads - reads == 4)
     }
 
     @Test func mergeRefusesWhenTheLoadStaysAboveTheThreshold() throws {

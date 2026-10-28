@@ -342,7 +342,7 @@ public final class LeadAdvance: @unchecked Sendable {
             }
         }
         let limits = lead.macLimits()
-        let busy = lead.runtime.loadAverage().map { $0 > limits.loadLimit } ?? false
+        let busy = lead.runtime.steadyLoad().map { $0 > limits.loadLimit } ?? false
         // The quick steps first: findings back to work, merged tasks' sessions ended (room on the Mac); then the starts
         // (a done report freed its worker's slot already); then the audits and merges, which can take as long as the
         // suite. Each in board order.
@@ -570,7 +570,7 @@ public final class LeadAdvance: @unchecked Sendable {
     /// audit count it).
     private func hasRoom(_ slug: String, need: Int) -> Bool {
         guard let sessions = try? lead.advanceSessions(),
-              let mac = try? lead.macLoad(sessions, load: lead.runtime.loadAverage(), except: Worktrees.path(root: lead.root, slug: slug)) else { return false }
+              let mac = try? lead.macLoad(sessions, load: lead.runtime.steadyLoad(), except: Worktrees.path(root: lead.root, slug: slug)) else { return false }
         let limits = lead.macLimits()
         return !mac.isBusy(threshold: limits.loadLimit) && mac.sessions + need <= limits.maxSessions
     }

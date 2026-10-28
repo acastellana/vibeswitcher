@@ -1,8 +1,10 @@
 #!/bin/bash
 # Checks that scripts/test-under-load.sh leaves no load behind: its busy loops (2, for a few seconds) are gone after a
 # failing command, after Ctrl-C, after its owner dies and after it's killed outright; that it refuses more than
-# 2 × ncpu, an already loaded Mac, low memory and a session with no live owner; and that a run's home is its own. Like
-# the harness, it won't start on a loaded Mac: run it again once `uptime` is under 2 × ncpu.
+# 2 × ncpu, an already loaded Mac, low memory and a session with no live owner; and that a run's home is its own. The
+# cleanup checks run its fake burner (loops that sleep, with a fake load of 0, so it starts both on any Mac): the same
+# processes, owners and watchdog, with no CPU burnt. Like the harness, it won't start on a loaded Mac: run it again
+# once `uptime` is under 2 × ncpu. It takes a load run's lock and slot like any load run.
 #
 # scripts/test-under-load-selfcheck.sh
 set -uo pipefail
@@ -10,6 +12,7 @@ cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
 
 harness=scripts/test-under-load.sh
+fake="env TEST_UNDER_LOAD_FAKE_BURNER=1 TEST_UNDER_LOAD_FAKE_LOAD=0 TEST_UNDER_LOAD_TICK=0.2"
 cores=$(sysctl -n hw.ncpu)
 work=$(mktemp -d /tmp/vs-load-check.XXXXXX)
 started=()
@@ -66,17 +69,17 @@ check "memory under the floor is refused" "[[ $status -ne 0 && \$out == *'memory
 out=$(CLAUDECODE=1 TEST_UNDER_LOAD_OWNER_NAME=no-such-process $harness --check-only); status=$?
 check "a session with no live claude is refused" "[[ $status -ne 0 && \$out == *'no live owner'* ]]"
 # A fake load of 0 would pass --max-load 0.01; the real one (never 0 on a running Mac) doesn't.
-out=$(TEST_UNDER_LOAD_FAKE_LOAD=0 $harness --max-load 0.01 --pid-file "$work/fake.pids" -- true); status=$?
+out=$(TEST_UNDER_LOAD_FAKE_LOAD=0 $harness --max-load 0.01 --wait 0 --pid-file "$work/fake.pids" -- true); status=$?
 check "fake readings are ignored when it would start load" "[[ $status -ne 0 && \$out == *'already loaded'* && ! -e $work/fake.pids ]]"
 
 # A failing command: its status comes back and the busy loops are gone.
-$harness --load 2 --pid-file "$work/fail.pids" -- bash -c 'sleep 1; exit 3' > "$work/fail.out" 2>&1
+$fake $harness --load 2 --pid-file "$work/fail.pids" -- bash -c 'sleep 1; exit 3' > "$work/fail.out" 2>&1
 status=$?
 check "a failing command's status comes back (3)" "[[ $status -eq 3 ]]"
 check "the busy loops are gone after a failing command" "gone_within $work/fail.pids 2"
 
 # Ctrl-C (SIGINT to the harness's process group).
-$harness --load 2 --pid-file "$work/int.pids" -- sleep 30 > "$work/int.out" 2>&1 &
+$fake $harness --load 2 --pid-file "$work/int.pids" -- sleep 30 > "$work/int.out" 2>&1 &
 harness_pid=$!
 started+=($harness_pid)
 if loaded "$work/int.pids"; then
@@ -91,7 +94,7 @@ else
 fi
 
 # Its owner dies (a turn ending without its shell): the harness and its busy loops stop by themselves.
-bash -c "$harness --load 2 --pid-file $work/owner.pids -- sleep 30 > $work/owner.out 2>&1 & echo \$! > $work/owner.harness; wait" &
+bash -c "$fake $harness --load 2 --pid-file $work/owner.pids -- sleep 30 > $work/owner.out 2>&1 & echo \$! > $work/owner.harness; wait" &
 owner=$!
 started+=($owner)
 if loaded "$work/owner.pids"; then
@@ -107,7 +110,7 @@ else
 fi
 
 # Killed outright (SIGKILL, no trap): the busy loops and the command stop anyway.
-$harness --load 2 --pid-file "$work/kill.pids" -- bash -c "echo \$\$ > $work/command.pids; exec sleep 30" > "$work/kill.out" 2>&1 &
+$fake $harness --load 2 --pid-file "$work/kill.pids" -- bash -c "echo \$\$ > $work/command.pids; exec sleep 30" > "$work/kill.out" 2>&1 &
 harness_pid=$!
 started+=($harness_pid)
 if loaded "$work/kill.pids"; then

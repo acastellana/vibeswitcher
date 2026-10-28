@@ -97,7 +97,7 @@ extension LeadToolsetTests {
         let told = Told()
         let merged = ToolProgress.with(ToolProgress(every: 0.01, told.add)) { call(lead, "merge", ["task": "add-b"]) }
         #expect(!merged.isError, "\(merged.text)")
-        #expect(told.texts.first?.contains("for the Mac's 1-minute load (150) to drop below load_threshold (24) before testing add-b") == true, "\(told.texts)")
+        #expect(told.texts.first?.contains("for the Mac's load (150, the greater of its 1- and 5-minute averages) to drop below load_threshold (24) before testing add-b") == true, "\(told.texts)")
     }
 
     @Test func anAuditRunWaitingOnFullSlotsSaysWhoHoldsThem() throws {

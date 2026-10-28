@@ -531,8 +531,8 @@ public enum LeadPrompts {
     /// contract's load on a Mac other sessions and the user were using, and a turn that ended left its burners running.
     public static let loadTests = "Load tests (a test run beside busy loops, to see what fails only on a loaded Mac): "
         + "only through scripts/test-under-load.sh (`--load N -- COMMAND`; a project without it gets no load: ask the lead), "
-        + "never more than 2×ncpu load processes, and never when the Mac is already loaded (the script refuses then and "
-        + "says what to wait for: wait, don't work around it). No `yes` loops, fork storms or burners of your own: "
+        + "never more than 2×ncpu load processes, and never when the Mac is already loaded (the script waits then, saying why, and "
+        + "burns one load run at a time Mac-wide in a heavy slot: let it wait, don't work around it). No `yes` loops, fork storms or burners of your own: "
         + "other sessions and the user share this Mac."
 
     /// The load a branch's new tests are proven under: the most `loadTests` allows on this Mac.
@@ -934,8 +934,8 @@ public enum LeadPrompts {
         let limit = MacLoad.number(limits.loadLimit) + (limits.loadThreshold == nil ? ", twice the cores" : "")
         return """
         The Mac is shared: other projects' leads run their teams on it too, and a loaded Mac slows every build and \
-        fails timing-sensitive tests. start_worker and audit refuse while its 1-minute load average is above \
-        load_threshold (\(limit)) or the workers and verifiers of all projects together are at mac_max_sessions \
+        fails timing-sensitive tests. start_worker and audit refuse while its load (the greater of its 1- and 5-minute averages, so a dip after a spike \
+        doesn't count as room) is above load_threshold (\(limit)) or the workers and verifiers of all projects together are at mac_max_sessions \
         (\(limits.maxSessions)); both are set once for the Mac by the user in VibeSwitcher's Settings, not in workflow.md. \
         After such a refusal VibeSwitcher sends you one message once there's room again. merge waits up to test_timeout_min (\(MacLoad.number(workflow.testTimeoutMinutes)) min) for \
         the load to drop before its tests, then refuses. status shows the Mac's load and every project's team \

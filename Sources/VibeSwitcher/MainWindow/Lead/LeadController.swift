@@ -260,8 +260,8 @@ final class LeadController: ObservableObject {
     /// project's sessions ended (see `LeadWitness.RoomWaits`); none until the app starts it (`watchRoom`).
     private var roomWaits: LeadWitness.RoomWaits?
     private var roomTimer: Heartbeat.Subscription?
-    /// The Mac's 1-minute load as the room watch reads it (see `MacLoad.oneMinute`); faked in tests.
-    var macLoad: () -> Double? = MacLoad.oneMinute
+    /// The Mac's load as the room watch reads it, as the leads' tools judge it (see `MacLoad.steady`); faked in tests.
+    var macLoad: () -> Double? = MacLoad.steady
     /// Ended team sessions the host has been asked to drop.
     private var forgetting: Set<UUID> = []
     /// Ends the sessions of finished tasks from the vault's roster, in every project (see `RoleSweep`); nil in tests
