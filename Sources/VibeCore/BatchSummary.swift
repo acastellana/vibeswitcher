@@ -114,7 +114,7 @@ public enum BatchSummary {
     static func batchStart(_ board: LeadBoard) -> Double {
         if let last = board.allDone?.last { return last.at }
         var start = -Double.infinity, end = -Double.infinity
-        for span in board.tasks.filter(isClosed).map({ (from: min($0.createdAt, closedAt($0)), to: closedAt($0)) }).sorted(by: { $0.from < $1.from }) {
+        for span in closed(board).map({ (from: min($0.createdAt, closedAt($0)), to: closedAt($0)) }).sorted(by: { $0.from < $1.from }) {
             if span.from > end { start = span.from }
             end = max(end, span.to)
         }
@@ -127,7 +127,14 @@ public enum BatchSummary {
         let start = batchStart(board)
         // After the last mark; with none, from the start of the last run on (its first task's own close included).
         let after: (Double) -> Bool = board.allDone?.last == nil ? { $0 >= start } : { $0 > start }
-        return board.tasks.filter { isClosed($0) && after(closedAt($0)) }.sorted { closedAt($0) < closedAt($1) }
+        return closed(board).filter { after(closedAt($0)) }.sorted { closedAt($0) < closedAt($1) }
+    }
+
+    /// The board's closed tasks, and the copies of the open batch's archived ones (`LeadBoard.archivedBatch`) it no
+    /// longer holds.
+    static func closed(_ board: LeadBoard) -> [LeadTask] {
+        let live = Set(board.tasks.map(\.id))
+        return board.tasks.filter(isClosed) + (board.archivedBatch ?? []).filter { !live.contains($0.id) }
     }
 
     /// The mark to make at `now`, when the board went from open work (`previous`) to none (`current`) and at least one
@@ -197,7 +204,7 @@ public enum BatchSummary {
     /// The input for `mark`: its tasks' titles and goals from `board`, and the lead's posted results since the batch
     /// began. Everything is redacted here (`Redaction.secrets`, as the briefing's input), before any model sees it.
     public static func input(_ mark: LeadAllDone, board: LeadBoard, project: String) -> Input {
-        let goals = Dictionary(board.tasks.map { ($0.slug, $0.contract.goal) }, uniquingKeysWith: { first, _ in first })
+        let goals = Dictionary((board.tasks + (board.archivedBatch ?? [])).map { ($0.slug, $0.contract.goal) }, uniquingKeysWith: { first, _ in first })
         let tasks = mark.tasks.prefix(tasksShown).map { task in
             Input.Item(title: clean(task.title, titleLimit), goal: clean(goals[task.slug] ?? "", goalLimit), outcome: task.outcome)
         }

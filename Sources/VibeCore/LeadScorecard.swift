@@ -131,22 +131,26 @@ public struct LeadScorecard: Equatable, Sendable {
     /// Merged with no audit (review none): not in the audit numbers, which are the audited merges'.
     public var mergedUnaudited: Int
 
+    /// The board's tasks and, through its tally, those it archived (`LeadArchivedScores`).
     public init(_ board: LeadBoard, now: Double = Date().timeIntervalSince1970) {
-        // A folded task isn't counted (its work merged with the task that carried it; that one's rounds count), nor
-        // an abandoned one.
-        let merged = board.tasks.filter { $0.merged != nil && ![.folded, .abandoned].contains($0.status) }
+        let merged = board.tasks.filter(Self.counts)
         let scores = merged.map { LeadTaskScore($0, questions: board.questions, now: now) }
         let rounds = scores.compactMap(\.roundsToPass)
-        self.merged = merged.count
-        counted = rounds.count
-        meanRoundsToPass = rounds.isEmpty ? nil : Double(rounds.reduce(0, +)) / Double(rounds.count)
-        firstAuditPassRate = rounds.isEmpty ? nil : Double(rounds.filter { $0 == 1 }.count) / Double(rounds.count)
+        let archived = board.archivedScores ?? LeadArchivedScores()
+        self.merged = merged.count + archived.merged
+        counted = rounds.count + archived.counted
+        meanRoundsToPass = counted == 0 ? nil : Double(rounds.reduce(0, +) + archived.rounds) / Double(counted)
+        firstAuditPassRate = counted == 0 ? nil : Double(rounds.filter { $0 == 1 }.count + archived.firstPass) / Double(counted)
         userMinutes = board.questions.reduce(0) { $0 + $1.waitingOnUser(now: now) } / 60
-        userMinutesPerMergedTask = merged.isEmpty ? nil : userMinutes / Double(merged.count)
-        reverts = scores.filter { $0.revertedBy != nil }.count
-        mergedWithoutTests = scores.filter { $0.mergedWithoutTests == true }.count
-        mergedUnaudited = scores.filter { $0.mergedUnaudited == true }.count
+        userMinutesPerMergedTask = self.merged == 0 ? nil : userMinutes / Double(self.merged)
+        reverts = scores.filter { $0.revertedBy != nil }.count + archived.reverts
+        mergedWithoutTests = scores.filter { $0.mergedWithoutTests == true }.count + archived.withoutTests
+        mergedUnaudited = scores.filter { $0.mergedUnaudited == true }.count + archived.unaudited
     }
+
+    /// Counted in the scorecard: merged. A folded task isn't (its work merged with the task that carried it; that
+    /// one's rounds count), nor an abandoned one.
+    static func counts(_ task: LeadTask) -> Bool { task.merged != nil && ![.folded, .abandoned].contains(task.status) }
 
     /// The four numbers as the Team tab shows them, each a value and what it is ("–" while nothing is merged).
     public var items: [(value: String, label: String)] {

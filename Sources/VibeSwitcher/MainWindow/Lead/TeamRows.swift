@@ -158,6 +158,7 @@ extension LeadBoard {
         return leadSession == other.leadSession && leadPid == other.leadPid && leadTTY == other.leadTTY && baseBranch == other.baseBranch
             && same(tasks, other.tasks) && same(questions, other.questions) && same(updates, other.updates) && same(reports, other.reports)
             && reportsSeenAt == other.reportsSeenAt && same(removed, other.removed) && same(allDone, other.allDone) && same(flakes, other.flakes)
+            && archivedScores == other.archivedScores && same(archivedBatch, other.archivedBatch)
     }
 }
 

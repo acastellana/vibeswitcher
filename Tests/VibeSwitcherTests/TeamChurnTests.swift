@@ -140,7 +140,7 @@ struct TeamChurnTests {
         // Every stored property is compared: a new one goes in `isSame` too.
         #expect(Mirror(reflecting: LeadBoard()).children.map { $0.label ?? "" } == [
             "leadSession", "leadPid", "leadTTY", "baseBranch", "tasks", "questions", "updates", "reports", "reportsSeenAt", "removed",
-            "allDone", "flakes",
+            "allDone", "flakes", "archivedScores", "archivedBatch",
         ])
     }
 

@@ -460,7 +460,10 @@ public struct LeadReceiptTotals: Codable, Equatable, Sendable {
         if let open = LeadReceiptTotals(BatchSummary.batch(board)) { return (open, nil) }
         guard let mark = board.allDone?.last else { return nil }
         let slugs = Set(mark.tasks.map(\.slug))
-        return LeadReceiptTotals(board.tasks.filter { slugs.contains($0.slug) }).map { ($0, mark.at) }
+        let held = board.tasks.filter { slugs.contains($0.slug) }
+        // Some of its tasks archived (`BoardStore.archive`): the sums the card kept when it was made.
+        guard held.count == slugs.count else { return mark.receipts.map { ($0, mark.at) } }
+        return LeadReceiptTotals(held).map { ($0, mark.at) }
     }
 
     /// "Receipts (this batch): …" or "Receipts (last batch, all done at 14:02): …"; nil when there are none.

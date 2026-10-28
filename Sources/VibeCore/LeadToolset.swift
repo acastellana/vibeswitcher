@@ -171,6 +171,11 @@ public final class LeadToolset: MCPToolset {
     private let tellingIgnoredKeys = NSLock()
     /// Status said once that decisions.md is past the size to archive (`LeadRecords.archiveNudge`).
     private var toldArchive = false
+    /// When this server last moved finished tasks to the board's archive (`archiveFinished`), and its clock (faked in
+    /// tests).
+    var archivedAt: Double?
+    private let archiving = NSLock()
+    var archiveClock: () -> Double = { Date().timeIntervalSince1970 }
     /// The slots merge's and an audit's test runs take one of (see `TestLock`; the workflow's heavy_slots sets how
     /// many): the tool server sets the Mac-wide ones, every project's merges sharing them with `vs-heavy`; nil (tests
     /// that don't give scratch ones): none.
@@ -253,7 +258,22 @@ public final class LeadToolset: MCPToolset {
         grant = refusal == nil ? member?.id : nil
         role = refusal == nil ? member?.role : nil
         taskID = refusal == nil ? member?.task : nil
-        if role == .lead, (try? authenticate()) != nil { introduceLead() }
+        if role == .lead, (try? authenticate()) != nil {
+            introduceLead()
+            // An existing project's board is moved over the first time a server with the archive starts on it.
+            archiveFinished(force: true)
+        }
+    }
+
+    /// Moves the board's finished tasks a day old to its archive (`BoardStore.archive`): on the lead's server's start
+    /// (`force`), and after merges at most every `BoardStore.archiveEvery`. Never in the app.
+    func archiveFinished(force: Bool) {
+        archiving.lock()
+        defer { archiving.unlock() }
+        let now = archiveClock()
+        if !force, let last = archivedAt, now - last < BoardStore.archiveEvery { return }
+        archivedAt = now
+        _ = try? store.archive(now: now)
     }
 
     /// The server as `vibeswitcher-mcp` starts it: `--root <repo>` (plus `--role`/`--task` as it was started).
@@ -587,7 +607,7 @@ public final class LeadToolset: MCPToolset {
             guard let taskID, try store.read().taskIndex(taskID) != nil else { throw Problem(text: "Your task isn't on the board any more.") }
             return taskID
         }
-        guard let wanted = arguments["task"] as? String, let task = try store.read().task(wanted) else {
+        guard let wanted = arguments["task"] as? String, let task = try store.read().task(wanted) ?? store.archived().first(where: { $0.id == wanted || $0.slug == wanted }) else {
             throw Problem(text: "No such task on the board. Use status to see the tasks.")
         }
         return task.slug
@@ -677,9 +697,9 @@ public final class LeadToolset: MCPToolset {
         let auto = try autoArgument(arguments)
         let budget = try budgetArgument(arguments)
         let task = try store.update { board -> LeadTask in
-            var task = LeadTask(slug: Slug.make(title, taken: Set(board.tasks.map(\.slug))), title: title, contract: contract)
+            var task = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title, contract: contract)
             task.review = review
-            if arguments["after"] != nil { task.after = try Self.afterList(strings(arguments["after"]), on: board, for: task.slug) }
+            if arguments["after"] != nil { task.after = try Self.afterList(strings(arguments["after"]), on: store.withArchive(board), for: task.slug) }
             task.autoAdvance = auto == false ? false : nil
             task.budgetMin = budget
             board.tasks.append(task)
@@ -771,7 +791,7 @@ public final class LeadToolset: MCPToolset {
             throw Problem(text: "Name the finding as <task>:<id> (e.g. add-b:F2), as status and board show it.")
         }
         let wanted = String(reference[..<cut]).trimmingCharacters(in: .whitespaces), id = String(reference[reference.index(after: cut)...])
-        guard let slug = store.load().task(wanted)?.slug else { throw Problem(text: "No task \(wanted) on the board.") }
+        guard let slug = store.loadAll().task(wanted)?.slug else { throw Problem(text: "No task \(wanted) on the board.") }
         guard let finding = vault.audits(root: root, task: slug)?.finding(id) else { throw Problem(text: "\(slug) has no finding \(id).") }
         return (slug, finding)
     }
@@ -923,7 +943,8 @@ public final class LeadToolset: MCPToolset {
         let usage = ending == nil ? nil : store.load().task(slug).map(receiptUsage)
         var changed: [String] = []
         try boardChange { board in
-            guard let index = board.taskIndex(slug) else { return }
+            // A task in the board's archive comes back to be changed (reopened, renamed).
+            guard let index = store.restore(slug, into: &board) else { return }
             if let status, board.tasks[index].status == .reverted {
                 throw BoardError(text: "\(slug) was merged and reverted\(board.tasks[index].merged?.revertedBy.map { " (by \($0.prefix(8)))" } ?? ""); it stays reverted, not \(status.rawValue). To do its work again, add_task a new task. Nothing was changed.")
             }
@@ -935,7 +956,7 @@ public final class LeadToolset: MCPToolset {
             }
             var target: LeadTask?
             if status == .folded {
-                guard let found = board.task(into) else {
+                guard let found = board.task(into) ?? store.withArchive(board).task(into) else {
                     throw BoardError(text: "No task \(into) on the board to fold \(slug) into. Nothing was changed.")
                 }
                 guard found.id != board.tasks[index].id else {
@@ -957,7 +978,7 @@ public final class LeadToolset: MCPToolset {
             if let context = arguments["context"] as? String { board.tasks[index].contract.context = context; changed.append("context (replaced)") }
             if let review { board.tasks[index].review = review; changed.append("review \(review.rawValue)") }
             if arguments["after"] != nil {
-                board.tasks[index].after = try Self.afterList(strings(arguments["after"]), on: board, for: slug)
+                board.tasks[index].after = try Self.afterList(strings(arguments["after"]), on: store.withArchive(board), for: slug)
                 changed.append(board.tasks[index].after.map { "after \($0.joined(separator: ", "))" } ?? "after cleared")
             }
             if let auto {
@@ -2202,7 +2223,7 @@ public final class LeadToolset: MCPToolset {
                 // The flake ledger, and a task for each test that flaked once too often (once: `recordFlakes`).
                 return board.recordFlakes(flakes, task: slug, commit: tested, now: Date().timeIntervalSince1970).map { test, merges in
                     let title = "Fix the flaky test " + Self.clip(test, 60)
-                    let fix = LeadTask(slug: Slug.make(title, taken: Set(board.tasks.map(\.slug))), title: title,
+                    let fix = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title,
                                        contract: MergeRerun.fixContract(test: test, merges: merges, workflow: workflow))
                     board.tasks.append(fix)
                     board.notePlanned(fix.slug, for: test)
@@ -2235,6 +2256,7 @@ public final class LeadToolset: MCPToolset {
                     + ")"
             }
             let caughtUp = tellToCatchUp(merged: slug, from: current, to: tested, base: base)
+            archiveFinished(force: false)
             return MCPToolResult(text: "Merged \(slug) into \(base)\(untested). Next: cleanup(\(slug)). \(LeadPrompts.Policy.updates)\(overruled)\(unaudited)\(ran)\(patience)\(evidence)\(flakeNote)\(caughtUp)")
         case .refused(let reason):
             throw Problem(text: "Not merged: \(reason)")
@@ -2269,7 +2291,7 @@ public final class LeadToolset: MCPToolset {
         guard !reason.isEmpty else {
             throw Problem(text: "Not reverted: say what the merge broke (reason), in one line; it goes into the revert commit and the task's record.")
         }
-        guard let task = store.load().task(slug) else { throw Problem(text: "No task \(slug).") }
+        guard let task = store.loadAll().task(slug) else { throw Problem(text: "No task \(slug).") }
         if task.status == .reverted {
             throw Problem(text: "\(slug) is reverted already" + (task.merged?.revertedBy.map { " (by \($0.prefix(8)))" } ?? "") + ". Nothing to do.")
         }
@@ -2349,7 +2371,7 @@ public final class LeadToolset: MCPToolset {
             try vault.setHead(made, root: root, branch: base)
             let now = Date().timeIntervalSince1970
             try store.update { board in
-                guard let index = board.taskIndex(slug) else { return }
+                guard let index = store.restore(slug, into: &board) else { return }
                 board.tasks[index].status = .reverted
                 board.tasks[index].merged?.revertedBy = made
                 board.tasks[index].merged?.revertedAt = now
@@ -2374,7 +2396,7 @@ public final class LeadToolset: MCPToolset {
     private func laterTouches(_ files: [String], slug: String, after: String, current: String) -> [String] {
         let lines = { (output: String) in output.split(whereSeparator: \.isNewline).map(String.init) }
         var owner: [String: String] = [:]
-        for task in store.load().tasks where task.slug != slug {
+        for task in store.loadAll().tasks where task.slug != slug {
             guard let merged = task.merged, let onto = merged.onto else { continue }
             let listed = Git.run(["rev-list", "\(onto)..\(merged.commit)"], in: root)
             guard listed.ok else { continue }
@@ -2909,7 +2931,7 @@ public final class LeadToolset: MCPToolset {
         let decideIn = try minutes(arguments["decide_in"])
         var about: String?
         if let wanted = (arguments["task"] as? String)?.trimmingCharacters(in: .whitespaces), !wanted.isEmpty {
-            guard let task = store.load().task(wanted) else { throw Problem(text: "No task \(wanted) on the board: name the task the question is about by its slug, or leave task out.") }
+            guard let task = store.loadAll().task(wanted) else { throw Problem(text: "No task \(wanted) on the board: name the task the question is about by its slug, or leave task out.") }
             about = task.slug
         }
         if decideIn != nil, proposal == nil { throw Problem(text: "decide_in needs a proposal: the answer you'd go ahead with.") }
@@ -3047,14 +3069,14 @@ public final class LeadToolset: MCPToolset {
         guard !evidence.isEmpty else { throw Problem(text: "Give the evidence: the transcript, log, commit or steps that show it (evidence).") }
         var about: String?
         if !wanted.isEmpty {
-            guard let task = store.load().task(wanted) else { throw Problem(text: "No task \(wanted) on the board: name the task by its slug, or leave task out.") }
+            guard let task = store.loadAll().task(wanted) else { throw Problem(text: "No task \(wanted) on the board: name the task by its slug, or leave task out.") }
             about = task.slug
         }
         let workflow = self.workflow
         let contract = Self.incidentContract(what: what, evidence: evidence, task: about, workflow: workflow)
         let title = "Turn this incident into a check: " + Self.clip(what.split(whereSeparator: \.isNewline).joined(separator: " "), 60)
         let task = try store.update { board -> LeadTask in
-            let task = LeadTask(slug: Slug.make(title, taken: Set(board.tasks.map(\.slug))), title: title, contract: contract)
+            let task = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title, contract: contract)
             board.tasks.append(task)
             return task
         }
@@ -3754,12 +3776,16 @@ public final class LeadToolset: MCPToolset {
 
     private func status() -> String {
         let board = store.load()
+        // The tasks the archive holds (finished a day ago and more): counted, not named.
+        let all = store.withArchive(board)
+        let live = Set(board.tasks.map(\.id))
+        let archived = all.tasks.filter { !live.contains($0.id) }
         // nil: the host can't be read (what workers do isn't known), never "none running".
         let listing = try? listed()
         let sessions = listing.map { Dictionary($0.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) }
         let workflow = self.workflow
         let power = self.power()?.statusText.map { "; \($0)" } ?? ""
-        var lines = ["Project \(project) on branch \(workflow.base) — \(board.tasks.count) task(s), max \(workflow.maxWorkers) workers at once\(power)\(longHolderText())."]
+        var lines = ["Project \(project) on branch \(workflow.base) — \(all.tasks.count) task(s), max \(workflow.maxWorkers) workers at once\(power)\(longHolderText())."]
         lines += workflowWarnings(workflow)
         if let ignored = ignoredKeysOnce(workflow) { lines.append(ignored) }
         lines += diskWarning(workflow, board: board, sessions: listing)
@@ -3819,11 +3845,11 @@ public final class LeadToolset: MCPToolset {
             }
         }
         let settled = board.tasks.filter { !endedIDs.contains($0.id) }
-        if let merged = Self.mergedLine(settled) { lines.append("\n" + merged) }
-        if let reverted = Self.revertedLine(settled) { lines.append("\n" + reverted) }
-        if let abandoned = Self.abandonedLine(settled) { lines.append("\n" + abandoned) }
+        if let merged = Self.mergedLine(settled, earlier: archived) { lines.append("\n" + merged) }
+        if let reverted = Self.revertedLine(settled, earlier: archived) { lines.append("\n" + reverted) }
+        if let abandoned = Self.abandonedLine(settled, earlier: archived) { lines.append("\n" + abandoned) }
         // The scorecard's cost line: the batch's receipts summed, and its most expensive task.
-        if let receipts = LeadReceiptTotals.line(board) { lines.append("\n" + receipts) }
+        if let receipts = LeadReceiptTotals.line(all) { lines.append("\n" + receipts) }
         if !ended.isEmpty {
             lines.append("\nworker ended (\(ended.count)), not running:")
             lines += ended.prefix(Self.statusTasks).map { task, who in
@@ -3851,7 +3877,7 @@ public final class LeadToolset: MCPToolset {
         }
         if let reports = try? newReports(), !reports.isEmpty {
             // One line each: the full text is on the board (board(task)), and reports about finished work are a count.
-            let finished = reports.filter { report in report.task.flatMap(board.task).map(LeadTeams.isFinished) ?? false }
+            let finished = reports.filter { report in report.task.flatMap(all.task).map(LeadTeams.isFinished) ?? false }
             let current = reports.filter { !finished.contains($0) }
             lines.append("\nReports since your last status (\(reports.count)), each cut to its start (board(task) has a task's reports in full, read_session its conversation):")
             if current.count > Self.statusReports { lines.append("- \(current.count - Self.statusReports) earlier ones: board(task) has them.") }
@@ -3880,13 +3906,13 @@ public final class LeadToolset: MCPToolset {
     /// ones found now.
     @discardableResult
     func recordReverts(base: String) -> [(slug: String, commit: String)] {
-        let merges = store.load().tasks.compactMap { task in task.merged.map { (slug: task.slug, merged: $0) } }
+        let merges = store.loadAll().tasks.compactMap { task in task.merged.map { (slug: task.slug, merged: $0) } }
         let found = LeadReverts.find(root: root, base: base, merges: merges)
         guard !found.isEmpty else { return [] }
         let now = Date().timeIntervalSince1970
         try? store.update { board in
             for (slug, commit) in found {
-                guard let index = board.taskIndex(slug), board.tasks[index].merged?.revertedBy == nil else { continue }
+                guard let index = store.restore(slug, into: &board), board.tasks[index].merged?.revertedBy == nil else { continue }
                 board.tasks[index].merged?.revertedBy = commit
                 board.tasks[index].merged?.revertedAt = now
             }
@@ -3902,38 +3928,48 @@ public final class LeadToolset: MCPToolset {
     static let reviewLegend = "Review: none (merge takes the worker's done report and runs the test command; no audit) unless a task's line says review audit (merge needs a passing audit). A branch that touches sensitive_paths is audited either way."
 
     /// "done (5, 2 folded): add-a, add-b, add-c; folded: old-a → add-a, old-b → add-c": the merged tasks and those folded
-    /// into another, counted together (bounded); nil when there are none.
-    static func mergedLine(_ tasks: [LeadTask]) -> String? {
+    /// into another, counted together (bounded); nil when there are none. `earlier`: the archived tasks, counted but
+    /// not named (board(task) finds each).
+    static func mergedLine(_ tasks: [LeadTask], earlier: [LeadTask] = []) -> String? {
         let done = tasks.filter { $0.status == .done }
         let folded = tasks.filter { $0.status == .folded }
-        guard !done.isEmpty || !folded.isEmpty else { return nil }
-        let count = "\(done.count + folded.count)" + (folded.isEmpty ? "" : ", \(folded.count) folded")
+        let older = earlier.filter { [.done, .folded].contains($0.status) }
+        guard !done.isEmpty || !folded.isEmpty || !older.isEmpty else { return nil }
+        let allFolded = folded.count + older.filter { $0.status == .folded }.count
+        let count = "\(done.count + folded.count + older.count)" + (allFolded == 0 ? "" : ", \(allFolded) folded")
         var names = done.map { $0.slug + ($0.merged?.unaudited == true ? " (unaudited)" : "") }.joined(separator: ", ")
         if !folded.isEmpty {
             names += (done.isEmpty ? "" : "; ") + "folded: " + folded.map { "\($0.slug) → \($0.foldedInto ?? "?")" }.joined(separator: ", ")
         }
-        return "done (\(count)): " + clip(names, 600)
+        return "done (\(count)): " + clip(names, 600) + earlierNote(older.count, named: !done.isEmpty || !folded.isEmpty)
+    }
+
+    /// "; and 240 earlier (archived: board(task) finds each)", after the names of the recent ones.
+    static func earlierNote(_ count: Int, named: Bool) -> String {
+        count == 0 ? "" : (named ? "; and " : "") + "\(count) earlier (archived: board(task) finds each)"
     }
 
     /// "reverted (1): add-a (by 1a2b3c4d: the chat froze on paste)": the merged tasks the lead's revert undid (bounded);
     /// nil when there are none.
-    static func revertedLine(_ tasks: [LeadTask]) -> String? {
+    static func revertedLine(_ tasks: [LeadTask], earlier: [LeadTask] = []) -> String? {
         let reverted = tasks.filter { $0.status == .reverted }
-        guard !reverted.isEmpty else { return nil }
-        return "reverted (\(reverted.count)): " + clip(reverted.map { task in
+        let older = earlier.filter { $0.status == .reverted }.count
+        guard !reverted.isEmpty || older > 0 else { return nil }
+        return "reverted (\(reverted.count + older)): " + clip(reverted.map { task in
             task.slug + " (" + (task.merged?.revertedBy.map { "by \($0.prefix(8))" } ?? "by ?")
                 + (task.merged?.revertReason.map { ": \(clip($0, 60))" } ?? "") + ")"
-        }.joined(separator: ", "), 600)
+        }.joined(separator: ", "), 600) + earlierNote(older, named: !reverted.isEmpty)
     }
 
     /// "abandoned (2): old-a (no longer wanted), old-b": the tasks the lead gave up, and those cleaned up after
     /// failing (bounded); nil when there are none.
-    static func abandonedLine(_ tasks: [LeadTask]) -> String? {
+    static func abandonedLine(_ tasks: [LeadTask], earlier: [LeadTask] = []) -> String? {
         let abandoned = tasks.filter(\.isAbandoned)
-        guard !abandoned.isEmpty else { return nil }
-        return "abandoned (\(abandoned.count)): " + clip(abandoned.map { task in
+        let older = earlier.filter(\.isAbandoned).count
+        guard !abandoned.isEmpty || older > 0 else { return nil }
+        return "abandoned (\(abandoned.count + older)): " + clip(abandoned.map { task in
             task.slug + (task.abandonedBecause.map { " (\(clip($0, 60)))" } ?? "")
-        }.joined(separator: ", "), 600)
+        }.joined(separator: ", "), 600) + earlierNote(older, named: !abandoned.isEmpty)
     }
 
     /// A task in one line (bounded): its title, what its worker does, its audit, rework, why it's kept, its last
@@ -4171,7 +4207,8 @@ public final class LeadToolset: MCPToolset {
     /// The board in one bounded line per task, with the open questions and the latest updates; with `task`, that task
     /// in full, with the reports about it.
     private func boardText(task wanted: String?) throws -> String {
-        let board = store.load()
+        // With the archive: every task, as before it, finished ones and all.
+        let board = store.loadAll()
         let sessions = (try? listed()).map { Dictionary($0.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first }) }
         if let wanted, !wanted.isEmpty {
             guard let task = board.task(wanted) else { throw Problem(text: "No task \(wanted) on the board. board without task lists them.") }

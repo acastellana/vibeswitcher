@@ -574,9 +574,12 @@ public final class LeadAdvance: @unchecked Sendable {
     /// never starts by itself (one is abandoned, reverted or gone), told once.
     private func waiting(_ task: LeadTask, _ board: LeadBoard) -> [String]? {
         var left: [String] = []
+        // A task finished a day ago is in the board's archive: read only when one is missing from the board.
+        lazy var all = lead.store.withArchive(board)
+        func find(_ slug: String) -> LeadTask? { board.task(slug) ?? all.task(slug) }
         for slug in task.after ?? [] {
-            var other = board.task(slug)
-            if other?.status == .folded, let carrier = other?.foldedInto { other = board.task(carrier) }
+            var other = find(slug)
+            if other?.status == .folded, let carrier = other?.foldedInto { other = find(carrier) }
             guard let other, !other.isAbandoned, ![.abandoned, .reverted].contains(other.status) else {
                 let why = other?.status == .reverted ? "which was merged and then reverted (its work is out of the base)" : "which is abandoned or gone"
                 once("after|\(task.slug)|\(slug)", "\(task.slug) won't start by itself: it comes after \(slug), \(why). update_task(\(task.slug), after: …) or start_worker it.")

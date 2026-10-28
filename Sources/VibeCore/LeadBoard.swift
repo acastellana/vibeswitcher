@@ -1044,6 +1044,13 @@ public struct LeadBoard: Codable, Equatable, Sendable {
     /// The flake ledger: each test that failed a merge's test run and passed its rerun (`MergeRerun`), oldest first,
     /// at most `keptFlakes`. Optional: older boards have none.
     public var flakes: [LeadFlake]?
+    /// What the tasks moved to the archive (`BoardStore.archive`) add to the scorecard, so it counts every merge from
+    /// this file alone. Optional: boards before the archive have none.
+    public var archivedScores: LeadArchivedScores?
+    /// The open batch's tasks the archive took (finished since the last all-done mark), cut to what the batch's card
+    /// and receipts read (`BoardStore.batchCopy`): the batch is told from this file alone (`BatchSummary.batch`).
+    /// Those a mark has taken in leave with the next archive. Optional: boards before the archive have none.
+    public var archivedBatch: [LeadTask]?
 
     public static let keptReports = 50
     public static let keptFlakes = 200
@@ -1327,7 +1334,15 @@ public final class BoardStore: @unchecked Sendable {
     public let root: String
     public var folder: String { (root as NSString).appendingPathComponent(".vibeswitcher") }
     var file: String { (folder as NSString).appendingPathComponent("board.json") }
-    private let local = NSLock()
+    /// Finished tasks a day old, moved off the board (`archive`): one task per line, appended, the last line of a task
+    /// the one that counts.
+    var archiveFile: String { (folder as NSString).appendingPathComponent("board-archive.jsonl") }
+    let local = NSLock()
+    /// The archive as last read, by its size and change time (it's only appended to), and the tasks `restore` brought
+    /// back in this `update`, with the status they had there.
+    let archiveLock = NSLock()
+    var archiveCache: (size: Int, changed: Date, tasks: [LeadTask])?
+    var restoring: [String: LeadTask.Status] = [:]
 
     public init(root: String) { self.root = root }
 
@@ -1385,6 +1400,27 @@ public final class BoardStore: @unchecked Sendable {
     /// Reads, changes and writes the board under a lock (other processes too), atomically.
     @discardableResult
     public func update<T>(_ change: (inout LeadBoard) throws -> T) throws -> T {
+        try locked {
+            var board = try read()
+            restoring = [:]
+            var before = Dictionary(board.tasks.map { ($0.id, $0.status) }, uniquingKeysWith: { first, _ in first })
+            let result = try change(&board)
+            // A task brought back from the archive had the status it had there.
+            before.merge(restoring) { first, _ in first }
+            restoring = [:]
+            // Each status change is stamped, whoever made it: how long a task has been where it is.
+            let now = Date().timeIntervalSince1970
+            for index in board.tasks.indices where before[board.tasks[index].id] != board.tasks[index].status {
+                board.tasks[index].since = before[board.tasks[index].id] == nil ? board.tasks[index].createdAt : now
+            }
+            board.refreshScores(now: now)
+            try write(board)
+            return result
+        }
+    }
+
+    /// Runs `body` holding the board's lock (other processes too).
+    func locked<T>(_ body: () throws -> T) throws -> T {
         try ensureFolder()
         local.lock()
         defer { local.unlock() }
@@ -1395,19 +1431,14 @@ public final class BoardStore: @unchecked Sendable {
             flock(fd, LOCK_UN)
             close(fd)
         }
-        var board = try read()
-        let before = Dictionary(board.tasks.map { ($0.id, $0.status) }, uniquingKeysWith: { first, _ in first })
-        let result = try change(&board)
-        // Each status change is stamped, whoever made it: how long a task has been where it is.
-        let now = Date().timeIntervalSince1970
-        for index in board.tasks.indices where before[board.tasks[index].id] != board.tasks[index].status {
-            board.tasks[index].since = before[board.tasks[index].id] == nil ? board.tasks[index].createdAt : now
-        }
-        board.refreshScores(now: now)
+        return try body()
+    }
+
+    /// Writes the board, atomically (under the lock).
+    func write(_ board: LeadBoard) throws {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         try VibePaths.writePrivate(try encoder.encode(board), to: URL(fileURLWithPath: file))
-        return result
     }
 
     public func appendProgress(_ line: String) throws {
@@ -1493,7 +1524,7 @@ public final class BoardStore: @unchecked Sendable {
 
     /// The `.vibeswitcher` folder, private to you (0700); the first time this version writes in it, what older ones left
     /// there is made private too (`PrivateRepair.project`).
-    private func ensureFolder() throws {
+    func ensureFolder() throws {
         try VibePaths.ensurePrivate(URL(fileURLWithPath: folder, isDirectory: true))
         PrivateRepair.project(folder)
     }

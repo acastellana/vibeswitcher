@@ -415,6 +415,31 @@ struct LeadFindingsToolTests: LeadTeamFixture {
         #expect(call(lead, "add_task", ["title": "No goal"]).isError)
     }
 
+    @Test func aFindingOfAnArchivedTaskStillBecomesATask() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        try started(lead, runtime, root: root)
+        _ = try audit(lead, runtime, ["completion": "complete", "integrity": "clean", "summary": "checked", "findings": Self.threeKinds])
+        // add-b finished two days ago, its worktree gone: the lead's server moves it to the archive.
+        let store = BoardStore(root: root)
+        try store.locked {
+            var board = try store.read()
+            let index = try #require(board.taskIndex("add-b"))
+            board.tasks[index].status = .done
+            board.tasks[index].worktree = nil
+            board.tasks[index].since = Date().timeIntervalSince1970 - 2 * 86_400
+            try store.write(board)
+        }
+        lead.archiveFinished(force: true)
+        #expect(store.load().task("add-b") == nil && store.archived().map(\.slug) == ["add-b"])
+        let added = call(lead, "add_task", ["from_finding": "add-b:F3"])
+        #expect(!added.isError, "\(added.text)")
+        let made = try #require(store.load().tasks.last)
+        #expect(made.contract.context.contains("a.txt says one"))
+        #expect(vault.audits(root: root, task: "add-b")?.finding("F3")?.followUp == made.slug)
+    }
+
     @Test func aReauditChecksTheOpenFindingsAndTheNewDiffAndNeverRepeatsAClosedOne() throws {
         let root = try repo()
         let runtime = FakeRuntime()
