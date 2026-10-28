@@ -1598,3 +1598,9 @@
 - 2026-10-28 07:25 Planned sidebar-running-workers: Sidebar: running workers and verifiers aren't nested under their lead (shown as their own worktree groups, with no "team:" line on the lead)
 - 2026-10-28 07:29 Started a worker on sidebar-running-workers
 - 2026-10-28 07:32 Merged land-pr-1-host: Land PR #1 (host security boundaries): apply it, fix what the review found, merge through project-lead
+- 2026-10-28 07:32 Automatically (auto_advance): Merged land-pr-1-host (Land PR #1 (host security boundaries): apply it, fix what the review found, merge through project-lead) into project-lead at f5bdf1a2, on its passing audit and the full test run.
+- 2026-10-28 07:33 Automatically (auto_advance): Cleaned up land-pr-1-host (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-10-28 07:33 Started a worker on issue-2-workers
+- 2026-10-28 07:33 Automatically (auto_advance): Started a worker on issue-2-workers (Issue #2: workers' vibeswitcher tools can come up empty (role bind races Claude Code 2.1.311's faster MCP start)), its after tasks done (land-pr-1-host).
+- 2026-10-28 07:36 Ended turn-this-incident-into-3's worker (idle since its done report on ee1aaad2) to make room on the Mac for its audit
+- 2026-10-28 07:36 Automatically (auto_advance): Started the audit of turn-this-incident-into-3 at ee1aaad2 (Its review is audit).
