@@ -1729,3 +1729,6 @@
 - 2026-10-28 11:24 Automatically (auto_advance): Started a worker on lead-chat-multi-line (Lead chat: multi-line shell blocks (if/then/fi, { … }) get a Run button that runs them as one script, after confirming).
 - 2026-10-28 11:24 Automatically (auto_advance): Started the audit of terminalclipboardsecurit at 485e259b (Its review is audit).
 - 2026-10-28 11:31 Merged sidebardifftests-leave: SidebarDiffTests leave sidebar-diff-* and sidebar-groups-* in TMPDIR (load runs exit 1) (no audit: review none)
+- 2026-10-28 11:31 Automatically (auto_advance): Merged sidebardifftests-leave (SidebarDiffTests leave sidebar-diff-* and sidebar-groups-* in TMPDIR (load runs exit 1)) into project-lead at 6e1b317a, review none: on its worker's done report on c3148298 and the full test run.
+- 2026-10-28 11:31 Automatically (auto_advance): Cleaned up sidebardifftests-leave; ended pid 59810 (Worker: SidebarDiffTests leave sidebar-diff-* and sidebar-groups-* in TMPDIR (load runs exit 1)) (freed 930 MB of build output and temporary folders). It stays done.
+- 2026-10-28 11:34 Automatically (auto_advance): Started the audit of the-lead-s-tools-2 at 8c2cfb1d (Its review is audit).
