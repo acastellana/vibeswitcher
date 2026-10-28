@@ -9,7 +9,8 @@ import Testing
 /// its tool server, installed from a scratch copy of the built one as the app's is. The copy is replaced by another
 /// one; each server switches to it in place, on the same pid and pipes, and the host still knows it as its session's:
 /// the lead's status answers, its auto_advance loop holds its lock again and its sealed report verifies, and so does a
-/// worker's report.
+/// worker's report. Under the keeper Claude Code runs them through (`MCPKeeper`), the same, and then each server is
+/// killed (SIGKILL): its keeper starts another, which the host knows as its session's too, with the same role and seals.
 @Suite(.serialized) struct ToolServerSwitchTests {
     let temp = Scratch()
 
@@ -76,7 +77,18 @@ import Testing
         return text.split(separator: "\n").compactMap { try? JSONDecoder().decode(SteerMessage.self, from: Data($0.utf8)) }
     }
 
-    @Test func theLeadsAndAWorkersServersKeepTheirRolesAndSealsThroughASwitch() throws {
+    /// The keeper's one child, the tool server, once it runs: not `previous`.
+    func child(of keeper: pid_t, not previous: pid_t? = nil) -> pid_t? {
+        var found: pid_t?
+        _ = eventually {
+            found = SessionStrays.children(of: keeper).first { $0 != previous }
+            return found != nil
+        }
+        return found
+    }
+
+    @Test(arguments: [false, true])
+    func theLeadsAndAWorkersServersKeepTheirRolesAndSealsThroughASwitch(keeper: Bool) throws {
         let built = URL(fileURLWithPath: hostLauncher).deletingLastPathComponent().appendingPathComponent("vibeswitcher-mcp").path
         try #require(FileManager.default.isExecutableFile(atPath: built), "vibeswitcher-mcp isn't built beside the host: run swift build first")
         let files = FileManager.default
@@ -119,7 +131,7 @@ import Testing
             let script = "\(folder)/\(name).sh"
             try """
             while [ ! -f '\(folder)/go-\(name)' ]; do sleep 0.05; done
-            tail -n +1 -f '\(folder)/\(name).in' | '\(installed)' --root '\(root)' \(arguments) > '\(folder)/\(name).out' 2> '\(folder)/\(name).err' &
+            tail -n +1 -f '\(folder)/\(name).in' | '\(installed)' \(keeper ? MCPKeeper.flag + " " : "")--root '\(root)' \(arguments) > '\(folder)/\(name).out' 2> '\(folder)/\(name).err' &
             echo $! > '\(folder)/\(name).pid'
             wait
             """.write(toFile: script, atomically: true, encoding: .utf8)
@@ -169,6 +181,8 @@ import Testing
         #expect(eventually { !fromLoop().isEmpty }, "the lead's inbox: \(inbox(vibe, tty: leadTTY)); stderr: \(lead.errors)")
         #expect(FileLock.attempt(advancing) == nil, "the loop doesn't hold \(advancing)")
         let reportsBefore = fromLoop().count
+        // Under the keeper, its child is the server that switches (on its own pid, the keeper's staying as it is).
+        let kept = keeper ? (try #require(child(of: leadPid)), try #require(child(of: workerPid))) : nil
 
         // The install: another build (another file) in its place, written beside it and renamed over it.
         try files.copyItem(atPath: built, toPath: dir + "/app/next")
@@ -180,6 +194,7 @@ import Testing
         // The same processes, on the same pipes, now the new build.
         #expect(kill(leadPid, 0) == 0 && kill(workerPid, 0) == 0)
         #expect(lead.pid == leadPid && worker.pid == workerPid)
+        if let kept { #expect(SessionStrays.children(of: leadPid) == [kept.0] && SessionStrays.children(of: workerPid) == [kept.1]) }
 
         // The lead's server is still the lead's: status answers, its role is the same grant in the same session.
         let after = try lead.settledCall(&leadID, "status")
@@ -191,6 +206,25 @@ import Testing
         // The new build's loop: its first pass reports again, sealed as auto_advance's, and it holds the lock again.
         #expect(eventually { fromLoop().count > reportsBefore }, "the lead's inbox: \(inbox(vibe, tty: leadTTY)); stderr: \(lead.errors)")
         #expect(FileLock.attempt(advancing) == nil, "the new build's loop doesn't hold \(advancing)")
+
+        if let kept {
+            // Each server is killed; its keeper starts another, which the client goes on with (no new initialize).
+            let reportsBeforeKill = fromLoop().count
+            #expect(kill(kept.0, SIGKILL) == 0 && kill(kept.1, SIGKILL) == 0)
+            // Asked once the new ones run: a call the keeper reads before it hears of the end fails as one in hand.
+            let next = (try #require(child(of: leadPid, not: kept.0)), try #require(child(of: workerPid, not: kept.1)))
+            let restarted = try lead.settledCall(&leadID, "status")
+            #expect(restarted?.isError == false, "status: \(restarted?.text ?? "no answer"); stderr: \(lead.errors)")
+            guard case .member(let again?) = book.answer(.current(role: .lead, root: root, task: nil), from: .app) else {
+                Issue.record("the lead's role is gone after the restart"); return
+            }
+            #expect(again.id == leadGrant && again.session == leadSession.id.uuidString)
+            // The new server's loop reports again, sealed, and holds the lock.
+            #expect(eventually { fromLoop().count > reportsBeforeKill }, "the lead's inbox: \(inbox(vibe, tty: leadTTY)); stderr: \(lead.errors)")
+            #expect(FileLock.attempt(advancing) == nil, "the restarted server's loop doesn't hold \(advancing)")
+            let log = (try? String(contentsOfFile: "\(vibe)/debug/mcp-lead-\(leadPid).log", encoding: .utf8)) ?? ""
+            #expect(log.contains("keeper: the tool server was killed by signal 9") && log.contains("started the tool server again, pid \(next.0)"), "\(log)")
+        }
 
         // The worker's server reports as its session's worker.
         let report = try worker.settledCall(&workerID, "report", ["status": "blocked", "summary": "Blocked on purpose (a test)."])
