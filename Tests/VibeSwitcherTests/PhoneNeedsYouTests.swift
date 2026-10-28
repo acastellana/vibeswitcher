@@ -148,9 +148,9 @@ struct PhoneNeedsYouTests {
 
     @Test func aWorkerThatCdsAwayStillShowsItsTaskUnderItsLead() async throws {
         let worker = Window(tty: "ttys974", label: "Worker: fix-login", event: "PreToolUse", cwd: "/r/acme/.vibeswitcher/worktrees/fix-login",
-                            hookCwd: "/tmp/scratch")
+                            hookCwd: "/r/scratch")
         let store = try await store([worker])
-        #expect(store.sessions.first { $0.tty == worker.tty }?.cwd == "/tmp/scratch")
+        #expect(store.sessions.first { $0.tty == worker.tty }?.cwd == "/r/scratch")
         let (access, token, done) = try serve(store, reads: Box([]))
         defer { done() }
 

@@ -39,7 +39,7 @@ struct SessionTeamsTests {
 
     @Test func aTeamMemberThatCdsAwayKeepsItsRepositoryAndTask() {
         // Its agent ran `cd` into a scratch folder: its window session's start folder still says where it works.
-        var drifted = session("w", .worker, cwd: "/tmp/scratch", project: "scratch")
+        var drifted = session("w", .worker, cwd: "/r/scratch", project: "scratch")
         drifted.startFolder = "/r/acme/.vibeswitcher/worktrees/fix-login"
         #expect(SessionTeams.project(of: drifted) == "acme")
         #expect(SessionTeams.name(of: drifted) == "acme · worker fix-login")
