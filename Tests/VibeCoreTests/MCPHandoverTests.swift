@@ -23,9 +23,12 @@ final class ScratchToolServer {
     /// The id of every reply, in the order they came (a reply sent twice is here twice).
     private var answered: [Int] = []
     private var notified: [String] = []
+    /// Replies with an id that isn't a number: none of this client's.
+    private var strays: [[String: Any]] = []
 
-    /// `extra`: more of the server's environment.
-    init(_ scratch: Scratch, environment extra: [String: String] = [:]) throws {
+    /// `extra`: more of the server's environment. `keeper`: run as Claude Code runs it, through its keeper (`MCPKeeper`),
+    /// which is then `process`.
+    init(_ scratch: Scratch, environment extra: [String: String] = [:], keeper: Bool = false) throws {
         dir = scratch.url("mcp-handover")
         let home = dir.appendingPathComponent("home")
         try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
@@ -33,7 +36,7 @@ final class ScratchToolServer {
         #expect(FileManager.default.isExecutableFile(atPath: toolServer), "swift build makes \(toolServer)")
         try install(build: "A")
         process.executableURL = URL(fileURLWithPath: installed)
-        process.arguments = ["--root", dir.path]
+        process.arguments = (keeper ? [MCPKeeper.flag] : []) + ["--root", dir.path]
         process.environment = ["HOME": home.path, "CFFIXED_USER_HOME": home.path, "PATH": "/usr/bin:/bin",
                                "TMPDIR": dir.path + "/", "VIBESWITCHER_MCP_TEST_BINARY": installed].merging(extra) { $1 }
         let log = dir.appendingPathComponent("server.log")
@@ -56,7 +59,23 @@ final class ScratchToolServer {
         }
     }
 
+    /// Closes the server's input, as a client that's gone does.
+    func closeInput() { try? input.fileHandleForWriting.close() }
+
     var log: String { (try? String(contentsOf: dir.appendingPathComponent("server.log"), encoding: .utf8)) ?? "" }
+
+    /// The `MCPLog` of the process `pid` (started without --role: as a lead), in its scratch home.
+    func mcpLog(_ pid: pid_t) -> String {
+        let file = dir.appendingPathComponent("home/.vibeswitcher/debug/mcp-lead-\(pid).log")
+        return (try? String(contentsOf: file, encoding: .utf8)) ?? ""
+    }
+
+    /// Replies whose id isn't a number (this client sends none such).
+    var strayReplies: [[String: Any]] {
+        lock.lock()
+        defer { lock.unlock() }
+        return strays
+    }
 
     /// Installs a build as an install does: written beside the binary, then renamed over it.
     func install(build: String) throws {
@@ -130,6 +149,8 @@ final class ScratchToolServer {
             if let id = message["id"] as? Int {
                 replies[id] = message
                 answered.append(id)
+            } else if message["id"] != nil {
+                strays.append(message)
             } else if let method = message["method"] as? String {
                 notified.append(method)
             }

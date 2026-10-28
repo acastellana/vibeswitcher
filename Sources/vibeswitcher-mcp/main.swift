@@ -7,6 +7,24 @@ import Darwin
 import Foundation
 import VibeCore
 
+// `vibeswitcher-mcp --keeper <arguments>`, as Claude Code starts it (see `LeadLaunch`): the tool server with the other
+// arguments, run as a child that's started again when it stops (see `MCPKeeper`). First of all, so the keeper runs
+// none of the server's code: its own log, and the relay.
+if let at = CommandLine.arguments.dropFirst().firstIndex(of: MCPKeeper.flag) {
+    var arguments = CommandLine.arguments
+    arguments.remove(at: at)
+    arguments.removeFirst()
+    let environment = ProcessInfo.processInfo.environment
+    // MCPKeeperTests' builds are scripts standing in for one (as MCPHandoverTests'), installed there: the keeper starts
+    // what's installed, as it does the app's binary.
+    let test = environment["VIBESWITCHER_MCP_TEST_BUILD"] != nil ? environment["VIBESWITCHER_MCP_TEST_BINARY"] : nil
+    let executable = test ?? Bundle.main.executablePath ?? CommandLine.arguments[0]
+    let role = arguments.firstIndex(of: "--role").flatMap { $0 + 1 < arguments.count ? arguments[$0 + 1] : nil } ?? "lead"
+    MCPLog.start(role: role)
+    MCPLog.note("keeper started: pid \(getpid()), parent \(getppid()), as \(role), keeping \(executable)")
+    exit(MCPKeeper.run(executable: executable, arguments: arguments))
+}
+
 // `vibeswitcher-mcp --test-failures FILE`, for scripts/test-under-load.sh: the failing tests in a saved `swift test`
 // output, as the lead's tools report them; nothing printed when it shows none.
 if CommandLine.arguments.count == 3, CommandLine.arguments[1] == "--test-failures" {
@@ -99,6 +117,11 @@ final class TestBuild: MCPToolset {
 
 let environment = ProcessInfo.processInfo.environment
 if let build = environment["VIBESWITCHER_MCP_TEST_BUILD"], let installed = environment["VIBESWITCHER_MCP_TEST_BINARY"] {
+    // `VIBESWITCHER_MCP_TEST_EXIT`: a build that exits with that status as it starts (a broken one, for MCPKeeperTests).
+    if let status = environment["VIBESWITCHER_MCP_TEST_EXIT"].flatMap(Int32.init) {
+        MCPLog.note("exiting with status \(status) at once, as VIBESWITCHER_MCP_TEST_EXIT says")
+        exit(status)
+    }
     let host = environment["VIBESWITCHER_MCP_TEST_HOST"]
     let toolset = MCPHostedToolset(patience: environment["VIBESWITCHER_MCP_TEST_PATIENCE"].flatMap(Double.init) ?? 120,
                                    firstDelay: 0.05, longestDelay: 0.2, attempt: {

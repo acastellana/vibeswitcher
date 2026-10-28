@@ -25,7 +25,8 @@ struct LeadLaunchTests {
         let mcp = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.mcpFile))) as? [String: Any]
         let server = (mcp?["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any]
         #expect(server?["command"] as? String == "/App/vibeswitcher-mcp")
-        #expect(server?["args"] as? [String] == ["--role", "lead", "--root", root])
+        // Through its keeper, which starts it again if it stops (MCPKeeperTests).
+        #expect(server?["args"] as? [String] == ["--keeper", "--role", "lead", "--root", root])
         let settings = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.settingsFile))) as? [String: Any]
         let deny = (settings?["permissions"] as? [String: Any])?["deny"] as? [String] ?? []
         #expect(deny.contains("Edit") && deny.contains("Write") && deny.contains("Bash(git commit:*)"))
@@ -53,7 +54,7 @@ struct LeadLaunchTests {
         #expect(settings?["env"] as? [String: String] == ["GIT_EDITOR": "true", "GIT_OPTIONAL_LOCKS": "0"])
         let mcp = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: launch.mcpFile))) as? [String: Any]
         let args = ((mcp?["mcpServers"] as? [String: Any])?["vibeswitcher"] as? [String: Any])?["args"] as? [String]
-        #expect(args == ["--role", "worker", "--root", root, "--task", "add-login"])
+        #expect(args == ["--keeper", "--role", "worker", "--root", root, "--task", "add-login"])
         #expect(launch.promptFile.contains("/.vibeswitcher/run/worker-add-login/"))
     }
 

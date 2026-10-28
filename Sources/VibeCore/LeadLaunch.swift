@@ -153,7 +153,9 @@ public enum LeadLaunch {
         let settingsFile = (folder as NSString).appendingPathComponent("settings.json")
         try LeadVault.writePrivate(Data(prompt.utf8), to: URL(fileURLWithPath: promptFile))
         // The role and task here are only what the server expects; the session host says what its session holds.
-        var args = ["--role", role.rawValue, "--root", root]
+        // Through a keeper (`MCPKeeper`): a server that stops is started again, and the session's tools come back by
+        // themselves, with no /mcp.
+        var args = [MCPKeeper.flag, "--role", role.rawValue, "--root", root]
         if let task { args += ["--task", task] }
         let entry: [String: Any] = ["command": server, "args": args]
         let mcp: [String: Any] = ["mcpServers": ["vibeswitcher": entry]]
