@@ -1854,3 +1854,11 @@
 - 2026-10-28 17:20 Merged docs-overhaul-a-clear: Docs overhaul: a clear README and a docs/ guide set that match today's app
 - 2026-10-28 17:20 Automatically (auto_advance): Merged docs-overhaul-a-clear (Docs overhaul: a clear README and a docs/ guide set that match today's app) into project-lead at aa0737a3, on its passing audit and the full test run.
 - 2026-10-28 17:20 Automatically (auto_advance): Cleaned up docs-overhaul-a-clear; ended pid 63952 (Worker: Docs overhaul: a clear README and a docs/ guide set that match today's app) (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-10-28 17:37 Started a worker on docs-touch-ups-the
+- 2026-10-28 17:37 Automatically (auto_advance): Started a worker on docs-touch-ups-the (Docs touch-ups: the sandbox's Team fixture uses a real project name ('stakegen') in a published screenshot; the lint list misses AgentExportLint).
+- 2026-10-28 17:37 Started a worker on systempower-onacpower
+- 2026-10-28 17:37 Automatically (auto_advance): Started a worker on systempower-onacpower (SystemPower.onACPower blocks the main thread (6.4 s) from KeepAwake.update in LeadController.refreshed).
+- 2026-10-28 17:38 Planned the-mac-hit-load: The Mac hit load 150: load-test runs and heavy suites must not stack, and auto_advance must not start work on a momentary dip (review audit)
+- 2026-10-28 17:40 Started a worker on the-mac-hit-load
+- 2026-10-28 17:40 Automatically (auto_advance): Started a worker on the-mac-hit-load (The Mac hit load 150: load-test runs and heavy suites must not stack, and auto_advance must not start work on a momentary dip).
+- 2026-10-28 17:40 Automatically (auto_advance): Started the audit of lead-start-preflight-on at f056cb39 (Its review is audit).
