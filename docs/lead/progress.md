@@ -1852,3 +1852,5 @@
 - 2026-10-28 17:10 Planned docs-touch-ups-the: Docs touch-ups: the sandbox's Team fixture uses a real project name ('stakegen') in a published screenshot; the lint list misses AgentExportLint
 - 2026-10-28 17:11 Planned systempower-onacpower: SystemPower.onACPower blocks the main thread (6.4 s) from KeepAwake.update in LeadController.refreshed
 - 2026-10-28 17:20 Merged docs-overhaul-a-clear: Docs overhaul: a clear README and a docs/ guide set that match today's app
+- 2026-10-28 17:20 Automatically (auto_advance): Merged docs-overhaul-a-clear (Docs overhaul: a clear README and a docs/ guide set that match today's app) into project-lead at aa0737a3, on its passing audit and the full test run.
+- 2026-10-28 17:20 Automatically (auto_advance): Cleaned up docs-overhaul-a-clear; ended pid 63952 (Worker: Docs overhaul: a clear README and a docs/ guide set that match today's app) (freed 1.4 GB of build output and temporary folders). It stays done.
