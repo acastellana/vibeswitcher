@@ -1882,3 +1882,5 @@
 - 2026-10-28 19:05 Started a worker on a-full-suite-run
 - 2026-10-28 19:11 Merged lead-start-preflight-on: Lead start preflight: on a new Mac, say plainly what's missing (claude, git, Command Line Tools) instead of failing with an error code
 - 2026-10-28 19:11 Automatically (auto_advance): Merged lead-start-preflight-on (Lead start preflight: on a new Mac, say plainly what's missing (claude, git, Command Line Tools) instead of failing with an error code) into project-lead at 3c279ba5, on its passing audit and the full test run.
+- 2026-10-28 19:13 accepted 1 commit on project-lead that you ran from VibeSwitcher's window: 2dff2f8 docs/lead: other projects named generically
+- 2026-10-28 19:20 Automatically (auto_advance): Didn't merge a-hung-merge-test: Not merged: project-lead is at 2dff2f8a, not at 7529351c where it was; it moved meanwhile.
