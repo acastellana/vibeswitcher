@@ -364,6 +364,9 @@ final class LeadController: ObservableObject {
     /// What this Mac lacks to start a lead with a command line (see `LaunchPreflight`), looked at off the main thread
     /// before anything else of a start. Faked in tests.
     var preflight: (_ command: String) -> LaunchPreflight.Problem? = { LaunchPreflight.standard.check(command: $0, helpers: LeadController.helpers) }
+    /// Installs what a start found missing, on the user's click (`ToolInstaller`); its alerts are `confirm`'s, and the
+    /// install session it starts is shown with `select`.
+    let installer: ToolInstaller
 
     init(host: HostClient, store: SessionStore, vault: LeadVault = .standard, inbox: URL = VibePaths.root,
          home: String = VibePaths.home, keepAwake: KeepAwake = KeepAwake(), sweepsRoles: Bool = false, claudeCommand: @escaping (String) -> String) {
@@ -378,6 +381,7 @@ final class LeadController: ObservableObject {
         baseMoves = BaseMoves(vault: vault, reads: reads)
         allDone = AllDoneWatch(reads: reads)
         self.claudeCommand = claudeCommand
+        installer = ToolInstaller(host: host)
         summaries.lookup = { [weak host, weak store] id in
             (host?.sessions.first { $0.id.uuidString == id }, store?.sessions.first { $0.hostID?.uuidString == id }?.transcriptPath)
         }
@@ -392,6 +396,8 @@ final class LeadController: ObservableObject {
         roleSweep?.tools = { [weak self] tools in
             DispatchQueue.main.async { self?.toolTimes = tools }
         }
+        installer.confirm = { [weak self] title, text, buttons in self?.confirm(title, text, buttons) ?? buttons.count - 1 }
+        installer.select = { [weak self] id in self?.select(id) }
         allDone.enabled = { [weak summaries] in summaries?.enabled ?? false }
         allDone.changed = { [weak self] _ in self?.refresh() }
         timer = Heartbeat.shared.every(3) { [weak self] in self?.refresh() }
@@ -502,8 +508,13 @@ final class LeadController: ObservableObject {
         // git can be slow (a network volume, a git shim): find the repository off the main thread.
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             // First: on a Mac without the Command Line Tools, git below would only say the folder isn't a repository.
+            // What's missing is offered to install (on your click), then this start runs again.
             if let missing = preflight(command) {
-                return DispatchQueue.main.async { self?.alert(missing.title, "The lead wasn't started. " + missing.text) }
+                return DispatchQueue.main.async {
+                    self?.installer.resolve(missing, preflight: { preflight(command) }) { [weak self] in
+                        self?.startLead(in: folder, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead)
+                    }
+                }
             }
             let top = Git.run(["rev-parse", "--show-toplevel"], in: folder)
             let root = (top.output as NSString).standardizingPath

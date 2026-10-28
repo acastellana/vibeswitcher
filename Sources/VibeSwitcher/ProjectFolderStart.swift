@@ -124,6 +124,10 @@ struct ProjectFolderStart {
     /// the folder isn't a repository).
     var leadCommand: (_ folder: String) -> String = { _ in "claude" }
     var preflight: (_ command: String) -> LaunchPreflight.Problem? = { _ in nil }
+    /// Offers to install what the preflight found missing (`ToolInstaller.resolve`): its look again, and this start
+    /// again once it's installed. Nil: only says what's missing (`failed`).
+    var install: ((_ problem: LaunchPreflight.Problem, _ preflight: @escaping () -> LaunchPreflight.Problem?,
+                   _ retry: @escaping () -> Void) -> Void)?
 
     func run(preset: LaunchPreset?, folder: String?) {
         let plan = Self.plan(preset: preset, folder: folder)
@@ -145,7 +149,10 @@ struct ProjectFolderStart {
         // git can be slow (a network volume): off the main thread.
         DispatchQueue.global(qos: .userInitiated).async {
             if let missing = preflight(command) {
-                return DispatchQueue.main.async { self.failed(missing.title, "The lead wasn't started. " + missing.text) }
+                return DispatchQueue.main.async {
+                    guard let install = self.install else { return self.failed(missing.title, "The lead wasn't started. " + missing.text) }
+                    install(missing, { preflight(command) }) { self.startLead(chosen: folder) }
+                }
             }
             let top = git(["rev-parse", "--show-toplevel"], folder)
             let inRepository = top.ok && !top.output.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty

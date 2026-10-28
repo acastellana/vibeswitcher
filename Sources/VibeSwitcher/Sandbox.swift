@@ -829,18 +829,30 @@ private final class Driver: NSObject, NSApplicationDelegate {
             return alert.window
         }),
         // A lead started on a Mac without Claude Code: the real look (`LaunchPreflight`), its login shell a stand-in
-        // whose PATH has no claude, and the alert the start shows.
+        // whose PATH has no claude, and the alert the start shows, offering Anthropic's installer (`ToolInstall`).
         ("missing-claude", { driver in
             let shell = driver.home + "/bin/fakesh"
             let script = "#!/bin/sh\nshift 2\nPATH=/usr/bin:/bin; export PATH\nexec /bin/sh \"$@\"\n"
             try? VibePaths.ensurePrivate(URL(fileURLWithPath: driver.home + "/bin"))
             try? VibePaths.writePrivate(Data(script.utf8), to: URL(fileURLWithPath: shell))
             chmod(shell, 0o700)
-            guard let missing = LaunchPreflight(shell: shell).check(command: "claude") else { return nil }
-            let alert = LeadController.makeAlert(missing.title, "The lead wasn't started. " + missing.text, ["OK"])
+            guard let missing = LaunchPreflight(shell: shell).check(command: "claude"), let install = ToolInstall.offer(for: missing)
+            else { return nil }
+            let offer = install.offer(missing)
+            let alert = LeadController.makeAlert(offer.title, offer.text, ToolInstall.buttons)
             alert.layout()
             return alert.window
         }),
+        // A lead started on a Mac without Apple's Command Line Tools (nor git with them): the install it offers.
+        ("missing-tools", { _ in
+            let missing = LaunchPreflight.Problem(missing: [.commandLineTools])
+            let offer = ToolInstall.commandLineTools.offer(missing)
+            let alert = LeadController.makeAlert(offer.title, offer.text, ToolInstall.buttons)
+            alert.layout()
+            return alert.window
+        }),
+        // What shows while Apple's installer runs.
+        ("installing-tools", { _ in ToolInstaller.waitingPanel(ToolInstaller.waitingText) {} }),
     ] }
 
     /// The `lead-team` sheet's board, as of now.

@@ -657,7 +657,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
             },
             failed: { title, text in _ = LeadController.runAlert(title, text, ["OK"]) },
             leadCommand: { [weak self] folder in self?.leadController.command(for: folder) ?? "claude" },
-            preflight: leadController.preflight)
+            preflight: leadController.preflight,
+            install: { [weak self] problem, preflight, retry in self?.leadController.installer.resolve(problem, preflight: preflight, retry: retry) })
     }
 
     func startSession(_ preset: LaunchPreset, in folder: String) {
