@@ -1732,3 +1732,9 @@
 - 2026-10-28 11:31 Automatically (auto_advance): Merged sidebardifftests-leave (SidebarDiffTests leave sidebar-diff-* and sidebar-groups-* in TMPDIR (load runs exit 1)) into project-lead at 6e1b317a, review none: on its worker's done report on c3148298 and the full test run.
 - 2026-10-28 11:31 Automatically (auto_advance): Cleaned up sidebardifftests-leave; ended pid 59810 (Worker: SidebarDiffTests leave sidebar-diff-* and sidebar-groups-* in TMPDIR (load runs exit 1)) (freed 930 MB of build output and temporary folders). It stays done.
 - 2026-10-28 11:34 Automatically (auto_advance): Started the audit of the-lead-s-tools-2 at 8c2cfb1d (Its review is audit).
+- 2026-10-28 11:37 Audit of terminalclipboardsecurit: complete, clean, round 1: 1 Pre-existing open
+- 2026-10-28 11:38 Dismissed terminalclipboardsecurit:F1: Already fixed: sidebardifftests-leave merged at 6e1b317a.
+- 2026-10-28 11:44 Audit of the-lead-s-tools-2: complete, clean, round 1: 2 Nit open
+- 2026-10-28 11:55 Planned hang-reports-are-pruned: Hang reports are pruned to the newest 10: keep a week (by age and total size), so tasks can read the reports they're about
+- 2026-10-28 11:56 Merged terminalclipboardsecurit: TerminalClipboardSecurityTests.onlyTheFocusedVisiblePaneSetsTheClipboardLive flakes (copied "REPLAYED" instead of "LIVE"): 3 times
+- 2026-10-28 11:56 Flaky in terminalclipboardsecurit's merge: aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone(), indexLockIsWaitedForAndAFailureIsReported() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
