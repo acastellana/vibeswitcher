@@ -1916,3 +1916,8 @@
 - 2026-10-28 20:16 Automatically (auto_advance): Started the audit of team-panel-and-inspector at 31318dee (The risk check raised it to audit: it changes 508 lines outside tests, over risk_lines (400)).
 - 2026-10-28 20:16 Planned sessionstore-refresh: SessionStore.refresh writes the activity ledger and asks NSRunningApplication for bundle ids on the main thread
 - 2026-10-28 20:18 Automatically (auto_advance): a-full-suite-run is audited, not merged: it changes test or build infrastructure the suite relies on (Tests/VibeCoreTests/TestSupport.swift, Tests/VibeHostTests/TestSupport.swift, Tests/VibeSwitcherTests/TestSupport.swift) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-10-28 20:31 Audit of the-mac-hit-load: complete, clean, round 1: 3 Nit open
+- 2026-10-28 20:32 Audit of team-panel-and-inspector: incomplete, clean, round 1: 2 Important open, 2 Nit open
+- 2026-10-28 20:32 Planned the-witness-s-stall: The witness's stall and event computation runs on the main thread (LeadController.witness → LeadWitness.stalls)
+- 2026-10-28 20:33 Audit of keep-awake-s-power: incomplete, clean, round 1: 1 Important open, 1 Nit open
+- 2026-10-28 20:37 Merged the-mac-hit-load: The Mac hit load 150: load-test runs and heavy suites must not stack, and auto_advance must not start work on a momentary dip
