@@ -57,7 +57,12 @@ public struct PendingPrompt: Equatable, Sendable {
 
     /// Told of each text `quoted` builds and whether on the main thread, for tests: the app's witness builds none
     /// there (masking a long one took up to a second of a refresh, hang-20261027-201145).
-    nonisolated(unsafe) public static var quoting: ((String, Bool) -> Void)?
+    public static var quoting: ((String, Bool) -> Void)? {
+        get { quotingLock.lock(); defer { quotingLock.unlock() }; return quotingHook }
+        set { quotingLock.lock(); quotingHook = newValue; quotingLock.unlock() }
+    }
+    private static let quotingLock = NSLock()
+    nonisolated(unsafe) private static var quotingHook: ((String, Bool) -> Void)?
 
     /// The text as the lead reads it, credentials masked: inline (“…”) when it's short and on one line, otherwise in
     /// a fenced block; past `limit` characters cut at a word, with a note saying how much more there is.

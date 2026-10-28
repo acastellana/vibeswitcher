@@ -36,11 +36,12 @@ final class AllDoneWatch {
     }
 
     private func summarize(_ mark: LeadAllDone, root: String, board: LeadBoard) {
-        let input = BatchSummary.input(mark, board: board, project: (root as NSString).lastPathComponent)
         let generate = generate
         let enabled = enabled() && generate != nil
         let reads = reads
         run { [weak self] in
+            // Its input too: the batch's titles, goals and updates, each masked (`BatchSummary.clean`), off the main thread.
+            let input = BatchSummary.input(mark, board: board, project: (root as NSString).lastPathComponent)
             let summary = BatchSummary.write(input, tasks: mark.tasks, enabled: enabled, generate: generate ?? { _ in nil })
             reads.async({ _ in (try? BoardStore(root: root).update { $0.setAllDoneSummary(summary, for: mark.id) }) ?? false }) { wrote in
                 if wrote { self?.changed(root) }
