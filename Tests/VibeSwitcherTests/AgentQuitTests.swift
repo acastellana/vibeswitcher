@@ -66,8 +66,12 @@ struct AgentQuitTests {
             try await h.waitFor { h.host.sessions.first { $0.id == h.session.id }?.isLive == false }
             return
         }
-        let exited = try await table { $0[agent] == nil && $0[child] != nil }
+        // The kept shell started (its profile's commands, path_helper, run under it as it does: they'd count as its
+        // agent's work), its child left to launchd.
         let shell = try #require(h.host.sessions.first { $0.id == h.session.id })
+        let exited = try await table { table in
+            table[agent] == nil && table[child]?.ppid == 1 && !table.values.contains { $0.ppid == shell.childPID }
+        }
         #expect(shell.isLive && !shell.agentRuns(in: exited))
         let quit = witness(shell, table: exited, now: later)
         #expect(quit.events.contains { $0.contains("ended without a verdict (\(LeadWitness.agentQuitEnding))") }, "\(quit.events)")
