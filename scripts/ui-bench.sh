@@ -13,10 +13,12 @@
 #
 # scripts/ui-bench.sh [-b BINARY] [-B BASE] [-r ROUNDS] [-t PCT] [MINUTES] [--onscreen] [--ticking] [--transcript PATH]
 #   -b BINARY: the build judged (.build/debug/VibeSwitcher).  -B BASE: the base: a VibeSwitcher binary, or a git ref
-#   (project-lead) exported and built under .build/ui-bench-base/COMMIT (once per commit; only the latest is kept).
+#   (project-lead) exported and built in this run's scratch folder under /tmp, outside the worktree, and removed on exit
+#   (Ctrl-C too). Not under .build/: the export holds the ref's AGENTS.md and CLAUDE.md, and the lead's audit counts
+#   instructions files a worktree holds uncommitted (its verifier then starts with project settings off).
 #   -r ROUNDS: runs of each with -B (2).  -t PCT: how far over the base's instructions/s the branch may be (20).
 #   MINUTES: the idle phase (default 5). --onscreen: the window shows (without taking focus) instead of off screen.
-#   Logs: .build/ui-bench/{base,branch}-N.log (UI_BENCH_LOGS: another folder).
+#   Logs: .build/ui-bench/{base,branch}-N.log, and the base's build-base.log (UI_BENCH_LOGS: another folder).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source scripts/lib/scratch.sh
@@ -55,27 +57,27 @@ if over "$started_load"; then
     exit 0
 fi
 
+logs=${UI_BENCH_LOGS:-.build/ui-bench}
+mkdir -p "$logs"
+rm -f "$logs"/*.log
 if [[ -n $base && ! ( -f $base && -x $base ) ]]; then
     commit=$(git rev-parse --verify --quiet "$base^{commit}") || { echo "-B $base: neither a binary nor a git ref"; exit 64; }
-    folder=.build/ui-bench-base/$commit
-    if [[ ! -x $folder/.build/debug/VibeSwitcher ]]; then
-        # One base build kept: each is about 1 GB.
-        rm -rf .build/ui-bench-base
-        mkdir -p "$folder"
-        echo "building the base, $base ($commit), in $folder"
-        git archive "$commit" | tar -x -C "$folder"
-        scratch_tmpdir vs-uibench
-        swift build --package-path "$folder" > "$folder.build.log" 2>&1 || { echo "the base didn't build: $folder.build.log"; exit 1; }
-    fi
+    # Where it was built before 2026-10-28 (about 1 GB, the ref's AGENTS.md and CLAUDE.md in it).
+    rm -rf .build/ui-bench-base
+    scratch_tmpdir vs-uibench
+    folder=$tool_scratch/base
+    mkdir "$folder"
+    echo "building the base, $base ($commit), in $folder"
+    git archive "$commit" | tar -x -C "$folder"
+    # In the tests UI_BENCH_SWIFT stands in for swift.
+    [[ -z ${UI_BENCH_SWIFT:-} ]] || swift() { "$UI_BENCH_SWIFT" "$@"; }
+    swift build --package-path "$folder" > "$logs/build-base.log" 2>&1 || { echo "the base didn't build: $logs/build-base.log"; exit 1; }
     base=$folder/.build/debug/VibeSwitcher
 fi
 # Neither may write the real ~/Library/Preferences/VibeSwitcher.plist (scripts/lib/bench-defaults.sh).
 bench_defaults_in_scratch "$binary" || exit 1
 [[ -z $base ]] || bench_defaults_in_scratch "$base" || exit 1
 
-logs=${UI_BENCH_LOGS:-.build/ui-bench}
-mkdir -p "$logs"
-rm -f "$logs"/*.log
 loaded=""   # set when the load went over the threshold during a run
 # run NAME BINARY ARGS…: one bench in a scratch home of its own; its log is $logs/NAME.log, its exit status in $status.
 run() {

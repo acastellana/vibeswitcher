@@ -44,7 +44,7 @@ struct UIBenchScriptTests {
         return url
     }
 
-    func bench(_ arguments: [String], load: String = "0.5") throws -> (status: Int32, output: String) {
+    func bench(_ arguments: [String], load: String = "0.5", swift: URL? = nil) throws -> (status: Int32, output: String) {
         let logs = scratch.url("ui-bench-logs")
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/bash")
@@ -52,6 +52,7 @@ struct UIBenchScriptTests {
         var environment = ProcessInfo.processInfo.environment
         environment["UI_BENCH_FAKE_LOAD"] = load
         environment["UI_BENCH_LOGS"] = logs.path
+        if let swift { environment["UI_BENCH_SWIFT"] = swift.path }
         process.environment = environment
         let pipe = Pipe()
         process.standardOutput = pipe
@@ -74,6 +75,35 @@ struct UIBenchScriptTests {
         #expect(run.status == 0, "\(run.output)")
         #expect(self.order(order) == ["base", "branch", "base", "branch"])
         #expect(run.output.contains("PASS  idle: 76.0 M instructions/s, the base 78.0 M"), "\(run.output)")
+    }
+
+    /// 2026-10-28: the base's export sat under .build/ui-bench-base/COMMIT, its AGENTS.md and CLAUDE.md with it, and the
+    /// lead's audit took them for instructions the worktree held uncommitted: its verifier waited on a trust question.
+    /// The base is built in the run's scratch folder, outside the worktree, and goes when the run ends.
+    @Test func aBaseRefIsBuiltOutsideTheWorktreeAndRemovedOnExit() throws {
+        let order = scratch.url("order")
+        let built = scratch.url("built")
+        let branch = try fakeBuild("branch", rate: 30e6, order: order)
+        // A fake swift: notes the package it builds and whether the ref's AGENTS.md is in it, and leaves a fake base build.
+        let swift = scratch.url("fake-swift")
+        try """
+        #!/bin/bash
+        [[ $1 == build && $2 == --package-path ]] || exit 2
+        { echo "$3"; [[ -f $3/AGENTS.md ]] && echo agents; } > '\(built.path)'
+        mkdir -p "$3/.build/debug"
+        cp '\(try fakeBuild("base", rate: 30e6, order: order).path)' "$3/.build/debug/VibeSwitcher"
+        """.write(to: swift, atomically: true, encoding: .utf8)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: swift.path)
+        let run = try bench(["-b", branch.path, "-B", "HEAD", "-r", "1", "1"], swift: swift)
+        #expect(run.status == 0, "\(run.output)")
+        #expect(self.order(order) == ["base", "branch"])
+        let noted = self.order(built)
+        let folder = try #require(noted.first, "\(run.output)")
+        #expect(noted.last == "agents")
+        let worktree = Self.repo.standardizedFileURL.resolvingSymlinksInPath().path
+        #expect(!URL(fileURLWithPath: folder).resolvingSymlinksInPath().path.hasPrefix(worktree + "/"), "\(folder)")
+        #expect(!FileManager.default.fileExists(atPath: folder))
+        #expect(!FileManager.default.fileExists(atPath: Self.repo.appendingPathComponent(".build/ui-bench-base").path))
     }
 
     @Test func aBranchWorkingMoreThanTheToleranceOverTheBaseFails() throws {
