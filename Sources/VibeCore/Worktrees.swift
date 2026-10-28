@@ -1684,7 +1684,7 @@ public struct TestFailures: Equatable, Sendable {
     }
 
     /// The name in a Swift Testing event line ("✘ Test answerIsRight() recorded an issue at …"), when it's `event`.
-    private static func swiftTesting(_ line: String, _ event: String, marks: [String] = ["✘", "􀢄"]) -> String? {
+    static func swiftTesting(_ line: String, _ event: String, marks: [String] = ["✘", "􀢄"]) -> String? {
         for mark in marks where line.hasPrefix(mark + " Test ") {
             let rest = line.dropFirst(mark.count + " Test ".count)
             guard !rest.hasPrefix("run with "), !rest.hasPrefix("run started"), let end = rest.range(of: event) else { return nil }
@@ -1702,7 +1702,7 @@ public struct TestFailures: Equatable, Sendable {
     }
 
     /// "-[Module.Suite testName]" or "Suite.testName" as "Suite.testName".
-    private static func xcTestName<S: StringProtocol>(_ raw: S) -> String {
+    static func xcTestName<S: StringProtocol>(_ raw: S) -> String {
         let parts = raw.trimmingCharacters(in: CharacterSet(charactersIn: "-[]")).split(separator: " ")
         guard parts.count == 2 else { return String(raw) }
         return "\(parts[0].split(separator: ".").last ?? parts[0]).\(parts[1])"

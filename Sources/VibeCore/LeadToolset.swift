@@ -2160,7 +2160,7 @@ public final class LeadToolset: MCPToolset {
         // (`MergeRerun`): what failed, then the rerun that passed, when that's how it passed.
         let tested: String
         var rerun: MergeRerun.Plan?
-        var flaked: (plan: MergeRerun.Plan, log: String?)?
+        var flaked: (plan: MergeRerun.Plan, failed: String, log: String?)?
         // The passing run's test count, for its receipt.
         var testCount: Int?
         switch Worktrees.rebaseAndTest(root: root, commit: commit, onto: current, setup: workflow.initCommand, test: workflow.mergeChecks,
@@ -2182,7 +2182,7 @@ public final class LeadToolset: MCPToolset {
                               + "\nIts rerun of the failing tests exited 0 but didn't show \(names) passing (a filter that matched nothing), so it doesn't count.")
             }
             tested = commit
-            flaked = (plan, saveMergeLog(failed + "\n" + again, slug: slug))
+            flaked = (plan, failed, saveMergeLog(failed + "\n" + again, slug: slug))
         case .cancelled:
             // Stopped by the caller: nothing is known about the work, and the task stays as it was.
             throw Problem(text: "The merge of \(slug) was cancelled; nothing was merged, and \(slug) stays as it was.")
@@ -2214,6 +2214,9 @@ public final class LeadToolset: MCPToolset {
         case .merged:
             try vault.setHead(tested, root: root, branch: base)
             let flakes = flaked.map { $0.plan.tests.isEmpty ? [MergeRerun.unnamed] : $0.plan.tests } ?? []
+            // Each flaky test's failure lines, where every session can read them (the merge's log is in the vault).
+            let flakeLines = flaked.map { MergeRerun.evidence(in: $0.failed, tests: $0.plan.tests) } ?? [:]
+            let flakeLog = flakeLines.isEmpty ? nil : saveFlakeEvidence(flakeLines, tests: flakes, slug: slug, commit: tested)
             // Its receipt, written with the merge: its transcripts read before the board's lock is taken.
             let usage = receiptUsage(task)
             let brought = Int(Git.run(["rev-list", "--count", "\(current)..\(tested)"], in: root).output)
@@ -2228,17 +2231,18 @@ public final class LeadToolset: MCPToolset {
                 guard !flakes.isEmpty else { return [] }
                 // The flake ledger, and a task for each test that flaked once too often (once: `recordFlakes`), unless
                 // an open task names it already: its count goes in that task's context.
-                return board.recordFlakes(flakes, task: slug, commit: tested, now: Date().timeIntervalSince1970).map { test, merges in
+                return board.recordFlakes(flakes, task: slug, commit: tested, now: Date().timeIntervalSince1970, evidence: flakeLines,
+                                          log: flakeLog).map { test, _, counted in
                     if let open = board.openTask(naming: test), let index = board.taskIndex(open.id) {
                         let context = board.tasks[index].contract.context.trimmingCharacters(in: .whitespacesAndNewlines)
-                        let line = MergeRerun.flakeNote(test: test, merges: merges)
+                        let line = MergeRerun.flakeNote(test: test, flakes: counted)
                         board.tasks[index].contract.context = context.isEmpty ? line : context + "\n\n" + line
                         board.notePlanned(open.slug, for: test)
                         return (test, open.slug, true)
                     }
                     let title = "Fix the flaky test " + Self.clip(test, 60)
                     let fix = LeadTask(slug: Slug.make(title, taken: store.takenSlugs(board)), title: title,
-                                       contract: MergeRerun.fixContract(test: test, merges: merges, workflow: workflow))
+                                       contract: MergeRerun.fixContract(test: test, flakes: counted, workflow: workflow))
                     board.tasks.append(fix)
                     board.notePlanned(fix.slug, for: test)
                     return (test, fix.slug, false)
@@ -2271,6 +2275,8 @@ public final class LeadToolset: MCPToolset {
                 }
                 flakeNote = " (Its first test run failed on \(Self.clip(names, 300)) and the rerun of \(flaked.plan.filtered ? "those tests" : "the whole test command") passed, so it merged on the rerun: recorded in the flake ledger, which status lists."
                     + (flaked.log.map { " Both runs' output: \($0)." } ?? "")
+                let readable = flakeLog.map { " Each flaky test's failing lines, readable by its fixer: \($0)." } ?? ""
+                flakeNote += readable
                     + (due.isEmpty ? "" : " " + due.joined(separator: " "))
                     + ")"
             }
@@ -2647,6 +2653,16 @@ public final class LeadToolset: MCPToolset {
     }
 
     /// Saves a merge's test output where the lead can read it; its path, or nil when it couldn't be saved.
+    /// Writes a merge's flake evidence to `MergeRerun.evidenceFile` (0600, in a 0700 folder in the repository's
+    /// ignored `.vibeswitcher/`); its path, or nil when it couldn't be written (the ledger keeps the lines anyway).
+    private func saveFlakeEvidence(_ evidence: [String: [String]], tests: [String], slug: String, commit: String) -> String? {
+        let file = MergeRerun.evidenceFile(root: root, task: slug, at: Date())
+        let text = MergeRerun.evidenceLog(task: slug, commit: commit, evidence: evidence, tests: tests)
+        guard (try? VibePaths.ensurePrivate(file.deletingLastPathComponent(), within: URL(fileURLWithPath: store.folder))) != nil,
+              (try? VibePaths.writePrivate(Data(text.utf8), to: file)) != nil else { return nil }
+        return file.path
+    }
+
     private func saveMergeLog(_ output: String, slug: String, name: String = "merge-test.log") -> String? {
         let log = vault.scratch(root: root, "\(slug)/\(name)")
         return (try? vault.ensurePrivate(log.deletingLastPathComponent())).flatMap {

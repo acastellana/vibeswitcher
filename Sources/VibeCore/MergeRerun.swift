@@ -92,15 +92,102 @@ public enum MergeRerun {
     /// What a flake is recorded under when the failed run named no test.
     public static let unnamed = "(the test command, naming no test)"
 
-    /// The line added to an open task's context that names `test` (`LeadBoard.openTask(naming:)`) once it flaked
-    /// `LeadBoard.flakeLimit` times within `LeadBoard.flakeWindow`, in place of a task to fix it.
-    static func flakeNote(test: String, merges: [String]) -> String {
-        "Flake ledger: \(test) flaked \(merges.count) times within \(Int(LeadBoard.flakeWindow / 86_400)) days (failed its first run and passed its rerun in the merges of \(merges.joined(separator: ", "))); no task was planned to fix it, as this one names it."
+    // MARK: Evidence
+
+    /// The most lines a flaky test's evidence keeps, and the most characters of each.
+    public static let evidenceLimit = 20
+    static let evidenceWidth = 400
+
+    /// Each of `tests`' failure lines in a failed run's `output`, where workers and verifiers can read them: the merge's
+    /// own log is in the vault's scratch, which every session's permissions refuse (on 2026-10-28 three fix tasks and
+    /// their verifiers re-derived each flake's cause by reproduction). Swift Testing's issue lines ("recorded an issue
+    /// at File.swift:12:5: …", with the ↳ details and an expectation's source lines under them, as `TestFailures`
+    /// reads them) and its "failed after" line; XCTest's error: and "Test Case … failed" lines. Secrets masked
+    /// (`Redaction`), each line cut at `evidenceWidth`, at most `evidenceLimit` lines a test. A test with none is left out.
+    public static func evidence(in output: String, tests: [String]) -> [String: [String]] {
+        var found: [String: [String]] = [:]
+        var issue: (test: String, count: Int)?
+        for raw in output.components(separatedBy: "\n") {
+            let plain = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
+            let line = plain.trimmingCharacters(in: .whitespaces)
+            if let (test, count) = issue {
+                if line.hasPrefix("↳ ") { found[test, default: []].append(line); continue }
+                if count < 20, !line.isEmpty, line.range(of: #"^\S (Test|Suite|Passing) "#, options: .regularExpression) == nil {
+                    found[test, default: []].append(plain.replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression))
+                    issue = (test, count + 1)
+                    continue
+                }
+            }
+            issue = nil
+            if let test = TestFailures.swiftTesting(line, " recorded an issue") {
+                found[test, default: []].append(line)
+                issue = (test, 0)
+            } else if let test = TestFailures.swiftTesting(line, " failed after") {
+                found[test, default: []].append(line)
+            } else if let match = line.range(of: #": error: -?\[?[^ :\]]+[ .][^ :\]]+\]? : "#, options: .regularExpression) {
+                found[TestFailures.xcTestName(String(line[match]).dropFirst(": error: ".count).dropLast(3)), default: []].append(line)
+            } else if let match = line.range(of: #"^Test Case '[^']+' failed"#, options: .regularExpression) {
+                found[TestFailures.xcTestName(line[match].dropFirst("Test Case '".count).prefix { $0 != "'" }), default: []].append(line)
+            }
+        }
+        var evidence: [String: [String]] = [:]
+        for test in tests {
+            guard let lines = found[test], !lines.isEmpty else { continue }
+            // Masked together, so a secret an expectation spreads over lines is seen whole.
+            let masked = Redaction.secrets(in: lines.joined(separator: "\n")).components(separatedBy: "\n")
+                .map { $0.count > evidenceWidth ? String($0.prefix(evidenceWidth - 1)) + "…" : $0 }
+            evidence[test] = masked.count > evidenceLimit
+                ? masked.prefix(evidenceLimit - 1) + ["… and \(masked.count - evidenceLimit + 1) more lines."] : masked
+        }
+        return evidence
     }
 
-    /// The task planned once `test` flaked `LeadBoard.flakeLimit` times within `LeadBoard.flakeWindow`: in `merges`
-    /// (the tasks whose merges it held up, oldest first).
-    static func fixContract(test: String, merges: [String], workflow: LeadWorkflow) -> LeadContract {
+    /// Where a merge's flake evidence is kept: `<root>/.vibeswitcher/flakes/<yyyy-mm-dd>-<task>.log`, in the
+    /// repository's ignored folder, where every session can read it.
+    public static func evidenceFile(root: String, task: String, at date: Date) -> URL {
+        let format = DateFormatter()
+        format.locale = Locale(identifier: "en_US_POSIX")
+        format.calendar = Calendar(identifier: .gregorian)
+        format.dateFormat = "yyyy-MM-dd"
+        return URL(fileURLWithPath: root).appendingPathComponent(".vibeswitcher/flakes/\(format.string(from: date))-\(task).log")
+    }
+
+    /// The evidence file's text: what flaked in `task`'s merge (tested at `commit`), and each test's lines.
+    public static func evidenceLog(task: String, commit: String, evidence: [String: [String]], tests: [String]) -> String {
+        var text = "Flaky in \(task)'s merge (tested \(commit.prefix(12))): each test below failed the merge's first test run and passed its rerun. "
+            + "Its lines from the failing run (secrets masked, at most \(evidenceLimit) a test):\n"
+        for test in tests {
+            guard let lines = evidence[test] else { continue }
+            text += "\n" + test + "\n" + lines.map { "    " + $0 }.joined(separator: "\n") + "\n"
+        }
+        return text
+    }
+
+    /// For a task's context: each of `flakes`' failing lines, under the merge it held up and where its log is.
+    static func quoted(_ flakes: [LeadFlake]) -> String {
+        var text = ""
+        for flake in flakes {
+            let lines: [String] = flake.lines ?? []
+            guard !lines.isEmpty || flake.log != nil else { continue }
+            text += "\n- \(flake.task)'s merge" + (flake.log.map { " (\($0))" } ?? "") + ":"
+            for line in lines { text += "\n    " + line }
+        }
+        return text.isEmpty ? "" : "\nThe failing runs' lines (secrets masked):" + text
+    }
+
+    /// The line added to an open task's context that names `test` (`LeadBoard.openTask(naming:)`) once it flaked
+    /// `LeadBoard.flakeLimit` times within `LeadBoard.flakeWindow` (`flakes`, oldest first), in place of a task to fix
+    /// it, with the failing runs' lines.
+    static func flakeNote(test: String, flakes: [LeadFlake]) -> String {
+        let merges = flakes.map(\.task)
+        return "Flake ledger: \(test) flaked \(merges.count) times within \(Int(LeadBoard.flakeWindow / 86_400)) days (failed its first run and passed its rerun in the merges of \(merges.joined(separator: ", "))); no task was planned to fix it, as this one names it."
+            + quoted(flakes)
+    }
+
+    /// The task planned once `test` flaked `LeadBoard.flakeLimit` times within `LeadBoard.flakeWindow`: `flakes` (in
+    /// the merges they held up, oldest first), whose failing lines its context quotes.
+    static func fixContract(test: String, flakes: [LeadFlake], workflow: LeadWorkflow) -> LeadContract {
+        let merges = flakes.map(\.task)
         let tests = workflow.testCommand.map { "`\($0)` passes" } ?? "The project's tests pass"
         return LeadContract(
             goal: "\(test) stops flaking: it failed \(merges.count) merges' test runs within \(Int(LeadBoard.flakeWindow / 86_400)) days and passed each one's rerun, so the merges went ahead on the rerun alone.",
@@ -109,6 +196,7 @@ public enum MergeRerun {
                          "It passes repeatedly under load (scripts/test-under-load.sh when the project has it)",
                          tests],
             boundaries: ["The test and what it checks; nothing else changes unless it's the bug"],
-            context: "Flake ledger (the board's flakes; status lists them): \(test) failed its first run and passed its rerun in the merges of \(merges.joined(separator: ", ")).")
+            context: "Flake ledger (the board's flakes; status lists them): \(test) failed its first run and passed its rerun in the merges of \(merges.joined(separator: ", "))."
+                + quoted(flakes))
     }
 }
