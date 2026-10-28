@@ -1848,3 +1848,7 @@
 - 2026-10-28 17:01 Planned a-hung-merge-test: A hung merge test run names the tests that started and never finished, in a readable file (review audit)
 - 2026-10-28 17:04 Started a worker on a-hung-merge-test
 - 2026-10-28 17:04 Automatically (auto_advance): Started a worker on a-hung-merge-test (A hung merge test run names the tests that started and never finished, in a readable file).
+- 2026-10-28 17:09 Audit of docs-overhaul-a-clear: complete, clean, round 1: 3 Nit open
+- 2026-10-28 17:10 Planned docs-touch-ups-the: Docs touch-ups: the sandbox's Team fixture uses a real project name ('stakegen') in a published screenshot; the lint list misses AgentExportLint
+- 2026-10-28 17:11 Planned systempower-onacpower: SystemPower.onACPower blocks the main thread (6.4 s) from KeepAwake.update in LeadController.refreshed
+- 2026-10-28 17:20 Merged docs-overhaul-a-clear: Docs overhaul: a clear README and a docs/ guide set that match today's app
