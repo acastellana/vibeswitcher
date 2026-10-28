@@ -1592,3 +1592,9 @@
 - 2026-10-27 23:15 Automatically (auto_advance): Started the audit of lead-chat-freezes-of at 00d697c3 (Its review is audit. (audited: it has code that adds locks or threads (Sources/VibeSwitcher/MainWindow/Lead/LeadController.swift: DispatchQueue.global(qos: .utility).async { [weak self] in), as the risk check found.)).
 - 2026-10-27 23:15 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-10-28 00:11 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
+- 2026-10-28 07:22 Started a worker on app-memory-grows-to
+- 2026-10-28 07:22 Automatically (auto_advance): Started a worker on app-memory-grows-to (App memory grows to about 700 MB over a day (footprint 215 MB → 709 MB peak on 2026-10-27)).
+- 2026-10-28 07:23 Audit of land-pr-1-host: complete, clean, round 2: 2 Important closed, 2 Nit closed
+- 2026-10-28 07:25 Planned sidebar-running-workers: Sidebar: running workers and verifiers aren't nested under their lead (shown as their own worktree groups, with no "team:" line on the lead)
+- 2026-10-28 07:29 Started a worker on sidebar-running-workers
+- 2026-10-28 07:32 Merged land-pr-1-host: Land PR #1 (host security boundaries): apply it, fix what the review found, merge through project-lead
