@@ -8,6 +8,10 @@ import Testing
 /// holds can answer.
 struct LoginShellVariableTests {
     static let name = "VIBESWITCHER_TEST_LOGIN_VARIABLE"
+    /// The reads' timeout where the shell ends on its own: a ceiling, not a wait (its exit ends the read). The read's
+    /// default, 5 s, is counted from the spawn, and on a loaded Mac the fake shell's three execs (sh, sh, printenv)
+    /// took longer than that: a shell that would have answered was read as timed out.
+    static let budget: TimeInterval = 120
     let scratch = Scratch()
 
     /// A fake `$SHELL` whose startup is `rc` (sh), then the command as a login shell would run it.
@@ -37,31 +41,40 @@ struct LoginShellVariableTests {
 
     @Test func aBannerBeforeTheValueIsLeftOut() throws {
         let shell = try shell("echo 'Welcome back!'; printf 'no newline'; \(Self.name)='sk_from_rc'; export \(Self.name)")
-        #expect(LoginShellVariable.read(Self.name, shell: shell) == .found("sk_from_rc"))
+        #expect(LoginShellVariable.read(Self.name, shell: shell, timeout: Self.budget) == .found("sk_from_rc"))
     }
 
     @Test func unsetEmptyOrAnExitIsNotFound() throws {
-        #expect(LoginShellVariable.read(Self.name, shell: try shell("echo hi")) == .unset)
-        #expect(LoginShellVariable.read(Self.name, shell: try shell("\(Self.name)=; export \(Self.name)")) == .unset)
+        #expect(LoginShellVariable.read(Self.name, shell: try shell("echo hi"), timeout: Self.budget) == .unset)
+        #expect(LoginShellVariable.read(Self.name, shell: try shell("\(Self.name)=; export \(Self.name)"), timeout: Self.budget) == .unset)
         // The startup files exit before the command: nothing after the marker.
-        #expect(LoginShellVariable.read(Self.name, shell: try shell("echo bye; exit 3")) == .failed)
-        #expect(LoginShellVariable.read(Self.name, shell: scratch.url("no-such-shell").path) == .failed)
+        #expect(LoginShellVariable.read(Self.name, shell: try shell("echo bye; exit 3"), timeout: Self.budget) == .failed)
+        #expect(LoginShellVariable.read(Self.name, shell: scratch.url("no-such-shell").path, timeout: Self.budget) == .failed)
         // A name that isn't one runs nothing.
-        #expect(LoginShellVariable.read("A; touch x", shell: try shell("exit 9")) == .unset)
+        #expect(LoginShellVariable.read("A; touch x", shell: try shell("exit 9"), timeout: Self.budget) == .unset)
     }
 
-    /// A .zshrc that waits (on a prompt, a network mount): stopped after the timeout, with what it started.
+    /// A .zshrc that waits (on a prompt, a network mount): stopped after the timeout, with what it started. The timeout
+    /// is counted from the spawn, so it can end before the shell has started at all (on a loaded Mac that took over 5 s):
+    /// then there's nothing of it to look for, and the read is tried again with twice the timeout, until the shell had
+    /// written its pid when the timeout ended.
     @Test func aShellThatWaitsIsStopped() throws {
         let pidFile = scratch.url("shell-pid").path
-        let shell = try shell("echo $$ > '\(pidFile)'; echo starting; /bin/sleep 60; \(Self.name)=late; export \(Self.name)")
-        let started = Date()
-        // Long enough for the fake shell to start on a loaded Mac (a full run: 0.5 s wasn't), far under its sleep.
-        #expect(LoginShellVariable.read(Self.name, shell: shell, timeout: 5) == .timedOut)
-        #expect(Date().timeIntervalSince(started) < 30)
+        let shell = try shell("echo $$ > '\(pidFile)'; echo starting; /bin/sleep 600; \(Self.name)=late; export \(Self.name)")
+        var timeout: TimeInterval = 1
+        var pid: Int32?
+        while pid == nil, timeout <= 64 {
+            let started = Date()
+            #expect(LoginShellVariable.read(Self.name, shell: shell, timeout: timeout) == .timedOut)
+            // Stopped, not waited for: far under its sleep.
+            #expect(Date().timeIntervalSince(started) < timeout + 60)
+            pid = (try? String(contentsOfFile: pidFile, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            timeout *= 2
+        }
+        let shellPid = try #require(pid, "the fake shell never started within a 64 s timeout")
         // The shell and its sleep are gone.
-        let pid = try #require(Int32(String(contentsOfFile: pidFile, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines)))
-        #expect(kill(pid, 0) != 0)
-        #expect(!ProcessTable.snapshot().values.contains { $0.ppid == pid })
+        #expect(kill(shellPid, 0) != 0)
+        #expect(!ProcessTable.snapshot().values.contains { $0.ppid == shellPid })
     }
 
     @Test func theOutcomeIsWhatFollowsTheMarker() {
