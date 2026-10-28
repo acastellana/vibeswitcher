@@ -1908,3 +1908,11 @@
 - 2026-10-28 20:11 Audit of a-full-suite-run: complete, suspect, round 1: 4 Nit open
 - 2026-10-28 20:12 Raised keep-awake-s-power to audit (the risk check, at a347ade0): it has code that adds locks or threads (Sources/VibeSwitcher/KeepAwake.swift: private let queue = DispatchQueue(label: "VibeSwitcher.keep-awake", qos: .utilit)
 - 2026-10-28 20:12 Automatically (auto_advance): keep-awake-s-power is audited, not merged: it has code that adds locks or threads (Sources/VibeSwitcher/KeepAwake.swift: private let queue = DispatchQueue(label: "VibeSwitcher.keep-awake", qos: .utilit) (the risk check raised it from review none). Its audit starts once the Mac has room.
+- 2026-10-28 20:14 Ended the-mac-hit-load's worker (idle since its done report on 09ddf7e1) to make room on the Mac for its audit
+- 2026-10-28 20:14 Automatically (auto_advance): Started the audit of the-mac-hit-load at 09ddf7e1 (Its review is audit).
+- 2026-10-28 20:14 Ended keep-awake-s-power's worker (idle since its done report on a347ade0) to make room on the Mac for its audit
+- 2026-10-28 20:14 Automatically (auto_advance): Started the audit of keep-awake-s-power at a347ade0 (Its review is audit. (audited: it has code that adds locks or threads (Sources/VibeSwitcher/KeepAwake.swift: private let queue = DispatchQueue(label: "VibeSwitcher.keep-awake", qos: .utilit), as the risk check found.)).
+- 2026-10-28 20:15 Raised team-panel-and-inspector to audit (the risk check, at 31318dee): it changes 508 lines outside tests, over risk_lines (400)
+- 2026-10-28 20:16 Automatically (auto_advance): Started the audit of team-panel-and-inspector at 31318dee (The risk check raised it to audit: it changes 508 lines outside tests, over risk_lines (400)).
+- 2026-10-28 20:16 Planned sessionstore-refresh: SessionStore.refresh writes the activity ledger and asks NSRunningApplication for bundle ids on the main thread
+- 2026-10-28 20:18 Automatically (auto_advance): a-full-suite-run is audited, not merged: it changes test or build infrastructure the suite relies on (Tests/VibeCoreTests/TestSupport.swift, Tests/VibeHostTests/TestSupport.swift, Tests/VibeSwitcherTests/TestSupport.swift) (the risk check raised it from review none). Its audit starts once the Mac has room.
