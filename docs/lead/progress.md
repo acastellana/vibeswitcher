@@ -1750,3 +1750,9 @@
 - 2026-10-28 12:01 Automatically (auto_advance): Started the audit of main-thread-overloaded at 57c2a94a (The risk check raised it to audit: it has code that adds locks or threads (Sources/VibeCore/PendingPrompt.swift: private static let quotingLock = NSLock())).
 - 2026-10-28 12:01 Ended lead-chat-multi-line's worker (idle since its done report on 86ab1bba) to make room on the Mac for its audit
 - 2026-10-28 12:01 Automatically (auto_advance): Started the audit of lead-chat-multi-line at 86ab1bba (Its review is audit).
+- 2026-10-28 12:11 Audit of flake-ledger-don-t: complete, clean, round 1: 2 Nit open
+- 2026-10-28 12:12 Audit of main-thread-overloaded: complete, clean, round 1: 3 Nit open
+- 2026-10-28 12:14 Audit of lead-chat-multi-line: complete, clean, round 1: 4 Nit open
+- 2026-10-28 12:19 Merged flake-ledger-don-t: Flake ledger: don't plan a "fix the flaky test" task when an open task already names that test
+- 2026-10-28 12:19 Flaky in flake-ledger-don-t's merge: indexLockIsWaitedForAndAFailureIsReported() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-10-28 12:19 Planned fix-the-flaky-test-4: indexLockIsWaitedForAndAFailureIsReported() flaked 3 times within 7 days
