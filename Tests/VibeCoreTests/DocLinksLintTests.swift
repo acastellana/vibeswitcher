@@ -9,6 +9,8 @@ struct DocLinksLintTests {
 
     /// `[text](target)` and `![alt](target)`, with an optional `"title"` after the target.
     static let link = try! Regex(#"!?\[[^\]]*\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)"#)
+    /// An HTML image's `src="target"` or `srcset="target"` (a `<picture>` for light and dark).
+    static let htmlSource = try! Regex(#"\b(?:src|srcset)="([^"\s]+)""#)
 
     /// The markdown files the check covers: README.md and everything under docs/.
     static func markdownFiles() -> [URL] {
@@ -31,6 +33,9 @@ struct DocLinksLintTests {
             let prose = line.split(separator: "`", omittingEmptySubsequences: false).enumerated()
                 .filter { $0.offset % 2 == 0 }.map { String($0.element) }.joined(separator: " ")
             for match in prose.matches(of: link) {
+                if let target = match.output[1].substring { found.append(String(target)) }
+            }
+            for match in prose.matches(of: htmlSource) {
                 if let target = match.output[1].substring { found.append(String(target)) }
             }
         }
@@ -107,6 +112,7 @@ struct DocLinksLintTests {
         #expect(Self.problem("README.md#no-such-heading-anywhere", in: readme) != nil)
         #expect(Self.problem("https://example.com/x", in: readme) == nil)
         #expect(Self.targets(in: "`[a](nowhere.md)` and\n```\n[b](nowhere.md)\n```\n[c](here.md)") == ["here.md"])
+        #expect(Self.targets(in: "<source srcset=\"d.png\">\n<img alt=\"x\" src=\"l.png\">") == ["d.png", "l.png"])
         #expect(Self.anchor("Security: the signing identity") == "security-the-signing-identity")
         #expect(Self.anchors(in: "# A\n## A\n```\n# B\n```\n<a id=\"e-19\"></a>**E-19**") == ["a", "a-1", "e-19"])
     }

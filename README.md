@@ -3,7 +3,10 @@
 A macOS app that keeps track of every Claude Code and Codex session on your Mac, tells you which one needs you, and
 can run a small team of Claude sessions on a repository for you.
 
-![The main window: a project lead's chat with its team strip, an all-done card and the sessions list](docs/images/lead-light.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/lead-dark.png">
+  <img alt="The main window: a project lead's chat with its team strip, an all-done card and the sessions list" src="docs/images/lead-light.png">
+</picture>
 
 ## What it does
 
