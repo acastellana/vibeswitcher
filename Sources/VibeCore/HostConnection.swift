@@ -35,8 +35,10 @@ public final class HostConnection {
     /// it was, or with no key to answer it with.
     private var held: Data?
 
-    public init(path: String, queue: DispatchQueue, appKey: SymmetricKey? = HostConnection.appKey) throws {
-        fd = try UnixSocket.connect(path: path)
+    /// `patience`: how long to retry a refused connect (see `UnixSocket.connect`); the app's own connection, made on
+    /// the main thread, doesn't wait.
+    public init(path: String, queue: DispatchQueue, appKey: SymmetricKey? = HostConnection.appKey, patience: TimeInterval = 0) throws {
+        fd = try UnixSocket.connect(path: path, patience: patience)
         self.queue = queue
         self.appKey = appKey
         held = appKey == nil ? nil : Data()

@@ -139,13 +139,18 @@ public enum HostCall {
         }
     }
 
+    /// How long a call retries a connect the host refused (a burst filled its backlog), with backoff, before failing:
+    /// at most half its timeout (the hook's is 1 s, and its agent waits on it).
+    public static let connectPatience: TimeInterval = 1
+
     /// `requires`: a capability the request needs (see `HostProtocol.Capability`); a host whose welcome doesn't list it
     /// isn't sent the request, and `capable` is false.
     private static func exchange(_ request: HostRequest?, then follow: HostRequest? = nil, socket: String, timeout: TimeInterval,
                                  expectsReply: Bool = true, requires: String? = nil, appKey: SymmetricKey? = HostConnection.appKey) throws
         -> (sessions: [HostSession], reply: HostEvent?, refusal: String?, capable: Bool) {
         let queue = DispatchQueue(label: "vibeswitcher.host-call")
-        let connection = try HostConnection(path: socket, queue: queue, appKey: appKey)
+        let patience = min(connectPatience, timeout / 2)
+        let connection = try HostConnection(path: socket, queue: queue, appKey: appKey, patience: patience)
         defer { queue.sync { connection.close() } }
         let done = DispatchSemaphore(value: 0)
         var sessions: [HostSession]?

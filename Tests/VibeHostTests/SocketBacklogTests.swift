@@ -22,4 +22,50 @@ import Testing
         fds.forEach { Darwin.close($0) }
         #expect(fds.count == 64, "refused: \(results.compactMap { if case .failure(let e) = $0 { return "\(e)" } else { return nil } })")
     }
+
+    /// A socket file bound but not listening: every connect to it is refused.
+    private func refusingSocket() throws -> (path: String, fd: Int32) {
+        let path = scratchSocketPath()
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        var address = try UnixSocket.address(path)
+        let bound = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { bind(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size)) }
+        }
+        #expect(bound == 0)
+        return (path, fd)
+    }
+
+    @Test func aRefusedConnectIsRetriedWithBackoffThenFails() throws {
+        let (path, fd) = try refusingSocket()
+        defer { Darwin.close(fd); unlink(path) }
+        var pauses: [TimeInterval] = []
+        #expect(throws: UnixSocket.Failure.system("connect", ECONNREFUSED)) {
+            try UnixSocket.connect(path: path, patience: 1) { pauses.append($0) }
+        }
+        #expect(pauses.count > 2 && pauses.count < 12)
+        #expect(abs(pauses.reduce(0, +) - 1) < 0.001)
+        #expect(zip(pauses, pauses.dropFirst()).dropLast().allSatisfy { $0 < $1 || $1 == 0.2 })
+    }
+
+    @Test func aRefusedConnectSucceedsOnceTheHostListens() throws {
+        let (path, fd) = try refusingSocket()
+        defer { Darwin.close(fd); unlink(path) }
+        var pauses = 0
+        let client = try UnixSocket.connect(path: path, patience: 1) { _ in
+            pauses += 1
+            if pauses == 2 { Darwin.listen(fd, SOMAXCONN) }
+        }
+        Darwin.close(client)
+        #expect(pauses == 2)
+    }
+
+    @Test func noPatienceFailsAtOnce() throws {
+        let (path, fd) = try refusingSocket()
+        defer { Darwin.close(fd); unlink(path) }
+        var pauses = 0
+        #expect(throws: UnixSocket.Failure.system("connect", ECONNREFUSED)) {
+            try UnixSocket.connect(path: path) { _ in pauses += 1 }
+        }
+        #expect(pauses == 0)
+    }
 }

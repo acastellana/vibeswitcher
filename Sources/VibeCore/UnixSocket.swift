@@ -21,8 +21,27 @@ public enum UnixSocket {
         return address
     }
 
-    /// A connected, nonblocking socket.
-    public static func connect(path: String) throws -> Int32 {
+    /// A connected, nonblocking socket. `patience`: how long to keep retrying a connect the host refused
+    /// (ECONNREFUSED: its backlog was full, or no one listens on a socket file left behind; EAGAIN), pausing longer
+    /// each time; then it fails as it would at once. 0 (the default) fails at once. `pause`: waits between attempts
+    /// (a test's records them instead).
+    public static func connect(path: String, patience: TimeInterval = 0,
+                               pause: (TimeInterval) -> Void = { usleep(useconds_t($0 * 1_000_000)) }) throws -> Int32 {
+        var waited: TimeInterval = 0
+        var next: TimeInterval = 0.01
+        while true {
+            do {
+                return try connectOnce(path: path)
+            } catch Failure.system("connect", let code) where (code == ECONNREFUSED || code == EAGAIN) && waited < patience {
+                let wait = min(next, patience - waited)
+                pause(wait)
+                waited += wait
+                next = min(next * 2, 0.2)
+            }
+        }
+    }
+
+    private static func connectOnce(path: String) throws -> Int32 {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw Failure.system("socket", errno) }
         do {
