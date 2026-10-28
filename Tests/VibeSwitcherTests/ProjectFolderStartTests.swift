@@ -528,3 +528,64 @@ extension LeadRelaunchTests {
         #expect(host.sessions.isEmpty)
     }
 }
+
+/// The look before a lead starts (`LaunchPreflight`): what's missing is said, and nothing else of the start runs.
+extension ProjectFolderStartTests {
+    static let noClaude = LaunchPreflight.Problem(missing: [.agent(program: "claude", shell: "/bin/zsh")])
+
+    @Test func aMacWithoutClaudeIsToldSoBeforeGitRuns() async throws {
+        let calls = Calls()
+        var looked: [String] = []
+        var said: [(title: String, text: String)] = []
+        var flow = ProjectFolderStart(chooseFolder: { calls.prompts.append($0); return "/a/folder" },
+                                      git: { _, _ in Issue.record("git ran"); return Git.Result(status: 1, output: "", error: "") },
+                                      startLead: { calls.leads.append($0) },
+                                      startSession: { calls.sessions.append(($0?.name, $1)) },
+                                      failed: { said.append(($0, $1)) })
+        flow.leadCommand = { "claude --model opus #\($0)" }
+        flow.preflight = { command in
+            #expect(!Thread.isMainThread, "the preflight ran on the main thread")
+            DispatchQueue.main.async { looked.append(command) }
+            return Self.noClaude
+        }
+        flow.run(preset: nil, folder: nil)
+        #expect(await until { said.count == 1 })
+        #expect(looked == ["claude --model opus #/a/folder"])
+        #expect(said.first?.title == "Claude Code isn't installed.")
+        #expect(said.first?.text == "The lead wasn't started. " + LaunchPreflight.text(Self.noClaude.missing[0]))
+        #expect(calls.leads.isEmpty && calls.sessions.isEmpty)
+    }
+
+}
+
+extension LeadRelaunchTests {
+    /// The controller's own start (Project Lead, `vibeswitcher --lead`) looks too: an alert says what's missing, and
+    /// no repository is looked for and no lead started. With nothing missing, the start goes on as before (the tests
+    /// above start leads with the real look).
+    @Test func theControllersStartSaysWhatsMissingAndStartsNoLead() async throws {
+        let world = try world()
+        defer { world.stop() }
+        let root = try emptyRepository()
+        let (host, controller) = relaunched(world)
+        var asked: [(title: String, text: String)] = []
+        var looked: [String] = []
+        controller.confirm = { title, text, _ in asked.append((title, text)); return 0 }
+        controller.select = { _ in Issue.record("a lead was shown") }
+        controller.preflight = { command in
+            #expect(!Thread.isMainThread, "the preflight ran on the main thread")
+            DispatchQueue.main.async { looked.append(command) }
+            return LaunchPreflight.Problem(missing: [.commandLineTools])
+        }
+        host.connectIfRunning()
+        #expect(await until { host.state == .connected })
+
+        controller.startLead(in: root)
+        #expect(await until { asked.count == 1 })
+        #expect(looked == ["exec /bin/sleep 600"])
+        #expect(asked.first?.title == "git needs Apple's Command Line Tools.")
+        #expect(asked.first?.text.hasPrefix("The lead wasn't started. They aren't installed on this Mac") == true)
+        // Not offered a first commit: git wasn't asked about the folder.
+        #expect(!Git.run(["rev-parse", "--verify", "--quiet", "HEAD"], in: root).ok)
+        #expect(host.sessions.isEmpty)
+    }
+}
