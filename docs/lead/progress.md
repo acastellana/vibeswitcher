@@ -1884,3 +1884,9 @@
 - 2026-10-28 19:11 Automatically (auto_advance): Merged lead-start-preflight-on (Lead start preflight: on a new Mac, say plainly what's missing (claude, git, Command Line Tools) instead of failing with an error code) into project-lead at 3c279ba5, on its passing audit and the full test run.
 - 2026-10-28 19:13 accepted 1 commit on project-lead that you ran from VibeSwitcher's window: 2dff2f8 docs/lead: other projects named generically
 - 2026-10-28 19:20 Automatically (auto_advance): Didn't merge a-hung-merge-test: Not merged: project-lead is at 2dff2f8a, not at 7529351c where it was; it moved meanwhile.
+- 2026-10-28 19:30 Audit of systempower-onacpower at 34b2024b tested its merged result b544003a onto project-lead: the test command passed
+- 2026-10-28 19:30 Automatically (auto_advance): Started the audit of systempower-onacpower at 34b2024b (Its review is audit. (audited: it has code that spawns processes (Sources/VibeSwitcher/PowerReading.swift: static func system() -> Reading {), as the risk check found.)).
+- 2026-10-28 19:30 Automatically (auto_advance): Cleaned up lead-start-preflight-on (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-10-28 19:37 Planned missing-tools-at-lead: Missing tools at lead start: offer one-click install instead of only explaining (Command Line Tools, Claude Code), then start the lead (review audit)
+- 2026-10-28 19:40 Audit of systempower-onacpower: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
+- 2026-10-28 19:40 Merged a-hung-merge-test: A hung merge test run names the tests that started and never finished, in a readable file
