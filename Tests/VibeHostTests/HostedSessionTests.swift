@@ -248,7 +248,7 @@ extension HostedSessionTests {
 
     /// The launcher itself not there: the spawn's error says which program, at which path.
     @Test func aLauncherThatIsntThereIsNamedInTheSpawnsFailure() {
-        let request = SpawnRequest(cwd: "/tmp", command: "true", env: [:], cols: 80, rows: 24, keepShell: false, label: "Test", agent: nil)
+        let request = SpawnRequest(cwd: NSHomeDirectory(), command: "true", env: [:], cols: 80, rows: 24, keepShell: false, label: "Test", agent: nil)
         #expect(throws: HostedSession.Failure.couldntStart("Couldn't start vibeswitcher-host: it should be at /no/such/vibeswitcher-host, and isn't (No such file or directory).")) {
             _ = try HostedSession.spawn(request, shell: "/bin/sh", launcher: "/no/such/vibeswitcher-host", baseEnvironment: [:],
                                         ringCapacity: 1 << 16, queue: DispatchQueue(label: "launcher-missing"))
