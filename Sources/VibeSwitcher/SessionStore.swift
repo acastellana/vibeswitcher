@@ -49,7 +49,9 @@ final class SessionStore: ObservableObject {
     private let bridge: TerminalPoll<TerminalTab>.Bridge
     /// Whether Terminal is the active app, and its front window then (see `TerminalSignal`); read on the scan queue.
     var terminalFront: @Sendable () -> (active: Bool, window: Int?) = { TerminalBridge.front() }
-    /// Whether you're at the Mac (see `UserPresence`) and the desktops shown (see `Spaces`).
+    /// Whether you're at the Mac (see `UserPresence`) and the desktops shown (see `Spaces`); read on the scan queue,
+    /// once a scan: both ask the window server, which on a loaded Mac kept main waiting while an alert was up
+    /// (hang-20261027-2109…).
     var presence: @Sendable () -> Bool = { UserPresence.isPresent() }
     var desktops: @Sendable () -> Set<Int> = { Spaces.currentDesktops() }
 
@@ -208,10 +210,12 @@ final class SessionStore: ObservableObject {
         let hostScreens = self.hostScreens()
         let clock = self.clock
         let terminalFront = self.terminalFront
+        let (presence, desktops) = (self.presence, self.desktops)
         queue.async { [weak self] in
             guard let self else { return }
             let now = clock()
             let raw = self.scanner.scan(now: now)
+            let screen = Shown(present: presence(), desktops: desktops())
             let readAt = self.scanner.readAt
             let undecided = self.scanner.undecided
             let transcripts = Self.transcripts(for: raw)
@@ -233,7 +237,7 @@ final class SessionStore: ObservableObject {
                     self.terminalAccess = access
                     AppStatus.write(sessions: self.sessions, terminalAccess: access)
                 }
-                self.apply(raw: raw, tabs: tabs, hosted: hosted, background: background, transcripts: transcripts, now: now)
+                self.apply(raw: raw, tabs: tabs, hosted: hosted, background: background, transcripts: transcripts, shown: screen, now: now)
                 let read = TableRead(at: readAt, undecided: undecided)
                 if read != self.tableRead { self.tableRead = read }
                 self.scansApplied += 1
@@ -261,7 +265,7 @@ final class SessionStore: ObservableObject {
         terminalAccess = terminal.poll(now: now, interval: 0, terminalTTYs: Set(raw.filter(\.inTerminalApp).map(\.tty)),
                                        quiet: quiet, force: true, bridge: bridge)?.access ?? .unknown
         apply(raw: raw, tabs: terminal.tabs, hosted: [:], background: terminal.backgroundWork,
-              transcripts: Self.transcripts(for: raw), now: now)
+              transcripts: Self.transcripts(for: raw), shown: Shown(present: presence(), desktops: desktops()), now: now)
         tableRead = TableRead(at: scanner.readAt, undecided: scanner.undecided)
     }
 
@@ -276,12 +280,18 @@ final class SessionStore: ObservableObject {
         return paths
     }
 
+    /// What the scan read of you and the screen: whether you're at the Mac, and the desktops shown.
+    private struct Shown {
+        var present: Bool
+        var desktops: Set<Int>
+    }
+
     private func apply(raw: [RawSession], tabs: [String: TerminalTab], hosted: [String: HostSession],
-                       background: [String: String], transcripts: [String: String], now: Date) {
+                       background: [String: String], transcripts: [String: String], shown: Shown, now: Date) {
         var quiet: Set<String> = []
         var nudges: [(Session, Nudge)] = []
-        let present = presence()
-        let currentDesktops = desktops()
+        let present = shown.present
+        let currentDesktops = shown.desktops
         let terminalFront = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == TerminalBridge.bundleID
         var result: [Session] = []
         for item in raw {

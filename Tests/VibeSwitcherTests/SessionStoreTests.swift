@@ -85,6 +85,40 @@ struct SessionStoreTests {
         #expect(store.sessions.first { $0.tty == "ttys970" }?.backgroundJobs == [])
     }
 
+    /// Whether you're at the Mac, and the desktops shown, are asked of the window server on the scan's queue, once a
+    /// scan: asked on the main thread at each scan's landing, they held End Session…'s alert on a loaded Mac (10-27).
+    @Test func presenceAndDesktopsAreReadOffTheMainThread() async throws {
+        AppStatus.enabled = false
+        defer { try? FileManager.default.removeItem(at: stateDir) }
+        let store = try store(started: Date())
+        let reads = Reads()
+        store.presence = { reads.add("presence"); return true }
+        store.desktops = { reads.add("desktops"); return [] }
+        for _ in 0..<2 { try await refreshAndSettle(store) }
+        // A scan each (a scan asked for while one runs follows it).
+        #expect(reads.names(main: false).filter { $0 == "presence" }.count >= 2)
+        #expect(reads.names(main: false).filter { $0 == "desktops" }.count >= 2)
+        #expect(reads.names(main: true) == [])
+    }
+
+    /// What was read, and on which thread.
+    final class Reads: @unchecked Sendable {
+        private let lock = NSLock()
+        private var reads: [(name: String, main: Bool)] = []
+
+        func add(_ name: String) {
+            lock.lock()
+            reads.append((name, Thread.isMainThread))
+            lock.unlock()
+        }
+
+        func names(main: Bool) -> [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            return reads.filter { $0.main == main }.map(\.name)
+        }
+    }
+
     /// A scan whose process table couldn't be read (in time, on a loaded Mac) keeps the sessions found before, and the
     /// time that table was read: the witness tells a session's agent as quit only from a table read since.
     @Test func anUnreadTableKeepsTheTimeOfTheLastOneRead() async throws {
