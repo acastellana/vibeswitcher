@@ -177,19 +177,29 @@ final class HostClient: ObservableObject {
         whenReady.append(ready)
         guard connection == nil else { return }   // a welcome is on its way
         if connect() { return }
+        let started: pid_t
         do {
-            try startHost()
+            started = try startHost()
         } catch {
             return finishWaiting("Couldn't start the session host: \(error.localizedDescription)")
         }
-        retryConnect(attempts: 30)
+        retryConnect(host: started)
     }
 
-    private func retryConnect(attempts: Int) {
+    /// How long a host this client started may run without listening before it's called failed: a hang guard only.
+    /// On a loaded Mac a fresh build's first exec waits on amfid (see `hostProbeLimit`).
+    static let hostStartLimit: TimeInterval = hostProbeLimit
+
+    /// Connects every 0.1 s: while `host` (the one this client just started) runs, up to `hostStartLimit`; then (it
+    /// ended, or none was started: another host may hold the lock and be the one to answer) `attempts` more times.
+    private func retryConnect(host: pid_t?, attempts: Int = 30, since started: Date = Date()) {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             guard self.connection == nil else { return }
             if self.connect() { return }
-            if attempts > 0 { return self.retryConnect(attempts: attempts - 1) }
+            if let host, self.stillRuns(host), Date().timeIntervalSince(started) < Self.hostStartLimit {
+                return self.retryConnect(host: host, attempts: attempts, since: started)
+            }
+            if attempts > 0 { return self.retryConnect(host: nil, attempts: attempts - 1) }
             self.state = .failed("The session host didn't start. See ~/.vibeswitcher/host.log.")
             self.finishWaiting("The session host didn't start. See ~/.vibeswitcher/host.log.")
         }
@@ -265,8 +275,8 @@ final class HostClient: ObservableObject {
         connectionLost()
     }
 
-    /// Detached (own session, not our child for signals), stdout/stderr appended to host.log.
-    private func startHost() throws {
+    /// Detached (own session, not our child for signals), stdout/stderr appended to host.log. Its pid.
+    private func startHost() throws -> pid_t {
         let path = hostPath ?? Self.hostExecutable.path
         guard FileManager.default.isExecutableFile(atPath: path) else {
             throw HostClientError(message: "vibeswitcher-host is missing from the app")
@@ -305,6 +315,18 @@ final class HostClient: ObservableObject {
         }
         source.resume()
         hostProcesses[pid] = source
+        return pid
+    }
+
+    /// Whether `pid`, a host this client started, still runs: reaped here once it ended (one that ended before its
+    /// watch began may never be told to it).
+    private func stillRuns(_ pid: pid_t) -> Bool {
+        guard hostProcesses[pid] != nil else { return false }
+        var status: Int32 = 0
+        let reaped = waitpid(pid, &status, WNOHANG)
+        if reaped == 0 || (reaped < 0 && errno == EINTR) { return true }
+        hostProcesses.removeValue(forKey: pid)?.cancel()
+        return false
     }
 
     private func connectionLost() {
@@ -318,15 +340,13 @@ final class HostClient: ObservableObject {
         pending.values.forEach { $0(.error(Self.wentAway)) }
         if replacing {
             replacing = false
-            try? startHost()
-            return retryConnect(attempts: 30)
+            return retryConnect(host: try? startHost())
         }
         // Closed before its welcome while a new session waits (an idle host quitting just as we connected): start
         // one and try again, rather than giving up.
         if !welcomed, !whenReady.isEmpty, !restartedForWaiting {
             restartedForWaiting = true
-            try? startHost()
-            return retryConnect(attempts: 30)
+            return retryConnect(host: try? startHost())
         }
         // Keep the sessions and their terminals as they are (the last output is what you want to read now) and
         // try to get back to the host; only when it's really gone are its sessions marked ended.
