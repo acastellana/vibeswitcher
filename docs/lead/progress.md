@@ -1892,3 +1892,5 @@
 - 2026-10-28 19:40 Merged a-hung-merge-test: A hung merge test run names the tests that started and never finished, in a readable file
 - 2026-10-28 19:40 Automatically (auto_advance): Merged a-hung-merge-test (A hung merge test run names the tests that started and never finished, in a readable file) into project-lead at 07832fa8, on its passing audit and the full test run.
 - 2026-10-28 19:47 Merged systempower-onacpower: SystemPower.onACPower blocks the main thread (6.4 s) from KeepAwake.update in LeadController.refreshed
+- 2026-10-28 19:47 Automatically (auto_advance): Merged systempower-onacpower (SystemPower.onACPower blocks the main thread (6.4 s) from KeepAwake.update in LeadController.refreshed) into project-lead at 64908a43, on its passing audit and the full test run.
+- 2026-10-28 19:53 Merged scrub-the-names-of: Scrub the names of the user's other projects from the repository's current files, the lead's records included (no audit: review none)
