@@ -15,11 +15,15 @@ public struct WindowRow: Identifiable, Equatable, Sendable {
     /// tell what runs on its terminal (see `TableRead.agentQuit`): its shell lives on. False while no such table has
     /// been read.
     public var agentQuit: Bool
+    /// The folder its window session was started in (the host's record, as its label is); nil outside the window.
+    /// The agent's own cwd follows each `cd` (a lead looking into `.vibeswitcher/worktrees`), this one doesn't.
+    public var startFolder: String?
 
-    public init(content: Content, project: String, agentQuit: Bool = false) {
+    public init(content: Content, project: String, agentQuit: Bool = false, startFolder: String? = nil) {
         self.content = content
         self.project = project
         self.agentQuit = agentQuit
+        self.startFolder = startFolder
     }
 
     /// Window sessions are keyed by their host id, so a row keeps its identity (and selection) when the
@@ -76,9 +80,10 @@ public enum WindowRows {
         }
         // The scan can list an agent before the store learns its tty is a window session's.
         let liveHosted = Dictionary(hosted.filter(\.isLive).map { ($0.tty, $0.id) }, uniquingKeysWith: { $1 })
+        let folders = Dictionary(hosted.map { ($0.id, $0.cwd) }, uniquingKeysWith: { first, _ in first })
         for var session in sessions {
             if session.hostID == nil { session.hostID = liveHosted[session.tty] }
-            add(WindowRow(content: .agent(session), project: session.project))
+            add(WindowRow(content: .agent(session), project: session.project, startFolder: session.hostID.flatMap { folders[$0] }))
         }
         let extras = extras(hosted: hosted, agentTTYs: Set(sessions.map(\.tty))).sorted {
             if $0.isLive != $1.isLive { return $0.isLive }

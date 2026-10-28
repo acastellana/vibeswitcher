@@ -431,12 +431,13 @@ final class LeadController: ObservableObject {
         Set(host.sessions.filter { $0.isLive && LeadTeams.role(label: $0.label) == .lead }.map { ($0.cwd as NSString).standardizingPath })
     }
 
-    /// The lead a row is, if it is one: its root and board.
+    /// The lead a row is, if it is one: its root (the folder its window session started in, wherever its agent has
+    /// `cd`'d since) and board.
     func lead(for row: WindowRow) -> (root: String, board: LeadBoard)? {
-        guard let cwd = row.cwd else { return nil }
-        let root = (cwd as NSString).standardizingPath
-        guard let id = row.hostID, host.sessions.first(where: { $0.id == id }).map({ LeadTeams.role(label: $0.label) == .lead }) == true,
-              let board = boards[root] else { return nil }
+        guard let id = row.hostID, let session = host.sessions.first(where: { $0.id == id }), LeadTeams.role(label: session.label) == .lead
+        else { return nil }
+        let root = (session.cwd as NSString).standardizingPath
+        guard let board = boards[root] else { return nil }
         return (root, board)
     }
 

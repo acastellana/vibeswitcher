@@ -12,6 +12,10 @@ extension WindowRow {
     }
 
     public var cwd: String? { session?.cwd ?? hosted?.cwd }
+
+    /// The folder a team is told from: where the window session was started (a lead's repository, a worker's worktree),
+    /// else the agent's cwd. Not `cwd`: a lead that ran `cd .vibeswitcher/worktrees` would lose its team.
+    public var teamFolder: String? { hosted?.cwd ?? startFolder ?? cwd }
 }
 
 /// A project lead and its team in the session list: workers and verifiers fold under their lead.
@@ -197,7 +201,7 @@ public enum LeadTeams {
         var order: [String] = []
         var tasks: [String: [WindowRow]] = [:]
         for row in team where isLive(row) {
-            let key = row.cwd.flatMap(task(ofWorktree:)) ?? row.id
+            let key = row.teamFolder.flatMap(task(ofWorktree:)) ?? row.id
             if tasks[key] == nil { order.append(key) }
             tasks[key, default: []].append(row)
         }
@@ -250,12 +254,12 @@ public enum LeadTeams {
         let rows = sections.flatMap(\.rows)
         var leadByRoot: [String: String] = [:]
         for row in rows where role(label: label(row)) == .lead {
-            if let cwd = row.cwd { leadByRoot[(cwd as NSString).standardizingPath] = row.id }
+            if let folder = row.teamFolder { leadByRoot[(folder as NSString).standardizingPath] = row.id }
         }
         var teams: [String: [WindowRow]] = [:]
         var moved = Set<String>()
         for row in rows {
-            guard let role = role(label: label(row)), role != .lead, let cwd = row.cwd, let root = root(ofWorktree: cwd),
+            guard let role = role(label: label(row)), role != .lead, let folder = row.teamFolder, let root = root(ofWorktree: folder),
                   let lead = leadByRoot[(root as NSString).standardizingPath] else { continue }
             teams[lead, default: []].append(row)
             moved.insert(row.id)

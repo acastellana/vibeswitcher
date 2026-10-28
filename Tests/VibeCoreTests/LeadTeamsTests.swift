@@ -249,4 +249,52 @@ struct LeadTeamsTests {
         #expect(LeadTeams.state(of: ended, now: now).text == "agent ended · shell")
         #expect(LeadTeams.summary([ended], label: label, board: nil, now: now) == "team: none running")
     }
+
+    /// 2026-10-28 07:23: vibeswitcher's running worker and verifier showed as groups of their own, named after their worktrees,
+    /// and its lead row had no "team:" line. The lead had run `cd .vibeswitcher/worktrees` (its hooks' cwd follows each `cd`),
+    /// so its row's folder was no longer the repository its team's worktrees are in. A team is told from the folders the window
+    /// sessions were started in (the host's, as their labels are), never from where the agent is now nor from the titles Claude
+    /// Code 2.1.311 gives them ("lead-acme", "worker-add-login").
+    @Test func aLeadThatChangedFolderKeepsItsTeam() {
+        let now = Date()
+        let wt = "/r/acme/.vibeswitcher/worktrees/add-login"
+        func window(_ tty: String, _ label: String, cwd: String) -> HostSession {
+            HostSession(id: UUID(), tty: tty, childPID: 1, cwd: cwd, command: "claude", label: label, agent: "claude", title: "",
+                        startedAt: now - 600, cols: 80, rows: 24, exit: nil)
+        }
+        // The scan names its project from where the agent was started (the host's folder), its cwd from the hooks.
+        func agent(_ host: HostSession, cwd: String, title: String, status: SessionStatus) -> Session {
+            var session = Session(tty: host.tty, agent: .claude, pid: 1, startedAt: now - 600, cwd: cwd,
+                                  project: (host.cwd as NSString).lastPathComponent, task: title, status: status, statusSince: now,
+                                  detail: nil, hasHooks: true, inTerminalApp: false)
+            session.hostID = host.id
+            return session
+        }
+        let lead = window("ttys8", "Lead · acme", cwd: "/r/acme")
+        let worker = window("ttys2", "Worker: Add login", cwd: wt)
+        let verifier = window("ttys13", "Verifier: Add login", cwd: wt)
+        let other = window("ttys20", "Claude", cwd: "/r/other")
+        let hosted = [lead, worker, verifier, other]
+        let sessions = [agent(lead, cwd: "/r/acme/.vibeswitcher/worktrees", title: "lead-acme", status: .done),
+                        agent(worker, cwd: wt + "/Sources", title: "worker-add-login", status: .idle),
+                        agent(verifier, cwd: wt, title: "verify-add-login", status: .working),
+                        agent(other, cwd: "/r/other", title: "worker-not-a-worker", status: .working)]
+        let sections = WindowRows.sections(sessions: sessions, hosted: hosted, table: TableRead(at: now)) { ($0 as NSString).lastPathComponent }
+        // As the window labels its rows: from the host's sessions, by id.
+        let labels = Dictionary(uniqueKeysWithValues: hosted.map { ($0.id, $0.label) })
+        let label = { (row: WindowRow) in row.hosted?.label ?? row.hostID.flatMap { labels[$0] } }
+        let leadID = "host:\(lead.id)"
+
+        let arranged = LeadTeams.arrange(sections, label: label, expanded: [])
+        #expect(arranged.sections.map(\.project) == ["acme", "other"])
+        #expect(arranged.teams[leadID]?.map(\.id) == ["host:\(worker.id)", "host:\(verifier.id)"])
+        #expect(arranged.teams.count == 1)
+        let team = arranged.teams[leadID] ?? []
+        #expect(LeadTeams.summary(team, label: label, board: nil, now: now) == "team: 1 in review")
+        let open = LeadTeams.arrange(sections, label: label, expanded: [leadID])
+        #expect(open.sections[0].rows.map(\.id) == [leadID, "host:\(worker.id)", "host:\(verifier.id)"])
+        // A title alone never makes a role: the session the user started reads like a worker but has no worker's label.
+        #expect(LeadTeams.role(label: label(sections[2].rows[0])) == nil)
+        #expect(LeadTeams.role(label: "worker-add-login") == nil && LeadTeams.role(label: "lead-acme") == nil)
+    }
 }

@@ -511,8 +511,8 @@ enum TeamRows {
     /// An ended worker or verifier of a finished task (merged, folded, abandoned): the lead's history, not the list's. The host is
     /// told to forget these (see `LeadController`); until it has, the team folding leaves them out.
     static func isHistory(_ row: WindowRow, boards: [String: LeadBoard], now: Date) -> Bool {
-        guard let cwd = row.cwd, !LeadTeams.isLive(row), let root = LeadTeams.root(ofWorktree: cwd),
-              let slug = LeadTeams.task(ofWorktree: cwd), let task = boards[(root as NSString).standardizingPath]?.task(slug) else { return false }
+        guard let folder = row.teamFolder, !LeadTeams.isLive(row), let root = LeadTeams.root(ofWorktree: folder),
+              let slug = LeadTeams.task(ofWorktree: folder), let task = boards[(root as NSString).standardizingPath]?.task(slug) else { return false }
         return LeadTeams.isFinished(task)
     }
 

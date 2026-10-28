@@ -25,7 +25,7 @@ enum PhoneLeads {
         let teams = LeadTeams.arrange(sections, label: label, expanded: []).teams
         return controller.boards.keys.sorted().compactMap { root in
             guard let board = controller.boards[root] else { return nil }
-            let leadRow = rows.first { LeadTeams.role(label: label($0)) == .lead && $0.cwd.map { ($0 as NSString).standardizingPath } == root }
+            let leadRow = rows.first { LeadTeams.role(label: label($0)) == .lead && $0.teamFolder.map { ($0 as NSString).standardizingPath } == root }
             var summary: String?
             if let leadRow, let team = teams[leadRow.id], !team.isEmpty {
                 let key = "sidebar|" + root
