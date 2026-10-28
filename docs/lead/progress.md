@@ -1644,3 +1644,8 @@
 - 2026-10-28 09:28 Started a worker on session-host-refuses
 - 2026-10-28 09:28 Automatically (auto_advance): Started a worker on session-host-refuses (Session host refuses connections under bursts (listen backlog 16 → ECONNREFUSED)).
 - 2026-10-28 09:28 Automatically (auto_advance): Didn't audit lead-chat-freezes-of: An audit of lead-chat-freezes-of is already making its build and test run; its verdict comes as a report.
+- 2026-10-28 09:37 Audit of lead-chat-freezes-of at 1a53c78d tested its merged result 517e7d1c onto project-lead: test command failed
+- 2026-10-28 09:38 Audit of app-memory-grows-to at 5bbac440 tested its merged result d512a374 onto project-lead: test command failed
+- 2026-10-28 09:38 Automatically (auto_advance): Started the audit of app-memory-grows-to at 5bbac440 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-10-28 09:38 Planned verifier-trust-check: Verifier trust check trips on agent files inside .build (ui-bench.sh's base checkout copies AGENTS.md/CLAUDE.md) (review audit)
+- 2026-10-28 09:41 Audit of archive-finished-tasks: complete, clean, round 1: 5 Nit open
