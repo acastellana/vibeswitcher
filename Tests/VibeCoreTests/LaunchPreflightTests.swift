@@ -75,7 +75,7 @@ struct LaunchPreflightTests {
         let problem = try #require(mac.preflight.check(command: "claude --model opus"))
         #expect(problem.missing == [.agent(program: "claude", shell: mac.preflight.shell)])
         #expect(problem.title == "Claude Code isn't installed.")
-        #expect(problem.text.contains("`claude`") && problem.text.contains("fakesh -l") && problem.text.contains("Install Claude Code"))
+        #expect(problem.text.contains("“claude”") && problem.text.contains("fakesh -l") && problem.text.contains("Install Claude Code"))
         // Codex by its name too.
         #expect(try #require(mac.preflight.check(command: "codex")).title == "Codex isn't installed.")
     }

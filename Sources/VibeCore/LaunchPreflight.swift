@@ -214,8 +214,8 @@ public struct LaunchPreflight: Sendable {
                 return "VibeSwitcher starts it as \(program), and there's nothing at that path. \(install(program)), or set the Claude "
                     + "preset's Command in Settings to where it is, then try again."
             }
-            return "VibeSwitcher starts it as `\(program)`, and your login shell (\((shell as NSString).lastPathComponent) -l) doesn't find "
-                + "that command. \(install(program)), check that `\(program)` runs in a new Terminal window, then try again."
+            return "VibeSwitcher starts it as “\(program)”, and your login shell (\((shell as NSString).lastPathComponent) -l) doesn't find "
+                + "that command. \(install(program)), check that “\(program)” runs in a new Terminal window, then try again."
         case .commandLineTools:
             return "They aren't installed on this Mac (xcode-select -p names no developer folder). Run xcode-select --install in "
                 + "Terminal, finish the installer, then try again."

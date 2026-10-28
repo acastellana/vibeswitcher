@@ -37,7 +37,7 @@ struct StartWorkerPreflightTests: LeadTeamFixture {
 
         let refused = lead.call("start_worker", ["task": "add-b"])
         #expect(refused.isError)
-        #expect(refused.text.hasPrefix("Not started: Claude Code isn't installed. VibeSwitcher starts it as `claude`"), "\(refused.text)")
+        #expect(refused.text.hasPrefix("Not started: Claude Code isn't installed. VibeSwitcher starts it as “claude”"), "\(refused.text)")
         #expect(refused.text.contains("Install Claude Code") && refused.text.contains("never installs anything"))
         #expect(runtime.preflighted == [runtime.claude])
         #expect(runtime.spawned.isEmpty)

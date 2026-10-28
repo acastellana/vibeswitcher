@@ -1479,11 +1479,17 @@ final class LeadController: ObservableObject {
         _ = confirm(title, text, ["OK"])
     }
 
-    static func runAlert(_ title: String, _ text: String, _ buttons: [String]) -> Int {
+    /// The alert `runAlert` shows (the sandbox draws it too).
+    static func makeAlert(_ title: String, _ text: String, _ buttons: [String]) -> NSAlert {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = text
         buttons.forEach { alert.addButton(withTitle: $0) }
+        return alert
+    }
+
+    static func runAlert(_ title: String, _ text: String, _ buttons: [String]) -> Int {
+        let alert = makeAlert(title, text, buttons)
         NSApp.activate()
         return alert.runModal().rawValue - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
     }

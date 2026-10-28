@@ -827,6 +827,19 @@ private final class Driver: NSObject, NSApplicationDelegate {
             alert.layout()
             return alert.window
         }),
+        // A lead started on a Mac without Claude Code: the real look (`LaunchPreflight`), its login shell a stand-in
+        // whose PATH has no claude, and the alert the start shows.
+        ("missing-claude", { driver in
+            let shell = driver.home + "/bin/fakesh"
+            let script = "#!/bin/sh\nshift 2\nPATH=/usr/bin:/bin; export PATH\nexec /bin/sh \"$@\"\n"
+            try? VibePaths.ensurePrivate(URL(fileURLWithPath: driver.home + "/bin"))
+            try? VibePaths.writePrivate(Data(script.utf8), to: URL(fileURLWithPath: shell))
+            chmod(shell, 0o700)
+            guard let missing = LaunchPreflight(shell: shell).check(command: "claude") else { return nil }
+            let alert = LeadController.makeAlert(missing.title, "The lead wasn't started. " + missing.text, ["OK"])
+            alert.layout()
+            return alert.window
+        }),
     ] }
 
     /// The `lead-team` sheet's board, as of now.
