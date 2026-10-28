@@ -1890,3 +1890,5 @@
 - 2026-10-28 19:37 Planned missing-tools-at-lead: Missing tools at lead start: offer one-click install instead of only explaining (Command Line Tools, Claude Code), then start the lead (review audit)
 - 2026-10-28 19:40 Audit of systempower-onacpower: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
 - 2026-10-28 19:40 Merged a-hung-merge-test: A hung merge test run names the tests that started and never finished, in a readable file
+- 2026-10-28 19:40 Automatically (auto_advance): Merged a-hung-merge-test (A hung merge test run names the tests that started and never finished, in a readable file) into project-lead at 07832fa8, on its passing audit and the full test run.
+- 2026-10-28 19:47 Merged systempower-onacpower: SystemPower.onACPower blocks the main thread (6.4 s) from KeepAwake.update in LeadController.refreshed
