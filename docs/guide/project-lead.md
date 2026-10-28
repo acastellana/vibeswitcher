@@ -4,7 +4,10 @@ A project lead is one Claude Code session per git repository that you talk to ab
 runs a small team of Claude sessions to do it, checks what they did and merges what passes. You decide what to build;
 it handles the rest and asks you only what's yours to decide.
 
-![A lead's chat: the team strip, notes from workers and an all-done card](../images/lead-light.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/lead-dark.png">
+  <img alt="A lead's chat: the team strip, notes from workers and an all-done card" src="../images/lead-light.png">
+</picture>
 
 ## Starting a lead
 
@@ -190,7 +193,10 @@ tools) at most every 3 minutes while the tab is open; "Summarize what each agent
 General › Project lead turns it off. Click a task for its checkpoints, report, audit and links to its
 sessions. Below are the scorecard, answered questions and the lead's files.
 
-![The all-done card](../images/all-done-light.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/all-done-dark.png">
+  <img alt="The all-done card" src="../images/all-done-light.png">
+</picture>
 
 When the board goes from open work to none, with at least one merge since the last one, the lead's chat shows an
 **all-done card**: a headline and bullets saying what landed, the batch's tasks, and its cost.

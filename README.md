@@ -80,7 +80,10 @@ Codex sessions started before need a restart.
 
 ### Sessions and the sidebar
 
-![A permission prompt shown as a card in the chat](docs/images/question-card-light.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/question-card-dark.png">
+  <img alt="A permission prompt shown as a card in the chat" src="docs/images/question-card-light.png">
+</picture>
 
 The main window (⌘-click the menu bar icon) lists every session on the left, grouped by what needs you (Needs you,
 Working, Idle…) or by project. Each row's icon leads with the status; the agent's mark is a small badge in its corner.
@@ -118,7 +121,10 @@ and answers to a lead's questions, need a separate switch. See [Phone access](do
 
 ### The project lead and its team
 
-![The lead's Team tab: tasks with their state, the scorecard, answered questions and the lead's files](docs/images/team-tab-light.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/team-tab-dark.png">
+  <img alt="The lead's Team tab: tasks with their state, the scorecard, answered questions and the lead's files" src="docs/images/team-tab-light.png">
+</picture>
 
 Start a lead from the start page, ⌘K, the ⊕ menu, or `VibeSwitcher --lead FOLDER --goal "…"`. Then talk to it
 like any session. It:

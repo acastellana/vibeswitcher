@@ -36,7 +36,10 @@ desktop. It slides in when the mouse touches the middle of that edge and slides 
 
 ## The main window
 
-![The start page](../images/start-page-light.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../images/start-page-dark.png">
+  <img alt="The start page" src="../images/start-page-light.png">
+</picture>
 
 - **The list** (left) groups sessions by what needs you or by project (⌃⌘1, ⌃⌘2); ⌥⌘F filters it. A lead's workers
   and verifiers fold under the lead.

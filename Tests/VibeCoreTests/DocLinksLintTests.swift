@@ -106,6 +106,68 @@ struct DocLinksLintTests {
         #expect(broken == [], Comment(rawValue: "dead links in the docs:\n" + broken.joined(separator: "\n")))
     }
 
+    /// The files in `images` (a folder's PNGs and such) that none of `shown`, the resolved paths the docs link to, names.
+    static func unshown(_ images: [URL], shown: Set<String>) -> [String] {
+        images.map { $0.standardizedFileURL.path }.filter { !shown.contains($0) }.sorted()
+    }
+
+    /// Every file in docs/images is shown by some doc: a screenshot nothing links to (a dark twin left out of a
+    /// `<picture>`, an image a guide stopped using) is published for no reader and goes stale unnoticed.
+    @Test func everyImageInDocsImagesIsShown() throws {
+        var shown: Set<String> = []
+        for file in Self.markdownFiles() {
+            let text = try String(contentsOf: file, encoding: .utf8)
+            for target in Self.targets(in: text) where Self.problem(target, in: file) == nil {
+                let path = String(target.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false)[0])
+                let decoded = path.removingPercentEncoding ?? path
+                guard !decoded.isEmpty, !decoded.contains("://") else { continue }
+                let url = decoded.hasPrefix("/") ? Self.repo.appendingPathComponent(String(decoded.dropFirst()))
+                                                 : file.deletingLastPathComponent().appendingPathComponent(decoded)
+                shown.insert(url.standardizedFileURL.path)
+            }
+        }
+        let folder = Self.repo.appendingPathComponent("docs/images")
+        let images = try FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil)
+            .filter { !$0.lastPathComponent.hasPrefix(".") }
+        let unused = Self.unshown(images, shown: shown)
+            .map { $0.replacingOccurrences(of: Self.repo.standardizedFileURL.path + "/", with: "") }
+        #expect(!images.isEmpty)
+        #expect(unused == [], Comment(rawValue: "images no doc shows (link them, or remove them):\n" + unused.joined(separator: "\n")))
+    }
+
+    /// The lint suites: every `*LintTests.swift` under Tests/, by the name `--filter` matches (`KeychainLint`).
+    static func lintSuites() -> [String] {
+        var names: [String] = []
+        let tests = repo.appendingPathComponent("Tests")
+        if let walk = FileManager.default.enumerator(at: tests, includingPropertiesForKeys: nil) {
+            for case let url as URL in walk where url.lastPathComponent.hasSuffix("LintTests.swift") {
+                names.append(String(url.lastPathComponent.dropLast("Tests.swift".count)))
+            }
+        }
+        return names.sorted()
+    }
+
+    /// The names in the development guide's lint command (the first `--filter '…'` under "## The lints").
+    static func lintCommand(in guide: String) -> Set<String> {
+        guard let section = guide.range(of: "\n## The lints\n") else { return [] }
+        guard let match = guide[section.upperBound...].firstMatch(of: try! Regex(#"--filter '([^']+)'"#)),
+              let names = match.output[1].substring else { return [] }
+        return Set(names.split(separator: "|").map { $0.trimmingCharacters(in: .whitespaces) })
+    }
+
+    /// The development guide's lint command and its table name every lint suite in Tests/, so the command a worker
+    /// runs before reporting done runs them all.
+    @Test func theDevelopmentGuideNamesEveryLintSuite() throws {
+        let guide = try String(contentsOf: Self.repo.appendingPathComponent("docs/guide/development.md"), encoding: .utf8)
+        let suites = Self.lintSuites()
+        let command = Self.lintCommand(in: guide)
+        #expect(suites.count >= 10)
+        let notRun = suites.filter { !command.contains($0) }
+        let notListed = suites.filter { !guide.contains("| `\($0)` |") }
+        #expect(notRun == [], Comment(rawValue: "lint suites missing from development.md's lint command: \(notRun)"))
+        #expect(notListed == [], Comment(rawValue: "lint suites missing from development.md's lint table: \(notListed)"))
+    }
+
     @Test func theCheckFindsADeadLinkAndAMissingHeading() {
         let readme = Self.repo.appendingPathComponent("README.md")
         #expect(Self.problem("docs/no-such-guide.md", in: readme) != nil)
@@ -115,5 +177,9 @@ struct DocLinksLintTests {
         #expect(Self.targets(in: "<source srcset=\"d.png\">\n<img alt=\"x\" src=\"l.png\">") == ["d.png", "l.png"])
         #expect(Self.anchor("Security: the signing identity") == "security-the-signing-identity")
         #expect(Self.anchors(in: "# A\n## A\n```\n# B\n```\n<a id=\"e-19\"></a>**E-19**") == ["a", "a-1", "e-19"])
+        let images = [URL(fileURLWithPath: "/r/docs/images/a-light.png"), URL(fileURLWithPath: "/r/docs/images/a-dark.png")]
+        #expect(Self.unshown(images, shown: ["/r/docs/images/a-light.png"]) == ["/r/docs/images/a-dark.png"])
+        let guide = "# Dev\n```sh\nx --filter 'Old'\n```\n## The lints\n```sh\nbash scripts/test.sh --filter 'ALint|BLint'\n```\n"
+        #expect(Self.lintCommand(in: guide) == ["ALint", "BLint"])
     }
 }

@@ -62,14 +62,15 @@ keychain code is reachable from a test any other way. The one test of the real k
 Run them before you call a change done; they take seconds:
 
 ```sh
-bash scripts/test.sh --filter 'AccessibilityLint|DebugAidsLint|DocLinksLint|HomePathLint|KeychainLint|PreferencesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|TemporaryFolderLint'
+bash scripts/test.sh --filter 'AccessibilityLint|AgentExportLint|DebugAidsLint|DocLinksLint|HomePathLint|KeychainLint|PreferencesLint|PrivateWriteLint|ScriptScratchLint|SecretShapeLint|TemporaryFolderLint'
 ```
 
 | Lint | What it catches |
 | --- | --- |
 | `AccessibilityLint` | An SF Symbol the app shows that's neither named for VoiceOver nor hidden from it. |
+| `AgentExportLint` | A script or test that writes a git tree into the worktree with its agent files (AGENTS.md, `CLAUDE*.md`, `.claude/`, `.mcp.json`). |
 | `DebugAidsLint` | A notification handler that writes a session's screen where the (unknown) sender says. |
-| `DocLinksLint` | A relative link or `#anchor` in README.md or `docs/**/*.md` that doesn't resolve. |
+| `DocLinksLint` | A relative link or `#anchor` in README.md or `docs/**/*.md` that doesn't resolve, an image in `docs/images` no doc shows, or a lint suite missing from the command above. |
 | `HomePathLint` | A path under the home folder worked out once per process. |
 | `KeychainLint` | A test that can reach the real keychain. |
 | `PreferencesLint` | A test that makes a defaults suite in the real `~/Library/Preferences`. |

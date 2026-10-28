@@ -790,7 +790,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }),
         ("lead-team", { driver in
             let team = Driver.leadTeam()
-            return AnyView(LeadTeamView(root: driver.home + "/projects/stakegen", board: team.board, seen: team.seen, open: { _ in },
+            return AnyView(LeadTeamView(root: driver.home + "/projects/sandbox-project", board: team.board, seen: team.seen, open: { _ in },
                                         decisions: team.decisions, keepingAwake: true,
                                         mac: MacLine(text: "Mac: load 16.5, 5 team sessions across 3 projects", spoken: "", isOver: false))
                 .frame(width: 360, height: 980))
