@@ -103,6 +103,18 @@ struct SessionHeaderView: View {
     }
 
     @ViewBuilder private var hostState: some View {
+        if let refusal = host.proofRefusal {
+            // The host shows this app none of its sessions: say why the list is empty.
+            Label("The session host doesn't recognise this app", systemImage: "exclamationmark.triangle.fill")
+                .font(.caption).foregroundStyle(.red).lineLimit(1)
+                .help(refusal + " Its sessions aren't shown, and new ones can't start, until it does.")
+                .accessibilityLabel("The session host doesn't recognise this app: \(refusal)")
+        } else {
+            connectionState
+        }
+    }
+
+    @ViewBuilder private var connectionState: some View {
         switch host.state {
         case .connecting:
             Text("Connecting…").font(.caption).foregroundStyle(.orange)

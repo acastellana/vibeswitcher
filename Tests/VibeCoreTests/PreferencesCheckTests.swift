@@ -77,7 +77,7 @@ struct PreferencesCheckTests {
     @Test func theFullRunChecksTheBuildsDefaults() throws {
         let lines = try String(contentsOf: Self.repo.appendingPathComponent("scripts/test.sh"), encoding: .utf8)
             .components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
-        let build = #"Resources/bin/vs-heavy --as scripts/test.sh bash -c 'swift build && swift test "$@"' scripts/test.sh "$@""#
+        let build = #"Resources/bin/vs-heavy --as scripts/test.sh bash -c 'swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; swift test "$@"' scripts/test.sh "$@""#
         let before = lines.firstIndex(of: "defaults_before=$(build_defaults)")
         let swift = lines.firstIndex(of: build)
         let check = lines.firstIndex(of: #"check_preferences "$preferences_before" "$defaults_before" || status=1"#)

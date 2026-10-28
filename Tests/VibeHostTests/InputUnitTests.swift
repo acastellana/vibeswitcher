@@ -44,7 +44,7 @@ struct InputUnitTests {
             seqs = app_.map { app.send(.inputUnit(id: session.id, writes: Self.unit($0), more: false)) }
         }
         DispatchQueue.global().async(group: done) {
-            typed = tools.filter { (try? HostCall.type(Self.unit($0), into: session.id, socket: host.socket, timeout: hangGuard)) != nil }.count
+            typed = tools.filter { (try? HostCall.type(Self.unit($0), into: session.id, socket: host.socket, appKey: host.appKey, timeout: hangGuard)) != nil }.count
         }
         #expect(done.wait(timeout: .now() + hangGuard) == .success)
         #expect(typed == count)
@@ -60,13 +60,13 @@ struct InputUnitTests {
     @Test func inputWaitsBehindAHeldUnitUntilItsEnterIsIn() throws {
         let host = try TestHost()
         let app = try TestClient(host)
-        let other = try TestClient(host, asApp: false)
+        let other = try TestClient(host)
         let (session, out) = try lineSession(app)
         // The app's unit, held between its text and its Enter (its sender reads the screen in between, say).
         let first = app.send(.inputUnit(id: session.id, writes: [HostInput.Write(bytes: Array("first".utf8), delay: 0)], more: true))
         #expect(eventually { app.reply(to: first) == .ok })
         // Meanwhile another client's keys and another's unit: neither goes in yet.
-        try HostCall.send(.input(id: session.id, bytes: Data("second\r".utf8), reply: false), socket: host.socket, timeout: hangGuard)
+        try HostCall.send(.input(id: session.id, bytes: Data("second\r".utf8), reply: false), socket: host.socket, appKey: host.appKey, timeout: hangGuard)
         let third = other.send(.inputUnit(id: session.id, writes: Self.unit("third"), more: false))
         Thread.sleep(forTimeInterval: 0.3)
         #expect(Self.lines(out).isEmpty)
@@ -87,14 +87,14 @@ struct InputUnitTests {
         let half = gone.send(.inputUnit(id: session.id, writes: [HostInput.Write(bytes: Array("gone".utf8), delay: 0)], more: true))
         #expect(eventually { gone.reply(to: half) == .ok })
         gone.close()
-        try HostCall.type(Self.unit(" next"), into: session.id, socket: host.socket, timeout: hangGuard)
+        try HostCall.type(Self.unit(" next"), into: session.id, socket: host.socket, appKey: host.appKey, timeout: hangGuard)
         // What did go in stays typed, as a person's would: the next Enter takes it along.
         #expect(eventually { Self.lines(out) == ["gone next"] })
         // No next part within the hold: over, and the next unit goes in.
         let quiet = app.send(.inputUnit(id: session.id, writes: [HostInput.Write(bytes: Array("quiet".utf8), delay: 0)], more: true))
         #expect(eventually { app.reply(to: quiet) == .ok })
         let started = Date()
-        try HostCall.type(Self.unit(" after"), into: session.id, socket: host.socket, timeout: hangGuard)
+        try HostCall.type(Self.unit(" after"), into: session.id, socket: host.socket, appKey: host.appKey, timeout: hangGuard)
         #expect(Date().timeIntervalSince(started) > 0.4)
         #expect(eventually { Self.lines(out) == ["gone next", "quiet after"] })
         // A part with no writes ends a held unit at once (a sender whose check said no).
@@ -102,7 +102,7 @@ struct InputUnitTests {
         #expect(eventually { app.reply(to: held) == .ok })
         let release = app.send(.inputUnit(id: session.id, writes: [], more: false))
         #expect(eventually { app.reply(to: release) == .ok })
-        try HostCall.type(Self.unit(" last"), into: session.id, socket: host.socket, timeout: 0.4)
+        try HostCall.type(Self.unit(" last"), into: session.id, socket: host.socket, appKey: host.appKey, timeout: 0.4)
         #expect(eventually { Self.lines(out) == ["gone next", "quiet after", "stopped last"] })
     }
 
@@ -114,7 +114,7 @@ struct InputUnitTests {
         let app = try TestClient(host)
         // A program that reads nothing.
         let session = try app.spawn(keepRunning)
-        let holder = try TestClient(host, asApp: false)
+        let holder = try TestClient(host)
         let held = holder.send(.inputUnit(id: session.id, writes: [HostInput.Write(bytes: Array("x".utf8), delay: 0)], more: true))
         #expect(eventually { holder.reply(to: held) == .ok })
         // A paste, as `HostClient` paces one: a piece, then a screen read for its receipt. Four fit the host's 1 MB.
@@ -161,7 +161,7 @@ struct InputUnitTests {
         #expect(eventually { app.reply(to: filled) != nil })
         #expect(fills.contains { if case .error? = app.reply(to: $0) { true } else { false } })
         // Behind unit A: refused (no room), with nothing of its own waiting.
-        let holder = try TestClient(host, asApp: false)
+        let holder = try TestClient(host)
         let a = holder.send(.inputUnit(id: session.id, writes: [], more: true))
         #expect(eventually { holder.reply(to: a) == .ok })
         let refused = app.send(.input(id: session.id, bytes: Data("r".utf8), reply: false))
@@ -200,7 +200,7 @@ struct InputUnitTests {
         guard case .error(let message)? = app.reply(to: refused) else { Issue.record("taken: \(String(describing: app.reply(to: refused)))"); return }
         #expect(message.contains("doesn't know that request"))
         // …and the tool server, seeing its welcome, types as before.
-        try HostCall.type(Self.unit("the old way"), into: session.id, socket: host.socket, timeout: hangGuard)
+        try HostCall.type(Self.unit("the old way"), into: session.id, socket: host.socket, appKey: host.appKey, timeout: hangGuard)
         #expect(eventually { Self.lines(out) == ["the old way"] })
     }
 
@@ -210,7 +210,7 @@ struct InputUnitTests {
         let (session, _) = try lineSession(app)
         let held = app.send(.inputUnit(id: session.id, writes: [HostInput.Write(bytes: Array("held".utf8), delay: 0)], more: true))
         #expect(eventually { app.reply(to: held) == .ok })
-        let other = try TestClient(host, asApp: false)
+        let other = try TestClient(host)
         let waiting = other.send(.inputUnit(id: session.id, writes: Self.unit("waits"), more: false))
         app.send(.kill(id: session.id))
         #expect(eventually { app.latest(session.id)?.isLive == false })

@@ -218,12 +218,23 @@ else
     # the one these tests check.
     preferences_before=$(test_preferences)
     defaults_before=$(build_defaults)
-    Resources/bin/vs-heavy --as scripts/test.sh bash -c 'swift build && swift test "$@"' scripts/test.sh "$@"
+    # A failed build leaves a mark, so what needs its products is skipped rather than failed (or run on an older build).
+    export VS_BUILD_FAILED_MARK=$tool_scratch/build-failed
+    Resources/bin/vs-heavy --as scripts/test.sh bash -c 'swift build || { : > "$VS_BUILD_FAILED_MARK"; exit 1; }; swift test "$@"' scripts/test.sh "$@"
     status=$?
     check_preferences "$preferences_before" "$defaults_before" || status=1
     # Even when the build or a test failed: they don't need the build, and their result is worth having. Not in --perf.
     if [[ -z $perf ]]; then
         run_web_tests Tests/Web || status=1
+        # These use a private host, synthetic data and ad-hoc signed copies: no user sessions or Keychain.
+        if [[ -e $VS_BUILD_FAILED_MARK ]]; then
+            echo "security socket/signing tests: skipped, the build failed (above): they need its vibeswitcher-host"
+        elif [[ -x .build/debug/vibeswitcher-host ]]; then
+            run_web_tests Tests/SecurityAudit || status=1
+        else
+            echo "security socket/signing tests: no built host at .build/debug/vibeswitcher-host"
+            status=1
+        fi
     fi
 fi
 end_leftovers "$mark" || status=1

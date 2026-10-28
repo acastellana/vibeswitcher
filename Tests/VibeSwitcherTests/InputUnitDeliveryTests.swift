@@ -18,15 +18,17 @@ struct InputUnitDeliveryTests {
         let server: HostServer
         let host: HostClient
         let folder: URL
+        let key: SymmetricKey
 
         /// `capabilities`: the host's (one from before units leaves `inputUnits` out).
         @MainActor
         init(capabilities: [String] = HostServer.capabilities) throws {
+            let key = SymmetricKey(size: .bits256)
+            self.key = key
             let launcher = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host").path
             socket = try temp.shortFolder("vsh-unit") + "/h.sock"
             folder = temp.url("units")
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let key = SymmetricKey(size: .bits256)
             var config = HostServer.Config(socketPath: socket, lockPath: socket + ".lock", shell: "/bin/sh", launcher: launcher,
                                            baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()],
                                            hostBuild: HostBuild.id(ofExecutableAt: HostClient.hostExecutable.path))
@@ -71,11 +73,11 @@ struct InputUnitDeliveryTests {
     func sendAtOnce(_ scratch: Scratch, count: Int) async throws -> (got: [String], app: [String], tools: [String], typed: Int) {
         let (session, out) = try await scratch.spawnLines()
         let app = (0..<count).map { "app message \($0)" }, tools = (0..<count).map { "tool server message \($0)" }
-        let socket = scratch.socket, id = session.id
+        let socket = scratch.socket, id = session.id, key = scratch.key
         // The tool server's, as `HostRuntime.type` sends them: each on a connection of its own, off the main thread.
         let typing = Task.detached {
             tools.filter { text in
-                (try? HostCall.type(HostInput.writes(text: text, submit: true, key: nil), into: id, socket: socket, timeout: hangGuard)) != nil
+                (try? HostCall.type(HostInput.writes(text: text, submit: true, key: nil), into: id, socket: socket, appKey: key, timeout: hangGuard)) != nil
             }.count
         }
         // The app's, as the phone's replies and the lead's wake-ups: one unit each, on its queue.
@@ -105,7 +107,7 @@ struct InputUnitDeliveryTests {
         let (session, out, go) = try await scratch.spawnReader()
         // The other client (a tool server, say): its unit's first part in, the session held for the next.
         let queue = DispatchQueue(label: "holder")
-        let holder = try HostConnection(path: scratch.socket, queue: queue, appKey: nil)
+        let holder = try HostConnection(path: scratch.socket, queue: queue, appKey: scratch.key)
         var answers: [Int: HostEvent] = [:]
         holder.onEvent = { envelope in if let seq = envelope.replyTo { DispatchQueue.main.async { answers[seq] = envelope.event } } }
         let held = try queue.sync { try holder.send(.inputUnit(id: session.id, writes: [HostInput.Write(bytes: Array("x".utf8), delay: 0)], more: true)) }
@@ -138,9 +140,9 @@ struct InputUnitDeliveryTests {
         scratch.host.send(session.id, writes: HostInput.writes(text: "from the app", submit: true, key: nil), confirmed: { confirmed = $0 })
         #expect(await until { confirmed != nil })
         #expect(confirmed == true)
-        let socket = scratch.socket, id = session.id
+        let socket = scratch.socket, id = session.id, key = scratch.key
         try await Task.detached {
-            try HostCall.type(ComposerText.writes("from the tool server", bracketed: false), into: id, socket: socket, timeout: hangGuard)
+            try HostCall.type(ComposerText.writes("from the tool server", bracketed: false), into: id, socket: socket, appKey: key, timeout: hangGuard)
         }.value
         #expect(await until { Scratch.lines(out).count >= 2 })
         #expect(Scratch.lines(out) == ["from the app", "from the tool server"])

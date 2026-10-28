@@ -11,6 +11,11 @@ public final class HostConnection {
     /// The host didn't take this connection as the app's (see `AppProof`): its reason.
     public var onProofRefused: ((String) -> Void)?
     private var proofSeq: Int?
+    /// Why a connection with no key (`appKey`) isn't the app's, when the host asks it to prove it is.
+    public static let noKey = "This app has no key to prove itself with: VibeSwitcher couldn't read it from the Keychain."
+    /// The compatibility hello may precede proof. Repeat it after proof and expose only that welcome.
+    private var helloForProof: Data?
+    private var proofFinished = false
 
     private let fd: Int32
     private let queue: DispatchQueue
@@ -65,6 +70,9 @@ public final class HostConnection {
         nextSeq += 1
         guard let payload = try? HostCoding.encode(HostRequestEnvelope(seq: seq, request: request)) else { throw SendFailure.tooLarge(0) }
         guard payload.count <= HostFrame.maxPayload else { throw SendFailure.tooLarge(payload.count) }
+        if appKey != nil, !proofFinished, Self.isHello(request) {
+            helloForProof = HostFrame.encode(.control, payload)
+        }
         // The hello goes at once: an older host sends no challenge, only its welcome.
         if held != nil, !Self.isHello(request) {
             held?.append(HostFrame.encode(.control, payload))
@@ -134,17 +142,21 @@ public final class HostConnection {
 
     private func readAvailable() {
         var buffer = [UInt8](repeating: 0, count: 65_536)
-        while !closed {
+        var received = 0
+        while !closed, received < 256 * 1024 {
             let count = Darwin.read(fd, &buffer, buffer.count)
             if count > 0 {
+                received += count
                 decoder.append(Data(buffer[0..<count]))
+                deliver()
                 continue
             }
-            if count < 0, errno == EAGAIN || errno == EINTR { break }
+            if count < 0, errno == EINTR { continue }
+            if count < 0, errno == EAGAIN { return }
             deliver()
             return finish(notify: true)
         }
-        deliver()
+        if !closed { queue.async { [weak self] in self?.readAvailable() } }
     }
 
     private func deliver() {
@@ -154,13 +166,24 @@ public final class HostConnection {
                 case .control:
                     // An event this app doesn't know (a newer host) is skipped, not fatal.
                     guard let envelope = try? HostCoding.decode(HostEventEnvelope.self, from: frame.payload) else { break }
-                    if let proofSeq, envelope.replyTo == proofSeq, case .error(let reason) = envelope.event {
-                        onProofRefused?(reason)
+                    if let proofSeq, envelope.replyTo == proofSeq {
+                        proofFinished = true
+                        if case .error(let reason) = envelope.event { onProofRefused?(reason) }
+                        if let hello = helloForProof {
+                            helloForProof = nil
+                            outgoing.append(hello)
+                            flush()
+                        }
                     }
                     if case .challenge(let challenge, let keyless) = envelope.event {
+                        // No key to answer with: the host takes this connection for no one, as it would a wrong proof.
+                        if appKey == nil { onProofRefused?(Self.noKey) }
                         answer(challenge, keyless: keyless)
                     } else if case .welcome = envelope.event {
+                        if proofSeq != nil, !proofFinished { continue }
                         // A host that sent no challenge first (older than it) won't send one.
+                        helloForProof = nil
+                        proofFinished = true
                         release()
                     }
                     onEvent?(envelope)

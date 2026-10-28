@@ -195,6 +195,10 @@ import Testing
         // The worker's server reports as its session's worker.
         let report = try worker.settledCall(&workerID, "report", ["status": "blocked", "summary": "Blocked on purpose (a test)."])
         #expect(report?.isError == false, "report: \(report?.text ?? "no answer"); stderr: \(worker.errors)")
+        // Its lead was told, though the host shows a worker none of its lead's session (only itself and what it
+        // started): the report waits in the lead's inbox, where its hooks or the app's wake-up (`LeadWake`, on the
+        // app's connection, which reaches every session) hand it over. The worker never types into its lead.
+        #expect(report?.text.contains("There's no lead running") == false, "report: \(report?.text ?? "no answer")")
         let fromWorker = { inbox(vibe, tty: leadTTY).filter { $0.from == .system("worker t") } }
         #expect(eventually { fromWorker().count == 1 }, "the lead's inbox: \(inbox(vibe, tty: leadTTY))")
 

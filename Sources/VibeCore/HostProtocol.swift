@@ -26,6 +26,10 @@ public enum HostProtocol {
 
     /// The error a spawn gets once the host agreed to shut down.
     public static let shuttingDown = "The session host is shutting down."
+    /// The error a request about a session the host doesn't have gets.
+    public static let noSuchSession = "No such session."
+    /// The error a request gets that its connection may not make: a session it may not reach, or the app's alone.
+    public static let unauthorized = "This connection is not authorized to access that session or operation."
 }
 
 /// Framing on the socket: a 4-byte big-endian length (kind byte + payload), the kind byte, the payload.
@@ -83,10 +87,20 @@ public struct HostFrameDecoder {
 
     private var buffer = Data()
     private var offset = 0
+    /// One maximum frame plus the next socket read; callers consume frames between reads.
+    public static let maxBufferedBytes = HostFrame.maxPayload + 5 + 65_536
+    private var overflowed = false
 
     public init() {}
 
     public mutating func append(_ data: Data) {
+        guard !overflowed else { return }
+        guard data.count <= Self.maxBufferedBytes - (buffer.count - offset) else {
+            overflowed = true
+            buffer = Data()
+            offset = 0
+            return
+        }
         // Compact once the consumed part is at least half of what's held: removing from the front copies.
         if offset > 0, offset >= buffer.count / 2 {
             buffer = Data(buffer.dropFirst(offset))
@@ -97,6 +111,7 @@ public struct HostFrameDecoder {
 
     /// The next complete frame, or nil until more bytes arrive.
     public mutating func next() throws -> (kind: HostFrame.Kind, payload: Data)? {
+        guard !overflowed else { throw Failure.oversize(Self.maxBufferedBytes + 1) }
         guard buffer.count - offset >= 4 else { return nil }
         let length = buffer[offset..<(offset + 4)].reduce(0) { $0 << 8 | Int($1) }
         guard length >= 1 else { throw Failure.emptyFrame }

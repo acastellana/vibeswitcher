@@ -1,5 +1,6 @@
 import AppKit
 import Combine
+import CryptoKit
 import ObjectiveC
 import SwiftUI
 import VibeCore
@@ -253,6 +254,13 @@ private final class Driver: NSObject, NSApplicationDelegate {
         /// nil: a plain shell, which no scan takes for an agent.
         var agent: Agent? = .claude
     }
+    /// The key the app proves itself with: its own, or (`unproved`) one the host doesn't hold.
+    final class SandboxKey: @unchecked Sendable {
+        let own = AppProof.MemoryStore()
+        var stranger: SymmetricKey?
+        var current: SymmetricKey? { stranger ?? own.key() }
+    }
+    private let key: SandboxKey
     private let lock = NSLock()
     /// By tty (read on the scanner's queue).
     private var fakes: [String: Fake] = [:]
@@ -269,7 +277,9 @@ private final class Driver: NSObject, NSApplicationDelegate {
         self.minutes = minutes
         // Its own host: its own lock (not the user's host.lock: a host on it is the user's, which reads its vault key
         // from the Keychain), its socket in this home, ending with this process however it ends.
-        host = HostClient(socketPath: VibePaths.hostSocket.path, appKey: { [key = AppProof.MemoryStore()] in key.key() })
+        let key = SandboxKey()
+        self.key = key
+        host = HostClient(socketPath: VibePaths.hostSocket.path, appKey: { key.current })
         host.hostArguments = HostClient.endsWithThisProcess + ["--lock", VibePaths.root.appendingPathComponent("sandbox-host.lock").path]
         weak var weakSelf: Driver?
         // Only the fake sessions: never the Mac's processes, never Terminal's tabs.
@@ -724,6 +734,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("sheet NAME", "shows a sheet on the window: " + (Driver.sheets.map(\.name) + Driver.windowSheets.map(\.name) + ["choose-folder", "new-session-menu"]).joined(separator: ", ")),
         ("close settings|sheet", "closes Settings or the sheet"),
         ("shot NAME", "draws each window, light and dark, into the shots folder"),
+        ("unproved", "connects again with a key the host doesn't hold: it refuses the app's proof and shows it no sessions"),
         ("quit", "quits (the host and fake sessions end with it)"),
     ]
 
@@ -1123,6 +1134,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
             reply(true, "closed \(rest)")
         case "shot": shot(rest.isEmpty ? "shot" : rest, reply)
+        case "unproved":
+            key.stranger = SymmetricKey(size: .bits256)
+            host.confirmKeyReset = { _, _ in false }
+            host.connectAgain()
+            reply(true, "connecting again with a key the host doesn't hold")
         case "quit":
             reply(true, "quitting")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { NSApp.terminate(nil) }

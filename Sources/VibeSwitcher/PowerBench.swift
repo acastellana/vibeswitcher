@@ -76,7 +76,7 @@ enum PowerBench {
 
         init(seconds: TimeInterval) {
             self.seconds = seconds
-            host = HostClient(socketPath: socket, appKey: { nil }, bundledBuild: { [hostPath] in HostBuild.id(ofExecutableAt: hostPath) })
+            host = HostClient(socketPath: socket, appKey: HostClient.ownKey(), bundledBuild: { [hostPath] in HostBuild.id(ofExecutableAt: hostPath) })
             // The Mac's own processes, read as the app reads them, as no one's sessions; with the bench's agents.
             store = SessionStore(scanner: SessionScanner(processes: { [agents] in
                 var table = (ProcessTable.trySnapshot() ?? [:]).mapValues {

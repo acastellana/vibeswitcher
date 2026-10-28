@@ -78,7 +78,7 @@ extension LeadVaultHostTests {
     /// `git cherry-pick <sha>`. What that session then runs is the worker's say, not yours: the commit it makes on the
     /// base is asked about at the next merge, even once the session types into itself or you type into it after.
     /// Your own keys and the session's own terminal leave it yours.
-    @Test func aWorkersKeysInYourSessionMakeWhatItCommitsNotYours() throws {
+    @Test func aWorkersKeysCannotContaminateYourSessionOrItsCommits() throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let root = try gitRepo()
         let log = folder.appendingPathComponent("host.log").path
@@ -111,28 +111,19 @@ extension LeadVaultHostTests {
         #expect(!logged().contains("input to \(HostServer.short(mine.id))"))
         left = made
 
-        // The worker's Bash types `git cherry-pick` into another idle session of yours, over the host's socket.
+        // The worker's Bash attempts to type into another idle session of yours. It is refused at the socket.
         let idle = try app.spawn(try hooksShell(host, "idle"))
-        _ = try sessionSends("typist", [.input(id: idle.id, bytes: Data("git cherry-pick \(left)\r".utf8), reply: false)], expecting: nil) {
-            logged().contains("input to \(HostServer.short(idle.id)) from session \(worker.id.uuidString.prefix(8)), not the app")
-        }
-        // You type into it after, and it types into itself (its shell running what it was sent): still the worker's say.
+        let rejected = try sessionSends("typist", [.input(id: idle.id, bytes: Data("git cherry-pick \(left)\r".utf8), reply: false)], expecting: 2...2)
+        guard case .error? = rejected[2] else { Issue.record("A worker typed into your session"); return }
+        // The user's own later keys and git operation remain the user's.
         app.send(.input(id: idle.id, bytes: Data("\r".utf8), reply: false))
         made = try commit("c.txt", in: root)
         got = try sessionSends("idle", [.input(id: idle.id, bytes: Data("\r".utf8), reply: false), step(.before, root, left), step(.after, root, made)],
                                expecting: 3...4)
         #expect(got[3] == .vault(.ok) && got[4] == .vault(.ok), "\(got)")
-        // Refused at the merge, and asked about (the window's card: not taken, nothing still running, the session named).
         let asked = try #require(move(book, root))
-        #expect(!asked.accepted && asked.waiting != true, "\(asked)")
-        #expect(asked.reason?.contains(String(idle.id.uuidString.prefix(8))) == true, "\(asked.reason ?? "")")
-        #expect(book.answer(.head(root: root, branch: "main"), from: .app) == .head(left))
-        // Through the host, as the app asks at merge: the same.
-        let seq = app.send(.vault(.acceptMove(root: root, branch: "main")))
-        #expect(eventually { app.reply(to: seq) != nil })
-        guard case .vault(.move(let viaHost))? = app.reply(to: seq) else { Issue.record("\(String(describing: app.reply(to: seq)))"); return }
-        #expect(!viaHost.accepted)
-        #expect(logged().contains("vault: didn't take main at \(made.prefix(8))"))
+        #expect(asked.accepted, "\(asked)")
+        #expect(book.answer(.head(root: root, branch: "main"), from: .app) == .head(made))
     }
 
     @Test func gitCommandsCountAsYoursOnlyFromASessionTheAppOpenedOutsideTheTeam() throws {
@@ -151,8 +142,19 @@ extension LeadVaultHostTests {
         var left = Git.run(["rev-parse", "main"], in: root).output
         #expect(book.answer(.setHead(root: root, branch: "main", commit: left), from: .app) == .ok)
 
-        // A session something other than the app asked for (a script of a worker's could): not yours.
-        let stranger = try other.spawn(try hooksShell(host, "stranger"))
+        // A session another hosted session asked for: not the user's own session. Unknown clients may no
+        // longer bootstrap this fixture through spawn, so send it from a real scratch parent session.
+        let childRequests = folder.appendingPathComponent("child.requests")
+        let childAnswers = folder.appendingPathComponent("child.answers")
+        let childStop = folder.appendingPathComponent("child.stop")
+        try frames([.spawn(SpawnRequest(cwd: folder.path, command: try hooksShell(host, "stranger"), env: [:],
+                                       cols: 80, rows: 24, keepShell: false, label: "Test", agent: nil))]).write(to: childRequests)
+        _ = try app.spawn(nc(host, childRequests, childAnswers, until: childStop))
+        #expect(eventually { answered(childAnswers, 2...2) })
+        guard case .spawned(let stranger)? = try replies(Data(contentsOf: childAnswers))[2] else {
+            Issue.record("The scratch parent could not spawn its child"); return
+        }
+        FileManager.default.createFile(atPath: childStop.path, contents: nil)
         var made = try commit("b.txt", in: root)
         var got = try hooksSay("stranger", root: root, before: left, after: made)
         #expect(got[2] == .vault(.ok) && got[3] == .vault(.ok), "\(got)")
@@ -190,17 +192,18 @@ extension LeadVaultHostTests {
         #expect(book.answer(.head(root: root, branch: "main"), from: .app) == .head(made))
         #expect(eventually { ((try? String(contentsOfFile: log, encoding: .utf8)) ?? "").contains("vault: accepted 1 commit on main from your session Test") })
 
-        // A session of yours something else typed into (a worker's Bash can type into any session outside a team): what
-        // its agent runs may be that something's say, so it isn't taken as yours.
+        // An unknown process cannot contaminate input to a session of yours. Its attempted keys are refused,
+        // and the session's own later git operation remains attributable to you.
         let typed = try app.spawn(try hooksShell(host, "typed"))
-        other.send(.input(id: typed.id, bytes: Data("x".utf8), reply: false))
-        #expect(eventually { ((try? String(contentsOfFile: log, encoding: .utf8)) ?? "").contains("input to \(HostServer.short(typed.id)) from a process outside the sessions, not the app") })
+        let refusedInput = other.send(.input(id: typed.id, bytes: Data("x".utf8), reply: false))
+        #expect(eventually { other.reply(to: refusedInput) != nil })
+        guard case .error? = other.reply(to: refusedInput) else { Issue.record("Unknown input was accepted"); return }
         left = made
         made = try commit("e.txt", in: root)
         got = try hooksSay("typed", root: root, before: left, after: made)
         #expect(got[2] == .vault(.ok), "\(got)")
-        #expect(move(book, root)?.accepted == false)
-        #expect(book.answer(.head(root: root, branch: "main"), from: .app) == .head(left))
+        #expect(move(book, root)?.accepted == true)
+        #expect(book.answer(.head(root: root, branch: "main"), from: .app) == .head(made))
 
         // A process outside every session can't say what any session ran.
         let requests = folder.appendingPathComponent("outside.requests")

@@ -97,6 +97,13 @@ final class HostClient: ObservableObject {
         }
     }
 
+    /// A key of its own, held in memory, for a client that starts its own scratch host (a bench): it proves itself to
+    /// that host as the app does (the host takes only the app's sessions as its own), never touching the Keychain.
+    static func ownKey() -> () -> SymmetricKey? {
+        let store = AppProof.MemoryStore()
+        return { store.key() }
+    }
+
     /// What this client does, for app.log (a test's own list instead).
     private let note: (String) -> Void
     /// The bundled host's build (see `HostBuild`); a test's fake build instead.
@@ -198,6 +205,8 @@ final class HostClient: ObservableObject {
         guard let connection = try? HostConnection(path: socketPath, queue: .main, appKey: proofKey()) else { return false }
         self.connection = connection
         state = .connecting
+        // Each connection proves the app anew.
+        proofRefusal = nil
         connection.onEvent = { [weak self] in self?.handle($0) }
         connection.onOutput = { [weak self] id, bytes in self?.sinks[id]?.sink.output(bytes) }
         connection.onClose = { [weak self] in self?.connectionLost() }
@@ -206,15 +215,18 @@ final class HostClient: ObservableObject {
         return true
     }
 
+    /// The host didn't take this app as VibeSwitcher (see `AppProof`): why, while this connection lasts. It then shows
+    /// the app none of its sessions and refuses what the app asks of them, so the window says so (`SessionHeaderView`)
+    /// rather than showing an empty list.
+    @Published private(set) var proofRefusal: String?
+
     /// The host didn't take this app as VibeSwitcher (see `AppProof`): the lead's tools, a handover and ending
     /// sessions are off until it does. Asked once per launch.
     private var offeredKeyReset = false
 
-    private func proofRefused(_ reason: String) {
-        note("host: proof refused: \(reason)")
-        guard !offeredKeyReset, let key = proofKey() else { return }
-        offeredKeyReset = true
-        let live = sessions.filter(\.isLive).count
+    /// Asks whether to teach the host this app's key, given why it refused and how many sessions the app knew to be
+    /// live: true to replace the host's key. An alert; a test's answer instead.
+    var confirmKeyReset: (_ reason: String, _ live: Int) -> Bool = { reason, live in
         let alert = NSAlert()
         alert.messageText = "The session host doesn't recognise this VibeSwitcher."
         alert.informativeText = reason + " The project lead's tools, updating the host in place and ending sessions from the app are off until it does. "
@@ -223,14 +235,32 @@ final class HostClient: ObservableObject {
         if live == 0 { alert.addButton(withTitle: "Teach It This App's Key") }
         alert.addButton(withTitle: live == 0 ? "Not Now" : "OK")
         NSApp.activate()
-        guard alert.runModal() == .alertFirstButtonReturn, live == 0 else { return }
+        return alert.runModal() == .alertFirstButtonReturn && live == 0
+    }
+
+    private func proofRefused(_ reason: String) {
+        note("host: proof refused: \(reason)")
+        proofRefusal = reason
+        guard !offeredKeyReset, let key = proofKey() else { return }
+        offeredKeyReset = true
+        // The sessions known from before this connection: the host shows none to a connection it didn't take.
+        guard confirmKeyReset(reason, sessions.filter(\.isLive).count) else { return }
         request(.replaceAppKey(key: key.data)) { [weak self] event in
             guard let self else { return }
-            guard case .ok = event else { return note("host: key not replaced: \(event)") }
+            guard case .ok = event else {
+                if case .error(let message) = event { self.proofRefusal = message }
+                return self.note("host: key not replaced: \(event)")
+            }
             // A new connection, with a new challenge, answered with the key the host now holds.
-            self.connection?.close()
-            self.connectionLost()
+            self.connectAgain()
         }
+    }
+
+    /// Drops the connection and makes a new one (a new challenge, proved anew).
+    func connectAgain() {
+        guard let connection else { return connectIfRunning() }
+        connection.close()
+        connectionLost()
     }
 
     /// Detached (own session, not our child for signals), stdout/stderr appended to host.log.
@@ -330,6 +360,7 @@ final class HostClient: ObservableObject {
         }
         screens = [:]
         state = .notRunning
+        proofRefusal = nil
         finishWaiting("The session host stopped.")
     }
 
@@ -346,6 +377,7 @@ final class HostClient: ObservableObject {
         case .welcome(let version, let build, let list, let capabilities, let pid, _):
             note("host: welcome v\(version) build \(build) pid \(pid.map(String.init) ?? "?"), \(list.count) sessions")
             hostCapabilities = Set(capabilities ?? [])
+            refusedInputTold = []
             reconnectAttempt = 0
             restartedForWaiting = false
             hostPID = pid
@@ -697,9 +729,16 @@ final class HostClient: ObservableObject {
     private var unshownCuts: [(id: UUID, went: Int, total: Int, reason: String)] = []
     private var showingCut = false
 
+    /// Sessions whose input the host refused for good (it has no such session, or this app may not type into it): told
+    /// once, not at every key typed after. Cleared by a welcome (a new connection may be the app's, proved).
+    private var refusedInputTold: Set<UUID> = []
+
     /// Input that didn't all go in: to `onInputCut` when set (tests), else the user is told how much did.
     private func inputCut(_ id: UUID, _ went: Int, _ total: Int, _ reason: String) {
         note("host: input to \(id.uuidString.prefix(8)) cut: \(went) of \(total) bytes went in: \(reason)")
+        if went == 0, [HostProtocol.noSuchSession, HostProtocol.unauthorized].contains(reason) {
+            guard refusedInputTold.insert(id).inserted else { return }
+        }
         if let onInputCut { return onInputCut(id, went, total, reason) }
         unshownCuts.append((id, went, total, reason))
         guard !showingCut else { return }

@@ -129,6 +129,23 @@ struct LeadVaultHostTests {
         return false
     }
 
+    /// Start a fixture through the binary this host recognizes as its app, with the app's proof.
+    func spawnViaNC(_ host: TestHost, _ command: String) throws -> HostSession {
+        let request = SpawnRequest(cwd: folder.path, command: command, env: [:], cols: 80, rows: 24,
+                                   keepShell: false, label: "Test", agent: nil)
+        guard case .spawned(let session)? = try viaNC(host.socket, proof: host.appKey, [.spawn(request)])[2] else {
+            throw CancellationError()
+        }
+        return session
+    }
+
+    func screenViaNC(_ host: TestHost, _ id: UUID) throws -> String {
+        guard case .screenText(_, let text)? = try viaNC(host.socket, proof: host.appKey, [.screen(id: id)])[2] else {
+            throw CancellationError()
+        }
+        return text
+    }
+
     @Test func aWorkersShellCantGiveAVerdictSealAsTheUserOrTypeIntoTheLead() throws {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let book = LeadVault.Book()
@@ -236,8 +253,7 @@ struct LeadVaultHostTests {
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let book = LeadVault.Book()
         let host = try TestHost(vault: book, appExecutable: "/usr/bin/nc")
-        let app = try TestClient(host)
-        let lead = try app.spawn("read x; echo lead-got:$x; sleep 30")
+        let lead = try spawnViaNC(host, "read x; echo lead-got:$x; sleep 30")
         let script = folder.appendingPathComponent("attack.sh").path
         let requests = folder.appendingPathComponent("requests.bin")
         // The worker's shell, one attempt per line of `attempts`: out of the session, connect, fork, exec the app.
@@ -269,7 +285,7 @@ struct LeadVaultHostTests {
             return "/usr/bin/perl '\(attack)' '\(host.socket)' '\(requests.path)' '\(file).answers' '\(file).go' '\(listens[name]!)'"
         }.joined(separator: "\n").appending("\nsleep 30\n").write(toFile: script, atomically: true, encoding: .utf8)
 
-        let worker = try app.spawn("sh '\(script)'")
+        let worker = try spawnViaNC(host, "sh '\(script)'")
         guard case .grant(let leadGrant) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else {
             Issue.record("no lead grant"); return
         }
@@ -289,7 +305,7 @@ struct LeadVaultHostTests {
         // refusal below isn't nc going unrecognised).
         let controlled = try viaNC(host.socket, proof: host.appKey, [.vault(.seal(forged)), .input(id: lead.id, bytes: Data("CONTROL\r".utf8), reply: false)])
         guard case .vault(.seal)? = controlled[2] else { Issue.record("nc isn't the app: \(String(describing: controlled[2]))"); return }
-        #expect(eventually { screen(app, lead.id).contains("lead-got:CONTROL") })
+        #expect(eventually { (try? screenViaNC(host, lead.id))?.contains("lead-got:CONTROL") == true })
 
         for name in attempts {
             let file = folder.appendingPathComponent(name).path
@@ -310,7 +326,7 @@ struct LeadVaultHostTests {
         }
         #expect(current.id == leadGrant)
         Thread.sleep(forTimeInterval: 0.5)
-        #expect(!screen(app, lead.id).contains("PWNED"))
+        #expect(!(try screenViaNC(host, lead.id)).contains("PWNED"))
     }
 
     /// The LOCAL_PEERTOKEN race, from the host's side: whatever sent the bytes, the kernel names the process accepted,
@@ -321,7 +337,7 @@ struct LeadVaultHostTests {
         let book = LeadVault.Book()
         let host = try TestHost(vault: book, appExecutable: "/usr/bin/nc")
         let app = try TestClient(host, asApp: false)
-        let lead = try app.spawn("read x; echo lead-got:$x; sleep 30")
+        let lead = try spawnViaNC(host, "read x; echo lead-got:$x; sleep 30")
         guard case .grant(let grant) = book.answer(.issue(role: .lead, root: root, task: nil, auditing: nil), from: .app) else { return }
         _ = book.answer(.bind(grant: grant, root: root, session: lead.id.uuidString), from: .app)
         let ran = folder.appendingPathComponent("would-be-build-ran").path

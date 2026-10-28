@@ -1,4 +1,5 @@
 import Dispatch
+import CryptoKit
 import Foundation
 
 /// A session's conversation, condensed for the lead to read: prompts, replies, each tool run as one line with its
@@ -57,13 +58,15 @@ public enum HostCall {
     }
 
     /// The host's sessions (from its welcome).
-    public static func sessions(socket: String = VibePaths.hostSocket.path, timeout: TimeInterval = 5) throws -> [HostSession] {
-        try exchange(nil, socket: socket, timeout: timeout).sessions
+    public static func sessions(socket: String = VibePaths.hostSocket.path, appKey: SymmetricKey? = HostConnection.appKey,
+                                timeout: TimeInterval = 5) throws -> [HostSession] {
+        try exchange(nil, socket: socket, timeout: timeout, appKey: appKey).sessions
     }
 
     /// Sends `request` and returns the host's reply to it.
-    public static func request(_ request: HostRequest, socket: String = VibePaths.hostSocket.path, timeout: TimeInterval = 10) throws -> HostEvent {
-        guard let reply = try exchange(request, socket: socket, timeout: timeout).reply else {
+    public static func request(_ request: HostRequest, socket: String = VibePaths.hostSocket.path,
+                               appKey: SymmetricKey? = HostConnection.appKey, timeout: TimeInterval = 10) throws -> HostEvent {
+        guard let reply = try exchange(request, socket: socket, timeout: timeout, appKey: appKey).reply else {
             throw Failure(description: "The session host didn't answer.")
         }
         return reply
@@ -87,30 +90,32 @@ public enum HostCall {
     /// Sends a request the host doesn't answer (`input`, `resize`). Input returns once the host has read it: a
     /// request it does answer follows on the same connection, and the host reads them in order (closing right after
     /// writing would lose what's still in the socket's buffer, over ~8 KB).
-    public static func send(_ request: HostRequest, socket: String = VibePaths.hostSocket.path, timeout: TimeInterval = 5) throws {
+    public static func send(_ request: HostRequest, socket: String = VibePaths.hostSocket.path,
+                            appKey: SymmetricKey? = HostConnection.appKey, timeout: TimeInterval = 5) throws {
         if case .input(let id, _, _) = request {
-            let answer = try exchange(request, then: .screen(id: id), socket: socket, timeout: timeout)
+            let answer = try exchange(request, then: .screen(id: id), socket: socket, timeout: timeout, appKey: appKey)
             // A host answers input only to refuse it (its buffer for that program is full).
             if let refusal = answer.refusal { throw Failure(description: refusal) }
             guard answer.reply != nil else { throw Failure(description: "The session host didn't take the input.") }
             return
         }
-        _ = try exchange(request, socket: socket, timeout: timeout, expectsReply: false)
+        _ = try exchange(request, socket: socket, timeout: timeout, expectsReply: false, appKey: appKey)
     }
 
     /// Writes these into the session as one unit (see `HostRequest.inputUnit`): a message's text and its Enter, with
     /// nothing anyone else types into the session in between. Throws when they didn't all go in. A host from before
     /// units gets them one by one as plain input, each `delay` after the one before, as before.
     public static func type(_ writes: [HostInput.Write], into id: UUID, socket: String = VibePaths.hostSocket.path,
+                            appKey: SymmetricKey? = HostConnection.appKey,
                             timeout: TimeInterval = 40) throws {
         guard !writes.isEmpty else { return }
         // Long enough to wait behind another client's unit (a held one waits 10 s at most for its next part).
         let answer = try exchange(.inputUnit(id: id, writes: writes, more: false), socket: socket, timeout: timeout,
-                                  requires: HostProtocol.Capability.inputUnits)
+                                  requires: HostProtocol.Capability.inputUnits, appKey: appKey)
         guard answer.capable else {
             for write in writes {
                 if write.delay > 0 { usleep(useconds_t(write.delay * 1_000_000)) }
-                try send(.input(id: id, bytes: Data(write.bytes), reply: false), socket: socket)
+                try send(.input(id: id, bytes: Data(write.bytes), reply: false), socket: socket, appKey: appKey)
             }
             return
         }
@@ -124,10 +129,10 @@ public enum HostCall {
     /// `requires`: a capability the request needs (see `HostProtocol.Capability`); a host whose welcome doesn't list it
     /// isn't sent the request, and `capable` is false.
     private static func exchange(_ request: HostRequest?, then follow: HostRequest? = nil, socket: String, timeout: TimeInterval,
-                                 expectsReply: Bool = true, requires: String? = nil) throws
+                                 expectsReply: Bool = true, requires: String? = nil, appKey: SymmetricKey? = HostConnection.appKey) throws
         -> (sessions: [HostSession], reply: HostEvent?, refusal: String?, capable: Bool) {
         let queue = DispatchQueue(label: "vibeswitcher.host-call")
-        let connection = try HostConnection(path: socket, queue: queue)
+        let connection = try HostConnection(path: socket, queue: queue, appKey: appKey)
         defer { queue.sync { connection.close() } }
         let done = DispatchSemaphore(value: 0)
         var sessions: [HostSession]?

@@ -30,7 +30,7 @@ extension LeadVaultHostTests {
         let book = LeadVault.Book()
         let host = try TestHost(vault: book, appExecutable: "/usr/bin/nc", log: sessionLog())
         let other = try TestClient(host, asApp: false)
-        let session = try other.spawn("sleep 30")
+        let session = try spawnViaNC(host, "sleep 30")
         let fresh = SymmetricKey(size: .bits256)
         let message = SteerMessage(text: "x", from: .user, agentPid: 1)
 
@@ -38,7 +38,11 @@ extension LeadVaultHostTests {
         guard case .error? = try viaNC(host.socket, proof: nil, [.replaceAppKey(key: fresh.data)])[2] else { Issue.record("replaced with a session live"); return }
         #expect(book.appKey?.data == host.appKey.data)
         kill(-session.childPID, SIGKILL)
-        #expect(eventually { other.latest(session.id)?.isLive == false })
+        #expect(eventually {
+            guard case .welcome(_, _, let list, _, _, _)? = try? viaNC(host.socket, proof: host.appKey,
+                [.hello(protocolVersion: HostProtocol.version, app: "test")])[2] else { return false }
+            return list.first { $0.id == session.id }?.isLive == false
+        })
         // No session, but not the app's code.
         let seq = other.send(.replaceAppKey(key: fresh.data))
         #expect(eventually { other.reply(to: seq) != nil })

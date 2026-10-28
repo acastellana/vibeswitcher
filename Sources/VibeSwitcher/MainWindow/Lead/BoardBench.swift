@@ -213,7 +213,7 @@ enum BoardBench {
 
         init(rounds: Int) {
             self.rounds = rounds
-            host = HostClient(socketPath: socket, appKey: { nil }, bundledBuild: { [hostPath] in HostBuild.id(ofExecutableAt: hostPath) })
+            host = HostClient(socketPath: socket, appKey: HostClient.ownKey(), bundledBuild: { [hostPath] in HostBuild.id(ofExecutableAt: hostPath) })
             store = SessionStore(scanner: SessionScanner(processes: { [agents] in agents.table() }, cwd: { [root] _ in root }, arguments: { _ in [] }))
             wiring = host.$sessions.receive(on: DispatchQueue.main).sink { [store] in store.updateHosted($0) }
         }

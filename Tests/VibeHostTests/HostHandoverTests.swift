@@ -24,7 +24,8 @@ final class ScratchHostProcess {
     /// The app's key, as the app hands it to the host it starts.
     let appKey = SymmetricKey(size: .bits256)
 
-    init(arguments extra: [String] = []) throws {
+    /// `old`: the build it starts as (another commit's host, for an upgrade); this one's otherwise.
+    init(arguments extra: [String] = [], old: String = hostLauncher) throws {
         // Short: a socket's path has a 104-byte limit.
         dir = "\(shortScratchRoot)/vsho-\(UUID().uuidString.prefix(8))"
         home = dir + "/home"
@@ -36,7 +37,7 @@ final class ScratchHostProcess {
         let files = FileManager.default
         for folder in [home, dir + "/old", dir + "/new"] { try files.createDirectory(atPath: folder, withIntermediateDirectories: true) }
         // APFS clones: no extra disk for the copies.
-        try files.copyItem(atPath: hostLauncher, toPath: oldBinary)
+        try files.copyItem(atPath: old, toPath: oldBinary)
         try files.copyItem(atPath: hostLauncher, toPath: newBinary)
         // The app beside each build is this test process's own binary (the same code, so the same cdhash): its
         // clients are the app once they answer the challenge with `appKey`, given to the host on stdin as the app does.

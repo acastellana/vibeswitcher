@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// How a message reaches an agent: steered in while it works (at its next step, without stopping it), typed in
 /// as its next prompt while it's idle (a steer would wait for a turn that never comes).
@@ -283,11 +284,12 @@ extension LeadDelivery {
 
 extension HostCall {
     /// A session's screen with how it's drawn; only its text from a host too old to say (see `HostRequest.styledScreen`).
-    public static func styledScreen(_ id: UUID, socket: String = VibePaths.hostSocket.path) -> LeadDelivery.Screen? {
-        switch try? request(.styledScreen(id: id), socket: socket) {
+    public static func styledScreen(_ id: UUID, socket: String = VibePaths.hostSocket.path,
+                                    appKey: SymmetricKey? = HostConnection.appKey) -> LeadDelivery.Screen? {
+        switch try? request(.styledScreen(id: id), socket: socket, appKey: appKey) {
         case .styledScreenText(_, let text, let runs)?: return LeadDelivery.Screen(text: text, runs: runs)
         case .error?:
-            if case .screenText(_, let text)? = try? request(.screen(id: id), socket: socket) { return LeadDelivery.Screen(text: text) }
+            if case .screenText(_, let text)? = try? request(.screen(id: id), socket: socket, appKey: appKey) { return LeadDelivery.Screen(text: text) }
             return nil
         default: return nil
         }

@@ -185,7 +185,7 @@ enum IdleBench {
         let churned: ChurnedAgents
         let started = Date()
         let store: SessionStore
-        let host = HostClient()
+        let host = HostClient(appKey: HostClient.ownKey())
         let model = WindowModel()
         lazy var leads = LeadController(host: host, store: store) { _ in "claude" }
         var window: MainWindowController?

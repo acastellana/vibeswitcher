@@ -35,7 +35,7 @@ struct LeadEndsTeamTests {
         #expect(answers[2] == .ok, "\(String(describing: answers[2]))")
         #expect(eventually { app.latest(replaced.id)?.isLive == false })
         guard case .error(let refusal)? = answers[3] else { Issue.record("a stranger's kill: \(String(describing: answers[3]))"); return }
-        #expect(refusal.contains("team's lead"))
+        #expect(refusal.contains("not authorized"))
         Thread.sleep(forTimeInterval: 0.3)
         #expect(app.latest(stranger.id)?.isLive != false && kill(stranger.childPID, 0) == 0)
     }

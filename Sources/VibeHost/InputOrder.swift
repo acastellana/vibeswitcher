@@ -113,7 +113,7 @@ final class InputOrder {
     /// The session is gone: what waits isn't written.
     func close() {
         step += 1
-        let error = HostEvent.error("No such session.")
+        let error = HostEvent.error(HostProtocol.noSuchSession)
         if writing { current?.reply(error) }
         nextParts.forEach { $0.reply(error) }
         for case .part(let part) in waiting { part.reply(error) }

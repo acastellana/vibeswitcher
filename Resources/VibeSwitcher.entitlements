@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- The app reads Terminal's tabs and selects one (TerminalBridge), lists Chrome's localhost tabs (ChromeTabs)
+         and asks for both at onboarding: Apple Events sent in-process. Under the hardened runtime they fail with -1743
+         and no prompt without this. The helpers send none and get no entitlements. -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+</dict>
+</plist>

@@ -129,10 +129,12 @@ else
     IDENTITY=(--sign -)
 fi
 sign() {
-    codesign --force "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-hook"
-    codesign --force "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-host"
-    codesign --force "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-mcp"
-    codesign --force "${IDENTITY[@]}" "$APP"
+    # Keep DYLD environment injection and foreign libraries disabled for the app and every helper.
+    codesign --force --options runtime "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-hook"
+    codesign --force --options runtime "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-host"
+    codesign --force --options runtime "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-mcp"
+    # The app alone sends Apple Events (Terminal, Chrome): the hardened runtime refuses them without the entitlement.
+    codesign --force --options runtime --entitlements Resources/VibeSwitcher.entitlements "${IDENTITY[@]}" "$APP"
 }
 if [[ -n "${KEYCHAIN:-}" ]]; then
     # codesign only finds the key while its keychain is in the search list: it's there for the four codesigns alone.

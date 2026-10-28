@@ -17,6 +17,7 @@ struct PasteDeliveryTests {
         let socket: String
         let server: HostServer
         let host: HostClient
+        let key: SymmetricKey
         let folder = scratchRoot.appendingPathComponent("paste-\(UUID().uuidString.prefix(8))")
 
         @MainActor
@@ -24,6 +25,7 @@ struct PasteDeliveryTests {
             let launcher = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host").path
             socket = try temp.shortFolder("vsh-paste") + "/h.sock"
             let key = SymmetricKey(size: .bits256)
+            self.key = key
             var config = HostServer.Config(socketPath: socket, lockPath: socket + ".lock", shell: "/bin/sh", launcher: launcher,
                                            baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()],
                                            hostBuild: HostBuild.id(ofExecutableAt: HostClient.hostExecutable.path))
@@ -158,5 +160,31 @@ struct PasteDeliveryTests {
         let expected = Self.paste + Data("zz!".utf8)
         #expect(await Self.received(out, expected) == expected)
         #expect(cuts == 0)
+    }
+
+    /// Keys typed into a session the host doesn't have (removed, forgotten, or gone with an earlier host) are refused
+    /// one by one: the user is told once for that session, not at every key.
+    @Test func keysIntoAMissingSessionAreToldOnce() async throws {
+        let scratch = try Scratch()
+        let (session, _, _) = try await scratch.spawnReader()
+        var cuts: [(id: UUID, reason: String)] = []
+        scratch.host.onInputCut = { id, _, _, reason in cuts.append((id, reason)) }
+        var removed = false
+        scratch.host.kill(session.id)
+        #expect(await until { scratch.host.sessions.first { $0.id == session.id }?.isLive == false })
+        scratch.host.remove(session.id)
+        #expect(await until { removed = !scratch.host.sessions.contains { $0.id == session.id }; return removed })
+        let missing = UUID()
+        for key in "hello" {
+            scratch.host.send(session.id, bytes: Data(String(key).utf8), reply: false)
+            scratch.host.send(missing, bytes: Data(String(key).utf8), reply: false)
+        }
+        // Answered after every key's refusal: the host answers a connection's requests in order.
+        var spawned: Result<HostSession, HostClientError>?
+        scratch.host.spawn(SpawnRequest(cwd: "/tmp", command: "exit 0", env: [:], cols: 80, rows: 24, keepShell: false,
+                                        label: "Barrier", agent: nil)) { spawned = $0 }
+        #expect(await until { spawned != nil })
+        #expect(cuts.map(\.id) == [session.id, missing], "\(cuts)")
+        #expect(cuts.allSatisfy { $0.reason == HostProtocol.noSuchSession })
     }
 }

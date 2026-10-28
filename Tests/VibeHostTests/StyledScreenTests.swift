@@ -278,7 +278,7 @@ struct ClearDraftTests {
         let session = try client.spawn("/bin/sh \(script)")
         let id = session.id
         let older = { () -> LeadDelivery.Screen? in
-            if case .screenText(_, let text)? = try? HostCall.request(.screen(id: id), socket: host.socket) { return LeadDelivery.Screen(text: text) }
+            if case .screenText(_, let text)? = try? HostCall.request(.screen(id: id), socket: host.socket, appKey: host.appKey) { return LeadDelivery.Screen(text: text) }
             return nil
         }
         #expect(eventually { older()?.text.contains("open rotate.html") == true })
@@ -286,14 +286,14 @@ struct ClearDraftTests {
         let typeInto = { (text: String) -> Bool in
             for write in ComposerText.writes(text, bracketed: true) {
                 if write.delay > 0 { usleep(useconds_t(write.delay * 1_000_000)) }
-                guard (try? HostCall.send(.input(id: id, bytes: Data(write.bytes), reply: false), socket: host.socket)) != nil else { return false }
+                guard (try? HostCall.send(.input(id: id, bytes: Data(write.bytes), reply: false), socket: host.socket, appKey: host.appKey)) != nil else { return false }
             }
             return true
         }
         let agent = LeadAgent(pid: 7, tty: "ttys909", session: id.uuidString)
         let delivered = try LeadDelivery.deliver("go on with the tests", from: .lead("lead"), to: agent, activity: .idle(background: nil),
                                                  styledScreen: older, typeInto: typeInto, clearDraft: true, clear: {
-            let sent = (try? HostCall.send(.input(id: id, bytes: Data(HostInput.bytes(forKey: "interrupt") ?? []), reply: false), socket: host.socket)) != nil
+            let sent = (try? HostCall.send(.input(id: id, bytes: Data(HostInput.bytes(forKey: "interrupt") ?? []), reply: false), socket: host.socket, appKey: host.appKey)) != nil
             usleep(300_000)
             return sent
         }, root: root)
@@ -302,7 +302,7 @@ struct ClearDraftTests {
         #expect((try? String(contentsOfFile: typedFile + ".log", encoding: .utf8)) == "cleared\n")
         // The host that says what's dim: the suggestion is an empty box, typed into without a ^C.
         let styled = try LeadDelivery.deliver("and then report", from: .lead("lead"), to: agent, activity: .idle(background: nil),
-                                              styledScreen: { HostCall.styledScreen(id, socket: host.socket) }, typeInto: typeInto, root: root)
+                                              styledScreen: { HostCall.styledScreen(id, socket: host.socket, appKey: host.appKey) }, typeInto: typeInto, root: root)
         #expect(styled == .typed)
         #expect(eventually { (try? String(contentsOfFile: typedFile, encoding: .utf8))?.contains("and then report") == true })
     }
@@ -316,7 +316,7 @@ struct StyledScreenHostTests {
         let session = try client.spawn("printf 'typed \\033[2mfaint\\033[22m\\n'; \(keepRunning)")
         var screen: LeadDelivery.Screen?
         #expect(eventually {
-            screen = HostCall.styledScreen(session.id, socket: host.socket)
+            screen = HostCall.styledScreen(session.id, socket: host.socket, appKey: host.appKey)
             return screen?.text.contains("faint") == true
         })
         let row = screen?.text.components(separatedBy: "\n").firstIndex { $0.hasPrefix("typed faint") }

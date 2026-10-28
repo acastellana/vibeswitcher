@@ -75,8 +75,12 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
     /// The views off screen waiting to be let go, each by the release that's still theirs (shown again: none).
     private var releases: [UUID: UUID] = [:]
 
-    init(host: HostClient) {
+    /// Where OSC 52 writes (see `clipboardCopy`): a test's named pasteboard instead, never the user's clipboard.
+    private let clipboard: NSPasteboard
+
+    init(host: HostClient, clipboard: NSPasteboard = .general) {
         self.host = host
+        self.clipboard = clipboard
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -347,10 +351,22 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         NSWorkspace.shared.open(url)
     }
 
+    /// OSC 52: a program sets the clipboard (a remote shell's or an editor's copy). Program output is untrusted, so it's
+    /// taken only from the pane you're looking at and typing in, live (`mayCopyToClipboard`); hidden terminals, ones
+    /// behind the chat, replays of earlier output and background windows are refused. Your own Copy is
+    /// `TerminalView.copy(_:)`, not this.
     func clipboardCopy(source: TerminalView, content: Data) {
-        guard let text = String(data: content, encoding: .utf8) else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        guard let terminal = source as? HostTerminalView, let id = id(of: terminal), id == current, !covered,
+              gates[id]?.allowsReplies != false, Self.mayCopyToClipboard(from: terminal),
+              let text = String(data: content, encoding: .utf8) else { return }
+        clipboard.clearContents()
+        clipboard.setString(text, forType: .string)
+    }
+
+    /// The view is on screen, in the key window, and what you type goes to it.
+    static func mayCopyToClipboard(from terminal: NSView) -> Bool {
+        guard let window = terminal.window, window.isKeyWindow, window.isVisible, !terminal.isHiddenOrHasHiddenAncestor else { return false }
+        return window.firstResponder === terminal
     }
 
     /// Programs don't get to read your clipboard.

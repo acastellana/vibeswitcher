@@ -21,11 +21,13 @@ final class TestHost {
     /// `submittedGrace`, `housekeeping`, `capabilities`, `inputUnitHold`: the config's (see `HostServer.Config`).
     init(build: Int = 42, vault: LeadVault.Book? = nil, appExecutable: String? = HostServer.executable(of: getpid()), log: String? = nil,
          holdsKey: Bool = true, submittedGrace: TimeInterval = HostServer.submittedGrace, housekeeping: TimeInterval? = nil,
-         capabilities: [String] = HostServer.capabilities, inputUnitHold: TimeInterval = InputOrder.holdLimit) throws {
+         capabilities: [String] = HostServer.capabilities, inputUnitHold: TimeInterval = InputOrder.holdLimit,
+         maxSessions: Int = 256) throws {
         lock = socket + ".lock"
         var config = HostServer.Config(socketPath: socket, lockPath: lock, shell: "/bin/sh",
                                        launcher: hostLauncher, baseEnvironment: ["PATH": "/usr/bin:/bin", "HOME": NSHomeDirectory()], hostBuild: build)
         config.idleExit = nil
+        config.maxSessions = maxSessions
         config.vault = vault
         if holdsKey {
             vault?.adoptAppKey(appKey.data)
@@ -196,7 +198,6 @@ struct HostServerTests {
         defer { close(fd) }
         let attach = HostFrame.encode(.control, try HostCoding.encode(HostRequestEnvelope(seq: 1, request:
             .attach(id: session.id, cols: 80, rows: 24))))
-        _ = attach.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
         var decoder = HostFrameDecoder()
         var buffer = [UInt8](repeating: 0, count: 65_536)
         /// Reads what the slow client has been sent until `done` says stop (or the hang guard passes).
@@ -215,7 +216,15 @@ struct HostServerTests {
             return false
         }
         // It reads only until it's attached, and never again.
-        #expect(try readSlowClient { $0 == .attached(id: session.id) })
+        #expect(try readSlowClient { event in
+            if case .challenge(let challenge, _) = event {
+                let proof = HostFrame.encode(.control, try! HostCoding.encode(HostRequestEnvelope(seq: 0,
+                    request: .proveApp(answer: AppProof.answer(challenge, key: host.appKey)))))
+                let bytes = proof + attach
+                _ = bytes.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+            }
+            return event == .attached(id: session.id)
+        })
         watcher.send(.input(id: session.id, bytes: Data("go\r".utf8), reply: false))
         // The program finishes (its output wasn't blocked), which the host reports on screen. Blocked, it never
         // would; the time is the host taking in 24 MB, which a busy Mac stretches (10 s alone, 12-16 s in the suite).
@@ -335,14 +344,14 @@ struct HostCallTests {
         let session = try client.spawn("cat")
         client.attach(session.id)
         let started = Date()
-        try HostCall.send(.input(id: session.id, bytes: Data("ping\n".utf8), reply: false), socket: host.socket, timeout: hangGuard)
+        try HostCall.send(.input(id: session.id, bytes: Data("ping\n".utf8), reply: false), socket: host.socket, appKey: host.appKey, timeout: hangGuard)
         // Well inside its own timeout: it returned on the host's answer to what followed, not by giving up.
         #expect(Date().timeIntervalSince(started) < hangGuard / 2)
         #expect(eventually { client.text(session.id).contains("ping") })
         // A request the host doesn't answer still times out through `request`, so callers must use `send` for it.
         // (The host never answers it: a busy Mac can only make this time out, as it should.)
         #expect(throws: HostCall.Failure.self) {
-            try HostCall.request(.input(id: session.id, bytes: Data(), reply: false), socket: host.socket, timeout: 0.3)
+            try HostCall.request(.input(id: session.id, bytes: Data(), reply: false), socket: host.socket, appKey: host.appKey, timeout: 0.3)
         }
     }
 
@@ -417,7 +426,7 @@ struct HostCallTests {
         var refusal: String?
         for _ in 0..<6 where refusal == nil {
             do {
-                try HostCall.send(.input(id: session.id, bytes: Data(repeating: 0x61, count: 512 << 10), reply: false), socket: host.socket,
+                try HostCall.send(.input(id: session.id, bytes: Data(repeating: 0x61, count: 512 << 10), reply: false), socket: host.socket, appKey: host.appKey,
                                   timeout: hangGuard)
             } catch {
                 refusal = "\(error)"
@@ -435,15 +444,15 @@ struct HostCallTests {
         client.attach(session.id)
         let huge = Data(repeating: 0x61, count: 900 << 10)
         #expect(throws: HostCall.Failure.self) {
-            try HostCall.send(.input(id: session.id, bytes: huge, reply: false), socket: host.socket, timeout: hangGuard)
+            try HostCall.send(.input(id: session.id, bytes: huge, reply: false), socket: host.socket, appKey: host.appKey, timeout: hangGuard)
         }
         do {
-            try HostCall.send(.input(id: session.id, bytes: huge, reply: false), socket: host.socket, timeout: hangGuard)
+            try HostCall.send(.input(id: session.id, bytes: huge, reply: false), socket: host.socket, appKey: host.appKey, timeout: hangGuard)
         } catch {
             #expect("\(error)".contains("too large"), "\(error)")
         }
         // Nothing of it went in, and the connection still works for what fits.
-        try HostCall.send(.input(id: session.id, bytes: Data("after\n".utf8), reply: false), socket: host.socket, timeout: hangGuard)
+        try HostCall.send(.input(id: session.id, bytes: Data("after\n".utf8), reply: false), socket: host.socket, appKey: host.appKey, timeout: hangGuard)
         #expect(eventually { client.text(session.id).contains("after") })
         #expect(!client.text(session.id).contains("aaaa"))
     }
@@ -469,7 +478,7 @@ struct HostCallTests {
                                                  typeInto: { text in
             for write in ComposerText.writes(text, bracketed: true) {
                 if write.delay > 0 { usleep(useconds_t(write.delay * 1_000_000)) }
-                guard (try? HostCall.send(.input(id: session.id, bytes: Data(write.bytes), reply: false), socket: host.socket,
+                guard (try? HostCall.send(.input(id: session.id, bytes: Data(write.bytes), reply: false), socket: host.socket, appKey: host.appKey,
                                           timeout: hangGuard)) != nil else { return false }
             }
             return true
@@ -495,7 +504,7 @@ struct HostCallTests {
         let app = try TestClient(host)
         let session = try app.spawn("cat")
         app.attach(session.id)
-        try HostCall.send(.input(id: session.id, bytes: Data("typed\n".utf8), reply: false), socket: host.socket, timeout: hangGuard)
+        try HostCall.send(.input(id: session.id, bytes: Data("typed\n".utf8), reply: false), socket: host.socket, appKey: host.appKey, timeout: hangGuard)
         #expect(eventually { app.text(session.id).contains("typed") })
         // The app's terminal still answers the program (its replies go through only from the primary client).
         app.send(.input(id: session.id, bytes: Data("answer\n".utf8), reply: true))
