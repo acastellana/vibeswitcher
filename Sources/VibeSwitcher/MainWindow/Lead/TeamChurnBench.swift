@@ -391,9 +391,9 @@ enum TeamChurnBench {
             }
         }
 
-        /// The main run loop in the modal panel mode for `duration` s (what `NSAlert.runModal` does to it, without an
-        /// alert on screen), the board written every second from another thread and the sessions retitling; the
-        /// footprint every 5 s; then main's catching up, timed.
+        /// A modal session for `duration` s (as `NSAlert.runModal`'s, on a panel off screen), the board written every
+        /// second from another thread and the sessions retitling; the footprint and malloc's blocks in use every 5 s,
+        /// what grew by class over the modal, then main's catching up, timed.
         private func modalPhase(_ duration: Double) {
             let flag = (NSHomeDirectory() as NSString).appendingPathComponent("churn-on")
             if !modalWithout.contains("churn") { FileManager.default.createFile(atPath: flag, contents: nil) }
@@ -410,34 +410,60 @@ enum TeamChurnBench {
             let done = DispatchSemaphore(value: 0)
             let lock = NSLock()
             var peak = before
+            /// Malloc's blocks in use (MB) by seconds into the modal.
+            var samples: [(at: Double, inUse: Double)] = []
             let root = root
+            let census = HeapCensus.take()
             Thread.detachNewThread {
                 var round = 0
                 let began = Date()
                 while done.wait(timeout: .now() + 1) == .timedOut {
                     round += 1
-                    if writes { try? BoardStore(root: root).update { board in
+                    // A pool a write: this thread's own would keep what each autoreleased until the thread ends.
+                    if writes { autoreleasepool { try? BoardStore(root: root).update { board in
                         let index = round % board.tasks.count
                         board.tasks[index].checkpoints = (board.tasks[index].checkpoints ?? [])
                             + [LeadCheckpoint(text: "checkpoint \(round): read the diff and ran the suite again")]
-                    } }
+                    } } }
                     guard round % 5 == 0 else { continue }
-                    let now = footprint()
+                    let kinds = UIBench.memoryKinds()
+                    let now = (kinds["footprint"] ?? 0) / 1_048_576
+                    let inUse = kinds.filter { $0.key.hasSuffix(" in use") }.values.reduce(0, +) / 1_048_576
+                    let at = Date().timeIntervalSince(began)
                     lock.lock()
                     peak = max(peak, now)
+                    samples.append((at, inUse))
                     lock.unlock()
-                    print(String(format: "  %3.0f s: footprint %.0f MB", Date().timeIntervalSince(began), now))
+                    print(String(format: "  %3.0f s: footprint %.0f MB, malloc's blocks in use %.0f MB", at, now, inUse))
                     fflush(stdout)
                 }
             }
-            let end = Date().addingTimeInterval(duration)
-            while Date() < end { _ = RunLoop.main.run(mode: .modalPanel, before: min(end, Date().addingTimeInterval(1))) }
+            // A modal session on a panel off screen, as `NSAlert.runModal` runs one (its events, its autorelease pools),
+            // stopped by a timer of the modal mode's.
+            let panel = NSPanel(contentRect: NSRect(x: -12_000, y: -12_000, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: true)
+            let stop = Timer(timeInterval: duration, repeats: false) { _ in NSApp.stopModal() }
+            RunLoop.main.add(stop, forMode: .modalPanel)
+            let began = Date()
+            _ = NSApp.runModal(for: panel)
+            panel.orderOut(nil)
+            print(String(format: "  the modal ran %.0f s", Date().timeIntervalSince(began)))
             done.signal()
+            let grown = HeapCensus.take()
+            print("  grew in the modal, by class (malloc blocks), then blocks of no class by size:")
+            var classed = census, unclassed = census, after = grown, afterRaw = grown
+            classed.unclassed = [:]; after.unclassed = [:]; unclassed.classes = [:]; afterRaw.classes = [:]
+            for row in HeapCensus.growth(from: classed, to: after, top: 15) + HeapCensus.growth(from: unclassed, to: afterRaw, top: 5) {
+                print(String(format: "    %-60@ %+8.2f MB %+8ld blocks", String(row.name.prefix(60)) as NSString,
+                             Double(row.after.bytes - row.before.bytes) / 1_048_576, row.after.blocks - row.before.blocks))
+            }
             try? FileManager.default.removeItem(atPath: flag)
             let held = footprint()
             lock.lock()
             peak = max(peak, held)
+            // Over the modal's second half: the first's warm-up (fonts, the first boards' rows) left out.
+            let half = samples.first { $0.at >= duration / 2 }, last = samples.last
             lock.unlock()
+            let slope = half.flatMap { half in last.map { ($0.inUse - half.inUse) / max(1, $0.at - half.at) * 60 } } ?? 0
             // What waited for the default mode runs once main is back in it: its longest block then.
             let watchdog = BoardBench.Watchdog()
             DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [self] in
@@ -446,8 +472,8 @@ enum TeamChurnBench {
                 let after = footprint()
                 print(String(format: "RESULT team-churn modal-footprint-mb %.0f %.0f %.0f %.0f (before, at the modal's end, peak, 3 s after)",
                              before, held, peak, after))
-                print(String(format: "RESULT team-churn modal-growth-mb-per-minute %.1f (%d boards published, %d host upserts, %d session lists)",
-                             (held - before) / duration * 60, publishes, self.upserts - upserts, listed))
+                print(String(format: "RESULT team-churn modal-growth-mb-per-minute %.1f (malloc's blocks in use over the modal's second half; "
+                             + "%d boards published, %d host upserts, %d session lists)", slope, publishes, self.upserts - upserts, listed))
                 print(String(format: "RESULT team-churn modal-catch-up-ms %.0f (main's longest block after the modal; wall %.0f)",
                              block.cpu * 1000, block.wall * 1000))
                 finish(nil)
