@@ -1821,3 +1821,6 @@
 - 2026-10-28 14:35 Audit of review-and-fix-the: complete, clean, round 2: 4 Nit (3 open)
 - 2026-10-28 14:39 Audit of keep-flake-evidence-out: complete, clean, round 1: 1 Nit open
 - 2026-10-28 14:41 Merged review-and-fix-the: Review and fix the mid-chat notifications: how reports, wakes and user messages reach a lead (and show in the chat)
+- 2026-10-28 14:41 Automatically (auto_advance): Merged review-and-fix-the (Review and fix the mid-chat notifications: how reports, wakes and user messages reach a lead (and show in the chat)) into project-lead at d4b5170f, on its passing audit and the full test run.
+- 2026-10-28 14:42 Audit of verifier-trust-check: complete, clean, round 3: 2 Important closed, 3 Nit (1 open)
+- 2026-10-28 14:49 Merged keep-flake-evidence-out: Keep flake evidence out of board.json: the ledger stores only the evidence file's path
