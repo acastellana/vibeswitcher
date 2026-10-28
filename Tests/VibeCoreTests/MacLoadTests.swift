@@ -41,6 +41,33 @@ extension LeadToolsetTests {
         #expect(MacLoad.oneMinute().map { $0 >= 0 } == true)
     }
 
+    /// What a lead is told goes into its repo's records (auto_advance logs refusals to progress.md): on 2026-10-28 a
+    /// start refusal there named the Mac's other projects, an hour after the user had their names scrubbed from it.
+    /// The text for one project names only it and counts the rest.
+    @Test func theSessionsTextForOneProjectNamesOnlyItAndCountsTheOthers() {
+        let census = [HostCensus(root: "/Users/x/dev/alpha", role: .worker, sessions: 2), HostCensus(root: "/Users/x/dev/alpha", role: .verifier, sessions: 1),
+                      HostCensus(root: "/Users/x/dev/beta", role: .worker, sessions: 3), HostCensus(root: "/Users/x/dev/gamma", role: .worker, sessions: 2),
+                      HostCensus(root: "/Users/x/dev/beta", role: .lead, sessions: 1)]
+        let mac = MacLoad.count(census: census, sessions: [], load: 46.9)
+        let forAlpha = mac.sessionsText(for: "/Users/x/dev/alpha/")
+        #expect(forAlpha == "8 team sessions across 3 projects (this one 3, 2 others 5)")
+        #expect(mac.sessionsText(for: "/Users/x/dev/beta") == "8 team sessions across 3 projects (this one 3, 2 others 5)")
+        // Two projects: A named, B only counted, and the other way round.
+        let two = MacLoad.count(census: Array(census.prefix(3)), sessions: [], load: 1)
+        #expect(two.sessionsText(for: "/Users/x/dev/alpha") == "6 team sessions across 2 projects (this one 3, 1 other 3)")
+        #expect(two.sessionsText(for: "/Users/x/dev/beta") == "6 team sessions across 2 projects (this one 3, 1 other 3)")
+        for (root, other) in [("/Users/x/dev/alpha", "beta"), ("/Users/x/dev/beta", "alpha")] {
+            #expect(!two.sessionsText(for: root).contains(other))
+            #expect(!LeadWitness.roomText(["start_worker(one)"], mac: two, limits: MacLimits(), root: root).contains(other))
+        }
+        // A project with none of its own, alone, and an empty Mac.
+        #expect(mac.sessionsText(for: "/Users/x/dev/delta") == "8 team sessions across 3 projects (this one 0, 3 others 8)")
+        #expect(MacLoad.count(census: [census[0]], sessions: [], load: 1).sessionsText(for: "/Users/x/dev/alpha") == "2 team sessions across 1 project (this one 2)")
+        #expect(MacLoad.count(census: [], sessions: [], load: 1).sessionsText(for: "/Users/x/dev/alpha") == "0 team sessions across 0 projects")
+        // The app's own views keep every project's name: they're written to no repository.
+        #expect(mac.sessionsText == "8 team sessions across 3 projects (alpha 3, beta 3, gamma 2)")
+    }
+
     /// The load the leads judge by is the greater of the 1- and 5-minute averages: on 2026-10-28 the 1-minute dipped
     /// under load_threshold at 17:38 with the 5-minute still at 64, eight minutes after load 150, and work started.
     @Test func theLoadTheLeadsJudgeByIsTheGreaterOfTheOneAndFiveMinuteAverages() {
@@ -148,7 +175,7 @@ extension LeadToolsetTests {
         #expect(refused.isError)
         #expect(refused.text.contains("Not started"))
         #expect(refused.text.contains("load 150.0 (load_threshold \(MacLoad.number(2 * Self.cores)), twice the \(MacLoad.processors) cores)"))
-        #expect(refused.text.contains("2 team sessions across 2 projects (films 1, project-c 1) (mac_max_sessions 6)"))
+        #expect(refused.text.contains("2 team sessions across 2 projects (this one 0, 2 others 2) (mac_max_sessions 6)"))
         #expect(refused.text.contains(LeadPrompts.retryWhenWoken) && !refused.text.contains("about 5 minutes"))
         #expect(runtime.spawned.isEmpty)
         #expect(BoardStore(root: root).load().task("one")?.status == .planned)
@@ -194,7 +221,7 @@ extension LeadToolsetTests {
         let refused = call(lead, "start_worker", ["task": "two"])
         #expect(refused.isError)
         #expect(refused.text.contains("team sessions of all its projects are at mac_max_sessions"))
-        #expect(refused.text.contains("7 team sessions across 3 projects (project-c 4, films 2, \((root as NSString).lastPathComponent) 1) (mac_max_sessions 6)"))
+        #expect(refused.text.contains("7 team sessions across 3 projects (this one 1, 2 others 6) (mac_max_sessions 6)"))
         #expect(!refused.text.contains("above load_threshold"))
         #expect(runtime.spawned.count == 1)
         // The user raises the Mac's cap in Settings: it starts.
@@ -213,8 +240,7 @@ extension LeadToolsetTests {
         #expect(!call(lead, "start_worker", ["task": "one"]).isError)
         runtime.unlisted = Self.neighbours
         #expect(try runtime.sessions().count == 1)
-        let own = (root as NSString).lastPathComponent
-        let counted = "7 team sessions across 3 projects (project-c 4, films 2, \(own) 1) (mac_max_sessions 6)"
+        let counted = "7 team sessions across 3 projects (this one 1, 2 others 6) (mac_max_sessions 6)"
         #expect(call(lead, "status").text.contains("Mac (every project's team): load 0.5 (load_threshold \(MacLoad.number(2 * Self.cores)), twice the \(MacLoad.processors) cores), \(counted)."))
         let refused = call(lead, "start_worker", ["task": "two"])
         #expect(refused.isError)
@@ -269,7 +295,7 @@ extension LeadToolsetTests {
         runtime.others = Self.neighbours
         let full = call(lead, "audit", ["task": "add-b"])
         #expect(full.isError)
-        #expect(full.text.contains("6 team sessions across 2 projects (project-c 4, films 2)"))
+        #expect(full.text.contains("6 team sessions across 2 projects (this one 0, 2 others 6)"))
         #expect(runtime.spawned.count == 1)
         // Its own worker, done, isn't counted: with a cap of one and nobody else, the verifier starts.
         runtime.others = []
@@ -417,7 +443,7 @@ extension LeadToolsetTests {
         #expect(refused.text.contains(LeadPrompts.retryWhenWoken))
         #expect(refused.text.contains("load 150.0"))
         // The task's own worker and verifier count too, here: the Mac as it is.
-        #expect(refused.text.contains("8 team sessions across 3 projects (project-c 4, films 2, \((root as NSString).lastPathComponent) 2)"))
+        #expect(refused.text.contains("8 team sessions across 3 projects (this one 2, 2 others 6)"))
         #expect(runtime.loadReads > 3)
         #expect(Git.run(["rev-parse", "main"], in: root).output == before)
         #expect(BoardStore(root: root).load().task("add-b")?.status == .review)
@@ -438,7 +464,7 @@ extension LeadToolsetTests {
         runtime.load = 12.5
         let status = call(lead, "status").text
         #expect(status.contains("Mac (every project's team): load 12.5"))
-        #expect(status.contains("6 team sessions across 2 projects (project-c 4, films 2) (mac_max_sessions 6)"))
+        #expect(status.contains("6 team sessions across 2 projects (this one 0, 2 others 6) (mac_max_sessions 6)"))
         #expect(status.contains("start_worker and audit refuse until it eases"))
         runtime.others = []
         runtime.load = 1

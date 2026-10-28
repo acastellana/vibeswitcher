@@ -93,7 +93,9 @@ import Testing
             var id = 2
             let status = try lead.server.settledCall(&id, "status")
             #expect(status?.isError == false, "status: \(status?.text ?? "no answer"); stderr: \(lead.server.errors)")
-            #expect(status?.text.contains("3 team sessions across 2 projects (alpha 2, beta 1) (mac_max_sessions 10)") == true,
+            // Naming only its own project: the status is the lead's, and what a lead is told can go into its repo's records.
+            let mine = name == "alpha" ? "this one 2, 1 other 1" : "this one 1, 1 other 2"
+            #expect(status?.text.contains("3 team sessions across 2 projects (\(mine)) (mac_max_sessions 10)") == true,
                     "\(name)'s status: \(status?.text ?? "no answer")")
 
             // The host still lists it only its own team, and refuses it the other project's sessions.

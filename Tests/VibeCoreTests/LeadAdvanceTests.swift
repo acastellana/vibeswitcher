@@ -183,6 +183,30 @@ struct LeadAdvanceTests: LeadTeamFixture {
         #expect(!FileManager.default.fileExists(atPath: root + "/b.txt"))
     }
 
+    /// 2026-10-28 20:37: auto_advance's start of a task was refused (the load rose between its count of the Mac's room
+    /// and start_worker's), and the refusal it logged to progress.md named the Mac's other projects, an hour after the
+    /// user had them scrubbed from the repo. Logged, it names only this project and counts the others.
+    @Test func aStartRefusalLoggedToTheProgressLogNamesNoOtherProject() throws {
+        let (root, runtime, lead) = try team()
+        #expect(!lead.call("add_task", ["title": "Add b", "goal": "b.txt exists", "acceptance": ["test -f b.txt"]]).isError)
+        // Room for its worker beside the other projects' six: only the load refuses it.
+        lead.macLimits = { MacLimits(maxSessions: 10, loadThreshold: 24) }
+        runtime.calls.lock()
+        // Other projects' teams, which the host counts in its census but doesn't list this lead.
+        runtime.unlisted = LeadToolsetTests.neighbours
+        // The pass's own reading and its count of the room: idle; start_worker's, a moment later: loaded.
+        runtime.loadReadings = [0.5, 0.5, 150]
+        runtime.calls.unlock()
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        #expect(advancing.until { progress(root).contains("Automatically (auto_advance): Didn't start add-b: Not started") })
+        let log = progress(root)
+        #expect(log.contains("6 team sessions across 2 projects (this one 0, 2 others 6)"), "\(log)")
+        for other in ["project-c", "films"] { #expect(!log.contains(other), "\(log)") }
+        // The load drops: it starts.
+        #expect(advancing.until { task("add-b", root)?.status == .running })
+    }
+
     // MARK: review none
 
     @Test func aReviewNoneTaskStartsMergesWithItsTestRunAndIsCleanedUpWithNoLeadCall() throws {

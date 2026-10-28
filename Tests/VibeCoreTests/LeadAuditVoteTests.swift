@@ -396,7 +396,7 @@ struct LeadAuditFindersTests: LeadTeamFixture {
         let refused = call(lead, "audit", ["task": "add-b"])
         #expect(refused.isError)
         #expect(refused.text.contains("audit_finders is 3, and mac_max_sessions leaves room for 2 more sessions now"), "\(refused.text)")
-        #expect(refused.text.contains("4 team sessions across 1 project (project-c 4) (mac_max_sessions 6)"), "\(refused.text)")
+        #expect(refused.text.contains("4 team sessions across 1 project (this one 0, 1 other 4) (mac_max_sessions 6)"), "\(refused.text)")
         #expect(refused.text.contains(LeadPrompts.retryWhenWoken), "\(refused.text)")
         #expect(runtime.spawned.count == before)
         #expect(lines(runs).isEmpty, "nothing built or tested")

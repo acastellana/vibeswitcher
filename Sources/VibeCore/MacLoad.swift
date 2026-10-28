@@ -102,18 +102,37 @@ public struct MacLoad: Equatable, Sendable {
     /// 12.34 → "12.3"; unknown → "unknown".
     public var loadText: String { load.map { String(format: "%.1f", $0) } ?? "unknown" }
 
-    /// "3 team sessions across 2 projects (vibeswitcher 2, project-c 1)".
+    /// "3 team sessions across 2 projects (vibeswitcher 2, project-c 1)": every project by name, for the app's own
+    /// views only. What a lead is told goes into its repository's records (auto_advance logs refusals to progress.md),
+    /// so it names only its own project: see `sessionsText(for:)`.
     public var sessionsText: String {
-        let projects = holders.count == 1 ? "1 project" : "\(holders.count) projects"
         let who = holders.isEmpty ? "" : " (" + holders.map { "\($0.project) \($0.sessions)" }.joined(separator: ", ") + ")"
-        return "\(sessions) team session\(sessions == 1 ? "" : "s") across \(projects)\(who)"
+        return sessionsCount + who
+    }
+
+    /// "8 team sessions across 3 projects (this one 3, 2 others 5)": as told to the lead of the repository `root`,
+    /// naming no other project. On 2026-10-28 a start refusal naming the Mac's other projects went into this repo's
+    /// progress.md through auto_advance, an hour after the user had their names scrubbed from it.
+    public func sessionsText(for root: String) -> String {
+        guard !holders.isEmpty else { return sessionsCount }
+        let own = ((root as NSString).standardizingPath as NSString).lastPathComponent
+        let mine = holders.filter { $0.project == own }.reduce(0) { $0 + $1.sessions }
+        let others = holders.filter { $0.project != own }
+        var who = ["this one \(mine)"]
+        if !others.isEmpty {
+            who.append("\(others.count) other\(others.count == 1 ? "" : "s") \(others.reduce(0) { $0 + $1.sessions })")
+        }
+        return sessionsCount + " (" + who.joined(separator: ", ") + ")"
+    }
+
+    /// "3 team sessions across 2 projects".
+    private var sessionsCount: String {
+        let projects = holders.count == 1 ? "1 project" : "\(holders.count) projects"
+        return "\(sessions) team session\(sessions == 1 ? "" : "s") across \(projects)"
     }
 
     /// The Team view's line: "Mac: load 12.3, 3 team sessions across 2 projects".
-    public var line: String {
-        let projects = holders.count == 1 ? "1 project" : "\(holders.count) projects"
-        return "Mac: load \(loadText), \(sessions) team session\(sessions == 1 ? "" : "s") across \(projects)"
-    }
+    public var line: String { "Mac: load \(loadText), \(sessionsCount)" }
 
     /// The line as VoiceOver reads it: what the numbers are, who holds the sessions, and against the lead's limits.
     public func spoken(threshold: Double, max: Int) -> String {

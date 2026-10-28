@@ -1620,7 +1620,7 @@ public final class LeadToolset: MCPToolset {
             let room = max(0, limits.maxSessions - mac.sessions)
             roomWaits.record(root: root, what: "audit(\(slug))", need: finders, auto: LeadAdvance.isAutomatic)
             throw Problem(text: "Not audited, no finder started: audit_finders is \(finders), and mac_max_sessions leaves room for \(room) more session\(room == 1 ? "" : "s") now "
-                          + "(each finder is one, counted with every project's workers and verifiers). Now: \(Self.macText(mac, limits)). "
+                          + "(each finder is one, counted with every project's workers and verifiers). Now: \(Self.macText(mac, limits, root: root)). "
                           + "Set audit_finders lower with configure (1 is one verifier), or audit again once sessions have ended. " + LeadPrompts.retryWhenWoken)
         }
         // Settings, hooks or MCP servers the branch brings would run in the verifier: it starts with project settings
@@ -2865,9 +2865,10 @@ public final class LeadToolset: MCPToolset {
         (session.cwd as NSString).standardizingPath == folder && [.worker, .verifier].contains(LeadTeams.role(label: session.label))
     }
 
-    /// The Mac's load and every project's team sessions, against the Mac-wide limits, in one line.
-    private static func macText(_ mac: MacLoad, _ limits: MacLimits) -> String {
-        "load \(mac.loadText) (load_threshold \(limits.loadLimitText)), \(mac.sessionsText) (mac_max_sessions \(limits.maxSessions))"
+    /// The Mac's load and every project's team sessions, against the Mac-wide limits, in one line, naming only the
+    /// project `root` (see `MacLoad.sessionsText(for:)`: refusals and merge replies go into the repo's records).
+    private static func macText(_ mac: MacLoad, _ limits: MacLimits, root: String) -> String {
+        "load \(mac.loadText) (load_threshold \(limits.loadLimitText)), \(mac.sessionsText(for: root)) (mac_max_sessions \(limits.maxSessions))"
     }
 
     /// Why no worker or verifier may start now on the Mac as `mac` has it (`not`: what didn't happen); nil when one may.
@@ -2880,7 +2881,7 @@ public final class LeadToolset: MCPToolset {
         if mac.isFull(max: limits.maxSessions) { over.append("the team sessions of all its projects are at mac_max_sessions") }
         guard !over.isEmpty else { return nil }
         if let what { roomWaits.record(root: root, what: what, need: need, auto: LeadAdvance.isAutomatic) }
-        return "\(not): the Mac is shared by every project's team, and \(over.joined(separator: " and ")). Now: \(Self.macText(mac, limits)). "
+        return "\(not): the Mac is shared by every project's team, and \(over.joined(separator: " and ")). Now: \(Self.macText(mac, limits, root: root)). "
             + (what == nil ? "" : "VibeSwitcher sends you one message once there's room again. ") + LeadPrompts.retryWhenWoken + " "
             + "Meanwhile merge and cleanup finished tasks (cleanup ends their sessions), plan, or answer the user."
     }
@@ -2920,7 +2921,7 @@ public final class LeadToolset: MCPToolset {
                 let listing = (try? listed()) ?? []
                 let mac = (try? macLoad(listing, load: current)) ?? MacLoad.count(listing.map { ($0.label, $0.cwd, $0.live) }, load: current)
                 roomWaits.record(root: root, what: "\(doing)(\(slug))", need: 0, auto: LeadAdvance.isAutomatic)
-                throw Problem(text: "Not \(done) (nothing was tested): the Mac's load (the greater of its 1- and 5-minute averages) stayed above load_threshold for the \(Worktrees.duration(workflow.testTimeout)) \(doing) waits (test_timeout_min). Now: \(Self.macText(mac, limits)). "
+                throw Problem(text: "Not \(done) (nothing was tested): the Mac's load (the greater of its 1- and 5-minute averages) stayed above load_threshold for the \(Worktrees.duration(workflow.testTimeout)) \(doing) waits (test_timeout_min). Now: \(Self.macText(mac, limits, root: root)). "
                               + "Timing-sensitive tests fail on a Mac this busy, so \(slug) wasn't tested and stays as it was. \(LeadPrompts.retryWhenWoken) Meanwhile start no workers or audits (they'd add to the load), and tell the user if it stays this busy.")
             }
             Thread.sleep(forTimeInterval: min(loadPoll, progress?.every ?? loadPoll, max(0, deadline.timeIntervalSinceNow)))
@@ -3892,7 +3893,7 @@ public final class LeadToolset: MCPToolset {
             do {
                 let mac = try macLoad(listing, load: runtime.steadyLoad())
                 let full = macRefusal(mac, not: "") != nil
-                lines.append("Mac (every project's team): \(Self.macText(mac, macLimits())).\(full ? " start_worker and audit refuse until it eases; merge waits for the load." : "")")
+                lines.append("Mac (every project's team): \(Self.macText(mac, macLimits(), root: root)).\(full ? " start_worker and audit refuse until it eases; merge waits for the load." : "")")
             } catch {
                 lines.append("Mac (every project's team): not known, the session host's count of their sessions can't be read (\(error)); start_worker and audit refuse until it can.")
             }
