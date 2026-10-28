@@ -100,10 +100,10 @@ final class TestClient {
         return nil
     }
 
-    /// Spawns a scratch program and waits for the reply.
-    func spawn(_ command: String?, cwd: String = "/tmp") throws -> HostSession {
+    /// Spawns a scratch program and waits for the reply. `label`: as the app or a lead names it ("Worker: fix-x").
+    func spawn(_ command: String?, cwd: String = "/tmp", label: String = "Test") throws -> HostSession {
         let seq = send(.spawn(SpawnRequest(cwd: cwd, command: command, env: [:], cols: 80, rows: 24, keepShell: false,
-                                           label: "Test", agent: nil)))
+                                           label: label, agent: nil)))
         #expect(eventually { reply(to: seq) != nil })
         guard case .spawned(let session) = reply(to: seq) else { throw CancellationError() }
         return session

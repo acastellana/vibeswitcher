@@ -175,6 +175,8 @@ final class HostRuntime: LeadRuntime {
 
     func loadAverage() -> Double? { MacLoad.oneMinute() }
 
+    func census() throws -> [HostCensus]? { try HostCall.census(socket: socket) }
+
     func forget(_ session: String) {
         guard let id = UUID(uuidString: session) else { return }
         _ = try? HostCall.request(.remove(id: id), socket: socket, timeout: 3)

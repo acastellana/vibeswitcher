@@ -128,7 +128,8 @@ public final class HostServer {
     /// When this host started: a build it hands over to is the same host, started then.
     private var startedAt = Date()
     public static let capabilities = [HostProtocol.Capability.styledScreen, HostProtocol.Capability.inputRefusals, HostProtocol.Capability.handover,
-                                      HostProtocol.Capability.leadVault, HostProtocol.Capability.appProof, HostProtocol.Capability.inputUnits]
+                                      HostProtocol.Capability.leadVault, HostProtocol.Capability.appProof, HostProtocol.Capability.inputUnits,
+                                      HostProtocol.Capability.census]
     /// Per session, its input from every client in order (see `InputOrder`).
     private var inputOrders: [UUID: InputOrder] = [:]
     private var handingOver = false
@@ -360,7 +361,8 @@ public final class HostServer {
         case .hello, .proveApp, .enrollApp, .replaceAppKey, .vault:
             // Metadata only before authentication; proof and vault operations enforce their own policies.
             return true
-        case .spawn:
+        case .spawn, .census:
+            // A census is counts only (see `HostCensus`): nothing in it reaches a session.
             if caller == .app { return true }
             guard case .session(let id) = caller, let id = UUID(uuidString: id) else { return false }
             return sessions[id]?.info.isLive == true
@@ -404,6 +406,8 @@ public final class HostServer {
             let visible = allInfo.filter { mayKill($0.id, from: caller(of: client)) }
             reply(.welcome(protocolVersion: HostProtocol.version, hostBuild: config.hostBuild, sessions: visible,
                            capabilities: config.capabilities, pid: getpid(), startedAt: startedAt))
+        case .census:
+            reply(.census(HostCensus.count(allInfo.map { ($0.label, $0.cwd, $0.isLive) })))
         case .spawn(let request):
             // Started now, it would be torn down with the host a moment later.
             guard !shuttingDown else { return reply(.error(HostProtocol.shuttingDown)) }

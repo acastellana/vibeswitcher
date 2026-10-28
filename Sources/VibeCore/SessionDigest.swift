@@ -63,6 +63,19 @@ public enum HostCall {
         try exchange(nil, socket: socket, timeout: timeout, appKey: appKey).sessions
     }
 
+    /// Every project's live team sessions, counted (see `HostRequest.census`); nil from a host older than that, which
+    /// doesn't count them. Throws when the host can't be asked or refuses.
+    public static func census(socket: String = VibePaths.hostSocket.path, appKey: SymmetricKey? = HostConnection.appKey,
+                              timeout: TimeInterval = 5) throws -> [HostCensus]? {
+        let answer = try exchange(.census, socket: socket, timeout: timeout, requires: HostProtocol.Capability.census, appKey: appKey)
+        guard answer.capable else { return nil }
+        switch answer.reply {
+        case .census(let counts)?: return counts
+        case .error(let message)?: throw Failure(description: message)
+        default: throw Failure(description: "The session host answered something else.")
+        }
+    }
+
     /// Sends `request` and returns the host's reply to it.
     public static func request(_ request: HostRequest, socket: String = VibePaths.hostSocket.path,
                                appKey: SymmetricKey? = HostConnection.appKey, timeout: TimeInterval = 10) throws -> HostEvent {

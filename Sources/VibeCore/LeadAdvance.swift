@@ -532,10 +532,9 @@ public final class LeadAdvance: @unchecked Sendable {
     /// The Mac has room for `need` more team sessions on `slug` (its own worktree's not counted, as start_worker and
     /// audit count it).
     private func hasRoom(_ slug: String, need: Int) -> Bool {
-        guard let sessions = try? lead.advanceSessions() else { return false }
+        guard let sessions = try? lead.advanceSessions(),
+              let mac = try? lead.macLoad(sessions, load: lead.runtime.loadAverage(), except: Worktrees.path(root: lead.root, slug: slug)) else { return false }
         let limits = lead.macLimits()
-        let mac = MacLoad.count(sessions.map { ($0.label, $0.cwd, $0.live) }, load: lead.runtime.loadAverage(),
-                                except: Worktrees.path(root: lead.root, slug: slug))
         return !mac.isBusy(threshold: limits.loadLimit) && mac.sessions + need <= limits.maxSessions
     }
 

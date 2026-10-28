@@ -169,6 +169,53 @@ extension LeadToolsetTests {
         #expect(!call(lead, "start_worker", ["task": "two"]).isError)
     }
 
+    /// 2026-10-28: since PR #1 the host lists a lead only its own team. Counted from that, status read "5 team sessions
+    /// across 1 project" with 9 running across 3, and start_worker went past the Mac's cap. The host's census counts
+    /// every project's team for it.
+    @Test func startWorkerRefusesAtTheMacWideCapCountingProjectsTheHostDoesntList() throws {
+        let root = try repo()
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        for title in ["One", "Two"] { _ = call(lead, "add_task", ["title": title, "goal": "g", "acceptance": ["a"]]) }
+        #expect(!call(lead, "start_worker", ["task": "one"]).isError)
+        runtime.unlisted = Self.neighbours
+        #expect(try runtime.sessions().count == 1)
+        let own = (root as NSString).lastPathComponent
+        let counted = "7 team sessions across 3 projects (genswap 4, films 2, \(own) 1) (mac_max_sessions 6)"
+        #expect(call(lead, "status").text.contains("Mac (every project's team): load 0.5 (load_threshold \(MacLoad.number(2 * Self.cores)), twice the \(MacLoad.processors) cores), \(counted)."))
+        let refused = call(lead, "start_worker", ["task": "two"])
+        #expect(refused.isError)
+        #expect(refused.text.contains("team sessions of all its projects are at mac_max_sessions"), "\(refused.text)")
+        #expect(refused.text.contains(counted), "\(refused.text)")
+        #expect(runtime.spawned.count == 1)
+        // A census that can't be read starts nothing: counted from its own team, the lead would go past the cap.
+        lead.macLimits = { MacLimits(maxSessions: 8) }
+        runtime.censusDown = "The session host didn't answer in time."
+        let unknown = call(lead, "start_worker", ["task": "two"])
+        #expect(unknown.isError && unknown.text.contains("count of every project's team sessions can't be read"), "\(unknown.text)")
+        #expect(call(lead, "status").text.contains("Mac (every project's team): not known"))
+        #expect(runtime.spawned.count == 1)
+        runtime.censusDown = nil
+        #expect(!call(lead, "start_worker", ["task": "two"]).isError)
+    }
+
+    @Test func theCensusCountsLiveTeamSessionsByRepositoryAndRole() {
+        let census = HostCensus.count(Self.neighbours.map { ($0.label, $0.cwd, $0.live) }
+                                      + [("Claude", "/Users/x/dev/genswap", true), ("Worker: z", "/Users/x/dev/films/.vibeswitcher/worktrees/z/", true)])
+        #expect(census == [HostCensus(root: "/Users/x/dev/films", role: .lead, sessions: 1),
+                           HostCensus(root: "/Users/x/dev/films", role: .verifier, sessions: 1),
+                           HostCensus(root: "/Users/x/dev/films", role: .worker, sessions: 2),
+                           HostCensus(root: "/Users/x/dev/genswap", role: .lead, sessions: 1),
+                           HostCensus(root: "/Users/x/dev/genswap", role: .verifier, sessions: 1),
+                           HostCensus(root: "/Users/x/dev/genswap", role: .worker, sessions: 3)])
+        // The Mac from it: the leads aren't counted, and the sessions listed in the task's own worktree are left out.
+        let listed = [Self.member("genswap", "a"), Self.member("genswap", "a", "Verifier"), Self.member("genswap", "b")]
+        let mac = MacLoad.count(census: census, sessions: listed.map { ($0.label, $0.cwd, $0.live) }, load: 2,
+                                except: "/Users/x/dev/genswap/.vibeswitcher/worktrees/a")
+        #expect(mac.holders == [MacLoad.Holder(project: "films", sessions: 3), MacLoad.Holder(project: "genswap", sessions: 2)])
+        #expect(MacLoad.count(census: census, sessions: [], load: 2).sessions == 7)
+    }
+
     // MARK: audit
 
     @Test func auditRefusesWhileTheMacIsLoadedButNotForTheTasksOwnWorker() throws {

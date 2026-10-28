@@ -74,6 +74,9 @@ public protocol LeadRuntime: AnyObject {
     /// Window sessions, each live one with what its agent is doing (see `LeadActivity`); throws when the session
     /// host can't be read (never "no sessions" then).
     func sessions() throws -> [LeadSessionInfo]
+    /// Every project's live team sessions, counted (see `HostRequest.census`): `sessions` lists only what this caller
+    /// may reach, its own team. Nil when the host doesn't count them (older than that); throws when it can't be read.
+    func census() throws -> [HostCensus]?
     /// Its transcript, found with or without its hooks (see `LeadObserver`); throws when the host can't be read.
     func transcript(of session: String) throws -> String?
     /// The agent this tool server belongs to (its parent process).
@@ -91,6 +94,9 @@ public protocol LeadRuntime: AnyObject {
 }
 
 public extension LeadRuntime {
+    /// None: the Mac-wide limits count the sessions `sessions` lists.
+    func census() throws -> [HostCensus]? { nil }
+
     /// From the Claude command's own --model only; the app's runtime also reads Claude's settings (see `HostRuntime`).
     func workerModel(root: String) -> String? { LeadWorkflow.claudeModel(command: claudeCommand(root: root)) }
 
@@ -1265,8 +1271,8 @@ public final class LeadToolset: MCPToolset {
         }
         // The Mac is every project's: its load and their teams count, not only this one's. A session already in this
         // task's worktree (an ended worker's earlier verifier) is the one this worker replaces.
-        let mac = MacLoad.count(sessions.map { ($0.label, $0.cwd, $0.live) }, load: runtime.loadAverage(),
-                                except: Worktrees.path(root: root, slug: slug))
+        let mac = try macLoad(sessions, load: runtime.loadAverage(), except: Worktrees.path(root: root, slug: slug),
+                              refused: "whether the Mac has room for \(slug)'s worker isn't known; no worker was started")
         if let refusal = macRefusal(mac, not: "Not started", what: "start_worker(\(slug))", need: 1) { throw Problem(text: refusal) }
         // A worker on a full disk fails, and takes every other session with it (none can write its output).
         if let free = freeSpace(worktreesFolder), free < workflow.diskFloor {
@@ -1382,8 +1388,8 @@ public final class LeadToolset: MCPToolset {
         let refused = "\(task.slug)'s worker wasn't ended to make room"
         guard let worker = task.worker, worker != task.stopped, let sessions = try? hostSessions(refused),
               let info = sessions.first(where: { $0.id == worker && $0.live }) else { return "" }
-        let others = MacLoad.count(sessions.map { ($0.label, $0.cwd, $0.live) }, load: nil, except: Worktrees.path(root: root, slug: task.slug))
-        guard others.sessions + need + 1 > limits.maxSessions, info.waiting == nil, info.status == LeadActivity.idle(background: nil).text,
+        guard let others = try? macLoad(sessions, load: nil, except: Worktrees.path(root: root, slug: task.slug)),
+              others.sessions + need + 1 > limits.maxSessions, info.waiting == nil, info.status == LeadActivity.idle(background: nil).text,
               (try? vault.unaudited(root: root, task: task.slug))?.reported == head else { return "" }
         guard let ending = try? end([info], refused: refused).first else { return "" }
         if ending.failure != nil {
@@ -1574,8 +1580,8 @@ public final class LeadToolset: MCPToolset {
         // Not on a Mac every project's teams already load: the task's own worker (done) and earlier verifier aren't
         // counted, the verifier takes their place.
         let sessions = try hostSessions("whether the Mac has room for a verifier isn't known; no verifier was started")
-        let mac = MacLoad.count(sessions.map { ($0.label, $0.cwd, $0.live) }, load: runtime.loadAverage(),
-                                except: Worktrees.path(root: root, slug: slug))
+        let mac = try macLoad(sessions, load: runtime.loadAverage(), except: Worktrees.path(root: root, slug: slug),
+                              refused: "whether the Mac has room for a verifier isn't known; no verifier was started")
         // The finders' number and their Nits' cap as the lead set them, not as a worker rewrote them.
         try checkSettings(workflow, not: "Not audited, no verifier started", keys: ["audit_finders", "audit_nit_cap"])
         // Several finders, or a merged result to test: the audit itself runs init_command and test_command as the lead
@@ -2838,7 +2844,8 @@ public final class LeadToolset: MCPToolset {
                 throw Problem(text: "The \(doing) of \(slug) was cancelled while it waited for the Mac's load to drop; nothing was \(done), and \(slug) stays as it was.")
             }
             guard Date() < deadline else {
-                let mac = MacLoad.count(((try? listed()) ?? []).map { ($0.label, $0.cwd, $0.live) }, load: current)
+                let listing = (try? listed()) ?? []
+                let mac = (try? macLoad(listing, load: current)) ?? MacLoad.count(listing.map { ($0.label, $0.cwd, $0.live) }, load: current)
                 roomWaits.record(root: root, what: "\(doing)(\(slug))", need: 0, auto: LeadAdvance.isAutomatic)
                 throw Problem(text: "Not \(done) (nothing was tested): the Mac's 1-minute load stayed above load_threshold for the \(Worktrees.duration(workflow.testTimeout)) \(doing) waits (test_timeout_min). Now: \(Self.macText(mac, limits)). "
                               + "Timing-sensitive tests fail on a Mac this busy, so \(slug) wasn't tested and stays as it was. \(LeadPrompts.retryWhenWoken) Meanwhile start no workers or audits (they'd add to the load), and tell the user if it stays this busy.")
@@ -3006,6 +3013,23 @@ public final class LeadToolset: MCPToolset {
     private func hostSessions(_ refused: String) throws -> [LeadSessionInfo] {
         do { return try listed() } catch {
             throw Problem(text: "The session host can't be read (\(error)), so \(refused). Try again in a moment; if it keeps failing, tell the user (VibeSwitcher may be restarting its session host).")
+        }
+    }
+
+    /// The Mac as its limits count it: every project's team from the host's census (`HostCensus`), `sessions` (what
+    /// the host lists this lead, its own team) only for the task worktree `except` leaves out; `sessions` alone from a
+    /// host that doesn't count. Throws when the census can't be read: counted from its own team, a lead would start
+    /// past mac_max_sessions.
+    func macLoad(_ sessions: [LeadSessionInfo], load: Double?, except folder: String? = nil) throws -> MacLoad {
+        let listed = sessions.map { ($0.label, $0.cwd, $0.live) }
+        guard let census = try runtime.census() else { return MacLoad.count(listed, load: load, except: folder) }
+        return MacLoad.count(census: census, sessions: listed, load: load, except: folder)
+    }
+
+    /// As `macLoad`, a census that can't be read a refusal saying what didn't happen (`refused`).
+    private func macLoad(_ sessions: [LeadSessionInfo], load: Double?, except folder: String?, refused: String) throws -> MacLoad {
+        do { return try macLoad(sessions, load: load, except: folder) } catch {
+            throw Problem(text: "The session host's count of every project's team sessions can't be read (\(error)), so \(refused). Try again in a moment; if it keeps failing, tell the user (VibeSwitcher may be restarting its session host).")
         }
     }
 
@@ -3792,9 +3816,13 @@ public final class LeadToolset: MCPToolset {
         if let line = records.statusLine { lines.append(line) }
         if let line = archiveNudgeOnce() { lines.append(line) }
         if let listing {
-            let mac = MacLoad.count(listing.map { ($0.label, $0.cwd, $0.live) }, load: runtime.loadAverage())
-            let full = macRefusal(mac, not: "") != nil
-            lines.append("Mac (every project's team): \(Self.macText(mac, macLimits())).\(full ? " start_worker and audit refuse until it eases; merge waits for the load." : "")")
+            do {
+                let mac = try macLoad(listing, load: runtime.loadAverage())
+                let full = macRefusal(mac, not: "") != nil
+                lines.append("Mac (every project's team): \(Self.macText(mac, macLimits())).\(full ? " start_worker and audit refuse until it eases; merge waits for the load." : "")")
+            } catch {
+                lines.append("Mac (every project's team): not known, the session host's count of their sessions can't be read (\(error)); start_worker and audit refuse until it can.")
+            }
         }
         if let line = heavyLockLine(board) { lines.append(line) }
         if sessions == nil {

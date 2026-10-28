@@ -46,6 +46,29 @@ public struct MacLoad: Equatable, Sendable {
         return MacLoad(load: load, holders: holders)
     }
 
+    /// As `count`, from the host's census of every project's team (`HostCensus`): since PR #1 the host lists a lead
+    /// only its own team, and a lead counting what it's listed saw the Mac emptier than it was (2026-10-28: 5 team
+    /// sessions across 1 project, with 9 running across 3) and started past mac_max_sessions. `sessions`, what the
+    /// host lists this caller, only tell which of the counted are in the folder `except`.
+    public static func count(census: [HostCensus], sessions: [(label: String?, cwd: String, live: Bool)], load: Double?,
+                             except folder: String? = nil) -> MacLoad {
+        var counts: [String: Int] = [:]
+        for entry in census where entry.role != .lead && entry.sessions > 0 {
+            counts[(entry.root as NSString).lastPathComponent, default: 0] += entry.sessions
+        }
+        if let folder {
+            let excluded = MacLoad.count(sessions, load: nil).holders
+            let kept = MacLoad.count(sessions, load: nil, except: folder).holders
+            for holder in excluded {
+                let there = holder.sessions - (kept.first { $0.project == holder.project }?.sessions ?? 0)
+                if there > 0 { counts[holder.project] = max(0, (counts[holder.project] ?? 0) - there) }
+            }
+        }
+        let holders = counts.filter { $0.value > 0 }.map { Holder(project: $0.key, sessions: $0.value) }
+            .sorted { $0.sessions != $1.sessions ? $0.sessions > $1.sessions : $0.project < $1.project }
+        return MacLoad(load: load, holders: holders)
+    }
+
     /// Above the threshold: builds and tests slow down for every project's team.
     public func isBusy(threshold: Double) -> Bool { load.map { $0 > threshold } ?? false }
 

@@ -31,6 +31,10 @@ final class FakeRuntime: LeadRuntime {
     var loadReads = 0
     /// Sessions of other projects' teams the host also lists.
     var others: [LeadSessionInfo] = []
+    /// Sessions of other projects' teams the host doesn't list this lead (since PR #1) but counts in its census.
+    var unlisted: [LeadSessionInfo] = []
+    /// Set: the host's census can't be read (the error it gives).
+    var censusDown: String?
     /// What each session's agent is doing, as the host's sessions say it ("working" unless set).
     var statuses: [String: String] = [:]
     /// The prompt each session waits on, as the host's reading of it says.
@@ -92,7 +96,18 @@ final class FakeRuntime: LeadRuntime {
         defer { calls.unlock() }
         onSessions?()
         if let hostDown { throw BoardError(text: hostDown) }
-        return spawned.filter { !forgotten.contains($0.id) }.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: statuses[$0.id] ?? "working", tty: nil, pid: pids[$0.id] ?? getpid(), waiting: waiting[$0.id]) } + others
+        return listing
+    }
+    private var listing: [LeadSessionInfo] {
+        spawned.filter { !forgotten.contains($0.id) }.map { LeadSessionInfo(id: $0.id, cwd: $0.cwd, label: $0.label, live: !killed.contains($0.id) || stubborn.contains($0.id), status: statuses[$0.id] ?? "working", tty: nil, pid: pids[$0.id] ?? getpid(), waiting: waiting[$0.id]) } + others
+    }
+    /// As the host counts them: what it lists and what it doesn't (`HostCensus.count`).
+    func census() throws -> [HostCensus]? {
+        calls.lock()
+        defer { calls.unlock() }
+        if let censusDown { throw BoardError(text: censusDown) }
+        if let hostDown { throw BoardError(text: hostDown) }
+        return HostCensus.count((listing + unlisted).map { ($0.label, $0.cwd, $0.live) })
     }
     func loadAverage() -> Double? {
         calls.lock()
@@ -137,6 +152,7 @@ final class FakeSeat: LeadRuntime {
         try shared.steer(target, from: sender, text: text, clearDraft: clearDraft)
     }
     func sessions() throws -> [LeadSessionInfo] { try shared.sessions() }
+    func census() throws -> [HostCensus]? { try shared.census() }
     func transcript(of session: String) throws -> String? { try shared.transcript(of: session) }
     func currentAgent() -> LeadAgent? { agent }
     func isRunning(_ agent: LeadAgent) -> Bool { shared.isRunning(agent) }

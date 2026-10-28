@@ -22,6 +22,8 @@ public enum HostProtocol {
         /// Takes `HostRequest.inputUnit`: a unit of writes (a message's text and its Enter) goes into its session whole,
         /// whoever else types into it meanwhile. Without it, a client writes the unit as plain `input`.
         public static let inputUnits = "inputUnits"
+        /// Answers `HostRequest.census`: every project's live team sessions, counted.
+        public static let census = "census"
     }
 
     /// The error a spawn gets once the host agreed to shut down.
@@ -283,6 +285,10 @@ public enum HostRequest: Codable, Equatable, Sendable {
     /// The app lost its key (its Keychain item is gone): the host takes this one in place of the one it holds, only
     /// from the app's code and only while no session runs, and logs it. Answered `ok` or with an error.
     case replaceAppKey(key: Data)
+    /// Every project's live team sessions, counted by repository and role (see `HostCensus`), for the Mac-wide limits
+    /// a lead starts its team under: the welcome lists a lead its own team only. Answered `census` to the app and to
+    /// any live session; a host older than this answers with an error.
+    case census
 }
 
 public enum HostEvent: Codable, Equatable, Sendable {
@@ -307,6 +313,37 @@ public enum HostEvent: Codable, Equatable, Sendable {
     /// Sent once to each connection as it's accepted, before anything else: what the app answers to be the app on it
     /// (`HostRequest.proveApp`). `keyless`: the host holds no app key yet (`HostRequest.enrollApp`).
     case challenge(Data, keyless: Bool)
+    /// The answer to `HostRequest.census`.
+    case census([HostCensus])
+}
+
+/// How many live sessions one repository's team holds in one role, as the host counts them for every caller
+/// (`HostRequest.census`). A repository's folder, a role and a number: no session's id, label, terminal or screen, so
+/// nothing a lead could reach another project's sessions with.
+public struct HostCensus: Codable, Equatable, Sendable {
+    /// The repository: a worktree's (see `LeadTeams.root(ofWorktree:)`), else the session's own folder.
+    public var root: String
+    public var role: LeadLaunch.Role
+    public var sessions: Int
+
+    public init(root: String, role: LeadLaunch.Role, sessions: Int) {
+        self.root = root
+        self.role = role
+        self.sessions = sessions
+    }
+
+    /// The live sessions among `sessions` that hold a team role (told by their labels, see `LeadTeams.role`), by
+    /// repository and role, sorted.
+    public static func count(_ sessions: [(label: String?, cwd: String, live: Bool)]) -> [HostCensus] {
+        var counts: [String: [LeadLaunch.Role: Int]] = [:]
+        for session in sessions where session.live {
+            guard let role = LeadTeams.role(label: session.label) else { continue }
+            let cwd = (session.cwd as NSString).standardizingPath
+            counts[LeadTeams.root(ofWorktree: cwd) ?? cwd, default: [:]][role, default: 0] += 1
+        }
+        return counts.flatMap { root, roles in roles.map { HostCensus(root: root, role: $0.key, sessions: $0.value) } }
+            .sorted { ($0.root, $0.role.rawValue) < ($1.root, $1.role.rawValue) }
+    }
 }
 
 /// A run of characters on one screen row drawn alike, when that isn't plain: faint (SGR 2), inverse (SGR 7: an
