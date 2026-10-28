@@ -33,7 +33,8 @@ public enum LoginShellVariable {
     public static func read(_ name: String, shell: String = userShell, timeout: TimeInterval = 5) -> Outcome {
         guard LaunchPlan.validEnvName(name) else { return .unset }
         let argv = arguments(shell: shell, name: name)
-        let run = Shell.run(executable: argv[0], args: Array(argv.dropFirst()), in: NSHomeDirectory(), timeout: timeout, grace: 1)
+        let run = Shell.run(executable: argv[0], args: Array(argv.dropFirst()), in: NSHomeDirectory(), timeout: timeout, grace: 1,
+                            ownSession: true)
         if run.timedOut || run.cancelled { return .timedOut }
         return outcome(status: run.status, output: run.output)
     }
@@ -77,7 +78,10 @@ public enum LoginShellCommand {
     public static func resolve(_ name: String, shell: String = LoginShellVariable.userShell, timeout: TimeInterval = 10) -> Outcome {
         guard validName(name) else { return .missing }
         let argv = arguments(shell: shell, name: name)
-        let run = Shell.run(executable: argv[0], args: Array(argv.dropFirst()), in: NSHomeDirectory(), timeout: timeout, grace: 1)
+        // In a session of its own: an interactive shell would take the caller's terminal, and the tool server has the
+        // lead's (`Shell.run`'s ownSession).
+        let run = Shell.run(executable: argv[0], args: Array(argv.dropFirst()), in: NSHomeDirectory(), timeout: timeout, grace: 1,
+                            ownSession: true)
         if run.timedOut || run.cancelled { return .unknown }
         return outcome(status: run.status, output: run.output)
     }

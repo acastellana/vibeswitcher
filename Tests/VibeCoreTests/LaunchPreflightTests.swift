@@ -160,6 +160,43 @@ struct LaunchPreflightTests {
         #expect(LaunchPreflight.program(in: "  ") == nil)
     }
 
+    /// A program the shell expands or finds from its folder isn't called missing: the session's shell may well run it.
+    @Test func aProgramTheShellExpandsIsntCalledMissing() throws {
+        let mac = try make(Mac(claude: false))
+        #expect(mac.preflight.check(command: "$HOME/.claude/local/claude --resume") == nil)
+        #expect(mac.preflight.check(command: "${HOME}/.local/bin/claude") == nil)
+        #expect(mac.preflight.check(command: "bin/claude") == nil)
+        #expect(LaunchPreflight.program(in: "env -u FOO claude") == "claude")
+        #expect(LaunchPreflight.program(in: "exec -a lead claude") == "claude")
+        #expect(mac.preflight.check(command: "env -u FOO claude")?.missing == [.agent(program: "claude", shell: mac.preflight.shell)])
+    }
+
+    /// The login shell runs in a session of its own (no controlling terminal): an interactive zsh started from the tool
+    /// server, which has the lead's terminal, would otherwise be stopped by SIGTTOU taking it, and read as not known.
+    /// The fake shell says its pid and waits for the test to look at its session.
+    @Test func theLoginShellRunsInASessionOfItsOwn() async throws {
+        let folder = scratch.url("own-session").path
+        let (pidFile, go) = (folder + "/pid", folder + "/go")
+        let shell = folder + "/fakesh"
+        try script(shell, """
+            echo $$ > '\(pidFile).tmp' && mv '\(pidFile).tmp' '\(pidFile)'
+            while [ ! -e '\(go)' ]; do sleep 0.05; done
+            shift 2
+            exec /bin/sh "$@"
+            """)
+        let answer = Task.detached { LoginShellCommand.resolve("sh", shell: shell, timeout: Self.budget) }
+        var pid: Int32?
+        let deadline = Date().addingTimeInterval(Self.budget)
+        while pid == nil, Date() < deadline {
+            pid = (try? String(contentsOfFile: pidFile, encoding: .utf8)).flatMap { Int32($0.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            if pid == nil { try await Task.sleep(nanoseconds: 20_000_000) }
+        }
+        let shellPid = try #require(pid)
+        #expect(getsid(shellPid) == shellPid, "the login shell shares the caller's session (\(getsid(shellPid)), the caller's \(getsid(0)))")
+        FileManager.default.createFile(atPath: go, contents: nil)
+        #expect(await answer.value == .found("/bin/sh"))
+    }
+
     @Test func theLoginShellsAnswerIsRead() {
         let marker = LoginShellCommand.marker
         #expect(LoginShellCommand.outcome(status: 0, output: "banner\(marker)/opt/homebrew/bin/claude\n") == .found("/opt/homebrew/bin/claude"))

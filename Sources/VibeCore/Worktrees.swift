@@ -117,10 +117,12 @@ public enum BranchCode {
 public enum Shell {
     /// With `interleaved`, stderr goes to the same pipe as stdout, so `output` holds both in the order they were
     /// written (a build's warnings and the test results after them) and `error` is empty. With `branchCode`, it runs
-    /// as `BranchCode` says: under its wrapper, in a session of its own.
+    /// as `BranchCode` says: under its wrapper, in a session of its own. With `ownSession`, only in a session of its own:
+    /// no controlling terminal, so an interactive shell (`-i`) started from a process that has one (the tool server, under
+    /// the lead's terminal) isn't stopped by SIGTTOU as it takes the terminal from a background group.
     public static func run(executable: String, args: [String], in directory: String, env: [String: String] = [:],
                            timeout: TimeInterval = 120, grace: TimeInterval = 5, interleaved: Bool = false,
-                           branchCode: Bool = false) -> Git.Result {
+                           branchCode: Bool = false, ownSession: Bool = false) -> Git.Result {
         let environment = ProcessInfo.processInfo.environment.merging(env) { $1 }
         let out: ShellPipe, err: ShellPipe
         do {
@@ -132,7 +134,7 @@ public enum Shell {
         let process: Running
         do {
             process = try Spawned((branchCode ? BranchCode.wrapper : []) + [executable] + args, in: directory, environment: environment,
-                                  output: out, errors: err, session: branchCode)
+                                  output: out, errors: err, session: branchCode || ownSession)
         } catch { return Git.Result(status: -1, output: "", error: "\(error)") }
         let pid = process.processIdentifier
         // It starts as the leader of a process group of its own (branch code: of a session of its own), whose id is

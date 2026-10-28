@@ -86,7 +86,7 @@ public struct LaunchPreflight: Sendable {
         }
         if !files.isExecutableFile(atPath: shell) {
             missing.append(.shell(shell))
-        } else if let program = Self.program(in: command) {
+        } else if let program = Self.program(in: command), Self.checkable(program) {
             if program.contains("/") {
                 let path = (program as NSString).expandingTildeInPath
                 if !files.isExecutableFile(atPath: path) { missing.append(.agent(program: program, shell: shell)) }
@@ -128,11 +128,20 @@ public struct LaunchPreflight: Sendable {
             if ["exec", "command", "builtin", "noglob", "nocorrect", "env"].contains(word) || (word.hasPrefix("-") && word != "-")
                 || isAssignment(word) {
                 words = words.dropFirst()
+                // env's (and exec's -a) options that take a value: the value isn't the program.
+                if ["-u", "-P", "-S", "-C", "-a"].contains(word) { words = words.dropFirst() }
             } else {
                 return word
             }
         }
         return nil
+    }
+
+    /// A program the look can find as the session's shell would: a name, or a path from `/` or `~/`. One the shell
+    /// expands (`$HOME/bin/claude`, a glob) or finds from its folder (`bin/claude`) isn't looked for: not known isn't missing.
+    static func checkable(_ program: String) -> Bool {
+        guard !program.contains(where: { "$`*?[{".contains($0) }) else { return false }
+        return !program.contains("/") || program.hasPrefix("/") || program.hasPrefix("~/")
     }
 
     private static func isAssignment(_ word: String) -> Bool {
