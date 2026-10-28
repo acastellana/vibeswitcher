@@ -4,7 +4,7 @@ import Foundation
 extension Publisher where Failure == Never {
     /// `receive(on: runLoop)`, holding only the newest value until it's delivered (the ones before it are dropped).
     /// RunLoop's scheduler delivers in the run loop's default mode only, and `receive(on:)` keeps every value in a block
-    /// of its own until then. While End Session…'s alert ran modal (open by 21:23 and left so until 07:07, 2026-10-27),
+    /// of its own until then. While End Session…'s alert ran modal (from about 20:48 until 07:07, 2026-10-27),
     /// each value of the leads' boards waited so, a copy of a day's boards each: the footprint went to 990 MB, and
     /// main froze 8.9 s freeing them all once the alert closed (hang-20261028-070849). A menu tracking holds it too.
     func receiveLatest(on runLoop: RunLoop) -> Publishers.ReceiveLatest<Self> {

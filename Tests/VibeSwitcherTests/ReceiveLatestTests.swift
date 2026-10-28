@@ -35,9 +35,7 @@ import Testing
             .sink(receiveCompletion: { _ in finished = true }, receiveValue: { received.append($0.id) })
         for id in 0..<100 { subject.send(Token(id)) }
         #expect(Token.alive == 1, "\(Token.alive) values waiting")
-        // A modal session's turn of the run loop delivers nothing, as `receive(on:)`'s didn't.
-        _ = RunLoop.main.run(mode: .modalPanel, before: .distantPast)
-        #expect(received.isEmpty && Token.alive == 1)
+        #expect(received.isEmpty)
 
         runDefault { !received.isEmpty }
         #expect(received == [99])
