@@ -57,19 +57,24 @@ final class SystemPower: PowerRuntime {
 /// first look that finds it idle (the lead controller looks every 3 s). On battery nothing is held unless the
 /// setting says always; the power source is asked only while there's work.
 final class KeepAwake: ObservableObject {
-    /// The roots whose team the Mac is kept awake for right now: the Team view says so.
+    /// The roots whose team the Mac is kept awake for right now (as the assertions' queue last left them): the Team
+    /// view says so.
     @Published private(set) var held: Set<String> = []
     /// The setting, as it is at each look. Never until the app gives it the setting: benches and tests hold nothing.
     var mode: () -> KeepAwakeMode = { .never }
     private let power: PowerRuntime
-    private var assertions: [String: UInt32] = [:]
+    let assertions: Assertions
+    /// The roots last asked of `assertions`.
+    private var asked: Set<String> = []
 
     init(power: PowerRuntime = SystemPower()) {
         self.power = power
+        assertions = Assertions(power: power)
+        assertions.changed = { [weak self] in DispatchQueue.main.async { self?.publish() } }
     }
 
     deinit {
-        assertions.values.forEach(power.release)
+        assertions.want([])
     }
 
     static func name(root: String) -> String {
@@ -79,7 +84,6 @@ final class KeepAwake: ObservableObject {
     /// What a lead's `merge` and `revert` tool calls show as its session's activity while they run (see `ToolActivity`).
     static let mergeActivity = ToolActivity.describe(toolName: "mcp__vibeswitcher__merge", input: [:])
     static let revertActivity = ToolActivity.describe(toolName: "mcp__vibeswitcher__revert", input: [:])
-
     /// Whether a lead's team works: a worker or verifier of its board runs a turn (or shells after one, its tests in
     /// the background), or the lead merges or reverts (its `merge` or `revert` tool call runs the tests: its session
     /// reads working, on that tool, until the call ends). One waiting on you, or done, isn't working. `hosted` and
@@ -100,7 +104,8 @@ final class KeepAwake: ObservableObject {
     }
 
     /// Holds an assertion for each of `roots` (the projects whose team works), as the setting and the power source
-    /// allow, and releases the rest.
+    /// allow, and releases the rest. Only decides: `assertions` holds and releases on its own queue. Asked again while
+    /// what's held isn't what's wanted, so a refused assertion is asked for again at the next look.
     func update(working roots: Set<String>) {
         let wanted: Set<String>
         switch mode() {
@@ -108,17 +113,87 @@ final class KeepAwake: ObservableObject {
         case .always: wanted = roots
         case .onPower: wanted = roots.isEmpty || !power.onACPower ? [] : roots
         }
-        for (root, id) in assertions where !wanted.contains(root) {
-            power.release(id)
-            assertions[root] = nil
-            Breadcrumbs.shared.note("keep awake: released for \((root as NSString).lastPathComponent)")
-        }
-        for root in wanted where assertions[root] == nil {
-            guard let id = power.hold(Self.name(root: root)) else { continue }
-            assertions[root] = id
-            Breadcrumbs.shared.note("keep awake: holding for \((root as NSString).lastPathComponent)")
-        }
-        let now = Set(assertions.keys)
+        publish()
+        guard wanted != asked || wanted != held else { return }
+        asked = wanted
+        assertions.want(wanted)
+    }
+
+    private func publish() {
+        let now = assertions.holding
         if now != held { held = now }
+    }
+
+    /// Runs `then` on the main thread once every hold and release asked for so far has ended and `held` says so (for
+    /// tests).
+    func settled(then: @escaping () -> Void) {
+        assertions.settled { DispatchQueue.main.async { self.publish(); then() } }
+    }
+
+    /// The assertions, held and released on a serial queue of their own: like the power source's read (see
+    /// `PowerSourceCache`), `IOPMAssertionCreateWithName` and `IOPMAssertionRelease` ask powerd, which can keep them
+    /// waiting around sleep and charging changes. One project's hold and release reach the system in the order asked,
+    /// never twice held; asked again while the queue is stuck, only the last ask waits, not a pile.
+    final class Assertions: @unchecked Sendable {
+        /// Called on the queue after it held or released what it was asked.
+        var changed: () -> Void = {}
+        private let power: PowerRuntime
+        private let queue = DispatchQueue(label: "VibeSwitcher.keep-awake", qos: .utility)
+        private let lock = NSLock()
+        /// Under `lock`: the roots last asked for that the queue hasn't taken yet, whether the queue drains them, and
+        /// the roots held.
+        private var pending: Set<String>?
+        private var draining = false
+        private var held: Set<String> = []
+        /// On the queue only: each held root's assertion.
+        private var ids: [String: UInt32] = [:]
+
+        init(power: PowerRuntime) {
+            self.power = power
+        }
+
+        /// The roots held now.
+        var holding: Set<String> { lock.withLock { held } }
+
+        /// Holds an assertion for each of `roots` and releases the rest, on the queue.
+        func want(_ roots: Set<String>) {
+            let start = lock.withLock {
+                pending = roots
+                defer { draining = true }
+                return !draining
+            }
+            if start { queue.async(execute: drain) }
+        }
+
+        private func drain() {
+            while let roots = lock.withLock({ () -> Set<String>? in
+                defer { pending = nil }
+                if pending == nil { draining = false }
+                return pending
+            }) {
+                apply(roots)
+            }
+            changed()
+        }
+
+        private func apply(_ roots: Set<String>) {
+            for (root, id) in ids where !roots.contains(root) {
+                power.release(id)
+                ids[root] = nil
+                lock.withLock { _ = held.remove(root) }
+                Breadcrumbs.shared.note("keep awake: released for \((root as NSString).lastPathComponent)")
+            }
+            for root in roots where ids[root] == nil {
+                guard let id = power.hold(KeepAwake.name(root: root)) else { continue }
+                ids[root] = id
+                lock.withLock { _ = held.insert(root) }
+                Breadcrumbs.shared.note("keep awake: holding for \((root as NSString).lastPathComponent)")
+            }
+        }
+
+        /// Runs `then` on the queue once every hold and release asked for so far has ended (for tests).
+        func settled(then: @escaping () -> Void) {
+            queue.async(execute: then)
+        }
     }
 }
