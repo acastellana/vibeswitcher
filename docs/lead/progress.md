@@ -1771,3 +1771,9 @@
 - 2026-10-28 12:41 Automatically (auto_advance): Started the audit of fix-the-flaky-test-4 at 960845a1 (It touches sensitive_paths (Sources/VibeCore/Worktrees.swift), so it's treated as audit whatever its review says).
 - 2026-10-28 12:41 Started a worker on verifier-trust-check
 - 2026-10-28 12:41 Automatically (auto_advance): Started a worker on verifier-trust-check (Verifier trust check trips on agent files inside .build (ui-bench.sh's base checkout copies AGENTS.md/CLAUDE.md)).
+- 2026-10-28 12:46 Audit of hang-reports-are-pruned: complete, clean, round 1: 1 Nit open
+- 2026-10-28 12:46 Planned review-and-fix-the: Review and fix the mid-chat notifications: how reports, wakes and user messages reach a lead (and show in the chat) (review audit)
+- 2026-10-28 12:46 Started a worker on review-and-fix-the
+- 2026-10-28 12:51 Audit of fix-the-flaky-test-4: complete, clean, round 1: 1 Nit open
+- 2026-10-28 12:51 Planned flake-evidence-readable: Flake evidence readable: the merge keeps each flaky test's failure lines where workers and verifiers can read them (review audit)
+- 2026-10-28 12:52 Merged hang-reports-are-pruned: Hang reports are pruned to the newest 10: keep a week (by age and total size), so tasks can read the reports they're about
