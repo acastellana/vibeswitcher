@@ -144,6 +144,8 @@ final class HangWatchdog: @unchecked Sendable {
 
     private func record(since: Date, state: String) {
         let formatter = DateFormatter()
+        // As `AppHealth.nameDate` reads it back (another calendar's year would make every report look old).
+        formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyyMMdd-HHmmss"
         let name = "hang-\(formatter.string(from: since))"
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
@@ -210,8 +212,9 @@ final class HangWatchdog: @unchecked Sendable {
     /// Hangs are kept a week, and at most `keepBytes` of them (the oldest go first; the newest is always kept): a fix
     /// task reads the reports it names. 2026-10-28, two workers and a verifier couldn't read theirs (hang-20261027-19xx
     /// to 21xx): the ten newest were all that was kept, and the evening's 100+ freezes had pushed them out within hours.
+    /// A hang is about 0.8 MB (a .log of 20-300 KB, a sample of 0.2-2 MB): 500 MB holds six such evenings.
     static let keepFor: TimeInterval = 7 * 86_400
-    static let keepBytes = 50 << 20
+    static let keepBytes = 500 << 20
 
     private func prune() { Self.prune(folder, now: Date()) }
 
