@@ -1952,3 +1952,5 @@
 - 2026-10-28 21:12 Automatically (auto_advance): Started the audit of urgent-mac-limit at 519952db (Its review is audit).
 - 2026-10-28 21:16 Audit of keep-awake-s-power: incomplete, clean, round 2: 1 Important open, 1 Nit open
 - 2026-10-28 21:17 Started a worker on keep-awake-s-power
+- 2026-10-28 21:21 Audit of urgent-mac-limit: complete, clean, round 1: 2 Nit open, 1 Pre-existing open
+- 2026-10-28 21:25 Audit of keep-awake-s-power: complete, clean, round 3: 1 Important closed, 1 Nit closed
