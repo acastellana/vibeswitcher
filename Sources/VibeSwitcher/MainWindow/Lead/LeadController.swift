@@ -827,16 +827,24 @@ final class LeadController: ObservableObject {
     /// held until a lead runs).
     private func deliver(_ text: String, from sender: SteerMessage.Sender, root: String, order: Int? = nil,
                          then: @escaping (Bool) -> Void = { _ in }) {
+        deliver(built: { text }, from: sender, root: root, order: order, then: then)
+    }
+
+    /// As above, the text built on the boards' queue too (the witness's, which quote what a session waits for, see
+    /// `LeadWitness.Notice`).
+    private func deliver(built: @escaping @Sendable () -> String, from sender: SteerMessage.Sender, root: String, order: Int? = nil,
+                         then: @escaping (Bool) -> Void = { _ in }) {
         let (leadRuns, inbox) = (self.leadRuns, self.inbox)
         let order = order ?? next()
         // The board as it is now names the lead that holds the role (none while a new one starts, see
         // `LeadHandover`); if that one is gone (a restart under way), the message would be dropped by the next lead's
         // hook: keep it until a lead runs again. Only the lead's fields are read here (see `LeadNames`).
-        reads.async({ files in
-            guard let agent = LeadHandover.named(files.names.board(root)), leadRuns(agent) else { return false }
-            return (try? LeadDelivery.deliver(text, from: sender, to: agent, state: HookState.load(from: VibePaths.stateFile(tty: agent.tty)),
-                                              inputIsEmpty: nil, typeInto: nil, root: inbox)) != nil
-        }) { [weak self] went in
+        reads.async({ files -> (went: Bool, text: String) in
+            let text = built()
+            guard let agent = LeadHandover.named(files.names.board(root)), leadRuns(agent) else { return (false, text) }
+            return ((try? LeadDelivery.deliver(text, from: sender, to: agent, state: HookState.load(from: VibePaths.stateFile(tty: agent.tty)),
+                                               inputIsEmpty: nil, typeInto: nil, root: inbox)) != nil, text)
+        }) { [weak self] went, text in
             guard let self else { return }
             if went {
                 self.wake(root: root)
@@ -1098,11 +1106,13 @@ final class LeadController: ObservableObject {
             let teams = Dictionary(uniqueKeysWithValues: loaded.map { root, board in
                 (root, TeamReading.read(root: root, board: board, hosted: hosted, sessions: sessions, observer: observer))
             })
-            return (fired, loaded, decisions, teams, records, refusals)
-        }) { [weak self] fired, loaded, decisions, teams, records, refusals in
+            let finished = Set(loaded.flatMap { root, board in LeadTeams.finished(Array(hosted.values), root: root, board: board) })
+            return (fired, loaded, decisions, teams, records, refusals, finished)
+        }) { [weak self] fired, loaded, decisions, teams, records, refusals, finished in
             guard let self else { return }
             if records != self.recordsDirs { self.recordsDirs = records }
-            self.refreshed(roots: roots, fired: fired, loaded: loaded, decisions: decisions, teams: teams, refusals: refusals)
+            self.refreshed(roots: roots, fired: fired, loaded: loaded, decisions: decisions, teams: teams, refusals: refusals,
+                           finished: finished)
             self.refreshing = false
             if self.refreshAgain {
                 self.refreshAgain = false
@@ -1111,10 +1121,11 @@ final class LeadController: ObservableObject {
         }
     }
 
-    /// What a refresh read, on the main thread.
+    /// What a refresh read, on the main thread. `finished`: the ended sessions of the boards' finished tasks, among the
+    /// sessions as they were when the read began (see `forgetFinished`).
     func refreshed(roots: Set<String>, fired: [String: [(question: LeadQuestion, message: String)]], loaded: [String: LeadBoard],
                    decisions read: [String: [LeadDecision]], teams: [String: TeamReading],
-                   refusals: [String: LeadVault.BaseMoveRefusal]) {
+                   refusals: [String: LeadVault.BaseMoveRefusal], finished: Set<UUID> = []) {
         dispatchPrecondition(condition: .onQueue(.main))
         tell(timers: fired)
         let previous = boards
@@ -1136,7 +1147,7 @@ final class LeadController: ObservableObject {
             witness(root: root, board: board, team: teams[root] ?? TeamReading())
             allDone.look(root: root, previous: previous[root], board: board)
         }
-        forgetFinished(loaded)
+        forgetFinished(finished)
         keepAwake.update(working: KeepAwake.working(loaded, teams: teams))
         // A lead that ended, or another agent on its terminal now: its wake-ups and its waiting count go.
         let leads = Set(loaded.values.compactMap { board in board.leadTTY.flatMap { tty in board.leadPid.map { "\(tty)#\($0)" } } })
@@ -1261,12 +1272,13 @@ final class LeadController: ObservableObject {
 
     /// A task merged or abandoned: its ended workers and verifiers leave the session list (everywhere it's shown:
     /// the host drops them). The lead's cleanup does this too; this catches tasks finished some other way.
-    private func forgetFinished(_ boards: [String: LeadBoard]) {
-        forgetting.formIntersection(host.sessions.map(\.id))
-        for (root, board) in boards {
-            for id in LeadTeams.finished(host.sessions, root: root, board: board) where forgetting.insert(id).inserted {
-                host.remove(id)
-            }
+    /// The ended workers and verifiers of finished tasks the host still lists go (`LeadTeams.finished`, matched off the
+    /// main thread: 0.5 s of path work on it a refresh, hang-20261027-201145), each asked once.
+    private func forgetFinished(_ finished: Set<UUID>) {
+        let listed = Set(host.sessions.map(\.id))
+        forgetting.formIntersection(listed)
+        for id in finished.intersection(listed) where forgetting.insert(id).inserted {
+            host.remove(id)
         }
     }
 
@@ -1336,9 +1348,10 @@ final class LeadController: ObservableObject {
             }
             advanced = LeadWitness.leftToAdvance(board: board, seen: seen, now: now, firstSeen: firstSeen)
         }
-        for message in LeadWitness.messages(board: board, seen: seen, now: now, advanced: advanced, told: { told.contains("\(root)|\($0)") }) {
+        // Only the keys here: each text is built where it's posted, off the main thread.
+        for message in LeadWitness.unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, told: { told.contains("\(root)|\($0)") }) {
             message.keys.forEach { told.insert("\(root)|\($0)") }
-            deliver(message.text, from: .system("witness"), root: root)
+            deliver(built: message.text, from: .system("witness"), root: root)
         }
         // Low disk space, once per episode; what takes it is sized off the main thread.
         var disk = disks[root] ?? LeadWitness.Disk(free: freeSpace, file: DiskWatch.file)
@@ -1385,10 +1398,14 @@ final class LeadController: ObservableObject {
         let minutes = task.overBudget?.minutes ?? LeadBudget.minutes(task, default: defaultMinutes) ?? 0
         Breadcrumbs.shared.note("witness: \(task.slug) in \((root as NSString).lastPathComponent) reached its \(minutes) min budget")
         if let worker {
-            let state = HookState.load(from: VibePaths.stateFile(tty: worker.tty))
-            _ = try? LeadDelivery.deliver(LeadBudget.stopText(task, minutes: minutes), from: .system("time budget"), to: worker,
-                                          state: state, inputIsEmpty: nil, typeInto: nil, root: inbox)
-            flush(worker)
+            // Posted on the boards' queue: a post asks the session host for its seal, which held the main thread 6.4 s
+            // on a loaded Mac (hang-20261028-070712).
+            let (text, inbox) = (LeadBudget.stopText(task, minutes: minutes), self.inbox)
+            reads.async({ _ in
+                _ = try? LeadDelivery.deliver(text, from: .system("time budget"), to: worker,
+                                              state: HookState.load(from: VibePaths.stateFile(tty: worker.tty)),
+                                              inputIsEmpty: nil, typeInto: nil, root: inbox)
+            }) { [weak self] in self?.flush(worker) }
         }
         deliver(LeadBudget.leadText(task, minutes: minutes), from: .system("witness"), root: root)
     }

@@ -206,23 +206,34 @@ public enum LeadWitness {
 
     /// `advanced`: the verifiers left to auto_advance (see `leftToAdvance`), not told here.
     public static func events(board: LeadBoard, seen: [String: Seen], now: Date = Date(), advanced: Set<String> = []) -> [(key: String, text: String)] {
-        var events: [(key: String, text: String)] = []
+        notices(board: board, seen: seen, now: now, advanced: advanced).map { ($0.key, $0.text()) }
+    }
+
+    /// An event to tell, its text built only when read (`text()`): a waiting session's quotes what it waits for in
+    /// full, credentials masked (`PendingPrompt.quoted`), which took up to a second on the main thread a refresh
+    /// (hang-20261027-201145) for events told long before.
+    public typealias Notice = (key: String, text: @Sendable () -> String)
+
+    /// `events`, their texts not built yet.
+    public static func notices(board: LeadBoard, seen: [String: Seen], now: Date = Date(), advanced: Set<String> = []) -> [Notice] {
+        var events: [Notice] = []
+        func add(_ key: String, _ text: @autoclosure @escaping @Sendable () -> String) { events.append((key, text)) }
         for task in board.tasks where task.status != .done {
             // One whose tools never connected is told so, once, and nothing else of it is (its end is VibeSwitcher's).
             let noTools = noToolsSessions(task, seen: seen, now: now)
             for session in noTools {
                 guard let info = seen[session] else { continue }
                 let who = session == task.worker ? "worker" : "verifier"
-                events.append(("\(session)|no-tools", noToolsText(who, task: task, session: session, info: info, ended: !info.live)))
+                add("\(session)|no-tools", noToolsText(who, task: task, session: session, info: info, ended: !info.live))
             }
             // A worker the lead stopped itself ended because it was told to.
             if let worker = task.worker, worker != task.stopped, !noTools.contains(worker), let info = seen[worker] {
                 if !info.live, [.running, .failed].contains(task.status) {
-                    events.append(("\(worker)|ended", "The worker on \(task.slug) ended (\(info.ending)) without reporting. Its commits are on agent/\(task.slug); read_session to see why, then start_worker(\(task.slug)) starts it again where it was (the task needn't be set to blocked first), or re-plan."))
+                    add("\(worker)|ended", "The worker on \(task.slug) ended (\(info.ending)) without reporting. Its commits are on agent/\(task.slug); read_session to see why, then start_worker(\(task.slug)) starts it again where it was (the task needn't be set to blocked first), or re-plan.")
                 } else if info.live, info.agentQuit, [.running, .failed].contains(task.status) {
-                    events.append(("\(worker)|ended", "The worker on \(task.slug) ended without reporting: its agent quit and left the session's shell open. Its commits are on agent/\(task.slug); read_session to see why, then stop_worker (it closes the shell) and start_worker again, or re-plan."))
+                    add("\(worker)|ended", "The worker on \(task.slug) ended without reporting: its agent quit and left the session's shell open. Its commits are on agent/\(task.slug); read_session to see why, then stop_worker (it closes the shell) and start_worker again, or re-plan.")
                 } else if info.live, !info.agentQuit, let error = info.apiError, [.running, .failed].contains(task.status) {
-                    events.append(("\(worker)|api-error-\(Int(info.apiErrorAt ?? 0))", "The worker on \(task.slug) stopped mid-task: its turn ended on an API error (\(error)). Tell it to go on with message(\(task.slug), …); it picks up where it was."))
+                    add("\(worker)|api-error-\(Int(info.apiErrorAt ?? 0))", "The worker on \(task.slug) stopped mid-task: its turn ended on an API error (\(error)). Tell it to go on with message(\(task.slug), …); it picks up where it was.")
                 } else if info.live, !info.agentQuit, let event = waiting(info, session: worker, now: now,
                                                          input: waitingText("The worker on \(task.slug)", info, now: now, advice: "Answer it with message, or ask the user if it's theirs to decide."),
                                                          stopped: task.status == .running ? "The worker on \(task.slug) stopped without calling report. read_session to see where it is, then message it." : nil) {
@@ -230,7 +241,7 @@ public enum LeadWitness {
                 }
                 if info.live {
                     for stall in LeadStall.detect(info, task: task, now: now) {
-                        events.append((stall.key(session: worker), "The worker on \(task.slug) is \(stall.text(now: now)). \(stall.advice(slug: task.slug))"))
+                        add(stall.key(session: worker), "The worker on \(task.slug) is \(stall.text(now: now)). \(stall.advice(slug: task.slug))")
                     }
                 }
             }
@@ -238,9 +249,9 @@ public enum LeadWitness {
             for verifier in task.status == .review && task.evidence == nil ? task.awaitedVerifiers : [] {
                 guard !noTools.contains(verifier), !advanced.contains(verifier), let info = seen[verifier], !gaveVerdict(info, on: task) else { continue }
                 if info.live, !info.agentQuit, let error = info.apiError {
-                    events.append(("\(verifier)|api-error-\(Int(info.apiErrorAt ?? 0))", "The verifier on \(task.slug) stopped mid-audit: its turn ended on an API error (\(error)). Tell the user, or audit again."))
+                    add("\(verifier)|api-error-\(Int(info.apiErrorAt ?? 0))", "The verifier on \(task.slug) stopped mid-audit: its turn ended on an API error (\(error)). Tell the user, or audit again.")
                 } else if !info.live || info.agentQuit {
-                    events.append(("\(verifier)|ended", "The verifier on \(task.slug) ended without a verdict (\(verifierEnding(info))). read_session(\(task.slug), who: verifier) to see why, then audit again."))
+                    add("\(verifier)|ended", "The verifier on \(task.slug) ended without a verdict (\(verifierEnding(info))). read_session(\(task.slug), who: verifier) to see why, then audit again.")
                 } else if let event = waiting(info, session: verifier, now: now,
                                               input: waitingText("The verifier on \(task.slug)", info, now: now, advice: "Tell the user if it's theirs, or audit again."),
                                               stopped: "The verifier on \(task.slug) stopped without calling submit_audit. read_session(\(task.slug), who: verifier) to see why, then audit again.") {
@@ -256,7 +267,13 @@ public enum LeadWitness {
     /// once). Each message carries the keys of the events it tells.
     public static func messages(board: LeadBoard, seen: [String: Seen], now: Date = Date(), advanced: Set<String> = [],
                                 told: (String) -> Bool) -> [(keys: [String], text: String)] {
-        let fresh = events(board: board, seen: seen, now: now, advanced: advanced).filter { !told($0.key) }
+        unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, told: told).map { ($0.keys, $0.text()) }
+    }
+
+    /// `messages`, their texts built only when read (see `Notice`): the app builds them off the main thread.
+    public static func unbuiltMessages(board: LeadBoard, seen: [String: Seen], now: Date = Date(), advanced: Set<String> = [],
+                                       told: (String) -> Bool) -> [(keys: [String], text: @Sendable () -> String)] {
+        let fresh = notices(board: board, seen: seen, now: now, advanced: advanced).filter { !told($0.key) }
         let ended = Set(fresh.map(\.key).filter { $0.hasSuffix("|ended") })
         guard ended.count > 1 else { return fresh.map { ([$0.key], $0.text) } }
         let lines = endings(board: board, seen: seen).filter { ended.contains($0.key) }
@@ -268,7 +285,7 @@ public enum LeadWitness {
         if lines.contains(where: { $0.restart == .verifier }) { advice.append("audit(<task>) checks a task again") }
         let text = "\(lines.count) sessions ended without reporting:\n" + lines.map { "- The \($0.line)" }.joined(separator: "\n")
             + "\nread_session to see why. " + advice.joined(separator: "; ") + "."
-        return [(lines.map(\.key), text)] + fresh.filter { !ended.contains($0.key) }.map { ([$0.key], $0.text) }
+        return [(lines.map(\.key), { text })] + fresh.filter { !ended.contains($0.key) }.map { ([$0.key], $0.text) }
     }
 
     private enum Restart { case worker, stopFirst, verifier }
@@ -480,7 +497,8 @@ public enum LeadWitness {
         return quoted.hasPrefix("“") ? "\(head): \(quoted). \(advice)" : "\(head). It waits on:\n\(quoted)\n\(advice)"
     }
 
-    private static func waiting(_ info: Seen, session: String, now: Date, input: String, stopped: String?) -> (key: String, text: String)? {
+    private static func waiting(_ info: Seen, session: String, now: Date, input: @autoclosure @escaping @Sendable () -> String,
+                                stopped: String?) -> Notice? {
         let since = Int(info.since?.timeIntervalSince1970 ?? 0)
         if info.status == .needsInput { return ("\(session)|input-\(since)", input) }
         // Waiting on its own background task (a long test run) or shell, its turn goes on when that's done.
@@ -495,7 +513,7 @@ public enum LeadWitness {
         // fire reads as finished since ever, one on a reused terminal as the earlier session finished), and its
         // transcript's last write.
         let quietSince = max(at.timeIntervalSince1970, info.started ?? -.infinity, info.lastActivity ?? -.infinity)
-        return now.timeIntervalSince1970 - quietSince > quiet ? ("\(session)|stopped-\(since)", stopped) : nil
+        return now.timeIntervalSince1970 - quietSince > quiet ? ("\(session)|stopped-\(since)", { stopped }) : nil
     }
 }
 
