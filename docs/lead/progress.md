@@ -1676,3 +1676,7 @@
 - 2026-10-28 10:19 Audit of session-host-refuses: complete, clean, round 1: 2 Nit open
 - 2026-10-28 10:19 Audit of team-members-that-cd: complete, clean
 - 2026-10-28 10:25 Merged turn-this-incident-into-5: Mac-wide session limit blind to other projects since PR #1: give leads a Mac-wide census without reopening the host
+- 2026-10-28 10:25 Automatically (auto_advance): Merged turn-this-incident-into-5 (Mac-wide session limit blind to other projects since PR #1: give leads a Mac-wide census without reopening the host) into project-lead at 7a9d6c0d, on its passing audit and the full test run.
+- 2026-10-28 10:35 Merged team-members-that-cd: Team members that cd away lose their repository and task (SessionTeams.project/name, PhoneAccess.teamTask read cwd)
+- 2026-10-28 10:35 Flaky in team-members-that-cd's merge: aLongLeadChatKeepsItsRowsOutOfTheKeyViewLoop() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-10-28 10:35 Planned fix-the-flaky-test-2: aLongLeadChatKeepsItsRowsOutOfTheKeyViewLoop() flaked 3 times within 7 days
