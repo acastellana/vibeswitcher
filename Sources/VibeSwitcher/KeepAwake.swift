@@ -84,6 +84,7 @@ final class KeepAwake: ObservableObject {
     /// What a lead's `merge` and `revert` tool calls show as its session's activity while they run (see `ToolActivity`).
     static let mergeActivity = ToolActivity.describe(toolName: "mcp__vibeswitcher__merge", input: [:])
     static let revertActivity = ToolActivity.describe(toolName: "mcp__vibeswitcher__revert", input: [:])
+
     /// Whether a lead's team works: a worker or verifier of its board runs a turn (or shells after one, its tests in
     /// the background), or the lead merges or reverts (its `merge` or `revert` tool call runs the tests: its session
     /// reads working, on that tool, until the call ends). One waiting on you, or done, isn't working. `hosted` and

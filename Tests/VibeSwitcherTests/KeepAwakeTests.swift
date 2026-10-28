@@ -394,7 +394,9 @@ struct KeepAwakeTests {
     }
 
     /// The freeze of 17:02 replayed: the power daemon stuck under a read, a lead's team working, the setting on power
-    /// only. A refresh on the main thread doesn't wait for it; once the read ends, the next look has what it found.
+    /// only. A lead refresh's look on the main thread doesn't wait for it; once the read ends, the next look has what it
+    /// found. The look is the one `LeadController.refreshed` makes, without a lead controller: its heartbeat looks on
+    /// its own every 3 s, and with no lead session on a host it finds no team working and releases the hold.
     @MainActor @Test func aSlowPowerDaemonDoesntHoldUpALeadRefresh() async throws {
         let slow = SlowPower()
         let source = PowerSourceCache(read: slow.read)
@@ -402,22 +404,15 @@ struct KeepAwakeTests {
         try #require(slow.started.wait(timeout: .now() + 5) == .success)
         let awake = KeepAwake(power: SystemPower(source: source))
         awake.mode = { .onPower }
-        let temp = Scratch()
-        let scratch = temp.url("keep-awake-slow-power")
-        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
-        let host = HostClient(socketPath: scratch.appendingPathComponent("no-host.sock").path)
-        let store = SessionStore(scanner: SessionScanner(processes: { [:] }, stateDir: { scratch }, cwd: { _ in nil }, arguments: { _ in [] }))
-        let leads = LeadController(host: host, store: store, vault: LeadVault(folder: scratch.appendingPathComponent("vault"), ask: { _ in throw LeadVault.Refused("none") }),
-                                   inbox: scratch, home: scratch.path, keepAwake: awake) { _ in "true" }
         var team = Team()
         team.set(team.worker, .working)
-        func refresh() -> TimeInterval {
+        func look() -> TimeInterval {
             let began = Date()
-            leads.refreshed(roots: [Self.root], fired: [:], loaded: [Self.root: team.board], decisions: [:], teams: [Self.root: team.reading], refusals: [:])
+            awake.update(working: KeepAwake.working([Self.root: team.board], teams: [Self.root: team.reading]))
             return Date().timeIntervalSince(began)
         }
-        let took = refresh()
-        #expect(took < 0.05, "refreshed took \(took) s")
+        let took = look()
+        #expect(took < 0.05, "the look took \(took) s")
         // Nothing read yet: taken as AC power, as before when the system didn't say.
         await Self.settle(awake)
         #expect(awake.held == [Self.root])
@@ -426,7 +421,7 @@ struct KeepAwakeTests {
         slow.open()
         try Self.settle(source)
         #expect(!source.onACPower && source.state?.percent == 40)
-        #expect(refresh() < 0.05)
+        #expect(look() < 0.05)
         // On battery: released at the first look after the read.
         await Self.settle(awake)
         #expect(awake.held.isEmpty)
