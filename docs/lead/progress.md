@@ -1667,3 +1667,8 @@
 - 2026-10-28 10:07 Merged app-memory-grows-to: App memory grows to about 700 MB over a day (footprint 215 MB → 709 MB peak on 2026-10-27)
 - 2026-10-28 10:07 Flaky in app-memory-grows-to's merge: aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone(), aShellThatWaitsIsStopped(), unsetEmptyOrAnExitIsNotFound(), aBannerBeforeTheValueIsLeftOut() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
 - 2026-10-28 10:07 Planned fix-the-flaky-test: unsetEmptyOrAnExitIsNotFound() flaked 3 times within 7 days
+- 2026-10-28 10:07 Automatically (auto_advance): Merged app-memory-grows-to (App memory grows to about 700 MB over a day (footprint 215 MB → 709 MB peak on 2026-10-27)) into project-lead at c69d95ef, on its passing audit and the full test run. (Its first test run failed on aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone(), aShellThatWaitsIsStopped(), unsetEmptyOrAnExitIsNotFound(), aBannerBeforeTheValueIsLeftOut() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/app-memory-grows-to/merge….)
+- 2026-10-28 10:08 Folded fix-the-flaky-test into loginshellvariabletests: that task carries its work
+- 2026-10-28 10:08 Audit of lead-chat-freezes-of: complete, clean, round 3: 1 Important closed, 4 Nit (1 open)
+- 2026-10-28 10:17 Merged turn-this-incident-into-4: The lead's tool server exits mid-session (after EBADF): log why, find the cause, fix it
+- 2026-10-28 10:17 Flaky in turn-this-incident-into-4's merge: aLongLeadChatKeepsItsRowsOutOfTheKeyViewLoop() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
