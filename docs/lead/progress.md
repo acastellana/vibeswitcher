@@ -1716,3 +1716,5 @@
 - 2026-10-28 11:13 Planned flake-ledger-don-t: Flake ledger: don't plan a "fix the flaky test" task when an open task already names that test
 - 2026-10-28 11:15 Planned lead-chat-multi-line: Lead chat: multi-line shell blocks (if/then/fi, { … }) get a Run button that runs them as one script, after confirming (review audit)
 - 2026-10-28 11:16 Merged lead-chat-freezes-of: Lead chat freezes of 3–25 s: SwiftUI accessibility tree and session-list rebuilds on a long lead chat
+- 2026-10-28 11:16 Automatically (auto_advance): Merged lead-chat-freezes-of (Lead chat freezes of 3–25 s: SwiftUI accessibility tree and session-list rebuilds on a long lead chat) into project-lead at a30ff04b, on its passing audit and the full test run.
+- 2026-10-28 11:23 Merged fix-the-flaky-test-2: Fix the flaky test aLongLeadChatKeepsItsRowsOutOfTheKeyViewLoop() (no audit: review none)
