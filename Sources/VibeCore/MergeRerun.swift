@@ -178,6 +178,72 @@ public enum MergeRerun {
         return text
     }
 
+    // MARK: A hung run
+
+    /// The most of a hung run's output its evidence keeps: its last lines.
+    public static let hungTail = 60
+
+    private static let swiftTestingEvent = try! NSRegularExpression(
+        pattern: #"^\S{1,2} Test (.+?) (started\.$|passed after |failed after |skipped(\.$|:| with))"#)
+    private static let xcTestEvent = try! NSRegularExpression(pattern: #"^Test Case '([^']+)' (started|passed|failed|skipped)"#)
+
+    /// The tests a stopped run's `output` shows started and never finished, in the order they started: Swift Testing's
+    /// "◇ Test x() started." with no "passed after", "failed after" or "skipped" line of its own, XCTest's "Test Case
+    /// '-[Module.Suite testName]' started." with no "passed", "failed" or "skipped" one. On 2026-10-28 a merge hung
+    /// 45 min and its log was in the vault's scratch, which no session can read: its fixer had to guess which test hung.
+    public static func hung(in output: String) -> [String] {
+        var started: [String] = [], ended: Set<String> = []
+        for raw in output.components(separatedBy: "\n") {
+            let line = raw.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression).trimmingCharacters(in: .whitespaces)
+            let range = NSRange(line.startIndex..., in: line)
+            var name: String, event: String
+            if let match = swiftTestingEvent.firstMatch(in: line, range: range),
+               let found = Range(match.range(at: 1), in: line), let what = Range(match.range(at: 2), in: line) {
+                name = String(line[found])
+                event = String(line[what])
+                // The run's own lines ("◇ Test run started.", "✔ Test run with 5 tests passed after …").
+                guard name != "run", !name.hasPrefix("run with ") else { continue }
+            } else if let match = xcTestEvent.firstMatch(in: line, range: range),
+                      let found = Range(match.range(at: 1), in: line), let what = Range(match.range(at: 2), in: line) {
+                name = TestFailures.xcTestName(line[found])
+                event = String(line[what])
+            } else {
+                continue
+            }
+            if event.hasPrefix("started") {
+                if !started.contains(name) { started.append(name) }
+            } else {
+                ended.insert(name)
+            }
+        }
+        return started.filter { !ended.contains($0) }
+    }
+
+    /// Where a hung merge's evidence is kept, beside its flake evidence: `.vibeswitcher/flakes/<yyyy-mm-dd>-<task>-<commit>-hung.log`.
+    public static func hungPath(task: String, commit: String, at date: Date) -> String {
+        String(evidencePath(task: task, commit: commit, at: date).dropLast(".log".count)) + "-hung.log"
+    }
+
+    /// The hung file's text: which of `task`'s merge commands (`command`, testing `commit`) ran past test_timeout_min
+    /// (`after`) and was stopped, the tests its `output` left started and unfinished (`hung(in:)`), and the output's
+    /// last `hungTail` lines. Masked whole before it's cut (`Redaction`): a secret the tail starts partway into (a
+    /// key's lines under its header) is masked as it would be in full. Each line cut at `evidenceWidth`.
+    public static func hungLog(task: String, commit: String, command: String, after: TimeInterval, output: String) -> String {
+        let masked = Redaction.secrets(in: output).components(separatedBy: "\n")
+            .map { $0.replacingOccurrences(of: "\u{1B}\\[[0-9;]*m", with: "", options: .regularExpression)
+                .replacingOccurrences(of: #"\s+$"#, with: "", options: .regularExpression) }
+        let tail = masked.reversed().drop { $0.isEmpty }.prefix(hungTail).reversed()
+            .map { $0.count > evidenceWidth ? String($0.prefix(evidenceWidth - 1)) + "…" : $0 }
+        let tests = hung(in: masked.joined(separator: "\n"))
+        let what = command == "rerun" ? "the rerun of its failing tests" : "its \(command)"
+        var text = "Hung in \(task)'s merge (tested \(commit.prefix(12))): \(what) ran past test_timeout_min (\(Worktrees.duration(after))) and was stopped, with everything started under it.\n"
+        text += tests.isEmpty ? "\nNo test in its output started and never finished.\n"
+            : "\nStarted and never finished (secrets masked):\n" + tests.map { "    " + $0 }.joined(separator: "\n") + "\n"
+        text += "\nIts output's last \(tail.count) lines (secrets masked, each cut at \(evidenceWidth) characters):\n"
+            + tail.map { "    " + $0 }.joined(separator: "\n") + "\n"
+        return text
+    }
+
     /// The most of an evidence file read back: more than a merge's evidence writes.
     static let evidenceRead = 1 << 20
 

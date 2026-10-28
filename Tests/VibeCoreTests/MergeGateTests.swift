@@ -604,6 +604,132 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(board.openTask(naming: "test()") == nil)
     }
 
+    // MARK: A hung run
+
+    @Test func aHungRunsUnfinishedTestsAreTheOnesThatStartedAndNeverEnded() {
+        let output = """
+            ◇ Test run started.
+            ◇ Test passes() started.
+            ◇ Test fails() started.
+            ◇ Test skips() started.
+            ◇ Test hangs() started.
+            ◇ Test "Some words" started.
+            \u{1B}[1;32m✔\u{1B}[0m Test passes() passed after 0.001 seconds.
+            ✘ Test fails() recorded an issue at F.swift:1:1: Expectation failed: x
+            ✘ Test fails() failed after 0.002 seconds with 1 issue.
+            ➜ Test skips() skipped: "not here"
+            ✘ Test known() passed after 0.003 seconds with 1 known issue.
+            Test Case '-[VibeCoreTests.OldTests testDone]' started.
+            Test Case '-[VibeCoreTests.OldTests testDone]' passed (0.001 seconds).
+            Test Case '-[VibeCoreTests.OldTests testHangs]' started.
+            ✔ Test run with 5 tests passed after 0.004 seconds.
+            """
+        #expect(MergeRerun.hung(in: output) == ["hangs()", "\"Some words\"", "OldTests.testHangs"], "\(MergeRerun.hung(in: output))")
+        #expect(MergeRerun.hung(in: Self.failure).isEmpty)
+        #expect(MergeRerun.hung(in: "").isEmpty)
+    }
+
+    @Test func aHungRunsFileListsItsUnfinishedTestsAndItsTailMaskedAndCut() {
+        let filler: String = (1...80).map { "filler \($0)" }.joined(separator: "\n")
+        let wide: String = String(repeating: "y", count: 900)
+        let output: String = filler + "\n" + """
+            -----BEGIN RSA PRIVATE KEY-----
+            MIIEowIBAAKCAQEAsecretkeybodyline1
+            MIIEowIBAAKCAQEAsecretkeybodyline2
+            -----END RSA PRIVATE KEY-----
+            ◇ Test hangs() started.
+            waiting with X-Auth: Bearer abc123def456
+            """ + "\n" + wide + "\n\n\n"
+        let text = MergeRerun.hungLog(task: "add-b", commit: "0123456789abcdef", command: "test command", after: 180, output: output)
+        #expect(text.hasPrefix("Hung in add-b's merge (tested 0123456789ab): its test command ran past test_timeout_min (3 min) and was stopped"), "\(text)")
+        #expect(text.contains("\nStarted and never finished (secrets masked):\n    hangs()\n"), "\(text)")
+        // The last 60 lines, trailing blank ones left out (the key masked to one): filler 25 on.
+        #expect(text.contains("Its output's last 60 lines"), "\(text)")
+        #expect(text.contains("\n    filler 25\n") && !text.contains("\n    filler 24\n"), "\(text)")
+        #expect(text.contains("X-Auth: Bearer •••") && !text.contains("abc123def456"), "\(text)")
+        // A key masked whole, though only part of it might have been in the tail.
+        #expect(!text.contains("secretkeybody"), "\(text)")
+        #expect(text.contains("    " + String(repeating: "y", count: MergeRerun.evidenceWidth - 1) + "…\n"), "\(text)")
+        #expect(text.hasSuffix(String(repeating: "y", count: MergeRerun.evidenceWidth - 1) + "…\n"))
+        let none = MergeRerun.hungLog(task: "add-b", commit: "0123", command: "init_command", after: 3, output: "building\n")
+        #expect(none.contains("its init_command ran past") && none.contains("No test in its output started and never finished."), "\(none)")
+        #expect(MergeRerun.hungPath(task: "add-b", commit: "0123456789", at: Date(timeIntervalSince1970: 0))
+                    .range(of: #"^\.vibeswitcher/flakes/19(69|70)-\d{2}-\d{2}-add-b-01234567-hung\.log$"#, options: .regularExpression) != nil)
+    }
+
+    /// The tests a hung merge left started and never finished, and its output's tail, in a file every session can read
+    /// (the merge's log is in the vault); the reply and the progress log name them.
+    @Test func aHungMergeNamesTheTestsThatNeverFinishedInAReadableFile() throws {
+        let root = try repo()
+        let marks = temp.url("marks").path
+        try FileManager.default.createDirectory(atPath: marks, withIntermediateDirectories: true)
+        // Three tests start, two finish (one passing, one failing), and the third hangs till the merge stops it.
+        try commit(["scripts/test.sh": """
+            #!/bin/bash
+            for i in $(seq 1 80); do echo "filler $i"; done
+            echo "◇ Test run started."
+            echo "◇ Test passes() started."
+            echo "◇ Test fails() started."
+            echo "◇ Test hangs() started."
+            echo "✔ Test passes() passed after 0.001 seconds."
+            echo "✘ Test fails() failed after 0.002 seconds with 1 issue."
+            echo "hangs() waits with X-Auth: Bearer abc123def456"
+            sleep \(ShellTests.childRuns) & echo $! > \(RecentProjects.shellQuote(marks))/child; wait
+            """], in: root, "a suite that hangs")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        // 0.1 min: 6 s.
+        configure(lead, ["test_command": "bash scripts/test.sh", "test_timeout_min": "0.1"])
+        try audited(lead, runtime, root: root)
+        let commit = Git.run(["rev-parse", "agent/add-b"], in: root).output
+
+        let merged = lead.call("merge", ["task": "add-b"])
+        #expect(merged.isError)
+        #expect(merged.text.contains("the tests hung after 6 s") && merged.text.contains("Started and never finished: hangs()."), "\(merged.text)")
+        let flakes = root + "/.vibeswitcher/flakes"
+        let files = try FileManager.default.contentsOfDirectory(atPath: flakes)
+        #expect(files.count == 1 && files.first?.hasSuffix("-add-b-\(commit.prefix(8))-hung.log") == true, "\(files)")
+        let file = flakes + "/" + (files.first ?? "")
+        #expect(merged.text.contains("Those and the output's last 60 lines, readable by the worker who fixes it: \(file)."), "\(merged.text)")
+        let text = try String(contentsOfFile: file, encoding: .utf8)
+        #expect(text.contains("\nStarted and never finished (secrets masked):\n    hangs()\n"), "\(text)")
+        #expect(!text.contains("    passes()\n") && !text.contains("    fails()\n"), "\(text)")
+        #expect(text.contains("\n    hangs() waits with X-Auth: Bearer •••\n") && !text.contains("abc123def456"), "\(text)")
+        #expect(text.contains("\n    filler 80\n") && !text.contains("\n    filler 1\n"), "\(text)")
+        let mode = { (path: String) in (try? FileManager.default.attributesOfItem(atPath: path)[.posixPermissions] as? Int) ?? -1 }
+        #expect(mode(file) == 0o600 && mode(flakes) == 0o700)
+        #expect(Git.run(["check-ignore", "-q", file], in: root).ok)
+        let progress = try String(contentsOfFile: BoardStore(root: root).recordPath("progress.md"), encoding: .utf8)
+        #expect(progress.contains("Hung in add-b's merge: the tests stopped after 6 s; started and never finished: hangs() (\(file))"), "\(progress)")
+        // Not a failure of the work: the task stays as it was.
+        let task = try #require(BoardStore(root: root).load().task("add-b"))
+        #expect(task.status == .review && task.setback == nil)
+        let child = try #require(Int32((try String(contentsOfFile: marks + "/child", encoding: .utf8)).trimmingCharacters(in: .whitespacesAndNewlines)))
+        #expect(eventually { kill(child, 0) != 0 })
+    }
+
+    @Test func aFailingOrPassingMergeWritesNoHungFile() throws {
+        let root = try repo()
+        let pass = temp.url("pass").path
+        try fakeSuite(root, passes: "[[ -e \(RecentProjects.shellQuote(pass)) ]]")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        configure(lead, ["test_command": "bash scripts/test.sh", "max_workers": 2])
+        try audited(lead, runtime, root: root)
+        let hungFiles = { ((try? FileManager.default.contentsOfDirectory(atPath: root + "/.vibeswitcher/flakes")) ?? []).filter { $0.hasSuffix("-hung.log") } }
+
+        // Fails, and its rerun fails too.
+        let failed = lead.call("merge", ["task": "add-b"])
+        #expect(failed.isError && !failed.text.contains("hung"), "\(failed.text)")
+        #expect(hungFiles().isEmpty)
+        // Passes.
+        FileManager.default.createFile(atPath: pass, contents: nil)
+        try audited(lead, runtime, root: root, slug: "add-c", files: ["c2.txt": "sea\n"])
+        let merged = lead.call("merge", ["task": "add-c"])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(hungFiles().isEmpty)
+    }
+
     // MARK: Catching up
 
     @Test func aMergeTellsOnlyTheRunningBranchesItOverlapsToMergeTheBaseNow() throws {

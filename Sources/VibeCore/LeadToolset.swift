@@ -2209,7 +2209,19 @@ public final class LeadToolset: MCPToolset {
             // Not a failure of the work as far as anyone knows: the task stays as it was, and the lead decides.
             let (what, they) = command == "init_command" ? ("init_command", "it was") : ("tests", "they were")
             let saved = saveMergeLog(output, slug: slug)
+            // The tests that never finished and the output's tail, where the worker who fixes the hang can read them
+            // (the merge's log is in the vault).
+            let hung = Self.clip(Redaction.secrets(in: MergeRerun.hung(in: output).joined(separator: ", ")))
+            let readable = saveEvidence(MergeRerun.hungLog(task: slug, commit: commit, command: command, after: after, output: output),
+                                        log: MergeRerun.hungPath(task: slug, commit: commit, at: Date()))
+                .map { MergeRerun.evidenceFile(root: root, log: $0) }
+            let named = hung.isEmpty ? "No test in its output started and never finished. " : "Started and never finished: \(hung). "
+            try? store.appendProgress("Hung in \(slug)'s merge: the \(what) stopped after \(Worktrees.duration(after))"
+                                      + (hung.isEmpty ? "; no test in its output started and never finished" : "; started and never finished: \(hung)")
+                                      + (readable.map { " (\($0))" } ?? ""))
             throw Problem(text: "Not merged: the \(what) hung after \(Worktrees.duration(after)) on \(slug) rebased onto \(base); \(they) stopped, with everything started under them. \(slug) stays as it was. "
+                          + named
+                          + (readable.map { "Those and the output's last \(MergeRerun.hungTail) lines, readable by the worker who fixes it: \($0). " } ?? "")
                           + (saved.map { "The output so far: \($0). " } ?? "(The output couldn't be saved.) ")
                           + "If they only need longer, raise test_timeout_min (\(Self.gb(workflow.testTimeoutMinutes)) in workflow.md) with configure; else have the worker find what hangs.")
         case .conflict:
@@ -2673,19 +2685,24 @@ public final class LeadToolset: MCPToolset {
             + lines.joined(separator: "\n")
     }
 
-    /// Saves a merge's test output where the lead can read it; its path, or nil when it couldn't be saved.
     /// Writes a merge's flake evidence to `MergeRerun.evidenceFile` (0600, in a 0700 folder in the repository's
     /// ignored `.vibeswitcher/`); its path relative to the root, as the ledger keeps it, or nil when it couldn't be
     /// written (the merge's log in the vault keeps them).
     private func saveFlakeEvidence(_ evidence: [String: [String]], tests: [String], slug: String, commit: String, at date: Date) -> String? {
-        let log = MergeRerun.evidencePath(task: slug, commit: commit, at: date)
+        saveEvidence(MergeRerun.evidenceLog(task: slug, commit: commit, evidence: evidence, tests: tests),
+                     log: MergeRerun.evidencePath(task: slug, commit: commit, at: date))
+    }
+
+    /// Writes `text` to `log` (relative to the root, in `.vibeswitcher/flakes/`), 0600 in a 0700 folder; `log`, or nil
+    /// when it couldn't be written.
+    private func saveEvidence(_ text: String, log: String) -> String? {
         let file = URL(fileURLWithPath: MergeRerun.evidenceFile(root: root, log: log))
-        let text = MergeRerun.evidenceLog(task: slug, commit: commit, evidence: evidence, tests: tests)
         guard (try? VibePaths.ensurePrivate(file.deletingLastPathComponent(), within: URL(fileURLWithPath: store.folder))) != nil,
               (try? VibePaths.writePrivate(Data(text.utf8), to: file)) != nil else { return nil }
         return log
     }
 
+    /// Saves a merge's test output where the lead can read it; its path, or nil when it couldn't be saved.
     private func saveMergeLog(_ output: String, slug: String, name: String = "merge-test.log") -> String? {
         let log = vault.scratch(root: root, "\(slug)/\(name)")
         return (try? vault.ensurePrivate(log.deletingLastPathComponent())).flatMap {
