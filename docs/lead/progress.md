@@ -1779,3 +1779,9 @@
 - 2026-10-28 12:52 Merged hang-reports-are-pruned: Hang reports are pruned to the newest 10: keep a week (by age and total size), so tasks can read the reports they're about
 - 2026-10-28 12:52 Automatically (auto_advance): Merged hang-reports-are-pruned (Hang reports are pruned to the newest 10: keep a week (by age and total size), so tasks can read the reports they're about) into project-lead at 64ef5a1f, on its passing audit and the full test run.
 - 2026-10-28 12:57 Merged fix-the-flaky-test-4: Fix the flaky test indexLockIsWaitedForAndAFailureIsReported()
+- 2026-10-28 12:57 Automatically (auto_advance): Merged fix-the-flaky-test-4 (Fix the flaky test indexLockIsWaitedForAndAFailureIsReported()) into project-lead at 4cd925d9, on its passing audit and the full test run.
+- 2026-10-28 12:57 Automatically (auto_advance): Cleaned up hang-reports-are-pruned (freed 979 MB of build output and temporary folders). It stays done.
+- 2026-10-28 12:57 Automatically (auto_advance): Cleaned up fix-the-flaky-test-4; ended pid 51060 (Worker: Fix the flaky test indexLockIsWaitedForAndAFailureIsReported()) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-28 13:01 Started a worker on flake-evidence-readable
+- 2026-10-28 13:01 Automatically (auto_advance): Started a worker on flake-evidence-readable (Flake evidence readable: the merge keeps each flaky test's failure lines where workers and verifiers can read them).
+- 2026-10-28 13:01 Automatically (auto_advance): Started the audit of verifier-trust-check at 02cd89c8 (Its review is audit).
