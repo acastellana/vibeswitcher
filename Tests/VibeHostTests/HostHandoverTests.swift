@@ -203,8 +203,12 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         #expect(sessions.first { $0.id == scene.done.id }?.exit?.status == 3)
         #expect(sessions.map(\.childPID) == scene.all.map(\.childPID))
         #expect(sessions.map(\.tty) == scene.all.map(\.tty))
-        // The screens are rebuilt from what each session printed.
-        for (id, before) in screens { #expect(client.screen(id) == before) }
+        // The screens are rebuilt from what each session printed: by each session's new parser, which a busy Mac starts
+        // late (until then the host answers a blank screen; at load 136 a single read came too soon).
+        for (id, before) in screens {
+            var after: String?
+            #expect(eventually { after = client.screen(id); return after == before }, "\(String(describing: after)) != \(before)")
+        }
         #expect(screens[scene.done.id]?.contains("finished-early") == true && screens[scene.painted.id]?.contains("BOX") == true)
 
         client.attach(scene.counter.id)
