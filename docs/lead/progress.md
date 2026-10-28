@@ -1806,3 +1806,7 @@
 - 2026-10-28 13:42 Planned keep-flake-evidence-out: Keep flake evidence out of board.json: the ledger stores only the evidence file's path (review audit)
 - 2026-10-28 13:43 Started a worker on keep-flake-evidence-out
 - 2026-10-28 13:43 Automatically (auto_advance): Started a worker on keep-flake-evidence-out (Keep flake evidence out of board.json: the ledger stores only the evidence file's path).
+- 2026-10-28 13:55 Audit of review-and-fix-the: complete, clean, round 1: 4 Nit open
+- 2026-10-28 13:59 Merged witness-stalled-false: Witness "stalled" false alarm: the progress reading (team.watched) goes stale while a worker's transcript keeps growing (no audit: review none)
+- 2026-10-28 13:59 Flaky in witness-stalled-false's merge: aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-10-28 13:59 Planned fix-the-flaky-test-5: aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone() flaked 3 times within 7 days
