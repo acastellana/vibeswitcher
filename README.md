@@ -149,6 +149,18 @@ If the app's main thread is stuck for more than 2 seconds, it writes a report to
 `workflow.md` has `watch_app_logs: true` gets a digest of new freezes and crashes so it can plan fixes. See
 [where the logs are](docs/guide/getting-started.md#where-the-logs-are).
 
+## Development
+
+```sh
+bash scripts/test.sh                       # build and test on a scratch home, then the web tests
+bash scripts/test.sh --filter LeadBoardTests
+```
+
+Run tests only through `scripts/test.sh`: nothing a test writes reaches your `~/.vibeswitcher`, `~/.claude` or
+keychain. The one test of the real keychain runs only when you ask for it:
+`VIBESWITCHER_HOME=$(mktemp -d) VIBESWITCHER_KEYCHAIN_LIVE=1 swift test --filter KeychainLiveTests`. Lints, load tests
+and the sandbox are in [Development](docs/guide/development.md).
+
 ## Documentation
 
 - [Getting started](docs/guide/getting-started.md): install, first run, troubleshooting, logs.

@@ -146,7 +146,7 @@ it off for the project; a task's own `auto_advance: false` opts it out.
 
 ## Mac-wide limits
 
-These are set once for the Mac, not per project, in Settings › Project lead, and kept in
+These are set once for the Mac, not per project, in Settings › General › Project lead, and kept in
 `~/.vibeswitcher/mac-limits.json`:
 
 - **Team sessions** (`mac_max_sessions`): the most workers and verifiers of all projects together, 10 by default.
@@ -163,8 +163,12 @@ every project on the Mac. There are `heavy_slots` of them: `VIBESWITCHER_HEAVY_S
 ## The battery hold
 
 On battery, below a set charge, lead work pauses: `start_worker`, `audit`, `merge` and `revert` refuse, and work
-already running finishes. The default is 50 %; Settings › Project lead sets it from 10 to 90 %, or never. The lead is
-told when the hold starts and ends.
+already running finishes. The default is 50 %; Settings › General › Project lead sets it from 10 to 90 %, or 0 for
+never. The lead is told when the hold starts and ends.
+
+**Keeping the Mac awake.** While a worker, verifier or merge runs, the Mac doesn't go to sleep on its own (the display
+still does). The setting "Keep the Mac awake while the team works" is On power only by default; Always or Never
+change it.
 
 ## Questions to you
 
@@ -180,7 +184,9 @@ You can message the lead any time; your message reaches it at its next step.
 
 The inspector's **Team** tab is meant to be glanced at: the lead's open questions, its recent decisions, then each task
 in one line with its state and how long it has been in it ("Working 12m", "Rework 1 · 22m", "Needs audit 2m"). Under a
-task at work, a dim line says what its agent is doing. Click a task for its checkpoints, report, audit and links to its
+task at work, a dim line says what its agent is doing, written by a small Claude model (`claude -p` with Haiku, no
+tools) at most every 3 minutes while the tab is open; "Summarize what each agent is doing with AI" in Settings ›
+General › Project lead turns it off. Click a task for its checkpoints, report, audit and links to its
 sessions. Below are the scorecard, answered questions and the lead's files.
 
 ![The all-done card](../images/all-done-light.png)
@@ -233,7 +239,7 @@ lead sets them again.
 ## Your working policy
 
 Every lead, worker and verifier gets your working policy in its prompt. It's one text for all projects, kept in
-`~/.vibeswitcher/policy.md` and edited in Settings › Project lead. The default is five rules: one agent owns each
+`~/.vibeswitcher/policy.md` and edited in Settings › General › Project lead. The default is five rules: one agent owns each
 change, affected tests while editing and the full suite once before merging, parallel work with builds and tests
 serialized, only material bugs fixed, stop when it works. Running leads are told once when you change it.
 
