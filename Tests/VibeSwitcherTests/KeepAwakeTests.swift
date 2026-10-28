@@ -364,7 +364,9 @@ struct KeepAwakeTests {
     // MARK: The power source, read off the main thread
 
     /// A power daemon as slow as on 2026-10-28 at 17:02 (the window froze 6.4 s in `SystemPower.onACPower`): each read
-    /// waits until the test opens the gate, 5 s at most, and finds the Mac on battery.
+    /// waits until the test opens the gate and finds the Mac on battery. The gate's 2 minutes are only a net for a test
+    /// that fails before opening it: with 5 s, a loaded Mac's full run let the first read end while the test was still
+    /// setting up, so its first look already read battery.
     final class SlowPower: @unchecked Sendable {
         let started = DispatchSemaphore(value: 0)
         private let gate = DispatchSemaphore(value: 0)
@@ -376,7 +378,7 @@ struct KeepAwakeTests {
         func read() -> PowerSourceCache.Reading {
             lock.withLock { count += 1 }
             started.signal()
-            _ = gate.wait(timeout: .now() + 5)
+            _ = gate.wait(timeout: .now() + 120)
             return PowerSourceCache.Reading(onACPower: false, state: PowerState(onBattery: true, percent: 40, at: 0))
         }
 
