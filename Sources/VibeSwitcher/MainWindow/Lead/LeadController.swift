@@ -1112,9 +1112,9 @@ final class LeadController: ObservableObject {
     }
 
     /// What a refresh read, on the main thread.
-    private func refreshed(roots: Set<String>, fired: [String: [(question: LeadQuestion, message: String)]], loaded: [String: LeadBoard],
-                           decisions read: [String: [LeadDecision]], teams: [String: TeamReading],
-                           refusals: [String: LeadVault.BaseMoveRefusal]) {
+    func refreshed(roots: Set<String>, fired: [String: [(question: LeadQuestion, message: String)]], loaded: [String: LeadBoard],
+                   decisions read: [String: [LeadDecision]], teams: [String: TeamReading],
+                   refusals: [String: LeadVault.BaseMoveRefusal]) {
         dispatchPrecondition(condition: .onQueue(.main))
         tell(timers: fired)
         let previous = boards

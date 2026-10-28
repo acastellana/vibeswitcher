@@ -49,6 +49,9 @@ final class SessionStore: ObservableObject {
     private let bridge: TerminalPoll<TerminalTab>.Bridge
     /// Whether Terminal is the active app, and its front window then (see `TerminalSignal`); read on the scan queue.
     var terminalFront: @Sendable () -> (active: Bool, window: Int?) = { TerminalBridge.front() }
+    /// Whether you're at the Mac (see `UserPresence`) and the desktops shown (see `Spaces`).
+    var presence: @Sendable () -> Bool = { UserPresence.isPresent() }
+    var desktops: @Sendable () -> Set<Int> = { Spaces.currentDesktops() }
 
     // Main-thread only.
     private let launchedAt = Date()
@@ -277,8 +280,8 @@ final class SessionStore: ObservableObject {
                        background: [String: String], transcripts: [String: String], now: Date) {
         var quiet: Set<String> = []
         var nudges: [(Session, Nudge)] = []
-        let present = UserPresence.isPresent()
-        let currentDesktops = Spaces.currentDesktops()
+        let present = presence()
+        let currentDesktops = desktops()
         let terminalFront = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == TerminalBridge.bundleID
         var result: [Session] = []
         for item in raw {
