@@ -1649,3 +1649,8 @@
 - 2026-10-28 09:38 Automatically (auto_advance): Started the audit of app-memory-grows-to at 5bbac440 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
 - 2026-10-28 09:38 Planned verifier-trust-check: Verifier trust check trips on agent files inside .build (ui-bench.sh's base checkout copies AGENTS.md/CLAUDE.md) (review audit)
 - 2026-10-28 09:41 Audit of archive-finished-tasks: complete, clean, round 1: 5 Nit open
+- 2026-10-28 09:43 Ended turn-this-incident-into-4's worker (idle since its done report on 08cc2d32) to make room on the Mac for its audit
+- 2026-10-28 09:43 Automatically (auto_advance): Started the audit of turn-this-incident-into-4 at 08cc2d32 (Its review is audit).
+- 2026-10-28 09:46 Audit of lead-chat-freezes-of: complete, clean, round 2: 1 Important closed, 4 Nit (1 open)
+- 2026-10-28 09:50 Audit of turn-this-incident-into-5: complete, clean, round 1: 2 Nit open
+- 2026-10-28 09:51 Merged archive-finished-tasks: Archive finished tasks out of board.json: the 4 MB, 277-task board makes the app freeze for up to 92 s
