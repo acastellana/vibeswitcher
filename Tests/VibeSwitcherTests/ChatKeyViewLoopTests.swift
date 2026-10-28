@@ -64,10 +64,10 @@ struct ChatKeyViewLoopTests {
 
         let chat = ChatModel()
         chat.show(path: path.path)
-        let deadline = Date().addingTimeInterval(20)
-        // The read lands through the main queue, and the rows are staged in over a few turns: let them run.
-        while chat.state != .ready || chat.staging != nil, Date() < deadline { try await Task.sleep(for: .milliseconds(20)) }
-        #expect(chat.state == .ready && chat.staging == nil)
+        // The read lands through the main queue, and the rows are staged in over a few turns: let them run. Each wait
+        // ends on its event, with its own hang guard: in a full suite other main-actor tests hold the main thread for
+        // minutes between these awaits, which used to run out one 20 s deadline shared by both waits.
+        #expect(await until { chat.state == .ready && chat.staging == nil })
         // Some tool runs opened: each of their tools is a row with its own disclosure.
         for item in chat.items.suffix(40) { if case .tools(let id, _) = item { chat.expanded.insert(id) } }
 
@@ -87,10 +87,10 @@ struct ChatKeyViewLoopTests {
         let shown = ChatWindow.shown(chat.items, limit: chat.shownLimit, including: nil).items
         let tools = shown.filter { if case .tools = $0 { return true } else { return false } }.count
         let teams = shown.filter { if case .team = $0 { return true } else { return false } }.count
-        while Self.count("ChatTextView", in: host) < 10, Date() < deadline {
+        _ = await until {
             host.layoutSubtreeIfNeeded()
             window.displayIfNeeded()
-            try await Task.sleep(for: .milliseconds(20))
+            return Self.count("ChatTextView", in: host) >= 10
         }
         host.layoutSubtreeIfNeeded()
         window.displayIfNeeded()
