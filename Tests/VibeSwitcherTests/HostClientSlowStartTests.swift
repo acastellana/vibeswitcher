@@ -11,7 +11,7 @@ import Testing
 /// runs, 2026-10-28). A host that ends without listening is still failed at once. A scratch host on its own socket and
 /// lock, ending with this process.
 @MainActor
-struct HostClientSlowStartTests {
+@Suite(hostTestLimit) struct HostClientSlowStartTests {
     private let scratch = Scratch()
     private static let host = Bundle(for: Anchor.self).bundleURL.deletingLastPathComponent().appendingPathComponent("vibeswitcher-host").path
 

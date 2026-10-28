@@ -5,7 +5,7 @@ import Testing
 
 /// The host's session log, on a private host with a scratch log file: what started each session, how each one
 /// ended (a signal or an exit code), and who asked to kill a session or shut the host down.
-struct HostLogTests {
+@Suite(hostTestLimit) struct HostLogTests {
     func scratchLog() -> String { "\(shortScratchRoot)/vsh-log-\(UUID().uuidString.prefix(8)).log" }
 
     func log(_ path: String) -> String { (try? String(contentsOfFile: path, encoding: .utf8)) ?? "" }

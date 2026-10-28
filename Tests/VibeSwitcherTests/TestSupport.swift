@@ -32,6 +32,10 @@ private let fakeTheDisk: @convention(c) () -> Void = {
 /// this is only a guard, sized for a Mac running several suites at once (load 100+), never a measure of speed.
 let hangGuard: TimeInterval = 300
 
+/// The longest a test that starts a scratch host process may run, its hang guards included (as VibeHostTests'
+/// `hostTestLimit`): past it the test fails and its waits end (see `until`), rather than holding the run.
+let hostTestLimit: TimeLimitTrait = .timeLimit(.minutes(10))
+
 /// Whether `condition` holds within `timeout` seconds (a hang guard), checked every 20 ms. Awaiting lets the main
 /// thread run what's queued for it meanwhile. A cancelled test (past its time limit) waits no more: its sleep would
 /// throw at once, and the loop spin until the deadline.
