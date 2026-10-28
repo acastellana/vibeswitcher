@@ -27,3 +27,9 @@ Evidence: 2026-10-27: cleanup(lead-chat-freeze) and auto_advance's start of lead
 
 Check: task turn-this-incident-into-4 turns it into a check that runs before merge.
 
+## 2026-10-28 07:59:44 After PR #1 was installed, the Mac-wide limits (mac_max_sessions, the per-project counts in status) count only the calling lead's own team. Each lead now sees the Mac as emptier than it is and can start past the shared limit of 10.
+
+Evidence: 2026-10-28 07:59: installed build 1793170724 (PR #1 merged as f5bdf1a), and the host handed over. Right after, the lead's status read "5 team sessions across 1 project (vibeswitcher 5)", while `ps` showed 9 team agents: vibeswitcher 5, stakegen 3 (worker-landing-page-fixes-and, worker-shared-css-and-style, worker-sidebar-and-badge) and genswap 1 (worker-make-github-ci-pass). Before the install, status read "vibeswitcher 6, stakegen 3, genswap 1". Cause: PR #1 filters hello's session list to what the caller may access, and the Mac-wide census is built from HostCall.sessions (hello).
+
+Check: task turn-this-incident-into-5 turns it into a check that runs before merge.
+

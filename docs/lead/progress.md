@@ -1608,3 +1608,15 @@
 - 2026-10-28 07:48 Review of turn-this-incident-into-4: audit
 - 2026-10-28 07:48 Ended sidebar-running-workers's worker (idle since its done report on 2ff6d0a2) to make room on the Mac for its audit
 - 2026-10-28 07:51 Audit of turn-this-incident-into-3: complete, clean, round 1: 2 Nit open
+- 2026-10-28 07:58 Audit of sidebar-running-workers at 2ff6d0a2 tested its merged result a5f11267 onto project-lead: the test command passed
+- 2026-10-28 07:58 Automatically (auto_advance): Started the audit of sidebar-running-workers at 2ff6d0a2 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
+- 2026-10-28 07:59 Incident: After PR #1 was installed, the Mac-wide limits (mac_max_sessions, the per-project counts in status) count only the calling lead's own team. Each lead now sees t…; planned turn-this-incident-into-5 to turn it into a check
+- 2026-10-28 07:59 Review of turn-this-incident-into-5: audit
+- 2026-10-28 08:00 Started a worker on turn-this-incident-into-5
+- 2026-10-28 08:00 Started a worker on turn-this-incident-into-4
+- 2026-10-28 08:00 Automatically (auto_advance): Started a worker on turn-this-incident-into-4 (The lead's tool server exits mid-session (after EBADF): log why, find the cause, fix it).
+- 2026-10-28 08:00 Automatically (auto_advance): Started the audit of issue-2-workers at 782faf4b (Its review is audit).
+- 2026-10-28 08:02 Audit of lead-chat-freezes-of: incomplete, clean, round 1: 1 Important open, 3 Nit open
+- 2026-10-28 08:02 Dismissed lead-chat-freezes-of:F1: The lead's check 7 can't be met as written: neither bench reproduces the multi-second stalls, and the run-to-run noise exceeds any difference. Checks 2–6 are met and the full suite passes. The real proof is the app's hang reports after install, which the lead will watch; another audit round on the bench wouldn't settle anything.
+- 2026-10-28 08:11 Merged turn-this-incident-into-3: Witness: "agent quit" only when the agent's process has exited, not while it waits on a background command
+- 2026-10-28 08:11 Flaky in turn-this-incident-into-3's merge: onlyTheFocusedVisiblePaneSetsTheClipboardLive() failed the first test run and passed its rerun (the failing tests only); merged on the rerun

@@ -226,3 +226,7 @@ Rule 10: a setback that happens twice gets a check. Freezes that long are materi
 
 Two verifier runs on PR #1 were reported as quit; one was alive and the lead killed it, which wasted about 7 minutes of verifier work and load-run time. The witness check is wrong under Claude Code's background commands.
 
+## 2026-10-28 08:00:12 Installed project-lead at 30e58fd on 2026-10-28 at 07:58, at the user's answer to C2D62447. It includes PR #1's host security, the board-read freeze fixes, the message-delivery check and the audit guard. The host handed over in place (pid 31589, build 1793170724), the app proved itself and sees all 23 sessions, and the app is signed runtime with apple-events. A regression followed: the Mac-wide census counts only the lead's own team, fixed by task turn-this-incident-into-5, started at once. Until it merges, the lead counts other projects' team sessions with ps before starting work.
+
+The user asked for the install. The census regression comes from PR #1's filtered hello and defeats the shared Mac-wide limit, so it takes priority over the other planned work.
+
