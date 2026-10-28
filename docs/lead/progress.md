@@ -1815,3 +1815,6 @@
 - 2026-10-28 14:00 Started a worker on fix-the-flaky-test-5
 - 2026-10-28 14:00 Automatically (auto_advance): Started a worker on fix-the-flaky-test-5 (Fix the flaky test aSandboxRunLeavesTheRealAppsStateHostAndKeychainAlone()).
 - 2026-10-28 14:01 Automatically (auto_advance): Merge of review-and-fix-the failed: Tests fail rebased onto project-lead: security socket/signing tests: skipped, the build failed (above): they need its vibeswitcher-host Sent its worker the output; it's back at work.
+- 2026-10-28 14:30 Automatically (auto_advance): Started the audit of verifier-trust-check at b9663058 (Its review is audit).
+- 2026-10-28 14:30 Automatically (auto_advance): Started the audit of review-and-fix-the at 71df6221 (Its review is audit).
+- 2026-10-28 14:30 Automatically (auto_advance): Started the audit of keep-flake-evidence-out at 7314c3b7 (Its review is audit).
