@@ -1758,3 +1758,9 @@
 - 2026-10-28 12:19 Planned fix-the-flaky-test-4: indexLockIsWaitedForAndAFailureIsReported() flaked 3 times within 7 days
 - 2026-10-28 12:19 Automatically (auto_advance): Merged flake-ledger-don-t (Flake ledger: don't plan a "fix the flaky test" task when an open task already names that test) into project-lead at 88ca7853, on its passing audit and the full test run. (Its first test run failed on indexLockIsWaitedForAndAFailureIsReported() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/flake-ledger-don-t/merge-test.log. indexLockIsWaitedForAndAFailureIsReported() flaked 3 times within 7 days: planned fix-the-flaky-….)
 - 2026-10-28 12:26 Merged lead-chat-multi-line: Lead chat: multi-line shell blocks (if/then/fi, { … }) get a Run button that runs them as one script, after confirming
+- 2026-10-28 12:26 Automatically (auto_advance): Merged lead-chat-multi-line (Lead chat: multi-line shell blocks (if/then/fi, { … }) get a Run button that runs them as one script, after confirming) into project-lead at e17ad7c5, on its passing audit and the full test run.
+- 2026-10-28 12:26 Automatically (auto_advance): Cleaned up flake-ledger-don-t (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-28 12:26 Automatically (auto_advance): Cleaned up lead-chat-multi-line (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-10-28 12:26 Started a worker on fix-the-flaky-test-4
+- 2026-10-28 12:26 Automatically (auto_advance): Started a worker on fix-the-flaky-test-4 (Fix the flaky test indexLockIsWaitedForAndAFailureIsReported()).
+- 2026-10-28 12:32 Merged main-thread-overloaded: Main thread overloaded while an alert is up: SessionStore.apply, LeadController.refreshed → Redaction.secrets, SwiftUI re-render (stalls of 5–95 s)
