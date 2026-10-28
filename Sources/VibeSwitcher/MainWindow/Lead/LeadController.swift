@@ -127,6 +127,9 @@ struct TeamReading {
     /// The lead's loop runs with workflow.md's auto_advance on: a verifier that ends without a verdict is its to
     /// audit again (see `LeadWitness.leftToAdvance`). Looked at only while a task is in review.
     var advancing = false
+    /// The live members with no agent in the scan whose agent's process has exited, by a process table read here (see
+    /// `HostSession.agentRuns`): only these have quit. One whose agent waits on a background command runs on.
+    var agentGone: Set<String> = []
 
     /// A worker's transcript is read whatever it shows: a stall is one that reads as working too (see `LeadStall`). A
     /// verifier's while it doesn't show working: a turn that ended on an API error reads as finished or waiting, and
@@ -148,6 +151,13 @@ struct TeamReading {
         }
         team.workflow = LeadWorkflow.load(from: (BoardStore(root: root).folder as NSString).appendingPathComponent("workflow.md"))
         team.advancing = team.workflow.autoAdvance && board.tasks.contains { $0.status == .review } && LeadAdvance.running(BoardStore(root: root))
+        // The table is read only when the scan lacks a member's agent (rare), here off the main thread.
+        let unseen = board.tasks.flatMap { [$0.worker, $0.verifier] }.compactMap { $0 }.compactMap { id in
+            hosted[id].flatMap { $0.isLive && sessions[id] == nil ? (id: id, session: $0) : nil }
+        }
+        if !unseen.isEmpty, let table = ProcessTable.trySnapshot() {
+            team.agentGone = Set(unseen.filter { !$0.session.agentRuns(in: table) }.map(\.id))
+        }
         return team
     }
 }
@@ -1270,7 +1280,8 @@ final class LeadController: ObservableObject {
             // No agent in the scan a minute on: "agent ended · shell", as good as ended. A minute on as of when the scan's
             // process table was read, and from a table that could tell what runs on its terminal: while it can't be read
             // (a loaded Mac), or its process there couldn't be told (mid-exec), it's unknown, not ended.
-            let quit = session == nil && store.agentQuit(info)
+            // And its agent's own process has exited (`TeamReading.agentGone`): one waiting on a background command runs on.
+            let quit = session == nil && store.agentQuit(info) && team.agentGone.contains(id)
             seen[id] = LeadWitness.Seen(live: info.isLive, exit: info.exit?.status, cause: info.exit?.cause, status: session?.status,
                                         since: session?.statusSince, detail: session?.detail, pending: watched?.tail?.pending,
                                         agentQuit: quit, apiError: apiError?.text,

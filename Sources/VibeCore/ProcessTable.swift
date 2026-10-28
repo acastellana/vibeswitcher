@@ -503,3 +503,36 @@ final class BoundedReads: @unchecked Sendable {
         var finished: Bool { value != nil }
     }
 }
+
+extension HostSession {
+    /// Whether this session's agent still runs, by `table`: an agent on its terminal (or a process there that couldn't
+    /// be told, mid-exec), its own process (`childPID`) no longer its shell (the shell exec'd the agent in its place, as
+    /// a team session's `claude` is), or anything running under its shell (the agent of a session that keeps one, and
+    /// what that agent runs). An agent that ended its turn to wait on a background command (Bash run_in_background, a
+    /// Monitor) runs, whatever its terminal's foreground is or its screen shows; only one with none of these has quit.
+    /// Its own process gone from the table: its session has ended, so has its agent.
+    public func agentRuns(in table: [Int32: ProcInfo]) -> Bool {
+        if table.values.contains(where: { $0.tty == tty && ($0.agent != nil || $0.identityUnknown) }) { return true }
+        guard let own = table[childPID] else { return false }
+        if own.agent != nil || own.identityUnknown || !ProcessTable.shells.contains(own.comm) { return true }
+        return table.values.contains { $0.pid != childPID && ProcessTable.descends($0, from: childPID, in: table) }
+    }
+}
+
+extension ProcessTable {
+    /// The programs a session's own process is while it is still the shell the host started (their kernel names).
+    static let shells: Set<String> = ["sh", "bash", "zsh", "dash", "ksh", "mksh", "tcsh", "csh", "fish"]
+
+    /// `process` runs under `ancestor` in `table` (its parent, or its parent's, and so on).
+    static func descends(_ process: ProcInfo, from ancestor: Int32, in table: [Int32: ProcInfo]) -> Bool {
+        var current = process.ppid
+        var steps = 0
+        while current > 1, steps < 64 {
+            if current == ancestor { return true }
+            guard let parent = table[current] else { return false }
+            current = parent.ppid
+            steps += 1
+        }
+        return false
+    }
+}

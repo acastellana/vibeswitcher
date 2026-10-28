@@ -91,14 +91,13 @@ public extension LeadRuntime {
     /// From the Claude command's own --model only; the app's runtime also reads Claude's settings (see `HostRuntime`).
     func workerModel(root: String) -> String? { LeadWorkflow.claudeModel(command: claudeCommand(root: root)) }
 
-    /// From the session host's record and the process table, as the app's witness tells it: quit when no agent runs
-    /// on its terminal a minute after it started (`HostSession.agentQuit`), by a table that could tell what runs there.
+    /// From the session host's record and the process table, as the app's witness tells it: quit when its agent's
+    /// process has exited a minute after it started (`LeadWitness.agentQuitEnding`), by a table read whole.
     func agentEnding(_ session: LeadSessionInfo) -> String? {
         let hosted = (try? HostCall.sessions())?.first { $0.id.uuidString == session.id }
         guard session.live, hosted?.isLive ?? true else { return hosted?.exit?.cause ?? "its session ended" }
-        guard let hosted, hosted.agentQuit(now: Date()), let table = ProcessTable.trySnapshot() else { return nil }
-        let there = table.values.filter { $0.tty == hosted.tty }
-        return there.contains { $0.agent != nil || $0.identityUnknown } ? nil : LeadWitness.agentQuitEnding
+        guard let hosted, hosted.agentQuit(now: Date()) else { return nil }
+        return LeadWitness.agentQuitEnding(hosted, table: ProcessTable.trySnapshot())
     }
 }
 

@@ -12,13 +12,17 @@ enum FakeClaude {
 # The test appends JSON lines to CONTROL ({"op": "ask" | "permission" | "work" | "take" | "done" | "freeze" | "thaw" |
 # "turns" (from now on a prompt starts a turn, as Claude's do: it works until "done") | "slowShell" (from now on a `!`
 # command runs until "background", which moves it to the background as the 120 s Bash timeout does) | "imageRead" (how
-# long a pasted image path takes to read, "seconds") | "exit" (it quits, as /exit));
+# long a pasted image path takes to read, "seconds") | "child" (it starts `sleep 600` and goes on: in its own process
+# group, as a background shell, or with "foreground" in one of its own that takes the terminal's foreground; its pid
+# goes in "children") | "exit" (it quits, as /exit));
 # the agent writes its state (mode, tab, answers, the free-text field, queued messages) to STATE after every change.
 import datetime
 import json
 import os
 import re
 import select
+import signal
+import subprocess
 import sys
 import time
 import tty
@@ -47,6 +51,7 @@ state = {
     "images": 0,             # the session's images so far ([Image #N])
     "attached": 0,           # the images in the box
     "droppedEnters": 0,      # Enters held back while images were read, then dropped
+    "children": [],          # the pids of the children "child" started
 }
 # The slash commands its menu offers while "/…" is typed in the box.
 COMMANDS = [("/clear", "Clear conversation history"), ("/compact", "Clear history but keep a summary"),
@@ -604,6 +609,21 @@ def feed(data):
         i += 1
 
 
+def start_child(foreground):
+    if foreground:
+        # The terminal is the child's: reading or writing it from here would stop this process.
+        signal.signal(signal.SIGTTIN, signal.SIG_IGN)
+        signal.signal(signal.SIGTTOU, signal.SIG_IGN)
+
+        def take_terminal():
+            os.setpgid(0, 0)
+            os.tcsetpgrp(0, os.getpgid(0))
+        child = subprocess.Popen(["/bin/sleep", "600"], preexec_fn=take_terminal)
+    else:
+        child = subprocess.Popen(["/bin/sleep", "600"], stdin=subprocess.DEVNULL)
+    state["children"].append(child.pid)
+
+
 def control():
     global control_offset
     try:
@@ -645,6 +665,8 @@ def control():
         elif op == "background":
             finish_shell("Command did not complete within its 120s timeout and was moved to the background (ID: bfake). "
                          "Output is being written to: bfake.output. You will be notified when it completes.")
+        elif op == "child":
+            start_child(command.get("foreground", False))
         elif op == "exit":
             state["mode"] = "exited"
             save_state()
@@ -666,7 +688,12 @@ def main():
         if not state["frozen"]:
             ready, _, _ = select.select([0], [], [], 0.02)
             if ready:
-                data = os.read(0, 65536)
+                try:
+                    data = os.read(0, 65536)
+                except OSError:
+                    # A child has the terminal's foreground (see `start_child`): its input isn't this one's.
+                    time.sleep(0.02)
+                    continue
                 if not data:
                     return
                 feed(data)

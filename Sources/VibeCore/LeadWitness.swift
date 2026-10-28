@@ -167,6 +167,15 @@ public enum LeadWitness {
     /// agent quit with the shell left open.
     static func verifierEnding(_ info: Seen) -> String { info.live ? agentQuitEnding : info.ending }
 
+    /// A live session's agent quit, leaving its shell open: a minute after it started (`HostSession.agentQuit`), its
+    /// agent's process has exited (`HostSession.agentRuns`), by a table read whole. Not from what its terminal shows: an
+    /// agent waiting on a background command runs on (2026-10-27: verifiers alive and waiting on a load run were said
+    /// to have quit, and their audits started again). `agentQuitEnding` then, else nil (no table: not known).
+    public static func agentQuitEnding(_ hosted: HostSession, table: [Int32: ProcInfo]?, now: Date = Date()) -> String? {
+        guard hosted.agentQuit(now: now), let table, !hosted.agentRuns(in: table) else { return nil }
+        return agentQuitEnding
+    }
+
     /// How long a verifier that ended without a verdict is left to auto_advance (see `leftToAdvance`) before the lead
     /// is told as ever: its loop audits again within a pass of the app's nudge, unless the Mac has no room or the
     /// ending couldn't be read there.
