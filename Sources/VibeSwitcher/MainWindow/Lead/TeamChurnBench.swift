@@ -16,6 +16,10 @@ import VibeCore
 ///    of 4 ticks, over the floor.
 /// 3. ticks: a decision fading, so the timeline ticks every second (and the fade animates): the main thread's CPU a tick.
 /// 4. churn: the sessions retitling: the main thread's CPU per upsert (over the quiet floor).
+/// With `--ax`, an accessibility client is attached as the user's was when the window froze for 3–25 s (10-27): SwiftUI's
+/// accessibility turned on in every hosting view of the window, the window's tree walked after each upsert (each
+/// element's role and children, as a client reads them), and the lead's transcript 75 turns (300 entries, the stakegen
+/// lead's 290-odd); the elements reached are printed with the phases.
 /// Each phase prints the main thread's longest block (its own CPU time while a post from another thread waited, and the
 /// wall clock's), and `RESULT team-churn …` lines. Nothing is checked: it's for comparing builds.
 ///
@@ -60,7 +64,7 @@ enum TeamChurnBench {
         VibePaths.ensurePrivateDirectories()
         let modal = arguments.firstIndex(of: "--modal").flatMap { arguments.indices.contains($0 + 1) ? Double(arguments[$0 + 1]) : nil }
         let without = arguments.firstIndex(of: "--modal-without").flatMap { arguments.indices.contains($0 + 1) ? arguments[$0 + 1] : nil }
-        let bench = Bench(seconds: seconds, onscreen: arguments.contains("--onscreen"), modal: modal,
+        let bench = Bench(seconds: seconds, onscreen: arguments.contains("--onscreen"), ax: arguments.contains("--ax"), modal: modal,
                           modalWithout: Set((without ?? "").split(separator: ",").map(String.init)))
         bench.start()
         app.run()
@@ -121,6 +125,11 @@ enum TeamChurnBench {
     private final class Bench {
         let seconds: Double
         let onscreen: Bool
+        /// An accessibility client walks the window after each upsert (`AXClient`).
+        let ax: Bool
+        var walked = 0
+        /// The main thread's CPU in the client's walks (its requests are served there).
+        var walking: TimeInterval = 0
         /// `--modal`'s seconds: that phase alone.
         let modal: Double?
         /// `--modal-without boards,churn`: traffic left out of it, to narrow a growth down.
@@ -145,9 +154,10 @@ enum TeamChurnBench {
         static let workers = 6, others = 4, period = 2.0
         var leadID: UUID?
 
-        init(seconds: Double, onscreen: Bool, modal: Double?, modalWithout: Set<String>) {
+        init(seconds: Double, onscreen: Bool, ax: Bool, modal: Double?, modalWithout: Set<String>) {
             self.seconds = seconds
             self.onscreen = onscreen
+            self.ax = ax
             self.modal = modal
             self.modalWithout = modalWithout
             weak var weakSelf: Bench?
@@ -183,12 +193,21 @@ enum TeamChurnBench {
             let folder = (NSHomeDirectory() as NSString).appendingPathComponent(".claude/projects/\(RecentProjects.claudeSlug(for: root))")
             try? FileManager.default.createDirectory(atPath: folder, withIntermediateDirectories: true)
             transcript = (folder as NSString).appendingPathComponent("\(UUID().uuidString.lowercased()).jsonl")
-            FileManager.default.createFile(atPath: transcript, contents: TeamChurnBench.transcript(turns: 23, now: started))
+            FileManager.default.createFile(atPath: transcript, contents: TeamChurnBench.transcript(turns: ax ? 75 : 23, now: started))
             try? TeamChurnBench.churnScript.write(toFile: (NSHomeDirectory() as NSString).appendingPathComponent("churn.sh"),
                                                  atomically: true, encoding: .utf8)
             // Wired as the app delegate wires them.
             host.$sessions.receiveLatest(on: RunLoop.main).sink { [weak self] in self?.store.updateHosted($0) }.store(in: &cancellables)
-            host.$sessions.dropFirst().sink { [weak self] _ in self?.upserts += 1 }.store(in: &cancellables)
+            host.$sessions.dropFirst().sink { [weak self] _ in
+                self?.upserts += 1
+                // The client reads the window again once the change is drawn, as a client told of it does.
+                guard let self, self.ax, let window = self.window?.window else { return }
+                DispatchQueue.main.async {
+                    let before = TeamChurnBench.cpu(of: self.main)
+                    self.walked = AXClient.walk(window)
+                    self.walking += TeamChurnBench.cpu(of: self.main) - before
+                }
+            }.store(in: &cancellables)
             store.$sessions.combineLatest(host.$sessions, host.$state, store.$tableRead).receiveLatest(on: RunLoop.main)
                 .sink { [weak self] sessions, hosted, state, table in
                     self?.model.update(sessions: sessions, hosted: hosted, table: table, hostAnswered: state != .connecting)
@@ -286,6 +305,11 @@ enum TeamChurnBench {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
                     print("selected \(self.model.selectedRow?.project ?? "none"), its Team tab \(self.model.selectedRow.flatMap(self.leads.lead(for:)) != nil ? "shown" : "missing")")
                     print(self.window?.debugState() ?? "")
+                    if self.ax, let window = self.window?.window {
+                        let hosts = AXClient.attach(window)
+                        self.walked = AXClient.walk(window)
+                        print("accessibility client attached: \(hosts) hosting views, \(self.walked) elements")
+                    }
                     // From the run loop as an event's handler is (End Session…'s alert ran from a menu's action), not
                     // from a block of the main queue: inside one the main queue would wait for it, as it never did there.
                     if let modal = self.modal { return RunLoop.main.perform(inModes: [.default]) { self.modalPhase(modal) } }
@@ -300,11 +324,14 @@ enum TeamChurnBench {
             _ = watchdog?.take()
             let cpu = TeamChurnBench.cpu(of: main)
             let upserts = upserts
+            let walking = walking
             DispatchQueue.main.asyncAfter(deadline: .now() + seconds) { [self] in
                 let used = TeamChurnBench.cpu(of: main) - cpu
                 let block: (cpu: TimeInterval, wall: TimeInterval) = watchdog?.take() ?? (cpu: 0, wall: 0)
-                print(String(format: "  %@: main thread %.0f ms of CPU in %.0f s, %d upserts, longest block %.0f ms (wall %.0f ms)",
-                             name as NSString, used * 1000, seconds, self.upserts - upserts, block.cpu * 1000, block.wall * 1000))
+                print(String(format: "  %@: main thread %.0f ms of CPU in %.0f s, %d upserts, longest block %.0f ms (wall %.0f ms)%@",
+                             name as NSString, used * 1000, seconds, self.upserts - upserts, block.cpu * 1000, block.wall * 1000,
+                             (ax ? String(format: ", %d accessibility elements, %.0f ms of it the client's walks", walked,
+                                          (self.walking - walking) * 1000) : "") as NSString))
                 fflush(stdout)
                 done(used, self.upserts - upserts, block)
             }
@@ -495,5 +522,51 @@ enum TeamChurnBench {
             fflush(stdout)
             exit(failure == nil ? 0 : 1)
         }
+    }
+}
+
+/// An accessibility client, for benches and tests: what a window manager or a screen tool attached to the app does. The
+/// process running it isn't trusted to be a real one (`AXIsProcessTrusted`), so it asks AppKit's entry point for a
+/// client's request in process, after turning on SwiftUI's accessibility as a client's first request does.
+enum AXClient {
+    private typealias EntryPoint = @convention(c) (AnyObject, NSString) -> Unmanaged<AnyObject>?
+    /// AppKit's entry point for a client's request (the hang stacks' `_NSAccessibilityEntryPointValueForAttribute`).
+    private static let entryPoint: EntryPoint? = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "NSAccessibilityEntryPointValueForAttribute")
+        .map { unsafeBitCast($0, to: EntryPoint.self) }
+
+    /// Turns on SwiftUI's accessibility in every hosting view of the window (`NSHostingView.accessibilityEnabled`'s
+    /// setter, called with the view as its self: a closure's context goes where a method's self does). How many.
+    @discardableResult
+    static func attach(_ window: NSWindow) -> Int {
+        guard let setter = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "$s7SwiftUI13NSHostingViewC20accessibilityEnabledSbvsTj"),
+              let content = window.contentView else { return 0 }
+        func hosts(_ view: NSView) -> [NSView] {
+            (String(describing: type(of: view)).hasPrefix("NSHostingView<") ? [view] : []) + view.subviews.flatMap(hosts)
+        }
+        let found = hosts(content)
+        for host in found {
+            let enable = unsafeBitCast((setter, Unmanaged.passRetained(host).toOpaque()), to: ((Bool) -> Void).self)
+            enable(true)
+        }
+        return found.count
+    }
+
+    /// Walks the element's tree as a client reads it (each element's role and children); the elements reached.
+    static func walk(_ element: AnyObject) -> Int {
+        guard let entryPoint else { return 0 }
+        _ = entryPoint(element, "AXRole")
+        let children = entryPoint(element, "AXChildren")?.takeUnretainedValue() as? [AnyObject] ?? []
+        return 1 + children.reduce(0) { $0 + walk($1) }
+    }
+
+    /// What every element of the tree says (its value, title, description and label), as a client reads it.
+    static func texts(_ element: AnyObject) -> [String] {
+        guard let entryPoint else { return [] }
+        let own = ["AXValue", "AXTitle", "AXDescription", "AXLabel"].compactMap { attribute -> String? in
+            let value = entryPoint(element, attribute as NSString)?.takeUnretainedValue()
+            return (value as? String) ?? (value as? NSAttributedString)?.string
+        }
+        let children = entryPoint(element, "AXChildren")?.takeUnretainedValue() as? [AnyObject] ?? []
+        return own + children.flatMap(texts)
     }
 }

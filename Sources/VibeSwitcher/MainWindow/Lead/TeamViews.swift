@@ -31,8 +31,10 @@ struct TeamMark: View {
 
 /// A task in one line: its mark, its title, its state and time; under it, dim, what its agent is doing (or what it
 /// asks, or why it's red; for a folded task, the task it's folded into, a link that opens that task's row). Clicking it
-/// shows its details.
-struct TeamRowView: View {
+/// shows its details. Equal while it shows the same (its actions aside: they're the same ones), SwiftUI leaves it as it
+/// is: a tick of the Team view's clock that changes no row's time made every row's spoken label and accessibility
+/// actions again, and an accessibility client watching compared them all (hang-20261027-203816, 203741).
+struct TeamRowView: View, Equatable {
     let row: TeamRow
     let now: Date
     let summary: String?
@@ -42,6 +44,13 @@ struct TeamRowView: View {
     /// Opens another task's row (its id): a folded task's link.
     var openTask: (String) -> Void = { _ in }
     let toggle: () -> Void
+
+    static func == (a: TeamRowView, b: TeamRowView) -> Bool {
+        a.row == b.row && a.summary == b.summary && a.isOpen == b.isOpen && a.row.stateText(now: a.now) == b.row.stateText(now: b.now)
+            // Its links and actions to the worker's and the verifier's sessions, there while they're listed.
+            && a.row.task.worker.map(a.canOpen) == b.row.task.worker.map(b.canOpen)
+            && a.row.task.verifier.map(a.canOpen) == b.row.task.verifier.map(b.canOpen)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -233,9 +242,17 @@ struct TeamTaskList: View {
     let open: (String) -> Void
     @State var openRows: Set<String> = []
     @State var showFinished = false
+    /// The rows as last drawn, for `reveal`: a row equal to the one before keeps its first closure (`TeamRowView` is
+    /// equatable), which must still find the rows of now.
+    @State private var shown = Shown()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
+    final class Shown {
+        var rows: [TeamRow] = []
+    }
+
     var body: some View {
+        let _ = shown.rows = rows
         let finished = rows.filter { $0.group == .finished }
         ScrollViewReader { proxy in
             VStack(alignment: .leading, spacing: 1) {
@@ -252,14 +269,15 @@ struct TeamTaskList: View {
 
     private func line(_ row: TeamRow, _ proxy: ScrollViewProxy) -> some View {
         TeamRowView(row: row, now: now, summary: summary(row), isOpen: openRows.contains(row.id), canOpen: canOpen, open: open,
-                    openTask: { reveal($0, proxy) }) {
+                    openTask: { [shown] in reveal($0, in: shown.rows, proxy) }) {
             if openRows.contains(row.id) { openRows.remove(row.id) } else { openRows.insert(row.id) }
         }
+        .equatable()
         .id(row.id)
     }
 
     /// Opens task `id`'s row (unfolding the finished ones when it's there) and scrolls to it.
-    private func reveal(_ id: String, _ proxy: ScrollViewProxy) {
+    private func reveal(_ id: String, in rows: [TeamRow], _ proxy: ScrollViewProxy) {
         guard let target = rows.first(where: { $0.id == id }) else { return }
         if target.group == .finished { showFinished = true }
         openRows.insert(id)
@@ -362,10 +380,11 @@ struct DecisionFeedView: View {
     let summary: (LeadDecision) -> String?
     @State var openDecisions: Set<String> = []
     @State var showEarlier = false
+    @State private var feed = DecisionFeed.Cache()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        let split = DecisionFeed.split(decisions, now: now.timeIntervalSince1970, reduceMotion: reduceMotion)
+        let split = feed.split(decisions, now: now.timeIntervalSince1970, reduceMotion: reduceMotion)
         // One you opened stays in view while it's open.
         let kept = split.earlier.filter { openDecisions.contains($0.id) && !showEarlier }
         let recent = (split.recent + kept.map { ($0, DecisionFeed.Phase.fresh) }).sorted { $0.decision.at > $1.decision.at }
@@ -451,6 +470,10 @@ struct LeadTeamPane: View, Equatable {
     /// The Mac's load and the Mac-wide limits, read again with each tick.
     @State private var load: Double?
     @State private var limits = MacLimits()
+    /// The Mac-wide line, made with each tick and when the host's sessions change, never in `body`: counting every
+    /// project's team sessions is a walk of all their folders, and the body is drawn again many times a second while
+    /// the window updates (hang-20261027-201145, 201501).
+    @State private var mac: MacLine?
 
     static func == (a: LeadTeamPane, b: LeadTeamPane) -> Bool {
         a.root == b.root && a.board == b.board && a.decisions == b.decisions && a.seen == b.seen && a.rows == b.rows
@@ -463,9 +486,10 @@ struct LeadTeamPane: View, Equatable {
     var body: some View {
         LeadTeamView(root: root, board: board, seen: seen, open: open, answer: answer, notices: notices, decisions: decisions,
                      summary: { summaries.line($0) }, decisionSummary: { summaries.line($0) }, keepingAwake: keepAwake.held.contains(root),
-                     mac: MacLine.make(listed: hosted, load: load, limits: limits), rows: teamRows, recordsDir: recordsDir)
+                     mac: mac, rows: teamRows, recordsDir: recordsDir)
             .onAppear(perform: request)
             .onChange(of: tick) { request() }
+            .onChange(of: hosted) { mac = MacLine.make(listed: hosted, load: load, limits: limits) }
             .onChange(of: summaries.enabled) { request() }
             .task {
                 while !Task.isCancelled {
@@ -478,6 +502,7 @@ struct LeadTeamPane: View, Equatable {
     private func request() {
         load = MacLoad.oneMinute()
         limits = MacLimits.load()
+        mac = MacLine.make(listed: hosted, load: load, limits: limits)
         let recent = DecisionFeed.split(decisions, now: Date().timeIntervalSince1970, reduceMotion: reduceMotion).recent.map(\.decision)
         summaries.request(rows: teamRows, decisions: recent)
     }

@@ -203,4 +203,21 @@ struct TeamChurnTests {
         #expect(files.fileReads == reads + 2)
         #expect(files.recordsDir(root) == store.recordsDir)
     }
+
+    /// A row is drawn again only when what it shows changes: not as the clock ticks without moving its time, but when
+    /// its worker's session leaves the list (its "Open the worker" goes) though the row reads the same.
+    @Test func aRowIsDrawnAgainOnlyWhenWhatItShowsChanges() throws {
+        var task = TeamRowsTests.task("fix", .running)
+        task.worker = "w-fix"
+        var board = LeadBoard()
+        board.tasks = [task]
+        let row = try #require(TeamRows.rows(board, seen: [:]).first)
+        func view(now: Date, listed: Set<String>) -> TeamRowView {
+            TeamRowView(row: row, now: now, summary: nil, isOpen: true, canOpen: listed.contains, open: { _ in }, toggle: {})
+        }
+        let shown = view(now: Self.now, listed: ["w-fix"])
+        #expect(shown == view(now: Self.now.addingTimeInterval(1), listed: ["w-fix"]))
+        #expect(shown != view(now: Self.now, listed: []))
+        #expect(shown != view(now: Self.now.addingTimeInterval(3 * 3_600), listed: ["w-fix"]))
+    }
 }

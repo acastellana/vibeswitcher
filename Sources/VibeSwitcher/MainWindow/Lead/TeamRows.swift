@@ -582,15 +582,49 @@ enum DecisionFeed {
         }
     }
 
+    typealias Split = (recent: [(decision: LeadDecision, phase: Phase)], earlier: [LeadDecision])
+
     /// The recent decisions (newest first, with their phase) and the earlier ones (newest first).
-    static func split(_ decisions: [LeadDecision], now: Double, reduceMotion: Bool) -> (recent: [(decision: LeadDecision, phase: Phase)], earlier: [LeadDecision]) {
+    static func split(_ decisions: [LeadDecision], now: Double, reduceMotion: Bool) -> Split {
+        split(sorted: decisions.sorted(by: { $0.at > $1.at }), now: now, reduceMotion: reduceMotion)
+    }
+
+    /// `split` of decisions sorted newest first already.
+    private static func split(sorted decisions: [LeadDecision], now: Double, reduceMotion: Bool) -> Split {
         var recent: [(LeadDecision, Phase)] = []
         var earlier: [LeadDecision] = []
-        for decision in decisions.sorted(by: { $0.at > $1.at }) {
+        for decision in decisions {
             let phase = phase(decision, now: now, reduceMotion: reduceMotion)
             if phase == .folded { earlier.append(decision) } else { recent.append((decision, phase)) }
         }
         return (recent, earlier)
+    }
+
+    /// `split`, kept by its inputs: the view's body asks for it on every update, many a second while the window
+    /// updates (hang-20261027-202749), and its clock moves once a second at most. The decisions are sorted again only
+    /// when they change.
+    final class Cache {
+        private var sorted: (decisions: [LeadDecision], sorted: [LeadDecision])?
+        private var kept: (decisions: [LeadDecision], now: Double, reduceMotion: Bool, split: Split)?
+        /// How many times it was split, and sorted (for tests).
+        private(set) var made = 0
+        private(set) var sorts = 0
+
+        func split(_ decisions: [LeadDecision], now: Double, reduceMotion: Bool) -> Split {
+            if let kept, kept.now == now, kept.reduceMotion == reduceMotion, kept.decisions == decisions { return kept.split }
+            made += 1
+            let order: [LeadDecision]
+            if let sorted, sorted.decisions == decisions {
+                order = sorted.sorted
+            } else {
+                sorts += 1
+                order = decisions.sorted { $0.at > $1.at }
+                sorted = (decisions, order)
+            }
+            let split = DecisionFeed.split(sorted: order, now: now, reduceMotion: reduceMotion)
+            kept = (decisions, now, reduceMotion, split)
+            return split
+        }
     }
 
     /// When the view next changes by itself: every second while one fades, else when the next one starts fading.

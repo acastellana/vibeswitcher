@@ -4,7 +4,9 @@ import VibeCore
 
 /// The main window's list and selection.
 final class WindowModel: ObservableObject {
-    @Published private(set) var sections: [WindowSection] = []
+    @Published private(set) var sections: [WindowSection] = [] {
+        didSet { arrangedKept = nil }
+    }
     @Published var selectedID: String? {
         didSet {
             guard selectedID != oldValue else { return }
@@ -14,7 +16,10 @@ final class WindowModel: ObservableObject {
         }
     }
     @Published var grouping: WindowGrouping {
-        didSet { UserDefaults.standard.set(grouping.rawValue, forKey: Self.groupingKey) }
+        didSet {
+            arrangedKept = nil
+            UserDefaults.standard.set(grouping.rawValue, forKey: Self.groupingKey)
+        }
     }
     /// The sidebar's filter text.
     @Published var filter = ""
@@ -23,9 +28,13 @@ final class WindowModel: ObservableObject {
     /// Folders you've recently run agents in, most recent first (for the start page and the palette).
     @Published var recentProjects: [String] = []
     /// Window sessions' labels ("Lead · acme", "Worker: …"), by host id: they say who's on a lead's team.
-    @Published private(set) var hostLabels: [UUID: String] = [:]
+    @Published private(set) var hostLabels: [UUID: String] = [:] {
+        didSet { arrangedKept = nil }
+    }
     /// Leads (row ids) whose team is shown under them.
-    @Published var expandedTeams: Set<String> = []
+    @Published var expandedTeams: Set<String> = [] {
+        didSet { arrangedKept = nil }
+    }
     /// Leads another session of their project replaced (see `LeadController.replacedLeads`), by window session.
     @Published var replacedLeads: [UUID: ReplacedLead] = [:]
     /// The agent's own session id last seen in each window session, so it can be resumed once it ends.
@@ -78,9 +87,31 @@ final class WindowModel: ObservableObject {
         WindowGroups.foldEnded(LeadTeams.arrange(sections, label: label(of:), expanded: []).sections).ended
     }
 
-    /// The list with each lead's team folded under it (the grunt work stays out of sight unless you open it).
+    /// The list with each lead's team folded under it (the grunt work stays out of sight unless you open it). Made
+    /// again only when its inputs change (the rows, the grouping, the labels, the teams open) or, grouped by attention,
+    /// when a window session's "starting" runs out: the sidebar's body asks for it on every update, and a lead's
+    /// window updates many times a second (hang-20261027-201459).
     var arranged: LeadTeams.Arranged {
-        LeadTeams.arrange(grouping == .attention ? WindowGroups.attention(sections) : sections, label: label(of:), expanded: expandedTeams)
+        let now = Date()
+        if let kept = arrangedKept, now < kept.until { return kept.arranged }
+        arrangedMade += 1
+        let arranged = LeadTeams.arrange(grouping == .attention ? WindowGroups.attention(sections, now: now) : sections, label: label(of:),
+                                         expanded: expandedTeams)
+        arrangedKept = (arranged, grouping == .attention ? Self.regroups(sections, after: now) : .distantFuture)
+        return arranged
+    }
+    private var arrangedKept: (arranged: LeadTeams.Arranged, until: Date)?
+    /// How many times `arranged` was made (for tests).
+    private(set) var arrangedMade = 0
+
+    /// When the attention grouping may move a row with nothing else changing: a window session's agent "starting" for
+    /// its first minute (`WindowRow.state(now:)`), the only state that turns with the clock.
+    static func regroups(_ sections: [WindowSection], after now: Date) -> Date {
+        sections.lazy.flatMap(\.rows).compactMap { row -> Date? in
+            guard let info = row.hosted, info.exit == nil, info.agent != nil else { return nil }
+            let ends = info.startedAt.addingTimeInterval(WindowGroups.startingFor)
+            return ends > now ? ends : nil
+        }.min() ?? .distantFuture
     }
 
     func label(of row: WindowRow) -> String? {

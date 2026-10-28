@@ -17,6 +17,7 @@ enum ChatFont {
 private struct ChatFolderKey: EnvironmentKey { static let defaultValue: String? = nil }
 private struct ChatRunnerKey: EnvironmentKey { static let defaultValue: ChatRunner? = nil }
 private struct ChatTextSelectableKey: EnvironmentKey { static let defaultValue = true }
+private struct ChatRowUnexposedKey: EnvironmentKey { static let defaultValue = false }
 
 /// Runs a command from a code block in the selected session (Run, next to Copy). One object for the chat's
 /// lifetime: what changes is only whether the session takes it now.
@@ -37,6 +38,13 @@ extension EnvironmentValues {
     var chatRunner: ChatRunner? {
         get { self[ChatRunnerKey.self] }
         set { self[ChatRunnerKey.self] = newValue }
+    }
+
+    /// The chat's row is out of accessibility's sight (`ChatExposure`): its AppKit text views leave the tree too, which
+    /// `accessibilityHidden` doesn't reach.
+    var chatRowUnexposed: Bool {
+        get { self[ChatRowUnexposedKey.self] }
+        set { self[ChatRowUnexposedKey.self] = newValue }
     }
 
     /// Whether the chat's text can be selected yet (see `ChatTextSelection`).

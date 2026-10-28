@@ -303,14 +303,11 @@ final class LeadController: ObservableObject {
     /// The boards and decisions, and the teams' transcripts, read off the main thread (the boards written there too, to
     /// keep the order; `baseMoves` writes there as well).
     private let reads: LeadReads
-    /// The lead each board names, for the starts and the once-a-minute notices that look it up on the main thread
-    /// (`leadSessions`). Messages, wake-ups, flushes and the 3 s refresh read it off the main thread (`LeadFiles.names`).
-    private var names = LeadNames()
-    /// Each board looked at for the lead it names, on the thread that looks (for tests).
+    /// Each board looked at for the lead it names, on the thread that looks (for tests). Every look is off the main
+    /// thread (`LeadFiles.names`): starts, notices, messages, wake-ups, flushes and the 3 s refresh.
     var boardLooked: (String) -> Void = { _ in } {
         didSet {
             let looked = boardLooked
-            names.looked = looked
             reads.async { files in files.names.looked = looked }
         }
     }
@@ -405,10 +402,12 @@ final class LeadController: ObservableObject {
     static let commandLineNote = "any process on this Mac can send one, so it isn't vouched for as the user's"
     static let commandLine = SteerMessage.Sender.system("vibeswitcher --lead on the command line; \(commandLineNote)")
 
-    /// The live window sessions that are leads, by root. Where a replaced lead runs on beside the one that replaced
-    /// it: the one the board names, else the newest.
-    private var leadSessions: [String: HostSession] {
-        Self.leadSessions(host.sessions) { names.board($0).leadSession }
+    /// The live window sessions that are leads, by root, to `then` on the main thread. Where a replaced lead runs on
+    /// beside the one that replaced it: the one the board names, else the newest. The board is read off the main thread
+    /// (`LeadFiles.names`): even its stat waited seconds on a busy disk (hang-20261027-175604).
+    private func readLeadSessions(then: @escaping ([String: HostSession]) -> Void) {
+        let sessions = host.sessions
+        reads.async({ files in Self.leadSessions(sessions) { files.names.board($0).leadSession } }, then: then)
     }
 
     /// The live window sessions among `sessions` that are leads, by root; `named` reads the lead session a root's board
@@ -527,13 +526,26 @@ final class LeadController: ObservableObject {
     }
 
     private func startLead(root: String, goal: String?, show: Bool, askAboutMovedHead: Bool) {
-        guard let running = leadSessions[root] else {
+        // A relaunched app's session list is empty until the host's welcome: no sign no lead runs. Held until then, as
+        // the sessions read below are the ones listed now.
+        if host.state == .connecting {
+            pendingStarts[root] = (goal, show, askAboutMovedHead)
+            return
+        }
+        readLeadSessions { [weak self] running in
+            self?.startLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead, running: running[root])
+        }
+    }
+
+    /// `running`: the project's live lead session, as its board names it.
+    private func startLead(root: String, goal: String?, show: Bool, askAboutMovedHead: Bool, running: HostSession?) {
+        guard let running else {
             if Self.plan(hostState: host.state, running: nil, holdsRole: nil, fromUser: askAboutMovedHead) == .wait {
                 // A relaunched app's session list is empty until the host's welcome: that's no sign no lead runs.
                 pendingStarts[root] = (goal, show, askAboutMovedHead)
                 return
             }
-            return prepareLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead)
+            return prepareLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead, running: nil)
         }
         // Whether it holds its role, the vault says (off the main thread: it's a call to the host); held, it's bound
         // to its session again, as at a relaunch.
@@ -547,13 +559,13 @@ final class LeadController: ObservableObject {
                 case .wait:
                     self.pendingStarts[root] = (goal, show, askAboutMovedHead)
                 case .start:
-                    self.prepareLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead)
+                    self.prepareLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead, running: running)
                 case .show(let id):
                     if let goal { self.deliver("New goal: \(goal)", from: Self.commandLine, root: root) }
                     if show { self.select(id) }
                 case .askToReplace(let id):
                     if self.askToReplace(root: root, running: running) {
-                        self.prepareLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead)
+                        self.prepareLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead, running: running)
                     } else if show {
                         self.select(id)
                     }
@@ -576,9 +588,8 @@ final class LeadController: ObservableObject {
     private func keepRunningLeads() {
         guard host.state != .connecting, !keepingRunning else { return }
         keepingRunning = true
-        // Which lead holds each root's role, from its board read off the main thread (see `LeadFiles.names`).
-        let sessions = host.sessions
-        reads.async({ files in Self.leadSessions(sessions) { files.names.board($0).leadSession } }) { [weak self] running in
+        // Which lead holds each root's role, from its board read off the main thread.
+        readLeadSessions { [weak self] running in
             guard let self else { return }
             self.keepingRunning = false
             guard self.host.state != .connecting else { return }
@@ -606,7 +617,8 @@ final class LeadController: ObservableObject {
         }
     }
 
-    private func prepareLead(root: String, goal: String?, show: Bool, askAboutMovedHead: Bool) {
+    /// `running`: the lead this start may replace.
+    private func prepareLead(root: String, goal: String?, show: Bool, askAboutMovedHead: Bool, running: HostSession?) {
         // The lead's vault lives in the session host: an older one still serving its sessions can't hold it (and
         // one too old to hand over stays until restarted).
         if case .outdated = host.state, !host.hostCapabilities.contains(HostProtocol.Capability.leadVault) {
@@ -619,8 +631,7 @@ final class LeadController: ObservableObject {
         let boardStore = BoardStore(root: root)
         let vault = self.vault
         let (inbox, home) = (self.inbox, self.home)
-        // The lead this start may replace, and where its conversation is: the new lead reads its last turns.
-        let running = leadSessions[root]
+        // Where the conversation of the lead this start may replace is: the new lead reads its last turns.
         let transcripts = Dictionary(store.sessions.compactMap { session in
             session.hostID.flatMap { id in session.transcriptPath.map { (id.uuidString, $0) } }
         }, uniquingKeysWith: { $1 })
@@ -1170,7 +1181,7 @@ final class LeadController: ObservableObject {
     /// A slot held long: to each running lead, as the witness.
     func lookAtHeavySlots() {
         guard let text = heavySlots?.look() else { return }
-        for root in leadSessions.keys { deliver(text, from: .system("witness"), root: root) }
+        for root in leadRoots { deliver(text, from: .system("witness"), root: root) }
     }
 
     /// Looks once a minute from now on for leads refused for the Mac's room or load that have room now.
@@ -1199,17 +1210,19 @@ final class LeadController: ObservableObject {
     /// read off the main thread for their compactions.
     func lookAtPolicy() {
         guard let watch = policyWatch else { return }
-        let running = leadSessions
-        let ids = Set(running.values.map(\.id))
-        let transcripts = Dictionary(store.sessions.compactMap { session in
-            session.hostID.flatMap { id in ids.contains(id) ? session.transcriptPath.map { (id.uuidString, $0) } : nil }
-        }, uniquingKeysWith: { $1 })
-        DispatchQueue.global(qos: .utility).async { [weak self] in
-            let compactions = transcripts.compactMapValues { TranscriptTail.lastCompaction(url: URL(fileURLWithPath: $0)) }
-            DispatchQueue.main.async {
-                guard let self, let news = watch.look(running: running.values.map(\.id.uuidString), compactions: compactions) else { return }
-                for (root, session) in running where news.leads.contains(session.id.uuidString) {
-                    self.deliver(news.text, from: .system("witness"), root: root)
+        readLeadSessions { [weak self] running in
+            guard let self else { return }
+            let ids = Set(running.values.map(\.id))
+            let transcripts = Dictionary(self.store.sessions.compactMap { session in
+                session.hostID.flatMap { id in ids.contains(id) ? session.transcriptPath.map { (id.uuidString, $0) } : nil }
+            }, uniquingKeysWith: { $1 })
+            DispatchQueue.global(qos: .utility).async { [weak self] in
+                let compactions = transcripts.compactMapValues { TranscriptTail.lastCompaction(url: URL(fileURLWithPath: $0)) }
+                DispatchQueue.main.async {
+                    guard let self, let news = watch.look(running: running.values.map(\.id.uuidString), compactions: compactions) else { return }
+                    for (root, session) in running where news.leads.contains(session.id.uuidString) {
+                        self.deliver(news.text, from: .system("witness"), root: root)
+                    }
                 }
             }
         }
@@ -1218,7 +1231,7 @@ final class LeadController: ObservableObject {
     /// A hold on battery, or the resume after one: to each running lead, as the witness.
     func lookAtPower() {
         guard let text = power?.look() else { return }
-        for root in leadSessions.keys {
+        for root in leadRoots {
             deliver(text, from: .system("witness"), root: root)
             // The lead's tool server looks again at what it held (see `LeadAdvance`).
             LeadAdvance.nudge(root: root)
@@ -1229,7 +1242,7 @@ final class LeadController: ObservableObject {
     /// watch_app_logs: true, as VibeSwitcher's report ("app health"); no other lead gets it. False when no running
     /// lead's project has it on (the watcher tries again later).
     func tellAppHealth(_ text: String) -> Bool {
-        let roots = Self.appHealthRoots(Set(leadSessions.keys).union(boards.keys))
+        let roots = Self.appHealthRoots(leadRoots.union(boards.keys))
         for root in roots { deliver(text, from: .system(AppHealth.sender), root: root) }
         return !roots.isEmpty
     }
@@ -1243,7 +1256,7 @@ final class LeadController: ObservableObject {
 
     /// The stranded role sessions, in every project: to each running lead, as the witness (its team's, so no alert).
     private func tellStranded(_ text: String) {
-        for root in leadSessions.keys { deliver(text, from: .system("witness"), root: root) }
+        for root in leadRoots { deliver(text, from: .system("witness"), root: root) }
     }
 
     /// A task merged or abandoned: its ended workers and verifiers leave the session list (everywhere it's shown:

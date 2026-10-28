@@ -143,6 +143,11 @@ struct ChatView: View {
     @State private var didInitialScroll = false
     /// Scrolled to where it opens, shown the turn after (once that scroll is laid out).
     @State private var placing = false
+    /// The stretch of the conversation accessibility sees (from the top of the rows): what's on screen and a screen
+    /// either side; nil until the scroll view says where it is. Moved only as what's on screen nears its edge.
+    @State private var exposed: ClosedRange<Double>?
+    /// The rows out of `exposed` (`ChatExposure`), made again as the band moves or the rows' tops do.
+    @State private var unexposed: Set<String> = []
     /// With Reduce Motion, scrolls jump instead of gliding.
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.chatFolder) private var folder
@@ -181,6 +186,7 @@ struct ChatView: View {
                             ChatRows(items: chunk.items, chat: chat, expanded: chat.expanded,
                                      current: chunk.items.contains { $0.id == current } ? current : nil,
                                      matches: matches.isEmpty ? [] : matches.intersection(chunk.items.map(\.id)),
+                                     unexposed: unexposed.isEmpty ? [] : unexposed.intersection(chunk.items.map(\.id)),
                                      agent: row?.markKind ?? .agent(.claude), rowID: row?.draftKey, canSend: live,
                                      resend: resend) { image in
                                          viewerRoom = ImageViewerLayout.room(over: NSApp.keyWindow)
@@ -256,11 +262,21 @@ struct ChatView: View {
                     Color.clear.frame(height: 1).id("bottom")
                 }
                 .coordinateSpace(name: RowTops.space)
-                .onPreferenceChange(RowTops.self) { tops in chat.rowTops = tops.mapValues(Double.init) }
-                .background(ScrollProbe { top, atEnd in
+                .onPreferenceChange(RowTops.self) { tops in
+                    chat.rowTops = tops.mapValues(Double.init)
+                    DispatchQueue.main.async { exposeRows() }
+                }
+                .background(ScrollProbe { top, height, atEnd in
                     chat.visibleTop = top
                     chat.atBottom = atEnd
                     bottom.set(atEnd)
+                    // Out of the view's update: the probe reports from layout too.
+                    if let band = ChatExposure.band(exposed, top: top, height: height) {
+                        DispatchQueue.main.async {
+                            if exposed != band { exposed = band }
+                            exposeRows()
+                        }
+                    }
                 })
                 .padding(.horizontal, 22).padding(.vertical, 16)
                 .frame(maxWidth: 900)
@@ -332,6 +348,12 @@ struct ChatView: View {
         .sheet(item: $viewing) { image in ImageViewer(image: image, room: viewerRoom) { viewing = nil } }
     }
 
+    /// The rows accessibility doesn't see, from where they are now and the band.
+    private func exposeRows() {
+        let hidden = ChatExposure.hidden(tops: chat.rowTops, exposed: exposed)
+        if hidden != unexposed { unexposed = hidden }
+    }
+
     /// The conversation out of sight: being laid out, or just scrolled to where it opens.
     private var hidden: Bool { chat.state == .ready && (chat.assembling || placing) }
 
@@ -376,6 +398,8 @@ private struct ChatRows: View, Equatable {
     /// The search match shown, and the block's other matches.
     let current: String?
     let matches: Set<String>
+    /// The rows accessibility doesn't see (`ChatExposure`).
+    let unexposed: Set<String>
     let agent: MarkKind
     let rowID: String?
     let canSend: Bool
@@ -384,7 +408,7 @@ private struct ChatRows: View, Equatable {
 
     static func == (a: ChatRows, b: ChatRows) -> Bool {
         a.items == b.items && a.expanded == b.expanded && a.current == b.current && a.matches == b.matches && a.agent == b.agent
-            && a.rowID == b.rowID && a.canSend == b.canSend
+            && a.rowID == b.rowID && a.canSend == b.canSend && a.unexposed == b.unexposed
     }
 
     var body: some View {
@@ -394,6 +418,8 @@ private struct ChatRows: View, Equatable {
                              canSend: canSend, resend: resend, openImage: openImage)
                     .equatable()
                     .id(item.id)
+                    .accessibilityHidden(unexposed.contains(item.id))
+                    .environment(\.chatRowUnexposed, unexposed.contains(item.id))
                     .padding(.horizontal, 6).padding(.vertical, item.isTools ? 2 : 6)
                     .background {
                         // Only on a search match: a shape on every row is that much more to lay out.
@@ -429,16 +455,17 @@ private struct RowTops: PreferenceKey {
     }
 }
 
-/// Reports where the scroll view around it is: the top of what's visible (from the top of this view) and whether
-/// the end is on screen. Read from AppKit as you scroll; the stack is eager, so its rows don't appear and disappear.
+/// Reports where the scroll view around it is: the top of what's visible (from the top of this view), its height and
+/// whether the end is on screen. Read from AppKit as you scroll; the stack is eager, so its rows don't appear and
+/// disappear.
 private struct ScrollProbe: NSViewRepresentable {
-    let report: (_ top: Double, _ atEnd: Bool) -> Void
+    let report: (_ top: Double, _ height: Double, _ atEnd: Bool) -> Void
 
     func makeNSView(context: Context) -> ProbeView { ProbeView() }
     func updateNSView(_ view: ProbeView, context: Context) { view.report = report }
 
     final class ProbeView: NSView {
-        var report: ((Double, Bool) -> Void)?
+        var report: ((Double, Double, Bool) -> Void)?
         private weak var clip: NSClipView?
         override var isFlipped: Bool { true }
 
@@ -457,10 +484,38 @@ private struct ScrollProbe: NSViewRepresentable {
         @objc private func changed() {
             guard let clip else { return }
             let visible = convert(clip.bounds, from: clip)
-            report?(Double(visible.minY), ChatWindow.atEnd(contentHeight: Double(bounds.height), visibleBottom: Double(visible.maxY)))
+            report?(Double(visible.minY), Double(visible.height),
+                    ChatWindow.atEnd(contentHeight: Double(bounds.height), visibleBottom: Double(visible.maxY)))
         }
 
         override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    }
+}
+
+/// The rows of a long chat accessibility sees: those on screen and a screen either side, the rest hidden. SwiftUI keeps
+/// its accessibility tree up to date while a client watches the app (a window manager, a screen or text tool), and each
+/// update walked every node of every shown row: with a lead's chat of 290 entries shown and its window not key, the app
+/// froze for 3-25 s at a time (hang-20261027-200338, 201159, 201459, 202707). The rows keep their ids and labels; the
+/// band moves as you scroll (VoiceOver's moves scroll it too), only when what's on screen nears its edge.
+enum ChatExposure {
+    /// The band to expose now, or nil when `current` still covers what's on screen with half a screen to spare.
+    static func band(_ current: ClosedRange<Double>?, top: Double, height: Double) -> ClosedRange<Double>? {
+        guard height > 0 else { return nil }
+        if let current, current.lowerBound <= top - height / 2, top + height * 1.5 <= current.upperBound { return nil }
+        return (top - height)...(top + height * 2)
+    }
+
+    /// The rows outside `exposed`, by where each starts (`tops`; the next one's start is where it ends). A row not laid
+    /// out yet is seen, and so is every row before the scroll view has said where it is.
+    static func hidden(tops: [String: Double], exposed: ClosedRange<Double>?) -> Set<String> {
+        guard let exposed else { return [] }
+        let rows = tops.sorted { $0.value < $1.value }
+        var hidden = Set<String>()
+        for (index, row) in rows.enumerated() {
+            let end = rows.indices.contains(index + 1) ? rows[index + 1].value : .infinity
+            if end < exposed.lowerBound || row.value > exposed.upperBound { hidden.insert(row.key) }
+        }
+        return hidden
     }
 }
 

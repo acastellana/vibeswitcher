@@ -246,6 +246,25 @@ struct ReplacedLeadRoutingTests {
         #expect(looks.roots(main: false).contains(world.root))
     }
 
+    /// A start, and the once-a-minute notices (the working policy here), find which of two leads sharing a root holds
+    /// its role off the main thread: they read the board on it, as the freezes of 10-27 showed the other paths did.
+    @Test func startsAndTheNoticesReadWhichLeadHoldsTheRoleOffTheMainThread() async throws {
+        let world = try world()
+        defer { world.stop() }
+        let old = try await oldLead(in: world)
+        let new = try await replace(in: world, old: old)
+        #expect(await until { world.controller.replacedLeads[old.id]?.live == new.id })
+        let looks = Looks()
+        world.controller.boardLooked = { looks.add($0) }
+        world.controller.watchPolicy()
+        world.controller.lookAtPolicy()
+        // The new lead holds the role: a start shows it, and starts nothing.
+        world.controller.startLead(in: world.root)
+        #expect(await until { looks.roots(main: false).filter { $0 == world.root }.count >= 2 })
+        #expect(looks.roots(main: true) == [])
+        #expect(world.host.sessions.count == 2)
+    }
+
     /// A message for the lead (here, typed into the replaced one) finds the lead the board names off the main thread,
     /// and goes into its inbox there.
     @Test func aMessageForTheLeadReadsItsBoardOffTheMainThread() async throws {

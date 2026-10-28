@@ -51,7 +51,10 @@ private struct ChatTextRepresentable: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ view: ChatTextView, context: Context) { update(view) }
+    func updateNSView(_ view: ChatTextView, context: Context) {
+        update(view)
+        view.unexposed = context.environment.chatRowUnexposed
+    }
 
     static func dismantleNSView(_ view: ChatTextView, coordinator: ()) { view.tearDown() }
 
@@ -789,6 +792,12 @@ final class ChatLayoutManager: NSLayoutManager {
 /// One message's text. Not editable; selectable, and a drag goes on into the messages above or below.
 final class ChatTextView: NSTextView {
     private(set) var content: ChatTextContent?
+    /// Its row is out of accessibility's sight (`ChatExposure`): neither it nor its code blocks' buttons are elements.
+    var unexposed = false {
+        didSet { if unexposed != oldValue { NSAccessibility.post(element: self, notification: .layoutChanged) } }
+    }
+    override func isAccessibilityElement() -> Bool { unexposed ? false : super.isAccessibilityElement() }
+    override func accessibilityChildren() -> [Any]? { unexposed ? [] : super.accessibilityChildren() }
     var extraMenu: [ChatTextMenuItem] = []
     var showAll: (Int) -> Void = { _ in }
     /// Where ⌘C and Copy write (a test's own pasteboard).

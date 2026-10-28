@@ -442,6 +442,27 @@ struct TeamRowsTests {
         #expect(DecisionFeed.tick([decisions[0]], now: Self.now.timeIntervalSince1970, reduceMotion: false) == 30)
     }
 
+    /// The feed's body asks for its split on every update (hang-20261027-202749): it's made again only when the
+    /// decisions, the clock or Reduce Motion change, and the decisions are sorted again only when they change.
+    @Test func theFeedsSplitIsKeptByItsInputs() {
+        var decisions = [Self.decision("Old", ago: 3_600), Self.decision("Fading", ago: 150), Self.decision("New", ago: 10)]
+        let cache = DecisionFeed.Cache()
+        let now = Self.now.timeIntervalSince1970
+        func same(_ a: DecisionFeed.Split, _ b: DecisionFeed.Split) -> Bool {
+            a.recent.map(\.decision) == b.recent.map(\.decision) && a.recent.map(\.phase) == b.recent.map(\.phase) && a.earlier == b.earlier
+        }
+        for _ in 0..<5 { #expect(same(cache.split(decisions, now: now, reduceMotion: false), DecisionFeed.split(decisions, now: now, reduceMotion: false))) }
+        #expect(cache.made == 1 && cache.sorts == 1)
+        // A tick of the clock: split again, not sorted again.
+        #expect(same(cache.split(decisions, now: now + 1, reduceMotion: false), DecisionFeed.split(decisions, now: now + 1, reduceMotion: false)))
+        #expect(same(cache.split(decisions, now: now + 1, reduceMotion: true), DecisionFeed.split(decisions, now: now + 1, reduceMotion: true)))
+        #expect(cache.made == 3 && cache.sorts == 1)
+        // A new decision: sorted again.
+        decisions.append(Self.decision("Newest", ago: 1))
+        #expect(cache.split(decisions, now: now + 1, reduceMotion: false).recent.first?.decision.text == "Newest")
+        #expect(cache.made == 4 && cache.sorts == 2)
+    }
+
     @Test func aDecisionReadsAsOneShortLine() {
         let short = Self.decision("Run overlapping tasks in parallel", ago: 0)
         #expect(DecisionFeed.line(short, summary: "ignored") == "Decided: run overlapping tasks in parallel")
