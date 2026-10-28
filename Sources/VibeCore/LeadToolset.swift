@@ -2216,7 +2216,9 @@ public final class LeadToolset: MCPToolset {
             let flakes = flaked.map { $0.plan.tests.isEmpty ? [MergeRerun.unnamed] : $0.plan.tests } ?? []
             // Each flaky test's failure lines, where every session can read them (the merge's log is in the vault).
             let flakeLines = flaked.map { MergeRerun.evidence(in: $0.failed, tests: $0.plan.tests) } ?? [:]
-            let flakeLog = flakeLines.isEmpty ? nil : saveFlakeEvidence(flakeLines, tests: flakes, slug: slug, commit: tested)
+            // One moment for the file's day and the ledger's entry.
+            let flakedAt = Date()
+            let flakeLog = flakeLines.isEmpty ? nil : saveFlakeEvidence(flakeLines, tests: flakes, slug: slug, commit: tested, at: flakedAt)
             // Its receipt, written with the merge: its transcripts read before the board's lock is taken.
             let usage = receiptUsage(task)
             let brought = Int(Git.run(["rev-list", "--count", "\(current)..\(tested)"], in: root).output)
@@ -2231,7 +2233,7 @@ public final class LeadToolset: MCPToolset {
                 guard !flakes.isEmpty else { return [] }
                 // The flake ledger, and a task for each test that flaked once too often (once: `recordFlakes`), unless
                 // an open task names it already: its count goes in that task's context.
-                return board.recordFlakes(flakes, task: slug, commit: tested, now: Date().timeIntervalSince1970, evidence: flakeLines,
+                return board.recordFlakes(flakes, task: slug, commit: tested, now: flakedAt.timeIntervalSince1970, evidence: flakeLines,
                                           log: flakeLog).map { test, _, counted in
                     if let open = board.openTask(naming: test), let index = board.taskIndex(open.id) {
                         let context = board.tasks[index].contract.context.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2655,8 +2657,8 @@ public final class LeadToolset: MCPToolset {
     /// Saves a merge's test output where the lead can read it; its path, or nil when it couldn't be saved.
     /// Writes a merge's flake evidence to `MergeRerun.evidenceFile` (0600, in a 0700 folder in the repository's
     /// ignored `.vibeswitcher/`); its path, or nil when it couldn't be written (the ledger keeps the lines anyway).
-    private func saveFlakeEvidence(_ evidence: [String: [String]], tests: [String], slug: String, commit: String) -> String? {
-        let file = MergeRerun.evidenceFile(root: root, task: slug, at: Date())
+    private func saveFlakeEvidence(_ evidence: [String: [String]], tests: [String], slug: String, commit: String, at date: Date) -> String? {
+        let file = MergeRerun.evidenceFile(root: root, task: slug, at: date)
         let text = MergeRerun.evidenceLog(task: slug, commit: commit, evidence: evidence, tests: tests)
         guard (try? VibePaths.ensurePrivate(file.deletingLastPathComponent(), within: URL(fileURLWithPath: store.folder))) != nil,
               (try? VibePaths.writePrivate(Data(text.utf8), to: file)) != nil else { return nil }
