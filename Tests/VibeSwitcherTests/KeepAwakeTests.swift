@@ -300,7 +300,8 @@ struct KeepAwakeTests {
         try #require(slow.started.wait(timeout: .now() + 5) == .success)
         let awake = KeepAwake(power: SystemPower(source: source))
         awake.mode = { .onPower }
-        let scratch = Scratch().url("keep-awake-slow-power")
+        let temp = Scratch()
+        let scratch = temp.url("keep-awake-slow-power")
         try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
         let host = HostClient(socketPath: scratch.appendingPathComponent("no-host.sock").path)
         let store = SessionStore(scanner: SessionScanner(processes: { [:] }, stateDir: { scratch }, cwd: { _ in nil }, arguments: { _ in [] }))
