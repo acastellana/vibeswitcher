@@ -38,6 +38,8 @@ struct PhoneNeedsYouTests {
         var label: String
         var event: String
         var cwd: String
+        /// Where the agent's hooks say it is now, when it `cd`'d away from `cwd` (its window session's folder).
+        var hookCwd: String? = nil
     }
 
     /// A store with each of `windows` as a Claude window session, its hooks' last event `event`, labelled as the lead
@@ -55,6 +57,7 @@ struct PhoneNeedsYouTests {
             var hook = HookState(agent: .claude, tty: window.tty, lastEvent: window.event,
                                  lastEventAt: Date().addingTimeInterval(-30).timeIntervalSince1970)
             hook.agentPid = shell + 1
+            hook.cwd = window.hookCwd
             try hook.save(to: stateDir.appendingPathComponent("\(window.tty).json"))
         }
         let cwds = Dictionary(uniqueKeysWithValues: table.map { proc in (proc.pid, windows.first { $0.tty == proc.tty }?.cwd ?? "/") })
@@ -141,6 +144,20 @@ struct PhoneNeedsYouTests {
         #expect(row["status"] as? String == SessionStatus.working.rawValue)
         #expect(row["statusLabel"] as? String == LeadTeams.waitsOnLeadLabel)
         #expect(row["menu"] == nil, "its lead answers the worker's prompt, not the phone")
+    }
+
+    @Test func aWorkerThatCdsAwayStillShowsItsTaskUnderItsLead() async throws {
+        let worker = Window(tty: "ttys974", label: "Worker: fix-login", event: "PreToolUse", cwd: "/r/acme/.vibeswitcher/worktrees/fix-login",
+                            hookCwd: "/tmp/scratch")
+        let store = try await store([worker])
+        #expect(store.sessions.first { $0.tty == worker.tty }?.cwd == "/tmp/scratch")
+        let (access, token, done) = try serve(store, reads: Box([]))
+        defer { done() }
+
+        let row = try row(try await get(access, "/api/state", token: token), worker.tty)
+        #expect(row["role"] as? String == "worker")
+        #expect(row["lead"] as? String == PhoneLeads.id(root: "/r/acme"))
+        #expect(row["teamTask"] as? String == "fix-login")
     }
 
     @Test func yourOwnSessionsPromptIsStillOffered() async throws {

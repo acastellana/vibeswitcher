@@ -40,16 +40,22 @@ public enum SessionTeams {
         return Split(own: own, teams: teams)
     }
 
+    /// The folder a team member is told from: where its window session was started (its worktree), else the agent's
+    /// cwd. Not `cwd` alone: a worker that ran `cd` into a scratch folder would lose its repository and task.
+    public static func folder(of session: Session) -> String? { session.startFolder ?? session.cwd }
+
     /// The repository a team member works for, by its worktree ("acme" for …/acme/.vibeswitcher/worktrees/k), else
     /// its own project.
     public static func project(of session: Session) -> String {
-        session.cwd.flatMap(LeadTeams.root(ofWorktree:)).map { ($0 as NSString).lastPathComponent } ?? session.project
+        folder(of: session).flatMap(LeadTeams.root(ofWorktree:)).map { ($0 as NSString).lastPathComponent } ?? session.project
     }
+
+    /// The task a team member's worktree is for ("fix-login"), nil outside a worktree.
+    public static func task(of session: Session) -> String? { folder(of: session).flatMap(LeadTeams.task(ofWorktree:)) }
 
     /// "acme · worker fix-login": what an alert calls a team member (its worktree's task), nil for your own sessions.
     public static func name(of session: Session) -> String? {
         guard session.isTeamMember, let role = session.teamRole else { return nil }
-        let task = session.cwd.flatMap(LeadTeams.task(ofWorktree:))
-        return "\(project(of: session)) · \(role.rawValue)" + (task.map { " \($0)" } ?? "")
+        return "\(project(of: session)) · \(role.rawValue)" + (task(of: session).map { " \($0)" } ?? "")
     }
 }

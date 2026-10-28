@@ -647,7 +647,7 @@ final class PhoneAccess: ObservableObject {
             if let role = session.teamRole, let lead = PhoneLeads.id(of: session) {
                 row["role"] = role.rawValue
                 row["lead"] = lead
-                if role != .lead, let task = session.cwd.flatMap(LeadTeams.task(ofWorktree:)) { row["teamTask"] = Redaction.secrets(in: task) }
+                if role != .lead, let task = SessionTeams.task(of: session) { row["teamTask"] = Redaction.secrets(in: task) }
             }
             return row
         }
