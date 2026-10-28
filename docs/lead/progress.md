@@ -1824,3 +1824,10 @@
 - 2026-10-28 14:41 Automatically (auto_advance): Merged review-and-fix-the (Review and fix the mid-chat notifications: how reports, wakes and user messages reach a lead (and show in the chat)) into project-lead at d4b5170f, on its passing audit and the full test run.
 - 2026-10-28 14:42 Audit of verifier-trust-check: complete, clean, round 3: 2 Important closed, 3 Nit (1 open)
 - 2026-10-28 14:49 Merged keep-flake-evidence-out: Keep flake evidence out of board.json: the ledger stores only the evidence file's path
+- 2026-10-28 14:49 Automatically (auto_advance): Merged keep-flake-evidence-out (Keep flake evidence out of board.json: the ledger stores only the evidence file's path) into project-lead at 681fb4d3, on its passing audit and the full test run.
+- 2026-10-28 14:49 Automatically (auto_advance): Cleaned up review-and-fix-the (freed 1.3 GB of build output and temporary folders). It stays done.
+- 2026-10-28 14:49 Automatically (auto_advance): Cleaned up keep-flake-evidence-out; ended pid 85985 (Worker: Keep flake evidence out of board.json: the ledger stores only the evidence file's path) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-28 15:05 Planned docs-overhaul-a-clear: Docs overhaul: a clear README and a docs/ guide set that match today's app
+- 2026-10-28 15:05 Started a worker on docs-overhaul-a-clear
+- 2026-10-28 15:07 Merged verifier-trust-check: Keep agent config copies out of worktrees' build folders (ui-bench base, old-host builds), and leave the audit's trust scan strict
+- 2026-10-28 15:07 Flaky in verifier-trust-check's merge: answersProgramStatusQueriesAndKeepsTheStatus() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
