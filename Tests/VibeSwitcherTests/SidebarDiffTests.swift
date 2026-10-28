@@ -20,6 +20,8 @@ import Testing
 @Suite(.serialized)
 struct SidebarDiffTests {
     static let now = Date()
+    /// Each test's scratch folder, removed when the test's suite instance goes: whatever way the test ends.
+    let scratch = Scratch()
 
     /// One window session: its host record and, while its agent runs, the scan's status.
     struct Member {
@@ -121,7 +123,7 @@ struct SidebarDiffTests {
         members[2].host.exit = HostSession.Exit(status: 129, at: Self.now)
         Self.feed(model, members, at: Self.now)
         model.endedOpen = true
-        let (hosting, close) = try await Self.show(model, scratch: Scratch().url("sidebar-groups"))
+        let (hosting, close) = try await Self.show(model, scratch: scratch.url("sidebar-groups"))
         defer { close() }
         for grouping in [WindowGrouping.attention, .projects] {
             model.grouping = grouping
@@ -166,7 +168,7 @@ struct SidebarDiffTests {
                        Self.member("Gamma", project: "tools", label: "Shell")]
         let lead = "host:\(members[0].host.id)"
         Self.feed(model, members, at: Self.now)
-        let (hosting, close) = try await Self.show(model, scratch: Scratch().url("sidebar-diff"))
+        let (hosting, close) = try await Self.show(model, scratch: scratch.url("sidebar-diff"))
         defer { close() }
 
         let statuses: [SessionStatus] = [.needsInput, .working, .done, .idle]
