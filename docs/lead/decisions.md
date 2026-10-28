@@ -230,3 +230,7 @@ Two verifier runs on PR #1 were reported as quit; one was alive and the lead kil
 
 The user asked for the install. The census regression comes from PR #1's filtered hello and defeats the shared Mac-wide limit, so it takes priority over the other planned work.
 
+## 2026-10-28 12:38:37 2026-10-28: installed project-lead three times today, all at the user's answers: 07:58 (PR #1 and more), 11:12 (the archive, memory, census, issue #2, sidebar, tool-server log, host backlog) and 11:38 (the big freeze fix). The fourth install at 12:37 is 69c62b3: the MCP keeper, the multi-line Run button, the main-thread fix and flake de-duplication. The user pushed project-lead and main to 69c62b3, and closed PR #1 and issue #2 on GitHub (lead-drafted notes). Pending: the user restarts this lead once, so its own tool server runs under the keeper; until then a /mcp reconnect may still be needed.
+
+Records what's installed and pushed, and the one step left for the keeper to cover the lead's own session.
+

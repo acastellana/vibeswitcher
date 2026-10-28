@@ -1764,3 +1764,10 @@
 - 2026-10-28 12:26 Started a worker on fix-the-flaky-test-4
 - 2026-10-28 12:26 Automatically (auto_advance): Started a worker on fix-the-flaky-test-4 (Fix the flaky test indexLockIsWaitedForAndAFailureIsReported()).
 - 2026-10-28 12:32 Merged main-thread-overloaded: Main thread overloaded while an alert is up: SessionStore.apply, LeadController.refreshed → Redaction.secrets, SwiftUI re-render (stalls of 5–95 s)
+- 2026-10-28 12:32 Automatically (auto_advance): Merged main-thread-overloaded (Main thread overloaded while an alert is up: SessionStore.apply, LeadController.refreshed → Redaction.secrets, SwiftUI re-render (stalls of 5–95 s)) into project-lead at 3b7ff47b, on its passing audit and the full test run.
+- 2026-10-28 12:32 Raised hang-reports-are-pruned to audit (the risk check, at a794da1f): it has code that deletes or rewrites files or data (Sources/VibeSwitcher/HangWatchdog.swift: for ext in ["txt", "log"] { try? fm.removeItem(at: folder.appendingPathComponent)
+- 2026-10-28 12:32 Automatically (auto_advance): Started the audit of hang-reports-are-pruned at a794da1f (The risk check raised it to audit: it has code that deletes or rewrites files or data (Sources/VibeSwitcher/HangWatchdog.swift: for ext in ["txt", "log"] { try? fm.removeItem(at: folder.appendingPathComponent)).
+- 2026-10-28 12:32 Automatically (auto_advance): Cleaned up main-thread-overloaded; ended pid 2968 (Worker: Main thread overloaded while an alert is up: SessionStore.apply, LeadController.refreshed → Redaction.secrets, SwiftUI re-render (stalls of 5–95 s)) (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-10-28 12:41 Automatically (auto_advance): Started the audit of fix-the-flaky-test-4 at 960845a1 (It touches sensitive_paths (Sources/VibeCore/Worktrees.swift), so it's treated as audit whatever its review says).
+- 2026-10-28 12:41 Started a worker on verifier-trust-check
+- 2026-10-28 12:41 Automatically (auto_advance): Started a worker on verifier-trust-check (Verifier trust check trips on agent files inside .build (ui-bench.sh's base checkout copies AGENTS.md/CLAUDE.md)).
