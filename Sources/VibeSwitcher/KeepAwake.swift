@@ -1,5 +1,4 @@
 import Foundation
-import IOKit.ps
 import IOKit.pwr_mgt
 import VibeCore
 
@@ -27,8 +26,17 @@ protocol PowerRuntime: AnyObject {
     var onACPower: Bool { get }
 }
 
-/// The real one: `pmset -g assertions` lists what it holds.
+/// The real one: `pmset -g assertions` lists what it holds. The power source is the one `source` last read off the
+/// main thread (see `PowerSourceCache`): asking IOKit here froze the window for 6.4 s. The app's cache unless one is
+/// given, taken at the first look that asks (benches and tests that hold nothing read nothing).
 final class SystemPower: PowerRuntime {
+    private let given: PowerSourceCache?
+    private lazy var source = given ?? .shared
+
+    init(source: PowerSourceCache? = nil) {
+        given = source
+    }
+
     func hold(_ name: String) -> UInt32? {
         var id = IOPMAssertionID(0)
         let result = IOPMAssertionCreateWithName(kIOPMAssertionTypePreventUserIdleSystemSleep as CFString,
@@ -40,12 +48,7 @@ final class SystemPower: PowerRuntime {
         IOPMAssertionRelease(id)
     }
 
-    var onACPower: Bool {
-        // No power source information: taken as power (a desktop Mac says AC anyway).
-        guard let snapshot = IOPSCopyPowerSourcesInfo()?.takeRetainedValue(),
-              let type = IOPSGetProvidingPowerSourceType(snapshot)?.takeUnretainedValue() else { return true }
-        return (type as String) != kIOPMBatteryPowerKey && (type as String) != kIOPMUPSPowerKey
-    }
+    var onACPower: Bool { source.onACPower }
 }
 
 /// Keeps the Mac awake while a lead's team works (2026-10-19 01:38, the Mac went to sleep under a merge's tests, a

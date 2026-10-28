@@ -66,7 +66,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         controller.alert = { [weak self] event in self?.notifier?.post(event) }
         controller.select = { [weak self] id in self?.showMainWindow(select: id) }
         controller.keepAwake.mode = { [weak self] in self?.preferences.keepAwake ?? .never }
-        controller.watchPower(limit: { [weak self] in self?.preferences.batteryHoldBelow ?? PowerWatch.defaultLimit }) { SystemPower.state() }
+        // Read off the main thread from now on, and at each change the system posts (see `PowerSourceCache`).
+        let power = PowerSourceCache.shared
+        controller.watchPower(limit: { [weak self] in self?.preferences.batteryHoldBelow ?? PowerWatch.defaultLimit }) { power.state }
         controller.watchPolicy()
         controller.watchHeavySlots()
         controller.watchRoom()

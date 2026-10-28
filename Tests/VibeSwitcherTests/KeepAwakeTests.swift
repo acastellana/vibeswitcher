@@ -261,6 +261,113 @@ struct KeepAwakeTests {
         #expect(KeepAwakeMode.allCases.map(\.label) == ["Always", "On power only", "Never"])
     }
 
+    // MARK: The power source, read off the main thread
+
+    /// A power daemon as slow as on 2026-10-28 at 17:02 (the window froze 6.4 s in `SystemPower.onACPower`): each read
+    /// waits until the test opens the gate, 5 s at most, and finds the Mac on battery.
+    final class SlowPower: @unchecked Sendable {
+        let started = DispatchSemaphore(value: 0)
+        private let gate = DispatchSemaphore(value: 0)
+        private let lock = NSLock()
+        private var count = 0
+
+        var reads: Int { lock.withLock { count } }
+
+        func read() -> PowerSourceCache.Reading {
+            lock.withLock { count += 1 }
+            started.signal()
+            _ = gate.wait(timeout: .now() + 5)
+            return PowerSourceCache.Reading(onACPower: false, state: PowerState(onBattery: true, percent: 40, at: 0))
+        }
+
+        /// Lets every read through from now on.
+        func open() { for _ in 0..<16 { gate.signal() } }
+    }
+
+    /// Waits until every read `source` was asked for so far has ended.
+    static func settle(_ source: PowerSourceCache) throws {
+        let done = DispatchSemaphore(value: 0)
+        source.settled { done.signal() }
+        try #require(done.wait(timeout: .now() + 10) == .success)
+    }
+
+    /// The freeze of 17:02 replayed: the power daemon stuck under a read, a lead's team working, the setting on power
+    /// only. A refresh on the main thread doesn't wait for it; once the read ends, the next look has what it found.
+    @MainActor @Test func aSlowPowerDaemonDoesntHoldUpALeadRefresh() throws {
+        let slow = SlowPower()
+        let source = PowerSourceCache(read: slow.read)
+        defer { slow.open() }
+        try #require(slow.started.wait(timeout: .now() + 5) == .success)
+        let awake = KeepAwake(power: SystemPower(source: source))
+        awake.mode = { .onPower }
+        let scratch = Scratch().url("keep-awake-slow-power")
+        try FileManager.default.createDirectory(at: scratch, withIntermediateDirectories: true)
+        let host = HostClient(socketPath: scratch.appendingPathComponent("no-host.sock").path)
+        let store = SessionStore(scanner: SessionScanner(processes: { [:] }, stateDir: { scratch }, cwd: { _ in nil }, arguments: { _ in [] }))
+        let leads = LeadController(host: host, store: store, vault: LeadVault(folder: scratch.appendingPathComponent("vault"), ask: { _ in throw LeadVault.Refused("none") }),
+                                   inbox: scratch, home: scratch.path, keepAwake: awake) { _ in "true" }
+        var team = Team()
+        team.set(team.worker, .working)
+        func refresh() -> TimeInterval {
+            let began = Date()
+            leads.refreshed(roots: [Self.root], fired: [:], loaded: [Self.root: team.board], decisions: [:], teams: [Self.root: team.reading], refusals: [:])
+            return Date().timeIntervalSince(began)
+        }
+        let took = refresh()
+        #expect(took < 0.05, "refreshed took \(took) s")
+        // Nothing read yet: taken as AC power, as before when the system didn't say.
+        #expect(awake.held == [Self.root])
+        #expect(slow.reads == 1)
+
+        slow.open()
+        try Self.settle(source)
+        #expect(!source.onACPower && source.state?.percent == 40)
+        #expect(refresh() < 0.05)
+        // On battery: released at the first look after the read.
+        #expect(awake.held.isEmpty)
+    }
+
+    /// However often the looks ask while the daemon is slow, one read at a time and one more queued, not a pile.
+    @Test func looksWhileAReadIsStuckQueueOneMore() throws {
+        let slow = SlowPower()
+        let source = PowerSourceCache(read: slow.read)
+        defer { slow.open() }
+        try #require(slow.started.wait(timeout: .now() + 5) == .success)
+        for _ in 0..<100 {
+            #expect(source.onACPower)
+            #expect(source.state == nil)
+        }
+        slow.open()
+        try Self.settle(source)
+        #expect(slow.reads == 2)
+        #expect(!source.onACPower)
+    }
+
+    /// A reading is read again at a look once it's older than `maxAge` (the battery's charge for the witness's minute
+    /// look), not at every look before.
+    @Test func anOldReadingIsReadAgainAtTheNextLook() throws {
+        let slow = SlowPower()
+        slow.open()
+        let source = PowerSourceCache(read: slow.read, maxAge: 30)
+        try Self.settle(source)
+        #expect(slow.reads == 1)
+        _ = source.current(now: Date().addingTimeInterval(10))
+        try Self.settle(source)
+        #expect(slow.reads == 1)
+        #expect(source.current(now: Date().addingTimeInterval(31))?.onACPower == false)
+        try Self.settle(source)
+        #expect(slow.reads == 2)
+    }
+
+    /// The app's reads the system, and registers for its changes, on the cache's queue.
+    @Test func theSystemsPowerSourceIsReadOnTheQueue() throws {
+        let source = PowerSourceCache(notifications: true)
+        try Self.settle(source)
+        let reading = try #require(source.current())
+        // A Mac without a battery has no state; one with says its charge.
+        if let state = reading.state { #expect((0...100).contains(state.percent) && state.onBattery == !reading.onACPower) }
+    }
+
     // MARK: The real assertion
 
     /// `pmset -g assertions`, all of it.
