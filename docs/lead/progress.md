@@ -1718,3 +1718,14 @@
 - 2026-10-28 11:16 Merged lead-chat-freezes-of: Lead chat freezes of 3–25 s: SwiftUI accessibility tree and session-list rebuilds on a long lead chat
 - 2026-10-28 11:16 Automatically (auto_advance): Merged lead-chat-freezes-of (Lead chat freezes of 3–25 s: SwiftUI accessibility tree and session-list rebuilds on a long lead chat) into project-lead at a30ff04b, on its passing audit and the full test run.
 - 2026-10-28 11:23 Merged fix-the-flaky-test-2: Fix the flaky test aLongLeadChatKeepsItsRowsOutOfTheKeyViewLoop() (no audit: review none)
+- 2026-10-28 11:23 Automatically (auto_advance): Merged fix-the-flaky-test-2 (Fix the flaky test aLongLeadChatKeepsItsRowsOutOfTheKeyViewLoop()) into project-lead at c45288e8, review none: on its worker's done report on c73040a5 and the full test run.
+- 2026-10-28 11:23 Automatically (auto_advance): Cleaned up lead-chat-freezes-of (freed 2.4 GB of build output and temporary folders). It stays done.
+- 2026-10-28 11:23 Automatically (auto_advance): Cleaned up fix-the-flaky-test-2; ended pid 7928 (Worker: Fix the flaky test aLongLeadChatKeepsItsRowsOutOfTheKeyViewLoop()) (freed 1.0 GB of build output and temporary folders). It stays done.
+- 2026-10-28 11:23 Started a worker on main-thread-overloaded
+- 2026-10-28 11:23 Automatically (auto_advance): Started a worker on main-thread-overloaded (Main thread overloaded while an alert is up: SessionStore.apply, LeadController.refreshed → Redaction.secrets, SwiftUI re-render (stalls of 5–95 s)), its after tasks done (lead-chat-freezes-of, app-memory-grows-to).
+- 2026-10-28 11:23 Started a worker on flake-ledger-don-t
+- 2026-10-28 11:23 Automatically (auto_advance): Started a worker on flake-ledger-don-t (Flake ledger: don't plan a "fix the flaky test" task when an open task already names that test).
+- 2026-10-28 11:24 Started a worker on lead-chat-multi-line
+- 2026-10-28 11:24 Automatically (auto_advance): Started a worker on lead-chat-multi-line (Lead chat: multi-line shell blocks (if/then/fi, { … }) get a Run button that runs them as one script, after confirming).
+- 2026-10-28 11:24 Automatically (auto_advance): Started the audit of terminalclipboardsecurit at 485e259b (Its review is audit).
+- 2026-10-28 11:31 Merged sidebardifftests-leave: SidebarDiffTests leave sidebar-diff-* and sidebar-groups-* in TMPDIR (load runs exit 1) (no audit: review none)
