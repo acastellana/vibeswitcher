@@ -2035,3 +2035,5 @@
 - 2026-10-29 20:51 Automatically (auto_advance): Started a worker on claude-dictation-records (Claude dictation records silence: Claude's mic under the session host, plus run logging and the overflowing notice).
 - 2026-10-29 21:00 Planned hold-fn-globe-to: Hold fn (Globe) to dictate in the composer, alongside ⌥Space
 - 2026-10-29 21:25 Automatically (auto_advance): Started the audit of claude-dictation-records at 4aedf74c (Its review is audit).
+- 2026-10-29 21:43 Audit of claude-dictation-records: complete, clean, round 1: 2 Nit open
+- 2026-10-29 21:49 Merged claude-dictation-records: Claude dictation records silence: Claude's mic under the session host, plus run logging and the overflowing notice
