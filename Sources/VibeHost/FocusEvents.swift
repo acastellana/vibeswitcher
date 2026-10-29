@@ -7,6 +7,10 @@ import Foundation
 struct FocusEvents {
     private(set) var on = false
 
+    init(on: Bool = false) {
+        self.on = on
+    }
+
     private enum State { case ground, escape, csi, privateMode, ignored }
     private var state = State.ground
     private var parameters: [UInt8] = []

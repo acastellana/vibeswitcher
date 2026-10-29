@@ -266,6 +266,8 @@ struct ClaudeDictationTests {
         let heard = shot("open the", [ScreenRun(row: 3, column: 2, length: 8, faint: true)])
         #expect(ClaudeVoiceScreen.seen(heard, sent: 7) == .heard)
         #expect(ClaudeVoiceScreen.seen(heard, sent: 7, dimBefore: "open the") == .nothing)
+        // Before the warmup's presses went in, a dim change is the box's own (its placeholder redrawn on focus).
+        #expect(ClaudeVoiceScreen.seen(heard, sent: ClaudeVoiceScreen.warmupPresses - 1) == .nothing)
 
         // Spaces before the caret: the warmup's two, with more Spaces sent than kept, against /voice off's.
         let caret = { (spaces: Int) in shot(String(repeating: " ", count: spaces + 1), [ScreenRun(row: 3, column: 2 + spaces, length: 1, inverse: true)]) }

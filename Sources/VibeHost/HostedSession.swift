@@ -168,8 +168,10 @@ public final class HostedSession {
     /// What a new host build needs to carry this session on (see `HostHandover`): the PTY's descriptor survives the
     /// exec, the rest is copied.
     func saved() -> HostHandover.Session {
-        HostHandover.Session(info: info, masterFD: closed ? nil : masterFD, output: ring?.replay() ?? Data(), pendingInput: pendingInput,
-                             ended: ended.map { .init(screen: $0.screen, runs: $0.runs, history: $0.history) })
+        var saved = HostHandover.Session(info: info, masterFD: closed ? nil : masterFD, output: ring?.replay() ?? Data(), pendingInput: pendingInput,
+                                         ended: ended.map { .init(screen: $0.screen, runs: $0.runs, history: $0.history) })
+        saved.focusEvents = focus.on
+        return saved
     }
 
     /// The session as the host build before this one left it. The screen and scrollback are rebuilt from the replay
@@ -187,7 +189,7 @@ public final class HostedSession {
             session.ring = nil
         } else {
             session.ring?.append(saved.output)
-            session.focus.feed(saved.output)
+            if let on = saved.focusEvents { session.focus = FocusEvents(on: on) } else { session.focus.feed(saved.output) }
             session.startParser(replay: saved.output)
         }
         guard let fd else {

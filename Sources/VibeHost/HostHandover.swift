@@ -33,6 +33,9 @@ public enum HostHandover {
         public var startedBy: UUID?
         /// The app asked for it: one of the user's (see `HostServer`'s `openedByApp`). Nil from builds before that.
         public var openedByApp: Bool?
+        /// Its program asked for focus events (see `FocusEvents`): a program asks once, and the replay seldom still
+        /// holds it. Nil from builds before that: read off `output` then.
+        public var focusEvents: Bool?
 
         public struct Ended: Codable, Equatable {
             public var screen: String

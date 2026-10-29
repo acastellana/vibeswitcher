@@ -290,6 +290,28 @@ func viewScreen(_ replay: String, cols: Int = 80, rows: Int = 24) -> String {
         #expect(all.contains { $0.contains("exit ") && $0.contains("pid \(killed.childPID)") && $0.contains("after a kill from peer pid \(getpid())") })
     }
 
+    /// A program that asked for focus events still has them after a handover, though the replay no longer holds its
+    /// ask: Claude Code asks once, and redraws past it long before.
+    @Test func focusEventsAskedForBeforeAHandoverAreKept() throws {
+        let scene = try scene()
+        defer { end(scene) }
+        let asked = try scene.client.spawn("printf '\\033[?1004h\\033[2J\\033[Hdrawn after\\n'; exec sleep 600")
+        let focus = { (client: TestClient) -> Bool? in
+            let seq = client.send(.styledScreen(id: asked.id))
+            guard eventually({ client.reply(to: seq) != nil }),
+                  case .styledScreenText(_, let text, _, let focusEvents)? = client.reply(to: seq), text.contains("drawn after") else { return nil }
+            return focusEvents
+        }
+        #expect(eventually { focus(scene.client) == true })
+        let seq = scene.client.send(.handover(executable: scene.host.newBinary))
+        #expect(eventually { scene.client.reply(to: seq) != nil })
+        #expect(scene.client.reply(to: seq) == .ok, "\(scene.host.log)")
+        #expect(eventually { scene.host.log.contains("took over") })
+        let (client, _, build, _, _, _, _) = try TestClient.welcomed(scene.host.socket, appKey: scene.host.appKey)
+        #expect(build == scene.host.newBuild)
+        #expect(focus(client) == true)
+    }
+
     @Test func aBuildThatCantStartLeavesTheHostAsItWas() throws {
         let scene = try scene()
         defer { end(scene) }

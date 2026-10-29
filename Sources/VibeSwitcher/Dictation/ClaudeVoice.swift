@@ -57,6 +57,8 @@ enum ClaudeVoiceScreen {
     /// The spaces a held Space leaves in the box while Claude's dictation warms up (2.1.312: its first two presses; the
     /// later repeats are swallowed).
     static let warmupTyped = 2
+    /// The presses its warmup takes before it records (2.1.312): no words can be heard before.
+    static let warmupPresses = 5
 
     static func prompt(_ screen: LeadDelivery.Screen) -> Prompt {
         let lines = screen.text.replacingOccurrences(of: "\u{0}", with: " ").components(separatedBy: "\n")
@@ -121,7 +123,8 @@ enum ClaudeVoiceScreen {
             // Kept beyond what a warmup leaves, or every one kept (one may still be on its way): typed. Fewer: swallowed.
             return spaces > warmupTyped || sent <= spaces + 1 ? .typed : .warming
         }
-        if prompt.dim != dimBefore, prompt.dim.contains(where: { $0.isLetter || $0.isNumber }) { return .heard }
+        // Before the warmup's presses, a dim change is the box's own (its placeholder redrawn with a caret on focus).
+        if sent >= warmupPresses, prompt.dim != dimBefore, prompt.dim.contains(where: { $0.isLetter || $0.isNumber }) { return .heard }
         return .nothing
     }
 
