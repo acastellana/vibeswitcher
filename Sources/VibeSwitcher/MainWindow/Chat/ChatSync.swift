@@ -647,6 +647,26 @@ final class ChatSync {
         chat.sendNotice = nil
     }
 
+    /// The selected window session as dictation drives Claude's /voice in it (`ClaudeVoiceRun`), when it's `key`'s
+    /// composer's and runs Claude Code; nil otherwise. Its keys go in raw and at once (key repeats can't wait out a
+    /// unit's gap), its screen is the host's with how it's drawn (Claude's live transcript is dim, not typed), and a
+    /// command is typed as the composer's messages are, only while that session is still the one shown.
+    func claudeVoice(key: String) -> ClaudeVoiceSession? {
+        guard let target = target(), target.key == key, target.agent == .claude, host.isUsable else { return nil }
+        let id = target.id
+        return ClaudeVoiceSession(keys: { [weak self] bytes in
+            guard let self, self.host.isUsable else { return false }
+            self.host.send(id, bytes: Data(bytes), reply: false)
+            return true
+        }, screen: { [weak self] done in
+            guard let self else { return done(nil) }
+            self.host.styledScreen(id, completion: done)
+        }, command: { [weak self] text in
+            guard let self, self.target()?.id == id else { return false }
+            return self.type(text)
+        })
+    }
+
     /// Keys for the session, as one unit: in order with the messages typed in (see `HostClient.send(_:writes:check:confirmed:)`).
     func write(_ writes: [HostInput.Write], to id: UUID) {
         host.send(id, writes: writes) { ok in

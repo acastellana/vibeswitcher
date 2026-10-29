@@ -15,18 +15,21 @@ extension EnvironmentValues {
     }
 }
 
-/// The composer's mic: hold it to record, let go to transcribe. Without a key it says one is needed, and a press says
-/// where to add it.
+/// The composer's mic: hold it to record, let go to transcribe. A Claude Code session's goes through Claude's /voice;
+/// any other's through OpenAI, and without a key it says one is needed, and a press says where to add it.
 struct DictationButton: View {
     @ObservedObject var dictation: DictationController
     let rowID: String
+    /// The session's agent: Claude's dictation for a Claude Code session the window can type into.
+    var agent: Agent? = nil
     let vocabulary: () -> @Sendable () -> String
     @State private var held = false
 
     var body: some View {
         let recording = dictation.isRecording(rowID)
         let transcribing = dictation.isTranscribing(rowID)
-        let missing = dictation.keyState == .missing
+        let claude = dictation.usesClaude(rowID, agent: agent)
+        let missing = !claude && dictation.keyState == .missing
         ZStack {
             if transcribing {
                 ProgressView().controlSize(.small).accessibilityLabel("Transcribing")
@@ -44,7 +47,7 @@ struct DictationButton: View {
             .onChanged { _ in
                 guard !held else { return }
                 held = true
-                dictation.press(rowID, vocabulary: vocabulary())
+                dictation.press(rowID, agent: agent, vocabulary: vocabulary())
             }
             .onEnded { _ in
                 held = false
@@ -53,10 +56,11 @@ struct DictationButton: View {
         // VoiceOver's press: once to start, once to stop.
         .accessibilityAddTraits(.isButton)
         .accessibilityAction {
-            if recording { dictation.release() } else { dictation.press(rowID, vocabulary: vocabulary()) }
+            if recording { dictation.release() } else { dictation.press(rowID, agent: agent, vocabulary: vocabulary()) }
         }
         .help(missing ? "Dictation needs an OpenAI API key: add one in Settings › General › Dictation"
-                      : "Hold to dictate (or hold \(DictationController.shortcut) in the box); let go and the text lands here to check before sending")
+              : claude ? "Hold to dictate with Claude's /voice (or hold \(DictationController.shortcut) in the box); let go and the text lands here to check before sending. Esc cancels."
+              : "Hold to dictate (or hold \(DictationController.shortcut) in the box); let go and the text lands here to check before sending")
         .padding(.bottom, 6)
     }
 }
@@ -74,15 +78,26 @@ struct DictationStatusRow: View {
                 Button("Got it") { dictation.acknowledgePrivacy() }.controlSize(.small)
             }
             .padding(.leading, 30)
+        } else if dictation.claudeRow == rowID, dictation.isRecording(rowID) {
+            Text(dictation.listening ? "Claude is listening… let go when you're done (Esc cancels)."
+                                     : "Keep holding: Claude's dictation is starting…")
+                .font(.system(size: 11)).foregroundStyle(.red).padding(.leading, 30)
+        } else if dictation.claudeRow == rowID, dictation.isTranscribing(rowID) {
+            Text("Claude is writing it out…").font(.system(size: 11)).foregroundStyle(.secondary).padding(.leading, 30)
         } else if dictation.isRecording(rowID) {
             Text("Recording… let go to transcribe (2 minutes at most).").font(.system(size: 11)).foregroundStyle(.red).padding(.leading, 30)
         } else if dictation.isTranscribing(rowID) {
             Text("Transcribing with OpenAI…").font(.system(size: 11)).foregroundStyle(.secondary).padding(.leading, 30)
         } else if let notice = dictation.notice, notice.rowID == rowID {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(notice.text).font(.system(size: 11)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                Text(notice.text).font(.system(size: 11)).foregroundStyle(notice.info ? Color.secondary : Color.red)
+                    .fixedSize(horizontal: false, vertical: true)
                 if notice.settings {
                     Button("Open Settings…") { dictation.openSettings() }.controlSize(.small)
+                }
+                if notice.turnOn {
+                    Button("Turn on Claude dictation") { dictation.turnOnClaude(rowID) }.controlSize(.small)
+                        .help("Types /voice hold into the session (its prompt box must be empty); your Claude settings aren't touched otherwise")
                 }
                 Button { dictation.dismissNotice() } label: {
                     Image(systemName: "xmark").font(.system(size: 9)).accessibilityLabel("Dismiss")

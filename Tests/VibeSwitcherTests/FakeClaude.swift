@@ -15,7 +15,10 @@ enum FakeClaude {
 # long a pasted image path takes to read, "seconds") | "child" (it starts `sleep 600` and goes on: in its own process
 # group, as a background shell, or with "foreground" in one of its own that takes the terminal's foreground; its pid
 # goes in "children") | "realShell" (from now on a `!` command really runs, in zsh, its output what it printed: the
-# sandbox's, to show a code block's Run) | "exit" (it quits, as /exit));
+# sandbox's, to show a code block's Run) | "voice" (its /voice, as code.claude.com/docs/en/voice-dictation tells it: "mode"
+# off | hold | tap, "account" yes | none (no claude.ai sign-in: "Unknown command: /voice") | expired (it can't use the
+# sign-in: "Voice mode requires a Claude.ai account"), "transcript", "warmup" (repeats before it listens), "gap" (seconds
+# without a repeat that end a hold)) | "exit" (it quits, as /exit));
 # the agent writes its state (mode, tab, answers, the free-text field, queued messages) to STATE after every change.
 import datetime
 import json
@@ -54,7 +57,21 @@ state = {
     "attached": 0,           # the images in the box
     "droppedEnters": 0,      # Enters held back while images were read, then dropped
     "children": [],          # the pids of the children "child" started
+    "enters": 0,             # Enter keys taken in the prompt box
+    "voice": "off",          # /voice: off | hold | tap
+    "voiceAccount": "yes",   # yes | none (/voice isn't a command) | expired (it can't use the sign-in)
+    "transcript": "open the composer view on main",
+    "warmup": 3,             # key repeats before a held Space starts recording
+    "gap": 0.8,              # no repeat this long: the key was let go
+    "rapid": 0.6,            # a Space this soon after the last is a repeat (the first one comes after macOS's delay)
+    "recording": "",         # "" | warming | listening | tap
+    "voiceMessage": "",      # what its footer says about dictation
+    "voiceStarts": 0,        # recordings started
+    "voiceCancels": 0,       # recordings cancelled (Esc)
+    "voiceInserts": 0,       # transcripts written into the box
+    "killed": 0,             # ⌃U taken
 }
+VOICE = {"before": "", "last": 0.0, "repeats": 0}
 # The slash commands its menu offers while "/…" is typed in the box.
 COMMANDS = [("/clear", "Clear conversation history"), ("/compact", "Clear history but keep a summary"),
             ("/help", "Show help and available commands"), ("/model", "Set the AI model for Claude Code")]
@@ -122,10 +139,18 @@ def draw():
         for text in state["queued"]:
             lines.append("  ⎿ " + text.replace("\n", " "))
         lines.append(RULE)
-        lines.append("❯ " + state["input"].replace("\n", " "))
+        live = ""
+        if state["recording"] == "listening":
+            # What it hears so far, dimmed until it's final.
+            words = state["transcript"].split()
+            live = ESC + "[2m" + " ".join(words[:max(1, len(words) // 2)]) + ESC + "[22m"
+        lines.append("❯ " + state["input"].replace("\n", " ") + live)
         lines.append(RULE)
         menu = suggestions()
-        if menu:
+        footer = {"warming": "keep holding…", "listening": "listening…", "tap": "● REC · tap to send"}.get(state["recording"])
+        if footer or state["voiceMessage"]:
+            lines.append("  " + (footer or state["voiceMessage"]))
+        elif menu:
             # Claude's suggestions: paddingX 2, the chosen one with its pointer, names padded to one column.
             for index, (name, description) in enumerate(menu):
                 pointer = "❯ " if index == state["suggest"] else "  "
@@ -251,10 +276,91 @@ def run_command(name):
         state["reply"] = "Ran " + name
     state["ran"] = name
 
+def voice_command(text):
+    """/voice [hold|tap|off]: the reply it prints."""
+    if state["voiceAccount"] == "none":
+        return "Unknown command: /voice"
+    if state["voiceAccount"] == "expired":
+        return "Voice mode requires a Claude.ai account. Run /login."
+    arg = text[len("/voice"):].strip()
+    if arg == "off" or (arg == "" and state["voice"] != "off"):
+        state["voice"] = "off"
+        return "Voice mode disabled."
+    state["voice"] = arg if arg in ("hold", "tap") else (state["voice"] if state["voice"] != "off" else "hold")
+    return "Voice mode enabled (%s). Hold space to record. Dictation language: en (/config to change)." % state["voice"]
+
+
+def voice_space():
+    """A Space in the prompt box with /voice on; True when it took it (not typed)."""
+    t = time.monotonic()
+    if state["recording"] == "listening":
+        VOICE["last"] = t
+        return True
+    if state["voice"] == "tap":
+        if state["recording"] == "tap":
+            finish_recording(submit=True)
+            return True
+        if state["input"] == "":
+            VOICE["before"] = ""
+            state["recording"] = "tap"
+            state["voiceStarts"] += 1
+            return True
+        return False
+    if state["voice"] != "hold":
+        return False
+    if t - VOICE["last"] <= state["rapid"] and state["recording"] in ("", "warming") and VOICE["repeats"] >= 0:
+        VOICE["repeats"] += 1
+    else:
+        VOICE["repeats"] = 0
+        VOICE["before"] = state["input"]
+    VOICE["last"] = t
+    if VOICE["repeats"] >= state["warmup"]:
+        if state["voiceAccount"] != "yes":
+            state["voiceMessage"] = "Voice mode requires a Claude.ai account. Run /login."
+            state["recording"] = ""
+            VOICE["repeats"] = -1000
+            return False
+        # The warmup's spaces go; it records.
+        state["input"] = VOICE["before"]
+        state["recording"] = "listening"
+        state["voiceMessage"] = ""
+        state["voiceStarts"] += 1
+        return True
+    if VOICE["repeats"] >= 1:
+        state["recording"] = "warming"
+    return False
+
+
+def finish_recording(submit=False):
+    """The key let go (hold) or tapped again (tap): the transcript goes in at the cursor; tap mode sends three words or more."""
+    state["input"] = VOICE["before"] + state["transcript"]
+    state["recording"] = ""
+    state["voiceInserts"] += 1
+    if submit and len(state["transcript"].split()) >= 3:
+        text = state["input"]
+        state["input"] = ""
+        submit_prompt(text)
+
+
+def voice_tick():
+    """No repeat for `gap`: a held key was let go. True when the screen changed."""
+    if state["recording"] in ("warming", "listening") and time.monotonic() - VOICE["last"] > state["gap"]:
+        if state["recording"] == "listening":
+            finish_recording()
+        else:
+            state["recording"] = ""
+        VOICE["repeats"] = 0
+        return True
+    return False
+
+
 def submit_prompt(text):
     text = text.strip()
     images, state["attached"] = state["attached"], 0
     if not text:
+        return
+    if text == "/voice" or text.startswith("/voice "):
+        state["reply"] = voice_command(text)
         return
     if state["mode"] == "working":
         state["queued"].append(text)
@@ -505,10 +611,23 @@ def key(name):
                 state["suggest"] = 0
                 run_command(chosen)
             return
+        if state["recording"] in ("listening", "tap") and name == "esc":
+            # Its cancel: the prompt as it was before the recording.
+            state["input"] = VOICE["before"]
+            state["recording"] = ""
+            state["voiceCancels"] += 1
+            return
+        if name == "space" and voice_space():
+            return
         if name not in ("up", "down"):
             state["suggest"] = 0
             state["dismissed"] = False
-        if name == "enter":
+        if name == "ctrl-u":
+            cut = state["input"].rstrip("\n").rfind("\n")
+            state["input"] = state["input"][:cut + 1] if cut >= 0 else ""
+            state["killed"] += 1
+        elif name == "enter":
+            state["enters"] += 1
             text = state["input"]
             state["input"] = ""
             submit_prompt(text)
@@ -608,7 +727,9 @@ def feed(data):
             key("tab")
         elif c == "\x7f":
             key("backspace")
-        elif c == " " and state["mode"] == "question":
+        elif c == "\x15":
+            key("ctrl-u")
+        elif c == " " and (state["mode"] == "question" or (state["mode"] in ("idle", "working") and paste is None)):
             key("space")
         elif c >= " ":
             key(c)
@@ -680,6 +801,10 @@ def control():
             save_state()
             out(ESC + "[?2004l" + ESC + "[2J" + ESC + "[H")
             sys.exit(0)
+        elif op == "voice":
+            for name in ("mode", "account", "transcript", "warmup", "gap"):
+                if name in command:
+                    state[{"mode": "voice", "account": "voiceAccount"}.get(name, name)] = command[name]
         elif op == "freeze":
             state["frozen"] = True
         elif op == "thaw":
@@ -711,6 +836,8 @@ def main():
         # After what came in: an Enter read in the same moment as the paste is one held back.
         if reading is not None and time.monotonic() >= reading["until"]:
             finish_reading()
+            changed = True
+        if voice_tick():
             changed = True
         if changed:
             draw()

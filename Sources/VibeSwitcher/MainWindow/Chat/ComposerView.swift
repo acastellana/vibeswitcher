@@ -70,7 +70,7 @@ struct ComposerView: View {
                 Button(action: attach) { Image(systemName: "paperclip").font(.system(size: 14)).accessibilityLabel("Attach files") }
                     .buttonStyle(.borderless).padding(.bottom, 9).help("Attach files or images")
                 if let dictation {
-                    DictationButton(dictation: dictation, rowID: rowID, vocabulary: vocabulary)
+                    DictationButton(dictation: dictation, rowID: rowID, agent: steerOnly ? nil : agent, vocabulary: vocabulary)
                 }
                 ZStack(alignment: .topLeading) {
                     if text.wrappedValue.isEmpty {
@@ -83,7 +83,8 @@ struct ComposerView: View {
                     ComposerTextView(text: text, height: $height, suggestions: $suggestions, history: { [chat] in chat.log.prompts },
                                      focusRequests: chat.focusComposerRequests, complete: complete,
                                      submit: { submit(queue: false) }, queue: { submit(queue: true) }, attachImage: attachImage,
-                                     cardKey: cardKey, rowID: rowID, dictation: dictation, vocabulary: vocabulary)
+                                     cardKey: cardKey, rowID: rowID, dictation: dictation, agent: steerOnly ? nil : agent,
+                                     vocabulary: vocabulary)
                         .frame(height: min(max(height, 22), 220))
                 }
                 .padding(.horizontal, 10).padding(.vertical, 8)
@@ -493,6 +494,8 @@ struct ComposerTextView: NSViewRepresentable {
     /// The box's row, and push to talk: ⌥Space held records, and transcripts land at the cursor.
     var rowID = ""
     var dictation: DictationController? = nil
+    /// The session's agent: a Claude Code session's dictation goes through Claude's /voice.
+    var agent: Agent? = nil
     var vocabulary: () -> @Sendable () -> String = { { "" } }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -502,6 +505,7 @@ struct ComposerTextView: NSViewRepresentable {
         textView.attachImage = attachImage
         textView.cardKey = cardKey
         textView.holdToTalk = dictation == nil ? nil : context.coordinator.holdToTalk
+        textView.cancelTalk = { [weak coordinator = context.coordinator] in coordinator?.parent.dictation?.cancel() }
         textView.delegate = context.coordinator
         textView.font = .systemFont(ofSize: 13)
         textView.isRichText = false
@@ -577,7 +581,7 @@ struct ComposerTextView: NSViewRepresentable {
         /// ⌥Space went down (true) or up (false) in the box.
         private(set) lazy var holdToTalk: (Bool) -> Void = { [weak self] down in
             guard let self, let dictation = self.parent.dictation else { return }
-            if down { dictation.press(self.parent.rowID, vocabulary: self.parent.vocabulary()) } else { dictation.release() }
+            if down { dictation.press(self.parent.rowID, agent: self.parent.agent, vocabulary: self.parent.vocabulary()) } else { dictation.release() }
         }
 
         func textDidChange(_ notification: Notification) {
@@ -624,6 +628,11 @@ struct ComposerTextView: NSViewRepresentable {
         func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
             // An input method is composing (Japanese, Chinese…): its keys aren't ours.
             if textView.hasMarkedText() { return false }
+            // Esc while dictating: the recording is dropped.
+            if selector == #selector(NSResponder.cancelOperation(_:)), let dictation = parent.dictation, dictation.isBusy(parent.rowID) {
+                dictation.cancel()
+                return true
+            }
             let count = min(parent.suggestions.items.count, 8)
             if count > 0 {
                 switch selector {
@@ -710,12 +719,22 @@ final class ComposerNSTextView: NSTextView {
     var attachments: URL = Attachments.folder
     /// Push to talk: ⌥Space held down (true) and let go (false). Nil: ⌥Space types as usual.
     var holdToTalk: ((Bool) -> Void)?
+    /// Esc while ⌥Space is held.
+    var cancelTalk: (() -> Void)?
     /// ⌥Space is held now.
     private(set) var talking = false
     /// While held: the window going out of key (another app, another window), whose key-up goes elsewhere.
     private var leaving: NSObjectProtocol?
 
     override func keyDown(with event: NSEvent) {
+        // Esc mid-hold (⌥ still down, so it isn't cancelOperation): the recording is dropped.
+        if talking, event.keyCode == UInt16(kVK_Escape) {
+            talking = false
+            if let leaving { NotificationCenter.default.removeObserver(leaving) }
+            leaving = nil
+            cancelTalk?()
+            return
+        }
         if let holdToTalk, !hasMarkedText(), Self.isTalkKey(event) {
             // Its repeats while held do nothing.
             if !event.isARepeat, !talking {

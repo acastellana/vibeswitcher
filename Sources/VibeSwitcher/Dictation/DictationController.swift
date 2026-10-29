@@ -12,9 +12,11 @@ enum DictationLimits {
     static let phoneMaxBytes = 4 * 1024 * 1024
 }
 
-/// Push to talk in the Mac's composer: hold the mic button (or ⌥Space in the box) to record, let go to have OpenAI
-/// transcribe it with your key; the text lands at the composer's cursor for you to read, and is never sent by itself.
-/// The first press on this Mac shows a one-time note that the audio goes to OpenAI instead of recording. Main thread.
+/// Push to talk in the Mac's composer: hold the mic button (or ⌥Space in the box) to record, let go to have it
+/// transcribed; the text lands at the composer's cursor for you to read, and is never sent by itself. A Claude Code
+/// session in the window dictates through Claude's own /voice (`ClaudeVoiceRun`: your claude.ai sign-in, no key);
+/// any other (Codex, a Terminal tab) records here and has OpenAI transcribe it with your key, and the first such press
+/// on this Mac shows a one-time note that the audio goes to OpenAI instead of recording. Main thread.
 final class DictationController: ObservableObject, @unchecked Sendable {
     enum Phase: Equatable {
         case idle
@@ -32,6 +34,10 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         var text: String
         /// Offers Open Settings (no key, or a key OpenAI refused).
         var settings = false
+        /// Offers to turn on Claude's dictation in the session (`/voice hold`).
+        var turnOn = false
+        /// News, not a failure (said in grey).
+        var info = false
     }
 
     /// A transcript waiting for its composer to put it at the cursor: numbered, so it goes in once.
@@ -56,6 +62,16 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     @Published private(set) var keyNotice: String?
     /// Opens Settings › General (the composer's link when a key is needed).
     var openSettings: () -> Void = {}
+    /// The Claude Code session a composer's dictation goes through (its /voice), when it's one the window can type into;
+    /// nil: OpenAI's.
+    var claudeSession: (String) -> ClaudeVoiceSession? = { _ in nil }
+    /// Claude's settings as dictation reads them (never writes them); off the main thread.
+    var claudeSettings: @Sendable () -> ClaudeVoiceSettings = { ClaudeVoiceSettings.read() }
+    /// The composer whose dictation goes through Claude's /voice now, and whether Claude says it's listening.
+    @Published private(set) var claudeRow: String?
+    @Published private(set) var listening = false
+    /// The composer whose session is turning Claude's dictation on (`/voice hold` typed, its answer read).
+    @Published private(set) var turningOn: String?
 
     private let keyStore: SecretStore
     private let recorder: DictationRecorder
@@ -70,6 +86,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     private var vocabulary: (@Sendable () -> String)?
     private var cancelLimit: (() -> Void)?
     private var serial = 0
+    private var claudeRun: ClaudeVoiceRun?
     /// Called each time the phase goes back to idle (tests wait on it).
     var onIdle: (() -> Void)?
 
@@ -98,13 +115,24 @@ final class DictationController: ObservableObject, @unchecked Sendable {
 
     func isRecording(_ rowID: String) -> Bool { phase == .recording(rowID: rowID) }
     func isTranscribing(_ rowID: String) -> Bool { phase == .transcribing(rowID: rowID) }
+    /// Recording or transcribing for that composer (Esc there cancels it).
+    func isBusy(_ rowID: String) -> Bool { isRecording(rowID) || isTranscribing(rowID) }
+
+    /// Whether `rowID`'s dictation goes through Claude's /voice: a Claude Code session the window can type into.
+    func usesClaude(_ rowID: String, agent: Agent?) -> Bool { route(rowID, agent: agent) != nil }
+
+    private func route(_ rowID: String, agent: Agent?) -> ClaudeVoiceSession? {
+        agent == .claude ? claudeSession(rowID) : nil
+    }
 
     // MARK: Push to talk
 
-    /// The button or ⌥Space went down in `rowID`'s composer. `vocabulary` makes the prompt (run off the main thread).
-    func press(_ rowID: String, vocabulary: @escaping @Sendable () -> String) {
-        guard phase == .idle else { return }
+    /// The button or ⌥Space went down in `rowID`'s composer, whose session runs `agent`. `vocabulary` makes OpenAI's
+    /// prompt (run off the main thread; Claude takes the project's and branch's names itself).
+    func press(_ rowID: String, agent: Agent? = nil, vocabulary: @escaping @Sendable () -> String) {
+        guard phase == .idle, turningOn == nil else { return }
         notice = nil
+        if let session = route(rowID, agent: agent) { return pressClaude(rowID, session) }
         if keyState == .missing { return needKey(rowID) }
         guard privacyNoted else {
             privacyNoteFor = rowID
@@ -133,10 +161,26 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         }
     }
 
-    /// The button or ⌥Space came up: the recording goes to OpenAI.
+    /// The button or ⌥Space came up: the recording goes to OpenAI, or Claude finishes its transcript.
     func release() {
         holding = false
+        if let claudeRun {
+            if case .recording(let rowID) = phase { phase = .transcribing(rowID: rowID) }
+            return claudeRun.release()
+        }
         stop(limitReached: false)
+    }
+
+    /// Esc in the composer: the recording is dropped (Claude's: its own cancel), nothing lands in the box.
+    func cancel() {
+        holding = false
+        if let claudeRun { return claudeRun.cancel() }
+        guard case .recording = phase else { return }
+        cancelLimit?()
+        cancelLimit = nil
+        vocabulary = nil
+        recorder.cancel()
+        idle()
     }
 
     /// The one-time note was read: from now on a press records.
@@ -184,9 +228,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     private func finish(_ result: Result<String, OpenAITranscription.Failure>, rowID: String) {
         switch result {
         case .success(let text):
-            serial += 1
-            let before = deliveries[rowID]?.text
-            deliveries[rowID] = Delivery(serial: serial, text: before.map { $0 + " " + text } ?? text)
+            deliver(text, to: rowID)
             if keyState != .saved { keyState = .saved }
         case .failure(.noKey):
             keyState = .missing
@@ -197,9 +239,112 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         idle()
     }
 
+    private func deliver(_ text: String, to rowID: String) {
+        serial += 1
+        let before = deliveries[rowID]?.text
+        deliveries[rowID] = Delivery(serial: serial, text: before.map { $0 + " " + text } ?? text)
+    }
+
     private func idle() {
         phase = .idle
         onIdle?()
+    }
+
+    // MARK: Claude's /voice
+
+    /// Claude's settings first (tap mode and autoSubmit send by themselves: not used), then the run.
+    private func pressClaude(_ rowID: String, _ session: ClaudeVoiceSession) {
+        holding = true
+        claudeRow = rowID
+        listening = false
+        phase = .recording(rowID: rowID)
+        let read = claudeSettings
+        background { [weak self] in
+            let settings = read()
+            DispatchQueue.main.async { self?.startClaude(rowID, session, settings) }
+        }
+    }
+
+    private func startClaude(_ rowID: String, _ session: ClaudeVoiceSession, _ settings: ClaudeVoiceSettings) {
+        guard claudeRun == nil, claudeRow == rowID, phase != .idle else { return }
+        if let refusal = settings.refusal { return finishClaude(rowID, .notice(refusal.text, offer: refusal.offer)) }
+        let run = ClaudeVoiceRun(session: session, schedule: schedule, onListening: { [weak self] in self?.listening = true },
+                                 finish: { [weak self] outcome in self?.finishClaude(rowID, outcome) })
+        claudeRun = run
+        cancelLimit = schedule(DictationLimits.maxDuration) { [weak self] in
+            guard let self, self.claudeRun === run else { return }
+            self.notice = Notice(rowID: rowID, text: "Stopped at 2 minutes, the most one dictation takes.", info: true)
+            self.release()
+        }
+        run.start()
+        // Let go while the settings were read.
+        if !holding { release() }
+    }
+
+    private func finishClaude(_ rowID: String, _ outcome: ClaudeVoiceRun.Outcome) {
+        claudeRun = nil
+        cancelLimit?()
+        cancelLimit = nil
+        switch outcome {
+        case .text(let text):
+            deliver(text, to: rowID)
+        case .notice(let text, let offer):
+            notice = Notice(rowID: rowID, text: text, turnOn: offer)
+        case .cancelled:
+            break
+        }
+        claudeRow = nil
+        listening = false
+        idle()
+    }
+
+    /// After your click on the notice's offer: `/voice hold` typed into the session (only with its prompt box empty),
+    /// and what Claude answers said under the box. Claude's settings and keys are its own: never edited from here.
+    func turnOnClaude(_ rowID: String) {
+        guard phase == .idle, turningOn == nil else { return }
+        guard let session = claudeSession(rowID) else {
+            notice = Notice(rowID: rowID, text: "This session can't be typed into from here: run /voice hold in its terminal.")
+            return
+        }
+        turningOn = rowID
+        notice = Notice(rowID: rowID, text: "Turning on Claude's dictation…", info: true)
+        session.screen { [weak self] screen in
+            guard let self, self.turningOn == rowID else { return }
+            guard let screen, LeadDelivery.box(in: screen) == .empty else {
+                return self.turnedOn(rowID, Notice(rowID: rowID, text: "Claude's prompt box in the terminal isn't empty: clear it there, then turn dictation on."))
+            }
+            let before = ClaudeVoiceScreen.signals(screen.text)
+            guard session.command(Self.turnOnCommand) else {
+                return self.turnedOn(rowID, Notice(rowID: rowID, text: "/voice hold couldn't be typed into the session."))
+            }
+            self.watchTurnOn(rowID, session, since: before, until: Date().addingTimeInterval(Self.turnOnWait))
+        }
+    }
+
+    static let turnOnCommand = "/voice hold"
+    /// How long Claude may take to say what came of `/voice hold` (it checks the microphone first).
+    static let turnOnWait: TimeInterval = 8
+
+    private func watchTurnOn(_ rowID: String, _ session: ClaudeVoiceSession, since before: [ClaudeVoiceScreen.Signal: Int], until deadline: Date) {
+        _ = schedule(ClaudeVoiceRun.readEvery * 2) { [weak self] in
+            session.screen { [weak self] screen in
+                guard let self, self.turningOn == rowID else { return }
+                if let screen, let signal = ClaudeVoiceScreen.new(ClaudeVoiceScreen.signals(screen.text), since: before).first {
+                    let notice = signal.notice.map { Notice(rowID: rowID, text: $0) }
+                        ?? Notice(rowID: rowID, text: "Claude's dictation is on: hold the mic (or \(Self.shortcut) in the box) and speak.", info: true)
+                    return self.turnedOn(rowID, notice)
+                }
+                guard Date() < deadline else {
+                    return self.turnedOn(rowID, Notice(rowID: rowID, text: "Claude didn't say whether its dictation is on: have a look at the terminal."))
+                }
+                self.watchTurnOn(rowID, session, since: before, until: deadline)
+            }
+        }
+    }
+
+    private func turnedOn(_ rowID: String, _ notice: Notice) {
+        turningOn = nil
+        self.notice = notice
     }
 
     private func needKey(_ rowID: String) {
