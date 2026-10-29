@@ -70,6 +70,7 @@ struct ClaudeDictationTests {
         #expect(await until { controller.phase == .idle })
         #expect(http.requests.isEmpty)
         #expect(controller.notice == nil, "\(String(describing: controller.notice))")
+        let keys = scripted.keys.count
 
         // Codex, or a Claude session the window can't type into (a Terminal tab): OpenAI's, which needs the key.
         #expect(!controller.usesClaude("codex-row", agent: .codex))
@@ -80,7 +81,8 @@ struct ClaudeDictationTests {
         #expect(controller.notice?.settings == true && controller.notice?.rowID == "terminal-row")
         // Even a Claude row whose session can be typed into, when its agent isn't Claude Code.
         #expect(!controller.usesClaude("claude-row", agent: .codex))
-        #expect(scripted.keys.filter { $0 == [ClaudeVoiceRun.space] }.count == 1)
+        // None of those reached the Claude session.
+        #expect(scripted.keys.count == keys)
     }
 
     @Test func claudesSettingsForTapModeOrAutoSubmitAreReadNeverWrittenAndStopIt() async {
