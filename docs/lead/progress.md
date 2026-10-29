@@ -1976,3 +1976,7 @@
 - 2026-10-29 09:13 Automatically (auto_advance): Started the audit of sessionstore-refresh at 42be64b8 (Its review is audit. (audited: it has code that adds locks or threads (Sources/VibeCore/BundleIDCache.swift: private let lock = NSLock()), as the risk check found.)).
 - 2026-10-29 09:14 Merged missing-tools-at-lead: Missing tools at lead start: offer one-click install instead of only explaining (Command Line Tools, Claude Code), then start the lead
 - 2026-10-29 09:14 Flaky in missing-tools-at-lead's merge: aKilledBenchsHostAndSessionsAreGoneWithin10Seconds() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-10-29 09:14 Automatically (auto_advance): Didn't cleanup|missing-tools-at-lead: error: branch 'agent/missing-tools-at-lead' not found.
+- 2026-10-29 09:16 Planned push-to-talk-speech: Push-to-talk speech-to-text in the composer (Mac and phone) via OpenAI transcription (review audit)
+- 2026-10-29 09:16 Started a worker on push-to-talk-speech
+- 2026-10-29 09:16 Automatically (auto_advance): Started a worker on push-to-talk-speech (Push-to-talk speech-to-text in the composer (Mac and phone) via OpenAI transcription).

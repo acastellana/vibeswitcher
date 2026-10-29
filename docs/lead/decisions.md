@@ -246,3 +246,7 @@ The repository is public. The user asked to scrub the other projects' names ever
 
 PrivateNamesLint fails every merge's full suite on that one line, and each failed merge sends a passing branch back to its worker, wasting worker and review cycles. Only the user can edit docs/lead (workers are refused and the lead has no file edits).
 
+## 2026-10-29 09:16:33 Speech-to-text uses OpenAI transcription only, at the user's choice (48B0C4E4). It's push-to-talk in the Mac and phone composers, the key is kept in the Keychain on the Mac only, the phone's audio is relayed through the paired Mac, the text is inserted for review and never auto-sent, and a one-time note says audio goes to OpenAI.
+
+The user picked accuracy with code words over on-device privacy. Keeping the key on the Mac and never auto-sending keeps the risk small.
+
