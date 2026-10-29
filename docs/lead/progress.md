@@ -2005,3 +2005,5 @@
 - 2026-10-29 12:20 Automatically (auto_advance): Started the audit of chat-composer-dictation at d3560db2 (Its review is audit).
 - 2026-10-29 12:45 Audit of chat-composer-dictation: incomplete, clean, round 1: 2 Important open, 6 Nit open
 - 2026-10-29 12:46 Automatically (auto_advance): Sent chat-composer-dictation's worker the open Important findings chat-composer-dictation:F1, chat-composer-dictation:F2 from its audit at d3560db2.
+- 2026-10-29 13:06 The worker on chat-composer-dictation answered findings: chat-composer-dictation:F1 fixed at 412a0927: 59358c7. watch() no longer counts Claude's recording-level cursor as typed. It sets `typed` only when the box's non-dim draft holds something other than the meter glyphs ' ▁▂▃▄▅▆▇█' (ClaudeVoiceScreen.meterOnly). A meter-only draft reads as empty while finishing and clearing, and line() drops a meter glyph left at the end of the text. FakeClaude now draws that cursor as a coloured, non-dim '▃' after the dim interim while listening. heldTheTranscriptL…
+- 2026-10-29 13:06 Automatically (auto_advance): Started the audit of chat-composer-dictation at 412a0927 (Its review is audit).
