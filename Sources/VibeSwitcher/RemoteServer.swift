@@ -23,8 +23,9 @@ struct HTTPResponse {
 
     func serialized() -> Data {
         let reason = [200: "OK", 204: "No Content", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden",
-                      404: "Not Found", 409: "Conflict", 413: "Payload Too Large", 421: "Misdirected Request", 423: "Locked",
-                      429: "Too Many Requests", 500: "Internal Server Error", 503: "Service Unavailable"][status] ?? "Status"
+                      404: "Not Found", 409: "Conflict", 413: "Payload Too Large", 415: "Unsupported Media Type", 421: "Misdirected Request",
+                      423: "Locked", 429: "Too Many Requests", 500: "Internal Server Error", 502: "Bad Gateway",
+                      503: "Service Unavailable"][status] ?? "Status"
         var head = "HTTP/1.1 \(status) \(reason)\r\n"
         head += "Content-Type: \(contentType)\r\nContent-Length: \(body.count)\r\nConnection: close\r\n"
         // Everything is served from our own origin; nothing may be framed, sniffed or leaked via referrers.
@@ -53,6 +54,18 @@ final class RemoteServer {
     /// waits this long, and the phone gives up after 30 s). Tests shorten them.
     var receiveLimit: TimeInterval = 15
     var answerLimit: TimeInterval = 120
+    /// How long a request that's allowed a big body (a dictation's recording) has to finish sending it, from when it
+    /// passes the usual limit: a phone on a slow uplink takes longer than `receiveLimit` for a few hundred KB.
+    var uploadLimit: TimeInterval = 60
+
+    /// How big a request's body may be: a recording for `POST /api/dictation` from a phone that says it's paired (its
+    /// token and account are checked once it's all in, like any request's), the usual 64 KB otherwise. At most
+    /// `maxConnections` such uploads are held at once.
+    static func bodyLimit(method: String, path: String, headers: [String: String]) -> Int {
+        guard method == "POST", path == PhoneAccess.dictationPath, headers["authorization"]?.hasPrefix("Bearer ") == true,
+              headers["tailscale-user-login"]?.isEmpty == false else { return HTTPParser.defaultMaxBodyBytes }
+        return DictationLimits.phoneMaxBytes
+    }
 
     init(handler: @escaping Handler) {
         self.handler = handler
@@ -122,15 +135,24 @@ final class RemoteServer {
         receive(on: connection, buffer: Data(), timeout: timeout)
     }
 
-    private func receive(on connection: NWConnection, buffer: Data, timeout: DispatchWorkItem) {
+    private func receive(on connection: NWConnection, buffer: Data, timeout: DispatchWorkItem, extended: Bool = false) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, isComplete, error in
             guard let self else { return }
             var buffer = buffer
             if let data { buffer.append(data) }
-            switch HTTPParser.parse(buffer) {
+            switch HTTPParser.parse(buffer, bodyLimit: Self.bodyLimit) {
             case .incomplete:
                 if isComplete || error != nil { connection.cancel(); return }
-                self.receive(on: connection, buffer: buffer, timeout: timeout)
+                // Past the usual size and still coming: only a request allowed a big body gets here. It has
+                // `uploadLimit` from now, once.
+                var timeout = timeout
+                let extend = !extended && buffer.count > HTTPParser.defaultMaxBodyBytes + 16 * 1024
+                if extend {
+                    timeout.cancel()
+                    timeout = DispatchWorkItem { connection.cancel() }
+                    self.queue.asyncAfter(deadline: .now() + self.uploadLimit, execute: timeout)
+                }
+                self.receive(on: connection, buffer: buffer, timeout: timeout, extended: extended || extend)
             case .invalid:
                 self.send(.error(400, "bad request"), on: connection, timeout: timeout)
             case .tooLarge:

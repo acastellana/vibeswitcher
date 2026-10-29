@@ -84,6 +84,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         snapshot: { [weak self] in BriefingModel.Snapshot(boards: self?.leadController.boards ?? [:], sessions: self?.store.sessions ?? []) },
         language: { [weak self] in BriefingLanguage.named(self?.preferences.briefingLanguage ?? "") ?? .preferred() },
         keyStore: briefingKey)
+    /// Dictation's OpenAI key: the login Keychain item only (one in your shell or Codex's file is offered for import in
+    /// Settings, never used until you confirm); read when a dictation goes out, the Mac's or the phone's.
+    private let dictationKey = AppProof.KeychainSecret(account: AppProof.openAIAccount, label: "VibeSwitcher OpenAI API key")
+    /// Push to talk in the composer.
+    private lazy var dictation: DictationController = {
+        let controller = DictationController(keyStore: dictationKey, recorder: EngineRecorder())
+        controller.openSettings = { [weak self] in self?.showSettings(tab: .general) }
+        return controller
+    }()
     private var statusItem: NSStatusItem!
     private let popover = NSPopover()
     private var hotKey: HotKey?
@@ -181,6 +190,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         phoneAccess.brief = phoneBriefer.brief
         phoneAccess.briefProject = phoneBriefer.brief(project:_:)
         phoneAccess.briefingProjects = phoneBriefer.projects
+        // Dictation from the phone: transcribed here with the Mac's key, the session's words from its identity.
+        let phoneDictation = PhoneDictation(keyStore: dictationKey, model: { [weak self] in self?.dictation.model ?? OpenAITranscription.defaultModel },
+                                            session: { [weak self] sid in self?.store.sessions.first { $0.identity == sid } })
+        phoneAccess.transcribe = phoneDictation.transcribe
+        phoneAccess.dictationReady = { [weak self] in
+            switch self?.dictation.keyState {
+            case .saved: return true
+            case .missing: return false
+            default: return nil
+            }
+        }
+        dictation.checkKey()
         PhoneLeads.wire(phoneAccess, controller: leadController, model: windowModel)
         phoneAccess.startIfEnabled()
 
@@ -550,7 +571,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
                 preferences: preferences, setup: setup, phoneAccess: phoneAccess,
                 recentProjects: { [weak self] in self?.popoverState.recentProjects.map(\.path) ?? [] },
                 showWelcome: { [weak self] in self?.showWelcome(firstRun: false) }, host: hostClient, briefing: briefing,
-                policy: WorkingPolicyEditor(saved: { [weak self] in self?.leadController.lookAtPolicy() }))
+                dictation: dictation, policy: WorkingPolicyEditor(saved: { [weak self] in self?.leadController.lookAtPolicy() }))
         }
         loadRecentProjects()
         settingsWindow?.show(tab: tab)
@@ -603,7 +624,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     func showMainWindow(select hostID: UUID? = nil) {
         if mainWindow == nil {
             let controller = MainWindowController(store: store, host: hostClient, model: windowModel, actions: windowActions,
-                                                  leads: leadController, briefing: briefing)
+                                                  leads: leadController, briefing: briefing, dictation: dictation)
             controller.onFontSize = { [weak self] step in self?.changeFontSize(step) }
             controller.pane.configure = { [weak self] view in
                 guard let self else { return }

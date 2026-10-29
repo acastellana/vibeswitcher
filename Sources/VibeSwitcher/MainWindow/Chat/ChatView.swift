@@ -90,13 +90,14 @@ struct ChatContainer: View {
                                      if sent { chat.scrollToBottom() }
                                      return sent
                                  }, steer: composer.steer, stop: composer.stop, cycleMode: composer.cycleMode),
-                                 cardKeys: cardKeys)
+                                 cardKeys: cardKeys, project: row.session?.project, folder: row.cwd)
                     // A text box of its own per session: nothing typed for one can end up in another.
                     .id(row.id)
                 } else if let session = row.session, session.inTerminalApp, session.agent == .claude, session.status == .working {
                     // Steering needs no typing, so it reaches a Terminal session too.
                     ComposerView(chat: chat, composer: chat.composer, rowID: row.draftKey, agent: session.agent, working: true, steerOnly: true,
-                                 actions: ComposerActions(send: { _ in false }, steer: composer.steer, stop: {}, cycleMode: {}))
+                                 actions: ComposerActions(send: { _ in false }, steer: composer.steer, stop: {}, cycleMode: {}),
+                                 project: session.project, folder: row.cwd)
                         .id(row.id)
                 } else if let session = row.session, session.inTerminalApp {
                     TerminalReplyHint(canMove: MoveToWindow.canMove(session), asking: chat.menu != nil,

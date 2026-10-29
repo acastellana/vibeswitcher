@@ -30,6 +30,10 @@ struct ComposerView: View {
     let actions: ComposerActions
     /// The answer card above, when it's a window session's: ⌘1–⌘9, ↩ and ↑ / ↓ are its while the box is empty.
     var cardKeys: AnswerCardKeys?
+    /// The session's project and folder: dictation's vocabulary (its name, its branches).
+    var project: String? = nil
+    var folder: String? = nil
+    @Environment(\.dictation) private var dictation
     @State private var height: CGFloat = 22
     @State private var suggestions = Suggestions()
     @State private var notice: String?
@@ -65,6 +69,9 @@ struct ComposerView: View {
             HStack(alignment: .bottom, spacing: 8) {
                 Button(action: attach) { Image(systemName: "paperclip").font(.system(size: 14)).accessibilityLabel("Attach files") }
                     .buttonStyle(.borderless).padding(.bottom, 9).help("Attach files or images")
+                if let dictation {
+                    DictationButton(dictation: dictation, rowID: rowID, vocabulary: vocabulary)
+                }
                 ZStack(alignment: .topLeading) {
                     if text.wrappedValue.isEmpty {
                         Text(working ? (steerOnly ? "Steer \(agent.displayName) while it works — ↩ sends it to its next step"
@@ -76,7 +83,7 @@ struct ComposerView: View {
                     ComposerTextView(text: text, height: $height, suggestions: $suggestions, history: { [chat] in chat.log.prompts },
                                      focusRequests: chat.focusComposerRequests, complete: complete,
                                      submit: { submit(queue: false) }, queue: { submit(queue: true) }, attachImage: attachImage,
-                                     cardKey: cardKey)
+                                     cardKey: cardKey, rowID: rowID, dictation: dictation, vocabulary: vocabulary)
                         .frame(height: min(max(height, 22), 220))
                 }
                 .padding(.horizontal, 10).padding(.vertical, 8)
@@ -101,6 +108,7 @@ struct ComposerView: View {
                 .help(working ? "Steer: send it to the agent's next step (↩)" : "Send (↩)")
                 .help(working ? "Steer (↩): it gets this at its next step, without stopping. ⌥↩ queues it for after the turn." : "Send (↩)")
             }
+            if let dictation { DictationStatusRow(dictation: dictation, rowID: rowID) }
             if !steerOnly {
                 ComposerChips(chat: chat, agent: agent, cycleMode: actions.cycleMode, notice: notice ?? chat.sendNotice) { command in
                     _ = actions.send(command)
@@ -110,6 +118,14 @@ struct ComposerView: View {
             }
         }
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
+    }
+
+    /// Dictation's prompt maker, taken at a press: the files come from the conversation shown now, the branches from
+    /// git when it runs (off the main thread).
+    private func vocabulary() -> @Sendable () -> String {
+        let files = DictationVocabulary.files(in: chat.log.entries)
+        let (project, folder) = (project, folder)
+        return { DictationVocabulary.prompt(project: project, branches: DictationVocabulary.branches(in: folder), files: files) }
     }
 
     /// ↩ and the Send button: steers while the agent works, sends otherwise. ⌥↩ (`queue`): typed in for after the turn.
@@ -474,6 +490,10 @@ struct ComposerTextView: NSViewRepresentable {
     let attachImage: (URL) -> Void
     /// A key for the answer card (true: it took it, so it isn't typed or sent).
     var cardKey: (AnswerKeys.Key) -> Bool = { _ in false }
+    /// The box's row, and push to talk: ⌥Space held records, and transcripts land at the cursor.
+    var rowID = ""
+    var dictation: DictationController? = nil
+    var vocabulary: () -> @Sendable () -> String = { { "" } }
 
     func makeNSView(context: Context) -> NSScrollView {
         // TextKit 1 from the start: `measure` asks for the layout manager, which switches a TextKit 2 view over, and
@@ -481,6 +501,7 @@ struct ComposerTextView: NSViewRepresentable {
         let textView = ComposerNSTextView(usingTextLayoutManager: false)
         textView.attachImage = attachImage
         textView.cardKey = cardKey
+        textView.holdToTalk = dictation == nil ? nil : context.coordinator.holdToTalk
         textView.delegate = context.coordinator
         textView.font = .systemFont(ofSize: 13)
         textView.isRichText = false
@@ -503,6 +524,8 @@ struct ComposerTextView: NSViewRepresentable {
         scroll.borderType = .noBorder
         // A new box (another session) takes the focus once it's on screen.
         context.coordinator.lastFocusRequest = focusRequests - 1
+        context.coordinator.inbox.watch(dictation, rowID: { [weak coordinator = context.coordinator] in coordinator?.parent.rowID ?? "" },
+                                        textView: textView)
         return scroll
     }
 
@@ -511,6 +534,9 @@ struct ComposerTextView: NSViewRepresentable {
         guard let textView = scroll.documentView as? NSTextView else { return }
         (textView as? ComposerNSTextView)?.attachImage = attachImage
         (textView as? ComposerNSTextView)?.cardKey = cardKey
+        (textView as? ComposerNSTextView)?.holdToTalk = dictation == nil ? nil : context.coordinator.holdToTalk
+        context.coordinator.inbox.watch(dictation, rowID: { [weak coordinator = context.coordinator] in coordinator?.parent.rowID ?? "" },
+                                        textView: textView)
         if textView.string != text {
             textView.string = text
             context.coordinator.undo.removeAllActions()
@@ -541,9 +567,18 @@ struct ComposerTextView: NSViewRepresentable {
         /// session's draft, a history step): undoing into text that's gone raises a range exception.
         let undo = UndoManager()
 
+        /// Transcripts for this box, put in at the cursor.
+        let inbox = DictationInbox()
+
         init(_ parent: ComposerTextView) { self.parent = parent }
 
         func undoManager(for view: NSTextView) -> UndoManager? { undo }
+
+        /// ⌥Space went down (true) or up (false) in the box.
+        private(set) lazy var holdToTalk: (Bool) -> Void = { [weak self] down in
+            guard let self, let dictation = self.parent.dictation else { return }
+            if down { dictation.press(self.parent.rowID, vocabulary: self.parent.vocabulary()) } else { dictation.release() }
+        }
 
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
@@ -673,6 +708,46 @@ final class ComposerNSTextView: NSTextView {
     var pasteboard: NSPasteboard = .general
     /// Where a pasted or dropped image is saved (a test's scratch folder).
     var attachments: URL = Attachments.folder
+    /// Push to talk: ⌥Space held down (true) and let go (false). Nil: ⌥Space types as usual.
+    var holdToTalk: ((Bool) -> Void)?
+    /// ⌥Space is held now.
+    private(set) var talking = false
+
+    override func keyDown(with event: NSEvent) {
+        if let holdToTalk, !hasMarkedText(), Self.isTalkKey(event) {
+            // Its repeats while held do nothing.
+            if !event.isARepeat, !talking {
+                talking = true
+                holdToTalk(true)
+            }
+            return
+        }
+        super.keyDown(with: event)
+    }
+
+    override func keyUp(with event: NSEvent) {
+        if talking, event.keyCode == UInt16(kVK_Space) {
+            talking = false
+            holdToTalk?(false)
+            return
+        }
+        super.keyUp(with: event)
+    }
+
+    /// Focus moving away mid-hold: its key-up would go elsewhere, so it ends here.
+    override func resignFirstResponder() -> Bool {
+        if talking {
+            talking = false
+            holdToTalk?(false)
+        }
+        return super.resignFirstResponder()
+    }
+
+    /// ⌥Space, nothing else held.
+    static func isTalkKey(_ event: NSEvent) -> Bool {
+        event.type == .keyDown && event.keyCode == UInt16(kVK_Space)
+            && event.modifierFlags.intersection([.command, .control, .option, .shift]) == .option
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if window?.firstResponder === self, !hasMarkedText(), let digit = Self.digit(event), cardKey(digit) { return true }

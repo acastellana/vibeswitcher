@@ -51,7 +51,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         moveTab: { [weak self] tab in self?.sync.moveTab(to: tab) },
         showTerminal: { [weak self] in self?.model.showsChat = false },
         dismissMenu: { [weak self] in self?.sync.cancel() })
-        .environment(\.holdLeadQuestion) { [weak leads] question in leads?.hold(question) })
+        .environment(\.holdLeadQuestion) { [weak leads] question in leads?.hold(question) }
+        .environment(\.dictation, dictation))
     }
 
     private func mountViews() {
@@ -99,11 +100,14 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
     let leads: LeadController
     /// The toolbar's Brief me (none in the benches).
     private let briefing: BriefingModel?
+    /// The composer's push to talk (none in the benches).
+    private let dictation: DictationController?
 
     init(store: SessionStore, host: HostClient, model: WindowModel, actions: WindowActions, leads: LeadController,
-         briefing: BriefingModel? = nil) {
+         briefing: BriefingModel? = nil, dictation: DictationController? = nil) {
         self.leads = leads
         self.briefing = briefing
+        self.dictation = dictation
         self.store = store
         self.host = host
         self.model = model

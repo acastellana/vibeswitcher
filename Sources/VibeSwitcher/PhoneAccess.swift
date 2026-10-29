@@ -148,6 +148,17 @@ final class PhoneAccess: ObservableObject {
     /// Briefings started, per source (see `RemoteGate.source`): each runs headless Claude and may spend ElevenLabs
     /// credit, so one source gets a few every ten minutes, and can't use up anyone else's.
     private var briefingStarts = FailureThrottle(limit: 6, window: 600)
+    /// Dictation from the phone: transcribes a recording on the Mac with its OpenAI key (`DictationService`), the
+    /// session's vocabulary from its identity (nil: none), and calls back on the main thread; nil, the route answers
+    /// 503. The key never leaves the Mac.
+    var transcribe: ((DictationAudio, _ sid: String?, @escaping (Result<String, OpenAITranscription.Failure>) -> Void) -> Void)?
+    /// Whether the Mac has a key for dictation (nil: not known yet), for the phone's mic button.
+    var dictationReady: () -> Bool? = { nil }
+    static let dictationPath = "/api/dictation"
+    /// Dictations, per source: each spends OpenAI credit, so one source gets a few a minute.
+    private var dictationStarts = FailureThrottle(limit: 20, window: 300)
+    /// What the phone may post: what MediaRecorder makes in Safari and Chrome, and what OpenAI reads.
+    static let dictationTypes: Set<String> = ["audio/webm", "audio/mp4", "audio/ogg", "audio/mpeg", "audio/wav", "audio/x-m4a", "audio/aac"]
 
     init(store: SessionStore) {
         self.store = store
@@ -460,6 +471,7 @@ final class PhoneAccess: ObservableObject {
         case ("POST", "/api/lead/answer"): answerLeadQuestion(request, device: device, respond: reply)
         case ("POST", "/api/briefing"): reply(startBriefing(request, device: device))
         case ("GET", "/api/briefing"): reply(briefing(for: device))
+        case ("POST", Self.dictationPath): dictate(request, device: device, respond: reply)
         case ("POST", "/api/unpair"):
             remove(device)
             respond(.json(["ok": true]))
@@ -663,6 +675,8 @@ final class PhoneAccess: ObservableObject {
             "web": WebAssets.version,
             "devPagesAllowed": devPagesAllowed,
             "briefingProjects": briefingProjects().map(Redaction.secrets(in:)),
+            // The mic button: "ready", "needsKey" (none saved on the Mac), or "unknown" (not looked yet: it may try).
+            "dictation": transcribe == nil ? "off" : dictationReady().map { $0 ? "ready" : "needsKey" } ?? "unknown",
             "device": ["id": device.id, "name": device.name, "push": device.push != nil],
             "vapidPublicKey": Base64URL.encode(vapidKey.publicKey.x963Representation),
             "mac": Host.current().localizedName ?? "Mac",
@@ -1413,6 +1427,43 @@ final class PhoneAccess: ObservableObject {
         case nil: return .error(404, "No briefing yet: press Brief me.")
         case .writing: return .json(["writing": true])
         case .ready(let briefing): return .json(briefing.json)
+        }
+    }
+
+    // MARK: - Dictation
+
+    /// `POST /api/dictation?duration=<seconds>&sid=<session>`, the recording as the body with its audio Content-Type:
+    /// transcribed on the Mac with its OpenAI key, the text answered for the phone's reply box (never typed anywhere).
+    /// Only with replies on (the box it fills is theirs), a recording of at most 2 minutes and `phoneMaxBytes`, a few
+    /// a minute per source. Audited without the text.
+    private func dictate(_ request: HTTPRequest, device: PairedDevice, respond: @escaping (HTTPResponse) -> Void) {
+        guard inputAllowed else {
+            return respond(.error(403, "Replying from the phone is off. Turn it on in VibeSwitcher › Settings… › Phone."))
+        }
+        let type = OpenAITranscription.partType(request.header("content-type") ?? "")
+        guard Self.dictationTypes.contains(type) else { return respond(.error(415, "Send the recording as audio.")) }
+        guard !request.body.isEmpty else { return respond(.error(400, "Nothing was recorded.")) }
+        guard request.body.count <= DictationLimits.phoneMaxBytes else { return respond(.error(413, "That recording is too big.")) }
+        guard let duration = request.query["duration"].flatMap(Double.init), duration.isFinite, duration > 0 else {
+            return respond(.error(400, "The recording's length is missing."))
+        }
+        guard duration <= DictationLimits.maxDuration + 1 else { return respond(.error(413, "Keep a dictation under 2 minutes.")) }
+        guard let transcribe else { return respond(.error(503, "Dictation isn't available on this Mac.")) }
+        if dictationReady() == false {
+            return respond(.error(503, "Dictation needs an OpenAI API key on the Mac: add one in Settings › General › Dictation."))
+        }
+        let source = RemoteGate.source(login: request.header("tailscale-user-login"), forwardedFor: request.header("x-forwarded-for"))
+        if dictationStarts.isThrottled(source) { return respond(.error(429, "That's a lot of dictation; wait a few minutes.")) }
+        dictationStarts.recordFailure(source)
+        // Its words come from the session the phone shows, when it's still here; else none.
+        let sid = request.query["sid"].flatMap { sid in store.sessions.first { $0.identity == sid }?.identity }
+        audit("dictation for \(device.name) (\(Int(duration.rounded())) s)")
+        transcribe(DictationAudio(data: request.body, mimeType: type, duration: duration), sid) { result in
+            switch result {
+            case .success(let text): respond(.json(["text": text]))
+            case .failure(.noKey): respond(.error(503, "Dictation needs an OpenAI API key on the Mac: add one in Settings › General › Dictation."))
+            case .failure(let failure): respond(.error(502, failure.notice))
+            }
         }
     }
 

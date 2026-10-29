@@ -78,18 +78,23 @@ public enum AppProof {
 
     /// Where the ElevenLabs API key for the spoken briefing is kept (Settings › General › Briefing).
     public static let elevenLabsAccount = "elevenlabs-api-key"
+    /// Where the OpenAI API key for dictation is kept (Settings › General › Dictation).
+    public static let openAIAccount = "openai-api-key"
 
-    /// A secret you typed in Settings (the ElevenLabs API key), in the login Keychain beside the app's key, with the
+    /// A secret you typed in Settings (the ElevenLabs API key, the OpenAI one), in the login Keychain beside the app's key, with the
     /// same access: this program only (`appOnlyAccess`). Read only when it's used (the Brief me button, Test voice,
     /// Settings showing whether one is saved); never written anywhere else. Only the app makes one (AppDelegate);
     /// tests use `MemorySecret`.
     public struct KeychainSecret: SecretStore {
         public let service: String
         public let account: String
+        /// What Keychain Access names the item.
+        public let label: String
 
-        public init(service: String = keychainService, account: String) {
+        public init(service: String = keychainService, account: String, label: String = "VibeSwitcher ElevenLabs API key") {
             self.service = service
             self.account = account
+            self.label = label
         }
 
         private var item: [String: Any] {
@@ -114,7 +119,7 @@ public enum AppProof {
             guard let access = appOnlyAccess() else { return false }
             var add = item
             add[kSecValueData as String] = Data(value.utf8)
-            add[kSecAttrLabel as String] = "VibeSwitcher ElevenLabs API key"
+            add[kSecAttrLabel as String] = label
             add[kSecAttrAccess as String] = access
             return SecItemAdd(add as CFDictionary, nil) == errSecSuccess
         }
