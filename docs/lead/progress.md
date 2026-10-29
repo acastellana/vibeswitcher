@@ -2027,3 +2027,4 @@
 - 2026-10-29 16:12 Started a worker on fix-the-flaky-test-6
 - 2026-10-29 16:12 Automatically (auto_advance): Started a worker on fix-the-flaky-test-6 (Fix the flaky test slowAppLookupsAndLedgerWritesDontHoldTheMainThread()).
 - 2026-10-29 16:14 Update: Claude dictation fix merged (claude-dictation-fails) — **What changed:** composer dictation in Claude sessions now works when Claude has a custom status line or its terminal isn't focused:
+- 2026-10-29 16:27 Merged fix-the-flaky-test-6: Fix the flaky test slowAppLookupsAndLedgerWritesDontHoldTheMainThread() (no audit: review none)
