@@ -83,19 +83,33 @@ enum ClaudeVoiceScreen {
         Signal.allCases.filter { (now[$0] ?? 0) > (before[$0] ?? 0) }
     }
 
-    /// Whether `text` is what grew out of the words heard (`live`, shown dim while recording): its first word is among
-    /// the text's first three (the final words may differ a little). Nothing heard shown: it can't be told, so yes.
+    /// Whether `text` is what grew out of the words heard (`live`, shown dim while recording), not something typed
+    /// before it: it starts with one of the first three words heard, the first word heard is among its first three, or
+    /// only its first word was revised (its second is the second heard). Nothing heard shown: it can't be told, so yes.
     static func grew(_ text: String, from live: String) -> Bool {
         let words = { (text: String) in
             text.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
         }
-        guard let first = words(live).first else { return true }
-        return words(text).prefix(3).contains(first)
+        let (heard, final) = (words(live), words(text))
+        guard !heard.isEmpty else { return true }
+        guard let first = final.first else { return false }
+        return heard.prefix(3).contains(first) || final.prefix(3).contains(heard[0])
+            || (heard.count > 1 && final.count > 1 && heard[1] == final[1])
     }
 
-    /// The box's draft as one line: the screen wraps it, and a transcript has no line breaks of its own.
+    /// The glyphs of Claude's recording-level cursor, which rises and falls with the microphone's level.
+    static let meter: Set<Character> = [" ", "▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"]
+
+    /// Nothing in `draft` but the level cursor (and spaces).
+    static func meterOnly(_ draft: String) -> Bool {
+        draft.allSatisfy { meter.contains($0) || $0.isNewline }
+    }
+
+    /// The box's draft as one line: the screen wraps it, and a transcript has no line breaks of its own; a level
+    /// cursor left at its end isn't part of it.
     static func line(_ draft: String) -> String {
-        draft.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " ")
+        let joined = draft.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " ")
+        return String(joined.reversed().drop(while: { meter.contains($0) }).reversed())
     }
 }
 
@@ -104,6 +118,9 @@ enum ClaudeVoiceScreen {
 struct ClaudeVoiceSettings: Equatable, Sendable {
     var mode: String?
     var autoSubmit = false
+    /// Claude's dictation key (`voice:pushToTalk` in its keybindings' Chat context): Space unless rebound; nil when it's
+    /// unbound. VibeSwitcher holds Space only.
+    var pushToTalk: String? = "space"
 
     /// Why dictation won't drive Claude's /voice with these settings; nil when it can. `offer`: `/voice hold` fixes it.
     var refusal: (text: String, offer: Bool)? {
@@ -113,7 +130,30 @@ struct ClaudeVoiceSettings: Equatable, Sendable {
         if mode == "tap" {
             return ("Claude's dictation is in tap mode, which sends what you say by itself; VibeSwitcher only uses hold mode.", true)
         }
+        guard let key = pushToTalk else {
+            return ("Claude's dictation key is unbound (voice:pushToTalk in ~/.claude/keybindings.json), so VibeSwitcher can't hold it.", false)
+        }
+        if key != "space" {
+            return ("Claude's dictation key is \(key) (voice:pushToTalk in ~/.claude/keybindings.json); VibeSwitcher only holds Space, so it didn't start. Hold \(key) in the terminal to dictate there.", false)
+        }
         return nil
+    }
+
+    /// The key bound to `voice:pushToTalk` in a keybindings file's Chat context (`{"bindings": [{"context": "Chat",
+    /// "bindings": {"meta+k": "voice:pushToTalk", "space": null}}]}`): a key bound to it replaces Space; Space bound
+    /// to null leaves none. No file, or none of that: Space.
+    static func pushToTalk(_ data: Data?) -> String? {
+        guard let data, data.count <= 1 << 20, let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+              let blocks = object["bindings"] as? [[String: Any]] else { return "space" }
+        var bound: String?
+        var spaceUnbound = false
+        for block in blocks where (block["context"] as? String)?.lowercased() == "chat" {
+            for (key, action) in block["bindings"] as? [String: Any] ?? [:] {
+                if action as? String == "voice:pushToTalk" { bound = key.lowercased() }
+                if key.lowercased() == "space", action is NSNull { spaceUnbound = true }
+            }
+        }
+        return bound ?? (spaceUnbound ? nil : "space")
     }
 
     static func parse(_ data: Data?) -> ClaudeVoiceSettings {
@@ -143,9 +183,16 @@ struct ClaudeVoiceSettings: Equatable, Sendable {
         return paths + ["/Library/Application Support/ClaudeCode/managed-settings.json"]
     }
 
+    /// Claude's keybindings, in its config folder.
+    static func keybindings(environment: [String: String] = ProcessInfo.processInfo.environment) -> String {
+        (environment["CLAUDE_CONFIG_DIR"].flatMap { $0.isEmpty ? nil : $0 } ?? NSHomeDirectory() + "/.claude") + "/keybindings.json"
+    }
+
     /// Blocks: never on the main thread.
     static func read(folder: String?) -> ClaudeVoiceSettings {
-        merged(files(folder: folder).map { FileManager.default.contents(atPath: $0) })
+        var settings = merged(files(folder: folder).map { FileManager.default.contents(atPath: $0) })
+        settings.pushToTalk = pushToTalk(FileManager.default.contents(atPath: keybindings()))
+        return settings
     }
 }
 
@@ -164,12 +211,20 @@ final class ClaudeVoiceRun {
         case cancelled
     }
 
-    /// How often Space goes in while held: well inside macOS's key repeat, which Claude takes for a held key.
-    static let repeatEvery: TimeInterval = 0.05
-    /// After the first Space, the screen is read before any repeat (as macOS waits before its first): tap mode, which
-    /// Claude may be in by a setting VibeSwitcher didn't see, records on that Space and sends on the next, so it's
-    /// cancelled (Esc) before a second one goes.
-    static let firstPause: TimeInterval = 0.3
+    /// The least time between two Spaces while held: well inside the 120 ms after which Claude Code (2.1.312) takes a
+    /// key for let go, and inside macOS's own key repeat.
+    static let repeatEvery: TimeInterval = 0.04
+    /// While held, the screen is read this long after each answer, and a Space goes only on a read showing Claude still
+    /// warming up or listening: once it stops by itself (silence, a limit, a stall that broke the repeats) it writes
+    /// the transcript, and a second push soon after that sends it.
+    static let holdReadEvery: TimeInterval = 0.02
+    /// No Space for this long and Claude takes the key for let go (2.1.312): a Space after that, while it writes the
+    /// transcript, would be a push; it goes only once a read taken since shows it still listening.
+    static let chainBreak: TimeInterval = 0.12
+    /// After the first Space, the screen is read before any repeat: tap mode, which Claude may be in by a setting
+    /// VibeSwitcher didn't see, records on that Space and sends on the next, so it's cancelled (Esc) before a second one
+    /// goes. Short enough that the read and the second Space come inside Claude's 120 ms chain.
+    static let firstPause: TimeInterval = 0.06
     /// How often the screen is read.
     static let readEvery: TimeInterval = 0.15
     /// No `listening…` this long after the first Space: Claude's dictation is off, or not in this session.
@@ -207,11 +262,14 @@ final class ClaudeVoiceRun {
     private var cancelled = false
     private var listening = false
     private var spaces = 0
-    private var repeating = false
+    /// When a read last showed Claude warming up or listening (Spaces go only while it's fresh).
+    private var lastSpace = Date.distantPast
+    private var stallChecked = false
+    /// The last read no longer showed `listening…`: no Space until the next one says whether it's over.
+    private var doubting = false
     private var started = Date.distantPast
     private var finishBy = Date.distantFuture
     private var baseline: [ClaudeVoiceScreen.Signal: Int] = [:]
-    private var stopRepeats: (() -> Void)?
     private var stopReads: (() -> Void)?
     private var lastDraft: String?
     private var steady = 0
@@ -242,7 +300,6 @@ final class ClaudeVoiceRun {
     func release() {
         released = true
         guard stage == .holding else { return }
-        stopHolding()
         if listening {
             finishing()
         } else {
@@ -255,10 +312,10 @@ final class ClaudeVoiceRun {
         cancelled = true
         switch stage {
         case .holding:
-            stopHolding()
             if listening {
+                // Claude's cancel puts back the box as it was; a Space it kept goes too.
                 _ = session.keys([Self.escape])
-                end(.cancelled)
+                tidy { [weak self] in self?.end(.cancelled) }
             } else {
                 tidy { [weak self] in self?.end(.cancelled) }
             }
@@ -291,23 +348,29 @@ final class ClaudeVoiceRun {
     /// One Space; false (and the run over) when it couldn't go out.
     private func space() -> Bool {
         guard session.keys([Self.space]) else {
-            stopHolding()
             end(.notice("The keys didn't reach the session; nothing was dictated.", offer: false))
             return false
         }
         spaces += 1
+        lastSpace = now()
         return true
     }
 
-    /// The repeats, once the first read after the first Space showed no tap mode.
+    /// The repeats: one Space per read that, taken since the last Space, shows Claude still warming up or listening
+    /// (`holding`). Once Claude stops by itself and writes the transcript, at most the one Space already on its way
+    /// follows it, never the second push that would send it.
     private func press() {
-        guard stage == .holding, !released, space() else { return }
-        stopRepeats = schedule(Self.repeatEvery) { [weak self] in self?.press() }
-    }
-
-    private func stopHolding() {
-        stopRepeats?()
-        stopRepeats = nil
+        guard stage == .holding, !released, !doubting else { return }
+        let gap = now().timeIntervalSince(lastSpace)
+        // Stalled (a busy Mac) past Claude's chain break: it may take the key for let go and be writing the transcript.
+        // A Space goes again only once a second read in a row still shows it listening.
+        if listening, gap >= Self.chainBreak - 0.01, !stallChecked {
+            stallChecked = true
+            return
+        }
+        stallChecked = false
+        guard gap >= Self.repeatEvery - 0.005 else { return }
+        _ = space()
     }
 
     private func readSoon(after delay: TimeInterval = ClaudeVoiceRun.readEvery) {
@@ -325,19 +388,17 @@ final class ClaudeVoiceRun {
         case .clearing: clearing(screen)
         case .checking, .done: return
         }
-        if stage != .done { readSoon() }
+        if stage != .done { readSoon(after: stage == .holding ? Self.holdReadEvery : Self.readEvery) }
     }
 
     private func holding(_ screen: LeadDelivery.Screen?) {
         guard let screen else { return timedOut() }
         if let signal = ClaudeVoiceScreen.new(ClaudeVoiceScreen.signals(screen.text), since: baseline).first(where: { $0 != .enabled }) {
-            stopHolding()
             return tidy { [weak self] in self?.end(.notice(signal.notice ?? Self.didntStart, offer: signal.offersTurnOn)) }
         }
         switch ClaudeVoiceScreen.footer(screen.text) {
         case .tap:
             // Never let tap mode run: its next tap sends.
-            stopHolding()
             _ = session.keys([Self.escape])
             return tidy { [weak self] in self?.end(.notice(Self.tapMode, offer: true)) }
         case .listening:
@@ -345,32 +406,34 @@ final class ClaudeVoiceRun {
                 listening = true
                 onListening()
             }
+            doubting = false
             watch(screen)
         case .warming, .none:
-            break
+            if listening {
+                // Claude stopped listening by itself: twice in a row (one read may land mid-redraw), it's over, and no
+                // more Spaces go; its transcript is waited for.
+                if doubting {
+                    return finishing()
+                }
+                doubting = true
+            }
         }
         switch LeadDelivery.box(in: screen) {
-        case .draft where !listening:
+        case .draft(let draft) where !listening && !ClaudeVoiceScreen.meterOnly(draft):
             // Not spaces: someone typed in the terminal. Nothing of theirs is touched.
-            stopHolding()
             return end(.notice(Self.typedMeanwhile, offer: false))
         case .dialog:
-            stopHolding()
             if listening { _ = session.keys([Self.escape]) }
             return end(.notice("Claude opened a question in the terminal: answer it there first, then dictate.", offer: false))
         case .draft, .empty:
             break
         }
-        if !repeating {
-            repeating = true
-            press()
-        }
+        press()
         timedOut()
     }
 
     private func timedOut() {
         guard stage == .holding, !listening, now().timeIntervalSince(started) >= Self.startWithin else { return }
-        stopHolding()
         tidy { [weak self] in self?.end(.notice(Self.didntStart, offer: true)) }
     }
 
@@ -413,6 +476,8 @@ final class ClaudeVoiceRun {
                 watch(screen)
             case .none:
                 switch LeadDelivery.box(in: screen) {
+                case .draft(let draft) where ClaudeVoiceScreen.meterOnly(draft):
+                    lastDraft = nil
                 case .draft(let draft):
                     steady = draft == lastDraft ? steady + 1 : 1
                     lastDraft = draft
@@ -431,7 +496,8 @@ final class ClaudeVoiceRun {
     /// While Claude records: the words it shows dim, and whether anything not dim (typed in the terminal) showed too.
     private func watch(_ screen: LeadDelivery.Screen) {
         guard screen.runs != nil else { return }
-        if case .draft = LeadDelivery.box(in: screen) { typed = true }
+        // Claude's recording-level cursor (a coloured bar glyph) isn't typed.
+        if case .draft(let draft) = LeadDelivery.box(in: screen), !ClaudeVoiceScreen.meterOnly(draft) { typed = true }
         if let dim = LeadDelivery.dimText(in: screen), !dim.isEmpty { live = dim }
     }
 
@@ -460,6 +526,8 @@ final class ClaudeVoiceRun {
         switch screen.map(LeadDelivery.box(in:)) {
         case .empty?:
             return end(cancelled ? .cancelled : .text(taken.text))
+        case .draft(let draft)? where ClaudeVoiceScreen.meterOnly(draft):
+            return end(cancelled ? .cancelled : .text(taken.text))
         case .draft(let draft)? where squeezed(taken.shown).hasPrefix(squeezed(draft)):
             // Not redrawn yet, or a line left (⌃U takes one line at a time).
             if draft != taken.shown || clearRead % 3 == 0 { kill() }
@@ -478,7 +546,6 @@ final class ClaudeVoiceRun {
         guard stage != .done else { return }
         stage = .done
         if let id = session.id { Self.busy.remove(id) }
-        stopHolding()
         stopReads?()
         stopReads = nil
         finish(outcome)

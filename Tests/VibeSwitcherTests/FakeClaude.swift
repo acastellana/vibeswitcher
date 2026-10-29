@@ -17,8 +17,11 @@ enum FakeClaude {
 # goes in "children") | "realShell" (from now on a `!` command really runs, in zsh, its output what it printed: the
 # sandbox's, to show a code block's Run) | "voice" (its /voice, as code.claude.com/docs/en/voice-dictation tells it: "mode"
 # off | hold | tap, "account" yes | none (no claude.ai sign-in: "Unknown command: /voice") | expired (it can't use the
-# sign-in: "Voice mode requires a Claude.ai account"), "transcript", "warmup" (repeats before it listens), "gap" (seconds
-# without a repeat that end a hold)) | "exit" (it quits, as /exit));
+# sign-in: "Voice mode requires a Claude.ai account"), "transcript", "interim" (what it shows dim while it listens; the
+# transcript's first half by default), "warmup" (repeats before it listens), "gap" (seconds without a repeat that end a
+# hold)) | "voiceStop" (it stops listening by itself, as after 15 s of silence) | "exit" (it quits, as /exit)).
+# Its /voice keeps Claude Code 2.1.312's timings: a repeat chain breaks 120 ms after the last Space (the key let go),
+# 5 repeats start recording, and a second push of the key within 300 ms of a transcript going in sends it.
 # the agent writes its state (mode, tab, answers, the free-text field, queued messages) to STATE after every change.
 import datetime
 import json
@@ -61,9 +64,11 @@ state = {
     "voice": "off",          # /voice: off | hold | tap
     "voiceAccount": "yes",   # yes | none (/voice isn't a command) | expired (it can't use the sign-in)
     "transcript": "open the composer view on main",
-    "warmup": 3,             # key repeats before a held Space starts recording
-    "gap": 0.8,              # no repeat this long: the key was let go
-    "rapid": 0.6,            # a Space this soon after the last is a repeat (the first one comes after macOS's delay)
+    "interim": None,         # what it shows dim while listening (None: the transcript's first half)
+    "warmup": 5,             # key repeats before a held Space starts recording
+    "gap": 0.12,             # no repeat this long: the key was let go (the chain breaks)
+    "doublePush": 0.3,       # a second push this soon after a transcript went in sends it
+    "doubleSubmits": 0,      # prompts sent by a double push
     "recording": "",         # "" | warming | listening | tap
     "voiceMessage": "",      # what its footer says about dictation
     "voiceStarts": 0,        # recordings started
@@ -71,7 +76,8 @@ state = {
     "voiceInserts": 0,       # transcripts written into the box
     "killed": 0,             # ⌃U taken
 }
-VOICE = {"before": "", "last": 0.0, "repeats": 0}
+VOICE = {"before": "", "last": 0.0, "repeats": 0, "inserted": -10.0, "pushes": 0}
+METER = ESC + "[38;2;215;119;87m" + "▃" + ESC + "[39m"   # its recording-level cursor: a coloured bar, not dim
 # The slash commands its menu offers while "/…" is typed in the box.
 COMMANDS = [("/clear", "Clear conversation history"), ("/compact", "Clear history but keep a summary"),
             ("/help", "Show help and available commands"), ("/model", "Set the AI model for Claude Code")]
@@ -143,7 +149,8 @@ def draw():
         if state["recording"] == "listening":
             # What it hears so far, dimmed until it's final.
             words = state["transcript"].split()
-            live = ESC + "[2m" + " ".join(words[:max(1, len(words) // 2)]) + ESC + "[22m"
+            heard = state["interim"] if state["interim"] is not None else " ".join(words[:max(1, len(words) // 2)])
+            live = ESC + "[2m" + heard + ESC + "[22m" + METER
         lines.append("❯ " + state["input"].replace("\n", " ") + live)
         lines.append(RULE)
         menu = suggestions()
@@ -308,7 +315,18 @@ def voice_space():
         return False
     if state["voice"] != "hold":
         return False
-    if t - VOICE["last"] <= state["rapid"] and state["recording"] in ("", "warming") and VOICE["repeats"] >= 0:
+    if state["recording"] == "" and t - VOICE["inserted"] <= state["doublePush"]:
+        # A push of the key right after a transcript went in; the second one sends it.
+        VOICE["pushes"] += 1
+        VOICE["last"] = t
+        if VOICE["pushes"] >= 2:
+            text = state["input"]
+            state["input"] = ""
+            state["doubleSubmits"] += 1
+            VOICE["inserted"] = -10.0
+            submit_prompt(text)
+        return True
+    if t - VOICE["last"] <= state["gap"] and state["recording"] in ("", "warming") and VOICE["repeats"] >= 0:
         VOICE["repeats"] += 1
     else:
         VOICE["repeats"] = 0
@@ -336,6 +354,9 @@ def finish_recording(submit=False):
     # At the cursor (the box's end here): after whatever was typed while it recorded.
     state["input"] = state["input"] + state["transcript"]
     state["recording"] = ""
+    VOICE["repeats"] = 0
+    VOICE["inserted"] = time.monotonic()
+    VOICE["pushes"] = 0
     state["voiceInserts"] += 1
     if submit and len(state["transcript"].split()) >= 3:
         text = state["input"]
@@ -802,8 +823,11 @@ def control():
             save_state()
             out(ESC + "[?2004l" + ESC + "[2J" + ESC + "[H")
             sys.exit(0)
+        elif op == "voiceStop":
+            if state["recording"] == "listening":
+                finish_recording()
         elif op == "voice":
-            for name in ("mode", "account", "transcript", "warmup", "gap"):
+            for name in ("mode", "account", "transcript", "interim", "warmup", "gap"):
                 if name in command:
                     state[{"mode": "voice", "account": "voiceAccount"}.get(name, name)] = command[name]
         elif op == "freeze":

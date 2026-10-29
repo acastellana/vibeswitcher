@@ -119,11 +119,38 @@ struct ClaudeDictationTests {
         #expect(ClaudeVoiceSettings.merged([Data(#"{"voice":{"mode":"hold"}}"#.utf8), nil, nil, tap]).mode == "tap")
     }
 
+    /// Claude's dictation key, from its keybindings (read, never written): Space unless rebound; rebound or unbound,
+    /// VibeSwitcher says so and sends nothing.
+    @Test func aDictationKeyReboundAwayFromSpaceIsSaidAndNothingIsSent() async {
+        #expect(ClaudeVoiceSettings.keybindings(environment: ["CLAUDE_CONFIG_DIR": "/c"]) == "/c/keybindings.json")
+        #expect(ClaudeVoiceSettings.pushToTalk(nil) == "space")
+        #expect(ClaudeVoiceSettings.pushToTalk(Data(#"{"bindings":[{"context":"Chat","bindings":{"ctrl+s":"chat:stash"}}]}"#.utf8)) == "space")
+        let rebound = Data(#"{"bindings":[{"context":"Chat","bindings":{"meta+k":"voice:pushToTalk","space":null}}]}"#.utf8)
+        #expect(ClaudeVoiceSettings.pushToTalk(rebound) == "meta+k")
+        #expect(ClaudeVoiceSettings.pushToTalk(Data(#"{"bindings":[{"context":"Chat","bindings":{"space":null}}]}"#.utf8)) == nil)
+        // Another context's binding isn't the composer's.
+        #expect(ClaudeVoiceSettings.pushToTalk(Data(#"{"bindings":[{"context":"Global","bindings":{"meta+k":"voice:pushToTalk"}}]}"#.utf8)) == "space")
+
+        for key in ["meta+k", nil] as [String?] {
+            let scripted = ScriptedSession()
+            let (controller, _) = controller(session: { _ in scripted.session }, settings: ClaudeVoiceSettings(pushToTalk: key))
+            controller.press("row", agent: .claude) { "" }
+            #expect(await until { controller.phase == .idle })
+            #expect(scripted.keys.isEmpty)
+            #expect(controller.notice?.text.contains(key ?? "unbound") == true, "\(String(describing: controller.notice))")
+        }
+    }
+
     @Test func onlyTextThatGrewOutOfWhatClaudeHeardIsTaken() {
         #expect(ClaudeVoiceScreen.grew("Open the composer view", from: "open the"))
         #expect(ClaudeVoiceScreen.grew("So, open the composer", from: "open"))
         #expect(!ClaudeVoiceScreen.grew("x", from: "open the"))
-        #expect(!ClaudeVoiceScreen.grew("xopen the composer", from: "open the"))
+        #expect(!ClaudeVoiceScreen.grew("something else entirely", from: "open the"))
+        // Only the first word revised once final.
+        #expect(ClaudeVoiceScreen.grew("Often the composer", from: "open the"))
+        // Claude's recording-level cursor isn't typed, and isn't part of the text.
+        #expect(ClaudeVoiceScreen.meterOnly("▃") && ClaudeVoiceScreen.meterOnly(" ▇ ") && !ClaudeVoiceScreen.meterOnly("x▃"))
+        #expect(ClaudeVoiceScreen.line("open the composer ▃") == "open the composer")
         #expect(ClaudeVoiceScreen.grew("anything", from: ""))
         let screen = LeadDelivery.Screen(text: [Self.rule, "❯ typed heard", Self.rule].joined(separator: "\n"),
                                          runs: [ScreenRun(row: 1, column: 8, length: 5, faint: true)])
@@ -191,7 +218,7 @@ struct ClaudeDictationTests {
     @Test func heldTheTranscriptLandsInTheComposerAndClaudesBoxIsCleared() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
-        h.tell(["op": "voice", "mode": "hold", "gap": 1.5])
+        h.tell(["op": "voice", "mode": "hold"])
         try await h.waitFor { h.agent["voice"] as? String == "hold" }
         let prompts = h.agentPrompts
         let controller = dictation(h)
@@ -210,6 +237,7 @@ struct ClaudeDictationTests {
         #expect(h.agent["voiceInserts"] as? Int == 1)
         #expect((h.agent["killed"] as? Int ?? 0) >= 1)
         #expect(h.agent["enters"] as? Int == 0)
+        #expect(h.agent["doubleSubmits"] as? Int == 0)
         #expect(h.agentPrompts == prompts)
 
         // Again: another recording, added after the first in the composer.
@@ -225,7 +253,7 @@ struct ClaudeDictationTests {
     @Test func escCancelsTheRecordingAndNothingLands() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
-        h.tell(["op": "voice", "mode": "hold", "gap": 1.5])
+        h.tell(["op": "voice", "mode": "hold"])
         try await h.waitFor { h.agent["voice"] as? String == "hold" }
         let controller = dictation(h)
         controller.press(h.key, agent: .claude) { "" }
@@ -317,6 +345,7 @@ struct ClaudeDictationTests {
     @Test func typedInTheTerminalWhileClaudeRecordsNothingIsMovedOrCleared() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
+        // Slow to finish (as Claude writing a long transcript): "y" lands before it does.
         h.tell(["op": "voice", "mode": "hold", "gap": 1.5])
         try await h.waitFor { h.agent["voice"] as? String == "hold" }
         let controller = dictation(h)
@@ -344,7 +373,7 @@ struct ClaudeDictationTests {
     @Test func nothingElseIsTypedIntoTheSessionWhileADictationGoesIn() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
-        h.tell(["op": "voice", "mode": "hold", "gap": 1.5])
+        h.tell(["op": "voice", "mode": "hold"])
         try await h.waitFor { h.agent["voice"] as? String == "hold" }
         let controller = dictation(h)
         controller.press(h.key, agent: .claude) { "" }
@@ -361,6 +390,42 @@ struct ClaudeDictationTests {
         // Once it's in the composer, a message goes as usual.
         #expect(h.sync.type("also check the tests"))
         try await h.waitFor { h.agentPrompts.last == "also check the tests" }
+    }
+
+    /// Claude stops listening by itself (silence, its limit, or repeats that stalled past its 120 ms) while the mic is
+    /// still held: no Space goes after, so no second push sends the transcript; it lands in the composer.
+    @Test func claudeStoppingByItselfWhileHeldSendsNothing() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold"])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" }
+        let prompts = h.agentPrompts
+        let controller = dictation(h)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        h.tell(["op": "voiceStop"])
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.deliveries[h.key]?.text == "open the composer view on main", "\(String(describing: controller.notice))")
+        #expect(h.agent["doubleSubmits"] as? Int == 0)
+        #expect(h.agent["voiceStarts"] as? Int == 1)
+        #expect(h.agentPrompts == prompts)
+        #expect(input(h) == "")
+        controller.release()
+        #expect(controller.phase == .idle)
+    }
+
+    /// What Claude showed while listening was revised once final (its first word): still the dictation, taken.
+    @Test func aTranscriptWhoseFirstWordWasRevisedIsTaken() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold", "interim": "often the composer"])
+        try await h.waitFor { h.agent["interim"] as? String == "often the composer" }
+        let controller = dictation(h)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.deliveries[h.key]?.text == "open the composer view on main", "\(String(describing: controller.notice))")
     }
 
     @Test func tapModeInTheSessionIsCancelledAndNothingIsSent() async throws {
