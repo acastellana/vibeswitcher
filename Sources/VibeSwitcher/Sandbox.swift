@@ -235,6 +235,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let controller = DictationController(keyStore: dictationKey, recorder: SandboxRecorder(),
                                              transcription: OpenAITranscription(client: SandboxTranscriber()), findKey: { nil })
         controller.openSettings = { [weak self] in self?.showSettings(.general) }
+        // A fake Claude's /voice (`tell '{"op": "voice", "mode": "hold"}'`): never the user's Claude settings.
+        controller.claudeSettings = { ClaudeVoiceSettings() }
         controller.checkKey()
         return controller
     }()
@@ -777,7 +779,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("answer", "answers the fake lead's open questions: its row reads as its terminal does again"),
         ("extras", "adds to the fake lead's board (start the lead first) a proposal on a timer, a revised question, a task needing an audit, an all-done card and two results"),
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
-        ("dictation key|nokey|note|ack|press|release", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer, let go"),
+        ("dictation key|nokey|note|ack|press|release|turnon", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer (a Claude session's through its fake /voice, see tell's \"voice\" op: until it listens or says why not), let go, the notice's Turn on Claude dictation clicked"),
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
         ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
@@ -1290,7 +1292,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// `dictation key|nokey|note|ack|press|release`.
+    /// `dictation key|nokey|note|ack|press|release|turnon`.
     private func dictate(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
         switch what {
         case "key", "nokey":
@@ -1305,12 +1307,25 @@ private final class Driver: NSObject, NSApplicationDelegate {
             settle { reply(true, "the note about OpenAI was read: a press records") }
         case "press", "release":
             guard let row = model.selectedRow else { return reply(false, "no session selected: chat NAME first") }
-            if what == "press" { dictation.press(row.draftKey) { "Words that may come up: sandbox." } } else { dictation.release() }
-            waitFor({ [weak self] in self?.dictation.isTranscribing(row.draftKey) != true }) { [weak self] _ in
-                self?.settle { reply(true, "\(self?.dictation.phase ?? .idle)") }
+            let agent = row.session?.agent
+            if what == "press" { dictation.press(row.draftKey, agent: agent) { "Words that may come up: sandbox." } } else { dictation.release() }
+            let claude = dictation.claudeRow == row.draftKey
+            waitFor({ [weak self] in
+                guard let dictation = self?.dictation else { return true }
+                // Claude's: held until it listens (or says why not); let go until the text is in the composer.
+                if claude { return what == "press" ? dictation.listening || dictation.phase == .idle : dictation.phase == .idle }
+                return !dictation.isTranscribing(row.draftKey)
+            }) { [weak self] _ in
+                self?.settle { reply(true, "\(self?.dictation.phase ?? .idle)\(self?.dictation.listening == true ? ", listening" : "")") }
+            }
+        case "turnon":
+            guard let row = model.selectedRow else { return reply(false, "no session selected: chat NAME first") }
+            dictation.turnOnClaude(row.draftKey)
+            waitFor({ [weak self] in self?.dictation.turningOn == nil }) { [weak self] _ in
+                self?.settle { reply(true, self?.dictation.notice?.text ?? "no notice") }
             }
         default:
-            reply(false, "dictation key|nokey|note|ack|press|release")
+            reply(false, "dictation key|nokey|note|ack|press|release|turnon")
         }
     }
 
