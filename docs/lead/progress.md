@@ -1962,3 +1962,6 @@
 - 2026-10-29 08:49 Abandoned launch-video-v3-narrated: The user said "delete them" (2026-10-29). The v3 launch video isn't kept; the deliverable was never meant to merge.
 - 2026-10-29 08:49 Started a worker on sessionstore-refresh
 - 2026-10-29 08:50 Merged keep-awake-s-power: Keep-awake's power assertions (IOPMAssertionCreateWithName/Release) run on the main thread and can block on powerd
+- 2026-10-29 08:50 Automatically (auto_advance): Merged keep-awake-s-power (Keep-awake's power assertions (IOPMAssertionCreateWithName/Release) run on the main thread and can block on powerd) into project-lead at f1ddd3a4, on its passing audit and the full test run.
+- 2026-10-29 08:50 Automatically (auto_advance): Cleaned up keep-awake-s-power; ended pid 65632 (Worker: Keep-awake's power assertions (IOPMAssertionCreateWithName/Release) run on the main thread and can block on powerd) (freed 983 MB of build output and temporary folders). It stays done.
+- 2026-10-29 08:56 Merged a-full-suite-run: A full-suite run hung 45 min: the old-host hand-over test (UpgradeFromLeadHostTests) can stall under load
