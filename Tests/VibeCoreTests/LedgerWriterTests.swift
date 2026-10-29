@@ -5,13 +5,14 @@ import VibeCore
 /// What the scan does at each landing on the main thread, done elsewhere (hang-20261028-171900): the ledger's writes
 /// on the writer's queue, and the frontmost app's bundle id asked once a pid.
 struct LedgerWriterTests {
-    /// Holds whoever waits on it until opened, 5 s at most (a slow write or lookup); open, it holds no one.
+    /// Holds whoever waits on it until the test opens it (a slow write or lookup: 5 s and more), 60 s at most; open,
+    /// it holds no one.
     final class Gate: @unchecked Sendable {
         private let group = DispatchGroup()
         private let lock = NSLock()
         private var isOpen = false
         init() { group.enter() }
-        func wait() { _ = group.wait(timeout: .now() + 5) }
+        func wait() { _ = group.wait(timeout: .now() + 60) }
         func open() { lock.lock(); isOpen = true; lock.unlock(); group.leave() }
         var opened: Bool { lock.lock(); defer { lock.unlock() }; return isOpen }
     }
@@ -40,7 +41,7 @@ struct LedgerWriterTests {
         }
         writer.save(ledger("2026-10-28", working: 1))
         #expect(started.wait(timeout: .now() + 300) == .success)
-        // The first write takes 5 s; these return at once, with it still going.
+        // The first write is held; these return at once, with it still going.
         writer.save(ledger("2026-10-28", working: 2))
         writer.save(ledger("2026-10-29", working: 10))
         writer.save(ledger("2026-10-28", working: 3))
@@ -82,7 +83,7 @@ struct LedgerWriterTests {
         #expect(cache.bundleID(pid: 10, lookup: { lookups.add(10); return "other" }) == "com.apple.Terminal")
         #expect(lookups.items == [10])
 
-        // A lookup that takes 5 s holds no one asking for a pid already known.
+        // A slow lookup holds no one asking for a pid already known.
         let gate = Gate()
         let asking = DispatchSemaphore(value: 0)
         let done = DispatchSemaphore(value: 0)

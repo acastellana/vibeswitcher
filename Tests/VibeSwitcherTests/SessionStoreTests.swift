@@ -183,11 +183,12 @@ struct SessionStoreTests {
         var finished: Int { lock.lock(); defer { lock.unlock() }; return done }
     }
 
-    /// Holds whoever waits on it until opened, 5 s at most (a slow writer or lookup); open, it holds no one.
+    /// Holds whoever waits on it until the test opens it (a slow writer or lookup: 5 s and more), 60 s at most, so a
+    /// run without the fix (the main thread held) ends; open, it holds no one.
     final class Gate: @unchecked Sendable {
         private let group = DispatchGroup()
         init() { group.enter() }
-        func wait() { _ = group.wait(timeout: .now() + 5) }
+        func wait() { _ = group.wait(timeout: .now() + 60) }
         func open() { group.leave() }
     }
 
