@@ -2037,3 +2037,8 @@
 - 2026-10-29 21:25 Automatically (auto_advance): Started the audit of claude-dictation-records at 4aedf74c (Its review is audit).
 - 2026-10-29 21:43 Audit of claude-dictation-records: complete, clean, round 1: 2 Nit open
 - 2026-10-29 21:49 Merged claude-dictation-records: Claude dictation records silence: Claude's mic under the session host, plus run logging and the overflowing notice
+- 2026-10-29 21:49 Automatically (auto_advance): Merged claude-dictation-records (Claude dictation records silence: Claude's mic under the session host, plus run logging and the overflowing notice) into main at 5c2ce582, on its passing audit and the full test run.
+- 2026-10-29 21:49 Automatically (auto_advance): Cleaned up claude-dictation-records; ended pid 77722 (Worker: Claude dictation records silence: Claude's mic under the session host, plus run logging and the overflowing notice) (freed 1.7 GB of build output and temporary folders). It stays done.
+- 2026-10-29 21:49 Started a worker on hold-fn-globe-to
+- 2026-10-29 21:49 Automatically (auto_advance): Started a worker on hold-fn-globe-to (Hold Space in the composer to dictate (like Claude Code's /voice hold)), its after tasks done (claude-dictation-records).
+- 2026-10-29 21:49 Update: Dictation trail and notices merged (claude-dictation-records) — **What changed:**
