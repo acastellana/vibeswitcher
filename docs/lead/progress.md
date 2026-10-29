@@ -2033,3 +2033,4 @@
 - 2026-10-29 20:51 Planned claude-dictation-records: Claude dictation records silence: Claude's mic under the session host, plus run logging and the overflowing notice (review audit)
 - 2026-10-29 20:51 Started a worker on claude-dictation-records
 - 2026-10-29 20:51 Automatically (auto_advance): Started a worker on claude-dictation-records (Claude dictation records silence: Claude's mic under the session host, plus run logging and the overflowing notice).
+- 2026-10-29 21:00 Planned hold-fn-globe-to: Hold fn (Globe) to dictate in the composer, alongside ⌥Space
