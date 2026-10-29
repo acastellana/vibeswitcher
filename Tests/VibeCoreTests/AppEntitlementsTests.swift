@@ -23,7 +23,23 @@ struct AppEntitlementsTests {
         let infoData = try Data(contentsOf: Self.repo.appendingPathComponent("Resources/Info.plist"))
         let info = try #require(try PropertyListSerialization.propertyList(from: infoData, format: nil) as? [String: Any])
         let why = try #require(info["NSMicrophoneUsageDescription"] as? String)
-        #expect(why.contains("OpenAI") && why.contains("hold"))
+        #expect(why.contains("OpenAI") && why.contains("hold") && why.contains("Claude"))
+    }
+
+    /// A Claude Code session's dictation records in claude itself (its own signature carries the audio-input
+    /// entitlement), under the session host and its launcher, which the app spawns without disclaiming: macOS asks about
+    /// VibeSwitcher, the responsible process, so the app's entitlement and usage text are the ones that count, and the
+    /// helpers, which record nothing, need none. A host spawned as its own responsible process would be asked about
+    /// instead, with no usage text: that change needs the helpers signed for audio input too.
+    @Test func theSessionHostIsSpawnedUnderTheAppsMicrophonePermission() throws {
+        let sources = Self.repo.appendingPathComponent("Sources")
+        let files = FileManager.default.enumerator(at: sources, includingPropertiesForKeys: nil)?.compactMap { $0 as? URL }
+            .filter { $0.pathExtension == "swift" || $0.pathExtension == "c" || $0.pathExtension == "m" } ?? []
+        #expect(files.count > 50)
+        for file in files {
+            let source = try String(contentsOf: file, encoding: .utf8)
+            #expect(!source.contains("spawnattrs_setdisclaim"), "\(file.lastPathComponent) disclaims the app's responsibility")
+        }
     }
 
     @Test func buildAppSignsTheAppAloneWithIt() throws {

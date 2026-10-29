@@ -39,13 +39,14 @@ struct ClaudeDictationTests {
     }
 
     func controller(key: String? = nil, session: @escaping (String) -> ClaudeVoiceSession?,
-                    settings: ClaudeVoiceSettings = ClaudeVoiceSettings()) -> (DictationController, DictationTests.FakeHTTP) {
+                    settings: ClaudeVoiceSettings = ClaudeVoiceSettings(),
+                    microphone: DictationTests.FakeMicrophone = DictationTests.FakeMicrophone()) -> (DictationController, DictationTests.FakeHTTP) {
         let http = DictationTests.FakeHTTP()
         var transcription = OpenAITranscription(client: http)
         transcription.boundary = { "BOUNDARY" }
         let defaults = temp.defaults("claude-dictation")
         defaults.set(true, forKey: DictationController.privacyNotedKey)
-        let controller = DictationController(keyStore: AppProof.MemorySecret(key), recorder: DictationTests.FakeRecorder(),
+        let controller = DictationController(keyStore: AppProof.MemorySecret(key), recorder: DictationTests.FakeRecorder(), microphone: microphone,
                                              transcription: transcription, defaults: defaults, findKey: { nil }, background: { $0() })
         controller.claudeSession = session
         controller.claudeSettings = { _ in settings }
@@ -156,6 +157,65 @@ struct ClaudeDictationTests {
                                          runs: [ScreenRun(row: 1, column: 8, length: 5, faint: true)])
         #expect(LeadDelivery.dimText(in: screen) == "heard")
         #expect(LeadDelivery.box(in: screen) == .draft("typed"))
+    }
+
+    // MARK: - The microphone
+
+    /// Denied (or restricted), either kind of dictation says so with a way to System Settings, and records nothing:
+    /// macOS asks about VibeSwitcher for a session's Claude too.
+    @Test func aDeniedMicrophoneIsSaidForBothKindsAndNothingRecords() async {
+        let scripted = ScriptedSession()
+        let recorder = DictationTests.FakeRecorder()
+        let microphone = DictationTests.FakeMicrophone(.denied)
+        let (controller, _) = controller(key: DictationTests.key, session: { $0 == "claude" ? scripted.session : nil }, microphone: microphone)
+        for (row, agent) in [("claude", Agent.claude), ("codex", Agent.codex)] {
+            controller.press(row, agent: agent) { "" }
+            #expect(controller.phase == .idle)
+            #expect(controller.notice == DictationController.Notice(rowID: row, text: DictationController.microphoneNotice, privacy: true))
+        }
+        #expect(await until { controller.phase == .idle })
+        #expect(scripted.keys.isEmpty && recorder.starts == 0)
+        #expect(microphone.requests == 0)
+    }
+
+    /// Never asked: the first press asks macOS, once; allowed while still held, the dictation goes on. Refused, it's
+    /// said, and later presses don't ask again.
+    @Test func theFirstPressAsksForTheMicrophoneOnce() async {
+        let scripted = ScriptedSession()
+        let microphone = DictationTests.FakeMicrophone(.undetermined)
+        let (first, _) = controller(session: { _ in scripted.session }, microphone: microphone)
+        first.press("row", agent: .claude) { "" }
+        #expect(microphone.requests == 1 && scripted.keys.isEmpty)
+        #expect(await until { scripted.keys.first == [ClaudeVoiceRun.space] })
+        first.cancel()
+        #expect(await until { first.phase == .idle })
+        first.press("row", agent: .claude) { "" }
+        #expect(microphone.requests == 1)
+        first.cancel()
+        #expect(await until { first.phase == .idle })
+
+        let refused = DictationTests.FakeMicrophone(.undetermined)
+        refused.grants = false
+        let other = ScriptedSession()
+        let (second, _) = controller(session: { _ in other.session }, microphone: refused)
+        second.press("row", agent: .claude) { "" }
+        #expect(await until { second.notice?.privacy == true })
+        second.press("row", agent: .claude) { "" }
+        #expect(refused.requests == 1 && other.keys.isEmpty)
+        #expect(second.notice?.text == DictationController.microphoneNotice)
+    }
+
+    /// Claude's own words about the microphone get the same notice.
+    @Test func claudesMicrophoneMessagesGetTheSameNotice() async {
+        for message in ["Microphone access is denied. Grant it in System Settings.", "No audio detected from microphone"] {
+            let scripted = ScriptedSession()
+            scripted.after = { count in count >= 1 ? ClaudeDictationTests.screen(footer: message) : nil }
+            let (controller, _) = controller(session: { _ in scripted.session })
+            controller.press("row", agent: .claude) { "" }
+            #expect(await until { controller.phase == .idle })
+            #expect(controller.notice?.text == DictationController.microphoneNotice && controller.notice?.privacy == true,
+                    "\(String(describing: controller.notice))")
+        }
     }
 
     // MARK: - The screen

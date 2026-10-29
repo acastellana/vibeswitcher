@@ -36,6 +36,8 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         var settings = false
         /// Offers to turn on Claude's dictation in the session (`/voice hold`).
         var turnOn = false
+        /// Offers Open Privacy Settings (the microphone's).
+        var privacy = false
         /// News, not a failure (said in grey).
         var info = false
     }
@@ -62,6 +64,10 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     @Published private(set) var keyNotice: String?
     /// Opens Settings › General (the composer's link when a key is needed).
     var openSettings: () -> Void = {}
+    /// Opens System Settings › Privacy & Security › Microphone.
+    var openPrivacy: () -> Void = { SystemMicrophone.openSettings() }
+    /// Said when VibeSwitcher may not use the microphone (macOS's answer, or Claude's own messages about it).
+    static let microphoneNotice = "VibeSwitcher may not use the microphone, or hears nothing from it: allow VibeSwitcher in System Settings › Privacy & Security › Microphone, and check the input in Sound."
     /// The Claude Code session a composer's dictation goes through (its /voice), when it's one the window can type into;
     /// nil: OpenAI's.
     var claudeSession: (String) -> ClaudeVoiceSession? = { _ in nil }
@@ -75,6 +81,9 @@ final class DictationController: ObservableObject, @unchecked Sendable {
 
     private let keyStore: SecretStore
     private let recorder: DictationRecorder
+    private let microphone: MicrophoneAuthorizer
+    /// macOS was asked about the microphone (once, at the first press).
+    private var askedMicrophone = false
     private let transcription: OpenAITranscription
     private let defaults: UserDefaults
     private let findKey: @Sendable () -> FoundOpenAIKey?
@@ -90,12 +99,14 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     /// Called each time the phase goes back to idle (tests wait on it).
     var onIdle: (() -> Void)?
 
-    init(keyStore: SecretStore, recorder: DictationRecorder, transcription: OpenAITranscription = OpenAITranscription(),
+    init(keyStore: SecretStore, recorder: DictationRecorder, microphone: MicrophoneAuthorizer,
+         transcription: OpenAITranscription = OpenAITranscription(),
          defaults: UserDefaults = .standard, findKey: @escaping @Sendable () -> FoundOpenAIKey? = { DictationKey.findLive() },
          background: @escaping (@escaping @Sendable () -> Void) -> Void = { DispatchQueue.global(qos: .userInitiated).async(execute: $0) },
          schedule: @escaping (TimeInterval, @escaping () -> Void) -> () -> Void = DictationController.after) {
         self.keyStore = keyStore
         self.recorder = recorder
+        self.microphone = microphone
         self.transcription = transcription
         self.defaults = defaults
         self.findKey = findKey
@@ -132,6 +143,26 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     func press(_ rowID: String, agent: Agent? = nil, vocabulary: @escaping @Sendable () -> String) {
         guard phase == .idle, turningOn == nil else { return }
         notice = nil
+        // The microphone first, for either: macOS asks about VibeSwitcher for a session's Claude too.
+        switch microphone.status {
+        case .allowed:
+            break
+        case .denied:
+            return microphoneDenied(rowID)
+        case .undetermined:
+            // Asked once, at this first press; still held when it's allowed, it goes on.
+            guard !askedMicrophone else { return microphoneDenied(rowID) }
+            askedMicrophone = true
+            holding = true
+            return microphone.request { [weak self] granted in
+                guard let self else { return }
+                guard granted else {
+                    self.holding = false
+                    return self.microphoneDenied(rowID)
+                }
+                if self.holding { self.press(rowID, agent: agent, vocabulary: vocabulary) }
+            }
+        }
         if let session = route(rowID, agent: agent) { return pressClaude(rowID, session) }
         if keyState == .missing { return needKey(rowID) }
         guard privacyNoted else {
@@ -143,8 +174,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
             guard let self else { return }
             guard allowed else {
                 self.holding = false
-                self.notice = Notice(rowID: rowID, text: "VibeSwitcher may not use the microphone: allow it in System Settings › Privacy & Security › Microphone.")
-                return
+                return self.microphoneDenied(rowID)
             }
             // Let go before macOS answered (its first-time question): nothing to record.
             guard self.holding, self.phase == .idle else { return }
@@ -289,7 +319,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         case .text(let text):
             deliver(text, to: rowID)
         case .notice(let text, let offer):
-            notice = Notice(rowID: rowID, text: text, turnOn: offer)
+            notice = Notice(rowID: rowID, text: text, turnOn: offer, privacy: text == Self.microphoneNotice)
         case .cancelled:
             break
         }
@@ -345,6 +375,10 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     private func turnedOn(_ rowID: String, _ notice: Notice) {
         turningOn = nil
         self.notice = notice
+    }
+
+    private func microphoneDenied(_ rowID: String) {
+        notice = Notice(rowID: rowID, text: Self.microphoneNotice, privacy: true)
     }
 
     private func needKey(_ rowID: String) {

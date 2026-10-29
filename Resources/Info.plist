@@ -23,7 +23,7 @@
     <key>LSUIElement</key>
     <true/>
     <key>NSMicrophoneUsageDescription</key>
-    <string>VibeSwitcher records you only while you hold the mic button (or ⌥Space) in the composer, and sends the recording to OpenAI with your own API key to turn it into text. Nothing is kept after.</string>
+    <string>VibeSwitcher records you only while you hold the mic button (or ⌥Space) in the composer. In a Claude Code session, Claude's own dictation records it and turns it into text; otherwise the recording goes to OpenAI with your own API key. Nothing is kept after.</string>
     <key>NSAppleEventsUsageDescription</key>
     <string>VibeSwitcher reads Terminal tab titles to show what each Claude/Codex session is doing and selects a tab when you click a session. If you allow dev pages for your phone, it also lists the localhost pages open in Google Chrome.</string>
 </dict>

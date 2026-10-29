@@ -232,7 +232,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
     /// that answers a made-up transcript, a key in memory (`dictation key|nokey|press|release|note`).
     let dictationKey = AppProof.MemorySecret()
     lazy var dictation: DictationController = {
-        let controller = DictationController(keyStore: dictationKey, recorder: SandboxRecorder(),
+        let controller = DictationController(keyStore: dictationKey, recorder: SandboxRecorder(), microphone: SandboxMicrophone(),
                                              transcription: OpenAITranscription(client: SandboxTranscriber()), findKey: { nil })
         controller.openSettings = { [weak self] in self?.showSettings(.general) }
         // A fake Claude's /voice (`tell '{"op": "voice", "mode": "hold"}'`): never the user's Claude settings.
@@ -1519,6 +1519,12 @@ private final class Driver: NSObject, NSApplicationDelegate {
 }
 
 /// The sandbox's microphone: no device opened, a made-up recording handed over.
+/// The sandbox's microphone permission: always allowed, never the Mac's (no dialog).
+final class SandboxMicrophone: MicrophoneAuthorizer {
+    var status: MicrophoneStatus { .allowed }
+    func request(_ done: @escaping (Bool) -> Void) { done(true) }
+}
+
 final class SandboxRecorder: DictationRecorder {
     func permission(_ done: @escaping (Bool) -> Void) { done(true) }
     func start() throws {}

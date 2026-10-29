@@ -59,6 +59,23 @@ struct DictationTests {
         func cancel() { recording = false }
     }
 
+    /// macOS's answer about the microphone, as the test sets it: never the Mac's (no dialog).
+    final class FakeMicrophone: MicrophoneAuthorizer {
+        var status: MicrophoneStatus
+        /// What the request answers (the status becomes it).
+        var grants = true
+        private(set) var requests = 0
+
+        init(_ status: MicrophoneStatus = .allowed) { self.status = status }
+
+        func request(_ done: @escaping (Bool) -> Void) {
+            requests += 1
+            status = grants ? .allowed : .denied
+            let granted = grants
+            DispatchQueue.main.async { done(granted) }
+        }
+    }
+
     /// The 2-minute limit's timer, fired when the test says.
     final class FakeClock {
         var pending: [(delay: TimeInterval, work: () -> Void)] = []
@@ -76,11 +93,12 @@ struct DictationTests {
     }
 
     func controller(_ http: FakeHTTP, recorder: FakeRecorder, key: String? = key, clock: FakeClock = FakeClock(),
-                    noted: Bool = true, found: FoundOpenAIKey? = nil) -> (DictationController, AppProof.MemorySecret) {
+                    noted: Bool = true, found: FoundOpenAIKey? = nil,
+                    microphone: FakeMicrophone = FakeMicrophone()) -> (DictationController, AppProof.MemorySecret) {
         let store = AppProof.MemorySecret(key)
         let defaults = temp.defaults("dictation")
         if noted { defaults.set(true, forKey: DictationController.privacyNotedKey) }
-        let controller = DictationController(keyStore: store, recorder: recorder, transcription: transcription(http), defaults: defaults,
+        let controller = DictationController(keyStore: store, recorder: recorder, microphone: microphone, transcription: transcription(http), defaults: defaults,
                                              findKey: { found }, background: { $0() }, schedule: clock.schedule)
         return (controller, store)
     }

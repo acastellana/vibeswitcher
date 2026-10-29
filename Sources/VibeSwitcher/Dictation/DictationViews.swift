@@ -95,6 +95,9 @@ struct DictationStatusRow: View {
                 if notice.settings {
                     Button("Open Settings…") { dictation.openSettings() }.controlSize(.small)
                 }
+                if notice.privacy {
+                    Button("Open Privacy Settings…") { dictation.openPrivacy() }.controlSize(.small)
+                }
                 if notice.turnOn {
                     Button("Turn on Claude dictation") { dictation.turnOnClaude(rowID) }.controlSize(.small)
                         .help("Types /voice hold into the session (its prompt box must be empty); your Claude settings aren't touched otherwise")

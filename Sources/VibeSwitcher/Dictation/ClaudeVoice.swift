@@ -57,8 +57,8 @@ enum ClaudeVoiceScreen {
                 return "This session's Claude Code has no /voice: it needs a claude.ai sign-in (run /login there), and an ANTHROPIC_API_KEY or another provider in use takes precedence over one."
             case .needsAccount: return "Claude's dictation needs a claude.ai sign-in: run /login in the session, then try again."
             case .policy: return "Claude's dictation is turned off by your organization's policy."
-            case .microphone: return "Claude couldn't use the microphone: allow VibeSwitcher in System Settings › Privacy & Security › Microphone."
-            case .noAudio: return "Claude heard no audio from the microphone: check the input in System Settings › Sound."
+            // VibeSwitcher's: macOS asks about it for the claude in its sessions.
+            case .microphone, .noAudio: return DictationController.microphoneNotice
             case .noSpeech: return "Claude didn't catch any words: hold the mic and speak a little closer."
             case .failed: return "Claude's dictation couldn't reach its service: check the network and try again."
             }

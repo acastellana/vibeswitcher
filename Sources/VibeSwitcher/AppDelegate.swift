@@ -89,7 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
     private let dictationKey = AppProof.KeychainSecret(account: AppProof.openAIAccount, label: "VibeSwitcher OpenAI API key")
     /// Push to talk in the composer.
     private lazy var dictation: DictationController = {
-        let controller = DictationController(keyStore: dictationKey, recorder: EngineRecorder())
+        let controller = DictationController(keyStore: dictationKey, recorder: EngineRecorder(), microphone: SystemMicrophone())
         controller.openSettings = { [weak self] in self?.showSettings(tab: .general) }
         return controller
     }()
