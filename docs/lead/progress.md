@@ -2043,3 +2043,6 @@
 - 2026-10-29 21:49 Automatically (auto_advance): Started a worker on hold-fn-globe-to (Hold Space in the composer to dictate (like Claude Code's /voice hold)), its after tasks done (claude-dictation-records).
 - 2026-10-29 21:49 Update: Dictation trail and notices merged (claude-dictation-records) — **What changed:**
 - 2026-10-29 22:16 Merged hold-fn-globe-to: Hold Space in the composer to dictate (like Claude Code's /voice hold) (no audit: review none)
+- 2026-10-29 22:16 Automatically (auto_advance): Merged hold-fn-globe-to (Hold Space in the composer to dictate (like Claude Code's /voice hold)) into main at b99407a7, review none: on its worker's done report on fbfc18d0 and the full test run.
+- 2026-10-29 22:16 Automatically (auto_advance): Cleaned up hold-fn-globe-to; ended pid 7047 (Worker: Hold Space in the composer to dictate (like Claude Code's /voice hold)) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-29 22:16 Update: Hold Space to dictate merged (hold-fn-globe-to) — **What changed:** in the composer box:
