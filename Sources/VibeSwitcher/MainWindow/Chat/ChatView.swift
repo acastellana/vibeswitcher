@@ -457,8 +457,8 @@ private struct RowTops: PreferenceKey {
 
 /// Reports where the scroll view around it is: the top of what's visible (from the top of this view), its height and
 /// whether the end is on screen. Read from AppKit as you scroll; the stack is eager, so its rows don't appear and
-/// disappear.
-private struct ScrollProbe: NSViewRepresentable {
+/// disappear. The Team tab's list reads it too (`TeamExposure`).
+struct ScrollProbe: NSViewRepresentable {
     let report: (_ top: Double, _ height: Double, _ atEnd: Bool) -> Void
 
     func makeNSView(context: Context) -> ProbeView { ProbeView() }

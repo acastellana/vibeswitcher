@@ -7,7 +7,18 @@ import VibeCore
 /// Settings, or while none has come, the rows show their checkpoint or live activity instead.
 final class TeamSummaryModel: ObservableObject {
     /// Settings' "AI summaries" switch.
-    @Published var enabled = true
+    @Published var enabled = true {
+        didSet { version += 1 }
+    }
+    /// Counts the changes to what `line` gives (a line come, the switch turned): a view keeps the lines it looked up
+    /// while it's the same.
+    private(set) var version = 0
+    /// Whether each message VibeSwitcher handed a lead needs a TL;DR, by its chat entry's id: a message's text never
+    /// changes, and counting a long report's characters and lines in each card's body, as every chat update drew them
+    /// all again, showed in a 52 s freeze (hang-20261028-175314).
+    private var needs: [String: Bool] = [:]
+    /// How many times a message's need was worked out (for tests).
+    private(set) var needsMade = 0
     /// What the main thread knows about a team member's session (by host id): its host session, and the transcript
     /// the scan found for its agent.
     var lookup: (String) -> (session: HostSession?, transcript: String?) = { _ in (nil, nil) }
@@ -26,7 +37,19 @@ final class TeamSummaryModel: ObservableObject {
         self.observer = observer
         let queue = DispatchQueue(label: "VibeSwitcher.team-summaries", qos: .utility)
         self.perform = perform ?? { queue.async(execute: $0) }
-        summarizer.changed = { [weak self] in self?.objectWillChange.send() }
+        summarizer.changed = { [weak self] in
+            self?.version += 1
+            self?.objectWillChange.send()
+        }
+    }
+
+    /// `message.needsSummary`, once a message (by its chat entry's id).
+    func needsSummary(_ message: TeamMessage, id: String) -> Bool {
+        if let known = needs[id] { return known }
+        needsMade += 1
+        let needs = message.needsSummary
+        self.needs[id] = needs
+        return needs
     }
 
     /// The summary of what a row's agent is doing, when there's one (nil: show the fallback).
@@ -43,14 +66,14 @@ final class TeamSummaryModel: ObservableObject {
 
     /// The TL;DR of a long message VibeSwitcher handed a lead (by its chat entry's id), when there's one.
     func line(_ message: TeamMessage, id: String) -> String? {
-        guard enabled, message.needsSummary else { return nil }
+        guard enabled, needsSummary(message, id: id) else { return nil }
         return summarizer.cached(Self.messageKey(id))
     }
 
     /// Asks for a message's TL;DR, once: its text never changes, so the cache never finds it due again (not after
     /// a failure either).
     func request(_ message: TeamMessage, id: String) {
-        guard enabled, message.needsSummary else { return }
+        guard enabled, needsSummary(message, id: id) else { return }
         summarizer.line(Self.messageKey(id), fingerprint: "message") { SummaryPrompts.message(message) }
     }
 

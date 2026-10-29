@@ -109,6 +109,26 @@ final class LeadReads: @unchecked Sendable {
     }
 }
 
+/// `LeadWitness.HeavySlots` and what it has told, looked at off the main thread (`LeadController.lookAtHeavySlots`),
+/// one look at a time.
+final class HeavySlotsWatch: @unchecked Sendable {
+    private var watch: LeadWitness.HeavySlots
+    private let lock = NSLock()
+    /// How many looks, and how many of them on the main thread (for tests).
+    private(set) var looks = 0
+    private(set) var lookedOnMain = 0
+
+    init(_ watch: LeadWitness.HeavySlots) { self.watch = watch }
+
+    func look(now: Date = Date()) -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        looks += 1
+        if Thread.isMainThread { lookedOnMain += 1 }
+        return watch.look(now: now)
+    }
+}
+
 /// What the witness reads of a lead's team at each look, on `LeadReads`' queue: a team's transcripts are a few hundred
 /// KB each to parse (thirty of them froze the window when read on the main thread). The sessions as they were when the
 /// look began, what each member it watches is doing (`LeadObserver.watching`), the oldest message waiting for each
@@ -254,7 +274,9 @@ final class LeadController: ObservableObject {
     private var policyTimer: Heartbeat.Subscription?
     /// The Mac-wide test and build slots, looked at once a minute: one held long is told to every running lead (see
     /// `LeadWitness.HeavySlots`); none until the app starts it (`watchHeavySlots`).
-    private var heavySlots: LeadWitness.HeavySlots?
+    private(set) var heavySlots: HeavySlotsWatch?
+    /// Where the slots are looked at (`lookAtHeavySlots`).
+    private let heavySlotsQueue = DispatchQueue(label: "VibeSwitcher.heavy-slots", qos: .utility)
     private var heavySlotsTimer: Heartbeat.Subscription?
     /// The leads refused for the Mac's room or load, looked at once a minute: each is woken once there's room, whichever
     /// project's sessions ended (see `LeadWitness.RoomWaits`); none until the app starts it (`watchRoom`).
@@ -442,12 +464,26 @@ final class LeadController: ObservableObject {
     /// The lead a row is, if it is one: its root (the folder its window session started in, wherever its agent has
     /// `cd`'d since) and board.
     func lead(for row: WindowRow) -> (root: String, board: LeadBoard)? {
-        guard let id = row.hostID, let session = host.sessions.first(where: { $0.id == id }), LeadTeams.role(label: session.label) == .lead
-        else { return nil }
-        let root = (session.cwd as NSString).standardizingPath
-        guard let board = boards[root] else { return nil }
+        guard let id = row.hostID, let root = leadRoots(of: host.sessions)[id], let board = boards[root] else { return nil }
         return (root, board)
     }
+
+    /// The window sessions that are leads (by their labels) and their roots, by host id, made once for each list the host
+    /// gives: the inspector and the sidebar ask on every draw, and looking through every session's label and folder
+    /// each time showed in the window's freezes (hang-20261028-174653).
+    func leadRoots(of sessions: [HostSession]) -> [UUID: String] {
+        if let kept = leadRootsKept, kept.sessions.isSameStorage(as: sessions) { return kept.roots }
+        leadRootsMade += 1
+        var roots: [UUID: String] = [:]
+        for session in sessions where LeadTeams.role(label: session.label) == .lead {
+            roots[session.id] = (session.cwd as NSString).standardizingPath
+        }
+        leadRootsKept = (sessions, roots)
+        return roots
+    }
+    private var leadRootsKept: (sessions: [HostSession], roots: [UUID: String])?
+    /// How many times the leads' roots were made (for tests).
+    private(set) var leadRootsMade = 0
 
     /// The user opened this lead: its all-done cards are seen, and the sidebar's check goes at once.
     func seeAllDone(for row: WindowRow) {
@@ -1201,14 +1237,23 @@ final class LeadController: ObservableObject {
     /// Looks at the Mac-wide test and build slots once a minute from now on: a slot held long is told to every
     /// running lead once (see `LeadWitness.HeavySlots`).
     func watchHeavySlots(_ watch: LeadWitness.HeavySlots = LeadWitness.HeavySlots()) {
-        heavySlots = watch
+        heavySlots = HeavySlotsWatch(watch)
         heavySlotsTimer = Heartbeat.shared.every(60) { [weak self] in self?.lookAtHeavySlots() }
     }
 
-    /// A slot held long: to each running lead, as the witness.
-    func lookAtHeavySlots() {
-        guard let text = heavySlots?.look() else { return }
-        for root in leadRoots { deliver(text, from: .system("witness"), root: root) }
+    /// A slot held long: to each running lead, as the witness. The Mac-wide lock files are read on a queue of their own
+    /// (`heavySlotsQueue`), never the main thread: on a loaded Mac reading them held it for 10 s
+    /// (hang-20261028-175702). `then` runs on the main thread once the look is told (tests).
+    func lookAtHeavySlots(then: @escaping () -> Void = {}) {
+        guard let watch = heavySlots else { return then() }
+        heavySlotsQueue.async { [weak self] in
+            let text = watch.look()
+            DispatchQueue.main.async {
+                defer { then() }
+                guard let self, let text else { return }
+                for root in self.leadRoots { self.deliver(text, from: .system("witness"), root: root) }
+            }
+        }
     }
 
     /// Looks once a minute from now on for leads refused for the Mac's room or load that have room now.
