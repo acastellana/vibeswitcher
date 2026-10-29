@@ -50,6 +50,8 @@ enum ClaudeVoiceScreen {
         var spaces: Int?
         /// The level cursor at the box's end.
         var meter = false
+        /// It's drawn grey: the level is low (silence, or a microphone that gives nothing).
+        var quiet = false
         /// What's dim in the box, less the level cursor.
         var dim = ""
     }
@@ -82,6 +84,7 @@ enum ClaudeVoiceScreen {
         if let last = cells.last(where: { !$0.character.isWhitespace }), meter.contains(last.character), last.character != " ",
            let drawn = run(last), drawn.color != nil, !drawn.faint, !drawn.inverse {
             prompt.meter = true
+            prompt.quiet = drawn.isDim
             cells.removeAll { $0 == last }
         }
         let dim = cells.filter { run($0)?.isDim == true }
@@ -368,6 +371,12 @@ final class ClaudeVoiceRun {
     }
     static let tapMode = "Claude's dictation is in tap mode, which sends what you say by itself; VibeSwitcher only uses hold mode."
     static let typedMeanwhile = "Something was typed in the terminal meanwhile, so VibeSwitcher left Claude's prompt box alone."
+    static let gaveNoText = "Claude's dictation gave no text."
+    /// No text, and its level cursor stayed grey (low) the whole recording: the microphone gave it silence.
+    static let heardNothing = "Claude heard nothing: check that VibeSwitcher may use the microphone (System Settings › Privacy & Security › Microphone) and that the input in Sound is the one you speak into."
+    /// After Claude's `processing…` went, its box empty this long: it wrote nothing (its transcript goes in as the
+    /// footer goes).
+    static let emptyAfterProcessing: TimeInterval = 2
     /// Reads in a row that must show the same text before it's taken (Claude may still be finishing it).
     static let steadyReads = 3
 
@@ -413,6 +422,14 @@ final class ClaudeVoiceRun {
     private var steady = 0
     /// Something not dim showed in the box while Claude recorded: typed in the terminal, not dictated.
     private var typed = false
+    /// Its level cursor as seen: grey (low) at some read, and coloured (a level heard) at some read.
+    private var meterQuiet = false
+    private var meterHeard = false
+    /// What the run went through, by name, for app.log (`trail`): never the screen's text.
+    private var trailed: [String] = []
+    /// While finishing: Claude's `processing…` was seen, and since when its box has shown nothing after it.
+    private var processed = false
+    private var emptySince: Date?
     /// The words Claude showed dim while it listened.
     private var live = ""
     private var taken: (shown: String, text: String)?
@@ -483,6 +500,7 @@ final class ClaudeVoiceRun {
             if screen.focusEvents == true, session.focusIn() { focusSent = true }
             stage = .holding
             started = now()
+            Breadcrumbs.shared.note("dictation: Claude's began (focus events \(screen.focusEvents == true ? "yes" : "no"))")
             guard space() else { return }
             _ = schedule(Self.firstRepeatWithin) { [weak self] in self?.beginRepeats() }
             readSoon(after: Self.holdReadEvery)
@@ -614,7 +632,30 @@ final class ClaudeVoiceRun {
 
     private func note(_ shown: ClaudeVoiceScreen.Seen, _ screen: LeadDelivery.Screen) {
         if seen.last != shown { seen.append(shown) }
-        spacesShown = ClaudeVoiceScreen.prompt(screen).spaces ?? 0
+        let prompt = ClaudeVoiceScreen.prompt(screen)
+        spacesShown = prompt.spaces ?? 0
+        level(prompt)
+        trail(shown.rawValue)
+    }
+
+    private func level(_ prompt: ClaudeVoiceScreen.Prompt) {
+        guard prompt.meter else { return }
+        if prompt.quiet { meterQuiet = true } else { meterHeard = true }
+    }
+
+    /// Its level cursor over the recording: `flat` (grey at every read that showed it), `moved`, or `not shown`.
+    private var meterSummary: String {
+        meterHeard ? "moved" : meterQuiet ? "flat" : "not shown"
+    }
+
+    /// The most changes of state one run puts in app.log (a long recording's reads may flicker between two).
+    static let trailLimit = 24
+
+    /// A change of what the run sees, in app.log once (by name).
+    private func trail(_ state: String) {
+        guard trailed.last != state, trailed.count < Self.trailLimit else { return }
+        trailed.append(state)
+        Breadcrumbs.shared.note("dictation: Claude's saw \(state)")
     }
 
     /// No recording by the end of the wait: off when the last read showed its Spaces typed and kept (more than a warmup
@@ -665,8 +706,15 @@ final class ClaudeVoiceRun {
             }
             // Still recording or processing (its footer, or its level cursor): the transcript isn't in yet.
             let footer = ClaudeVoiceScreen.footer(screen.text)
-            switch footer == .none && ClaudeVoiceScreen.prompt(screen).meter ? .listening : footer {
+            let prompt = ClaudeVoiceScreen.prompt(screen)
+            level(prompt)
+            let state = footer == .none && prompt.meter ? .listening : footer
+            switch state {
             case .listening, .warming, .tap, .processing:
+                let seen: ClaudeVoiceScreen.Seen = state == .processing ? .processing : state == .warming ? .warming : state == .tap ? .tap : .recording
+                trail(seen.rawValue)
+                if state == .processing { processed = true }
+                emptySince = nil
                 lastDraft = nil
                 watch(screen)
             case .none:
@@ -674,18 +722,34 @@ final class ClaudeVoiceRun {
                 case .draft(let draft) where ClaudeVoiceScreen.meterOnly(draft):
                     lastDraft = nil
                 case .draft(let draft):
+                    trail("text written")
+                    emptySince = nil
                     steady = draft == lastDraft ? steady + 1 : 1
                     lastDraft = draft
                     if steady >= Self.steadyReads { return take(draft) }
                 case .empty:
                     lastDraft = nil
+                    // Processed, and nothing went in: it wrote no text.
+                    if processed {
+                        trail("an empty box")
+                        let since = emptySince ?? now()
+                        emptySince = since
+                        if now().timeIntervalSince(since) >= Self.emptyAfterProcessing {
+                            return end(cancelled ? .cancelled : noText, why: "no text after processing")
+                        }
+                    }
                 case .dialog:
                     return end(cancelled ? .cancelled
                                : .notice("Claude opened a question before its dictation was written; whatever it wrote stays in the terminal.", offer: false))
                 }
             }
         }
-        if now() >= finishBy { end(cancelled ? .cancelled : .notice("Claude's dictation gave no text.", offer: false)) }
+        if now() >= finishBy { end(cancelled ? .cancelled : noText, why: "no text within \(Int(Self.finishWithin)) s") }
+    }
+
+    /// No transcript: Claude heard nothing when its level cursor stayed grey the whole recording.
+    private var noText: Outcome {
+        .notice(meterQuiet && !meterHeard ? Self.heardNothing : Self.gaveNoText, offer: false)
     }
 
     /// While Claude records: the words it shows dim, and whether anything not dim (typed in the terminal) showed too.
@@ -737,9 +801,19 @@ final class ClaudeVoiceRun {
         }
     }
 
-    private func end(_ outcome: Outcome) {
+    /// The run is over: `outcome` goes to the composer, and app.log says how it ended and why (`why`, else the notice,
+    /// which is VibeSwitcher's own words), never what Claude heard or wrote.
+    private func end(_ outcome: Outcome, why: String? = nil) {
         guard stage != .done else { return }
         stage = .done
+        let how: String
+        switch outcome {
+        case .text(let text): how = "text taken (\(text.count) characters)"
+        case .notice(let notice, _): how = "no text: \(why ?? notice)"
+        case .cancelled: how = "cancelled"
+        }
+        let took = started == .distantPast ? "before any Space" : String(format: "after %.1f s", now().timeIntervalSince(started))
+        Breadcrumbs.shared.note("dictation: Claude's ended, \(how), \(took), \(spaces) Spaces, level cursor \(meterSummary); saw \(trailed.isEmpty ? "nothing" : trailed.joined(separator: " → "))")
         stopSpaces?()
         stopSpaces = nil
         if focusSent {

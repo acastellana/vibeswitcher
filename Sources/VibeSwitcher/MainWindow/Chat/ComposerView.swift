@@ -110,12 +110,15 @@ struct ComposerView: View {
                 .help(working ? "Steer (↩): it gets this at its next step, without stopping. ⌥↩ queues it for after the turn." : "Send (↩)")
             }
             if let dictation { DictationStatusRow(dictation: dictation, rowID: rowID) }
+            // A line of its own, wrapped: in the chips' row a long one ran over them and past the window's edge.
+            if let notice = steerOnly ? notice : notice ?? chat.sendNotice {
+                Text(notice).font(.system(size: 11)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 30)
+            }
             if !steerOnly {
-                ComposerChips(chat: chat, agent: agent, cycleMode: actions.cycleMode, notice: notice ?? chat.sendNotice) { command in
+                ComposerChips(chat: chat, agent: agent, cycleMode: actions.cycleMode) { command in
                     _ = actions.send(command)
                 }
-            } else if let notice {
-                Text(notice).font(.system(size: 11)).foregroundStyle(.red).padding(.leading, 30)
             }
         }
         .padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 8)
@@ -295,7 +298,6 @@ private struct ComposerChips: View {
     @ObservedObject var chat: ChatModel
     let agent: Agent
     let cycleMode: () -> Void
-    let notice: String?
     let command: (String) -> Void
 
     var body: some View {
@@ -337,9 +339,7 @@ private struct ComposerChips: View {
                 }
             }
             Spacer(minLength: 0)
-            if let notice {
-                Text(notice).font(.system(size: 11)).foregroundStyle(.red).lineLimit(1)
-            } else if !chat.pending.isEmpty {
+            if !chat.pending.isEmpty {
                 Text("\(chat.pending.count) queued").font(.system(size: 11)).foregroundStyle(.secondary)
             }
         }

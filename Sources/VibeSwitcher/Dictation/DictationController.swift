@@ -297,7 +297,10 @@ final class DictationController: ObservableObject, @unchecked Sendable {
 
     private func startClaude(_ rowID: String, _ session: ClaudeVoiceSession, _ settings: ClaudeVoiceSettings) {
         guard claudeRun == nil, claudeRow == rowID, phase != .idle else { return }
-        if let refusal = settings.refusal { return finishClaude(rowID, .notice(refusal.text, offer: refusal.offer)) }
+        if let refusal = settings.refusal {
+            Breadcrumbs.shared.note("dictation: Claude's not started, its settings: \(refusal.text)")
+            return finishClaude(rowID, .notice(refusal.text, offer: refusal.offer))
+        }
         let run = ClaudeVoiceRun(session: session, schedule: schedule, onListening: { [weak self] in self?.listening = true },
                                  finish: { [weak self] outcome in self?.finishClaude(rowID, outcome) })
         claudeRun = run
@@ -319,7 +322,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         case .text(let text):
             deliver(text, to: rowID)
         case .notice(let text, let offer):
-            notice = Notice(rowID: rowID, text: text, turnOn: offer, privacy: text == Self.microphoneNotice)
+            notice = Notice(rowID: rowID, text: text, turnOn: offer, privacy: text == Self.microphoneNotice || text == ClaudeVoiceRun.heardNothing)
         case .cancelled:
             break
         }
@@ -383,6 +386,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     }
 
     private func microphoneDenied(_ rowID: String) {
+        Breadcrumbs.shared.note("dictation: not started, macOS says VibeSwitcher may not use the microphone")
         notice = Notice(rowID: rowID, text: Self.microphoneNotice, privacy: true)
     }
 

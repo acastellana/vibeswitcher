@@ -519,6 +519,68 @@ struct ClaudeDictationTests {
         #expect(controller.phase == .idle)
     }
 
+    /// Claude wrote nothing after its level cursor stayed grey the whole recording (silence from the microphone): the
+    /// notice says it heard nothing and offers the microphone's privacy settings, without waiting out the 20 s.
+    @Test func anEmptyTranscriptAfterAFlatLevelCursorSaysClaudeHeardNothing() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold", "transcript": "", "interim": "", "processing": 0.5])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" && h.agent["processing"] as? Double == 0.5 }
+        let controller = dictation(h)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.notice?.text == ClaudeVoiceRun.heardNothing && controller.notice?.privacy == true,
+                "\(String(describing: controller.notice))")
+        #expect(controller.deliveries[h.key] == nil)
+        #expect(h.agent["voiceInserts"] as? Int == 1)
+        #expect(h.agent["enters"] as? Int == 0)
+        let ended = try #require(Breadcrumbs.shared.lines.last { $0.contains("dictation: Claude's ended") })
+        #expect(ended.contains("no text after processing") && ended.contains("level cursor flat"), "\(ended)")
+    }
+
+    /// The same with a level heard (its cursor coloured): Claude gave no text, which isn't the microphone's doing.
+    @Test func anEmptyTranscriptAfterALevelHeardSaysItGaveNoText() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold", "transcript": "", "interim": "um", "processing": 0.5])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" && h.agent["processing"] as? Double == 0.5 }
+        let controller = dictation(h)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.notice?.text == ClaudeVoiceRun.gaveNoText && controller.notice?.privacy == false,
+                "\(String(describing: controller.notice))")
+        let ended = try #require(Breadcrumbs.shared.lines.last { $0.contains("dictation: Claude's ended") })
+        #expect(ended.contains("level cursor moved"), "\(ended)")
+    }
+
+    /// Each run leaves a trail in app.log: that it began, the states it saw by name (recording, processing), and how it
+    /// ended and why; never what was heard or written.
+    @Test func eachRunLeavesATrailInAppLogWithoutWhatWasSaid() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold", "transcript": "rename the quokka fixture", "interim": "rename the quokka", "processing": 0.5])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" && h.agent["processing"] as? Double == 0.5 }
+        let controller = dictation(h)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.deliveries[h.key]?.text == "rename the quokka fixture", "\(String(describing: controller.notice))")
+        let lines = Breadcrumbs.shared.lines
+        let began = try #require(lines.lastIndex { $0.contains("dictation: Claude's began") })
+        let run = lines[began...].filter { $0.contains("dictation: Claude's") }
+        let saw = run.filter { $0.contains("dictation: Claude's saw") }
+        #expect(saw.contains { $0.hasSuffix("saw recording") } && saw.contains { $0.hasSuffix("saw processing") }, "\(run)")
+        let ended = try #require(run.last { $0.contains("dictation: Claude's ended") })
+        #expect(ended.contains("text taken (25 characters)") && ended.contains("Spaces") && ended.contains("level cursor moved")
+                && ended.contains("recording → processing"), "\(ended)")
+        #expect(!run.contains { $0.contains("quokka") || $0.contains("rename") }, "\(run)")
+    }
+
     /// What Claude showed while listening was revised once final (its first word): still the dictation, taken.
     @Test func aTranscriptWhoseFirstWordWasRevisedIsTaken() async throws {
         let h = try await Harness.start(temp)
