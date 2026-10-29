@@ -65,6 +65,8 @@ final class ChatSync {
     var hostScreen: (UUID, @escaping ([String]?) -> Void) -> Void
     /// Whether the program in that session asked for bracketed paste.
     var bracketedPaste: (UUID) -> Bool = { _ in false }
+    /// Whether that session's terminal pane has the keyboard (is first responder).
+    var paneFocused: (UUID) -> Bool = { _ in false }
     /// Whether the chat is in sight (the window shown and not covered, the chat over the terminal: the rule
     /// `MainWindowController.followChat` reads by). The watch reads nothing otherwise, and goes on when it's back.
     var inSight: () -> Bool = { true }
@@ -672,8 +674,19 @@ final class ChatSync {
         }, command: { [weak self] text in
             guard let self, self.target()?.id == id else { return false }
             return self.type(text)
+        }, focusIn: { [weak self] in
+            guard let self, self.host.isUsable else { return false }
+            self.host.send(id, bytes: Data(Self.focusIn), reply: false)
+            return true
+        }, focusBack: { [weak self] in
+            guard let self, self.host.isUsable, !self.paneFocused(id) else { return }
+            self.host.send(id, bytes: Data(Self.focusOut), reply: false)
         })
     }
+
+    /// The focus reports a terminal sends a program that asked for them (DECSET 1004).
+    static let focusIn: [UInt8] = [0x1b, 0x5b, 0x49]
+    static let focusOut: [UInt8] = [0x1b, 0x5b, 0x4f]
 
     /// Keys for the session, as one unit: in order with the messages typed in (see `HostClient.send(_:writes:check:confirmed:)`).
     func write(_ writes: [HostInput.Write], to id: UUID) {

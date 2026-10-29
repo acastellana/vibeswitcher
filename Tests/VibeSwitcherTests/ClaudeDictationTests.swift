@@ -624,4 +624,113 @@ struct ClaudeDictationTests {
         #expect(!crumb.contains("Opus") && !crumb.contains("hooks"))
         controller.release()
     }
+
+    // MARK: - Focus
+
+    /// A session with a custom status line whose terminal is out of focus (the composer has the keyboard: the pane told
+    /// it so with CSI O), its program asking for focus events: Claude draws no caret and no level cursor then.
+    func outOfFocus(_ h: Harness, _ more: [String: Any] = [:]) async throws {
+        h.tell(["op": "voice", "mode": "hold", "statusLine": true, "focusEvents": true].merging(more) { $1 })
+        // Drawn after it asked: the pane read the request (and answered it, focused, as SwiftTerm does) before this.
+        try await h.paneShows { $0.contains("9 hooks") }
+        h.keys("\u{1b}[O")
+        try await h.waitFor { h.agent["focused"] as? Bool == false }
+    }
+
+    var focusOuts: (Harness) -> Int { { $0.agent["focusOuts"] as? Int ?? -1 } }
+
+    /// Told it has focus while it dictates, it draws its level cursor and the dictation lands; told the real focus after
+    /// (out, the pane not having it). With the pane having the keyboard, nothing is said after.
+    @Test func outOfFocusItsToldItHasFocusWhileItDictatesAndTheTruthAfterATake() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        try await outOfFocus(h)
+        let (ins, outs) = (h.agent["focusIns"] as? Int ?? -1, focusOuts(h))
+        let controller = dictation(h)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        #expect(h.agent["focused"] as? Bool == true)
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.deliveries[h.key]?.text == "open the composer view on main", "\(String(describing: controller.notice))")
+        try await h.waitFor { self.focusOuts(h) == outs + 1 }
+        #expect(h.agent["focused"] as? Bool == false)
+        #expect(h.agent["focusIns"] as? Int == ins + 1)
+        #expect(input(h) == "" && h.agent["enters"] as? Int == 0)
+
+        // The pane has the keyboard: it's focused, and stays so.
+        h.sync.paneFocused = { _ in true }
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.deliveries[h.key]?.text == "open the composer view on main open the composer view on main")
+        #expect(h.agent["focused"] as? Bool == true)
+        #expect(focusOuts(h) == outs + 1)
+    }
+
+    @Test func outOfFocusItsToldTheTruthAfterACancel() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        try await outOfFocus(h)
+        let outs = focusOuts(h)
+        let controller = dictation(h)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        controller.cancel()
+        try await h.waitFor { controller.phase == .idle }
+        try await h.waitFor { self.focusOuts(h) == outs + 1 }
+        #expect(h.agent["focused"] as? Bool == false)
+        #expect(h.agent["voiceCancels"] as? Int == 1 && controller.deliveries[h.key] == nil)
+    }
+
+    @Test func outOfFocusItsToldTheTruthAfterAWarmupThatNeverRecords() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        try await outOfFocus(h, ["warmup": 100000])
+        let outs = focusOuts(h)
+        let controller = dictation(h)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.notice?.text == ClaudeVoiceRun.unclear(.warming), "\(String(describing: controller.notice))")
+        try await h.waitFor { self.focusOuts(h) == outs + 1 }
+        #expect(h.agent["focused"] as? Bool == false)
+        try await h.waitFor { self.input(h) == "" }
+        controller.release()
+    }
+
+    @Test func outOfFocusItsToldTheTruthAfterClaudeRefuses() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        try await outOfFocus(h, ["account": "expired"])
+        let outs = focusOuts(h)
+        let controller = dictation(h)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.notice?.text == ClaudeVoiceScreen.Signal.needsAccount.notice, "\(String(describing: controller.notice))")
+        try await h.waitFor { self.focusOuts(h) == outs + 1 }
+        #expect(h.agent["focused"] as? Bool == false)
+    }
+
+    /// A program that didn't ask for focus events gets no focus report (it would take it as Esc and typed text), so out
+    /// of focus it draws no level cursor: the words heard, dim, are all that says it records, and they stay dim while it
+    /// processes. The run stops holding at them: what was heard lands, and nothing is sent.
+    @Test func withoutFocusEventsNoReportGoesAndADimOnlyRecordingStopsWithoutSending() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold", "statusLine": true, "focused": false])
+        try await h.waitFor { h.agent["focused"] as? Bool == false }
+        let prompts = h.agentPrompts
+        let controller = dictation(h)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.deliveries[h.key]?.text == "open the composer view on main", "\(String(describing: controller.notice))")
+        #expect(h.agent["voiceInserts"] as? Int == 1)
+        #expect(h.agent["focusIns"] as? Int == 0)
+        #expect(input(h) == "")
+        #expect(h.agent["enters"] as? Int == 0 && h.agent["doubleSubmits"] as? Int == 0)
+        #expect(h.agentPrompts == prompts)
+        controller.release()
+    }
 }

@@ -14,6 +14,11 @@ struct ClaudeVoiceSession {
     /// A command typed in and submitted as the composer sends a message (`/voice hold`, after your click); false when it
     /// didn't go.
     var command: (String) -> Bool
+    /// Tells its program its terminal has focus (`CSI I`), only ever sent to one that asked for focus events: Claude
+    /// draws its level cursor only then. False when it didn't go.
+    var focusIn: () -> Bool = { false }
+    /// Tells its program the terminal's real focus again: `CSI O` unless its pane has it.
+    var focusBack: () -> Void = {}
 }
 
 /// What Claude Code's screen says about its dictation (code.claude.com/docs/en/voice-dictation).
@@ -368,6 +373,8 @@ final class ClaudeVoiceRun {
     /// What the reads showed, each change once, and the spaces the last one showed typed.
     private var seen: [ClaudeVoiceScreen.Seen] = []
     private var spacesShown = 0
+    /// The session was told its terminal has focus (`focusIn`): it's told the real focus again when the run ends.
+    private var focusSent = false
     private var stopReads: (() -> Void)?
     private var lastDraft: String?
     private var steady = 0
@@ -437,6 +444,9 @@ final class ClaudeVoiceRun {
         case .empty:
             baseline = ClaudeVoiceScreen.signals(screen.text)
             dimBefore = ClaudeVoiceScreen.prompt(screen).dim
+            // Out of focus (the composer has it), Claude draws no level cursor: told it has focus, it does. Only a
+            // program that asked for focus events gets it; to any other it would be Esc and typed text.
+            if screen.focusEvents == true, session.focusIn() { focusSent = true }
             stage = .holding
             started = now()
             guard space() else { return }
@@ -666,6 +676,10 @@ final class ClaudeVoiceRun {
     private func end(_ outcome: Outcome) {
         guard stage != .done else { return }
         stage = .done
+        if focusSent {
+            focusSent = false
+            session.focusBack()
+        }
         if let id = session.id { Self.busy.remove(id) }
         stopReads?()
         stopReads = nil

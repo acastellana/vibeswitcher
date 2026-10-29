@@ -20,8 +20,10 @@ enum FakeClaude {
 # sign-in: "Voice mode requires a Claude.ai account"), "transcript", "interim" (what it shows dim while it listens; the
 # transcript's first half by default; "" for silence, its level cursor grey), "warmup" (repeats before it listens), "gap"
 # (seconds without a repeat that end a hold), "statusLine" (a custom status line: the footer shows it and never the
-# voice footer, and the box its caret, as a focused terminal's)) | "voiceStop" (it stops listening by itself, as after
-# 15 s of silence) | "exit" (it quits, as /exit)).
+# voice footer, and the box its caret, as a focused terminal's), "focusEvents" (it asks for focus events, DECSET 1004,
+# and takes CSI I and CSI O as them; else they're Esc and typed text), "focused" (its terminal has focus: only then
+# does it draw its caret and level cursor)) | "voiceStop" (it stops listening by itself, as after 15 s of silence) |
+# "exit" (it quits, as /exit)).
 # Its /voice keeps Claude Code 2.1.312's timings: a repeat chain breaks 120 ms after the last Space (the key let go),
 # 5 repeats start recording, and a second push of the key within 300 ms of a transcript going in sends it. A held
 # Space's first two presses are typed and its later repeats swallowed until it records, when those two go.
@@ -73,6 +75,10 @@ state = {
     "doublePush": 0.3,       # a second push this soon after a transcript went in sends it
     "doubleSubmits": 0,      # prompts sent by a double push
     "statusLine": False,     # a custom status line in the footer, never its voice footer; the box shows its caret
+    "focusEvents": False,    # it asked for focus events (DECSET 1004)
+    "focused": True,         # its terminal has focus: it draws its caret and level cursor
+    "focusIns": 0,           # CSI I taken
+    "focusOuts": 0,          # CSI O taken
     "recording": "",         # "" | warming | listening | tap
     "voiceMessage": "",      # what its footer says about dictation
     "voiceStarts": 0,        # recordings started
@@ -154,12 +160,12 @@ def draw():
         for text in state["queued"]:
             lines.append("  ⎿ " + text.replace("\n", " "))
         lines.append(RULE)
-        live = CARET if state["statusLine"] else ""
+        live = CARET if state["statusLine"] and state["focused"] else ""
         if state["recording"] == "listening":
-            # What it hears so far, dimmed until it's final; its level cursor where the caret was.
+            # What it hears so far, dimmed until it's final; its level cursor where the caret was (focused only).
             words = state["transcript"].split()
             heard = state["interim"] if state["interim"] is not None else " ".join(words[:max(1, len(words) // 2)])
-            live = ESC + "[2m" + heard + ESC + "[22m" + (METER if heard else QUIET)
+            live = ESC + "[2m" + heard + ESC + "[22m" + ((METER if heard else QUIET) if state["focused"] else "")
         lines.append("❯ " + state["input"].replace("\n", " ") + live)
         lines.append(RULE)
         menu = suggestions()
@@ -744,6 +750,12 @@ def feed(data):
             paste = ""
             i += 6
             continue
+        if c == ESC and state["focusEvents"] and text[i:i + 3] in (ESC + "[I", ESC + "[O"):
+            # A focus report: not a key.
+            state["focused"] = text[i + 2] == "I"
+            state["focusIns" if state["focused"] else "focusOuts"] += 1
+            i += 3
+            continue
         if c == ESC:
             seq = text[i:i + 3]
             names = {ESC + "[A": "up", ESC + "[B": "down", ESC + "[C": "right", ESC + "[D": "left", ESC + "[Z": "shift-tab"}
@@ -840,9 +852,12 @@ def control():
             if state["recording"] == "listening":
                 finish_recording()
         elif op == "voice":
-            for name in ("mode", "account", "transcript", "interim", "warmup", "gap", "statusLine"):
+            for name in ("mode", "account", "transcript", "interim", "warmup", "gap", "statusLine", "focused"):
                 if name in command:
                     state[{"mode": "voice", "account": "voiceAccount"}.get(name, name)] = command[name]
+            if "focusEvents" in command:
+                state["focusEvents"] = command["focusEvents"]
+                out(ESC + ("[?1004h" if command["focusEvents"] else "[?1004l"))
         elif op == "freeze":
             state["frozen"] = True
         elif op == "thaw":

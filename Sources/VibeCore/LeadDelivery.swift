@@ -64,10 +64,13 @@ extension LeadDelivery {
     public struct Screen: Equatable, Sendable {
         public var text: String
         public var runs: [ScreenRun]?
+        /// Its program asked for focus events (DECSET 1004); nil: not known (a host too old to say).
+        public var focusEvents: Bool?
 
-        public init(text: String, runs: [ScreenRun]? = nil) {
+        public init(text: String, runs: [ScreenRun]? = nil, focusEvents: Bool? = nil) {
             self.text = text
             self.runs = runs
+            self.focusEvents = focusEvents
         }
     }
 
@@ -303,7 +306,7 @@ extension HostCall {
     public static func styledScreen(_ id: UUID, socket: String = VibePaths.hostSocket.path,
                                     appKey: SymmetricKey? = HostConnection.appKey) -> LeadDelivery.Screen? {
         switch try? request(.styledScreen(id: id), socket: socket, appKey: appKey) {
-        case .styledScreenText(_, let text, let runs)?: return LeadDelivery.Screen(text: text, runs: runs)
+        case .styledScreenText(_, let text, let runs, let focusEvents)?: return LeadDelivery.Screen(text: text, runs: runs, focusEvents: focusEvents)
         case .error?:
             if case .screenText(_, let text)? = try? request(.screen(id: id), socket: socket, appKey: appKey) { return LeadDelivery.Screen(text: text) }
             return nil

@@ -262,6 +262,12 @@ final class TerminalPaneController: NSViewController, TerminalViewDelegate {
         views[id]?.getTerminal().bracketedPasteMode ?? false
     }
 
+    /// Whether that session's view has the keyboard (its window's first responder).
+    func hasKeyboard(_ id: UUID) -> Bool {
+        guard let view = views[id], let window = view.window else { return false }
+        return window.firstResponder === view
+    }
+
     func clearScrollback() {
         currentView?.feed(text: "\u{1b}[3J")
     }

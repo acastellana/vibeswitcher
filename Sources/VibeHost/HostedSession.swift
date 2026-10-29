@@ -46,6 +46,9 @@ public final class HostedSession {
     private let parserOptions: ParserOptions
     /// What the parser showed last: what a view falls back on when there's no parser to ask.
     private var lastView = ParserView.empty
+    /// Whether its program asked for focus events (see `FocusEvents`), read off its output as it's read. On `queue`.
+    private var focus = FocusEvents()
+    public var focusEvents: Bool { focus.on }
     /// When its parser failed lately (see `replaceParser`).
     private var parserFailures: [Date] = []
     static let maxParserFailures = 5
@@ -184,6 +187,7 @@ public final class HostedSession {
             session.ring = nil
         } else {
             session.ring?.append(saved.output)
+            session.focus.feed(saved.output)
             session.startParser(replay: saved.output)
         }
         guard let fd else {
@@ -357,6 +361,7 @@ public final class HostedSession {
             if count > 0 {
                 let chunk = Data(buffer[0..<count])
                 ring?.append(chunk)
+                focus.feed(chunk)
                 parser?.feed(chunk)
                 onOutput?(chunk)
                 if pausing, !exiting, let parser, parser.unparsed > Self.maxUnparsed { return pauseReading() }

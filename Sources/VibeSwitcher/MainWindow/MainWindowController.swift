@@ -422,6 +422,7 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         }
         sync.screen = { [weak self] id in self?.pane.screenText(id) ?? ScreenRead() }
         sync.bracketedPaste = { [weak self] id in self?.pane.bracketedPaste(id) ?? false }
+        sync.paneFocused = { [weak self] id in self?.pane.hasKeyboard(id) ?? false }
         sync.inSight = { [weak self] in self?.chatInSight ?? false }
         return sync
     }
