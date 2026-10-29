@@ -712,12 +712,16 @@ final class ComposerNSTextView: NSTextView {
     var holdToTalk: ((Bool) -> Void)?
     /// ⌥Space is held now.
     private(set) var talking = false
+    /// While held: the window going out of key (another app, another window), whose key-up goes elsewhere.
+    private var leaving: NSObjectProtocol?
 
     override func keyDown(with event: NSEvent) {
         if let holdToTalk, !hasMarkedText(), Self.isTalkKey(event) {
             // Its repeats while held do nothing.
             if !event.isARepeat, !talking {
                 talking = true
+                leaving = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window,
+                                                                 queue: .main) { [weak self] _ in self?.endTalk() }
                 holdToTalk(true)
             }
             return
@@ -726,21 +730,23 @@ final class ComposerNSTextView: NSTextView {
     }
 
     override func keyUp(with event: NSEvent) {
-        if talking, event.keyCode == UInt16(kVK_Space) {
-            talking = false
-            holdToTalk?(false)
-            return
-        }
+        if talking, event.keyCode == UInt16(kVK_Space) { return endTalk() }
         super.keyUp(with: event)
     }
 
     /// Focus moving away mid-hold: its key-up would go elsewhere, so it ends here.
     override func resignFirstResponder() -> Bool {
-        if talking {
-            talking = false
-            holdToTalk?(false)
-        }
+        endTalk()
         return super.resignFirstResponder()
+    }
+
+    /// ⌥Space let go, or as good as: the recording goes to be transcribed.
+    func endTalk() {
+        guard talking else { return }
+        talking = false
+        if let leaving { NotificationCenter.default.removeObserver(leaving) }
+        leaving = nil
+        holdToTalk?(false)
     }
 
     /// ⌥Space, nothing else held.

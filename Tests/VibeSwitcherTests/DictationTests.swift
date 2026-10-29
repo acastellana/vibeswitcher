@@ -406,4 +406,29 @@ struct DictationTests {
         #expect(!ComposerNSTextView.isTalkKey(try key([.option, .command])))
         #expect(!ComposerNSTextView.isTalkKey(try key(.option, code: kVK_ANSI_A)))
     }
+
+    /// ⌥Space held in the box records, its key-up sends it; the window losing key (another app) ends it as the key-up would.
+    @Test func holdingOptionSpaceTalksUntilLetGoOrTheWindowLeaves() throws {
+        func event(_ type: NSEvent.EventType, repeat: Bool = false, window: NSWindow) throws -> NSEvent {
+            try #require(NSEvent.keyEvent(with: type, location: .zero, modifierFlags: .option, timestamp: 0, windowNumber: window.windowNumber,
+                                          context: nil, characters: " ", charactersIgnoringModifiers: " ", isARepeat: `repeat`,
+                                          keyCode: UInt16(kVK_Space)))
+        }
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 100), styleMask: [.titled], backing: .buffered, defer: true)
+        let textView = ComposerNSTextView(frame: NSRect(x: 0, y: 0, width: 200, height: 100))
+        window.contentView = textView
+        var held: [Bool] = []
+        textView.holdToTalk = { held.append($0) }
+        textView.keyDown(with: try event(.keyDown, window: window))
+        textView.keyDown(with: try event(.keyDown, repeat: true, window: window))
+        #expect(held == [true])
+        #expect(textView.string.isEmpty, "⌥Space typed nothing")
+        textView.keyUp(with: try event(.keyUp, window: window))
+        #expect(held == [true, false])
+        textView.keyDown(with: try event(.keyDown, window: window))
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+        #expect(held == [true, false, true, false])
+        textView.keyUp(with: try event(.keyUp, window: window))
+        #expect(held == [true, false, true, false], "the late key-up sends nothing more")
+    }
 }
