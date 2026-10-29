@@ -46,7 +46,8 @@ struct PhoneDictationTests {
         head += "Content-Type: \(type)\r\nContent-Length: \(body.count)\r\n\r\n"
         var data = Data(head.utf8)
         data.append(body)
-        switch HTTPParser.parse(data, bodyLimit: RemoteServer.bodyLimit) {
+        let devices = access.devices
+        switch HTTPParser.parse(data, bodyLimit: { RemoteServer.bodyLimit(method: $0, path: $1, headers: $2, devices: devices) }) {
         case .complete(let request):
             var answer: Answer?
             access.handleForTests(request) { answer = Answer(status: $0.status, body: $0.body) }
@@ -186,26 +187,40 @@ struct PhoneDictationTests {
         #expect(state() == "off")
         access.transcribe = FakeTranscriber().transcribe
         access.dictationReady = { true }
-        #expect(state() == "ready")
+        #expect(state() == "on")
         access.dictationReady = { false }
         #expect(state() == "needsKey")
         access.dictationReady = { nil }
         #expect(state() == "unknown")
     }
 
-    /// Only a dictation from a phone that sends a token may be bigger than 64 KB; everything else keeps the usual limit.
-    @Test func onlyDictationGetsABigBody() {
-        let bearer = ["authorization": "Bearer x", "tailscale-user-login": Self.login]
-        #expect(RemoteServer.bodyLimit(method: "POST", path: "/api/dictation", headers: bearer) == DictationLimits.phoneMaxBytes)
-        #expect(RemoteServer.bodyLimit(method: "POST", path: "/api/dictation", headers: ["tailscale-user-login": Self.login]) == 64 * 1024)
-        #expect(RemoteServer.bodyLimit(method: "POST", path: "/api/dictation", headers: ["authorization": "Bearer x"]) == 64 * 1024)
-        #expect(RemoteServer.bodyLimit(method: "POST", path: "/api/input", headers: bearer) == 64 * 1024)
-        #expect(RemoteServer.bodyLimit(method: "GET", path: "/api/dictation", headers: bearer) == 64 * 1024)
-        let big = 100 * 1024
-        let head = "POST /api/input HTTP/1.1\r\nAuthorization: Bearer x\r\nTailscale-User-Login: a\r\nContent-Length: \(big)\r\n\r\n"
-        #expect(HTTPParser.parse(Data(head.utf8), bodyLimit: RemoteServer.bodyLimit) == .tooLarge)
-        let dictation = head.replacingOccurrences(of: "/api/input", with: "/api/dictation")
-        #expect(HTTPParser.parse(Data(dictation.utf8), bodyLimit: RemoteServer.bodyLimit) == .incomplete)
+    /// A phone paired with `token` from `login`.
+    nonisolated static func device(token: String, login: String = login) -> PairedDevice {
+        PairedDevice(id: "d", name: "Phone", tokenHash: RemoteAuth.hash(token), tailscaleLogin: login, pairedAt: Date())
+    }
+
+    /// Only a dictation from a paired phone (its token checked as the headers come in) may be bigger than 64 KB;
+    /// everything else, a made-up token's dictation too, keeps the usual limit.
+    @Test func onlyAPairedPhonesDictationGetsABigBody() {
+        let devices = [Self.device(token: "good-token")]
+        let paired = ["authorization": "Bearer good-token", "tailscale-user-login": Self.login]
+        let limit = { (method: String, path: String, headers: [String: String]) in
+            RemoteServer.bodyLimit(method: method, path: path, headers: headers, devices: devices)
+        }
+        #expect(limit("POST", "/api/dictation", paired) == DictationLimits.phoneMaxBytes)
+        #expect(limit("POST", "/api/dictation", ["authorization": "Bearer junk", "tailscale-user-login": Self.login]) == 64 * 1024)
+        #expect(limit("POST", "/api/dictation", ["authorization": "Bearer good-token", "tailscale-user-login": "other@example.com"]) == 64 * 1024)
+        #expect(limit("POST", "/api/dictation", ["tailscale-user-login": Self.login]) == 64 * 1024)
+        #expect(limit("POST", "/api/dictation", ["authorization": "Bearer good-token"]) == 64 * 1024)
+        #expect(limit("POST", "/api/input", paired) == 64 * 1024)
+        #expect(limit("GET", "/api/dictation", paired) == 64 * 1024)
+        #expect(RemoteServer.bodyLimit(method: "POST", path: "/api/dictation", headers: paired, devices: []) == 64 * 1024)
+        let head = { (path: String, token: String) in
+            "POST \(path) HTTP/1.1\r\nAuthorization: Bearer \(token)\r\nTailscale-User-Login: \(Self.login)\r\nContent-Length: \(100 * 1024)\r\n\r\n"
+        }
+        #expect(HTTPParser.parse(Data(head("/api/input", "good-token").utf8), bodyLimit: limit) == .tooLarge)
+        #expect(HTTPParser.parse(Data(head("/api/dictation", "junk").utf8), bodyLimit: limit) == .tooLarge)
+        #expect(HTTPParser.parse(Data(head("/api/dictation", "good-token").utf8), bodyLimit: limit) == .incomplete)
     }
 
     /// Through the real server on a loopback port: a 300 KB recording arrives whole at the handler, while a JSON route's
@@ -221,6 +236,7 @@ struct PhoneDictationTests {
             server.start(port: port, onReady: { started.resume() }, onFailure: { started.resume(throwing: URLError(.cannotConnectToHost, userInfo: [NSLocalizedDescriptionKey: $0])) })
         }
         defer { server.stop() }
+        server.paired = { [Self.device(token: "t")] }
         let body = Data((0..<(300 * 1024)).map { UInt8($0 % 251) })
         func post(_ path: String, headers: [String: String]) async throws -> Int {
             var request = URLRequest(url: URL(string: "http://127.0.0.1:\(port)\(path)")!)
@@ -235,6 +251,12 @@ struct PhoneDictationTests {
         #expect(try await post("/api/dictation?duration=30", headers: phone) == 200)
         #expect(handled.value.count == 1)
         #expect(handled.value.first?.body == body)
+        // A made-up token's recording is refused before its body, like any big body.
+        var junk = phone
+        junk["Authorization"] = "Bearer junk"
+        let refusedJunk = try? await post("/api/dictation?duration=30", headers: junk)
+        #expect(refusedJunk == 413 || refusedJunk == nil)
+        #expect(handled.value.count == 1)
         // Refused as soon as its length is read: the phone hears 413, or the connection closes mid-upload.
         let refused = try? await post("/api/input", headers: phone)
         #expect(refused == 413 || refused == nil)

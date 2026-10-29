@@ -1257,7 +1257,7 @@ function renderMic() {
   mic.hidden = !dictationSupported() || !mode || mode === 'off';
   mic.classList.toggle('needsKey', mode === 'needsKey');
   mic.classList.toggle('recording', Boolean(dictation));
-  mic.classList.toggle('busy', transcribing);
+  mic.classList.toggle('transcribing', transcribing);
   const label = mode === 'needsKey' ? DICTATION_NO_KEY : dictation ? 'Recording: let go to transcribe' : transcribing ? 'Transcribing' : 'Hold to dictate';
   mic.setAttribute('aria-label', label);
   mic.setAttribute('title', label);

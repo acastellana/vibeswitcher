@@ -28,7 +28,9 @@ final class PhoneAccess: ObservableObject {
         didSet { AppStatus.extras["phoneAccess"] = "\(state)" }
     }
     @Published private(set) var url: URL?
-    @Published private(set) var devices: [PairedDevice] = []
+    @Published private(set) var devices: [PairedDevice] = [] { didSet { pairedNow.value = devices } }
+    /// `devices`, for the server's queue: whether a request may send a recording is decided there, before its body.
+    private let pairedNow = PairedDevices()
     @Published private(set) var pairing: PairingCode?
     @Published private(set) var recentActivity: [String] = []
     @Published var enabled: Bool {
@@ -168,6 +170,7 @@ final class PhoneAccess: ObservableObject {
         devPagesAllowed = defaults.bool(forKey: "phoneDevPagesAllowed")
         pushOnlyWhenAway = defaults.bool(forKey: "phonePushOnlyWhenAway")
         devices = Self.loadDevices()
+        pairedNow.value = devices   // an initializer's assignment runs no didSet
         recentActivity = Self.tailOfAuditLog()
         // Network and Tailscale come back a few seconds after wake.
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didWakeNotification, object: nil,
@@ -241,6 +244,7 @@ final class PhoneAccess: ObservableObject {
                 self.route(request, respond: respond)
             }
         }
+        server.paired = { [pairedNow] in pairedNow.value }
         self.server = server
         server.start(port: Self.port, onReady: { [weak self] in
             guard let self, self.isCurrent(run) else { return server.stop() }
@@ -558,6 +562,7 @@ final class PhoneAccess: ObservableObject {
                 self.route(request, respond: respond)
             }
         }
+        server.paired = { [pairedNow] in pairedNow.value }
         self.server = server
         server.start(port: port, onReady: { [weak self] in
             guard let self else { return done(nil) }
@@ -675,8 +680,8 @@ final class PhoneAccess: ObservableObject {
             "web": WebAssets.version,
             "devPagesAllowed": devPagesAllowed,
             "briefingProjects": briefingProjects().map(Redaction.secrets(in:)),
-            // The mic button: "ready", "needsKey" (none saved on the Mac), or "unknown" (not looked yet: it may try).
-            "dictation": transcribe == nil ? "off" : dictationReady().map { $0 ? "ready" : "needsKey" } ?? "unknown",
+            // The mic button: "on", "needsKey" (none saved on the Mac), or "unknown" (not looked yet: it may try).
+            "dictation": transcribe == nil ? "off" : dictationReady().map { $0 ? "on" : "needsKey" } ?? "unknown",
             "device": ["id": device.id, "name": device.name, "push": device.push != nil],
             "vapidPublicKey": Base64URL.encode(vapidKey.publicKey.x963Representation),
             "mac": Host.current().localizedName ?? "Mac",
@@ -1599,5 +1604,16 @@ final class PhoneAccess: ObservableObject {
     private static func tailOfAuditLog() -> [String] {
         guard let text = try? String(contentsOf: auditURL, encoding: .utf8) else { return [] }
         return Array(text.split(separator: "\n").suffix(20).reversed().map(String.init))
+    }
+}
+
+/// The paired phones, readable from any thread.
+final class PairedDevices: @unchecked Sendable {
+    private let lock = NSLock()
+    private var held: [PairedDevice] = []
+
+    var value: [PairedDevice] {
+        get { lock.withLock { held } }
+        set { lock.withLock { held = newValue } }
     }
 }

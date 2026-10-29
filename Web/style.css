@@ -159,7 +159,7 @@ select.chip-btn { appearance: none; -webkit-appearance: none; }
   color: var(--text); display: flex; align-items: center; justify-content: center; padding: 0;
   touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .reply .mic.recording { background: var(--warn); border-color: var(--warn); color: #fff; }
-.reply .mic.busy { opacity: 0.6; }
+.reply .mic.transcribing { opacity: 0.6; }
 .reply .mic.needsKey { color: var(--muted); }
 .dictationNote { display: flex; gap: 8px; align-items: flex-start; margin: 0 2px 8px; }
 .dictationNote p { margin: 0; flex: 1; color: var(--muted); }

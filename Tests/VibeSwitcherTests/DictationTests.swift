@@ -85,15 +85,21 @@ struct DictationTests {
         return (controller, store)
     }
 
-    /// Releases and waits for the controller to be idle again (the transcription answered).
+    /// Releases and waits for the controller to be idle again (the transcription answered), within the hang guard.
     func releaseAndWait(_ controller: DictationController) async {
-        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-            controller.onIdle = {
-                controller.onIdle = nil
-                done.resume()
-            }
-            controller.release()
+        await whileWaitingForIdle(controller) { controller.release() }
+    }
+
+    /// Runs `start`, then waits for the controller's next return to idle; a regression that never gets there fails
+    /// after `hangGuard` instead of holding the run.
+    func whileWaitingForIdle(_ controller: DictationController, _ start: () -> Void) async {
+        var idled = false
+        controller.onIdle = {
+            controller.onIdle = nil
+            idled = true
         }
+        start()
+        #expect(await until { idled }, "the controller never went back to idle")
     }
 
     /// The names of the body's parts, in order.
@@ -237,11 +243,10 @@ struct DictationTests {
         #expect(store.read() == nil)
     }
 
-    /// Waits for main-thread work the controller queued (`DispatchQueue.main.async`) to have run and made `condition` true.
+    /// Waits for main-thread work the controller queued (`DispatchQueue.main.async`) to have run and made `condition`
+    /// true, within the hang guard.
     func waitForMain(_ condition: @escaping () -> Bool) async {
-        while !condition() {
-            await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in DispatchQueue.main.async { done.resume() } }
-        }
+        #expect(await until(condition), "what the controller queued on the main thread never came")
     }
 
     // MARK: - Push to talk
@@ -328,15 +333,11 @@ struct DictationTests {
         controller.press("row-1") { "" }
         let limit = try #require(clock.pending.first)
         #expect(limit.delay == 120)
-        await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-            controller.onIdle = { done.resume() }
-            limit.work()
-        }
+        await whileWaitingForIdle(controller) { limit.work() }
         #expect(!recorder.recording)
         #expect(http.requests.count == 1)
         #expect(controller.notice?.text.contains("2 minutes") == true)
         // Letting go afterwards sends nothing more.
-        controller.onIdle = nil
         controller.release()
         #expect(http.requests.count == 1)
     }
@@ -392,7 +393,9 @@ struct DictationTests {
         // Another box for another row takes nothing.
         let other = NSTextView()
         DictationInbox().watch(controller, rowID: { "row-2" }, textView: other)
-        await waitForMain { true }
+        var turned = false
+        DispatchQueue.main.async { turned = true }
+        await waitForMain { turned }
         #expect(other.string.isEmpty)
     }
 

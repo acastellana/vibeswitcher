@@ -58,12 +58,16 @@ final class RemoteServer {
     /// passes the usual limit: a phone on a slow uplink takes longer than `receiveLimit` for a few hundred KB.
     var uploadLimit: TimeInterval = 60
 
-    /// How big a request's body may be: a recording for `POST /api/dictation` from a phone that says it's paired (its
-    /// token and account are checked once it's all in, like any request's), the usual 64 KB otherwise. At most
-    /// `maxConnections` such uploads are held at once.
-    static func bodyLimit(method: String, path: String, headers: [String: String]) -> Int {
-        guard method == "POST", path == PhoneAccess.dictationPath, headers["authorization"]?.hasPrefix("Bearer ") == true,
-              headers["tailscale-user-login"]?.isEmpty == false else { return HTTPParser.defaultMaxBodyBytes }
+    /// The paired phones now, read off the main thread for `bodyLimit` (Phone Access keeps it current).
+    var paired: @Sendable () -> [PairedDevice] = { [] }
+
+    /// How big a request's body may be: a recording for `POST /api/dictation` from a paired phone (its token, from the
+    /// account that paired it, checked as its headers come in, before its body is taken), the usual 64 KB otherwise: a
+    /// made-up token gets no big upload. At most `maxConnections` such uploads are held at once.
+    static func bodyLimit(method: String, path: String, headers: [String: String], devices: [PairedDevice]) -> Int {
+        guard method == "POST", path == PhoneAccess.dictationPath,
+              RemoteAuth.authenticate(authorization: headers["authorization"], login: headers["tailscale-user-login"],
+                                      devices: devices) != nil else { return HTTPParser.defaultMaxBodyBytes }
         return DictationLimits.phoneMaxBytes
     }
 
@@ -140,7 +144,8 @@ final class RemoteServer {
             guard let self else { return }
             var buffer = buffer
             if let data { buffer.append(data) }
-            switch HTTPParser.parse(buffer, bodyLimit: Self.bodyLimit) {
+            let paired = self.paired
+            switch HTTPParser.parse(buffer, bodyLimit: { Self.bodyLimit(method: $0, path: $1, headers: $2, devices: paired()) }) {
             case .incomplete:
                 if isComplete || error != nil { connection.cancel(); return }
                 // Past the usual size and still coming: only a request allowed a big body gets here. It has

@@ -174,7 +174,7 @@ const session = { tty: 'ttys001', sid: 's1', number: 1, name: 'shop', project: '
                   statusLabel: 'Idle', inTerminal: true, inWindow: false, viewing: false, hasTranscript: false };
 const macState = { sessions: [session], today: { agentsWorking: 0, waitingOnYou: 0, projects: [] }, inputAllowed: true,
                    web: '', devPagesAllowed: false, device: { id: 'd', name: 'Phone', push: true }, mac: 'Mac',
-                   now: Date.now() / 1000, dictation: 'ready' };
+                   now: Date.now() / 1000, dictation: 'on' };
 
 ready();
 await flush();
@@ -294,7 +294,7 @@ run(`delete state.dictation; renderSessionMeta();`);
 assert.equal(mic.hidden, true);
 
 // 9. A microphone the browser refused is said.
-run(`state.dictation = 'ready'; renderSessionMeta();`);
+run(`state.dictation = 'on'; renderSessionMeta();`);
 micAllowed = false;
 fire(mic, 'pointerdown');
 await flush();
