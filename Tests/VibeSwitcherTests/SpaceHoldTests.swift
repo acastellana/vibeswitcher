@@ -140,6 +140,32 @@ struct SpaceHoldTests {
         #expect(box.held == [true])
     }
 
+    /// Spelling correction set off by the space ("teh " made "the "): undone with the spaces, the box as before the press.
+    @Test func aCorrectionTheSpaceSetOffIsUndoneWithIt() {
+        let box = Box("teh")
+        box.key(.keyDown)
+        box.undo.beginUndoGrouping()
+        box.view.insertText("the", replacementRange: NSRange(location: 0, length: 3))
+        box.undo.endUndoGrouping()
+        #expect(box.view.string == "the ")
+        box.reachThreshold()
+        #expect(box.view.string == "teh")
+        #expect(box.held == [true])
+    }
+
+    /// The box changed some other way while Space was down (undoing doesn't get back to it): left as it is, not started.
+    @Test func aBoxThatUndoingDoesNotBringBackIsLeftAsItIs() {
+        let box = Box("hello")
+        box.key(.keyDown)
+        // As the composer replaces its text from outside (another draft, a history step): its undo emptied too.
+        box.view.string = "something else"
+        box.undo.removeAllActions()
+        box.reachThreshold()
+        #expect(box.view.string == "something else")
+        #expect(box.held.isEmpty)
+        #expect(box.view.spaceHold == .idle)
+    }
+
     @Test func anotherKeyBeforeTheThresholdCancelsItAndTypes() {
         let box = Box("hello")
         box.key(.keyDown)

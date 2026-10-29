@@ -807,20 +807,15 @@ final class ComposerNSTextView: NSTextView {
     }
 
     /// Undoes the press's typing (one step when its spaces coalesced, one per space when they didn't), so ⌘Z after the
-    /// run never brings the spaces back as a step of their own (and the dictation's insert clears the redo). Only when
-    /// the box is `text` with its `selection` replaced by spaces, and the steps are closed; false otherwise, nothing
-    /// changed.
+    /// run never brings the spaces back as a step of their own (and the dictation's insert clears the redo). A
+    /// correction the space set off ("teh " made "the ") is a step too, undone with them. Only when the steps are
+    /// closed and undoing them gets back to `text` exactly; false otherwise, everything redone as it was.
     private func takeOutSpaces(before text: String, selection: NSRange) -> Bool {
-        let old = text as NSString, now = string as NSString
-        let typed = now.length - (old.length - selection.length)
-        guard typed > 0, let undo = undoManager, undo.canUndo, undo.groupingLevel == 0,
-              now.substring(to: selection.location) == old.substring(to: selection.location),
-              now.substring(from: selection.location + typed) == old.substring(from: NSMaxRange(selection)),
-              now.substring(with: NSRange(location: selection.location, length: typed)).allSatisfy({ $0 == " " })
-        else { return false }
+        let typed = (string as NSString).length - ((text as NSString).length - selection.length)
+        guard string != text, let undo = undoManager, undo.canUndo, undo.groupingLevel == 0 else { return false }
         breakUndoCoalescing()
         var steps = 0
-        while string != text, steps < typed, undo.canUndo {
+        while string != text, steps < max(typed, 1) + 2, undo.canUndo {
             undo.undo()
             steps += 1
         }
