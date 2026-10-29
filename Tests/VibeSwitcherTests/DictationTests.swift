@@ -13,7 +13,7 @@ import Testing
 @MainActor
 struct DictationTests {
     let temp = Scratch()
-    static let key = "sk-test-\(String(repeating: "a", count: 24))"
+    nonisolated static let key = "sk-test-\(String(repeating: "a", count: 24))"
 
     /// Answers every request with `status` and `body`, and keeps the requests.
     final class FakeHTTP: HTTPClient, @unchecked Sendable {
