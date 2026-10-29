@@ -1983,3 +1983,6 @@
 - 2026-10-29 09:22 Workflow: base_branch = `main`
 - 2026-10-29 09:23 Audit of sessionstore-refresh: complete, clean, round 1: 3 Nit open, 1 Pre-existing open
 - 2026-10-29 09:28 Merged sessionstore-refresh: SessionStore.refresh writes the activity ledger and asks NSRunningApplication for bundle ids on the main thread
+- 2026-10-29 09:28 Automatically (auto_advance): Merged sessionstore-refresh (SessionStore.refresh writes the activity ledger and asks NSRunningApplication for bundle ids on the main thread) into main at 1936a9c9, on its passing audit and the full test run.
+- 2026-10-29 09:28 Automatically (auto_advance): Cleaned up sessionstore-refresh; ended pid 88837 (Worker: SessionStore.refresh writes the activity ledger and asks NSRunningApplication for bundle ids on the main thread) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-29 09:34 Merged the-witness-s-stall: The witness's stall and event computation runs on the main thread (LeadController.witness → LeadWitness.stalls) (no audit: review none)
