@@ -2015,3 +2015,4 @@
 - 2026-10-29 14:29 Planned claude-dictation-fails: Claude dictation fails with a custom status line: recognise recording without Claude's footer text (review audit)
 - 2026-10-29 14:29 Started a worker on claude-dictation-fails
 - 2026-10-29 14:29 Automatically (auto_advance): Started a worker on claude-dictation-fails (Claude dictation fails with a custom status line: recognise recording without Claude's footer text).
+- 2026-10-29 15:25 Automatically (auto_advance): Started the audit of claude-dictation-fails at b35f6000 (Its review is audit).
