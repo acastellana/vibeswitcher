@@ -72,7 +72,8 @@ state = {
     "interim": None,         # what it shows dim while listening (None: the transcript's first half)
     "warmup": 5,             # key repeats before a held Space starts recording
     "gap": 0.12,             # no repeat this long: the key was let go (the chain breaks)
-    "doublePush": 0.3,       # a second push this soon after a transcript went in sends it
+    "doublePush": 0.3,       # a second push this soon after a transcript went in sends it, 120 ms on
+    "disarms": 0,            # sends a double push armed or could, called off by another key
     "doubleSubmits": 0,      # prompts sent by a double push
     "statusLine": False,     # a custom status line in the footer, never its voice footer; the box shows its caret
     "focusEvents": False,    # it asked for focus events (DECSET 1004)
@@ -86,7 +87,9 @@ state = {
     "voiceInserts": 0,       # transcripts written into the box
     "killed": 0,             # ⌃U taken
 }
-VOICE = {"before": "", "last": 0.0, "repeats": 0, "inserted": -10.0, "pushes": 0}
+# "awaiting": a transcript went in and a second push of the key would send it (2.1.312's awaitingVoiceSubmitDoubleTap);
+# "push": when the first push came; "submitAt": when an armed send fires (120 ms after the second push).
+VOICE = {"before": "", "last": 0.0, "repeats": 0, "awaiting": False, "push": 0.0, "submitAt": None}
 METER = ESC + "[38;2;215;119;87m" + "▃" + ESC + "[39m"   # its recording-level cursor: a coloured bar, not dim
 QUIET = ESC + "[38;2;128;128;128m" + "▁" + ESC + "[39m"  # the same below a low level: grey
 CARET = ESC + "[7m" + " " + ESC + "[27m"                  # a focused terminal's caret at the box's end
@@ -333,17 +336,20 @@ def voice_space():
         return False
     if state["voice"] != "hold":
         return False
-    if state["recording"] == "" and t - VOICE["inserted"] <= state["doublePush"]:
-        # A push of the key right after a transcript went in; the second one sends it.
-        VOICE["pushes"] += 1
-        VOICE["last"] = t
-        if VOICE["pushes"] >= 2:
-            text = state["input"]
-            state["input"] = ""
-            state["doubleSubmits"] += 1
-            VOICE["inserted"] = -10.0
-            submit_prompt(text)
-        return True
+    if state["recording"] == "" and VOICE["awaiting"]:
+        # After a transcript went in (2.1.312's push-to-talk handler): a push while a send is armed calls it off; a
+        # second push within 300 ms of the first arms one, 120 ms on, and is taken; a later one calls it off. Either way
+        # a push not taken goes on as a press of the key.
+        if VOICE["submitAt"] is not None:
+            disarm()
+        elif VOICE["push"] and t - VOICE["push"] <= state["doublePush"]:
+            VOICE["push"] = 0.0
+            VOICE["submitAt"] = t + state["gap"]
+            return True
+        elif VOICE["push"]:
+            disarm()
+        else:
+            VOICE["push"] = t
     if t - VOICE["last"] <= state["gap"] and state["recording"] in ("", "warming") and VOICE["repeats"] >= 0:
         VOICE["repeats"] += 1
     else:
@@ -359,6 +365,8 @@ def voice_space():
         # The warmup's spaces go; it records.
         state["input"] = VOICE["before"]
         state["recording"] = "listening"
+        VOICE["awaiting"] = False
+        VOICE["submitAt"] = None
         state["voiceMessage"] = ""
         state["voiceStarts"] += 1
         return True
@@ -374,8 +382,11 @@ def finish_recording(submit=False):
     state["input"] = state["input"] + state["transcript"]
     state["recording"] = ""
     VOICE["repeats"] = 0
-    VOICE["inserted"] = time.monotonic()
-    VOICE["pushes"] = 0
+    VOICE["awaiting"] = state["voice"] == "hold"
+    # A recording started next goes on after it (its warmup's spaces go, not the transcript).
+    VOICE["before"] = state["input"]
+    VOICE["push"] = 0.0
+    VOICE["submitAt"] = None
     state["voiceInserts"] += 1
     if submit and len(state["transcript"].split()) >= 3:
         text = state["input"]
@@ -383,8 +394,25 @@ def finish_recording(submit=False):
         submit_prompt(text)
 
 
+def disarm():
+    """Another key (or a push that came too late) calls off the send a double push would make."""
+    if VOICE["awaiting"]:
+        state["disarms"] += 1
+    VOICE["awaiting"] = False
+    VOICE["push"] = 0.0
+    VOICE["submitAt"] = None
+
+
 def voice_tick():
-    """No repeat for `gap`: a held key was let go. True when the screen changed."""
+    """No repeat for `gap`: a held key was let go. An armed double push sends. True when the screen changed."""
+    if VOICE["submitAt"] is not None and time.monotonic() >= VOICE["submitAt"]:
+        VOICE["submitAt"] = None
+        VOICE["awaiting"] = False
+        text = state["input"].rstrip(" ")
+        state["input"] = ""
+        state["doubleSubmits"] += 1
+        submit_prompt(text)
+        return True
     if state["recording"] in ("warming", "listening") and time.monotonic() - VOICE["last"] > state["gap"]:
         if state["recording"] == "listening":
             finish_recording()
@@ -628,6 +656,8 @@ def picker_key(key):
 
 
 def key(name):
+    if name != "space" and VOICE["awaiting"]:
+        disarm()
     mode = state["mode"]
     if mode == "question":
         question_key(name)
@@ -758,7 +788,8 @@ def feed(data):
             continue
         if c == ESC:
             seq = text[i:i + 3]
-            names = {ESC + "[A": "up", ESC + "[B": "down", ESC + "[C": "right", ESC + "[D": "left", ESC + "[Z": "shift-tab"}
+            names = {ESC + "[A": "up", ESC + "[B": "down", ESC + "[C": "right", ESC + "[D": "left", ESC + "[Z": "shift-tab",
+                     ESC + "[F": "end"}
             if seq in names:
                 key(names[seq])
                 i += 3

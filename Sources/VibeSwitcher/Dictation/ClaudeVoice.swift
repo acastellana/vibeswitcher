@@ -174,6 +174,25 @@ enum ClaudeVoiceScreen {
         return counts
     }
 
+    /// The conversation's lines: the screen above the prompt box (all of it when no box is shown).
+    static func conversation(_ text: String) -> [String] {
+        let lines = text.replacingOccurrences(of: "\u{0}", with: " ").components(separatedBy: "\n")
+        let rules = lines.indices.filter { lines[$0].filter { $0 == "─" }.count >= 20 }
+        return rules.count >= 2 ? Array(lines[..<rules[rules.count - 2]]) : lines
+    }
+
+    /// Claude's first message about its dictation after the newest echo of `command` in the conversation (not the box
+    /// it's typed in), once the conversation isn't what it was at the click (`before`): what it answered to this one.
+    /// Unlike a count of messages, it isn't fooled by an earlier answer scrolling off as the new one comes in.
+    static func answer(to command: String, in text: String, before: [String]) -> Signal? {
+        let lines = conversation(text)
+        guard lines != before, let echo = lines.lastIndex(where: { $0.contains(command) }) else { return nil }
+        let after = lines[(echo + 1)...].joined(separator: "\n")
+        return Signal.allCases.compactMap { signal -> (Signal, String.Index)? in
+            signal.phrases.compactMap { after.range(of: $0)?.lowerBound }.min().map { (signal, $0) }
+        }.min { $0.1 < $1.1 }?.0
+    }
+
     /// The messages shown more often in `now` than in `before`, in `Signal`'s order.
     static func new(_ now: [Signal: Int], since before: [Signal: Int]) -> [Signal] {
         Signal.allCases.filter { (now[$0] ?? 0) > (before[$0] ?? 0) }
@@ -307,20 +326,21 @@ final class ClaudeVoiceRun {
         case cancelled
     }
 
-    /// The least time between two Spaces while held: well inside the 120 ms after which Claude Code (2.1.312) takes a
-    /// key for let go, and inside macOS's own key repeat.
-    static let repeatEvery: TimeInterval = 0.04
-    /// While held, the screen is read this long after each answer, and a Space goes only on a read showing Claude still
-    /// warming up or listening: once it stops by itself (silence, a limit, a stall that broke the repeats) it writes
-    /// the transcript, and a second push soon after that sends it.
+    /// While held, a Space goes this often on a timer of its own, however long a read of the screen takes: Claude Code
+    /// (2.1.312) takes a key with no repeat for 120 ms as let go, and reads on a busy Mac take longer than that. Reads
+    /// only say when to stop.
+    static let repeatEvery: TimeInterval = 0.045
+    /// The repeats start at the first read after the first Space, or this long after it if that read is slower: tap
+    /// mode, which Claude may be in by a setting VibeSwitcher didn't see, records on the first Space and stops on the
+    /// next, so a read gets the chance to cancel it (Esc) first; still inside Claude's 120 ms.
+    static let firstRepeatWithin: TimeInterval = 0.1
+    /// While held, the screen is read this long after each answer.
     static let holdReadEvery: TimeInterval = 0.02
-    /// No Space for this long and Claude takes the key for let go (2.1.312): a Space after that, while it writes the
-    /// transcript, would be a push; it goes only once a read taken since shows it still listening.
-    static let chainBreak: TimeInterval = 0.12
-    /// After the first Space, the screen is read before any repeat: tap mode, which Claude may be in by a setting
-    /// VibeSwitcher didn't see, records on that Space and sends on the next, so it's cancelled (Esc) before a second one
-    /// goes. Short enough that the read and the second Space come inside Claude's 120 ms chain.
-    static let firstPause: TimeInterval = 0.06
+    /// Right after a hold's last Space: End, which in Claude's prompt only moves the caret to the end it's at already.
+    /// Any key but its dictation key clears its "a second push sends" state and the 120 ms timer a second push started
+    /// (2.1.312's push-to-talk handler: `if(!ut||!$e)qe()`), so a Space that reached it after the transcript went in
+    /// can't be half of a double push. Not Esc or ⌃C: those cancel the recording.
+    static let disarm: [UInt8] = [0x1b, 0x5b, 0x46]
     /// How often the screen is read.
     static let readEvery: TimeInterval = 0.15
     /// No `listening…` this long after the first Space: Claude's dictation is off, or not in this session.
@@ -363,11 +383,14 @@ final class ClaudeVoiceRun {
     private var cancelled = false
     private var listening = false
     private var spaces = 0
-    /// When a read last showed Claude warming up or listening (Spaces go only while it's fresh).
-    private var lastSpace = Date.distantPast
-    private var stallChecked = false
-    /// The last read no longer showed `listening…`: no Space until the next one says whether it's over.
+    /// The Spaces' timer (nil: none going), and whether the hold's Spaces were followed by `disarm`.
+    private var stopSpaces: (() -> Void)?
+    private var repeating = false
+    private var disarmed = false
+    /// The last read no longer showed it recording: the next one says whether it's over.
     private var doubting = false
+    /// A read showed it recording by its footer or level cursor, not only by words heard.
+    private var recordingShown = false
     private var started = Date.distantPast
     private var finishBy = Date.distantFuture
     private var baseline: [ClaudeVoiceScreen.Signal: Int] = [:]
@@ -408,6 +431,7 @@ final class ClaudeVoiceRun {
     func release() {
         released = true
         guard stage == .holding else { return }
+        stopHolding()
         if listening {
             finishing()
         } else {
@@ -453,7 +477,8 @@ final class ClaudeVoiceRun {
             stage = .holding
             started = now()
             guard space() else { return }
-            readSoon(after: Self.firstPause)
+            _ = schedule(Self.firstRepeatWithin) { [weak self] in self?.beginRepeats() }
+            readSoon(after: Self.holdReadEvery)
         }
     }
 
@@ -464,25 +489,31 @@ final class ClaudeVoiceRun {
             return false
         }
         spaces += 1
-        lastSpace = now()
         return true
     }
 
-    /// The repeats: one Space per read that, taken since the last Space, shows Claude still warming up or listening
-    /// (`holding`). Once Claude stops by itself and writes the transcript, at most the one Space already on its way
-    /// follows it, never the second push that would send it.
-    private func press() {
-        guard stage == .holding, !released, !doubting else { return }
-        let gap = now().timeIntervalSince(lastSpace)
-        // Stalled (a busy Mac) past Claude's chain break: it may take the key for let go and be writing the transcript.
-        // A Space goes again only once a second read in a row still shows it listening.
-        if listening, gap >= Self.chainBreak - 0.01, !stallChecked {
-            stallChecked = true
-            return
+    private func beginRepeats() {
+        guard !repeating, stage == .holding, !released, !cancelled else { return }
+        repeating = true
+        repeatSoon()
+    }
+
+    /// The repeats, every `repeatEvery` while held, until a read or the release stops them (`stopHolding`).
+    private func repeatSoon() {
+        stopSpaces = schedule(Self.repeatEvery) { [weak self] in
+            guard let self, self.stage == .holding, !self.released, !self.cancelled, self.stopSpaces != nil else { return }
+            guard self.space() else { return }
+            self.repeatSoon()
         }
-        stallChecked = false
-        guard gap >= Self.repeatEvery - 0.005 else { return }
-        _ = space()
+    }
+
+    /// No more Spaces; once some went, End follows the last at once (`disarm`), before anything else the run sends.
+    private func stopHolding() {
+        stopSpaces?()
+        stopSpaces = nil
+        guard spaces > 0, !disarmed, !cancelled else { return }
+        disarmed = true
+        _ = session.keys(Self.disarm)
     }
 
     private func readSoon(after delay: TimeInterval = ClaudeVoiceRun.readEvery) {
@@ -513,6 +544,8 @@ final class ClaudeVoiceRun {
         switch shown {
         case .tap:
             // Never let tap mode run: its next tap sends.
+            stopSpaces?()
+            stopSpaces = nil
             _ = session.keys([Self.escape])
             return tidy { [weak self] in self?.end(.notice(Self.tapMode, offer: true)) }
         case .recording:
@@ -520,19 +553,23 @@ final class ClaudeVoiceRun {
                 listening = true
                 onListening()
             }
+            recordingShown = true
             doubting = false
             watch(screen)
-        case .heard, .processing, .warming, .typed, .nothing:
-            // Words heard with nothing to say it still records: it does, but they stay dim while it processes too, when a
-            // Space could be the push that sends. So no more Spaces than the reads below allow.
-            if shown == .heard, !listening {
+        case .heard where !recordingShown, .processing:
+            // Words heard with nothing to say it still records (no footer, no level cursor): it does, but they stay dim
+            // while it processes too, when a Space could be typed or the push that sends. So the hold stops here, and
+            // what was heard is waited for. Processing: it stopped by itself.
+            if !listening {
                 listening = true
                 onListening()
-                watch(screen)
             }
+            watch(screen)
+            return finishing()
+        case .heard, .warming, .typed, .nothing:
             if listening {
-                // Claude stopped listening by itself: twice in a row (one read may land mid-redraw), it's over, and no
-                // more Spaces go; its transcript is waited for.
+                // Claude stopped listening by itself: twice in a row (one read may land mid-redraw), it's over; the
+                // Spaces stop and its transcript is waited for.
                 if doubting {
                     return finishing()
                 }
@@ -549,7 +586,7 @@ final class ClaudeVoiceRun {
         case .draft, .empty:
             break
         }
-        press()
+        beginRepeats()
         timedOut()
     }
 
@@ -571,6 +608,7 @@ final class ClaudeVoiceRun {
     /// The spaces that went in while Claude wasn't listening go (⌃U), once the box shows nothing else; if Claude is
     /// listening after all (the release came before a read saw it), its transcript is waited for instead.
     private func tidy(then done: @escaping () -> Void) {
+        stopHolding()
         let stage = self.stage
         self.stage = .done
         stopReads?()
@@ -592,6 +630,7 @@ final class ClaudeVoiceRun {
     // MARK: Finishing
 
     private func finishing() {
+        stopHolding()
         stage = .finishing
         finishBy = now().addingTimeInterval(Self.finishWithin)
         readSoon()
@@ -679,6 +718,8 @@ final class ClaudeVoiceRun {
     private func end(_ outcome: Outcome) {
         guard stage != .done else { return }
         stage = .done
+        stopSpaces?()
+        stopSpaces = nil
         if focusSent {
             focusSent = false
             session.focusBack()

@@ -344,10 +344,11 @@ final class DictationController: ObservableObject, @unchecked Sendable {
                 return self.turnedOn(rowID, Notice(rowID: rowID, text: "Claude's prompt box in the terminal isn't empty: clear it there, then turn dictation on."))
             }
             let before = ClaudeVoiceScreen.signals(screen.text)
+            let conversation = ClaudeVoiceScreen.conversation(screen.text)
             guard session.command(Self.turnOnCommand) else {
                 return self.turnedOn(rowID, Notice(rowID: rowID, text: "/voice hold couldn't be typed into the session."))
             }
-            self.watchTurnOn(rowID, session, since: before, until: Date().addingTimeInterval(Self.turnOnWait))
+            self.watchTurnOn(rowID, session, since: before, conversation: conversation, until: Date().addingTimeInterval(Self.turnOnWait))
         }
     }
 
@@ -355,11 +356,15 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     /// How long Claude may take to say what came of `/voice hold` (it checks the microphone first).
     static let turnOnWait: TimeInterval = 8
 
-    private func watchTurnOn(_ rowID: String, _ session: ClaudeVoiceSession, since before: [ClaudeVoiceScreen.Signal: Int], until deadline: Date) {
+    /// Claude's answer to `/voice hold`: its first dictation message after the command's newest echo once the
+    /// conversation changed since the click (`conversation`), or one shown more often than at the click.
+    private func watchTurnOn(_ rowID: String, _ session: ClaudeVoiceSession, since before: [ClaudeVoiceScreen.Signal: Int],
+                             conversation: [String], until deadline: Date) {
         _ = schedule(ClaudeVoiceRun.readEvery * 2) { [weak self] in
             session.screen { [weak self] screen in
                 guard let self, self.turningOn == rowID else { return }
-                if let screen, let signal = ClaudeVoiceScreen.new(ClaudeVoiceScreen.signals(screen.text), since: before).first {
+                if let screen, let signal = ClaudeVoiceScreen.answer(to: Self.turnOnCommand, in: screen.text, before: conversation)
+                    ?? ClaudeVoiceScreen.new(ClaudeVoiceScreen.signals(screen.text), since: before).first {
                     let notice = signal.notice.map { Notice(rowID: rowID, text: $0) }
                         ?? Notice(rowID: rowID, text: "Claude's dictation is on: hold the mic (or \(Self.shortcut) in the box) and speak.", info: true)
                     return self.turnedOn(rowID, notice)
@@ -367,7 +372,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
                 guard Date() < deadline else {
                     return self.turnedOn(rowID, Notice(rowID: rowID, text: "Claude didn't say whether its dictation is on: have a look at the terminal."))
                 }
-                self.watchTurnOn(rowID, session, since: before, until: deadline)
+                self.watchTurnOn(rowID, session, since: before, conversation: conversation, until: deadline)
             }
         }
     }

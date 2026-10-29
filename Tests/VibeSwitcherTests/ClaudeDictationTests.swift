@@ -735,4 +735,122 @@ struct ClaudeDictationTests {
         #expect(h.agentPrompts == prompts)
         controller.release()
     }
+
+    // MARK: - Pacing
+
+    /// The harness's session with every read of its screen taking `latency` (a busy Mac's host round trip).
+    func dictation(_ h: Harness, readLatency latency: TimeInterval) -> DictationController {
+        controller(session: { [weak h] key in
+            guard var session = h?.sync.claudeVoice(key: key) else { return nil }
+            let read = session.screen
+            session.screen = { done in DispatchQueue.main.asyncAfter(deadline: .now() + latency) { read(done) } }
+            return session
+        }).0
+    }
+
+    /// Reads slower than Claude's 120 ms chain: the Spaces keep their own time, so it records, and the transcript lands
+    /// with nothing sent.
+    @Test func underSlowReadsAHoldRecordsAndLandsWithNothingSent() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold"])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" }
+        let prompts = h.agentPrompts
+        let controller = dictation(h, readLatency: 0.25)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.deliveries[h.key]?.text == "open the composer view on main", "\(String(describing: controller.notice))")
+        #expect(h.agent["voiceStarts"] as? Int == 1)
+        #expect(h.agent["doubleSubmits"] as? Int == 0 && h.agent["enters"] as? Int == 0)
+        #expect(h.agentPrompts == prompts)
+        #expect(input(h) == "")
+    }
+
+    /// Claude stopping by itself while held, under slow reads: Spaces go on until the reads see it, some of them pushes
+    /// after its transcript went in, and none of it is sent.
+    @Test func underSlowReadsClaudeStoppingByItselfSendsNothing() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold"])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" }
+        let prompts = h.agentPrompts
+        let controller = dictation(h, readLatency: 0.25)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        h.tell(["op": "voiceStop"])
+        try await h.waitFor { h.agent["voiceInserts"] as? Int == 1 }
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        let text = controller.deliveries[h.key]?.text ?? ""
+        #expect(text.hasPrefix("open the composer view on main"), "\(text) \(String(describing: controller.notice))")
+        #expect(h.agent["doubleSubmits"] as? Int == 0 && h.agent["enters"] as? Int == 0)
+        #expect(h.agentPrompts == prompts)
+    }
+
+    /// A screen of Claude's for `keys`: recording after the first Space; the transcript in the box once `landed` says so;
+    /// empty once ⌃U went.
+    nonisolated static func scripted(_ keys: [[UInt8]], landed: Bool) -> LeadDelivery.Screen {
+        if keys.contains([ClaudeVoiceRun.killLine]) { return screen() }
+        if landed { return screen(input: "open the composer") }
+        return keys.isEmpty ? screen() : screen(footer: "listening…")
+    }
+
+    /// The hold's last Space is followed at once by End (any key but Space calls off Claude's double push), and no
+    /// Space after it: on the release, and when Claude stops by itself.
+    @Test func aHoldsLastSpaceIsFollowedByEndAndNoSpaceAfter() async {
+        for byItself in [false, true] {
+            let scripted = ScriptedSession()
+            var landed = false
+            scripted.after = { [scripted] _ in
+                // By itself: the transcript goes in after a few repeats.
+                if byItself, scripted.keys.filter({ $0 == [ClaudeVoiceRun.space] }).count >= 8 { landed = true }
+                return ClaudeDictationTests.scripted(scripted.keys, landed: landed)
+            }
+            let (controller, _) = controller(session: { _ in scripted.session })
+            controller.press("row", agent: .claude) { "" }
+            #expect(await until { controller.listening })
+            if !byItself {
+                controller.release()
+                landed = true
+            }
+            #expect(await until { controller.phase == .idle })
+            #expect(controller.deliveries["row"]?.text == "open the composer", "\(String(describing: controller.notice))")
+            let end = scripted.keys.firstIndex(of: ClaudeVoiceRun.disarm)
+            #expect(end != nil, "no End after the hold: \(scripted.keys)")
+            if let end {
+                #expect(scripted.keys[..<end].allSatisfy { $0 == [ClaudeVoiceRun.space] }, "\(scripted.keys)")
+                #expect(!scripted.keys[(end + 1)...].contains([ClaudeVoiceRun.space]), "\(scripted.keys)")
+            }
+            controller.release()
+        }
+    }
+
+    // MARK: - Turning it on
+
+    /// Claude's answer to /voice hold is the one after the command's newest echo: an earlier "Voice mode enabled"
+    /// scrolling off as the new one comes in (the same count before and after) doesn't hide it.
+    @Test func turningOnFindsTheAnswerAfterTheCommandThoughAnEarlierOneScrolledOff() async {
+        let earlier = ["❯ /voice hold", "  ⎿ Voice mode enabled (hold). Hold Space to record.", "⏺ Done earlier."]
+        let now = ["⏺ Done earlier.", "❯ /voice hold", "  ⎿ Voice mode enabled (hold). Hold Space to record."]
+        #expect(ClaudeVoiceScreen.signals(Self.screen(above: earlier.joined(separator: "\n")).text)
+                == ClaudeVoiceScreen.signals(Self.screen(above: now.joined(separator: "\n")).text))
+        let scripted = ScriptedSession()
+        scripted.screen = Self.screen(above: earlier.joined(separator: "\n"))
+        scripted.after = { [scripted] _ in
+            scripted.commands.isEmpty ? nil : ClaudeDictationTests.screen(above: now.joined(separator: "\n"))
+        }
+        let (controller, _) = controller(session: { _ in scripted.session })
+        controller.turnOnClaude("row")
+        #expect(await until { controller.turningOn == nil })
+        #expect(scripted.commands == [DictationController.turnOnCommand])
+        #expect(controller.notice?.info == true && controller.notice?.text.contains("is on") == true, "\(String(describing: controller.notice))")
+
+        // Typed into the box but not sent yet, or an answer to something else: not its answer.
+        let typed = ClaudeDictationTests.screen(input: "/voice hold", above: earlier.joined(separator: "\n"))
+        #expect(ClaudeVoiceScreen.answer(to: "/voice hold", in: typed.text, before: ClaudeVoiceScreen.conversation(Self.screen(above: earlier.joined(separator: "\n")).text)) == nil)
+        let unchanged = Self.screen(above: earlier.joined(separator: "\n")).text
+        #expect(ClaudeVoiceScreen.answer(to: "/voice hold", in: unchanged, before: ClaudeVoiceScreen.conversation(unchanged)) == nil)
+    }
 }
