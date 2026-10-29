@@ -228,6 +228,16 @@ private final class Driver: NSObject, NSApplicationDelegate {
     lazy var briefing = BriefingModel(
         snapshot: { [weak self] in BriefingModel.Snapshot(boards: self?.leads.boards ?? [:], sessions: self?.store.sessions ?? []) },
         language: { .preferred() }, keyStore: BriefingKey(saved: AppProof.MemorySecret()), generate: { _ in nil })
+    /// Push to talk with no microphone and no OpenAI: a recorder that hands over a made-up recording, an HTTP client
+    /// that answers a made-up transcript, a key in memory (`dictation key|nokey|press|release|note`).
+    let dictationKey = AppProof.MemorySecret()
+    lazy var dictation: DictationController = {
+        let controller = DictationController(keyStore: dictationKey, recorder: SandboxRecorder(),
+                                             transcription: OpenAITranscription(client: SandboxTranscriber()), findKey: { nil })
+        controller.openSettings = { [weak self] in self?.showSettings(.general) }
+        controller.checkKey()
+        return controller
+    }()
     var window: MainWindowController?
     /// The main window's actions (`sheet new-session-menu` lists the empty sidebar's menu from them).
     var windowActions: WindowActions?
@@ -606,6 +616,11 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let access = phone ?? PhoneAccess(store: store)
         access.hostClient = host
         access.inputAllowed = true
+        let phoneDictation = PhoneDictation(keyStore: dictationKey, transcription: OpenAITranscription(client: SandboxTranscriber()),
+                                            model: { [weak self] in self?.dictation.model ?? OpenAITranscription.defaultModel },
+                                            session: { [weak self] sid in self?.store.sessions.first { $0.identity == sid } })
+        access.transcribe = phoneDictation.transcribe
+        access.dictationReady = { [weak self] in self?.dictation.keyState == .saved }
         PhoneLeads.wire(access, controller: leads, model: model)
         phone = access
         let port = UInt16.random(in: 50_000...59_999)
@@ -698,7 +713,8 @@ private final class Driver: NSObject, NSApplicationDelegate {
             projectsFolder: { [weak self] in (self?.home ?? "") + "/projects" },
             projectCreated: { [weak self] folder, _ in self?.refuse("starting a lead in the new project \(folder)") })
         windowActions = actions
-        let controller = MainWindowController(store: store, host: host, model: model, actions: actions, leads: leads, briefing: briefing)
+        let controller = MainWindowController(store: store, host: host, model: model, actions: actions, leads: leads, briefing: briefing,
+                                              dictation: dictation)
         controller.pane.configure = { [weak self, weak controller] view in
             guard let self else { return }
             let dark = (view.window ?? controller?.window)?.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
@@ -723,7 +739,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
             settings = SettingsWindowController(
                 preferences: preferences, setup: SetupModel(preferences: preferences, system: .fixed(hooks: [.claude: true, .codex: false], terminal: .notAsked, notifications: .off)),
                 phoneAccess: PhoneAccess(store: store), recentProjects: { [] }, showWelcome: { [weak self] in self?.refuse("the welcome window") },
-                host: host, briefing: briefing, policy: WorkingPolicyEditor())
+                host: host, briefing: briefing, dictation: dictation, policy: WorkingPolicyEditor())
         }
         guard let window = settings?.window else { return }
         Sandbox.hide(window)
@@ -761,6 +777,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         ("answer", "answers the fake lead's open questions: its row reads as its terminal does again"),
         ("extras", "adds to the fake lead's board (start the lead first) a proposal on a timer, a revised question, a task needing an audit, an all-done card and two results"),
         ("phone", "serves the phone's web app for this sandbox on a port of 127.0.0.1, one phone paired: STATE/phone.json says where, its token, and the Host and Tailscale-User-Login headers to send (as tailscale serve would)"),
+        ("dictation key|nokey|note|ack|press|release", "push to talk in the composer (no microphone, no OpenAI: a made-up recording and transcript): a key saved or none, the one-time note about OpenAI shown again on the next press, the mic held down in the selected session's composer, let go"),
         ("select TEXT", "selects the first row whose title, project or task contains TEXT"),
         ("home", "shows the start page"),
         ("settings [TAB]", "opens Settings on a tab: " + SettingsTab.allCases.map(\.rawValue).joined(separator: ", ")),
@@ -1184,6 +1201,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
         case "answer": ask("", answer: true) { problem in reply(problem == nil, problem ?? "its questions answered") }
         case "extras": extras { problem in reply(problem == nil, problem ?? "the lead's board has a proposal, a revised question, an all-done card and results") }
         case "phone": servePhone(reply)
+        case "dictation": dictate(rest, reply)
         case "select":
             guard let row = WindowGroups.filter(model.sections, query: rest).first?.rows.first else { return reply(false, "no row matches \(rest)") }
             model.selectedID = row.id
@@ -1269,6 +1287,30 @@ private final class Driver: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.window?.chat.poll()
             self.settle { reply(met, met ? "chat of \(fake.label) shown" : "the chat of \(fake.label) didn't load: \(self.window?.chat.state ?? .none)") }
+        }
+    }
+
+    /// `dictation key|nokey|note|ack|press|release`.
+    private func dictate(_ what: String, _ reply: @escaping (Bool, String) -> Void) {
+        switch what {
+        case "key", "nokey":
+            dictationKey.write(what == "key" ? "sk-sandbox-\(String(repeating: "0", count: 24))" : nil)
+            dictation.checkKey()
+            settle { reply(true, what == "key" ? "a made-up key is saved" : "no key: the mic says one is needed") }
+        case "note":
+            UserDefaults.standard.removeObject(forKey: DictationController.privacyNotedKey)
+            reply(true, "the next press shows the note about OpenAI")
+        case "ack":
+            dictation.acknowledgePrivacy()
+            settle { reply(true, "the note about OpenAI was read: a press records") }
+        case "press", "release":
+            guard let row = model.selectedRow else { return reply(false, "no session selected: chat NAME first") }
+            if what == "press" { dictation.press(row.draftKey) { "Words that may come up: sandbox." } } else { dictation.release() }
+            waitFor({ [weak self] in self?.dictation.isTranscribing(row.draftKey) != true }) { [weak self] _ in
+                self?.settle { reply(true, "\(self?.dictation.phase ?? .idle)") }
+            }
+        default:
+            reply(false, "dictation key|nokey|note|ack|press|release")
         }
     }
 
@@ -1458,5 +1500,21 @@ private final class Driver: NSObject, NSApplicationDelegate {
             }
         }
         take([("light", .aqua), ("dark", .darkAqua)][...])
+    }
+}
+
+/// The sandbox's microphone: no device opened, a made-up recording handed over.
+final class SandboxRecorder: DictationRecorder {
+    func permission(_ done: @escaping (Bool) -> Void) { done(true) }
+    func start() throws {}
+    func stop() -> DictationAudio? { DictationAudio(data: Data("sandbox-recording".utf8), mimeType: "audio/mp4", duration: 2) }
+    func cancel() {}
+}
+
+/// The sandbox's OpenAI: nothing leaves the Mac, a made-up transcript comes back.
+struct SandboxTranscriber: HTTPClient {
+    func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
+        (Data(#"{"text":"run the tests on ComposerView.swift"}"#.utf8),
+         HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!)
     }
 }
