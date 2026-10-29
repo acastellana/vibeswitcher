@@ -2016,3 +2016,5 @@
 - 2026-10-29 14:29 Started a worker on claude-dictation-fails
 - 2026-10-29 14:29 Automatically (auto_advance): Started a worker on claude-dictation-fails (Claude dictation fails with a custom status line: recognise recording without Claude's footer text).
 - 2026-10-29 15:25 Automatically (auto_advance): Started the audit of claude-dictation-fails at b35f6000 (Its review is audit).
+- 2026-10-29 15:42 Audit of claude-dictation-fails: blocked, suspect, round 1: 1 Important open, 1 Nit open
+- 2026-10-29 15:42 Dismissed claude-dictation-fails:F1: The branch moved because the lead asked for the pacing and disarm changes mid-audit. A fresh audit runs on the commit the worker reports done; this verdict is moot.
