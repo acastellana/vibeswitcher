@@ -34,7 +34,7 @@ let clockOffset = 0;          // Mac clock minus phone clock, seconds
 const UNREACHABLE = "Can't reach your Mac. Is Tailscale on here, and is the Mac awake?";
 
 async function api(path, options = {}, authToken = token) {
-  const headers = { 'Content-Type': 'application/json' };
+  const headers = { 'Content-Type': options.contentType || 'application/json' };
   if (authToken) headers.Authorization = `Bearer ${authToken}`;
   // A dropped connection (phone off Wi-Fi, Mac asleep) must not leave requests hanging for minutes.
   const controller = new AbortController();
@@ -717,6 +717,7 @@ function renderSessionMeta() {
   $('composer').hidden = !canType;
   $('inputOff').hidden = state.inputAllowed || !session.inTerminal;
   $('reply').placeholder = `Message ${session.name}…`;
+  renderMic();
   layoutSession();
 }
 
@@ -1228,6 +1229,145 @@ async function send(payload, button, doneLabel) {
   }
 }
 
+// ---------- Dictation ----------
+
+// Hold the mic to record; let go and the recording goes to the Mac (`/api/dictation`), which has OpenAI transcribe it
+// with the Mac's key (the key never comes here). The text lands in the reply box at the cursor; it's never sent by
+// itself. The first press on this phone shows a note about OpenAI instead of recording. Nothing is kept: the recording
+// is in memory until it's posted.
+const DICTATION_MAX_MS = 120000;
+const DICTATION_MAX_BYTES = 4 * 1024 * 1024;
+const DICTATION_TYPES = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm', 'audio/ogg;codecs=opus'];
+const DICTATION_NO_KEY = 'Dictation needs an OpenAI API key on the Mac: VibeSwitcher › Settings… › General › Dictation.';
+let dictation = null;        // the recording under way: { recorder, stream, chunks, started, sid, timer, limit }
+let dictationHeld = false;   // the mic is held down now
+let transcribing = false;
+
+function dictationSupported() {
+  return Boolean(window.MediaRecorder && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+}
+
+function dictationNoted() {
+  try { return localStorage.getItem('vs.dictationNoted') === '1'; } catch (e) { return false; }
+}
+
+function renderMic() {
+  const mic = $('micButton');
+  const mode = state && state.dictation;
+  mic.hidden = !dictationSupported() || !mode || mode === 'off';
+  mic.classList.toggle('needsKey', mode === 'needsKey');
+  mic.classList.toggle('recording', Boolean(dictation));
+  mic.classList.toggle('busy', transcribing);
+  const label = mode === 'needsKey' ? DICTATION_NO_KEY : dictation ? 'Recording: let go to transcribe' : transcribing ? 'Transcribing' : 'Hold to dictate';
+  mic.setAttribute('aria-label', label);
+  mic.setAttribute('title', label);
+}
+
+function setDictationStatus(message, isError = false) {
+  const status = $('dictationStatus');
+  status.textContent = message || '';
+  status.hidden = !message;
+  status.classList.toggle('error', isError);
+}
+
+async function startDictation() {
+  setDictationStatus('');
+  if (state && state.dictation === 'needsKey') return setDictationStatus(DICTATION_NO_KEY, true);
+  if (!dictationNoted()) {
+    $('dictationNote').hidden = false;
+    layoutSession();
+    return;
+  }
+  if (dictation || transcribing || !current) return;
+  dictationHeld = true;
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (error) {
+    dictationHeld = false;
+    return setDictationStatus("This page may not use the microphone: allow it in your browser's settings for this site.", true);
+  }
+  // Let go while the browser asked: nothing to record.
+  if (!dictationHeld || dictation) {
+    stream.getTracks().forEach(track => track.stop());
+    return;
+  }
+  const type = DICTATION_TYPES.find(t => MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(t));
+  let recorder;
+  try {
+    recorder = new MediaRecorder(stream, type ? { mimeType: type, audioBitsPerSecond: 32000 } : { audioBitsPerSecond: 32000 });
+  } catch (error) {
+    stream.getTracks().forEach(track => track.stop());
+    return setDictationStatus("The microphone couldn't be started.", true);
+  }
+  const recording = { recorder, stream, chunks: [], started: Date.now(), sid: currentSid, limit: false };
+  recording.timer = setTimeout(() => stopDictation(true), DICTATION_MAX_MS);
+  recorder.addEventListener('dataavailable', event => { if (event.data && event.data.size) recording.chunks.push(event.data); });
+  recorder.addEventListener('stop', () => finishDictation(recording));
+  dictation = recording;
+  recorder.start();
+  setDictationStatus('Recording… let go to transcribe (2 minutes at most).');
+  renderMic();
+}
+
+function stopDictation(limit = false) {
+  dictationHeld = false;
+  const recording = dictation;
+  if (!recording) return;
+  dictation = null;
+  clearTimeout(recording.timer);
+  recording.limit = limit;
+  recording.duration = (Date.now() - recording.started) / 1000;
+  recording.stream.getTracks().forEach(track => track.stop());
+  if (recording.recorder.state !== 'inactive') recording.recorder.stop();
+  renderMic();
+}
+
+async function finishDictation(recording) {
+  const duration = Math.min(recording.duration || 0, DICTATION_MAX_MS / 1000);
+  const blob = new Blob(recording.chunks, { type: recording.recorder.mimeType || 'audio/webm' });
+  recording.chunks = [];
+  if (duration < 0.3 || !blob.size) return setDictationStatus('Nothing was recorded: hold the mic while you speak.', true);
+  if (blob.size > DICTATION_MAX_BYTES) return setDictationStatus('That recording is too big: keep it under 2 minutes.', true);
+  transcribing = true;
+  renderMic();
+  setDictationStatus('Transcribing on your Mac…');
+  try {
+    const sid = recording.sid ? `&sid=${encodeURIComponent(recording.sid)}` : '';
+    const result = await api(`/api/dictation?duration=${duration.toFixed(1)}${sid}`,
+                             { method: 'POST', body: blob, contentType: blob.type || 'audio/webm', timeout: 75000 });
+    // Another session opened meanwhile: its box isn't where this was meant to go.
+    if (recording.sid !== currentSid) return setDictationStatus('The session changed, so the dictation was dropped.', true);
+    insertDictation(result.text || '');
+    setDictationStatus(recording.limit ? 'Stopped at 2 minutes, the most one dictation takes.' : '');
+  } catch (error) {
+    setDictationStatus(error.message, true);
+  } finally {
+    transcribing = false;
+    renderMic();
+  }
+}
+
+/// The text at the reply box's cursor (in place of a selection), a space on a side that touches a word; never sent.
+function insertDictation(text) {
+  if (!text) return;
+  const reply = $('reply');
+  const value = reply.value;
+  const start = typeof reply.selectionStart === 'number' ? reply.selectionStart : value.length;
+  const end = typeof reply.selectionEnd === 'number' ? reply.selectionEnd : start;
+  const before = value.slice(0, start);
+  const after = value.slice(end);
+  let piece = text;
+  if (before && !/\s$/.test(before)) piece = ` ${piece}`;
+  if (after && !/^[\s.,;:!?]/.test(after)) piece = `${piece} `;
+  const room = 2000 - before.length - after.length;
+  piece = piece.slice(0, Math.max(0, room));
+  reply.value = before + piece + after;
+  const caret = before.length + piece.length;
+  if (typeof reply.setSelectionRange === 'function') reply.setSelectionRange(caret, caret);
+  growReply();
+}
+
 // ---------- Pairing ----------
 
 async function pair(event) {
@@ -1521,6 +1661,28 @@ document.addEventListener('DOMContentLoaded', () => {
     reply.value = '';
     growReply();
     reply.focus();
+  });
+  // Hold to dictate: down records, up (or the finger sliding off) sends it to the Mac. The press keeps the keyboard
+  // where it is.
+  const mic = $('micButton');
+  mic.addEventListener('pointerdown', event => {
+    event.preventDefault();
+    if (mic.setPointerCapture && event.pointerId !== undefined) { try { mic.setPointerCapture(event.pointerId); } catch (e) { /* gone */ } }
+    startDictation();
+  });
+  for (const type of ['pointerup', 'pointercancel']) mic.addEventListener(type, () => stopDictation());
+  mic.addEventListener('contextmenu', event => event.preventDefault());
+  // A keyboard or switch press: once starts, once stops.
+  mic.addEventListener('keydown', event => {
+    if ((event.key === 'Enter' || event.key === ' ') && !event.repeat) {
+      event.preventDefault();
+      if (dictation) stopDictation(); else startDictation();
+    }
+  });
+  $('dictationOk').addEventListener('click', () => {
+    try { localStorage.setItem('vs.dictationNoted', '1'); } catch (e) { /* private mode: it shows again */ }
+    $('dictationNote').hidden = true;
+    layoutSession();
   });
   $('replyForm').addEventListener('submit', async event => {
     event.preventDefault();

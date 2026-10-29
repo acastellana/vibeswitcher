@@ -154,6 +154,15 @@ select.chip-btn { appearance: none; -webkit-appearance: none; }
 .reply textarea::placeholder { color: var(--muted); }
 .reply button { min-height: 44px; }
 .replyButtons { display: flex; flex-direction: column; gap: 6px; }
+/* Hold to dictate: pressed, it records (red); without a key on the Mac it's dimmed and says what's needed. */
+.reply .mic { flex: none; width: 44px; min-height: 44px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg);
+  color: var(--text); display: flex; align-items: center; justify-content: center; padding: 0;
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.reply .mic.recording { background: var(--warn); border-color: var(--warn); color: #fff; }
+.reply .mic.busy { opacity: 0.6; }
+.reply .mic.needsKey { color: var(--muted); }
+.dictationNote { display: flex; gap: 8px; align-items: flex-start; margin: 0 2px 8px; }
+.dictationNote p { margin: 0; flex: 1; color: var(--muted); }
 .replyButtons #clearReply { min-height: 32px; padding: 4px 9px; color: var(--muted); }
 .status { margin: 6px 2px 0; font-size: 12.5px; color: var(--st-done); }
 .status.error { color: var(--warn); }
