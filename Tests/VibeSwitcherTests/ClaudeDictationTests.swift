@@ -789,6 +789,27 @@ struct ClaudeDictationTests {
         #expect(h.agentPrompts == prompts)
     }
 
+    /// The app stalls (its main thread busy) past the end of Claude's hold: Claude ends the recording and processes it,
+    /// and a Space then would be typed and make it drop what it heard. The Spaces wait for a read asked since: it shows
+    /// it processing, the hold stops, and what was heard lands.
+    @Test func aStallPastTheEndOfTheHoldSendsNoSpaceWhileClaudeProcesses() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold", "processing": 0.6])
+        try await h.waitFor { h.agent["processing"] as? Double == 0.6 }
+        let controller = dictation(h)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        // The stall itself (what's tested), longer than Claude's 120 ms here.
+        Thread.sleep(forTimeInterval: 0.35)
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.deliveries[h.key]?.text == "open the composer view on main", "\(String(describing: controller.notice))")
+        #expect(h.agent["dropped"] as? Int == 0)
+        #expect(h.agent["doubleSubmits"] as? Int == 0 && h.agent["enters"] as? Int == 0)
+        #expect(input(h) == "")
+        controller.release()
+    }
+
     /// A screen of Claude's for `keys`: recording after the first Space; the transcript in the box once `landed` says so;
     /// empty once ⌃U went.
     nonisolated static func scripted(_ keys: [[UInt8]], landed: Bool) -> LeadDelivery.Screen {

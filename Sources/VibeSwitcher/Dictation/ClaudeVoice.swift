@@ -334,6 +334,10 @@ final class ClaudeVoiceRun {
     /// mode, which Claude may be in by a setting VibeSwitcher didn't see, records on the first Space and stops on the
     /// next, so a read gets the chance to cancel it (Esc) first; still inside Claude's 120 ms.
     static let firstRepeatWithin: TimeInterval = 0.1
+    /// Claude (2.1.312) ends a hold's recording 200 ms after the last Space and processes it; a Space while it processes
+    /// is typed, and then it drops what it heard (`input_diverged`). So while it records, a repeat this late (the app
+    /// stalled) waits for a read asked since that shows it still recording.
+    static let stallGap: TimeInterval = 0.15
     /// While held, the screen is read this long after each answer.
     static let holdReadEvery: TimeInterval = 0.02
     /// Right after a hold's last Space: End, which in Claude's prompt only moves the caret to the end it's at already.
@@ -386,6 +390,9 @@ final class ClaudeVoiceRun {
     /// The Spaces' timer (nil: none going), and whether the hold's Spaces were followed by `disarm`.
     private var stopSpaces: (() -> Void)?
     private var repeating = false
+    /// When the last Space went, and when a late repeat paused the Spaces (nil: they aren't paused).
+    private var lastSpaceAt = Date.distantPast
+    private var pausedAt: Date?
     private var disarmed = false
     /// The last read no longer showed it recording: the next one says whether it's over.
     private var doubting = false
@@ -489,6 +496,7 @@ final class ClaudeVoiceRun {
             return false
         }
         spaces += 1
+        lastSpaceAt = now()
         return true
     }
 
@@ -502,6 +510,12 @@ final class ClaudeVoiceRun {
     private func repeatSoon() {
         stopSpaces = schedule(Self.repeatEvery) { [weak self] in
             guard let self, self.stage == .holding, !self.released, !self.cancelled, self.stopSpaces != nil else { return }
+            if self.listening, self.now().timeIntervalSince(self.lastSpaceAt) >= Self.stallGap {
+                // Late: Claude may have ended the recording; a read asked from now on says whether to go on.
+                self.stopSpaces = nil
+                self.pausedAt = self.now()
+                return
+            }
             guard self.space() else { return }
             self.repeatSoon()
         }
@@ -511,6 +525,7 @@ final class ClaudeVoiceRun {
     private func stopHolding() {
         stopSpaces?()
         stopSpaces = nil
+        pausedAt = nil
         guard spaces > 0, !disarmed, !cancelled else { return }
         disarmed = true
         _ = session.keys(Self.disarm)
@@ -520,13 +535,14 @@ final class ClaudeVoiceRun {
         stopReads?()
         stopReads = schedule(delay) { [weak self] in
             guard let self, self.stage != .done else { return }
-            self.session.screen { [weak self] screen in self?.read(screen) }
+            let asked = self.now()
+            self.session.screen { [weak self] screen in self?.read(screen, asked: asked) }
         }
     }
 
-    private func read(_ screen: LeadDelivery.Screen?) {
+    private func read(_ screen: LeadDelivery.Screen?, asked: Date) {
         switch stage {
-        case .holding: holding(screen)
+        case .holding: holding(screen, asked: asked)
         case .finishing: finishing(screen)
         case .clearing: clearing(screen)
         case .checking, .done: return
@@ -534,7 +550,7 @@ final class ClaudeVoiceRun {
         if stage != .done { readSoon(after: stage == .holding ? Self.holdReadEvery : Self.readEvery) }
     }
 
-    private func holding(_ screen: LeadDelivery.Screen?) {
+    private func holding(_ screen: LeadDelivery.Screen?, asked: Date = .distantFuture) {
         guard let screen else { return timedOut() }
         if let signal = ClaudeVoiceScreen.new(ClaudeVoiceScreen.signals(screen.text), since: baseline).first(where: { $0 != .enabled }) {
             return tidy { [weak self] in self?.end(.notice(signal.notice ?? Self.didntStart, offer: signal.offersTurnOn)) }
@@ -556,6 +572,12 @@ final class ClaudeVoiceRun {
             recordingShown = true
             doubting = false
             watch(screen)
+            // Paused by a late repeat, and still recording as of a read asked since: on again.
+            if let paused = pausedAt, asked >= paused, !released {
+                pausedAt = nil
+                guard space() else { return }
+                repeatSoon()
+            }
         case .heard where !recordingShown, .processing:
             // Words heard with nothing to say it still records (no footer, no level cursor): it does, but they stay dim
             // while it processes too, when a Space could be typed or the push that sends. So the hold stops here, and

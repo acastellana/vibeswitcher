@@ -22,7 +22,8 @@ enum FakeClaude {
 # (seconds without a repeat that end a hold), "statusLine" (a custom status line: the footer shows it and never the
 # voice footer, and the box its caret, as a focused terminal's), "focusEvents" (it asks for focus events, DECSET 1004,
 # and takes CSI I and CSI O as them; else they're Esc and typed text), "focused" (its terminal has focus: only then
-# does it draw its caret and level cursor)) | "voiceStop" (it stops listening by itself, as after 15 s of silence) |
+# does it draw its caret and level cursor), "processing" (seconds a recording takes to process once it ends: a
+# Space then is typed, and it drops what it heard if the box changed meanwhile, as 2.1.312's input_diverged)) | "voiceStop" (it stops listening by itself, as after 15 s of silence) |
 # "exit" (it quits, as /exit)).
 # Its /voice keeps Claude Code 2.1.312's timings: a repeat chain breaks 120 ms after the last Space (the key let go),
 # 5 repeats start recording, and a second push of the key within 300 ms of a transcript going in sends it. A held
@@ -74,6 +75,8 @@ state = {
     "gap": 0.12,             # no repeat this long: the key was let go (the chain breaks)
     "doublePush": 0.3,       # a second push this soon after a transcript went in sends it, 120 ms on
     "disarms": 0,            # sends a double push armed or could, called off by another key
+    "processing": 0.0,       # seconds a recording takes to process once it ends (0: its transcript goes in at once)
+    "dropped": 0,            # transcripts dropped: the box changed while they were processed
     "doubleSubmits": 0,      # prompts sent by a double push
     "statusLine": False,     # a custom status line in the footer, never its voice footer; the box shows its caret
     "focusEvents": False,    # it asked for focus events (DECSET 1004)
@@ -89,7 +92,8 @@ state = {
 }
 # "awaiting": a transcript went in and a second push of the key would send it (2.1.312's awaitingVoiceSubmitDoubleTap);
 # "push": when the first push came; "submitAt": when an armed send fires (120 ms after the second push).
-VOICE = {"before": "", "last": 0.0, "repeats": 0, "awaiting": False, "push": 0.0, "submitAt": None}
+VOICE = {"before": "", "last": 0.0, "repeats": 0, "awaiting": False, "push": 0.0, "submitAt": None,
+         "until": 0.0, "box": "", "processed": 0}
 METER = ESC + "[38;2;215;119;87m" + "▃" + ESC + "[39m"   # its recording-level cursor: a coloured bar, not dim
 QUIET = ESC + "[38;2;128;128;128m" + "▁" + ESC + "[39m"  # the same below a low level: grey
 CARET = ESC + "[7m" + " " + ESC + "[27m"                  # a focused terminal's caret at the box's end
@@ -164,15 +168,17 @@ def draw():
             lines.append("  ⎿ " + text.replace("\n", " "))
         lines.append(RULE)
         live = CARET if state["statusLine"] and state["focused"] else ""
-        if state["recording"] == "listening":
-            # What it hears so far, dimmed until it's final; its level cursor where the caret was (focused only).
+        if state["recording"] in ("listening", "processing"):
+            # What it hears so far, dimmed until it's final; its level cursor where the caret was (focused, recording).
             words = state["transcript"].split()
             heard = state["interim"] if state["interim"] is not None else " ".join(words[:max(1, len(words) // 2)])
-            live = ESC + "[2m" + heard + ESC + "[22m" + ((METER if heard else QUIET) if state["focused"] else "")
+            cursor = (METER if heard else QUIET) if state["focused"] and state["recording"] == "listening" else ""
+            live = ESC + "[2m" + heard + ESC + "[22m" + cursor
         lines.append("❯ " + state["input"].replace("\n", " ") + live)
         lines.append(RULE)
         menu = suggestions()
-        footer = {"warming": "keep holding…", "listening": "listening…", "tap": "● REC · tap to send"}.get(state["recording"])
+        footer = {"warming": "keep holding…", "listening": "listening…", "tap": "● REC · tap to send",
+                  "processing": "Voice: processing…"}.get(state["recording"])
         if state["statusLine"]:
             footer = None
             lines.extend(STATUS)
@@ -321,6 +327,10 @@ def voice_command(text):
 def voice_space():
     """A Space in the prompt box with /voice on; True when it took it (not typed)."""
     t = time.monotonic()
+    if state["recording"] == "processing":
+        # Its hold is over: the first two of a new chain are typed, the rest swallowed (no recording starts meanwhile).
+        VOICE["processed"] += 1
+        return VOICE["processed"] > 2
     if state["recording"] == "listening":
         VOICE["last"] = t
         return True
@@ -394,6 +404,17 @@ def finish_recording(submit=False):
         submit_prompt(text)
 
 
+def end_recording():
+    """A recording ends: processed for `processing` seconds (its transcript going in after), or at once."""
+    if state["processing"] <= 0:
+        finish_recording()
+        return
+    state["recording"] = "processing"
+    VOICE["until"] = time.monotonic() + state["processing"]
+    VOICE["box"] = state["input"]
+    VOICE["processed"] = 0
+
+
 def disarm():
     """Another key (or a push that came too late) calls off the send a double push would make."""
     if VOICE["awaiting"]:
@@ -413,9 +434,18 @@ def voice_tick():
         state["doubleSubmits"] += 1
         submit_prompt(text)
         return True
+    if state["recording"] == "processing" and time.monotonic() >= VOICE["until"]:
+        if state["input"] != VOICE["box"]:
+            # Typed into meanwhile: what it heard is dropped.
+            state["recording"] = ""
+            state["dropped"] += 1
+            VOICE["repeats"] = 0
+        else:
+            finish_recording()
+        return True
     if state["recording"] in ("warming", "listening") and time.monotonic() - VOICE["last"] > state["gap"]:
         if state["recording"] == "listening":
-            finish_recording()
+            end_recording()
         else:
             state["recording"] = ""
         VOICE["repeats"] = 0
@@ -881,9 +911,9 @@ def control():
             sys.exit(0)
         elif op == "voiceStop":
             if state["recording"] == "listening":
-                finish_recording()
+                end_recording()
         elif op == "voice":
-            for name in ("mode", "account", "transcript", "interim", "warmup", "gap", "statusLine", "focused"):
+            for name in ("mode", "account", "transcript", "interim", "warmup", "gap", "statusLine", "focused", "processing"):
                 if name in command:
                     state[{"mode": "voice", "account": "voiceAccount"}.get(name, name)] = command[name]
             if "focusEvents" in command:
