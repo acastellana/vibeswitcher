@@ -1906,3 +1906,4 @@
 - 2026-10-28 19:53 Automatically (auto_advance): Started the audit of a-full-suite-run at 12408989 (The risk check raised it to audit: it changes test or build infrastructure the suite relies on (Tests/VibeCoreTests/TestSupport.swift, Tests/VibeHostTests/TestSupport.swift, Tests/VibeSwitcherTests/TestSupport.swift)).
 - 2026-10-29 09:13 Abandoned workers-get-their: Fixed outside the team flow, on GitHub main (bfb89ef, tests 43dfcb9 and fb113f2; issue #2 closed), and installed 2026-10-29 at 09:10. Verified: wgmi's import-wagmi-wallet worker's tool server connected in about 0.1 s, and its progress call succeeded. This task's branch has no commits.
 - 2026-10-29 09:14 Workflow: base_branch = `main`
+- 2026-10-29 14:12 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
