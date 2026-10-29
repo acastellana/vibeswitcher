@@ -2018,3 +2018,7 @@
 - 2026-10-29 15:25 Automatically (auto_advance): Started the audit of claude-dictation-fails at b35f6000 (Its review is audit).
 - 2026-10-29 15:42 Audit of claude-dictation-fails: blocked, suspect, round 1: 1 Important open, 1 Nit open
 - 2026-10-29 15:42 Dismissed claude-dictation-fails:F1: The branch moved because the lead asked for the pacing and disarm changes mid-audit. A fresh audit runs on the commit the worker reports done; this verdict is moot.
+- 2026-10-29 16:07 Audit of claude-dictation-fails: complete, clean, round 2: 1 Important closed, 1 Nit open
+- 2026-10-29 16:12 Merged claude-dictation-fails: Claude dictation fails with a custom status line: recognise recording without Claude's footer text
+- 2026-10-29 16:12 Flaky in claude-dictation-fails's merge: slowAppLookupsAndLedgerWritesDontHoldTheMainThread() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-10-29 16:12 Planned fix-the-flaky-test-6: slowAppLookupsAndLedgerWritesDontHoldTheMainThread() flaked 3 times within 7 days
