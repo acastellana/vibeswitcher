@@ -11,7 +11,19 @@ struct AppEntitlementsTests {
         let data = try Data(contentsOf: Self.repo.appendingPathComponent("Resources/VibeSwitcher.entitlements"))
         let plist = try #require(try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
         #expect(plist["com.apple.security.automation.apple-events"] as? Bool == true)
-        #expect(plist.count == 1, "only what the app needs: \(plist.keys.sorted())")
+        #expect(plist.count == 2, "only what the app needs: \(plist.keys.sorted())")
+    }
+
+    /// Push to talk records from the microphone (`EngineRecorder`): under the hardened runtime the input is silent and
+    /// macOS asks nothing unless the signature carries the audio-input entitlement, and the Info.plist says why.
+    @Test func theEntitlementsFileAllowsTheMicrophone() throws {
+        let data = try Data(contentsOf: Self.repo.appendingPathComponent("Resources/VibeSwitcher.entitlements"))
+        let plist = try #require(try PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+        #expect(plist["com.apple.security.device.audio-input"] as? Bool == true)
+        let infoData = try Data(contentsOf: Self.repo.appendingPathComponent("Resources/Info.plist"))
+        let info = try #require(try PropertyListSerialization.propertyList(from: infoData, format: nil) as? [String: Any])
+        let why = try #require(info["NSMicrophoneUsageDescription"] as? String)
+        #expect(why.contains("OpenAI") && why.contains("hold"))
     }
 
     @Test func buildAppSignsTheAppAloneWithIt() throws {

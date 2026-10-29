@@ -7,5 +7,9 @@
          and no prompt without this. The helpers send none and get no entitlements. -->
     <key>com.apple.security.automation.apple-events</key>
     <true/>
+    <!-- Push to talk in the composer records from the microphone (EngineRecorder): under the hardened runtime macOS
+         gives the app no audio input, and asks nothing, without this. -->
+    <key>com.apple.security.device.audio-input</key>
+    <true/>
 </dict>
 </plist>
