@@ -2030,3 +2030,6 @@
 - 2026-10-29 16:27 Merged fix-the-flaky-test-6: Fix the flaky test slowAppLookupsAndLedgerWritesDontHoldTheMainThread() (no audit: review none)
 - 2026-10-29 16:27 Automatically (auto_advance): Merged fix-the-flaky-test-6 (Fix the flaky test slowAppLookupsAndLedgerWritesDontHoldTheMainThread()) into main at 7be33d5e, review none: on its worker's done report on 799ad566 and the full test run.
 - 2026-10-29 16:27 Automatically (auto_advance): Cleaned up fix-the-flaky-test-6; ended pid 38178 (Worker: Fix the flaky test slowAppLookupsAndLedgerWritesDontHoldTheMainThread()) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-29 20:51 Planned claude-dictation-records: Claude dictation records silence: Claude's mic under the session host, plus run logging and the overflowing notice (review audit)
+- 2026-10-29 20:51 Started a worker on claude-dictation-records
+- 2026-10-29 20:51 Automatically (auto_advance): Started a worker on claude-dictation-records (Claude dictation records silence: Claude's mic under the session host, plus run logging and the overflowing notice).
