@@ -131,7 +131,8 @@ fi
 sign() {
     # Keep DYLD environment injection and foreign libraries disabled for the app and every helper.
     codesign --force --options runtime "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-hook"
-    codesign --force --options runtime "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-host"
+    # The host may hold the microphone for its sessions' Claude Code (Resources/VibeSwitcherHost.entitlements).
+    codesign --force --options runtime --entitlements Resources/VibeSwitcherHost.entitlements "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-host"
     codesign --force --options runtime "${IDENTITY[@]}" "$APP/Contents/MacOS/vibeswitcher-mcp"
     # The app alone sends Apple Events (Terminal, Chrome): the hardened runtime refuses them without the entitlement.
     codesign --force --options runtime --entitlements Resources/VibeSwitcher.entitlements "${IDENTITY[@]}" "$APP"
