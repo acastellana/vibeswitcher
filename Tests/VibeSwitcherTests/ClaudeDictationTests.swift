@@ -255,7 +255,8 @@ struct ClaudeDictationTests {
         #expect(ClaudeVoiceScreen.seen(coloured, sent: 7) == .recording)
         let grey = shot("open the▁", [ScreenRun(row: 3, column: 2, length: 8, faint: true),
                                       ScreenRun(row: 3, column: 10, length: 1, color: .rgb(128, 128, 128)), bar])
-        #expect(ClaudeVoiceScreen.prompt(grey) == .init(spaces: 0, meter: true, dim: "open the"))
+        // Grey is a low level: quiet (a whole recording of it, and no text, is a microphone that gave silence).
+        #expect(ClaudeVoiceScreen.prompt(grey) == .init(spaces: 0, meter: true, quiet: true, dim: "open the"))
         #expect(ClaudeVoiceScreen.seen(grey, sent: 7) == .recording)
         // A bar glyph typed, or in the status line under the box, isn't its level cursor.
         #expect(!ClaudeVoiceScreen.prompt(shot("▃", [bar])).meter)
@@ -391,6 +392,10 @@ struct ClaudeDictationTests {
         try await h.waitFor { controller.turningOn == nil }
         #expect(h.agent["voice"] as? String == "hold")
         #expect(controller.notice?.info == true && controller.notice?.text.contains("is on") == true, "\(String(describing: controller.notice))")
+        // In app.log: the turning on, and what came of it.
+        let lines = Breadcrumbs.shared.lines
+        let typed = try #require(lines.lastIndex { $0.hasSuffix("dictation: turning on Claude's (/voice hold typed)") })
+        #expect(lines[typed...].contains { $0.contains("dictation: turning on Claude's ended: Claude's dictation is on") }, "\(lines.suffix(5))")
 
         controller.press(h.key, agent: .claude) { "" }
         try await h.waitFor { controller.listening }

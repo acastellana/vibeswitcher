@@ -351,6 +351,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
             guard session.command(Self.turnOnCommand) else {
                 return self.turnedOn(rowID, Notice(rowID: rowID, text: "/voice hold couldn't be typed into the session."))
             }
+            Breadcrumbs.shared.note("dictation: turning on Claude's (\(Self.turnOnCommand) typed)")
             self.watchTurnOn(rowID, session, since: before, conversation: conversation, until: Date().addingTimeInterval(Self.turnOnWait))
         }
     }
@@ -381,6 +382,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     }
 
     private func turnedOn(_ rowID: String, _ notice: Notice) {
+        Breadcrumbs.shared.note("dictation: turning on Claude's ended: \(notice.text)")
         turningOn = nil
         self.notice = notice
     }
