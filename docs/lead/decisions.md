@@ -242,3 +242,7 @@ Each attempt to exempt git-ignored folders opened a new way for a worker to hide
 
 The repository is public. The user asked to scrub the other projects' names everywhere, the lead's records included, and the lead's records and task titles keep growing. The user declined lowering heavy slots.
 
+## 2026-10-29 09:14:52 The base branch is now main (local, a2552c5 at 2026-10-29), replacing security/harden-host-and-credentials. Workers start from main, and verified work merges into the local main. Pushing to GitHub stays the user's call.
+
+The user answered 7F4217B7 with "main". main contains the security work, the worker tools fix (issue #2) and about 160 other commits that the old base lacks.
+
