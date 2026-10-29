@@ -48,7 +48,7 @@ struct ClaudeDictationTests {
         let controller = DictationController(keyStore: AppProof.MemorySecret(key), recorder: DictationTests.FakeRecorder(),
                                              transcription: transcription, defaults: defaults, findKey: { nil }, background: { $0() })
         controller.claudeSession = session
-        controller.claudeSettings = { settings }
+        controller.claudeSettings = { _ in settings }
         return (controller, http)
     }
 
@@ -101,6 +101,32 @@ struct ClaudeDictationTests {
             #expect(controller.notice?.text == settings.refusal?.text)
             #expect(controller.notice?.turnOn == settings.refusal?.offer)
         }
+    }
+
+    /// Claude reads its settings from its config folder, the project's two and the Mac's managed ones, each over the one
+    /// before: an autoSubmit anywhere that isn't turned off again above it stops dictation.
+    @Test func claudesSettingsAreReadFromEveryPlaceItReadsThem() {
+        #expect(ClaudeVoiceSettings.files(folder: "/p", environment: ["CLAUDE_CONFIG_DIR": "/c"])
+                == ["/c/settings.json", "/p/.claude/settings.json", "/p/.claude/settings.local.json",
+                    "/Library/Application Support/ClaudeCode/managed-settings.json"])
+        #expect(ClaudeVoiceSettings.files(folder: nil, environment: [:]).first == NSHomeDirectory() + "/.claude/settings.json")
+        let on = Data(#"{"voice":{"autoSubmit":true}}"#.utf8), off = Data(#"{"voice":{"autoSubmit":false}}"#.utf8)
+        let tap = Data(#"{"voice":{"mode":"tap"}}"#.utf8)
+        #expect(ClaudeVoiceSettings.merged([nil, nil, on, nil]).autoSubmit)
+        #expect(!ClaudeVoiceSettings.merged([on, off, nil, nil]).autoSubmit)
+        #expect(ClaudeVoiceSettings.merged([Data(#"{"voice":{"mode":"hold"}}"#.utf8), nil, nil, tap]).mode == "tap")
+    }
+
+    @Test func onlyTextThatGrewOutOfWhatClaudeHeardIsTaken() {
+        #expect(ClaudeVoiceScreen.grew("Open the composer view", from: "open the"))
+        #expect(ClaudeVoiceScreen.grew("So, open the composer", from: "open"))
+        #expect(!ClaudeVoiceScreen.grew("x", from: "open the"))
+        #expect(!ClaudeVoiceScreen.grew("xopen the composer", from: "open the"))
+        #expect(ClaudeVoiceScreen.grew("anything", from: ""))
+        let screen = LeadDelivery.Screen(text: [Self.rule, "❯ typed heard", Self.rule].joined(separator: "\n"),
+                                         runs: [ScreenRun(row: 1, column: 8, length: 5, faint: true)])
+        #expect(LeadDelivery.dimText(in: screen) == "heard")
+        #expect(LeadDelivery.box(in: screen) == .draft("typed"))
     }
 
     // MARK: - The screen
@@ -282,6 +308,57 @@ struct ClaudeDictationTests {
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.notice?.text.contains("already has text") == true)
         #expect(input(h) == before)
+    }
+
+    /// Typed in the terminal while Claude records, or after the release before its text lands: the box holds theirs and
+    /// Claude's, and none of it is moved or cleared.
+    @Test func typedInTheTerminalWhileClaudeRecordsNothingIsMovedOrCleared() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold", "gap": 1.5])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" }
+        let controller = dictation(h)
+        for (word, afterRelease) in [("x", false), ("y", true)] {
+            let (before, killed) = (input(h), h.agent["killed"] as? Int)
+            controller.press(h.key, agent: .claude) { "" }
+            try await h.waitFor { controller.listening }
+            if afterRelease { controller.release() }
+            h.keys(word)
+            try await h.waitFor { self.input(h).hasSuffix(word) }
+            if !afterRelease { controller.release() }
+            try await h.waitFor { controller.phase == .idle }
+            #expect(controller.notice?.text == ClaudeVoiceRun.typedMeanwhile, "\(String(describing: controller.notice))")
+            #expect(input(h) == before + word + "open the composer view on main")
+            #expect(h.agent["killed"] as? Int == killed)
+            #expect(controller.deliveries[h.key] == nil)
+            #expect(h.agent["enters"] as? Int == 0)
+            // The next one needs an empty box.
+            h.keys("\u{15}")
+            try await h.waitFor { self.input(h) == "" }
+        }
+    }
+
+    /// The composer's message, typed in while a dictation goes in, would take it out with its Enter: it waits in the box.
+    @Test func nothingElseIsTypedIntoTheSessionWhileADictationGoesIn() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold", "gap": 1.5])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" }
+        let controller = dictation(h)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        #expect(ClaudeVoiceRun.busy.contains(h.session.id))
+        #expect(!h.sync.type("also check the tests"))
+        #expect(h.chat.sendNotice == ChatSync.dictating)
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        #expect(!ClaudeVoiceRun.busy.contains(h.session.id))
+        #expect(controller.deliveries[h.key]?.text == "open the composer view on main")
+        #expect(h.agent["enters"] as? Int == 0)
+        #expect(input(h) == "")
+        // Once it's in the composer, a message goes as usual.
+        #expect(h.sync.type("also check the tests"))
+        try await h.waitFor { h.agentPrompts.last == "also check the tests" }
     }
 
     @Test func tapModeInTheSessionIsCancelledAndNothingIsSent() async throws {

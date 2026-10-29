@@ -65,8 +65,8 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     /// The Claude Code session a composer's dictation goes through (its /voice), when it's one the window can type into;
     /// nil: OpenAI's.
     var claudeSession: (String) -> ClaudeVoiceSession? = { _ in nil }
-    /// Claude's settings as dictation reads them (never writes them); off the main thread.
-    var claudeSettings: @Sendable () -> ClaudeVoiceSettings = { ClaudeVoiceSettings.read() }
+    /// Claude's settings for a session's folder as dictation reads them (never writes them); off the main thread.
+    var claudeSettings: @Sendable (String?) -> ClaudeVoiceSettings = { ClaudeVoiceSettings.read(folder: $0) }
     /// The composer whose dictation goes through Claude's /voice now, and whether Claude says it's listening.
     @Published private(set) var claudeRow: String?
     @Published private(set) var listening = false
@@ -258,9 +258,9 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         claudeRow = rowID
         listening = false
         phase = .recording(rowID: rowID)
-        let read = claudeSettings
+        let (read, folder) = (claudeSettings, session.folder)
         background { [weak self] in
-            let settings = read()
+            let settings = read(folder)
             DispatchQueue.main.async { self?.startClaude(rowID, session, settings) }
         }
     }

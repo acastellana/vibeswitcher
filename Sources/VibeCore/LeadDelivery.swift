@@ -98,6 +98,22 @@ extension LeadDelivery {
 
     public static func box(in screen: Screen) -> Box { box(in: screen.text, runs: screen.runs) }
 
+    /// What the input box shows dim (Claude's placeholder, its suggestion, the words its dictation hears before they're
+    /// final), its rows joined by spaces; nil when there's no box or the host doesn't say what's dim.
+    public static func dimText(in screen: Screen) -> String? {
+        guard let runs = screen.runs else { return nil }
+        let lines = screen.text.replacingOccurrences(of: "\u{0}", with: " ").components(separatedBy: "\n")
+        let rules = lines.indices.filter { lines[$0].filter { $0 == "─" }.count >= 20 }
+        guard rules.count >= 2 else { return nil }
+        let (top, bottom) = (rules[rules.count - 2], rules[rules.count - 1])
+        guard top + 1 < bottom, lines[top + 1].trimmingCharacters(in: .whitespaces).hasPrefix("❯") else { return nil }
+        return ((top + 1)..<bottom).map { row -> String in
+            let line = Array(lines[row])
+            let dim = dimColumns(row: row, runs: runs)
+            return String(line.indices.filter { dim.contains($0) }.map { line[$0] }).trimmingCharacters(in: .whitespaces)
+        }.filter { !$0.isEmpty }.joined(separator: " ")
+    }
+
     /// The columns of `row` drawn dim, with a caret cell (inverse, not dim) right before dim text.
     static func dimColumns(row: Int, runs: [ScreenRun]) -> Set<Int> {
         let onRow = runs.filter { $0.row == row }

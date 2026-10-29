@@ -1090,8 +1090,10 @@ final class LeadController: ObservableObject {
                 self?.wake(root: root)
             }
         case .ready:
-            // A prompt typed a moment ago (its hooks haven't said it's working yet) is one in flight too.
-            guard !flushing.contains(lead.tty), Date().timeIntervalSince(typedAt[lead.tty] ?? .distantPast) > 10 else { return }
+            // A prompt typed a moment ago (its hooks haven't said it's working yet) is one in flight too. Not into a
+            // dictation going on there (its words would go out with the prompt): the next try.
+            guard !flushing.contains(lead.tty), Date().timeIntervalSince(typedAt[lead.tty] ?? .distantPast) > 10,
+                  !ClaudeVoiceRun.busy.contains(id) else { return }
             flushing.insert(lead.tty)
             host.styledScreen(id) { [weak self] screen in
                 guard let self else { return }
@@ -1140,7 +1142,9 @@ final class LeadController: ObservableObject {
 
     /// What waits for an agent between turns, typed once its box is empty (see `flush`).
     private func type(waiting agent: LeadAgent, id: UUID, lead root: String?) {
-        guard !flushing.contains(agent.tty), Date().timeIntervalSince(typedAt[agent.tty] ?? .distantPast) > 10 else { return }
+        // Not into a dictation going on there (its words would go out with the message): the next flush.
+        guard !flushing.contains(agent.tty), Date().timeIntervalSince(typedAt[agent.tty] ?? .distantPast) > 10,
+              !ClaudeVoiceRun.busy.contains(id) else { return }
         flushing.insert(agent.tty)
         host.styledScreen(id) { [weak self] screen in
             guard let self else { return }

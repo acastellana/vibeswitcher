@@ -333,7 +333,8 @@ def voice_space():
 
 def finish_recording(submit=False):
     """The key let go (hold) or tapped again (tap): the transcript goes in at the cursor; tap mode sends three words or more."""
-    state["input"] = VOICE["before"] + state["transcript"]
+    # At the cursor (the box's end here): after whatever was typed while it recorded.
+    state["input"] = state["input"] + state["transcript"]
     state["recording"] = ""
     state["voiceInserts"] += 1
     if submit and len(state["transcript"].split()) >= 3:

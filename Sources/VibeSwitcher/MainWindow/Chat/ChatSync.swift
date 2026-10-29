@@ -542,6 +542,12 @@ final class ChatSync {
             Breadcrumbs.shared.note("composer: refused, no agent in the terminal")
             return false
         }
+        // Claude is taking down a dictation there: typed in now, the message (and its Enter) would go out with it.
+        if ClaudeVoiceRun.busy.contains(target.id) {
+            chat.sendNotice = Self.dictating
+            Breadcrumbs.shared.note("composer: refused, a dictation is going into that session")
+            return false
+        }
         readScreen()
         // A menu on the pane's last read not taken yet, or the card's while it's going: the message waits for it.
         if let menu = onScreenNow ?? (paneSettling ? chat.menu : nil) {
@@ -622,6 +628,7 @@ final class ChatSync {
     }
 
     static let noAgent = "Not sent: no agent is running in this terminal, so your message would run as a shell command."
+    static let dictating = "Not sent yet: Claude is taking down your dictation in that session. Send once it's in the box."
 
     /// The question's "Type something." row, when the open tab is a question that takes free text (not the review,
     /// not a permission prompt).
@@ -633,7 +640,8 @@ final class ChatSync {
     /// The messages held while a question was open, typed in now that it's answered (oldest first).
     private func releaseHeld(_ target: Target) {
         let held = chat.outbox.outbox.entries.filter { $0.key == target.key && $0.state == .held }.sorted { $0.sentAt < $1.sentAt }
-        guard !held.isEmpty else { return }
+        // Not into a dictation going on there: they go at a later read.
+        guard !held.isEmpty, !ClaudeVoiceRun.busy.contains(target.id) else { return }
         // The agent exited while they waited: they stay held (in the outbox strip), never typed into the shell.
         guard agentRunning(target) else {
             chat.sendNotice = Self.noAgent
@@ -651,10 +659,10 @@ final class ChatSync {
     /// composer's and runs Claude Code; nil otherwise. Its keys go in raw and at once (key repeats can't wait out a
     /// unit's gap), its screen is the host's with how it's drawn (Claude's live transcript is dim, not typed), and a
     /// command is typed as the composer's messages are, only while that session is still the one shown.
-    func claudeVoice(key: String) -> ClaudeVoiceSession? {
+    func claudeVoice(key: String, folder: String? = nil) -> ClaudeVoiceSession? {
         guard let target = target(), target.key == key, target.agent == .claude, host.isUsable else { return nil }
         let id = target.id
-        return ClaudeVoiceSession(keys: { [weak self] bytes in
+        return ClaudeVoiceSession(id: id, folder: folder, keys: { [weak self] bytes in
             guard let self, self.host.isUsable else { return false }
             self.host.send(id, bytes: Data(bytes), reply: false)
             return true

@@ -236,7 +236,7 @@ private final class Driver: NSObject, NSApplicationDelegate {
                                              transcription: OpenAITranscription(client: SandboxTranscriber()), findKey: { nil })
         controller.openSettings = { [weak self] in self?.showSettings(.general) }
         // A fake Claude's /voice (`tell '{"op": "voice", "mode": "hold"}'`): never the user's Claude settings.
-        controller.claudeSettings = { ClaudeVoiceSettings() }
+        controller.claudeSettings = { _ in ClaudeVoiceSettings() }
         controller.checkKey()
         return controller
     }()

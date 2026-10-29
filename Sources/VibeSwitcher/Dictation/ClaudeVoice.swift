@@ -3,6 +3,10 @@ import VibeCore
 
 /// A Claude Code session that dictation drives through its own /voice (`ClaudeVoiceRun`): its keys and its screen.
 struct ClaudeVoiceSession {
+    /// Its host session (what else types there waits while a dictation goes in: `ClaudeVoiceRun.busy`).
+    var id: UUID?
+    /// Its folder: Claude's project settings are read there.
+    var folder: String?
     /// Raw keys for the session's program, sent at once; false when they couldn't go out.
     var keys: ([UInt8]) -> Bool
     /// Its screen with how it's drawn (nil: it couldn't be read), answered on the main thread.
@@ -79,6 +83,16 @@ enum ClaudeVoiceScreen {
         Signal.allCases.filter { (now[$0] ?? 0) > (before[$0] ?? 0) }
     }
 
+    /// Whether `text` is what grew out of the words heard (`live`, shown dim while recording): its first word is among
+    /// the text's first three (the final words may differ a little). Nothing heard shown: it can't be told, so yes.
+    static func grew(_ text: String, from live: String) -> Bool {
+        let words = { (text: String) in
+            text.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        }
+        guard let first = words(live).first else { return true }
+        return words(text).prefix(3).contains(first)
+    }
+
     /// The box's draft as one line: the screen wraps it, and a transcript has no line breaks of its own.
     static func line(_ draft: String) -> String {
         draft.components(separatedBy: "\n").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }.joined(separator: " ")
@@ -103,14 +117,35 @@ struct ClaudeVoiceSettings: Equatable, Sendable {
     }
 
     static func parse(_ data: Data?) -> ClaudeVoiceSettings {
-        guard let data, data.count <= 1 << 20, let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
-              let voice = object["voice"] as? [String: Any] else { return ClaudeVoiceSettings() }
-        return ClaudeVoiceSettings(mode: voice["mode"] as? String, autoSubmit: voice["autoSubmit"] as? Bool ?? false)
+        merged([data])
     }
 
-    /// The user's, from the home folder this process runs on (a test's scratch home). Blocks: never on the main thread.
-    static func read() -> ClaudeVoiceSettings {
-        parse(FileManager.default.contents(atPath: NSHomeDirectory() + "/.claude/settings.json"))
+    /// Settings files from the lowest to the highest precedence: a later one's `voice.mode` and `voice.autoSubmit`
+    /// win over an earlier one's.
+    static func merged(_ files: [Data?]) -> ClaudeVoiceSettings {
+        var settings = ClaudeVoiceSettings()
+        for data in files {
+            guard let data, data.count <= 1 << 20, let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let voice = object["voice"] as? [String: Any] else { continue }
+            if let mode = voice["mode"] as? String { settings.mode = mode }
+            if let autoSubmit = voice["autoSubmit"] as? Bool { settings.autoSubmit = autoSubmit }
+        }
+        return settings
+    }
+
+    /// Where Claude Code reads settings, lowest precedence first: the user's (its config folder, `CLAUDE_CONFIG_DIR` or
+    /// ~/.claude, from the home this process runs on: a test's scratch home), the project's and its local ones in
+    /// `folder`, then the Mac's managed ones.
+    static func files(folder: String?, environment: [String: String] = ProcessInfo.processInfo.environment) -> [String] {
+        let config = environment["CLAUDE_CONFIG_DIR"].flatMap { $0.isEmpty ? nil : $0 } ?? NSHomeDirectory() + "/.claude"
+        var paths = [config + "/settings.json"]
+        if let folder { paths += [folder + "/.claude/settings.json", folder + "/.claude/settings.local.json"] }
+        return paths + ["/Library/Application Support/ClaudeCode/managed-settings.json"]
+    }
+
+    /// Blocks: never on the main thread.
+    static func read(folder: String?) -> ClaudeVoiceSettings {
+        merged(files(folder: folder).map { FileManager.default.contents(atPath: $0) })
     }
 }
 
@@ -152,6 +187,13 @@ final class ClaudeVoiceRun {
     static let holdLonger = "Hold the mic while you speak: Claude starts listening after a moment (“listening…”)."
     static let didntStart = "Claude's dictation didn't start in this session: it may be off."
     static let tapMode = "Claude's dictation is in tap mode, which sends what you say by itself; VibeSwitcher only uses hold mode."
+    static let typedMeanwhile = "Something was typed in the terminal meanwhile, so VibeSwitcher left Claude's prompt box alone."
+    /// Reads in a row that must show the same text before it's taken (Claude may still be finishing it).
+    static let steadyReads = 3
+
+    /// The host sessions a dictation is going into now: nothing else types into them meanwhile (the composer's
+    /// messages, held ones, the lead's), or its Enter would send the dictation with it. Main thread.
+    nonisolated(unsafe) static var busy: Set<UUID> = []
 
     private enum Stage { case checking, holding, finishing, clearing, done }
 
@@ -172,6 +214,11 @@ final class ClaudeVoiceRun {
     private var stopRepeats: (() -> Void)?
     private var stopReads: (() -> Void)?
     private var lastDraft: String?
+    private var steady = 0
+    /// Something not dim showed in the box while Claude recorded: typed in the terminal, not dictated.
+    private var typed = false
+    /// The words Claude showed dim while it listened.
+    private var live = ""
     private var taken: (shown: String, text: String)?
     private var clearSent = 0
     private var clearRead = 0
@@ -187,6 +234,7 @@ final class ClaudeVoiceRun {
 
     /// Reads the box first: only an empty one gets keys.
     func start() {
+        if let id = session.id { Self.busy.insert(id) }
         session.screen { [weak self] screen in self?.checked(screen) }
     }
 
@@ -297,6 +345,7 @@ final class ClaudeVoiceRun {
                 listening = true
                 onListening()
             }
+            watch(screen)
         case .warming, .none:
             break
         }
@@ -304,7 +353,7 @@ final class ClaudeVoiceRun {
         case .draft where !listening:
             // Not spaces: someone typed in the terminal. Nothing of theirs is touched.
             stopHolding()
-            return end(.notice("Something was typed in the terminal meanwhile, so VibeSwitcher left Claude's prompt box alone.", offer: false))
+            return end(.notice(Self.typedMeanwhile, offer: false))
         case .dialog:
             stopHolding()
             if listening { _ = session.keys([Self.escape]) }
@@ -361,11 +410,13 @@ final class ClaudeVoiceRun {
             switch ClaudeVoiceScreen.footer(screen.text) {
             case .listening, .warming, .tap:
                 lastDraft = nil
+                watch(screen)
             case .none:
                 switch LeadDelivery.box(in: screen) {
                 case .draft(let draft):
-                    if draft == lastDraft { return take(draft) }
+                    steady = draft == lastDraft ? steady + 1 : 1
                     lastDraft = draft
+                    if steady >= Self.steadyReads { return take(draft) }
                 case .empty:
                     lastDraft = nil
                 case .dialog:
@@ -377,8 +428,19 @@ final class ClaudeVoiceRun {
         if now() >= finishBy { end(cancelled ? .cancelled : .notice("Claude's dictation gave no text.", offer: false)) }
     }
 
-    /// The same text twice in a row: Claude is done writing it. Out of its box with ⌃U.
+    /// While Claude records: the words it shows dim, and whether anything not dim (typed in the terminal) showed too.
+    private func watch(_ screen: LeadDelivery.Screen) {
+        guard screen.runs != nil else { return }
+        if case .draft = LeadDelivery.box(in: screen) { typed = true }
+        if let dim = LeadDelivery.dimText(in: screen), !dim.isEmpty { live = dim }
+    }
+
+    /// The same text a few reads in a row: Claude is done writing it. Out of its box with ⌃U, if it's Claude's: nothing
+    /// was typed while it recorded, and it starts as what it heard (what's typed after the release isn't).
     private func take(_ draft: String) {
+        guard !typed, ClaudeVoiceScreen.grew(ClaudeVoiceScreen.line(draft), from: live) else {
+            return end(cancelled ? .cancelled : .notice(Self.typedMeanwhile, offer: false))
+        }
         taken = (draft, ClaudeVoiceScreen.line(draft))
         stage = .clearing
         clearSent = 0
@@ -415,6 +477,7 @@ final class ClaudeVoiceRun {
     private func end(_ outcome: Outcome) {
         guard stage != .done else { return }
         stage = .done
+        if let id = session.id { Self.busy.remove(id) }
         stopHolding()
         stopReads?()
         stopReads = nil
