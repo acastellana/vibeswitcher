@@ -334,10 +334,15 @@ enum TerminalBridge {
         """)
     }
 
+    /// The frontmost apps' bundle ids, asked once a pid (see `BundleIDCache`).
+    static let bundleIDs = BundleIDCache()
+
     /// Whether Terminal is the active app, and then the number of its front window on screen (the window server's
     /// list, without asking Terminal; a native tab picked is another window in front).
     static func front() -> (active: Bool, window: Int?) {
-        guard let app = NSWorkspace.shared.frontmostApplication, app.bundleIdentifier == bundleID else { return (false, nil) }
+        guard let app = NSWorkspace.shared.frontmostApplication,
+              bundleIDs.bundleID(pid: app.processIdentifier, lookup: { app.bundleIdentifier }) == bundleID
+        else { return (false, nil) }
         let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]] ?? []
         let window = windows.first {

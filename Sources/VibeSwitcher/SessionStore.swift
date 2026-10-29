@@ -33,7 +33,7 @@ final class SessionStore: ObservableObject {
     var order: SessionOrder = .screen { didSet { if order != oldValue { refresh() } } }
 
     private let scanner: SessionScanner
-    /// Writes `ledger` (once a minute, and at a day's end and at quit).
+    /// Writes `ledger` off the main thread (once a minute, and at a day's end and at quit).
     private let ledgers: LedgerWriter
     private let queue = DispatchQueue(label: "vibeswitcher.scan", qos: .utility)
     private var timer: Heartbeat.Subscription?
@@ -49,7 +49,8 @@ final class SessionStore: ObservableObject {
     // Scan-queue only.
     private var terminal = TerminalPoll<TerminalTab>()
     private let bridge: TerminalPoll<TerminalTab>.Bridge
-    /// Whether Terminal is the active app, and its front window then (see `TerminalSignal`); read on the scan queue.
+    /// Whether Terminal is the active app, and its front window then (see `TerminalSignal`); read on the scan queue,
+    /// never on main: it asks the frontmost app's bundle id (hang-20261028-171900).
     var terminalFront: @Sendable () -> (active: Bool, window: Int?) = { TerminalBridge.front() }
     /// Whether you're at the Mac (see `UserPresence`) and the desktops shown (see `Spaces`); read on the scan queue,
     /// once a scan: both ask the window server, which on a loaded Mac kept main waiting while an alert was up
@@ -242,7 +243,8 @@ final class SessionStore: ObservableObject {
                     self.terminalAccess = access
                     AppStatus.write(sessions: self.sessions, terminalAccess: access)
                 }
-                self.apply(raw: raw, tabs: tabs, hosted: hosted, background: background, transcripts: transcripts, shown: screen, now: now)
+                self.apply(raw: raw, tabs: tabs, hosted: hosted, background: background, transcripts: transcripts, shown: screen,
+                           terminalActive: front.active, now: now)
                 let read = TableRead(at: readAt, undecided: undecided)
                 if read != self.tableRead { self.tableRead = read }
                 self.scansApplied += 1
@@ -270,7 +272,8 @@ final class SessionStore: ObservableObject {
         terminalAccess = terminal.poll(now: now, interval: 0, terminalTTYs: Set(raw.filter(\.inTerminalApp).map(\.tty)),
                                        quiet: quiet, force: true, bridge: bridge)?.access ?? .unknown
         apply(raw: raw, tabs: terminal.tabs, hosted: [:], background: terminal.backgroundWork,
-              transcripts: Self.transcripts(for: raw), shown: Shown(present: presence(), desktops: desktops()), now: now)
+              transcripts: Self.transcripts(for: raw), shown: Shown(present: presence(), desktops: desktops()),
+              terminalActive: terminalFront().active, now: now)
         tableRead = TableRead(at: scanner.readAt, undecided: scanner.undecided)
     }
 
@@ -291,13 +294,15 @@ final class SessionStore: ObservableObject {
         var desktops: Set<Int>
     }
 
+    /// `terminalActive`: whether Terminal was the active app, as the scan read it (only asked with a session in it).
     private func apply(raw: [RawSession], tabs: [String: TerminalTab], hosted: [String: HostSession],
-                       background: [String: String], transcripts: [String: String], shown: Shown, now: Date) {
+                       background: [String: String], transcripts: [String: String], shown: Shown, terminalActive: Bool,
+                       now: Date) {
         var quiet: Set<String> = []
         var nudges: [(Session, Nudge)] = []
         let present = shown.present
         let currentDesktops = shown.desktops
-        let terminalFront = self.terminalFront().active
+        let terminalFront = terminalActive
         var result: [Session] = []
         for item in raw {
             let tab = tabs[item.tty]
