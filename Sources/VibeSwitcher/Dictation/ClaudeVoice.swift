@@ -19,8 +19,10 @@ struct ClaudeVoiceSession {
 /// What Claude Code's screen says about its dictation (code.claude.com/docs/en/voice-dictation).
 enum ClaudeVoiceScreen {
     /// Its footer, under the prompt box: `keep holding…` while a held key warms up, `listening…` while it records
-    /// (hold mode), `● REC · tap to send` (tap mode, which sends by itself).
-    enum Footer: Equatable { case none, warming, listening, tap }
+    /// (hold mode), `● REC · tap to send` (tap mode, which sends by itself), `Voice: processing…` once it stops. One
+    /// signal among several: where it shows depends on the layout (2.1.312 puts `listening…` in the notices at the
+    /// footer's right, or in its first row; a custom status line takes the footer's left), so it may not be on screen.
+    enum Footer: Equatable { case none, warming, listening, tap, processing }
 
     static func footer(_ text: String) -> Footer {
         let lines = text.replacingOccurrences(of: "\u{0}", with: " ").components(separatedBy: "\n")
@@ -29,7 +31,93 @@ enum ClaudeVoiceScreen {
         if below.contains("tap to send") { return .tap }
         if below.contains("listening…") || below.contains("listening...") { return .listening }
         if below.contains("keep holding") { return .warming }
+        if below.contains("processing…") { return .processing }
         return .none
+    }
+
+    /// What Claude Code (2.1.312, read from its code) draws in its prompt box itself about its dictation, footer aside:
+    /// a held Space's first two presses go in as spaces and its later repeats are swallowed (`warmupTyped`), until
+    /// recording starts and those two go; while it records, its level cursor stands where the caret was (a bar glyph,
+    /// grey below a low level, else a moving hue) and the words heard so far show dim. With /voice off, every Space
+    /// stays typed. Only a focused terminal gets the caret and the level cursor.
+    struct Prompt: Equatable {
+        /// Spaces typed into a box that holds nothing else (0: none); nil when it holds something else, or there's no box.
+        var spaces: Int?
+        /// The level cursor at the box's end.
+        var meter = false
+        /// What's dim in the box, less the level cursor.
+        var dim = ""
+    }
+
+    /// The spaces a held Space leaves in the box while Claude's dictation warms up (2.1.312: its first two presses; the
+    /// later repeats are swallowed).
+    static let warmupTyped = 2
+
+    static func prompt(_ screen: LeadDelivery.Screen) -> Prompt {
+        let lines = screen.text.replacingOccurrences(of: "\u{0}", with: " ").components(separatedBy: "\n")
+        let rules = lines.indices.filter { lines[$0].filter { $0 == "─" }.count >= 20 }
+        guard rules.count >= 2 else { return Prompt() }
+        let (top, bottom) = (rules[rules.count - 2], rules[rules.count - 1])
+        guard top + 1 < bottom, let marker = Array(lines[top + 1]).firstIndex(of: "❯") else { return Prompt() }
+        let runs = screen.runs ?? []
+        var prompt = Prompt()
+        // The box's cells after the marker and the space after it, row by row.
+        var cells: [(row: Int, column: Int, character: Character)] = []
+        for row in (top + 1)..<bottom {
+            let line = Array(lines[row])
+            let from = row == top + 1 ? marker + 2 : 0
+            cells += line.indices.filter { $0 >= from }.map { (row, $0, line[$0]) }
+        }
+        let run = { (cell: (row: Int, column: Int, character: Character)) in
+            runs.first { $0.row == cell.row && (($0.column)..<($0.column + $0.length)).contains(cell.column) }
+        }
+        // The level cursor: a bar glyph drawn in a colour, neither faint nor inverse, last in the box.
+        if let last = cells.last(where: { !$0.character.isWhitespace }), meter.contains(last.character), last.character != " ",
+           let drawn = run(last), drawn.color != nil, !drawn.faint, !drawn.inverse {
+            prompt.meter = true
+            cells.removeAll { $0 == last }
+        }
+        let dim = cells.filter { run($0)?.isDim == true }
+        prompt.dim = String(dim.map(\.character)).trimmingCharacters(in: .whitespaces)
+        // The caret: an inverse cell. The spaces typed are the plain ones it follows, first in the box.
+        let caret = cells.first { run($0)?.inverse == true && !(run($0)?.isDim ?? false) }
+        let plain = { (cell: (row: Int, column: Int, character: Character)) in
+            !dim.contains { $0 == cell } && !(caret.map { $0 == cell } ?? false)
+        }
+        guard cells.filter(plain).allSatisfy({ $0.character == " " }) else { return prompt }
+        prompt.spaces = cells.prefix { $0.row == top + 1 && $0.character == " " && plain($0) }.count
+        return prompt
+    }
+
+    /// What a read shows of Claude's dictation, by name: what notices and breadcrumbs say, never the screen's text.
+    enum Seen: String {
+        case nothing = "nothing"
+        /// Spaces typed and kept, as with /voice off.
+        case typed = "spaces typed"
+        case warming = "warming up"
+        /// Its footer's `listening…` or its level cursor: it records, and a Space keeps it recording.
+        case recording = "recording"
+        /// Words heard, dim, with neither its footer nor its level cursor to say it still records (they stay dim while
+        /// it processes).
+        case heard = "words heard"
+        case processing = "processing"
+        case tap = "tap mode"
+    }
+
+    /// What `screen` shows, `sent` Spaces after a box that showed `dimBefore` dim (its placeholder or suggestion).
+    static func seen(_ screen: LeadDelivery.Screen, sent: Int, dimBefore: String = "") -> Seen {
+        let footer = footer(screen.text)
+        let prompt = prompt(screen)
+        if footer == .tap { return .tap }
+        if footer == .listening || prompt.meter { return .recording }
+        if footer == .processing { return .processing }
+        if footer == .warming { return .warming }
+        if let spaces = prompt.spaces, spaces > 0 {
+            // Kept beyond what a warmup leaves, or every one kept (one may still be on its way): typed. Fewer: swallowed.
+            return spaces > warmupTyped || sent <= spaces + 1 ? .typed : .warming
+        }
+        if prompt.dim != dimBefore, prompt.dim.contains(where: { $0.isLetter || $0.isNumber }) { return .heard }
+        return .nothing
     }
 
     /// The messages Claude shows about its dictation.
@@ -240,7 +328,12 @@ final class ClaudeVoiceRun {
     static let killLine: UInt8 = 0x15
 
     static let holdLonger = "Hold the mic while you speak: Claude starts listening after a moment (“listening…”)."
-    static let didntStart = "Claude's dictation didn't start in this session: it may be off."
+    /// Its Spaces typed and kept: /voice is off in the session.
+    static let didntStart = "Claude's dictation is off in this session: holding Space typed spaces into its prompt box."
+    /// Neither off nor recording by the end of the wait: what was seen last, by name.
+    static func unclear(_ seen: ClaudeVoiceScreen.Seen) -> String {
+        "Claude's dictation didn't start here: no recording seen (last seen: \(seen.rawValue)). Nothing was dictated; its prompt box is as it was."
+    }
     static let tapMode = "Claude's dictation is in tap mode, which sends what you say by itself; VibeSwitcher only uses hold mode."
     static let typedMeanwhile = "Something was typed in the terminal meanwhile, so VibeSwitcher left Claude's prompt box alone."
     /// Reads in a row that must show the same text before it's taken (Claude may still be finishing it).
@@ -270,6 +363,11 @@ final class ClaudeVoiceRun {
     private var started = Date.distantPast
     private var finishBy = Date.distantFuture
     private var baseline: [ClaudeVoiceScreen.Signal: Int] = [:]
+    /// What the box showed dim before the first Space (its placeholder or suggestion).
+    private var dimBefore = ""
+    /// What the reads showed, each change once, and the spaces the last one showed typed.
+    private var seen: [ClaudeVoiceScreen.Seen] = []
+    private var spacesShown = 0
     private var stopReads: (() -> Void)?
     private var lastDraft: String?
     private var steady = 0
@@ -338,6 +436,7 @@ final class ClaudeVoiceRun {
             end(.notice("Claude's prompt box in the terminal already has text: send or clear it there first, then dictate.", offer: false))
         case .empty:
             baseline = ClaudeVoiceScreen.signals(screen.text)
+            dimBefore = ClaudeVoiceScreen.prompt(screen).dim
             stage = .holding
             started = now()
             guard space() else { return }
@@ -396,19 +495,28 @@ final class ClaudeVoiceRun {
         if let signal = ClaudeVoiceScreen.new(ClaudeVoiceScreen.signals(screen.text), since: baseline).first(where: { $0 != .enabled }) {
             return tidy { [weak self] in self?.end(.notice(signal.notice ?? Self.didntStart, offer: signal.offersTurnOn)) }
         }
-        switch ClaudeVoiceScreen.footer(screen.text) {
+        let shown = ClaudeVoiceScreen.seen(screen, sent: spaces, dimBefore: dimBefore)
+        note(shown, screen)
+        switch shown {
         case .tap:
             // Never let tap mode run: its next tap sends.
             _ = session.keys([Self.escape])
             return tidy { [weak self] in self?.end(.notice(Self.tapMode, offer: true)) }
-        case .listening:
+        case .recording:
             if !listening {
                 listening = true
                 onListening()
             }
             doubting = false
             watch(screen)
-        case .warming, .none:
+        case .heard, .processing, .warming, .typed, .nothing:
+            // Words heard with nothing to say it still records: it does, but they stay dim while it processes too, when a
+            // Space could be the push that sends. So no more Spaces than the reads below allow.
+            if shown == .heard, !listening {
+                listening = true
+                onListening()
+                watch(screen)
+            }
             if listening {
                 // Claude stopped listening by itself: twice in a row (one read may land mid-redraw), it's over, and no
                 // more Spaces go; its transcript is waited for.
@@ -432,9 +540,19 @@ final class ClaudeVoiceRun {
         timedOut()
     }
 
+    private func note(_ shown: ClaudeVoiceScreen.Seen, _ screen: LeadDelivery.Screen) {
+        if seen.last != shown { seen.append(shown) }
+        spacesShown = ClaudeVoiceScreen.prompt(screen).spaces ?? 0
+    }
+
+    /// No recording by the end of the wait: off when the last read showed its Spaces typed and kept (more than a warmup
+    /// leaves), else unclear, with no offer to turn it on. Either way the spaces that went in go.
     private func timedOut() {
         guard stage == .holding, !listening, now().timeIntervalSince(started) >= Self.startWithin else { return }
-        tidy { [weak self] in self?.end(.notice(Self.didntStart, offer: true)) }
+        let last = seen.last ?? .nothing
+        let off = last == .typed && spacesShown > ClaudeVoiceScreen.warmupTyped
+        Breadcrumbs.shared.note("dictation: Claude's didn't start (\(off ? "off" : "unclear")): seen \(seen.suffix(6).map(\.rawValue).joined(separator: " → ")) after \(spaces) Spaces")
+        tidy { [weak self] in self?.end(off ? .notice(Self.didntStart, offer: true) : .notice(Self.unclear(last), offer: false)) }
     }
 
     /// The spaces that went in while Claude wasn't listening go (⌃U), once the box shows nothing else; if Claude is
@@ -445,7 +563,8 @@ final class ClaudeVoiceRun {
         stopReads?()
         session.screen { [weak self] screen in
             guard let self else { return }
-            if let screen, stage == .holding, !self.cancelled, ClaudeVoiceScreen.footer(screen.text) == .listening {
+            if let screen, stage == .holding, !self.cancelled,
+               ClaudeVoiceScreen.seen(screen, sent: self.spaces, dimBefore: self.dimBefore) == .recording {
                 self.stage = .holding
                 self.listening = true
                 self.onListening()
@@ -470,8 +589,10 @@ final class ClaudeVoiceRun {
             if let signal = ClaudeVoiceScreen.new(ClaudeVoiceScreen.signals(screen.text), since: baseline).first(where: { $0 != .enabled }) {
                 return end(cancelled ? .cancelled : .notice(signal.notice ?? Self.didntStart, offer: signal.offersTurnOn))
             }
-            switch ClaudeVoiceScreen.footer(screen.text) {
-            case .listening, .warming, .tap:
+            // Still recording or processing (its footer, or its level cursor): the transcript isn't in yet.
+            let footer = ClaudeVoiceScreen.footer(screen.text)
+            switch footer == .none && ClaudeVoiceScreen.prompt(screen).meter ? .listening : footer {
+            case .listening, .warming, .tap, .processing:
                 lastDraft = nil
                 watch(screen)
             case .none:

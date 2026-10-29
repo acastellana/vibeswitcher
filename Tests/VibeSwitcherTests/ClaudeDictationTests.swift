@@ -225,6 +225,7 @@ struct ClaudeDictationTests {
         #expect(ClaudeVoiceScreen.footer(Self.screen(footer: "keep holding…").text) == .warming)
         #expect(ClaudeVoiceScreen.footer(Self.screen(footer: "listening…").text) == .listening)
         #expect(ClaudeVoiceScreen.footer(Self.screen(footer: "● REC · tap to send").text) == .tap)
+        #expect(ClaudeVoiceScreen.footer(Self.screen(footer: "Voice: processing…").text) == .processing)
         // Above the box it's the conversation, not the footer.
         #expect(ClaudeVoiceScreen.footer(Self.screen(above: "⏺ I'm listening… to the logs").text) == .none)
 
@@ -235,6 +236,48 @@ struct ClaudeDictationTests {
         #expect(ClaudeVoiceScreen.new(before, since: before).isEmpty)
         #expect(ClaudeVoiceScreen.signals(Self.screen(footer: "Voice mode requires a Claude.ai account. Run /login.").text) == [.needsAccount: 1])
         #expect(ClaudeVoiceScreen.line("open the composer\nview on main") == "open the composer view on main")
+    }
+
+    /// What Claude draws in the prompt box itself (2.1.312), for when its footer isn't on screen (a custom status line
+    /// in its place): its level cursor where the caret was, coloured or grey; the words heard, dim; the warmup's two
+    /// typed spaces with its later repeats swallowed, against /voice off's spaces that all stay.
+    @Test func claudesPromptBoxSaysWhatItsDictationDoesWithoutItsFooter() {
+        let status = "[Opus 5.5] vibeswitcher | 9 hooks | ctx ███░░ 41%"
+        // The box is row 3; its text starts at column 2, after "❯ ".
+        let shot = { (input: String, runs: [ScreenRun]) in
+            LeadDelivery.Screen(text: Self.screen(input: input, footer: status).text, runs: runs)
+        }
+        let bar = ScreenRun(row: 5, column: 43, length: 5, color: .rgb(0, 200, 0))
+
+        // Recording: the level cursor, coloured or grey (below a low level), after the words heard so far.
+        let coloured = shot("▃", [ScreenRun(row: 3, column: 2, length: 1, color: .rgb(215, 119, 87)), bar])
+        #expect(ClaudeVoiceScreen.prompt(coloured) == .init(spaces: 0, meter: true, dim: ""))
+        #expect(ClaudeVoiceScreen.seen(coloured, sent: 7) == .recording)
+        let grey = shot("open the▁", [ScreenRun(row: 3, column: 2, length: 8, faint: true),
+                                      ScreenRun(row: 3, column: 10, length: 1, color: .rgb(128, 128, 128)), bar])
+        #expect(ClaudeVoiceScreen.prompt(grey) == .init(spaces: 0, meter: true, dim: "open the"))
+        #expect(ClaudeVoiceScreen.seen(grey, sent: 7) == .recording)
+        // A bar glyph typed, or in the status line under the box, isn't its level cursor.
+        #expect(!ClaudeVoiceScreen.prompt(shot("▃", [bar])).meter)
+        #expect(ClaudeVoiceScreen.seen(shot("", [bar]), sent: 1) == .nothing)
+
+        // Words heard, dim, with no level cursor (a terminal out of focus draws none): heard, not more. The box's own
+        // placeholder, dim before the first Space too, isn't.
+        let heard = shot("open the", [ScreenRun(row: 3, column: 2, length: 8, faint: true)])
+        #expect(ClaudeVoiceScreen.seen(heard, sent: 7) == .heard)
+        #expect(ClaudeVoiceScreen.seen(heard, sent: 7, dimBefore: "open the") == .nothing)
+
+        // Spaces before the caret: the warmup's two, with more Spaces sent than kept, against /voice off's.
+        let caret = { (spaces: Int) in shot(String(repeating: " ", count: spaces + 1), [ScreenRun(row: 3, column: 2 + spaces, length: 1, inverse: true)]) }
+        #expect(ClaudeVoiceScreen.prompt(caret(2)).spaces == 2)
+        #expect(ClaudeVoiceScreen.seen(caret(2), sent: 5) == .warming)
+        #expect(ClaudeVoiceScreen.seen(caret(2), sent: 2) == .typed)
+        #expect(ClaudeVoiceScreen.seen(caret(6), sent: 7) == .typed)
+        // No caret (an older host, or a terminal out of focus): the spaces the row kept.
+        #expect(ClaudeVoiceScreen.prompt(shot("   ", [])).spaces == 3)
+        // Anything else in the box: not spaces.
+        #expect(ClaudeVoiceScreen.prompt(shot("  x", [])).spaces == nil)
+        #expect(ClaudeVoiceScreen.seen(shot("", []), sent: 0) == .nothing)
     }
 
     // MARK: - Safety, on a scripted screen
@@ -384,7 +427,7 @@ struct ClaudeDictationTests {
         try await h.waitFor { h.agent["warmup"] as? Int == 100000 }
         let controller = dictation(h)
         controller.press(h.key, agent: .claude) { "" }
-        try await h.waitFor { self.input(h).count >= 3 }
+        try await h.waitFor { self.input(h).count >= ClaudeVoiceScreen.warmupTyped }
         h.keys("x")
         try await h.waitFor { controller.phase == .idle }
         #expect(controller.notice?.text.contains("typed in the terminal") == true, "\(String(describing: controller.notice))")
@@ -503,5 +546,82 @@ struct ClaudeDictationTests {
         #expect(h.agent["voiceInserts"] as? Int == 0)
         #expect(input(h) == "")
         #expect(h.agent["enters"] as? Int == 0)
+    }
+
+    // MARK: - A custom status line (no voice footer)
+
+    /// Claude Code with a custom status line, as the user's (claude-hud): its footer never says `keep holding…` or
+    /// `listening…`. The level cursor in the box says it records: the whole hold, release and take, and again with it
+    /// grey (nothing heard yet) and Claude stopping by itself while held, which sends nothing.
+    @Test func withACustomStatusLineTheDictationIsReadOffThePromptBox() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold", "statusLine": true])
+        try await h.waitFor { h.agent["statusLine"] as? Bool == true }
+        let prompts = h.agentPrompts
+        let controller = dictation(h)
+
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        #expect(h.agent["recording"] as? String == "listening")
+        #expect(input(h) == "")
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.deliveries[h.key]?.text == "open the composer view on main", "\(String(describing: controller.notice))")
+        #expect(controller.notice == nil)
+        #expect(input(h) == "")
+        #expect(h.agent["voiceInserts"] as? Int == 1)
+
+        h.tell(["op": "voice", "interim": "", "transcript": "and run the tests"])
+        try await h.waitFor { h.agent["interim"] as? String == "" }
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        h.tell(["op": "voiceStop"])
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.deliveries[h.key]?.text == "open the composer view on main and run the tests", "\(String(describing: controller.notice))")
+        controller.release()
+        #expect(input(h) == "")
+        #expect(h.agent["voiceStarts"] as? Int == 2)
+        #expect(h.agent["enters"] as? Int == 0)
+        #expect(h.agent["doubleSubmits"] as? Int == 0)
+        #expect(h.agentPrompts == prompts)
+    }
+
+    /// /voice off with no footer: every Space stays typed, so it's said to be off (with the offer to turn it on), and
+    /// the spaces go.
+    @Test func withACustomStatusLineOffIsTheSpacesItKeeps() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "off", "statusLine": true])
+        try await h.waitFor { h.agent["statusLine"] as? Bool == true }
+        let controller = dictation(h)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { self.input(h).count > ClaudeVoiceScreen.warmupTyped }
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.notice?.text == ClaudeVoiceRun.didntStart && controller.notice?.turnOn == true, "\(String(describing: controller.notice))")
+        try await h.waitFor { self.input(h) == "" }
+        #expect(h.agent["enters"] as? Int == 0)
+    }
+
+    /// Warming up but never recording, with no footer: neither off nor on, so no offer to turn it on; the notice says
+    /// what was seen last, by name, so do the breadcrumbs (never the screen's text), and the warmup's spaces go.
+    @Test func withACustomStatusLineAWarmupThatNeverRecordsIsSaidByWhatWasSeen() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold", "statusLine": true, "warmup": 100000])
+        try await h.waitFor { h.agent["warmup"] as? Int == 100000 }
+        let controller = dictation(h)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { self.input(h).count == ClaudeVoiceScreen.warmupTyped }
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.notice?.text == ClaudeVoiceRun.unclear(.warming) && controller.notice?.turnOn == false,
+                "\(String(describing: controller.notice))")
+        try await h.waitFor { self.input(h) == "" }
+        #expect(h.agent["voiceStarts"] as? Int == 0)
+        #expect(h.agent["enters"] as? Int == 0)
+        let crumb = try #require(Breadcrumbs.shared.lines.last { $0.contains("dictation: Claude's didn't start") })
+        #expect(crumb.contains("unclear") && crumb.hasSuffix("Spaces") && crumb.contains("warming up"), "\(crumb)")
+        #expect(!crumb.contains("Opus") && !crumb.contains("hooks"))
+        controller.release()
     }
 }

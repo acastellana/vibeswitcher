@@ -18,10 +18,13 @@ enum FakeClaude {
 # sandbox's, to show a code block's Run) | "voice" (its /voice, as code.claude.com/docs/en/voice-dictation tells it: "mode"
 # off | hold | tap, "account" yes | none (no claude.ai sign-in: "Unknown command: /voice") | expired (it can't use the
 # sign-in: "Voice mode requires a Claude.ai account"), "transcript", "interim" (what it shows dim while it listens; the
-# transcript's first half by default), "warmup" (repeats before it listens), "gap" (seconds without a repeat that end a
-# hold)) | "voiceStop" (it stops listening by itself, as after 15 s of silence) | "exit" (it quits, as /exit)).
+# transcript's first half by default; "" for silence, its level cursor grey), "warmup" (repeats before it listens), "gap"
+# (seconds without a repeat that end a hold), "statusLine" (a custom status line: the footer shows it and never the
+# voice footer, and the box its caret, as a focused terminal's)) | "voiceStop" (it stops listening by itself, as after
+# 15 s of silence) | "exit" (it quits, as /exit)).
 # Its /voice keeps Claude Code 2.1.312's timings: a repeat chain breaks 120 ms after the last Space (the key let go),
-# 5 repeats start recording, and a second push of the key within 300 ms of a transcript going in sends it.
+# 5 repeats start recording, and a second push of the key within 300 ms of a transcript going in sends it. A held
+# Space's first two presses are typed and its later repeats swallowed until it records, when those two go.
 # the agent writes its state (mode, tab, answers, the free-text field, queued messages) to STATE after every change.
 import datetime
 import json
@@ -69,6 +72,7 @@ state = {
     "gap": 0.12,             # no repeat this long: the key was let go (the chain breaks)
     "doublePush": 0.3,       # a second push this soon after a transcript went in sends it
     "doubleSubmits": 0,      # prompts sent by a double push
+    "statusLine": False,     # a custom status line in the footer, never its voice footer; the box shows its caret
     "recording": "",         # "" | warming | listening | tap
     "voiceMessage": "",      # what its footer says about dictation
     "voiceStarts": 0,        # recordings started
@@ -78,6 +82,11 @@ state = {
 }
 VOICE = {"before": "", "last": 0.0, "repeats": 0, "inserted": -10.0, "pushes": 0}
 METER = ESC + "[38;2;215;119;87m" + "▃" + ESC + "[39m"   # its recording-level cursor: a coloured bar, not dim
+QUIET = ESC + "[38;2;128;128;128m" + "▁" + ESC + "[39m"  # the same below a low level: grey
+CARET = ESC + "[7m" + " " + ESC + "[27m"                  # a focused terminal's caret at the box's end
+# claude-hud's lines, as a custom status line draws them under the box (its context bar in bar glyphs).
+STATUS = ["  [Opus 5.5] vibeswitcher | 9 hooks | ctx " + ESC + "[32m" + "███░░░░░" + ESC + "[39m" + " 41%",
+          "  ✓ Read ×3 | ✓ Edit ×1"]
 # The slash commands its menu offers while "/…" is typed in the box.
 COMMANDS = [("/clear", "Clear conversation history"), ("/compact", "Clear history but keep a summary"),
             ("/help", "Show help and available commands"), ("/model", "Set the AI model for Claude Code")]
@@ -145,16 +154,19 @@ def draw():
         for text in state["queued"]:
             lines.append("  ⎿ " + text.replace("\n", " "))
         lines.append(RULE)
-        live = ""
+        live = CARET if state["statusLine"] else ""
         if state["recording"] == "listening":
-            # What it hears so far, dimmed until it's final.
+            # What it hears so far, dimmed until it's final; its level cursor where the caret was.
             words = state["transcript"].split()
             heard = state["interim"] if state["interim"] is not None else " ".join(words[:max(1, len(words) // 2)])
-            live = ESC + "[2m" + heard + ESC + "[22m" + METER
+            live = ESC + "[2m" + heard + ESC + "[22m" + (METER if heard else QUIET)
         lines.append("❯ " + state["input"].replace("\n", " ") + live)
         lines.append(RULE)
         menu = suggestions()
         footer = {"warming": "keep holding…", "listening": "listening…", "tap": "● REC · tap to send"}.get(state["recording"])
+        if state["statusLine"]:
+            footer = None
+            lines.extend(STATUS)
         if footer or state["voiceMessage"]:
             lines.append("  " + (footer or state["voiceMessage"]))
         elif menu:
@@ -162,7 +174,7 @@ def draw():
             for index, (name, description) in enumerate(menu):
                 pointer = "❯ " if index == state["suggest"] else "  "
                 lines.append("  " + pointer + name.ljust(14) + description)
-        else:
+        elif not state["statusLine"]:
             lines.append("  ? for shortcuts")
     out(ESC + "[H" + ESC + "[2J" + "\r\n".join(lines))
     save_state()
@@ -346,7 +358,8 @@ def voice_space():
         return True
     if VOICE["repeats"] >= 1:
         state["recording"] = "warming"
-    return False
+    # Its first two presses are typed; the later repeats are swallowed.
+    return VOICE["repeats"] >= 2
 
 
 def finish_recording(submit=False):
@@ -827,7 +840,7 @@ def control():
             if state["recording"] == "listening":
                 finish_recording()
         elif op == "voice":
-            for name in ("mode", "account", "transcript", "interim", "warmup", "gap"):
+            for name in ("mode", "account", "transcript", "interim", "warmup", "gap", "statusLine"):
                 if name in command:
                     state[{"mode": "voice", "account": "voiceAccount"}.get(name, name)] = command[name]
         elif op == "freeze":
