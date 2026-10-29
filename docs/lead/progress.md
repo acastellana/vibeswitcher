@@ -1991,3 +1991,5 @@
 - 2026-10-29 09:47 Automatically (auto_advance): Started the audit of push-to-talk-speech at 28e65433 (Its review is audit).
 - 2026-10-29 10:01 Audit of push-to-talk-speech: incomplete, clean, round 1: 1 Important open, 6 Nit open
 - 2026-10-29 10:01 Automatically (auto_advance): Sent push-to-talk-speech's worker the open Important findings push-to-talk-speech:F1 from its audit at 28e65433.
+- 2026-10-29 10:07 The worker on push-to-talk-speech answered findings: push-to-talk-speech:F1 fixed at d9513a8a: d9513a8: the phone's dictation state is now 'on' (not 'ready') in PhoneAccess, the web test and PhoneDictationTests, and the mic's class is 'transcribing' (not 'busy') in app.js and style.css. GlossaryTests passes; full suite `vs-heavy --timeout 2h bash scripts/test.sh`: EXIT=0, 'Test run with 2483 tests passed after 152.300 seconds with 4 known issues', web tests 5 of 5 and 2 of 2.; push-to-talk-speech:F3 fixed at d9513a8a: d9513a8: RemoteServer.bodyLim…
+- 2026-10-29 10:07 Automatically (auto_advance): Started the audit of push-to-talk-speech at d9513a8a (Its review is audit).
