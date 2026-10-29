@@ -10,6 +10,8 @@ enum DictationLimits {
     /// The most the phone may post (its recorder asks for 32 kbit/s, about 480 KB in 2 minutes; this leaves room for a
     /// browser that records at its own rate).
     static let phoneMaxBytes = 4 * 1024 * 1024
+    /// Space held alone in the box this long starts dictation (a tap, or typing, comes up well before).
+    static let spaceHold: TimeInterval = 0.4
 }
 
 /// Push to talk in the Mac's composer: hold the mic button (or ⌥Space in the box) to record, let go to have it
@@ -51,6 +53,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     static let privacyNotedKey = "dictationPrivacyNoted"
     static let modelKey = "dictationModel"
     static let shortcut = "⌥Space"
+    static let holdSpaceKey = "dictationHoldSpace"
 
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var keyState: KeyState = .unknown
@@ -59,6 +62,8 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     @Published private(set) var privacyNoteFor: String?
     @Published private(set) var deliveries: [String: Delivery] = [:]
     @Published var model: String { didSet { defaults.set(model, forKey: Self.modelKey) } }
+    /// Settings: holding Space alone in the box dictates too, as ⌥Space does (on at first).
+    @Published var holdSpace: Bool { didSet { defaults.set(holdSpace, forKey: Self.holdSpaceKey) } }
     /// Settings: a key found in your shell or Codex's file, offered for import (nil: none, or not looked).
     @Published private(set) var found: FoundOpenAIKey?
     @Published private(set) var keyNotice: String?
@@ -114,6 +119,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         self.schedule = schedule
         let saved = defaults.string(forKey: Self.modelKey) ?? ""
         model = OpenAITranscription.models.contains(saved) ? saved : OpenAITranscription.defaultModel
+        holdSpace = defaults.object(forKey: Self.holdSpaceKey) as? Bool ?? true
     }
 
     static func after(_ delay: TimeInterval, _ work: @escaping () -> Void) -> () -> Void {
@@ -128,6 +134,13 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     func isTranscribing(_ rowID: String) -> Bool { phase == .transcribing(rowID: rowID) }
     /// Recording or transcribing for that composer (Esc there cancels it).
     func isBusy(_ rowID: String) -> Bool { isRecording(rowID) || isTranscribing(rowID) }
+
+    /// The keys that dictate in the box, as said in tooltips and notices.
+    var shortcuts: String { holdSpace ? "Space or \(Self.shortcut)" : Self.shortcut }
+
+    /// Whether holding Space in a box may start a run now: it's on, and nothing else is under way (otherwise the
+    /// spaces stay typed).
+    var canHoldSpace: Bool { holdSpace && phase == .idle && turningOn == nil }
 
     /// Whether `rowID`'s dictation goes through Claude's /voice: a Claude Code session the window can type into.
     func usesClaude(_ rowID: String, agent: Agent?) -> Bool { route(rowID, agent: agent) != nil }
@@ -234,7 +247,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         let vocabulary = vocabulary ?? { "" }
         self.vocabulary = nil
         guard let audio, audio.duration >= DictationLimits.minDuration else {
-            notice = Notice(rowID: rowID, text: "Nothing was recorded: hold the mic button (or \(Self.shortcut)) while you speak.")
+            notice = Notice(rowID: rowID, text: "Nothing was recorded: hold the mic button (or \(shortcuts)) while you speak.")
             return idle()
         }
         if limitReached { notice = Notice(rowID: rowID, text: "Stopped at 2 minutes, the most one dictation takes.") }
@@ -370,7 +383,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
                 if let screen, let signal = ClaudeVoiceScreen.answer(to: Self.turnOnCommand, in: screen.text, before: conversation)
                     ?? ClaudeVoiceScreen.new(ClaudeVoiceScreen.signals(screen.text), since: before).first {
                     let notice = signal.notice.map { Notice(rowID: rowID, text: $0) }
-                        ?? Notice(rowID: rowID, text: "Claude's dictation is on: hold the mic (or \(Self.shortcut) in the box) and speak.", info: true)
+                        ?? Notice(rowID: rowID, text: "Claude's dictation is on: hold the mic (or \(shortcuts) in the box) and speak.", info: true)
                     return self.turnedOn(rowID, notice)
                 }
                 guard Date() < deadline else {

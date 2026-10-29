@@ -59,8 +59,8 @@ struct DictationButton: View {
             if recording { dictation.release() } else { dictation.press(rowID, agent: agent, vocabulary: vocabulary()) }
         }
         .help(missing ? "Dictation needs an OpenAI API key: add one in Settings › General › Dictation"
-              : claude ? "Hold to dictate with Claude's /voice (or hold \(DictationController.shortcut) in the box); let go and the text lands here to check before sending. Esc cancels."
-              : "Hold to dictate (or hold \(DictationController.shortcut) in the box); let go and the text lands here to check before sending")
+              : claude ? "Hold to dictate with Claude's /voice (or hold \(dictation.shortcuts) in the box); let go and the text lands here to check before sending. Esc cancels."
+              : "Hold to dictate (or hold \(dictation.shortcuts) in the box); let go and the text lands here to check before sending")
         .padding(.bottom, 6)
     }
 }
@@ -123,14 +123,17 @@ enum DictationInsert {
         return out
     }
 
-    /// Puts `text` at `textView`'s cursor, as typed (⌘Z takes it out).
+    /// Puts `text` at `textView`'s cursor, as typed (one ⌘Z takes it out).
     static func insert(_ text: String, into textView: NSTextView) {
         let string = textView.string as NSString
         let range = textView.selectedRange()
         let before = range.location > 0 ? Character(string.substring(with: string.rangeOfComposedCharacterSequence(at: range.location - 1))) : nil
         let end = range.location + range.length
         let after = end < string.length ? Character(string.substring(with: string.rangeOfComposedCharacterSequence(at: end))) : nil
+        // A step of its own: one ⌘Z takes out the transcript, not the words typed before it.
+        textView.breakUndoCoalescing()
         textView.insertText(Self.text(text, before: before, after: after), replacementRange: range)
+        textView.breakUndoCoalescing()
     }
 }
 
@@ -197,13 +200,18 @@ struct DictationSettings: View {
             Picker("Model", selection: $dictation.model) {
                 ForEach(OpenAITranscription.models, id: \.self) { Text($0).tag($0) }
             }
+            Toggle("Hold Space to dictate", isOn: $dictation.holdSpace)
+                .help(Self.holdSpaceHelp)
+            Text(Self.holdSpaceHelp).font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             if let notice = dictation.keyNotice { Text(notice).font(.caption).foregroundStyle(.red) }
         } header: {
             Text("Dictation")
         } footer: {
-            SettingsFooter("Hold the mic in the composer (or \(DictationController.shortcut) in its box), on the Mac or the phone, and speak: when you let go, the recording goes to OpenAI with this key and the text lands in the box for you to check before sending. It goes with the project's, its branches' and recent files' names, to spell them right; nothing else, and no recording is kept. The key stays on this Mac, in your login Keychain, and the phone's recordings are transcribed here. \(OpenAITranscription.defaultModel) is OpenAI's most accurate.")
+            SettingsFooter("Hold the mic in the composer (or \(dictation.shortcuts) in its box), on the Mac or the phone, and speak: when you let go, the recording goes to OpenAI with this key and the text lands in the box for you to check before sending. It goes with the project's, its branches' and recent files' names, to spell them right; nothing else, and no recording is kept. The key stays on this Mac, in your login Keychain, and the phone's recordings are transcribed here. \(OpenAITranscription.defaultModel) is OpenAI's most accurate.")
         }
     }
+
+    static let holdSpaceHelp = "In the composer's box, hold Space alone for a moment to dictate, as \(DictationController.shortcut) does; let go to finish. A tap types a space, and the spaces a hold typed come out. Holding Space to type many spaces doesn't work while this is on."
 
     static func line(_ state: DictationController.KeyState) -> String {
         switch state {
