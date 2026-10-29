@@ -33,6 +33,8 @@ final class SessionStore: ObservableObject {
     var order: SessionOrder = .screen { didSet { if order != oldValue { refresh() } } }
 
     private let scanner: SessionScanner
+    /// Writes `ledger` (once a minute, and at a day's end and at quit).
+    private let ledgers: LedgerWriter
     private let queue = DispatchQueue(label: "vibeswitcher.scan", qos: .utility)
     private var timer: Heartbeat.Subscription?
     private var watcher: DispatchSourceFileSystemObject?
@@ -89,10 +91,13 @@ final class SessionStore: ObservableObject {
     private var lastHostScreenRequest = Date.distantPast
 
     /// `scanner`: the Mac's processes; `--idle-bench` passes made-up ones. `bridge`: Terminal.app; tests pass a stand-in.
+    /// `ledgers`: writes the activity ledgers; tests pass their own.
     init(scanner: SessionScanner = SessionScanner(),
-         bridge: TerminalPoll<TerminalTab>.Bridge = .init(tabs: TerminalBridge.tabs, screens: TerminalBridge.readScreens)) {
+         bridge: TerminalPoll<TerminalTab>.Bridge = .init(tabs: TerminalBridge.tabs, screens: TerminalBridge.readScreens),
+         ledgers: LedgerWriter = LedgerWriter(folder: VibePaths.statsDir)) {
         self.scanner = scanner
         self.bridge = bridge
+        self.ledgers = ledgers
     }
 
     /// Titles change many times a second while an agent works (its spinner); the regular scan picks them up,
@@ -292,7 +297,7 @@ final class SessionStore: ObservableObject {
         var nudges: [(Session, Nudge)] = []
         let present = shown.present
         let currentDesktops = shown.desktops
-        let terminalFront = NSWorkspace.shared.frontmostApplication?.bundleIdentifier == TerminalBridge.bundleID
+        let terminalFront = self.terminalFront().active
         var result: [Session] = []
         for item in raw {
             let tab = tabs[item.tty]
@@ -442,8 +447,8 @@ final class SessionStore: ObservableObject {
     private func recordLedger(_ sessions: [Session], now: Date, userPresent: Bool) {
         let day = ActivityLedger.dayKey(for: now)
         if ledger.day != day {
-            ledger.save(in: VibePaths.statsDir)
-            ledger = ActivityLedger.load(day: day, from: VibePaths.statsDir)
+            ledgers.save(ledger)
+            ledger = ledgers.unwritten(day: day) ?? ActivityLedger.load(day: day, from: VibePaths.statsDir)
         }
         // Longer gaps are sleep or a stuck scan: nobody was working or waiting in any meaningful sense.
         if let last = lastLedgerAt, now.timeIntervalSince(last) <= 30 {
@@ -452,7 +457,7 @@ final class SessionStore: ObservableObject {
         }
         lastLedgerAt = now
         if now.timeIntervalSince(lastLedgerSave) >= 60 {
-            ledger.save(in: VibePaths.statsDir)
+            ledgers.save(ledger)
             lastLedgerSave = now
         }
         if now.timeIntervalSince(lastLedgerPublish) >= 15 || today.day != ledger.day {
@@ -461,7 +466,11 @@ final class SessionStore: ObservableObject {
         }
     }
 
-    func saveLedger() { ledger.save(in: VibePaths.statsDir) }
+    /// At quit: written before this returns.
+    func saveLedger() {
+        ledgers.save(ledger)
+        ledgers.flush()
+    }
 
     private func detail(for status: SessionStatus, hook: HookState?, agent: Agent) -> String? {
         switch status {
