@@ -1980,3 +1980,6 @@
 - 2026-10-29 09:16 Planned push-to-talk-speech: Push-to-talk speech-to-text in the composer (Mac and phone) via OpenAI transcription (review audit)
 - 2026-10-29 09:16 Started a worker on push-to-talk-speech
 - 2026-10-29 09:16 Automatically (auto_advance): Started a worker on push-to-talk-speech (Push-to-talk speech-to-text in the composer (Mac and phone) via OpenAI transcription).
+- 2026-10-29 09:22 Workflow: base_branch = `main`
+- 2026-10-29 09:23 Audit of sessionstore-refresh: complete, clean, round 1: 3 Nit open, 1 Pre-existing open
+- 2026-10-29 09:28 Merged sessionstore-refresh: SessionStore.refresh writes the activity ledger and asks NSRunningApplication for bundle ids on the main thread

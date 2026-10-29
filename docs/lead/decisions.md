@@ -250,3 +250,7 @@ PrivateNamesLint fails every merge's full suite on that one line, and each faile
 
 The user picked accuracy with code words over on-device privacy. Keeping the key on the Mac and never auto-sending keeps the risk small.
 
+## 2026-10-29 09:22:09 From 2026-10-29 the base branch is main (configure base_branch). Workers start from main, verified work merges into main, and a push is just `git push origin main`. project-lead is retired (the user deletes it locally and on GitHub), along with the leftover branches chat-view, agent-fix-chat-pre-rebase-30ba453 and archive/verifier-trust-check-1.
+
+The user said "Yes to both". project-lead only mirrored main, and every push had to fast-forward main by hand; one branch is simpler.
+
