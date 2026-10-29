@@ -127,6 +127,8 @@ struct SessionStoreTests {
         let reads = Reads()
         let lookups = Gate()
         store.terminalFront = { reads.add("front"); lookups.wait(); return (false, nil) }
+        // A failed run lets the scan and the writer go too.
+        defer { lookups.open(); writes.open() }
 
         // The scan waits on its lookup; the main thread doesn't. (Its clock is 10 s past the store's start: the
         // first save is a minute after that.)
@@ -143,7 +145,8 @@ struct SessionStoreTests {
             clock.advance(20)
             try await refreshAndSettle(store)
         }
-        #expect(written.ledgers.count == 1)
+        // Its write begins on the writer's queue, after the scan landed.
+        #expect(await until { written.ledgers.count == 1 })
         #expect(written.finished == 0)
         // Saved again at 130 s and 190 s while it waits: the later takes the earlier's place, written after it.
         for _ in 0..<6 {
@@ -183,13 +186,31 @@ struct SessionStoreTests {
         var finished: Int { lock.lock(); defer { lock.unlock() }; return done }
     }
 
-    /// Holds whoever waits on it until the test opens it (a slow writer or lookup: 5 s and more), 60 s at most, so a
-    /// run without the fix (the main thread held) ends; open, it holds no one.
+    /// Holds whoever waits on it off the main thread until the test opens it (a slow writer or lookup: 5 s and more);
+    /// open, it holds no one. It never opens by itself while the test still looks (a 60 s limit did, on a loaded Mac:
+    /// the scan landed before the test checked it hadn't), only past the hang guard. Waited on on the main thread (a
+    /// run without the fix) it fails the test and holds nothing, so that run ends.
     final class Gate: @unchecked Sendable {
+        private let lock = NSLock()
         private let group = DispatchGroup()
+        private var opened = false
         init() { group.enter() }
-        func wait() { _ = group.wait(timeout: .now() + 60) }
-        func open() { group.leave() }
+
+        func wait() {
+            guard !Thread.isMainThread else {
+                Issue.record("Waited on a slow lookup or write on the main thread")
+                return
+            }
+            if group.wait(timeout: .now() + hangGuard) == .timedOut { Issue.record("The gate was never opened") }
+        }
+
+        func open() {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !opened else { return }
+            opened = true
+            group.leave()
+        }
     }
 
     /// What was read, and on which thread.
