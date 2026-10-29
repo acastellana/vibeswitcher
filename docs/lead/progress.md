@@ -1988,3 +1988,4 @@
 - 2026-10-29 09:34 Merged the-witness-s-stall: The witness's stall and event computation runs on the main thread (LeadController.witness → LeadWitness.stalls) (no audit: review none)
 - 2026-10-29 09:34 Automatically (auto_advance): Merged the-witness-s-stall (The witness's stall and event computation runs on the main thread (LeadController.witness → LeadWitness.stalls)) into main at a18881fa, review none: on its worker's done report on 0a53007f and the full test run.
 - 2026-10-29 09:34 Automatically (auto_advance): Cleaned up the-witness-s-stall; ended pid 42982 (Worker: The witness's stall and event computation runs on the main thread (LeadController.witness → LeadWitness.stalls)) (freed 1.4 GB of build output and temporary folders). It stays done.
+- 2026-10-29 09:47 Automatically (auto_advance): Started the audit of push-to-talk-speech at 28e65433 (Its review is audit).
