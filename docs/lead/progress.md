@@ -1956,3 +1956,9 @@
 - 2026-10-28 21:25 Audit of keep-awake-s-power: complete, clean, round 3: 1 Important closed, 1 Nit closed
 - 2026-10-29 08:02 accepted 1 commit on project-lead that you ran from VibeSwitcher's window: a8ebff3 docs/lead: other projects named generically
 - 2026-10-29 08:08 Merged urgent-mac-limit: URGENT: Mac-limit messages name other projects, and auto_advance writes them into this repo's progress log (breaks PrivateNamesLint)
+- 2026-10-29 08:08 Started a worker on sessionstore-refresh
+- 2026-10-29 08:08 Automatically (auto_advance): Started a worker on sessionstore-refresh (SessionStore.refresh writes the activity ledger and asks NSRunningApplication for bundle ids on the main thread), its after tasks done (urgent-mac-limit).
+- 2026-10-29 08:49 Abandoned launch-video: The user said "delete them" (2026-10-29). The v1 and v2 launch videos aren't kept; the deliverable was never meant to merge.
+- 2026-10-29 08:49 Abandoned launch-video-v3-narrated: The user said "delete them" (2026-10-29). The v3 launch video isn't kept; the deliverable was never meant to merge.
+- 2026-10-29 08:49 Started a worker on sessionstore-refresh
+- 2026-10-29 08:50 Merged keep-awake-s-power: Keep-awake's power assertions (IOPMAssertionCreateWithName/Release) run on the main thread and can block on powerd
