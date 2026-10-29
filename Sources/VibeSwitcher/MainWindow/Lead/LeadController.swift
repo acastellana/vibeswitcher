@@ -188,6 +188,50 @@ struct TeamReading {
     }
 }
 
+/// What the witness works out of a lead's board and what it saw of the team (`LeadController.witness`), on `LeadReads`'
+/// queue: the sessions without tools, the verifiers auto_advance audits again, the messages to tell, the working time
+/// and the stalls. On the main thread at each refresh they held it for 7.1 s on a busy Mac (hang-20261028-195651);
+/// the main thread only applies what's worked out here.
+struct WitnessWork {
+    /// The live workers and verifiers that never got their tools (`LeadWitness.withoutTools`).
+    var withoutTools: [String] = []
+    /// The verifiers that ended without a verdict for auto_advance (`LeadWitness.endedForAdvance`), when it runs.
+    var endedForAdvance: [String] = []
+    /// The messages not told yet as of the look (`LeadWitness.unbuiltMessages`), their texts built where they're posted.
+    var messages: [(keys: [String], text: @Sendable () -> String)] = []
+    /// The running tasks' workers at work (`LeadBudget.working`), and whether the board's counts change for it.
+    var working: Set<String> = []
+    var notesWork = false
+    /// The stall to keep on each task (`LeadWitness.stalls`), and whether the board's change for it.
+    var stalls: [String: LeadStall] = [:]
+    var notesStalls = false
+
+    /// `firstSeen`: when the app first saw a verifier end for auto_advance (nil: not before now). `told`: whether an
+    /// event key was told already. `step` names each computation as it starts (tests watch or slow them).
+    init(board: LeadBoard, seen: [String: LeadWitness.Seen], now: Date, advancing: Bool, budgetMinutes: Int,
+         firstSeen: (String) -> Date?, told: (String) -> Bool, step: ((String) -> Void)? = nil) {
+        step?("withoutTools")
+        withoutTools = LeadWitness.withoutTools(board: board, seen: seen, now: now)
+        var advanced: Set<String> = []
+        if advancing {
+            step?("endedForAdvance")
+            endedForAdvance = LeadWitness.endedForAdvance(board: board, seen: seen, now: now)
+            let first = Dictionary(endedForAdvance.map { ($0, firstSeen($0) ?? now) }, uniquingKeysWith: { first, _ in first })
+            step?("leftToAdvance")
+            advanced = LeadWitness.leftToAdvance(board: board, seen: seen, now: now, firstSeen: first)
+        }
+        step?("unbuiltMessages")
+        messages = LeadWitness.unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, told: told)
+        step?("working")
+        working = LeadBudget.working(board: board, seen: seen)
+        notesWork = board.notesWork(working, defaultMinutes: budgetMinutes, now: now.timeIntervalSince1970)
+        step?("stalls")
+        stalls = LeadWitness.stalls(board: board, seen: seen, now: now)
+        var noted = board
+        notesStalls = noted.noteStalls(stalls)
+    }
+}
+
 /// The lead each board names (its pid, terminal and session): whom a message goes to, whether a wake-up or a flush
 /// still goes to the same lead, which session is the live lead. Only those fields are decoded (`BoardStore.loadLead`,
 /// under a millisecond for a MB of board), and only when the board's file changed. Looked at on `LeadReads`' queue
@@ -258,6 +302,9 @@ final class LeadController: ObservableObject {
     /// When the witness first saw each verifier that auto_advance audits again end without a verdict (by root and
     /// session; see `LeadWitness.leftToAdvance`).
     private var advanceSeen: [String: Date] = [:]
+    /// Names each computation of the witness's as it starts, on the thread that runs it (see `WitnessWork`), and
+    /// "applied" on the main thread once a look is applied (`witnessed`); tests watch or slow them.
+    var witnessStep: ((String) -> Void)?
     /// Each project's free disk space, watched (see `LeadWitness.Disk`), by root.
     private var disks: [String: LeadWitness.Disk] = [:]
     /// The bytes free on the volume holding a path, as the disk watch reads them (see `DiskSpace.free`; a test run's
@@ -1396,8 +1443,25 @@ final class LeadController: ObservableObject {
                                         boundAt: toolTimes[id]?.bound, toolsAt: toolTimes[id]?.tools, lockWait: team.lockWaits[id])
             if info.isLive, let session { flush(LeadAgent(pid: session.pid, tty: session.tty, session: id)) }
         }
+        // What to tell and do is worked out off the main thread (see `WitnessWork`), with what's told and seen so far;
+        // the boards' queue runs one thing at a time, so each look is applied before the next refresh's.
+        let (toldNow, advanceSeenNow, step) = (told, advanceSeen, witnessStep)
+        let (advancing, budget) = (team.advancing, team.workflow.taskBudgetMinutes)
+        reads.async({ _ in
+            WitnessWork(board: board, seen: seen, now: now, advancing: advancing, budgetMinutes: budget,
+                        firstSeen: { advanceSeenNow["\(root)|\($0)"] }, told: { toldNow.contains("\(root)|\($0)") }, step: step)
+        }) { [weak self] work in
+            self?.witnessed(work, root: root, board: board, team: team, now: now)
+        }
+    }
+
+    /// What the witness worked out of a look (`WitnessWork`), applied on the main thread: sessions without tools end,
+    /// the auto_advance loop is nudged, the lead is told what it wasn't yet, the board keeps the working time and the
+    /// stalls, held messages go, and the lead is woken.
+    private func witnessed(_ work: WitnessWork, root: String, board: LeadBoard, team: TeamReading, now: Date) {
+        dispatchPrecondition(condition: .onQueue(.main))
         // A worker or verifier whose tools never connected only holds a Mac slot: it ends (`events` tells the lead).
-        for id in LeadWitness.withoutTools(board: board, seen: seen, now: now) {
+        for id in work.withoutTools {
             guard let uuid = UUID(uuidString: id), endingNoTools[id].map({ now.timeIntervalSince($0) >= 60 }) ?? true else { continue }
             endingNoTools[id] = now
             Breadcrumbs.shared.note("witness: ending session \(id.prefix(8)) in \((root as NSString).lastPathComponent): its tools never connected")
@@ -1407,21 +1471,16 @@ final class LeadController: ObservableObject {
         // A verifier that ended without a verdict, which auto_advance audits again: its loop looks now (an agent that
         // quit leaving its shell open writes nothing in the project's folder), and the lead hears of it in its report;
         // past `LeadWitness.advanceGrace` with no retry, from here as ever.
-        var advanced: Set<String> = []
-        if team.advancing {
-            var firstSeen: [String: Date] = [:]
-            for verifier in LeadWitness.endedForAdvance(board: board, seen: seen, now: now) {
-                let key = "\(root)|\(verifier)"
-                if advanceSeen[key] == nil {
-                    advanceSeen[key] = now
-                    LeadAdvance.nudge(root: root)
-                }
-                firstSeen[verifier] = advanceSeen[key]
+        for verifier in work.endedForAdvance {
+            let key = "\(root)|\(verifier)"
+            if advanceSeen[key] == nil {
+                advanceSeen[key] = now
+                LeadAdvance.nudge(root: root)
             }
-            advanced = LeadWitness.leftToAdvance(board: board, seen: seen, now: now, firstSeen: firstSeen)
         }
-        // Only the keys here: each text is built where it's posted, off the main thread.
-        for message in LeadWitness.unbuiltMessages(board: board, seen: seen, now: now, advanced: advanced, told: { told.contains("\(root)|\($0)") }) {
+        // Only the keys here: each text is built where it's posted, off the main thread. One a look before this told
+        // already (two looks under way at once) isn't told again.
+        for message in work.messages where !message.keys.allSatisfy({ told.contains("\(root)|\($0)") }) {
             message.keys.forEach { told.insert("\(root)|\($0)") }
             deliver(built: message.text, from: .system("witness"), root: root)
         }
@@ -1438,11 +1497,11 @@ final class LeadController: ObservableObject {
         }
         disks[root] = disk
         // Working time, and the stop at a task's time budget (see `LeadBudget`): counted on the board as it is when
-        // written, so each budget is told once, to its worker and to the lead. Here only its running tasks are looked
-        // at, and nothing is copied or written: the count is written off the main thread, under the board's lock.
-        let working = LeadBudget.working(board: board, seen: seen)
+        // written, so each budget is told once, to its worker and to the lead. The count is written off the main
+        // thread, under the board's lock.
+        let working = work.working
         let budget = workflow.taskBudgetMinutes, at = now.timeIntervalSince1970
-        if board.notesWork(working, defaultMinutes: budget, now: at) {
+        if work.notesWork {
             let sessions = team.sessions
             reads.async({ _ in
                 (try? BoardStore(root: root).update { $0.noteWork(working, defaultMinutes: budget, now: at).reached }) ?? []
@@ -1454,14 +1513,14 @@ final class LeadController: ObservableObject {
             }
         }
         // On the board too, for status and the Team view, until the worker moves again.
-        let stalls = LeadWitness.stalls(board: board, seen: seen, now: now)
-        var noted = board
-        if noted.noteStalls(stalls) { reads.async { _ in try? BoardStore(root: root).update { $0.noteStalls(stalls) } } }
+        let stalls = work.stalls
+        if work.notesStalls { reads.async { _ in try? BoardStore(root: root).update { $0.noteStalls(stalls) } } }
         // A lead runs again: what was held for it goes now.
         if let waiting = held.removeValue(forKey: root) {
             for message in waiting { deliver(message.text, from: message.sender, root: root, order: message.order) }
         }
         wake(root: root)
+        witnessStep?("applied")
     }
 
     /// A task's worker reached its time budget: it's told to stop and report over_budget (in its inbox, typed in if
