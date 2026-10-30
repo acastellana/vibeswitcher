@@ -15,7 +15,7 @@ struct SessionHeaderView: View {
                 TimelineView(.ticking(every: 30)) { context in
                     VStack(alignment: .leading, spacing: 3) {
                         HStack(spacing: 8) {
-                            Text(row.title).font(.system(size: 14, weight: .semibold)).lineLimit(1).layoutPriority(1)
+                            Text(Self.oneLine(row.title)).font(.system(size: 14, weight: .semibold)).lineLimit(1).layoutPriority(1)
                                 .onTapGesture(count: 2) { if let session = row.session { actions.rename(session) } }
                                 .help(row.session != nil ? "Double-click to rename" : "")
                             StatusPill(row: row, now: context.date, replaced: model.replaced(row))
@@ -71,15 +71,25 @@ struct SessionHeaderView: View {
         if row.session?.inTerminalApp == true { parts.append("in Terminal") }
         if let activity = row.session?.activity { parts.append(activity) }
         if let program = row.hosted?.liveProgramStatus, let said = StatusRules.detail(for: program) { parts.append(said) }
-        return Text(parts.joined(separator: "  ·  "))
+        return Text(Self.oneLine(parts.joined(separator: "  ·  ")))
     }
 
     /// A replaced lead's second line: where to continue, and where what's typed into it goes (or went).
     static func replacedLine(_ replaced: ReplacedLead) -> String {
-        let typing = replaced.draft.isEmpty ? nil : "Enter sends to \(replaced.liveName): \(replaced.draft.replacingOccurrences(of: "\n", with: " "))"
+        let typing = replaced.draft.isEmpty ? nil : "Enter sends to \(replaced.liveName): \(oneLine(replaced.draft).replacingOccurrences(of: "\n", with: " "))"
         let said = typing ?? replaced.notice
             ?? "What you type here goes to \(replaced.liveName) as your message: this session has no tools"
-        return "\(replaced.label)  ·  \(said)"
+        return oneLine("\(replaced.label)  ·  \(said)")
+    }
+
+    /// The most a one-line text of the header is given: more than its width shows. A `lineLimit(1)` Text still lays out
+    /// all of its string each time it's measured (a 200,000-character draft took 350 ms a measure, a few a layout).
+    static let oneLineLimit = 400
+
+    /// `text` as a one-line text of the header gets it: its first `oneLineLimit` characters, "…" after them when cut.
+    static func oneLine(_ text: String) -> String {
+        guard let end = text.index(text.startIndex, offsetBy: oneLineLimit, limitedBy: text.endIndex), end < text.endIndex else { return text }
+        return String(text[..<end]) + "…"
     }
 
     @ViewBuilder private func buttons(_ row: WindowRow) -> some View {
