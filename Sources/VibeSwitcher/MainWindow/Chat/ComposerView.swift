@@ -907,6 +907,18 @@ final class ComposerNSTextView: NSTextView {
         cancelTalk?()
     }
 
+    /// Out of its window mid-hold: that window is watched by its address, which a later window may take, so it's let
+    /// go; the window the view moves into is watched instead.
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow !== window, leaving != nil { stopWatchingLeaving() }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil, talking || spaceHold != .idle { watchLeaving() }
+    }
+
     private func watchLeaving() {
         guard leaving == nil else { return }
         leaving = NotificationCenter.default.addObserver(forName: NSWindow.didResignKeyNotification, object: window,

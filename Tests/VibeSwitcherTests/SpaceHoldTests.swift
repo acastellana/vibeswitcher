@@ -30,9 +30,10 @@ struct SpaceHoldTests {
             view.allowsUndo = true
             view.delegate = self
             view.schedule = clock.schedule
-            view.holdToTalk = { [unowned self] in held.append($0) }
-            view.cancelTalk = { [unowned self] in cancels += 1 }
-            view.spaceHoldReady = { [unowned self] in ready }
+            // Weak: the window can keep the view (and a hold it's still in) alive after the box is gone.
+            view.holdToTalk = { [weak self] in self?.held.append($0) }
+            view.cancelTalk = { [weak self] in self?.cancels += 1 }
+            view.spaceHoldReady = { [weak self] in self?.ready ?? false }
             window.contentView = view
             window.makeFirstResponder(view)
             view.string = text
@@ -267,6 +268,40 @@ struct SpaceHoldTests {
         left.reachThreshold()
         #expect(left.view.string == "hello ")
         #expect(left.held.isEmpty)
+    }
+
+    /// A test's box gone mid-run while its view and window live on: the window resigning key later reaches the view's
+    /// hold, which ends with nothing left to tell (a box that held itself unowned there took the whole test process down).
+    @Test func theWindowResigningKeyAfterTheBoxIsGoneEndsTheHoldQuietly() {
+        weak var gone: Box?
+        let (view, window) = autoreleasepool {
+            let box = Box("hello")
+            box.key(.keyDown)
+            box.reachThreshold()
+            #expect(box.view.talking)
+            gone = box
+            return (box.view, box.window)
+        }
+        #expect(gone == nil, "the box is freed, its view and window are not")
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: window)
+        #expect(!view.talking)
+    }
+
+    /// The view leaving its window mid-run stops watching that window (whose address a later window may take): its
+    /// resigning key leaves the hold alone, and a window the view moves into is the one watched.
+    @Test func aViewOutOfItsWindowStopsWatchingIt() {
+        let box = Box("hello")
+        box.key(.keyDown)
+        box.reachThreshold()
+        box.window.contentView = nil
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: box.window)
+        #expect(box.view.talking)
+        #expect(box.held == [true])
+        let other = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 40), styleMask: [.titled], backing: .buffered, defer: true)
+        other.contentView = box.view
+        NotificationCenter.default.post(name: NSWindow.didResignKeyNotification, object: other)
+        #expect(!box.view.talking)
+        #expect(box.held == [true, false])
     }
 
     @Test func theSettingIsOnAtFirstKeptAndSaidInTheTooltips() {
