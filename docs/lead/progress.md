@@ -1,0 +1,4 @@
+- 2026-10-30 20:56 You accepted 13 commits on main in VibeSwitcher: d2c392a Merge branch 'main' of https://github.com/acastellana/vibeswitcher; 4e6fdb0 Lead: decisions and progress; e2095ef Scripts and docs name main as the base, not project-lead; README: updating, and the one-time switch for clones from before 2026-10-29; …
+- 2026-10-30 20:57 Planned build-app-sh-install: build-app.sh --install restarts the app, or says plainly that it didn't (review audit)
+- 2026-10-30 20:57 Started a worker on build-app-sh-install
+- 2026-10-30 20:57 Automatically (auto_advance): Started a worker on build-app-sh-install (build-app.sh --install restarts the app, or says plainly that it didn't).
