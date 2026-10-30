@@ -818,7 +818,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         store.saveLedger()
         phoneAccess.shutdown()
         // Never leave the Mac silent behind a dictation that was recording.
-        outputSilencer.restore()
+        outputSilencer.unsilence()
         // Script blocks written for Run and not run yet.
         RunnableCommand.Script.removeAll()
     }

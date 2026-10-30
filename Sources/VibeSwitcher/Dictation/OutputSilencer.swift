@@ -68,7 +68,7 @@ final class OutputSilencer {
 
     /// Who wants the sound off now (the composers recording): silenced from the first, put back after the last.
     func set(holders: Set<String>) {
-        if holders.isEmpty { restore() } else { silence() }
+        if holders.isEmpty { unsilence() } else { silence() }
     }
 
     /// The default output silenced, unless it is already (by us, or muted by you).
@@ -114,7 +114,7 @@ final class OutputSilencer {
     }
 
     /// What was silenced put back as it was, and taken out of the marker once it is (also at quit).
-    func restore() {
+    func unsilence() {
         active = false
         guard let change else { return }
         self.change = nil

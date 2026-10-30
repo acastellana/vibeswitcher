@@ -137,7 +137,7 @@ struct OutputSilencerTests {
         #expect(outputs.devices[1]?.mute == true)
         #expect(FileManager.default.fileExists(atPath: marker.path))
         // applicationWillTerminate's call, with the recording still under way.
-        silencer.restore()
+        silencer.unsilence()
         #expect(outputs.devices[1]?.mute == false)
         #expect(!FileManager.default.fileExists(atPath: marker.path))
     }
@@ -205,7 +205,7 @@ struct OutputSilencerTests {
         let silencer = silencer(outputs)
         silencer.silence()
         #expect(outputs.devices[7]?.volumes == [0: 0, 1: 0, 2: 0])
-        silencer.restore()
+        silencer.unsilence()
         #expect(outputs.devices[7]?.volumes == before)
         #expect(outputs.mutes.isEmpty)
     }
