@@ -614,4 +614,25 @@ enum AXClient {
         let children = entryPoint(element, "AXChildren")?.takeUnretainedValue() as? [AnyObject] ?? []
         return own + children.flatMap(texts)
     }
+
+    /// A list's rows (AXRow) under the element, as a client reads each: the elements in it and what they say.
+    static func rows(_ element: AnyObject) -> [(elements: Int, texts: [String])] {
+        guard let entryPoint else { return [] }
+        if entryPoint(element, "AXRole")?.takeUnretainedValue() as? String == "AXRow" { return [(walk(element), texts(element))] }
+        let children = entryPoint(element, "AXChildren")?.takeUnretainedValue() as? [AnyObject] ?? []
+        return children.flatMap(rows)
+    }
+
+    /// The tree as a client reads it, an element a line: its role and what it says, indented under its parent.
+    static func dump(_ element: AnyObject, depth: Int = 0) -> String {
+        guard let entryPoint else { return "" }
+        let role = entryPoint(element, "AXRole")?.takeUnretainedValue() as? String ?? "?"
+        let said = ["AXValue", "AXTitle", "AXDescription"].compactMap { attribute -> String? in
+            let value = entryPoint(element, attribute as NSString)?.takeUnretainedValue()
+            return (value as? String) ?? (value as? NSAttributedString)?.string
+        }.filter { !$0.isEmpty }
+        let children = entryPoint(element, "AXChildren")?.takeUnretainedValue() as? [AnyObject] ?? []
+        let line = String(repeating: "  ", count: depth) + role + (said.isEmpty ? "" : " " + said.joined(separator: " | "))
+        return ([line] + children.map { dump($0, depth: depth + 1) }).joined(separator: "\n")
+    }
 }

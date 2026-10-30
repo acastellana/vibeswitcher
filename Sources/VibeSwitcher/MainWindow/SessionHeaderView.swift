@@ -166,7 +166,9 @@ struct StatusPill: View {
         .overlay(Capsule().strokeBorder(color.opacity(0.6)))  // a tinted fill took the text under 4.5:1
         .fixedSize()
         .help(replaced.map { "This lead was \($0.label)" } ?? "")
-        .accessibilityElement(children: .combine)
+        // Its own words, its texts left out (not combined: a combine merges them again on every update while an
+        // accessibility client watches the app, and the duration changes with the clock).
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel(replaced.map { "Replaced: continue in \($0.liveName)" } ?? row.pillLabel(state))
     }
 }

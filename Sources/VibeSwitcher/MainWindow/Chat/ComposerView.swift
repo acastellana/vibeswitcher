@@ -378,6 +378,15 @@ private struct ContextMeter: View {
             }
         }
         .help("Tokens in the context of the latest request\(window.map { " (of \(TokenCount.short($0)))" } ?? "")")
+        // One element in words: its bar is drawn shapes, its text says the same.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
+    }
+
+    /// "45% context", or "12.3k context" without the model's window.
+    var spoken: String {
+        guard let window, window > 0 else { return "\(TokenCount.short(tokens)) context" }
+        return "\(Int(min(1, Double(tokens) / Double(window)) * 100))% context"
     }
 }
 

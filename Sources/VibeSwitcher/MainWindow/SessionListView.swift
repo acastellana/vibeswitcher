@@ -284,7 +284,34 @@ struct WindowRowView: View {
             .padding(.vertical, 3)
             // A failed end stays at full strength: it's worth a look.
             .opacity(row.isDimmed && row.end?.isFailure != true ? 0.55 : 1)
+            // One element in words, not one for each text and mark: while an accessibility client watches the app SwiftUI
+            // builds and compares every node again on each update, and 30 rows of 6–8 nodes (each list row's texts
+            // resolved into its label) held the main thread for seconds (hang-20261030-101253, 101318).
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(spokenLabel(state, now: context.date))
+            .accessibilityActions {
+                if let team, !team.isEmpty {
+                    Button(teamOpen ? "Hide the team" : "Show the team", action: toggleTeam)
+                }
+            }
         }
+    }
+
+    /// What VoiceOver says of the row: "Worker: Task 2, Claude, needs you, 1 question for you". What the row shows but
+    /// how long its state has lasted, which ticks on with the clock: a label that changes every tick is a node SwiftUI
+    /// updates every tick.
+    func spokenLabel(_ state: RowState, now: Date) -> String {
+        let named = nested ? "\(role == .verifier ? "Verifier" : "Worker"): \(row.title)" : role == .lead ? "Lead: \(row.title)" : row.title
+        var parts = [named]
+        if showProject, !nested { parts.append(row.project) }
+        parts += [row.markKind.name, state.text]
+        if allDone { parts.append("all tasks finished") }
+        if let questions, questions.open > 0 {
+            parts.append(questionCount(questions.open) + (questions.blocking > 0 ? " (\(questions.blocking) blocking)" : ""))
+        }
+        if let team, !team.isEmpty { parts.append(teamSummary ?? LeadTeams.summary(team, label: label, board: nil, now: now)) }
+        if row.session?.inTerminalApp == true { parts.append("runs in Terminal") }
+        return parts.joined(separator: ", ")
     }
 }
 
