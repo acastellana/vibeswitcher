@@ -2151,3 +2151,6 @@
 - 2026-10-30 15:15 Automatically (auto_advance): Merged starting-a-lead-with (Starting a lead with no session open fails: the session host isn't started first ("connect: connection refused")) into main at 2870cf5b, on its passing audit and the full test run.
 - 2026-10-30 15:15 Automatically (auto_advance): Cleaned up starting-a-lead-with; ended pid 81324 (Worker: Starting a lead with no session open fails: the session host isn't started first ("connect: connection refused")) (freed 1.5 GB of build output and temporary folders). It stays done.
 - 2026-10-30 15:16 Update: A lead starts with no session open (starting-a-lead-with) — **What changed:**
+- 2026-10-30 19:17 Planned readme-one-time-switch: README: one-time switch for clones made before main became the only branch; scripts still name project-lead
+- 2026-10-30 19:17 Started a worker on readme-one-time-switch
+- 2026-10-30 19:17 Automatically (auto_advance): Started a worker on readme-one-time-switch (README: one-time switch for clones made before main became the only branch; scripts still name project-lead).
