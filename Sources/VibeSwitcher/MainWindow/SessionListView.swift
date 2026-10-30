@@ -285,8 +285,9 @@ struct WindowRowView: View {
             // A failed end stays at full strength: it's worth a look.
             .opacity(row.isDimmed && row.end?.isFailure != true ? 0.55 : 1)
             // One element in words, not one for each text and mark: while an accessibility client watches the app SwiftUI
-            // builds and compares every node again on each update, and 30 rows of 6–8 nodes (each list row's texts
-            // resolved into its label) held the main thread for seconds (hang-20261030-101253, 101318).
+            // builds and compares every node again on each update, and resolves each list row's texts into its label
+            // (`PlatformItemList.Item.Accessibility.resolvedAttributedLabel` in hang-20261030-101318, 100802, 095700).
+            // 30 rows of 6–8 nodes each were half the cost of an update a client read (MainWindowAccessibilityTests).
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(spokenLabel(state, now: context.date))
             .accessibilityActions {
