@@ -810,6 +810,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
 
     func applicationWillTerminate(_ notification: Notification) {
         Breadcrumbs.shared.note("app: quitting")
+        // Never leave the Mac silent behind a dictation that was recording (a device that doesn't answer in time: put
+        // back at the next launch, from the marker).
+        if !outputSilencer.unsilence(waitingAtMost: 1) {
+            Breadcrumbs.shared.note("dictation: the sound output didn't answer at quit, restored at the next launch")
+        }
         Breadcrumbs.shared.flush()
         // Reopened at the next launch (an update relaunches the app: it shouldn't look like the window crashed).
         UserDefaults.standard.set(mainWindow?.window?.isVisible == true, forKey: "windowWasOpen")
@@ -817,8 +822,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSViewToolTipOwner, NS
         SidebarWorkspace.restoreHiddenWindows(timeout: 1)
         store.saveLedger()
         phoneAccess.shutdown()
-        // Never leave the Mac silent behind a dictation that was recording.
-        outputSilencer.unsilence()
         // Script blocks written for Run and not run yet.
         RunnableCommand.Script.removeAll()
     }

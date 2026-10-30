@@ -29,6 +29,9 @@ struct OutputSilencerTests {
         var defaultID: AudioDeviceID?
         /// Every set, in order: the device and what was set.
         private(set) var mutes: [(AudioDeviceID, Bool)] = []
+        /// When set, each mute set waits for it (a stalled device), after saying so on `entered`.
+        var stall: DispatchSemaphore?
+        let entered = DispatchSemaphore(value: 0)
         private(set) var volumeSets: [(AudioDeviceID, UInt32, Float32)] = []
 
         init(_ devices: [AudioDeviceID: Device], default id: AudioDeviceID?) {
@@ -42,6 +45,11 @@ struct OutputSilencerTests {
         func name(_ device: AudioDeviceID) -> String { devices[device]?.name ?? "?" }
         func mute(_ device: AudioDeviceID) -> Bool? { devices[device]?.mute }
         func setMute(_ device: AudioDeviceID, _ muted: Bool) -> Bool {
+            if let stall {
+                entered.signal()
+                // Bounded by the hang guard: a main thread held behind it fails the test instead of holding the run.
+                _ = stall.wait(timeout: .now() + hangGuard)
+            }
             mutes.append((device, muted))
             guard let found = devices[device], found.mute != nil else { return false }
             found.mute = muted
@@ -60,9 +68,10 @@ struct OutputSilencerTests {
         FakeOutputs([1: .init(uid: "BuiltInSpeakerDevice", name: "MacBook Pro Speakers")], default: 1)
     }
 
+    /// A silencer of `outputs` doing its work as it's given (the app's runs on a queue of its own).
     func silencer(_ outputs: FakeOutputs, marker: URL? = nil, lines: LogLines = LogLines()) -> OutputSilencer {
         OutputSilencer(outputs: outputs, marker: marker ?? self.marker("silencer"),
-                       log: { lines.all.append($0) })
+                       log: { lines.all.append($0) }, perform: { $0() })
     }
 
     /// The marker's path in a new private scratch folder (the app's is `~/.vibeswitcher`, there from launch).
@@ -137,7 +146,33 @@ struct OutputSilencerTests {
         #expect(outputs.devices[1]?.mute == true)
         #expect(FileManager.default.fileExists(atPath: marker.path))
         // applicationWillTerminate's call, with the recording still under way.
-        silencer.unsilence()
+        #expect(silencer.unsilence(waitingAtMost: hangGuard))
+        #expect(outputs.devices[1]?.mute == false)
+        #expect(!FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    /// The CoreAudio work runs on the silencer's own queue: a device that stalls it never holds the main thread, and
+    /// quitting waits for it a moment at most; what's left is put back once the device answers (or at the next launch).
+    @Test func aStalledDeviceNeverHoldsTheMainThread() {
+        let outputs = Self.speakers()
+        let stall = DispatchSemaphore(value: 0)
+        outputs.stall = stall
+        let marker = self.marker("stall")
+        let silencer = OutputSilencer(outputs: outputs, marker: marker, log: { _ in })
+        let controller = controller(silencer)
+        // Back on the main thread while the device holds the call.
+        controller.press("row") { "" }
+        #expect(controller.isRecording("row"))
+        #expect(outputs.entered.wait(timeout: .now() + hangGuard) == .success)
+        controller.cancel("row")
+        #expect(controller.runs.isEmpty)
+        // Quitting gives up on it after its moment (the queue still holds the stalled call).
+        #expect(!silencer.unsilence(waitingAtMost: 0.01))
+        outputs.stall = nil
+        stall.signal()
+        // The device answers: muted, then put back, in order; the marker gone.
+        #expect(silencer.unsilence(waitingAtMost: hangGuard))
+        #expect(outputs.mutes.map(\.1) == [true, false])
         #expect(outputs.devices[1]?.mute == false)
         #expect(!FileManager.default.fileExists(atPath: marker.path))
     }

@@ -30,8 +30,12 @@ protocol AudioOutputs: AnyObject {
 /// Before anything is changed a private marker (`marker`) says what and what it was; each change leaves it once it's
 /// put back, so a launch that finds one (the app ended mid-dictation without quitting) puts it back from there
 /// (`recover`). One that couldn't be (its device away, AirPods in their case) stays there and is tried again at each
-/// launch and before each silencing, so a device is never left silent for good. Main thread.
-final class OutputSilencer {
+/// launch and before each silencing, so a device is never left silent for good.
+///
+/// Called on the main thread; the CoreAudio and marker work runs in order on a serial queue of its own (`perform`),
+/// since a stalled device or Bluetooth output can hold a CoreAudio call for long, and nothing on the main thread waits
+/// for it but quitting, for a moment at most (`unsilence(waitingAtMost:)`).
+final class OutputSilencer: @unchecked Sendable {
     /// What was changed on a device, and what it was before: written to the marker before the change.
     struct Change: Codable, Equatable {
         struct Volume: Codable, Equatable {
@@ -54,16 +58,27 @@ final class OutputSilencer {
     private let outputs: AudioOutputs
     private let marker: URL
     private let log: (String) -> Void
-    /// What's silenced now and must be put back (nil: nothing of ours is).
-    private(set) var change: Change?
+    /// Runs the work given, in order, away from the main thread (tests may run it as it comes).
+    private let perform: (@escaping () -> Void) -> Void
+    /// What's silenced now and must be put back (nil: nothing of ours is). On `perform`'s queue only.
+    private var change: Change?
     /// Silenced for someone now (a device skipped or already muted counts: nothing's done again until all let go).
+    /// Main thread.
     private(set) var active = false
 
     init(outputs: AudioOutputs, marker: URL = OutputSilencer.defaultMarker,
-         log: @escaping (String) -> Void = { Breadcrumbs.shared.note($0) }) {
+         log: @escaping (String) -> Void = { Breadcrumbs.shared.note($0) },
+         perform: @escaping (@escaping () -> Void) -> Void = OutputSilencer.serialQueue()) {
         self.outputs = outputs
         self.marker = marker
         self.log = log
+        self.perform = perform
+    }
+
+    /// A serial queue of its own, run asynchronously.
+    static func serialQueue() -> (@escaping () -> Void) -> Void {
+        let queue = DispatchQueue(label: "VibeSwitcher.OutputSilencer", qos: .userInitiated)
+        return { queue.async(execute: $0) }
     }
 
     /// Who wants the sound off now (the composers recording): silenced from the first, put back after the last.
@@ -75,6 +90,34 @@ final class OutputSilencer {
     func silence() {
         guard !active else { return }
         active = true
+        perform { self.silenceNow() }
+    }
+
+    /// What was silenced put back as it was, and taken out of the marker once it is.
+    func unsilence() {
+        guard active else { return }
+        active = false
+        perform { self.unsilenceNow() }
+    }
+
+    /// At quit: what was silenced put back, waiting `seconds` at most for it (a stalled device isn't waited out: what's
+    /// left is in the marker, for the next launch). Whether it was done in time.
+    @discardableResult func unsilence(waitingAtMost seconds: TimeInterval) -> Bool {
+        active = false
+        let done = DispatchSemaphore(value: 0)
+        perform {
+            self.unsilenceNow()
+            done.signal()
+        }
+        return done.wait(timeout: .now() + seconds) == .success
+    }
+
+    /// At launch: what a run that ended while silenced, or a device away at its restore, left in the marker, put back.
+    func recover() {
+        perform { self.recoverNow() }
+    }
+
+    private func silenceNow() {
         guard let device = outputs.defaultOutput() else {
             return log("dictation: no sound output to silence")
         }
@@ -113,17 +156,14 @@ final class OutputSilencer {
         log("dictation: silenced \(name) (\(change.muted ? "muted" : "volume to 0"))")
     }
 
-    /// What was silenced put back as it was, and taken out of the marker once it is (also at quit).
-    func unsilence() {
-        active = false
+    private func unsilenceNow() {
         guard let change else { return }
         self.change = nil
         let others = pending().filter { $0 != change }
         try? save(others + putBack([change], why: ""))
     }
 
-    /// At launch: what a run that ended while silenced, or a device away at its restore, left in the marker, put back.
-    func recover() {
+    private func recoverNow() {
         guard FileManager.default.fileExists(atPath: marker.path) else { return }
         try? save(putBack(pending(), why: " (left silenced earlier)"))
     }
