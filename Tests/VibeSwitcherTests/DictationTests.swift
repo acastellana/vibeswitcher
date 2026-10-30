@@ -76,16 +76,16 @@ struct DictationTests {
         }
     }
 
-    /// Holds every request until the test lets them through (an upload under way), then answers the nth with
-    /// `texts[n]`; keeps the requests.
+    /// Holds every request until the test lets them through (an upload under way), then answers each with the text
+    /// of the recording it carries (`texts`: by the audio's bytes); keeps the requests.
     final class GatedHTTP: HTTPClient, @unchecked Sendable {
         private let lock = NSLock()
         private var seen: [URLRequest] = []
         private var waiting: [CheckedContinuation<Void, Never>] = []
         private var open = false
-        let texts: [String]
+        let texts: [String: String]
 
-        init(texts: [String]) { self.texts = texts }
+        init(texts: [String: String]) { self.texts = texts }
 
         var requests: [URLRequest] { lock.withLock { seen } }
 
@@ -100,10 +100,7 @@ struct DictationTests {
         }
 
         func send(_ request: URLRequest) async throws -> (Data, URLResponse) {
-            let index = lock.withLock {
-                seen.append(request)
-                return seen.count - 1
-            }
+            lock.withLock { seen.append(request) }
             await withCheckedContinuation { (go: CheckedContinuation<Void, Never>) in
                 let now = lock.withLock {
                     if open { return true }
@@ -112,7 +109,9 @@ struct DictationTests {
                 }
                 if now { go.resume() }
             }
-            let body = try JSONSerialization.data(withJSONObject: ["text": texts[index]])
+            let sent = String(decoding: request.httpBody ?? Data(), as: UTF8.self)
+            let text = texts.first { sent.contains($0.key) }?.value ?? "unknown recording"
+            let body = try JSONSerialization.data(withJSONObject: ["text": text])
             return (body, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!)
         }
     }
@@ -405,10 +404,13 @@ struct DictationTests {
     /// B records ends B's recording first, uploaded as its release would (B's late key-up then lets go of nothing).
     /// Each text lands in its own box.
     @Test func anotherComposerRecordsWhileOnesTranscriptionUploads() async {
-        let http = GatedHTTP(texts: ["the first", "the second", "the third"])
+        let http = GatedHTTP(texts: ["recording-a": "the first", "recording-b": "the second", "recording-c": "the third"])
         let recorder = FakeRecorder()
+        // What each recording hands over when it stops (the uploads may go in any order).
+        func next(_ name: String) { recorder.audio = DictationAudio(data: Data(name.utf8), mimeType: "audio/mp4", duration: 3) }
         let (controller, _) = controller(http, recorder: recorder)
         controller.press("A") { "" }
+        next("recording-a")
         controller.release("A")
         #expect(await until { http.requests.count == 1 }, "A's upload never began")
         #expect(controller.isTranscribing("A"))
@@ -417,11 +419,13 @@ struct DictationTests {
         #expect(controller.isRecording("B") && recorder.recording && recorder.starts == 2)
         #expect(controller.isTranscribing("A"))
 
+        next("recording-b")
         controller.press("C") { "" }
         #expect(recorder.stops == 2 && recorder.starts == 3)
         #expect(controller.isTranscribing("B") && controller.isRecording("C"))
         controller.release("B")
         #expect(controller.isRecording("C") && recorder.recording)
+        next("recording-c")
         controller.release("C")
         #expect(await until { http.requests.count == 3 }, "B's and C's uploads never began")
         #expect(controller.isTranscribing("A") && controller.deliveries.isEmpty)
