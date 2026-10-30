@@ -2137,3 +2137,6 @@
 - 2026-10-30 12:20 Audit of silence-the-mac-s: complete, clean, round 2: 1 Important closed, 3 Nit (2 open)
 - 2026-10-30 12:28 Merged silence-the-mac-s: Silence the Mac's sound while dictation listens, then put it back
 - 2026-10-30 12:28 Flaky in silence-the-mac-s's merge: theExitSourceReapsAtOnce() failed the first test run and passed its rerun (the failing tests only); merged on the rerun
+- 2026-10-30 12:28 Automatically (auto_advance): Merged silence-the-mac-s (Silence the Mac's sound while dictation listens, then put it back) into main at 153cf257, on its passing audit and the full test run. (Its first test run failed on theExitSourceReapsAtOnce() and the rerun of those tests passed, so it merged on the rerun: recorded in the flake ledger, which status lists. Both runs' output: /Users/albert/.vibeswitcher/lead/scratch/cd7380191605ddf1b5ac/silence-the-mac-s/merge-test.log. Each flaky test's failing lines, readable by its fixer: /Users/albert/dev/vibeswitcher/.vibeswitcher/flakes/2026-1….)
+- 2026-10-30 12:28 Automatically (auto_advance): Cleaned up silence-the-mac-s; ended pid 61437 (Worker: Silence the Mac's sound while dictation listens, then put it back) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-30 12:28 Update: Dictation silences the Mac while it listens (silence-the-mac-s) — **What changed:**
