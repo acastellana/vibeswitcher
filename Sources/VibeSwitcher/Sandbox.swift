@@ -477,17 +477,17 @@ private final class Driver: NSObject, NSApplicationDelegate {
         let lead = newLead
         let files = FileManager.default
         for path in [lead.folder, (lead.transcript as NSString).deletingLastPathComponent, (lead.state as NSString).deletingLastPathComponent] {
-            try? files.createDirectory(atPath: path, withIntermediateDirectories: true)
+            try? VibePaths.ensurePrivate(URL(fileURLWithPath: path))
         }
         if !files.fileExists(atPath: lead.folder + "/.git") {
-            try? Data("# New lead\n".utf8).write(to: URL(fileURLWithPath: lead.folder + "/README.md"))
+            try? VibePaths.writePrivate(Data("# New lead\n".utf8), to: URL(fileURLWithPath: lead.folder + "/README.md"))
             for args in [["init", "-q", "-b", "main"], ["config", "user.email", "sandbox@example.invalid"], ["config", "user.name", "Sandbox"],
                          ["add", "README.md"], ["commit", "-q", "-m", "First commit"]] {
                 guard Git.run(args, in: lead.folder).ok else { return reply(false, "couldn't make its repository: git \(args.joined(separator: " "))") }
             }
         }
-        files.createFile(atPath: lead.transcript, contents: Data(Driver.firstTurn.utf8))
-        files.createFile(atPath: lead.control, contents: nil)
+        try? VibePaths.writePrivate(Data(Driver.firstTurn.utf8), to: URL(fileURLWithPath: lead.transcript))
+        try? VibePaths.writePrivate(Data(), to: URL(fileURLWithPath: lead.control))
         try? files.removeItem(atPath: lead.state)
         let hostWas = host.state
         let refusedBefore = refused.count
