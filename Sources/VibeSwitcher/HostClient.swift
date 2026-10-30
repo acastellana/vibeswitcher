@@ -174,8 +174,11 @@ final class HostClient: ObservableObject {
         if isUsable { return ready(nil) }
         // Connected to a host that can't serve us: say so now (waiting would wait forever).
         if case .outdated(_, false) = state { return ready("The session host is out of date. Restart it from the window.") }
+        // Others waiting with no connection: a host is starting for them (or being reconnected to); this one waits too,
+        // rather than starting a second beside it.
+        let starting = connection == nil && !whenReady.isEmpty
         whenReady.append(ready)
-        guard connection == nil else { return }   // a welcome is on its way
+        guard connection == nil, !starting else { return }   // a welcome is on its way, or a start under way
         if connect() { return }
         let started: pid_t
         do {

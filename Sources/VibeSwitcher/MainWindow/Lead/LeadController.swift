@@ -634,6 +634,19 @@ final class LeadController: ObservableObject {
     }
 
     private func startLead(root: String, goal: String?, show: Bool, askAboutMovedHead: Bool) {
+        // The lead's vault is the session host's: with none running yet (a fresh Mac, no session opened since launch)
+        // it's started first, as opening a session starts it (or waited for, one already starting), then the start
+        // goes on. One that doesn't start says so, not the vault's connect error.
+        switch host.state {
+        case .notRunning, .failed:
+            return host.ensureHost { [weak self] problem in
+                guard let self else { return }
+                if let problem { return self.alert("The lead didn't start.", problem) }
+                self.startLead(root: root, goal: goal, show: show, askAboutMovedHead: askAboutMovedHead)
+            }
+        case .connecting, .connected, .outdated:
+            break
+        }
         // A relaunched app's session list is empty until the host's welcome: no sign no lead runs. Held until then, as
         // the sessions read below are the ones listed now.
         if host.state == .connecting {
