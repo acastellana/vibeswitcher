@@ -749,6 +749,44 @@ struct LeadAdvanceTests: LeadTeamFixture {
         return (root, runtime, advancing)
     }
 
+    /// 2026-10-30, build-app-sh-install: its audit passed, the lead set it kept (main's suite failed two pre-existing
+    /// tests) while auto_advance's merge was in its test run, the run failed, merge set the task failed, and the loop
+    /// sent its worker the output and put it back to work: kept, with its reason, became running. A hold set during
+    /// the test run is the lead's word like one set before it: the task stays kept whether the tests fail or pass,
+    /// nothing lands, its worker hears nothing, and the lead is told once.
+    @Test(arguments: [true, false])
+    func aTaskSetKeptDuringItsMergesTestRunStaysKept(_ fails: Bool) throws {
+        let gate = temp.url("gate").path, started = temp.url("started").path, release = temp.url("release").path
+        let test = "if mkdir '\(gate)' 2>/dev/null; then touch '\(started)'; while [ ! -e '\(release)' ]; do sleep 0.05; done; fi; "
+            + (fails ? "echo BROKEN-ON-PURPOSE; exit 1" : "echo ran >> '\(log)'")
+        let (root, runtime, lead) = try team(test: test)
+        let advancing = Advancing(lead)
+        defer { advancing.stop() }
+        _ = lead.call("add_task", ["title": "Add b", "goal": "g", "acceptance": ["a"]])
+        #expect(advancing.until { task("add-b", root)?.status == .running })
+        let main = head("main", root)
+        try work("add-b", file: "b.txt", root: root, runtime)
+        #expect(appears(started))
+        let kept = lead.call("update_task", ["task": "add-b", "status": "kept", "reason": "main's suite fails 2 pre-existing tests"])
+        #expect(!kept.isError && kept.text.contains("state kept"), "\(kept.text)")
+        FileManager.default.createFile(atPath: release, contents: nil)
+        // The loop's one word on it, whatever it did.
+        #expect(advancing.until { reports(runtime).contains { $0.contains("add-b") } })
+        advancing.settle()
+        let after = try #require(task("add-b", root))
+        #expect(after.status == .kept && after.keptBecause == "main's suite fails 2 pre-existing tests" && after.merged == nil, "\(after.status) \(after.keptBecause ?? "")")
+        #expect(after.setback == nil, "\(String(describing: after.setback))")
+        #expect(head("main", root) == main)
+        #expect(!Git.run(["show", "main:b.txt"], in: root).ok)
+        #expect(toWorker("add-b", root, runtime).isEmpty, "\(toWorker("add-b", root, runtime))")
+        let told = reports(runtime).filter { $0.contains("add-b") }
+        #expect(told.count == 1 && told[0].contains("Didn't merge add-b") && told[0].contains("kept"), "\(told)")
+        #expect(!told.contains { $0.contains("Merged add-b") || $0.contains("Merge of add-b failed") }, "\(told)")
+        // And merge itself says the same when the lead calls it.
+        let again = lead.call("merge", ["task": "add-b"])
+        #expect(again.isError && again.text.contains("kept unmerged"), "\(again.text)")
+    }
+
     @Test func aTaskOptedOutDuringAnotherTasksMergeIsntMerged() throws {
         let (root, runtime, advancing) = try duringAMerge { lead in
             #expect(!lead.call("update_task", ["task": "add-c", "auto_advance": false]).isError)
