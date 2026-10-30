@@ -27,9 +27,10 @@ protocol AudioOutputs: AnyObject {
 /// each of its volumes set to 0 and back to what it was. The device silenced is the one restored, even when the default
 /// output changed in between; one with neither (some Bluetooth outputs) is skipped, said in app.log.
 ///
-/// Before anything is changed a private marker (`marker`) says what and what it was; it's removed once it's put back,
-/// so a launch that finds one (the app ended mid-dictation without quitting) puts it back from there (`recover`). Main
-/// thread.
+/// Before anything is changed a private marker (`marker`) says what and what it was; each change leaves it once it's
+/// put back, so a launch that finds one (the app ended mid-dictation without quitting) puts it back from there
+/// (`recover`). One that couldn't be (its device away, AirPods in their case) stays there and is tried again at each
+/// launch and before each silencing, so a device is never left silent for good. Main thread.
 final class OutputSilencer {
     /// What was changed on a device, and what it was before: written to the marker before the change.
     struct Change: Codable, Equatable {
@@ -77,6 +78,10 @@ final class OutputSilencer {
         guard let device = outputs.defaultOutput() else {
             return log("dictation: no sound output to silence")
         }
+        // What earlier runs couldn't put back first: a device back now isn't silenced again from 0.
+        let earlier = pending()
+        var left = putBack(earlier, why: " (left silenced earlier)")
+        if left != earlier { try? save(left) }
         let name = outputs.name(device)
         guard let uid = outputs.uid(device) else {
             return log("dictation: skipped silencing \(name): it has no UID to restore it by")
@@ -92,8 +97,9 @@ final class OutputSilencer {
             }
             change.volumes = volumes.keys.sorted().map { Change.Volume(element: $0, value: volumes[$0]!) }
         }
+        left.removeAll { $0.uid == uid }
         do {
-            try VibePaths.writePrivate(try JSONEncoder().encode(change), to: marker)
+            try save(left + [change])
         } catch {
             // Not changed without the marker: a crash then could leave it silent with nothing to put it back.
             return log("dictation: couldn't write the marker, \(name) not silenced")
@@ -107,36 +113,57 @@ final class OutputSilencer {
         log("dictation: silenced \(name) (\(change.muted ? "muted" : "volume to 0"))")
     }
 
-    /// What was silenced put back as it was, and the marker removed (also at quit).
+    /// What was silenced put back as it was, and taken out of the marker once it is (also at quit).
     func restore() {
         active = false
         guard let change else { return }
         self.change = nil
-        put(back: change, why: "")
+        let others = pending().filter { $0 != change }
+        try? save(others + putBack([change], why: ""))
     }
 
-    /// At launch: a marker left by a run that ended while silenced; its device is put back and the marker removed.
+    /// At launch: what a run that ended while silenced, or a device away at its restore, left in the marker, put back.
     func recover() {
-        guard let data = try? Data(contentsOf: marker) else { return }
-        guard let change = try? JSONDecoder().decode(Change.self, from: data) else {
-            try? FileManager.default.removeItem(at: marker)
-            return log("dictation: a silencing marker was left unreadable, removed")
-        }
-        put(back: change, why: " (left silenced by the last run)")
+        guard FileManager.default.fileExists(atPath: marker.path) else { return }
+        try? save(putBack(pending(), why: " (left silenced earlier)"))
     }
 
-    private func put(back change: Change, why: String) {
-        defer { try? FileManager.default.removeItem(at: marker) }
-        guard let device = outputs.device(uid: change.uid) else {
-            return log("dictation: \(change.name) isn't connected now, nothing to restore\(why)")
+    /// The changes in the marker (an unreadable one is dropped, said in app.log).
+    private func pending() -> [Change] {
+        guard let data = try? Data(contentsOf: marker) else { return [] }
+        guard let changes = try? JSONDecoder().decode([Change].self, from: data) else {
+            try? FileManager.default.removeItem(at: marker)
+            log("dictation: a silencing marker was left unreadable, removed")
+            return []
         }
-        var done = true
-        if change.muted {
-            done = outputs.setMute(device, false)
-        } else {
-            for volume in change.volumes where !outputs.setVolume(device, element: volume.element, volume.value) { done = false }
+        return changes
+    }
+
+    /// The marker holding `changes`, or none when there are none.
+    private func save(_ changes: [Change]) throws {
+        guard !changes.isEmpty else {
+            if FileManager.default.fileExists(atPath: marker.path) { try FileManager.default.removeItem(at: marker) }
+            return
         }
-        log(done ? "dictation: restored \(change.name)\(why)" : "dictation: couldn't restore \(change.name)\(why)")
+        try VibePaths.writePrivate(try JSONEncoder().encode(changes), to: marker)
+    }
+
+    /// Each change put back; those that couldn't be (their device away, or CoreAudio refused) returned.
+    private func putBack(_ changes: [Change], why: String) -> [Change] {
+        changes.filter { change in
+            guard let device = outputs.device(uid: change.uid) else {
+                log("dictation: \(change.name) isn't connected now, restored when it's back\(why)")
+                return true
+            }
+            var done = true
+            if change.muted {
+                done = outputs.setMute(device, false)
+            } else {
+                for volume in change.volumes where !outputs.setVolume(device, element: volume.element, volume.value) { done = false }
+            }
+            log(done ? "dictation: restored \(change.name)\(why)" : "dictation: couldn't restore \(change.name)\(why), tried again later")
+            return !done
+        }
     }
 }
 

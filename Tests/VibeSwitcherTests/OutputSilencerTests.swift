@@ -247,6 +247,68 @@ struct OutputSilencerTests {
 
     // MARK: - The marker
 
+    /// A device that went away while silenced (AirPods put in their case) keeps its marker: put back when it's here
+    /// again, at a launch or before the next silencing, never left at 0.
+    @Test func aDeviceGoneBeforeItsRestoreKeepsItsMarkerUntilItsBack() {
+        let before: [UInt32: Float32] = [1: 0.5, 2: 0.25]
+        let airpods = FakeOutputs.Device(uid: "airpods", name: "AirPods Pro", mute: nil, volumes: before)
+        let outputs = FakeOutputs([3: airpods], default: 3)
+        let marker = self.marker("gone")
+        let silencer = silencer(outputs, marker: marker)
+        silencer.set(holders: ["row"])
+        #expect(airpods.volumes == [1: 0, 2: 0])
+        outputs.devices[3] = nil
+        outputs.defaultID = nil
+        silencer.set(holders: [])
+        #expect(FileManager.default.fileExists(atPath: marker.path))
+        // A launch with them still away: kept.
+        self.silencer(outputs, marker: marker).recover()
+        #expect(FileManager.default.fileExists(atPath: marker.path))
+        // Back (under a new id): the next launch puts them back.
+        outputs.devices[9] = airpods
+        let lines = LogLines()
+        self.silencer(outputs, marker: marker, lines: lines).recover()
+        #expect(airpods.volumes == before)
+        #expect(!FileManager.default.fileExists(atPath: marker.path))
+        #expect(lines.all == ["dictation: restored AirPods Pro (left silenced earlier)"])
+
+        // Gone again; back while the output is a muted display (skipped): put back all the same, the marker gone.
+        let again = self.silencer(outputs, marker: marker)
+        outputs.defaultID = 9
+        again.set(holders: ["row"])
+        outputs.devices[9] = nil
+        again.set(holders: [])
+        outputs.devices = [5: .init(uid: "display", name: "Studio Display", mute: true), 9: airpods]
+        outputs.defaultID = 5
+        again.set(holders: ["row"])
+        #expect(airpods.volumes == before)
+        #expect(!FileManager.default.fileExists(atPath: marker.path))
+        again.set(holders: [])
+
+        // While the app runs: gone at the restore, back and the output at the next dictation, which puts them back
+        // first and silences them from what they were.
+        outputs.devices = [1: .init(uid: "speakers", name: "Speakers"), 3: airpods]
+        outputs.defaultID = 3
+        let running = self.silencer(outputs, marker: marker)
+        running.set(holders: ["row"])
+        outputs.devices[3] = nil
+        running.set(holders: [])
+        #expect(airpods.volumes == [1: 0, 2: 0])
+        // Another recording meanwhile, on the speakers: both kept in the marker until each is back.
+        outputs.defaultID = 1
+        running.set(holders: ["row"])
+        running.set(holders: [])
+        #expect(outputs.devices[1]?.mute == false)
+        #expect(FileManager.default.fileExists(atPath: marker.path))
+        outputs.devices[3] = airpods
+        outputs.defaultID = 3
+        running.set(holders: ["row"])
+        #expect(airpods.volumes == [1: 0, 2: 0])
+        running.set(holders: [])
+        #expect(airpods.volumes == before)
+        #expect(!FileManager.default.fileExists(atPath: marker.path))
+    }
+
     /// The marker is written, private, before the device changes; a launch that finds it (the app ended mid-dictation
     /// without quitting) puts the device back and removes it.
     @Test func aLeftoverMarkerAtLaunchRestoresTheDeviceAndGoes() throws {
@@ -264,7 +326,7 @@ struct OutputSilencerTests {
         next.recover()
         #expect(outputs.devices[4]?.volumes == before)
         #expect(!FileManager.default.fileExists(atPath: marker.path))
-        #expect(lines.all == ["dictation: restored USB Audio (left silenced by the last run)"])
+        #expect(lines.all == ["dictation: restored USB Audio (left silenced earlier)"])
         // Nothing left: a second launch does nothing.
         next.recover()
         #expect(lines.all.count == 1)
