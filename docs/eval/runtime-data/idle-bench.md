@@ -41,7 +41,7 @@ its own (`UIBench.processTable`, tested with colliding pids).
 
 How it judges now:
 
-- `scripts/ui-bench.sh -B project-lead [-r ROUNDS] [-t PCT] MINUTES` builds the base once a run (a `git archive` of the
+- `scripts/ui-bench.sh -B main [-r ROUNDS] [-t PCT] MINUTES` builds the base once a run (a `git archive` of the
   ref in the run's scratch folder under /tmp, removed on exit: never in the worktree, where its AGENTS.md and CLAUDE.md
   would hold a verifier on a trust question; `-B` also takes a built binary) and runs base and branch alternately,
   ROUNDS times each (2), each in a fresh scratch home, so both see the same load. The branch's idle instructions/s

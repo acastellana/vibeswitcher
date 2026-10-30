@@ -128,7 +128,7 @@ come from it.
 | --- | --- |
 | `scripts/build-app.sh [--install]` | The release app in `build/`; `--install` replaces and relaunches the installed app ([Getting started](getting-started.md#build-and-install)). |
 | `scripts/setup-signing.sh` | The local signing identity. `scripts/test-signing.sh` checks the signing scripts. |
-| `scripts/ui-bench.sh -B project-lead 2` | The window on a scratch home, idle and busy, against a base build, alternately; judges idle CPU against the base measured in the same run ([idle bench](../eval/runtime-data/idle-bench.md)). |
+| `scripts/ui-bench.sh -B main 2` | The window on a scratch home, idle and busy, against a base build, alternately; judges idle CPU against the base measured in the same run ([idle bench](../eval/runtime-data/idle-bench.md)). |
 | `scripts/app-icon.sh` | Redraws the app icon from `scripts/app-icon.swift` ("A · Stack": three cards marked done, working and needs you) into `Resources/AppIcon.icns` and the web app's icons ([logo](../eval/logo/README.md)). |
 | `scripts/verifier-eval.sh` | The verifier's evaluation set ([docs/process/verifier-eval.md](../process/verifier-eval.md)). |
 

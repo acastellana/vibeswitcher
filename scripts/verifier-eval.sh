@@ -14,7 +14,7 @@
 #   it out.  --max-usd N: Claude stops past N dollars (20), per case.  --dry-run: all but the model's run (the clone,
 #   prompt, settings and command are made and kept), free; with --all it shows that every case resolves.
 #   --patch NAME HEAD: writes scripts/verifier-eval/NAME.patch.gz, the branch at HEAD (an audited commit, still in
-#   this repository) against its merge-base with project-lead, for a case whose commit won't stay (below).
+#   this repository) against its merge-base with the base branch, for a case whose commit won't stay (below).
 #
 # Cases, one a line in `cases` below: NAME COMMIT PLACES DESCRIPTION
 #   NAME: the case's name (the board task's slug).  COMMIT: the audited commit, full hash.  PLACES: each known bug's
@@ -23,14 +23,14 @@
 #   the marker expect-no-Important: any Important finding on it is a false alarm.  DESCRIPTION: one line, the board
 #   task and finding it came from and what the bug is.
 #   The commit and its base: with scripts/verifier-eval/NAME.patch.gz (made by --patch), the base is the patch's
-#   (a commit on project-lead), and the clone gets the patch on it as one commit, refused unless its tree is COMMIT's
+#   (a commit on the base branch), and the clone gets the patch on it as one commit, refused unless its tree is COMMIT's
 #   (a squashed merge leaves a branch's audited commit on no branch, and git's gc drops it in a few weeks). Without
 #   one, COMMIT is on a branch that stays (a merged task's commit on the base, not its agent/ branch's, which cleanup
 #   deletes), and its first parent is the base. The contract is scripts/verifier-eval/NAME.contract.md (the board
 #   task's, as text) when there is one, else COMMIT's message.
 #
-# What it does, none of it on project-lead, the board, the vault, the session host or a real session:
-#   1. A scratch clone (`git clone --no-local`, under a scratch folder removed on exit) with only `project-lead` (the
+# What it does, none of it on the base branch, the board, the vault, the session host or a real session:
+#   1. A scratch clone (`git clone --no-local`, under a scratch folder removed on exit) with only the base branch (the
 #      base) and `agent/NAME` (the commit, or the patch's one commit on the base): every other ref and the reflog are
 #      dropped and the rest pruned, so the later fix isn't in its history.
 #   2. Its .vibeswitcher/workflow.md holds this project's sensitive_paths and verifier_model, nothing else: no
@@ -98,12 +98,17 @@ done
 [[ $max_usd =~ ^[0-9]+(\.[0-9]+)?$ ]] || { echo "--max-usd takes a number"; exit 2; }
 cd "$(dirname "$0")/.." || exit 2
 data=scripts/verifier-eval
+repo=$(cd "$(git rev-parse --git-common-dir)" && pwd)
+# The lead's base: workflow.md's base_branch, else main (project-lead until 2026-10-29).
+base_branch=$(awk '/^base_branch:/ { sub(/^base_branch:[ \t]*/, ""); sub(/[ \t]+$/, ""); print; exit }' \
+    "$repo/../.vibeswitcher/workflow.md" 2>/dev/null)
+base_branch=${base_branch:-main}
 
-# --patch: a case's commit as a patch on project-lead, for when the commit won't stay.
+# --patch: a case's commit as a patch on the base branch, for when the commit won't stay.
 if [[ $patch == 1 ]]; then
     [[ $name =~ ^[a-z0-9-]+$ && -n $patch_head ]] || { echo "usage: scripts/verifier-eval.sh --patch NAME HEAD"; exit 2; }
     head=$(git rev-parse --verify --quiet "$patch_head^{commit}") || { echo "$patch_head isn't in this repository"; exit 2; }
-    base=$(git merge-base "$head" project-lead) || { echo "$head has no merge-base with project-lead"; exit 2; }
+    base=$(git merge-base "$head" "$base_branch") || { echo "$head has no merge-base with $base_branch"; exit 2; }
     mkdir -p "$data"
     {
         echo "verifier-eval case $name"
@@ -179,7 +184,6 @@ if [[ -z $name || -z $line ]]; then
     exit 2
 fi
 read -r _ commit places description <<< "$line"
-repo=$(cd "$(git rev-parse --git-common-dir)" && pwd)
 patch_file=$data/$name.patch.gz
 
 source scripts/lib/scratch.sh
@@ -222,10 +226,10 @@ else
     git -C "$clone" checkout --quiet -B "agent/$name" "$commit" || exit 2
     head=$commit
 fi
-git -C "$clone" branch --quiet -f project-lead "$base" || exit 2
+git -C "$clone" branch --quiet -f "$base_branch" "$base" || exit 2
 git -C "$clone" remote remove origin
 git -C "$clone" for-each-ref --format='%(refname)' | while read -r ref; do
-    [[ $ref == "refs/heads/agent/$name" || $ref == refs/heads/project-lead ]] || git -C "$clone" update-ref -d "$ref"
+    [[ $ref == "refs/heads/agent/$name" || $ref == "refs/heads/$base_branch" ]] || git -C "$clone" update-ref -d "$ref"
 done
 git -C "$clone" reflog expire --expire=now --all
 git -C "$clone" gc --quiet --prune=now || { echo "pruning the clone failed"; exit 2; }
@@ -248,7 +252,7 @@ else
 fi
 
 # 3. What audit gives the verifier.
-"$mcp" --verifier-prompt "$clone" "$name" project-lead "$tool_scratch/message.txt" "$checklist" > "$tool_scratch/start.json" \
+"$mcp" --verifier-prompt "$clone" "$name" "$base_branch" "$tool_scratch/message.txt" "$checklist" > "$tool_scratch/start.json" \
     || { echo "vibeswitcher-mcp --verifier-prompt failed"; exit 2; }
 python3 -I - "$tool_scratch/start.json" "$out" "$HOME" "$(dirname "$repo")" <<'EOF' || exit 2
 import json, sys
