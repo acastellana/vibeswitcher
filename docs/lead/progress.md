@@ -26,3 +26,5 @@
 - 2026-10-30 22:10 Audit of turn-this-incident-into-2: complete, clean
 - 2026-10-30 22:15 Merged build-app-sh-install: build-app.sh --install restarts the app, or says plainly that it didn't
 - 2026-10-30 22:15 Flaky in build-app-sh-install's merge: (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
+- 2026-10-30 22:17 Update: Install now really restarts the app — **What changed:** `scripts/build-app.sh --install` now quits the app the normal way, the same quit `osascript` sends. If that doesn't work it tries the kill signal, and if the app still won't quit it …
+- 2026-10-30 22:22 Merged test-under-load-sh: test-under-load.sh's own runner finds the per-target test bundles of Swift's new build system
