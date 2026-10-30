@@ -20,3 +20,4 @@
 - 2026-10-30 21:42 Review of turn-this-incident-into-2: audit
 - 2026-10-30 21:43 Kept build-app-sh-install unmerged: Audit clean at 72cc375 and no change since. Held until main-s-full-suite makes main's full suite green, then merged by the lead (auto_advance off).
 - 2026-10-30 21:44 Audit of test-under-load-sh: complete, clean
+- 2026-10-30 22:02 Merged main-s-full-suite: Main's full suite is green again: TeamRowsTests.voiceOverReadsTheRow and HomeIsolationTests' installer test (no audit: review none)
