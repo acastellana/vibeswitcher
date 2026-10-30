@@ -2079,3 +2079,6 @@
 - 2026-10-30 10:42 Automatically (auto_advance): Held: on battery under your 10 % limit, so nothing starts, audits or merges by itself until AC power returns.
 - 2026-10-30 10:44 Automatically (auto_advance): Started the audit of dictation-per-session at 040834da (Its review is audit).
 - 2026-10-30 10:58 Merged accessibility-graph: Accessibility-graph freezes: SwiftUI's accessibility updates take seconds while a lead's chat is shown (5 freezes, up to 15.7 s) (no audit: review none)
+- 2026-10-30 10:58 Automatically (auto_advance): Merged accessibility-graph (Accessibility-graph freezes: SwiftUI's accessibility updates take seconds while a lead's chat is shown (5 freezes, up to 15.7 s)) into main at 3ae4140f, review none: on its worker's done report on 804b028c and the full test run.
+- 2026-10-30 10:58 Automatically (auto_advance): Cleaned up accessibility-graph; ended pid 80237 (Worker: Accessibility-graph freezes: SwiftUI's accessibility updates take seconds while a lead's chat is shown (5 freezes, up to 15.7 s)) (freed 1.1 GB of build output and temporary folders). It stays done.
+- 2026-10-30 10:58 Update: Sidebar accessibility lighter (accessibility-graph) — **What changed:**
