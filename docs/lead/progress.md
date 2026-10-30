@@ -2046,3 +2046,6 @@
 - 2026-10-29 22:16 Automatically (auto_advance): Merged hold-fn-globe-to (Hold Space in the composer to dictate (like Claude Code's /voice hold)) into main at b99407a7, review none: on its worker's done report on fbfc18d0 and the full test run.
 - 2026-10-29 22:16 Automatically (auto_advance): Cleaned up hold-fn-globe-to; ended pid 7047 (Worker: Hold Space in the composer to dictate (like Claude Code's /voice hold)) (freed 1.1 GB of build output and temporary folders). It stays done.
 - 2026-10-29 22:16 Update: Hold Space to dictate merged (hold-fn-globe-to) — **What changed:** in the composer box:
+- 2026-10-30 08:15 Planned 7-s-freeze-measuring: 7 s freeze measuring chat text (NSAttributedString boundingRect under SwiftUI layout)
+- 2026-10-30 08:15 Started a worker on 7-s-freeze-measuring
+- 2026-10-30 08:15 Automatically (auto_advance): Started a worker on 7-s-freeze-measuring (7 s freeze measuring chat text (NSAttributedString boundingRect under SwiftUI layout)).
