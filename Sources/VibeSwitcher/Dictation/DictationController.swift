@@ -101,6 +101,13 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     private var cancelLimit: (() -> Void)?
     private var serial = 0
     private var claudeRun: ClaudeVoiceRun?
+    /// The clock Claude's runs keep (tests give their own).
+    private let now: () -> Date
+    /// A Claude run in this launch heard something (its level cursor coloured, or text taken): the microphone works, so
+    /// a later run that hears nothing isn't said to be the microphone's doing.
+    private var claudeHeard = false
+    /// Called once the Claude run under way has ended (a message sent over it goes then).
+    private var afterClaude: [() -> Void] = []
     /// Called each time the phase goes back to idle (tests wait on it).
     var onIdle: (() -> Void)?
 
@@ -108,7 +115,8 @@ final class DictationController: ObservableObject, @unchecked Sendable {
          transcription: OpenAITranscription = OpenAITranscription(),
          defaults: UserDefaults = .standard, findKey: @escaping @Sendable () -> FoundOpenAIKey? = { DictationKey.findLive() },
          background: @escaping (@escaping @Sendable () -> Void) -> Void = { DispatchQueue.global(qos: .userInitiated).async(execute: $0) },
-         schedule: @escaping (TimeInterval, @escaping () -> Void) -> () -> Void = DictationController.after) {
+         schedule: @escaping (TimeInterval, @escaping () -> Void) -> () -> Void = DictationController.after,
+         now: @escaping () -> Date = Date.init) {
         self.keyStore = keyStore
         self.recorder = recorder
         self.microphone = microphone
@@ -117,6 +125,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         self.findKey = findKey
         self.background = background
         self.schedule = schedule
+        self.now = now
         let saved = defaults.string(forKey: Self.modelKey) ?? ""
         model = OpenAITranscription.models.contains(saved) ? saved : OpenAITranscription.defaultModel
         holdSpace = defaults.object(forKey: Self.holdSpaceKey) as? Bool ?? true
@@ -214,10 +223,11 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         stop(limitReached: false)
     }
 
-    /// Esc in the composer: the recording is dropped (Claude's: its own cancel), nothing lands in the box.
-    func cancel() {
+    /// Esc or the ✕ in the composer: the recording is dropped (Claude's: stopped with its own cancel, held, waiting or
+    /// processing), nothing lands in the box.
+    func cancel(_ reason: ClaudeVoiceRun.CancelReason = .escape) {
         holding = false
-        if let claudeRun { return claudeRun.cancel() }
+        if let claudeRun { return claudeRun.cancel(reason) }
         guard case .recording = phase else { return }
         cancelLimit?()
         cancelLimit = nil
@@ -314,7 +324,9 @@ final class DictationController: ObservableObject, @unchecked Sendable {
             Breadcrumbs.shared.note("dictation: Claude's not started, its settings: \(refusal.text)")
             return finishClaude(rowID, .notice(refusal.text, offer: refusal.offer))
         }
-        let run = ClaudeVoiceRun(session: session, schedule: schedule, onListening: { [weak self] in self?.listening = true },
+        let run = ClaudeVoiceRun(session: session, schedule: schedule, now: now, heardBefore: claudeHeard,
+                                 onListening: { [weak self] in self?.listening = true },
+                                 onHeard: { [weak self] in self?.claudeHeard = true },
                                  finish: { [weak self] outcome in self?.finishClaude(rowID, outcome) })
         claudeRun = run
         cancelLimit = schedule(DictationLimits.maxDuration) { [weak self] in
@@ -333,6 +345,7 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         cancelLimit = nil
         switch outcome {
         case .text(let text):
+            claudeHeard = true
             deliver(text, to: rowID)
         case .notice(let text, let offer):
             notice = Notice(rowID: rowID, text: text, turnOn: offer, privacy: text == Self.microphoneNotice || text == ClaudeVoiceRun.heardNothing)
@@ -342,6 +355,19 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         claudeRow = nil
         listening = false
         idle()
+        let after = afterClaude
+        afterClaude = []
+        after.forEach { $0() }
+    }
+
+    /// A message sent from the composer into `session` while a Claude dictation goes into it: the dictation is
+    /// cancelled, and `then` runs once it's stopped, so the message never mixes with what Claude might still write.
+    /// False when no dictation of this controller's goes into that session.
+    func override(session: UUID, then: @escaping () -> Void) -> Bool {
+        guard let claudeRun, claudeRun.sessionID == session else { return false }
+        afterClaude.append(then)
+        claudeRun.cancel(.send)
+        return true
     }
 
     /// After your click on the notice's offer: `/voice hold` typed into the session (only with its prompt box empty),

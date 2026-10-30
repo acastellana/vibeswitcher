@@ -125,6 +125,8 @@ final class MainWindowController: NSWindowController, NSWindowDelegate, NSToolba
         window.delegate = self
         // A Claude Code session's dictation goes through its own /voice.
         dictation?.claudeSession = { [weak self] key in self?.sync.claudeVoice(key: key, folder: self?.model.selectedRow?.cwd) }
+        // A message sent over it cancels it, and goes once it's stopped.
+        sync.overrideDictation = { [weak dictation] id, then in dictation?.override(session: id, then: then) ?? false }
 
         // The side panes are sized by the split (their items' thicknesses) and the window, never by their content. Left
         // to it, a hosting controller holds the window to its content's smallest size, and SwiftUI takes that at no

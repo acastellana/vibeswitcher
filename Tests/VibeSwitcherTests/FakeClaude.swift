@@ -23,11 +23,13 @@ enum FakeClaude {
 # voice footer, and the box its caret, as a focused terminal's), "focusEvents" (it asks for focus events, DECSET 1004,
 # and takes CSI I and CSI O as them; else they're Esc and typed text), "focused" (its terminal has focus: only then
 # does it draw its caret and level cursor), "processing" (seconds a recording takes to process once it ends: a
-# Space then is typed, and it drops what it heard if the box changed meanwhile, as 2.1.312's input_diverged)) | "voiceStop" (it stops listening by itself, as after 15 s of silence) |
+# Space then is typed, and it drops what it heard if the box changed meanwhile, as 2.1.312's input_diverged), "stuck" (a
+# recording goes on after the Spaces stop, until Esc)) | "voiceStop" (it stops listening by itself, as after 15 s of silence) |
 # "exit" (it quits, as /exit)).
 # Its /voice keeps Claude Code 2.1.312's timings: a repeat chain breaks 120 ms after the last Space (the key let go),
 # 5 repeats start recording, and a second push of the key within 300 ms of a transcript going in sends it. A held
-# Space's first two presses are typed and its later repeats swallowed until it records, when those two go.
+# Space's first two presses are typed and its later repeats swallowed until it records, when those two go. Esc cancels a
+# recording, or one being processed (2.1.312: any voice state but idle), the box as it was before it.
 # the agent writes its state (mode, tab, answers, the free-text field, queued messages) to STATE after every change.
 import datetime
 import json
@@ -76,6 +78,7 @@ state = {
     "doublePush": 0.3,       # a second push this soon after a transcript went in sends it, 120 ms on
     "disarms": 0,            # sends a double push armed or could, called off by another key
     "processing": 0.0,       # seconds a recording takes to process once it ends (0: its transcript goes in at once)
+    "stuck": False,          # a recording goes on after the Spaces stop, until Esc
     "dropped": 0,            # transcripts dropped: the box changed while they were processed
     "doubleSubmits": 0,      # prompts sent by a double push
     "statusLine": False,     # a custom status line in the footer, never its voice footer; the box shows its caret
@@ -443,6 +446,8 @@ def voice_tick():
         else:
             finish_recording()
         return True
+    if state["recording"] == "listening" and state["stuck"]:
+        return False
     if state["recording"] in ("warming", "listening") and time.monotonic() - VOICE["last"] > state["gap"]:
         if state["recording"] == "listening":
             end_recording()
@@ -712,7 +717,7 @@ def key(name):
                 state["suggest"] = 0
                 run_command(chosen)
             return
-        if state["recording"] in ("listening", "tap") and name == "esc":
+        if state["recording"] in ("listening", "tap", "processing") and name == "esc":
             # Its cancel: the prompt as it was before the recording.
             state["input"] = VOICE["before"]
             state["recording"] = ""
@@ -913,7 +918,7 @@ def control():
             if state["recording"] == "listening":
                 end_recording()
         elif op == "voice":
-            for name in ("mode", "account", "transcript", "interim", "warmup", "gap", "statusLine", "focused", "processing"):
+            for name in ("mode", "account", "transcript", "interim", "warmup", "gap", "statusLine", "focused", "processing", "stuck"):
                 if name in command:
                     state[{"mode": "voice", "account": "voiceAccount"}.get(name, name)] = command[name]
             if "focusEvents" in command:

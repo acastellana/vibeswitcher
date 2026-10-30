@@ -318,8 +318,9 @@ struct ClaudeVoiceSettings: Equatable, Sendable {
 /// Space goes in as key repeats (Claude tells a held key from rapid repeats, after a warmup it shows as `keep
 /// holding…`, then `listening…`); let go, the repeats stop, Claude writes the transcript into its prompt box without
 /// sending it, and once the box shows the same text twice it's taken out (⌃U, read back until the box is empty) and
-/// handed over. Only into an empty box, never with Enter; a box that shows anything else is left alone. Esc cancels
-/// (Claude's own cancel). Main thread.
+/// handed over. Only into an empty box, never with Enter; a box that shows anything else is left alone. A cancel, at
+/// any point, stops it at once (`stop`): Claude's own cancel, Esc, while it records or processes, and the box as it was.
+/// Main thread.
 final class ClaudeVoiceRun {
     enum Outcome: Equatable {
         /// What Claude wrote, moved out of its box.
@@ -327,6 +328,14 @@ final class ClaudeVoiceRun {
         /// What happened instead; `offer`: turning Claude's dictation on (`/voice hold`) may help.
         case notice(String, offer: Bool)
         case cancelled
+    }
+
+    /// What cancelled a run, by name in app.log.
+    enum CancelReason: String {
+        case escape = "Esc"
+        case button = "the ✕"
+        /// A message sent from the composer while it went on: the message goes once it's stopped.
+        case send = "a message sent over it"
     }
 
     /// While held, a Space goes this often on a timer of its own, however long a read of the screen takes: Claude Code
@@ -354,6 +363,17 @@ final class ClaudeVoiceRun {
     static let startWithin: TimeInterval = 3
     /// After the release, how long Claude may take to write the transcript.
     static let finishWithin: TimeInterval = 20
+    /// After the release, this long with nothing to show for it (no processing, no words, no text, its level cursor
+    /// never coloured): it heard nothing, and it's stopped. Claude 2.1.312 ends a hold's recording 200 ms after the last
+    /// Space; one that went quiet without a word (or never got its audio going) goes back to idle too fast to be seen.
+    static let quietAfterRelease: TimeInterval = 3
+    /// Stopping: how often the screen is read, how long the box may take to show it's stopped, and Esc sent at most, the
+    /// second only this long after the first still shows it going (a read before the redraw would send a stray one, and
+    /// an Esc that lands after Claude's dictation went idle interrupts its turn).
+    static let stopReadEvery: TimeInterval = 0.05
+    static let stopWithin: TimeInterval = 2
+    static let stopKeys = 2
+    static let stopRetryAfter: TimeInterval = 0.5
     /// Reads after a ⌃U before the box must be empty, and ⌃U sent at most (a long draft spans lines; each takes one).
     static let clearReads = 12
     static let clearKeys = 4
@@ -372,8 +392,11 @@ final class ClaudeVoiceRun {
     static let tapMode = "Claude's dictation is in tap mode, which sends what you say by itself; VibeSwitcher only uses hold mode."
     static let typedMeanwhile = "Something was typed in the terminal meanwhile, so VibeSwitcher left Claude's prompt box alone."
     static let gaveNoText = "Claude's dictation gave no text."
-    /// No text, and its level cursor stayed grey (low) the whole recording: the microphone gave it silence.
+    /// No text, and its level cursor stayed grey (low) the whole recording: the microphone gave it silence. Only while no
+    /// run in this launch has heard anything: after one has, the microphone works (`didntCatch`).
     static let heardNothing = "Claude heard nothing: check that VibeSwitcher may use the microphone (System Settings › Privacy & Security › Microphone) and that the input in Sound is the one you speak into."
+    /// No text, its level cursor grey throughout, after an earlier run heard fine: too short, or spoken too soon.
+    static let didntCatch = "Claude didn't catch anything that time: hold a little longer and speak once the meter moves."
     /// After Claude's `processing…` went, its box empty this long: it wrote nothing (its transcript goes in as the
     /// footer goes).
     static let emptyAfterProcessing: TimeInterval = 2
@@ -384,16 +407,21 @@ final class ClaudeVoiceRun {
     /// messages, held ones, the lead's), or its Enter would send the dictation with it. Main thread.
     nonisolated(unsafe) static var busy: Set<UUID> = []
 
-    private enum Stage { case checking, holding, finishing, clearing, done }
+    private enum Stage { case checking, holding, finishing, clearing, stopping, done }
 
     private let session: ClaudeVoiceSession
     private let schedule: (TimeInterval, @escaping () -> Void) -> () -> Void
     private let now: () -> Date
     private let onListening: () -> Void
+    /// An earlier run in this launch heard something (its level cursor coloured, or text taken): the microphone works.
+    private let heardBefore: Bool
+    /// Called once this run hears something.
+    private let onHeard: () -> Void
     private let finish: (Outcome) -> Void
     private var stage = Stage.checking
     private var released = false
     private var cancelled = false
+    private var cancelReason = CancelReason.escape
     private var listening = false
     private var spaces = 0
     /// The Spaces' timer (nil: none going), and whether the hold's Spaces were followed by `disarm`.
@@ -430,6 +458,15 @@ final class ClaudeVoiceRun {
     /// While finishing: Claude's `processing…` was seen, and since when its box has shown nothing after it.
     private var processed = false
     private var emptySince: Date?
+    /// Since the release: when it came, and whether anything showed for it (processing, words, text, a level heard).
+    private var releasedAt = Date.distantFuture
+    private var stirred = false
+    /// Stopping: how it ends once stopped, why (for app.log), by when, the Esc and ⌃U sent, and when the last Esc went.
+    private var stopOutcome: (outcome: Outcome, why: String?) = (.cancelled, nil)
+    private var stopBy = Date.distantFuture
+    private var stopEscapes = 0
+    private var stopKills = 0
+    private var lastEscapeAt = Date.distantPast
     /// The words Claude showed dim while it listened.
     private var live = ""
     private var taken: (shown: String, text: String)?
@@ -437,13 +474,19 @@ final class ClaudeVoiceRun {
     private var clearRead = 0
 
     init(session: ClaudeVoiceSession, schedule: @escaping (TimeInterval, @escaping () -> Void) -> () -> Void,
-         now: @escaping () -> Date = Date.init, onListening: @escaping () -> Void = {}, finish: @escaping (Outcome) -> Void) {
+         now: @escaping () -> Date = Date.init, heardBefore: Bool = false, onListening: @escaping () -> Void = {},
+         onHeard: @escaping () -> Void = {}, finish: @escaping (Outcome) -> Void) {
         self.session = session
         self.schedule = schedule
         self.now = now
+        self.heardBefore = heardBefore
         self.onListening = onListening
+        self.onHeard = onHeard
         self.finish = finish
     }
+
+    /// The host session it dictates into.
+    var sessionID: UUID? { session.id }
 
     /// Reads the box first: only an empty one gets keys.
     func start() {
@@ -463,19 +506,18 @@ final class ClaudeVoiceRun {
         }
     }
 
-    /// Esc in the composer: Claude's own cancel while it listens; afterwards, what it writes is cleared, not kept.
-    func cancel() {
+    /// Esc or the ✕ in the composer, or a message sent over it: stopped at once, held or after the release (`stop`).
+    /// Before the first Space nothing went in; while its text is being taken out, it's taken out and not kept.
+    func cancel(_ reason: CancelReason = .escape) {
+        guard !cancelled else { return }
         cancelled = true
+        cancelReason = reason
         switch stage {
-        case .holding:
-            if listening {
-                // Claude's cancel puts back the box as it was; a Space it kept goes too.
-                _ = session.keys([Self.escape])
-                tidy { [weak self] in self?.end(.cancelled) }
-            } else {
-                tidy { [weak self] in self?.end(.cancelled) }
-            }
-        case .checking, .finishing, .clearing, .done:
+        case .holding, .finishing:
+            stop(.cancelled)
+        case .stopping:
+            stopOutcome = (.cancelled, nil)
+        case .checking, .clearing, .done:
             break
         }
     }
@@ -563,9 +605,11 @@ final class ClaudeVoiceRun {
         case .holding: holding(screen, asked: asked)
         case .finishing: finishing(screen)
         case .clearing: clearing(screen)
+        case .stopping: stopping(screen)
         case .checking, .done: return
         }
-        if stage != .done { readSoon(after: stage == .holding ? Self.holdReadEvery : Self.readEvery) }
+        guard stage != .done else { return }
+        readSoon(after: stage == .holding ? Self.holdReadEvery : stage == .stopping ? Self.stopReadEvery : Self.readEvery)
     }
 
     private func holding(_ screen: LeadDelivery.Screen?, asked: Date = .distantFuture) {
@@ -640,7 +684,12 @@ final class ClaudeVoiceRun {
 
     private func level(_ prompt: ClaudeVoiceScreen.Prompt) {
         guard prompt.meter else { return }
-        if prompt.quiet { meterQuiet = true } else { meterHeard = true }
+        if prompt.quiet {
+            meterQuiet = true
+        } else if !meterHeard {
+            meterHeard = true
+            onHeard()
+        }
     }
 
     /// Its level cursor over the recording: `flat` (grey at every read that showed it), `moved`, or `not shown`.
@@ -695,7 +744,8 @@ final class ClaudeVoiceRun {
     private func finishing() {
         stopHolding()
         stage = .finishing
-        finishBy = now().addingTimeInterval(Self.finishWithin)
+        releasedAt = now()
+        finishBy = releasedAt.addingTimeInterval(Self.finishWithin)
         readSoon()
     }
 
@@ -708,6 +758,9 @@ final class ClaudeVoiceRun {
             let footer = ClaudeVoiceScreen.footer(screen.text)
             let prompt = ClaudeVoiceScreen.prompt(screen)
             level(prompt)
+            // Anything for the release: processing, a level heard, or words (dim, not the box's own placeholder).
+            if footer == .processing || (prompt.meter && !prompt.quiet)
+                || (prompt.dim != dimBefore && prompt.dim.contains(where: { $0.isLetter || $0.isNumber })) { stirred = true }
             let state = footer == .none && prompt.meter ? .listening : footer
             switch state {
             case .listening, .warming, .tap, .processing:
@@ -723,6 +776,7 @@ final class ClaudeVoiceRun {
                     lastDraft = nil
                 case .draft(let draft):
                     trail("text written")
+                    stirred = true
                     emptySince = nil
                     steady = draft == lastDraft ? steady + 1 : 1
                     lastDraft = draft
@@ -744,12 +798,18 @@ final class ClaudeVoiceRun {
                 }
             }
         }
+        if !stirred, now().timeIntervalSince(releasedAt) >= Self.quietAfterRelease {
+            // Nothing for it since the release: whether it still shows recording or already went idle, it's stopped.
+            return stop(noText, why: "nothing \(Int(Self.quietAfterRelease)) s after the release, no processing")
+        }
         if now() >= finishBy { end(cancelled ? .cancelled : noText, why: "no text within \(Int(Self.finishWithin)) s") }
     }
 
-    /// No transcript: Claude heard nothing when its level cursor stayed grey the whole recording.
+    /// No transcript. Its level cursor grey the whole recording: the microphone gave silence, unless an earlier run
+    /// heard fine, when it was too short or too soon.
     private var noText: Outcome {
-        .notice(meterQuiet && !meterHeard ? Self.heardNothing : Self.gaveNoText, offer: false)
+        guard meterQuiet && !meterHeard else { return .notice(Self.gaveNoText, offer: false) }
+        return .notice(heardBefore ? Self.didntCatch : Self.heardNothing, offer: false)
     }
 
     /// While Claude records: the words it shows dim, and whether anything not dim (typed in the terminal) showed too.
@@ -801,16 +861,79 @@ final class ClaudeVoiceRun {
         }
     }
 
+    // MARK: Stopping
+
+    /// Stops Claude's dictation for good, then ends with `outcome`: a cancel, or a recording that heard nothing. No more
+    /// Spaces (nor End: Claude's cancel calls off its double push itself), and the box read at once.
+    private func stop(_ outcome: Outcome, why: String? = nil) {
+        stopHolding()
+        trail("stopping")
+        stage = .stopping
+        stopOutcome = (outcome, why)
+        stopBy = now().addingTimeInterval(Self.stopWithin)
+        readSoon(after: 0)
+    }
+
+    /// While a read shows Claude recording or processing (its footer or level cursor), Esc, its own cancel in either
+    /// (2.1.312: the box put back as it was before the recording, what it heard dropped); never when it shows neither,
+    /// where Esc would interrupt Claude's turn. Once it shows neither: the warmup's spaces go, and a transcript that went
+    /// in before the Esc is taken out if it's the dictation's; then it ends.
+    private func stopping(_ screen: LeadDelivery.Screen?) {
+        if let screen {
+            let footer = ClaudeVoiceScreen.footer(screen.text)
+            let prompt = ClaudeVoiceScreen.prompt(screen)
+            if prompt.meter || [.listening, .processing, .tap].contains(footer) {
+                let first = stopEscapes == 0
+                if stopEscapes < Self.stopKeys, now().timeIntervalSince(lastEscapeAt) >= Self.stopRetryAfter {
+                    if session.keys([Self.escape]) {
+                        stopEscapes += 1
+                        lastEscapeAt = now()
+                        if first { trail("Esc sent") }
+                    }
+                }
+            } else {
+                switch LeadDelivery.box(in: screen) {
+                case .empty where (prompt.spaces ?? 0) > 0 && stopKills < Self.clearKeys:
+                    // The warmup's spaces (the box shows nothing else): out with ⌃U.
+                    killStopping()
+                case .empty, .dialog:
+                    return endStopped()
+                case .draft(let draft):
+                    // Claude's transcript, in before the Esc: the dictation's when nothing was typed and it grew from
+                    // what was heard. Anything else is left alone.
+                    guard !typed, ClaudeVoiceScreen.grew(ClaudeVoiceScreen.line(draft), from: live), stopKills < Self.clearKeys else {
+                        return endStopped()
+                    }
+                    killStopping()
+                }
+            }
+        }
+        if now() >= stopBy { endStopped(unconfirmed: true) }
+    }
+
+    private func killStopping() {
+        guard session.keys([Self.killLine]) else { return }
+        stopKills += 1
+    }
+
+    private func endStopped(unconfirmed: Bool = false) {
+        let why = [stopOutcome.why, unconfirmed ? "not seen stopped within \(Int(Self.stopWithin)) s" : nil].compactMap { $0 }
+        end(cancelled ? .cancelled : stopOutcome.outcome, why: why.isEmpty ? nil : why.joined(separator: ", "))
+    }
+
     /// The run is over: `outcome` goes to the composer, and app.log says how it ended and why (`why`, else the notice,
     /// which is VibeSwitcher's own words), never what Claude heard or wrote.
     private func end(_ outcome: Outcome, why: String? = nil) {
         guard stage != .done else { return }
         stage = .done
+        // Cancelled: what it would have said isn't said.
+        var outcome = outcome
+        if cancelled, case .notice = outcome { outcome = .cancelled }
         let how: String
         switch outcome {
         case .text(let text): how = "text taken (\(text.count) characters)"
         case .notice(let notice, _): how = "no text: \(why ?? notice)"
-        case .cancelled: how = "cancelled"
+        case .cancelled: how = "cancelled by \(cancelReason.rawValue)" + (why.map { " (\($0))" } ?? "")
         }
         let took = started == .distantPast ? "before any Space" : String(format: "after %.1f s", now().timeIntervalSince(started))
         Breadcrumbs.shared.note("dictation: Claude's ended, \(how), \(took), \(spaces) Spaces, level cursor \(meterSummary); saw \(trailed.isEmpty ? "nothing" : trailed.joined(separator: " → "))")

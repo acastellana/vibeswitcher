@@ -544,8 +544,14 @@ final class ChatSync {
             Breadcrumbs.shared.note("composer: refused, no agent in the terminal")
             return false
         }
-        // Claude is taking down a dictation there: typed in now, the message (and its Enter) would go out with it.
+        // Claude is taking down a dictation there: typed in now, the message (and its Enter) would go out with it. Sending
+        // wins: the dictation is stopped first (Claude's recording cancelled, its box as it was), then the message goes.
         if ClaudeVoiceRun.busy.contains(target.id) {
+            let id = target.id
+            if overrideDictation(id, { [weak self] in self?.afterDictation(text, key: target.key, id: id) }) {
+                Breadcrumbs.shared.note("composer: a dictation cancelled to send a message")
+                return true
+            }
             chat.sendNotice = Self.dictating
             Breadcrumbs.shared.note("composer: refused, a dictation is going into that session")
             return false
@@ -628,6 +634,19 @@ final class ChatSync {
     static func alive(pid: Int32, on tty: String) -> Bool {
         ProcessTable.info(pid: pid)?.tty == tty
     }
+
+    /// The message sent over a dictation, once it's stopped: the usual way in, still into that session; not sent (back
+    /// in the composer's outbox strip, to send again) when another is shown by then, or it's refused now.
+    private func afterDictation(_ text: String, key: String, id: UUID) {
+        guard target()?.id == id, type(text) else {
+            Breadcrumbs.shared.note("composer: a message sent over a dictation didn't go in after it")
+            return chat.confirmed(key: key, message: text, ok: false)
+        }
+    }
+
+    /// Cancels the dictation going into a session for a message sent over it, calling back once it's stopped; false
+    /// when none of the window's goes there (`DictationController.override`).
+    var overrideDictation: (UUID, @escaping () -> Void) -> Bool = { _, _ in false }
 
     static let noAgent = "Not sent: no agent is running in this terminal, so your message would run as a shell command."
     static let dictating = "Not sent yet: Claude is taking down your dictation in that session. Send once it's in the box."

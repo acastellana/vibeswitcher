@@ -40,14 +40,16 @@ struct ClaudeDictationTests {
 
     func controller(key: String? = nil, session: @escaping (String) -> ClaudeVoiceSession?,
                     settings: ClaudeVoiceSettings = ClaudeVoiceSettings(),
-                    microphone: DictationTests.FakeMicrophone = DictationTests.FakeMicrophone()) -> (DictationController, DictationTests.FakeHTTP) {
+                    microphone: DictationTests.FakeMicrophone = DictationTests.FakeMicrophone(),
+                    now: @escaping () -> Date = Date.init) -> (DictationController, DictationTests.FakeHTTP) {
         let http = DictationTests.FakeHTTP()
         var transcription = OpenAITranscription(client: http)
         transcription.boundary = { "BOUNDARY" }
         let defaults = temp.defaults("claude-dictation")
         defaults.set(true, forKey: DictationController.privacyNotedKey)
         let controller = DictationController(keyStore: AppProof.MemorySecret(key), recorder: DictationTests.FakeRecorder(), microphone: microphone,
-                                             transcription: transcription, defaults: defaults, findKey: { nil }, background: { $0() })
+                                             transcription: transcription, defaults: defaults, findKey: { nil }, background: { $0() },
+                                             now: now)
         controller.claudeSession = session
         controller.claudeSettings = { _ in settings }
         return (controller, http)
@@ -314,10 +316,22 @@ struct ClaudeDictationTests {
 
     // MARK: - Against FakeClaude's /voice
 
-    /// The harness's session, as the window gives it to dictation.
-    func dictation(_ h: Harness) -> DictationController {
-        controller(session: { [weak h] key in h?.sync.claudeVoice(key: key) }).0
+    /// The harness's session, as the window gives it to dictation, a message sent over a dictation cancelling it as the
+    /// window wires it; `now`: the runs' clock.
+    func dictation(_ h: Harness, now: @escaping () -> Date = Date.init) -> DictationController {
+        let controller = controller(session: { [weak h] key in h?.sync.claudeVoice(key: key) }, now: now).0
+        h.sync.overrideDictation = { [weak controller] id, then in controller?.override(session: id, then: then) ?? false }
+        return controller
     }
+
+    /// The real time, moved on by the test.
+    final class Clock: @unchecked Sendable {
+        var ahead: TimeInterval = 0
+        func now() -> Date { Date().addingTimeInterval(ahead) }
+    }
+
+    /// How the last run ended, as app.log says.
+    var ended: String? { Breadcrumbs.shared.lines.last { $0.contains("dictation: Claude's ended") } }
 
     var input: (Harness) -> String { { $0.agent["input"] as? String ?? "?" } }
 
@@ -372,6 +386,110 @@ struct ClaudeDictationTests {
         #expect(h.agent["voiceInserts"] as? Int == 0)
         #expect(input(h) == "")
         #expect(h.agent["enters"] as? Int == 0)
+    }
+
+    /// Esc and the ✕ stop a dictation at once in each phase: held, waiting after the release (Claude still recording
+    /// after the Spaces stopped), and processing. Each time Claude's recording is cancelled (its own cancel), its box is
+    /// as before, nothing lands, and its turn goes on (mid-turn, as the user's was: an Esc that reached Claude idle
+    /// would have interrupted it). app.log says what cancelled it.
+    @Test func escAndTheCrossCancelWhileHeldWaitingAndProcessing() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "work"])
+        h.tell(["op": "voice", "mode": "hold"])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" && h.agent["mode"] as? String == "working" }
+        let controller = dictation(h)
+        var cancels = 0
+        for phase in ["held", "waiting", "processing"] {
+            for reason in [ClaudeVoiceRun.CancelReason.escape, .button] {
+                h.tell(["op": "voice", "stuck": phase == "waiting", "processing": phase == "processing" ? 30.0 : 0.0])
+                try await h.waitFor { h.agent["stuck"] as? Bool == (phase == "waiting") }
+                controller.press(h.key, agent: .claude) { "" }
+                try await h.waitFor { controller.listening }
+                if phase != "held" {
+                    controller.release()
+                    #expect(controller.isTranscribing(h.key))
+                    try await h.waitFor { h.agent["recording"] as? String == (phase == "waiting" ? "listening" : "processing") }
+                }
+                controller.cancel(reason)
+                try await h.waitFor { controller.phase == .idle }
+                cancels += 1
+                #expect(h.agent["voiceCancels"] as? Int == cancels, "\(phase) \(reason)")
+                #expect(h.agent["recording"] as? String == "", "\(phase) \(reason)")
+                #expect(input(h) == "" && h.agent["voiceInserts"] as? Int == 0, "\(phase) \(reason)")
+                #expect(controller.deliveries[h.key] == nil && controller.notice == nil, "\(phase) \(reason)")
+                #expect(!ClaudeVoiceRun.busy.contains(h.session.id))
+                #expect(ended?.contains("cancelled by \(reason.rawValue)") == true, "\(String(describing: ended))")
+            }
+        }
+        try await h.quiet()
+        #expect(h.agent["voiceCancels"] as? Int == cancels && h.agent["voiceInserts"] as? Int == 0 && input(h) == "")
+        #expect(h.agent["mode"] as? String == "working" && h.agent["enters"] as? Int == 0)
+    }
+
+    /// The user's case (2026-10-30): a recording whose level cursor stayed flat, no processing seen and no text after the
+    /// release, ends 3 s after it (the runs' clock), not 20. Claude went idle at once with nothing (too fast to see it
+    /// process): nothing more to do. Claude still recording after the Spaces stopped: its own cancel first, so it isn't
+    /// left recording. Mid-turn both times, and its turn goes on.
+    @Test func aRecordingThatStaysFlatAfterTheReleaseEndsWithinAboutThreeSeconds() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "work"])
+        h.tell(["op": "voice", "mode": "hold", "transcript": "", "interim": ""])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" && h.agent["interim"] as? String == "" }
+        let clock = Clock()
+        let controller = dictation(h, now: clock.now)
+        for stuck in [false, true] {
+            h.tell(["op": "voice", "stuck": stuck])
+            try await h.waitFor { h.agent["stuck"] as? Bool == stuck }
+            let inserts = h.agent["voiceInserts"] as? Int ?? 0
+            controller.press(h.key, agent: .claude) { "" }
+            try await h.waitFor { controller.listening }
+            controller.release()
+            if stuck {
+                try await h.waitFor { h.agent["recording"] as? String == "listening" }
+            } else {
+                // Idle again with nothing written, at once.
+                try await h.waitFor { h.agent["voiceInserts"] as? Int == inserts + 1 && h.agent["recording"] as? String == "" }
+            }
+            #expect(controller.isTranscribing(h.key), "ended before its 3 s: \(String(describing: ended))")
+            clock.ahead += ClaudeVoiceRun.quietAfterRelease + 0.1
+            try await h.waitFor { controller.phase == .idle }
+            #expect(controller.notice?.text == ClaudeVoiceRun.heardNothing, "\(String(describing: controller.notice))")
+            #expect(ended?.contains("nothing 3 s after the release, no processing") == true && ended?.contains("level cursor flat") == true,
+                    "\(String(describing: ended))")
+            #expect(h.agent["recording"] as? String == "")
+            #expect(h.agent["voiceCancels"] as? Int == (stuck ? 1 : 0))
+            #expect(input(h) == "" && controller.deliveries[h.key] == nil)
+        }
+        try await h.quiet()
+        #expect(h.agent["mode"] as? String == "working" && h.agent["enters"] as? Int == 0)
+    }
+
+    /// No text and a flat level cursor after an earlier run in this launch heard fine: the microphone works, so the
+    /// notice says Claude didn't catch anything that time, with no privacy settings to open. Until a run has heard, the
+    /// microphone's notice stays (`anEmptyTranscriptAfterAFlatLevelCursorSaysClaudeHeardNothing`).
+    @Test func afterARunHeardAFlatOneSaysClaudeDidntCatchAnything() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold"])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" }
+        let controller = dictation(h)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.deliveries[h.key]?.text == "open the composer view on main")
+
+        h.tell(["op": "voice", "transcript": "", "interim": "", "processing": 0.5])
+        try await h.waitFor { h.agent["interim"] as? String == "" && h.agent["processing"] as? Double == 0.5 }
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        controller.release()
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.notice?.text == ClaudeVoiceRun.didntCatch && controller.notice?.privacy == false,
+                "\(String(describing: controller.notice))")
+        #expect(ended?.contains("level cursor flat") == true, "\(String(describing: ended))")
     }
 
     @Test func offItsSaidAndTurningItOnTypesVoiceHoldAfterTheClick() async throws {
@@ -479,27 +597,38 @@ struct ClaudeDictationTests {
         }
     }
 
-    /// The composer's message, typed in while a dictation goes in, would take it out with its Enter: it waits in the box.
-    @Test func nothingElseIsTypedIntoTheSessionWhileADictationGoesIn() async throws {
+    /// The composer's message sent while a dictation waits for Claude's text: sending wins. Claude's recording is
+    /// cancelled first (its box as it was, nothing it heard written), then the message goes in, once, alone; the
+    /// dictation lands nowhere. Typed in before, its Enter would have sent the dictation with it.
+    @Test func sendingWhileADictationWaitsCancelsItAndTheMessageGoesOnceUnmixed() async throws {
         let h = try await Harness.start(temp)
         defer { h.stop() }
-        h.tell(["op": "voice", "mode": "hold"])
-        try await h.waitFor { h.agent["voice"] as? String == "hold" }
+        // Slow to process (as the user's 20 s wait): the transcript would land after the message, if at all.
+        h.tell(["op": "voice", "mode": "hold", "processing": 30.0])
+        try await h.waitFor { h.agent["voice"] as? String == "hold" && h.agent["processing"] as? Double == 30 }
+        let prompts = h.agentPrompts
         let controller = dictation(h)
         controller.press(h.key, agent: .claude) { "" }
         try await h.waitFor { controller.listening }
-        #expect(ClaudeVoiceRun.busy.contains(h.session.id))
-        #expect(!h.sync.type("also check the tests"))
-        #expect(h.chat.sendNotice == ChatSync.dictating)
         controller.release()
-        try await h.waitFor { controller.phase == .idle }
-        #expect(!ClaudeVoiceRun.busy.contains(h.session.id))
-        #expect(controller.deliveries[h.key]?.text == "open the composer view on main")
-        #expect(h.agent["enters"] as? Int == 0)
-        #expect(input(h) == "")
-        // Once it's in the composer, a message goes as usual.
+        try await h.waitFor { h.agent["recording"] as? String == "processing" }
+        #expect(ClaudeVoiceRun.busy.contains(h.session.id))
+
         #expect(h.sync.type("also check the tests"))
-        try await h.waitFor { h.agentPrompts.last == "also check the tests" }
+        try await h.waitFor { h.agentPrompts.count > prompts.count }
+        #expect(h.agentPrompts == prompts + ["also check the tests"], "\(h.agentPrompts)")
+        #expect(h.agent["voiceCancels"] as? Int == 1 && h.agent["voiceInserts"] as? Int == 0)
+        #expect(h.agent["recording"] as? String == "")
+        #expect(controller.phase == .idle && controller.deliveries[h.key] == nil && controller.notice == nil)
+        #expect(!ClaudeVoiceRun.busy.contains(h.session.id))
+        #expect(h.chat.sendNotice != ChatSync.dictating)
+        // In app.log: the override, and the run cancelled by it.
+        #expect(Breadcrumbs.shared.lines.contains { $0.hasSuffix("composer: a dictation cancelled to send a message") })
+        #expect(ended?.contains("cancelled by a message sent over it") == true, "\(String(describing: ended))")
+        // Nothing comes after: the message went once, and Claude wrote nothing of the dictation.
+        try await h.quiet()
+        #expect(h.agentPrompts == prompts + ["also check the tests"])
+        #expect(h.agent["voiceInserts"] as? Int == 0 && h.agent["enters"] as? Int == 1 && input(h) == "")
     }
 
     /// Claude stops listening by itself (silence, its limit, or repeats that stalled past its 120 ms) while the mic is

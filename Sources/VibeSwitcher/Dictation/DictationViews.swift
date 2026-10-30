@@ -79,11 +79,10 @@ struct DictationStatusRow: View {
             }
             .padding(.leading, 30)
         } else if dictation.claudeRow == rowID, dictation.isRecording(rowID) {
-            Text(dictation.listening ? "Claude is listening… let go when you're done (Esc cancels)."
-                                     : "Keep holding: Claude's dictation is starting…")
-                .font(.system(size: 11)).foregroundStyle(.red).padding(.leading, 30)
+            claude(dictation.listening ? "Claude is listening… let go when you're done (Esc cancels)."
+                                       : "Keep holding: Claude's dictation is starting…", color: .red)
         } else if dictation.claudeRow == rowID, dictation.isTranscribing(rowID) {
-            Text("Claude is writing it out…").font(.system(size: 11)).foregroundStyle(.secondary).padding(.leading, 30)
+            claude("Waiting for Claude to write it out… (Esc cancels; sending cancels it too)", color: .secondary)
         } else if dictation.isRecording(rowID) {
             Text("Recording… let go to transcribe (2 minutes at most).").font(.system(size: 11)).foregroundStyle(.red).padding(.leading, 30)
         } else if dictation.isTranscribing(rowID) {
@@ -110,6 +109,20 @@ struct DictationStatusRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.leading, 30)
         }
+    }
+
+    /// A Claude dictation under way, held or waiting for its text, with its ✕: Esc's cancel, in every phase.
+    private func claude(_ text: String, color: Color) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(text).font(.system(size: 11)).foregroundStyle(color).fixedSize(horizontal: false, vertical: true)
+            Button { dictation.cancel(.button) } label: {
+                Image(systemName: "xmark").font(.system(size: 9)).accessibilityLabel("Cancel dictation")
+            }
+            .buttonStyle(.borderless)
+            .help("Cancel the dictation: Claude stops recording, and its prompt box is left as it was")
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.leading, 30)
     }
 }
 
