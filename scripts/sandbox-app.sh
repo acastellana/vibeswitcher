@@ -15,7 +15,8 @@
 #                                               close settings|sheet (help lists them)
 # e.g. run; chat; type "hello"; shot chat; settings agents; shot settings; sheet new-project; shot new-project; quit
 #
-# Options: --minutes N (run: how long it lives, 10), --binary PATH (run: this build of VibeSwitcher, with
+# Options: --minutes N (run: how long it lives, 10), --empty (run: no fake session at launch, so no session host until
+# something asks for one, as at a first launch; e.g. startlead), --binary PATH (run: this build of VibeSwitcher, with
 # vibeswitcher-host beside it, instead of building), --shots DIR (run: where shots go, .build/sandbox-shots),
 # --dir DIR (where the sandbox's pid, state pointer and app.log are kept, .build/sandbox), --wait S (how long a
 # command's reply is waited for, 120).
@@ -28,6 +29,7 @@ dir=$repo/.build/sandbox
 shots=$repo/.build/sandbox-shots
 binary=""
 minutes=10
+empty=""
 wait_for=120
 # TMPDIR as given: scratch_tmpdir (the build's) replaces it and removes its own when this script exits.
 given_tmpdir=${TMPDIR:-}
@@ -35,16 +37,17 @@ given_tmpdir=${TMPDIR:-}
 while [[ $# -gt 0 ]]; do
     case $1 in
         --minutes) minutes=$2; shift 2 ;;
+        --empty) empty=--empty; shift ;;
         --binary) binary=$2; shift 2 ;;
         --shots) shots=$2; shift 2 ;;
         --dir) dir=$2; shift 2 ;;
         --wait) wait_for=$2; shift 2 ;;
-        -h|--help) sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         --*) echo "unknown option $1 (--help)"; exit 64 ;;
         *) break ;;
     esac
 done
-[[ $# -gt 0 ]] || { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
+[[ $# -gt 0 ]] || { sed -n '2,23p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
 [[ $minutes =~ ^[0-9]+([.][0-9]+)?$ ]] || { echo "--minutes $minutes: a number of minutes"; exit 64; }
 mkdir -p "$dir"
 dir=$(cd "$dir" && pwd -P)
@@ -132,7 +135,7 @@ run_sandbox() {
     echo "$state" >"$dir/state"
     : >"$dir/app.log"
     with_tmpdir "$state/tmp/" env HOME="$state/home" CFFIXED_USER_HOME="$state/home" VIBESWITCHER_HOME="$state/home/.vibeswitcher" \
-        nohup "$binary" --sandbox "$state" --shots "$shots" --minutes "$minutes" --fake-claude "$state/fake_claude.py" \
+        nohup "$binary" --sandbox "$state" --shots "$shots" --minutes "$minutes" --fake-claude "$state/fake_claude.py" ${empty:+"$empty"} \
         >>"$dir/app.log" 2>&1 </dev/null &
     local launched=$! deadline=$((SECONDS + wait_for))
     disown 2>/dev/null || true
