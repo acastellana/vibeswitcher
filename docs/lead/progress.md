@@ -2154,3 +2154,5 @@
 - 2026-10-30 19:17 Planned readme-one-time-switch: README: one-time switch for clones made before main became the only branch; scripts still name project-lead
 - 2026-10-30 19:17 Started a worker on readme-one-time-switch
 - 2026-10-30 19:17 Automatically (auto_advance): Started a worker on readme-one-time-switch (README: one-time switch for clones made before main became the only branch; scripts still name project-lead).
+- 2026-10-30 19:24 Raised readme-one-time-switch to audit (the risk check, at 0a541194): it changes test or build infrastructure the suite relies on (scripts/test-under-load.sh)
+- 2026-10-30 19:24 Automatically (auto_advance): Started the audit of readme-one-time-switch at 0a541194 (The risk check raised it to audit: it changes test or build infrastructure the suite relies on (scripts/test-under-load.sh)).
