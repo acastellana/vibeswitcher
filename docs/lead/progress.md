@@ -2061,3 +2061,5 @@
 - 2026-10-30 09:35 Automatically (auto_advance): Started the audit of a-claude-dictation-that at a4d3e232 (It touches sensitive_paths (Sources/VibeSwitcher/Sandbox.swift), so it's treated as audit whatever its review says).
 - 2026-10-30 09:35 Planned dictation-per-session: Dictation per session: one chat processing doesn't stop another from dictating (review audit)
 - 2026-10-30 09:36 Planned silence-the-mac-s: Silence the Mac's sound while dictation listens, then put it back
+- 2026-10-30 09:50 Audit of a-claude-dictation-that: incomplete, clean, round 1: 1 Important open, 3 Nit open
+- 2026-10-30 09:50 Automatically (auto_advance): Sent a-claude-dictation-that's worker the open Important findings a-claude-dictation-that:F1 from its audit at a4d3e232.
