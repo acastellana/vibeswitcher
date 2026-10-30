@@ -314,6 +314,51 @@ struct ClaudeDictationTests {
         #expect(controller.notice?.text == ClaudeVoiceRun.tapMode && controller.notice?.turnOn == true)
     }
 
+    /// Stopping on reads that come back late (a busy Mac): a read asked before Claude redrew after the Esc still shows
+    /// it processing, and must not send a second Esc, which would reach Claude idle and interrupt its turn. One Esc.
+    @Test func aStaleReadAfterTheEscSendsNoSecondOne() async {
+        var keys: [[UInt8]] = []
+        var escapedAt: Date?
+        let session = ClaudeVoiceSession(id: UUID(), keys: { keys.append($0); if $0 == [ClaudeVoiceRun.escape], escapedAt == nil { escapedAt = Date() }; return true },
+                                         screen: { done in
+            // As asked: processing until 0.3 s after the Esc (Claude's redraw), then idle; answered 0.6 s later.
+            let shown = escapedAt.map { Date().timeIntervalSince($0) >= 0.3 } == true
+                ? ClaudeDictationTests.screen() : ClaudeDictationTests.screen(footer: "Voice: processing…")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { done(shown) }
+        }, command: { _ in true })
+        var outcome: ClaudeVoiceRun.Outcome?
+        var listening = false
+        let run = ClaudeVoiceRun(session: session, schedule: DictationController.after, onListening: { listening = true }) { outcome = $0 }
+        run.start()
+        #expect(await until { listening })
+        run.release()
+        run.cancel(.button)
+        #expect(await until { outcome != nil })
+        #expect(outcome == .cancelled)
+        #expect(keys.filter { $0 == [ClaudeVoiceRun.escape] }.count == 1, "\(keys)")
+    }
+
+    /// A message sent over a dictation that doesn't show it stopped (Claude still processing after its Esc): the run says
+    /// so, and tells the override its box isn't clean, so the message doesn't go onto whatever lands there.
+    @Test func aMessageSentOverARunThatDidntStopDoesntGo() async {
+        let id = UUID()
+        let scripted = ScriptedSession()
+        scripted.after = { count in count >= 1 ? ClaudeDictationTests.screen(footer: "Voice: processing…") : nil }
+        var session = scripted.session
+        session.id = id
+        let (controller, _) = controller(session: { _ in session })
+        controller.press("row", agent: .claude) { "" }
+        #expect(await until { controller.listening })
+        controller.release()
+        var clean: Bool?
+        #expect(controller.override(session: id) { clean = $0 })
+        #expect(await until { controller.phase == .idle })
+        #expect(clean == false)
+        #expect(controller.notice?.text == ClaudeVoiceRun.notStopped, "\(String(describing: controller.notice))")
+        #expect(scripted.keys.filter { $0 == [ClaudeVoiceRun.escape] }.count == ClaudeVoiceRun.stopKeys)
+        #expect(ended?.contains("cancelled by a message sent over it") == true, "\(String(describing: ended))")
+    }
+
     // MARK: - Against FakeClaude's /voice
 
     /// The harness's session, as the window gives it to dictation, a message sent over a dictation cancelling it as the
@@ -464,6 +509,27 @@ struct ClaudeDictationTests {
         }
         try await h.quiet()
         #expect(h.agent["mode"] as? String == "working" && h.agent["enters"] as? Int == 0)
+    }
+
+    /// A level heard while held (its cursor coloured) but no words shown yet, and Claude processing out of sight (a
+    /// custom status line: no `processing…` footer): not the flat case, so 3 s after the release it's still waited for,
+    /// and the transcript lands in the composer, not left in Claude's box after the run let go of it.
+    @Test func aLevelHeardWithNoWordsYetIsWaitedForPastThreeSeconds() async throws {
+        let h = try await Harness.start(temp)
+        defer { h.stop() }
+        h.tell(["op": "voice", "mode": "hold", "statusLine": true, "interim": "", "loud": true, "processing": 3.0,
+                "transcript": "fix the build"])
+        try await h.waitFor { h.agent["loud"] as? Bool == true && h.agent["processing"] as? Double == 3 }
+        let clock = Clock()
+        let controller = dictation(h, now: clock.now)
+        controller.press(h.key, agent: .claude) { "" }
+        try await h.waitFor { controller.listening }
+        controller.release()
+        try await h.waitFor { h.agent["recording"] as? String == "processing" }
+        clock.ahead += ClaudeVoiceRun.quietAfterRelease + 0.1
+        try await h.waitFor { controller.phase == .idle }
+        #expect(controller.deliveries[h.key]?.text == "fix the build", "\(String(describing: controller.notice)) \(String(describing: ended))")
+        #expect(input(h) == "" && h.agent["voiceCancels"] as? Int == 0)
     }
 
     /// No text and a flat level cursor after an earlier run in this launch heard fine: the microphone works, so the

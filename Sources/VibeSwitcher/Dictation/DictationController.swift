@@ -106,8 +106,9 @@ final class DictationController: ObservableObject, @unchecked Sendable {
     /// A Claude run in this launch heard something (its level cursor coloured, or text taken): the microphone works, so
     /// a later run that hears nothing isn't said to be the microphone's doing.
     private var claudeHeard = false
-    /// Called once the Claude run under way has ended (a message sent over it goes then).
-    private var afterClaude: [() -> Void] = []
+    /// Called once the Claude run under way has ended (a message sent over it goes then): true when Claude's box is as
+    /// it was, false when the run said something's left there.
+    private var afterClaude: [(Bool) -> Void] = []
     /// Called each time the phase goes back to idle (tests wait on it).
     var onIdle: (() -> Void)?
 
@@ -357,13 +358,16 @@ final class DictationController: ObservableObject, @unchecked Sendable {
         idle()
         let after = afterClaude
         afterClaude = []
-        after.forEach { $0() }
+        let clean: Bool
+        if case .notice = outcome { clean = false } else { clean = true }
+        after.forEach { $0(clean) }
     }
 
     /// A message sent from the composer into `session` while a Claude dictation goes into it: the dictation is
-    /// cancelled, and `then` runs once it's stopped, so the message never mixes with what Claude might still write.
-    /// False when no dictation of this controller's goes into that session.
-    func override(session: UUID, then: @escaping () -> Void) -> Bool {
+    /// cancelled, and `then` runs once it's stopped, so the message never mixes with what Claude might still write: true
+    /// when its box is as it was, false when the run left something there (the message mustn't go onto it). False when no
+    /// dictation of this controller's goes into that session.
+    func override(session: UUID, then: @escaping (Bool) -> Void) -> Bool {
         guard let claudeRun, claudeRun.sessionID == session else { return false }
         afterClaude.append(then)
         claudeRun.cancel(.send)

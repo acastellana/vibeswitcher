@@ -548,7 +548,7 @@ final class ChatSync {
         // wins: the dictation is stopped first (Claude's recording cancelled, its box as it was), then the message goes.
         if ClaudeVoiceRun.busy.contains(target.id) {
             let id = target.id
-            if overrideDictation(id, { [weak self] in self?.afterDictation(text, key: target.key, id: id) }) {
+            if overrideDictation(id, { [weak self] clean in self?.afterDictation(text, key: target.key, id: id, clean: clean) }) {
                 Breadcrumbs.shared.note("composer: a dictation cancelled to send a message")
                 return true
             }
@@ -636,17 +636,20 @@ final class ChatSync {
     }
 
     /// The message sent over a dictation, once it's stopped: the usual way in, still into that session; not sent (back
-    /// in the composer's outbox strip, to send again) when another is shown by then, or it's refused now.
-    private func afterDictation(_ text: String, key: String, id: UUID) {
-        guard target()?.id == id, type(text) else {
+    /// in the composer's outbox strip, to send again) when the dictation left text in Claude's box (its Enter would send
+    /// that too), another session is shown by then, or it's refused now.
+    private func afterDictation(_ text: String, key: String, id: UUID, clean: Bool) {
+        if !clean { chat.sendNotice = Self.dictationLeft }
+        guard clean, target()?.id == id, type(text) else {
             Breadcrumbs.shared.note("composer: a message sent over a dictation didn't go in after it")
             return chat.confirmed(key: key, message: text, ok: false)
         }
     }
 
-    /// Cancels the dictation going into a session for a message sent over it, calling back once it's stopped; false
-    /// when none of the window's goes there (`DictationController.override`).
-    var overrideDictation: (UUID, @escaping () -> Void) -> Bool = { _, _ in false }
+    /// Cancels the dictation going into a session for a message sent over it, calling back once it's stopped (true: its
+    /// box as it was); false when none of the window's goes there (`DictationController.override`).
+    var overrideDictation: (UUID, @escaping (Bool) -> Void) -> Bool = { _, _ in false }
+    static let dictationLeft = "Not sent: the dictation left text in Claude's prompt box in the terminal. Clear it there, then send again from the outbox."
 
     static let noAgent = "Not sent: no agent is running in this terminal, so your message would run as a shell command."
     static let dictating = "Not sent yet: Claude is taking down your dictation in that session. Send once it's in the box."

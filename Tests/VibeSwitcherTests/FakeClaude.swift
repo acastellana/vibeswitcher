@@ -24,7 +24,7 @@ enum FakeClaude {
 # and takes CSI I and CSI O as them; else they're Esc and typed text), "focused" (its terminal has focus: only then
 # does it draw its caret and level cursor), "processing" (seconds a recording takes to process once it ends: a
 # Space then is typed, and it drops what it heard if the box changed meanwhile, as 2.1.312's input_diverged), "stuck" (a
-# recording goes on after the Spaces stop, until Esc)) | "voiceStop" (it stops listening by itself, as after 15 s of silence) |
+# recording goes on after the Spaces stop, until Esc), "loud" (its level cursor coloured though no words show)) | "voiceStop" (it stops listening by itself, as after 15 s of silence) |
 # "exit" (it quits, as /exit)).
 # Its /voice keeps Claude Code 2.1.312's timings: a repeat chain breaks 120 ms after the last Space (the key let go),
 # 5 repeats start recording, and a second push of the key within 300 ms of a transcript going in sends it. A held
@@ -79,6 +79,7 @@ state = {
     "disarms": 0,            # sends a double push armed or could, called off by another key
     "processing": 0.0,       # seconds a recording takes to process once it ends (0: its transcript goes in at once)
     "stuck": False,          # a recording goes on after the Spaces stop, until Esc
+    "loud": False,           # its level cursor coloured though no words show (a level heard, the words not in yet)
     "dropped": 0,            # transcripts dropped: the box changed while they were processed
     "doubleSubmits": 0,      # prompts sent by a double push
     "statusLine": False,     # a custom status line in the footer, never its voice footer; the box shows its caret
@@ -175,7 +176,7 @@ def draw():
             # What it hears so far, dimmed until it's final; its level cursor where the caret was (focused, recording).
             words = state["transcript"].split()
             heard = state["interim"] if state["interim"] is not None else " ".join(words[:max(1, len(words) // 2)])
-            cursor = (METER if heard else QUIET) if state["focused"] and state["recording"] == "listening" else ""
+            cursor = (METER if heard or state["loud"] else QUIET) if state["focused"] and state["recording"] == "listening" else ""
             live = ESC + "[2m" + heard + ESC + "[22m" + cursor
         lines.append("❯ " + state["input"].replace("\n", " ") + live)
         lines.append(RULE)
@@ -918,7 +919,7 @@ def control():
             if state["recording"] == "listening":
                 end_recording()
         elif op == "voice":
-            for name in ("mode", "account", "transcript", "interim", "warmup", "gap", "statusLine", "focused", "processing", "stuck"):
+            for name in ("mode", "account", "transcript", "interim", "warmup", "gap", "statusLine", "focused", "processing", "stuck", "loud"):
                 if name in command:
                     state[{"mode": "voice", "account": "voiceAccount"}.get(name, name)] = command[name]
             if "focusEvents" in command:

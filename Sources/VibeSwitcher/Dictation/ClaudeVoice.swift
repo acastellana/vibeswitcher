@@ -392,6 +392,9 @@ final class ClaudeVoiceRun {
     static let tapMode = "Claude's dictation is in tap mode, which sends what you say by itself; VibeSwitcher only uses hold mode."
     static let typedMeanwhile = "Something was typed in the terminal meanwhile, so VibeSwitcher left Claude's prompt box alone."
     static let gaveNoText = "Claude's dictation gave no text."
+    /// Ends that leave something in Claude's box, said even when cancelled: a message sent over the run doesn't go then.
+    static let keptText = "Claude's prompt box kept the dictated text; it's still there in the terminal."
+    static let notStopped = "Claude's dictation didn't show it had stopped: have a look at its prompt box in the terminal."
     /// No text, and its level cursor stayed grey (low) the whole recording: the microphone gave it silence. Only while no
     /// run in this launch has heard anything: after one has, the microphone works (`didntCatch`).
     static let heardNothing = "Claude heard nothing: check that VibeSwitcher may use the microphone (System Settings › Privacy & Security › Microphone) and that the input in Sound is the one you speak into."
@@ -461,11 +464,15 @@ final class ClaudeVoiceRun {
     /// Since the release: when it came, and whether anything showed for it (processing, words, text, a level heard).
     private var releasedAt = Date.distantFuture
     private var stirred = false
+    /// Words heard showed dim at some read (not the box's own placeholder).
+    private var wordsShown = false
     /// Stopping: how it ends once stopped, why (for app.log), by when, the Esc and ⌃U sent, and when the last Esc went.
     private var stopOutcome: (outcome: Outcome, why: String?) = (.cancelled, nil)
     private var stopBy = Date.distantFuture
     private var stopEscapes = 0
     private var stopKills = 0
+    /// When the stop began and the last Esc went: only reads asked after them say what to do.
+    private var stopAt = Date.distantFuture
     private var lastEscapeAt = Date.distantPast
     /// The words Claude showed dim while it listened.
     private var live = ""
@@ -605,7 +612,7 @@ final class ClaudeVoiceRun {
         case .holding: holding(screen, asked: asked)
         case .finishing: finishing(screen)
         case .clearing: clearing(screen)
-        case .stopping: stopping(screen)
+        case .stopping: stopping(screen, asked: asked)
         case .checking, .done: return
         }
         guard stage != .done else { return }
@@ -759,8 +766,8 @@ final class ClaudeVoiceRun {
             let prompt = ClaudeVoiceScreen.prompt(screen)
             level(prompt)
             // Anything for the release: processing, a level heard, or words (dim, not the box's own placeholder).
-            if footer == .processing || (prompt.meter && !prompt.quiet)
-                || (prompt.dim != dimBefore && prompt.dim.contains(where: { $0.isLetter || $0.isNumber })) { stirred = true }
+            if prompt.dim != dimBefore, prompt.dim.contains(where: { $0.isLetter || $0.isNumber }) { wordsShown = true }
+            if footer == .processing || (prompt.meter && !prompt.quiet) || wordsShown { stirred = true }
             let state = footer == .none && prompt.meter ? .listening : footer
             switch state {
             case .listening, .warming, .tap, .processing:
@@ -798,7 +805,7 @@ final class ClaudeVoiceRun {
                 }
             }
         }
-        if !stirred, now().timeIntervalSince(releasedAt) >= Self.quietAfterRelease {
+        if !stirred, meterQuiet, !meterHeard, !wordsShown, now().timeIntervalSince(releasedAt) >= Self.quietAfterRelease {
             // Nothing for it since the release: whether it still shows recording or already went idle, it's stopped.
             return stop(noText, why: "nothing \(Int(Self.quietAfterRelease)) s after the release, no processing")
         }
@@ -818,6 +825,8 @@ final class ClaudeVoiceRun {
         // Claude's recording-level cursor (a coloured bar glyph) isn't typed.
         if case .draft(let draft) = LeadDelivery.box(in: screen), !ClaudeVoiceScreen.meterOnly(draft) { typed = true }
         if let dim = LeadDelivery.dimText(in: screen), !dim.isEmpty { live = dim }
+        let prompt = ClaudeVoiceScreen.prompt(screen)
+        if prompt.dim != dimBefore, prompt.dim.contains(where: { $0.isLetter || $0.isNumber }) { wordsShown = true }
     }
 
     /// The same text a few reads in a row: Claude is done writing it. Out of its box with ⌃U, if it's Claude's: nothing
@@ -857,7 +866,7 @@ final class ClaudeVoiceRun {
             break
         }
         if clearRead >= Self.clearReads {
-            end(.notice("Claude's prompt box kept the dictated text; it's still there in the terminal.", offer: false))
+            end(.notice(Self.keptText, offer: false))
         }
     }
 
@@ -870,21 +879,24 @@ final class ClaudeVoiceRun {
         trail("stopping")
         stage = .stopping
         stopOutcome = (outcome, why)
-        stopBy = now().addingTimeInterval(Self.stopWithin)
+        stopAt = now()
+        stopBy = stopAt.addingTimeInterval(Self.stopWithin)
         readSoon(after: 0)
     }
 
     /// While a read shows Claude recording or processing (its footer or level cursor), Esc, its own cancel in either
     /// (2.1.312: the box put back as it was before the recording, what it heard dropped); never when it shows neither,
     /// where Esc would interrupt Claude's turn. Once it shows neither: the warmup's spaces go, and a transcript that went
-    /// in before the Esc is taken out if it's the dictation's; then it ends.
-    private func stopping(_ screen: LeadDelivery.Screen?) {
-        if let screen {
+    /// in before the Esc is taken out if it's the dictation's; then it ends. Only a read asked since the stop began says
+    /// anything (one asked before may show it processing after it went idle), and only one asked `stopRetryAfter` after
+    /// the last Esc sends another (one asked before Claude redrew still shows it going).
+    private func stopping(_ screen: LeadDelivery.Screen?, asked: Date) {
+        if let screen, asked >= stopAt {
             let footer = ClaudeVoiceScreen.footer(screen.text)
             let prompt = ClaudeVoiceScreen.prompt(screen)
             if prompt.meter || [.listening, .processing, .tap].contains(footer) {
                 let first = stopEscapes == 0
-                if stopEscapes < Self.stopKeys, now().timeIntervalSince(lastEscapeAt) >= Self.stopRetryAfter {
+                if stopEscapes < Self.stopKeys, asked.timeIntervalSince(lastEscapeAt) >= Self.stopRetryAfter {
                     if session.keys([Self.escape]) {
                         stopEscapes += 1
                         lastEscapeAt = now()
@@ -901,9 +913,8 @@ final class ClaudeVoiceRun {
                 case .draft(let draft):
                     // Claude's transcript, in before the Esc: the dictation's when nothing was typed and it grew from
                     // what was heard. Anything else is left alone.
-                    guard !typed, ClaudeVoiceScreen.grew(ClaudeVoiceScreen.line(draft), from: live), stopKills < Self.clearKeys else {
-                        return endStopped()
-                    }
+                    guard !typed, ClaudeVoiceScreen.grew(ClaudeVoiceScreen.line(draft), from: live) else { return endStopped() }
+                    guard stopKills < Self.clearKeys else { return end(.notice(Self.keptText, offer: false), why: "the dictated text stayed in the box") }
                     killStopping()
                 }
             }
@@ -918,7 +929,8 @@ final class ClaudeVoiceRun {
 
     private func endStopped(unconfirmed: Bool = false) {
         let why = [stopOutcome.why, unconfirmed ? "not seen stopped within \(Int(Self.stopWithin)) s" : nil].compactMap { $0 }
-        end(cancelled ? .cancelled : stopOutcome.outcome, why: why.isEmpty ? nil : why.joined(separator: ", "))
+        end(unconfirmed ? .notice(Self.notStopped, offer: false) : cancelled ? .cancelled : stopOutcome.outcome,
+            why: why.isEmpty ? nil : why.joined(separator: ", "))
     }
 
     /// The run is over: `outcome` goes to the composer, and app.log says how it ended and why (`why`, else the notice,
@@ -926,17 +938,18 @@ final class ClaudeVoiceRun {
     private func end(_ outcome: Outcome, why: String? = nil) {
         guard stage != .done else { return }
         stage = .done
-        // Cancelled: what it would have said isn't said.
+        // Cancelled: what it would have said isn't said, unless it left something in Claude's box.
         var outcome = outcome
-        if cancelled, case .notice = outcome { outcome = .cancelled }
+        if cancelled, case .notice(let text, _) = outcome, ![Self.keptText, Self.notStopped].contains(text) { outcome = .cancelled }
         let how: String
         switch outcome {
         case .text(let text): how = "text taken (\(text.count) characters)"
         case .notice(let notice, _): how = "no text: \(why ?? notice)"
         case .cancelled: how = "cancelled by \(cancelReason.rawValue)" + (why.map { " (\($0))" } ?? "")
         }
+        let ended = cancelled && outcome != .cancelled ? how + ", cancelled by \(cancelReason.rawValue)" : how
         let took = started == .distantPast ? "before any Space" : String(format: "after %.1f s", now().timeIntervalSince(started))
-        Breadcrumbs.shared.note("dictation: Claude's ended, \(how), \(took), \(spaces) Spaces, level cursor \(meterSummary); saw \(trailed.isEmpty ? "nothing" : trailed.joined(separator: " → "))")
+        Breadcrumbs.shared.note("dictation: Claude's ended, \(ended), \(took), \(spaces) Spaces, level cursor \(meterSummary); saw \(trailed.isEmpty ? "nothing" : trailed.joined(separator: " → "))")
         stopSpaces?()
         stopSpaces = nil
         if focusSent {
