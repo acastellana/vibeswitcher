@@ -2248,9 +2248,9 @@ public final class LeadToolset: MCPToolset {
         switch ShellCancel.with(nil, { Worktrees.fastForward(root: root, base: base, to: tested, from: current) }) {
         case .merged:
             try vault.setHead(tested, root: root, branch: base)
-            let flakes = flaked.map { $0.plan.tests.isEmpty ? [MergeRerun.unnamed] : $0.plan.tests } ?? []
+            let flakes = flaked.map { MergeRerun.flakes(in: $0.failed) } ?? []
             // Each flaky test's failure lines, where every session can read them (the merge's log is in the vault).
-            let flakeLines = flaked.map { MergeRerun.evidence(in: $0.failed, tests: $0.plan.tests) } ?? [:]
+            let flakeLines = flaked.map { MergeRerun.evidence(in: $0.failed, tests: flakes) } ?? [:]
             // One moment for the file's day and the ledger's entry.
             let flakedAt = Date()
             let flakeLog = flakeLines.isEmpty ? nil : saveFlakeEvidence(flakeLines, tests: flakes, slug: slug, commit: tested, at: flakedAt)

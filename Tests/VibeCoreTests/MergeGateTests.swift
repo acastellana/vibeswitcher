@@ -251,6 +251,40 @@ struct MergeGateTests: LeadTeamFixture {
         #expect(saved.contains("✘ Test flaky() recorded an issue") && saved.contains(Worktrees.rerunHeader), "\(saved)")
     }
 
+    /// A first run that crashed: what it named failing is a flake, and so is the crash (`unnamed`), but the tests that
+    /// were only running when it crashed aren't: on 2026-10-30 one crash logged 200 and more of them, and planned fix
+    /// tasks for six tests that had never failed (aFailingTestsHostIsEnded among them).
+    @Test func aCrashedRunsUnfinishedTestsArentFlakes() throws {
+        let root = try repo()
+        let crashed = Self.failure.components(separatedBy: "\n").dropLast().joined(separator: "\n") + """
+
+            ◇ Test bystander() started.
+            ◇ Test aFailingTestsHostIsEnded() started.
+            Fatal error: Unexpectedly found nil while unwrapping an Optional value
+            error: Exited with unexpected signal code 5
+            """
+        // Crashes on the first run in a scratch home, passes on the second (a whole one) in the same one.
+        try commit(["scripts/test.sh": """
+            #!/bin/bash
+            echo "run $*" >> \(RecentProjects.shellQuote(runs))
+            if [[ -e "$HOME/ran" ]]; then echo "✔ Test run with 4 tests passed"; exit 0; fi
+            touch "$HOME/ran"
+            printf '%s\\n' \(crashed.split(separator: "\n").map { RecentProjects.shellQuote(String($0)) }.joined(separator: " "))
+            exit 1
+            """], in: root, "the suite")
+        let runtime = FakeRuntime()
+        let lead = try lead(root, runtime)
+        configure(lead, ["test_command": "bash scripts/test.sh"])
+        try audited(lead, runtime, root: root)
+
+        let merged = lead.call("merge", ["task": "add-b"])
+        #expect(!merged.isError, "\(merged.text)")
+        #expect(ran() == ["run ", "run "])
+        let board = BoardStore(root: root).load()
+        #expect(board.flakes?.map(\.test) == ["flaky()", MergeRerun.unnamed])
+        #expect(!merged.text.contains("bystander()") && !merged.text.contains("aFailingTestsHostIsEnded()"), "\(merged.text)")
+    }
+
     @Test func aFilteredRerunRunsOnlyTheFailingTests() throws {
         let root = try repo()
         try fakeSuite(root, passes: "[[ \"$*\" == *--filter* ]]")
