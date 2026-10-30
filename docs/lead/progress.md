@@ -21,3 +21,8 @@
 - 2026-10-30 21:43 Kept build-app-sh-install unmerged: Audit clean at 72cc375 and no change since. Held until main-s-full-suite makes main's full suite green, then merged by the lead (auto_advance off).
 - 2026-10-30 21:44 Audit of test-under-load-sh: complete, clean
 - 2026-10-30 22:02 Merged main-s-full-suite: Main's full suite is green again: TeamRowsTests.voiceOverReadsTheRow and HomeIsolationTests' installer test (no audit: review none)
+- 2026-10-30 22:02 Automatically (auto_advance): Merged main-s-full-suite (Main's full suite is green again: TeamRowsTests.voiceOverReadsTheRow and HomeIsolationTests' installer test) into main at 1b405cfa, review none: on its worker's done report on 91a1e749 and the full test run.
+- 2026-10-30 22:02 Automatically (auto_advance): Cleaned up main-s-full-suite; ended pid 47957 (Worker: Main's full suite is green again: TeamRowsTests.voiceOverReadsTheRow and HomeIsolationTests' installer test) (freed 1.2 GB of build output and temporary folders). It stays done.
+- 2026-10-30 22:10 Audit of turn-this-incident-into-2: complete, clean
+- 2026-10-30 22:15 Merged build-app-sh-install: build-app.sh --install restarts the app, or says plainly that it didn't
+- 2026-10-30 22:15 Flaky in build-app-sh-install's merge: (the test command, naming no test) failed the first test run and passed its rerun (the whole test command); merged on the rerun
